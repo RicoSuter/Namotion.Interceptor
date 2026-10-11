@@ -3,8 +3,8 @@
 @inject IJSRuntime JavaScript
 
 <div class="d-flex flex-column mud-height-full">
-    @* column-reverse keeps the scroll position anchored at the newest entry without script. *@
-    <div class="d-flex flex-column-reverse flex-grow-1 overflow-y-auto" data-testid="agent-timeline">
+    @* The script keeps this scrolled to the newest entry while the reader is at the bottom. *@
+    <div class="flex-grow-1 overflow-y-auto" data-testid="agent-timeline" @ref="_timeline">
         <div>
             <AgentTimelineList Agent="Agent" TimeZoneVersion="TimeZoneVersion" />
         </div>
@@ -25,9 +25,11 @@
     private string _message = string.Empty;
     private bool _isSending;
     private ElementReference _inputContainer;
+    private ElementReference _timeline;
     private DotNetObjectReference<AgentChatTab>? _dotNetReference;
     private IJSObjectReference? _module;
     private IJSObjectReference? _enterListener;
+    private IJSObjectReference? _bottomFollower;
     private bool _sendsOnEnter;
     private bool _isDisposed;
 
@@ -51,11 +53,19 @@
             var module = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./_content/HomeBlaze.AI.Blazor/AgentChatTab.razor.js");
             if (_isDisposed)
             {
-                await module.DisposeAsync();
+                await DisposeReferenceAsync(module);
                 return;
             }
 
             _module = module;
+            var bottomFollower = await module.InvokeAsync<IJSObjectReference?>("attachStickToBottom", _timeline);
+            if (_isDisposed)
+            {
+                await DisposeListenerAsync(bottomFollower);
+                return;
+            }
+
+            _bottomFollower = bottomFollower;
             _dotNetReference = DotNetObjectReference.Create(this);
             var listener = await module.InvokeAsync<IJSObjectReference?>("attachEnterToSend", _inputContainer, _dotNetReference);
             if (_isDisposed)
@@ -71,7 +81,7 @@
                 StateHasChanged();
             }
         }
-        catch (Exception exception) when (exception is JSDisconnectedException or JSException or OperationCanceledException)
+        catch (Exception exception) when (IsInteropFailure(exception))
         {
             // The circuit is gone or the script failed to load; the Send button still works.
         }
@@ -113,6 +123,7 @@
         _message = string.Empty;
         _isSending = true;
         StateHasChanged();
+        await PinToBottomAsync();
         try
         {
             // Failures and the not-running case are recorded in the timeline; only caller cancellation throws.
@@ -125,32 +136,38 @@
         }
     }
 
+    // The reader's own message always scrolls the timeline to the bottom, and the reply follows from there.
+    private async Task PinToBottomAsync()
+    {
+        if (_bottomFollower is not { } bottomFollower)
+        {
+            return;
+        }
+
+        try
+        {
+            await bottomFollower.InvokeVoidAsync("pin");
+        }
+        catch (Exception exception) when (IsInteropFailure(exception) || exception is ObjectDisposedException)
+        {
+            // The page is going away; sending does not depend on scrolling.
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
-        var listener = _enterListener;
+        var enterListener = _enterListener;
+        var bottomFollower = _bottomFollower;
         var module = _module;
         _enterListener = null;
+        _bottomFollower = null;
         _module = null;
-        try
-        {
-            try
-            {
-                await DisposeListenerAsync(listener);
-            }
-            finally
-            {
-                if (module is not null)
-                {
-                    await module.DisposeAsync();
-                }
-            }
-        }
-        catch (Exception exception) when (exception is JSDisconnectedException or JSException or OperationCanceledException)
-        {
-            // The circuit is gone, and the browser dropped the listener with the page.
-        }
 
+        // Each release swallows its own interop failure, so a failing one does not skip the next.
+        await DisposeListenerAsync(enterListener);
+        await DisposeListenerAsync(bottomFollower);
+        await DisposeReferenceAsync(module);
         _dotNetReference?.Dispose();
     }
 
@@ -165,9 +182,31 @@
         {
             await listener.InvokeVoidAsync("dispose");
         }
-        finally
+        catch (Exception exception) when (IsInteropFailure(exception))
         {
-            await listener.DisposeAsync();
+            // The circuit is gone, and the browser dropped the listener with the page.
+        }
+
+        await DisposeReferenceAsync(listener);
+    }
+
+    private static async Task DisposeReferenceAsync(IJSObjectReference? reference)
+    {
+        if (reference is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await reference.DisposeAsync();
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            // The circuit is gone, and the browser released the reference with the page.
         }
     }
+
+    private static bool IsInteropFailure(Exception exception) =>
+        exception is JSDisconnectedException or JSException or OperationCanceledException;
 }

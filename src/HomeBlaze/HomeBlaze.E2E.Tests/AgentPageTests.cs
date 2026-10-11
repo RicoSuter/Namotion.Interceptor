@@ -71,18 +71,92 @@ public class AgentPageTests
         });
     }
 
+    [Fact]
+    public async Task WhenTheReaderStaysAtTheBottomOrScrollsUpWhileStreaming_ThenOnlyTheReaderAtTheBottomIsFollowed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // The fake CLI is a shell script.
+        }
+
+        // Arrange - the script streams enough lines to overflow the timeline, then waits for a signal file before
+        // streaming more, so the test controls when content grows. Deleting the directory ends the waits.
+        static string Delta(string text) =>
+            $$$"""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{{text}}}"}},"session_id":"e2e-session"}""";
+
+        var firstLines = string.Concat(Enumerable.Range(1, 40).Select(index => $"line {index}\\n"));
+        var moreLines = string.Concat(Enumerable.Range(1, 20).Select(index => $"more {index}\\n"));
+        string CreateScript(string directory) =>
+            "#!/bin/sh\ncat > /dev/null\n" +
+            "cat <<'EOF'\n" +
+            """{"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}""" + "\n" +
+            Delta(firstLines) + "\nEOF\n" +
+            $"while [ -d '{directory}' ] && [ ! -f '{directory}/more' ]; do sleep 0.05; done\n" +
+            "cat <<'EOF'\n" + Delta(moreLines) + "\nEOF\n" +
+            $"while [ -d '{directory}' ] && [ ! -f '{directory}/finish' ]; do sleep 0.05; done\n" +
+            "cat <<'EOF'\n" +
+            """{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""" +
+            "\nEOF\n";
+
+        // Act & Assert
+        await RunChatAsync(CreateScript, async (page, directory) =>
+        {
+            var streaming = page.GetByTestId("agent-streaming");
+            var timeline = await page.GetByTestId("agent-timeline").ElementHandleAsync();
+
+            // At the bottom, the streamed lines keep the timeline scrolled to the newest one.
+            await Assertions.Expect(streaming).ToContainTextAsync("line 40", new() { Timeout = ReplyTimeout });
+            await page.WaitForFunctionAsync(
+                "timeline => timeline.scrollHeight > timeline.clientHeight + 200 && timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 32",
+                timeline, new() { Timeout = ReplyTimeout });
+
+            // Scrolled up, further lines leave the view where the reader put it.
+            await page.GetByTestId("agent-timeline").HoverAsync();
+            await page.Mouse.WheelAsync(0, -300);
+            await page.WaitForFunctionAsync(
+                "timeline => timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight > 200", timeline, new() { Timeout = ReplyTimeout });
+            var contentOffset = await ReadContentOffsetAfterLayoutAsync(page, timeline);
+
+            await File.WriteAllTextAsync(Path.Combine(directory, "more"), string.Empty);
+            await Assertions.Expect(streaming).ToContainTextAsync("more 20", new() { Timeout = ReplyTimeout });
+            Assert.Equal(contentOffset, await ReadContentOffsetAfterLayoutAsync(page, timeline), 1.0);
+
+            await File.WriteAllTextAsync(Path.Combine(directory, "finish"), string.Empty);
+            await Assertions.Expect(page.GetByTestId("agent-reply").Last).ToContainTextAsync("done", new() { Timeout = ReplyTimeout });
+        });
+    }
+
+    // Where the content sits in the timeline's view, read after two animation frames so the resize observations
+    // that scroll the timeline have been delivered.
+    private static Task<double> ReadContentOffsetAfterLayoutAsync(IPage page, IElementHandle timeline) =>
+        page.EvaluateAsync<double>(
+            "timeline => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => " +
+            "resolve(timeline.firstElementChild.getBoundingClientRect().top - timeline.getBoundingClientRect().top))))",
+            timeline);
+
     /// <summary>
     /// Points the test agent at a script that replays <paramref name="output"/>, sends a chat message from its
     /// page and runs <paramref name="assert"/> on the page, then restores the agent and deletes its data files.
     /// </summary>
     [UnsupportedOSPlatform("windows")]
-    private async Task RunChatAsync(string output, Func<IPage, Task> assert)
+    private Task RunChatAsync(string output, Func<IPage, Task> assert) =>
+        RunChatAsync(
+            _ => "#!/bin/sh\ncat > /dev/null\ncat <<'EOF'\n" + output.Replace("\r\n", "\n") + "\nEOF\n",
+            (page, _) => assert(page));
+
+    /// <summary>
+    /// Points the test agent at the script <paramref name="createScript"/> writes for its directory, sends a chat
+    /// message from its page and runs <paramref name="assert"/> on the page with that directory, then restores the
+    /// agent and deletes its data files and the directory.
+    /// </summary>
+    [UnsupportedOSPlatform("windows")]
+    private async Task RunChatAsync(Func<string, string> createScript, Func<IPage, string, Task> assert)
     {
         var scriptDirectory = Directory.CreateTempSubdirectory("e2e-fake-claude").FullName;
         try
         {
             var scriptPath = Path.Combine(scriptDirectory, "claude");
-            await File.WriteAllTextAsync(scriptPath, "#!/bin/sh\ncat > /dev/null\ncat <<'EOF'\n" + output.Replace("\r\n", "\n") + "\nEOF\n");
+            await File.WriteAllTextAsync(scriptPath, createScript(scriptDirectory));
             File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
             // The page shows the chat only once the storage has loaded the agent, which can still be under way
@@ -103,7 +177,7 @@ public class AgentPageTests
                 await Assertions.Expect(send).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
                 await send.ClickAsync();
 
-                await assert(page);
+                await assert(page, scriptDirectory);
             }
             finally
             {

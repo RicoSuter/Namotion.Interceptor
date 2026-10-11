@@ -31,3 +31,59 @@ export function attachEnterToSend(container, dotNetReference) {
         }
     };
 }
+
+// Keeps the timeline scrolled to the newest content while the reader is at the bottom. Scrolling up releases it, so
+// new content never moves the view; scrolling back to the bottom or pin() holds it again.
+const bottomThreshold = 32;
+
+export function attachStickToBottom(scroller) {
+    const content = scroller?.firstElementChild;
+    if (!content) {
+        return null;
+    }
+
+    let isPinned = true;
+    let lastTop = scroller.scrollTop;
+
+    const isAtBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= bottomThreshold;
+
+    const scrollToBottom = () => {
+        scroller.scrollTop = scroller.scrollHeight;
+        lastTop = scroller.scrollTop;
+    };
+
+    // Only scrolling up releases the pin. A scroll event can be dispatched after content grew, so judging every
+    // event by its distance from the bottom would release the pin after a programmatic scroll to the bottom.
+    const onScroll = () => {
+        const top = scroller.scrollTop;
+        if (top < lastTop || !isPinned) {
+            isPinned = isAtBottom();
+        }
+
+        lastTop = top;
+    };
+
+    // Observations are delivered once per frame after layout and before paint, so streamed text scrolls at most once
+    // per frame and without showing the unscrolled state first. The content grows with entries and streamed text; the
+    // scroller shrinks when the input grows or an on-screen keyboard opens.
+    const resizeObserver = new ResizeObserver(() => {
+        if (isPinned) {
+            scrollToBottom();
+        }
+    });
+    resizeObserver.observe(content);
+    resizeObserver.observe(scroller);
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    scrollToBottom();
+
+    return {
+        pin: () => {
+            isPinned = true;
+            scrollToBottom();
+        },
+        dispose: () => {
+            resizeObserver.disconnect();
+            scroller.removeEventListener('scroll', onScroll);
+        }
+    };
+}
