@@ -18,10 +18,11 @@ public class DemoPagesTests
     // The reader of the JSON adds its own text after this, which is not ours to pin.
     private const string BrokenJsonError = "The json block must contain a valid JSON object without duplicate keys.";
 
-    // References.md is here as well: what a Widget block says about its path is shown by the widget when it
-    // renders and is no block error, and the sample motors next to the pages are not part of the fixture.
+    // References.md and Dashboard.md are here as well: what a Widget block says about its path is shown by the
+    // widget when it renders and is no block error, and the sample motors next to the pages are not part of the fixture.
     [Theory]
     [InlineData("Blocks.md")]
+    [InlineData("Dashboard.md")]
     [InlineData("References.md")]
     [InlineData("Configuration.md")]
     public async Task WhenDemoPageIsLoaded_ThenNoBlockIsShownAsError(string fileName)
@@ -42,6 +43,9 @@ public class DemoPagesTests
     [InlineData("Blocks.md", "exhaust", typeof(Tab))]
     [InlineData("Blocks.md", "closedmotor", typeof(Motor))]
     [InlineData("Blocks.md", "openmotor", typeof(Motor))]
+    [InlineData("Dashboard.md", "dashboardmotor", typeof(Motor))]
+    [InlineData("Dashboard.md", "dashboardgrid", typeof(GridLayout))]
+    [InlineData("Dashboard.md", "dashboardcanvas", typeof(CanvasLayout))]
     [InlineData("References.md", "refmotor", typeof(Motor))]
     [InlineData("References.md", "depth", typeof(Tab))]
     [InlineData("References.md", "secondcard", typeof(Card))]
@@ -59,6 +63,40 @@ public class DemoPagesTests
 
         // Assert
         Assert.IsType(expectedType, page.TryGetNamedSubject(name));
+    }
+
+    [Fact]
+    public async Task WhenDashboardPageIsLoaded_ThenItsFourTabsHoldTheLayoutsOfTheDashboard()
+    {
+        // Arrange
+        var fixture = await CreateFixtureAsync();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Dashboard.md");
+
+        // Assert
+        var dashboard = Assert.Single(page.Children.Values.OfType<TabLayout>());
+        Assert.Equal(["Dashboard", "Devices", "Grid and Canvas", "On This Page"], dashboard.Tabs.Select(tab => tab.Title));
+        Assert.Equal(4, PageErrorBoxes.Flatten(page.Children.Values).OfType<TabLayout>().Count());
+
+        // Tabs three levels deep: the tab of the devices holds a tab layout, and its tab of the fans holds another one.
+        var devices = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[1]));
+        Assert.Equal(["Pumps", "Fans", "Conveyor", "Sample Devices"], devices.Tabs.Select(tab => tab.Title));
+        var fans = Assert.Single(FindInTab<TabLayout>(devices.Tabs[1]));
+        Assert.Equal(["Cooling Fan", "Exhaust Fan"], fans.Tabs.Select(tab => tab.Title));
+
+        var gridAndCanvas = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[2]));
+        Assert.Equal(["Grid", "Canvas"], gridAndCanvas.Tabs.Select(tab => tab.Title));
+        var grid = Assert.Single(FindInTab<GridLayout>(gridAndCanvas.Tabs[0]));
+        Assert.Equal((2, 3, 5), (grid.Rows, grid.Columns, grid.Cells.Count));
+        var canvas = Assert.Single(FindInTab<CanvasLayout>(gridAndCanvas.Tabs[1]));
+        Assert.Equal(3, canvas.Nodes.Count);
+
+        // The motor that the page creates is shown once more by its name, in the same tab.
+        var ownTab = PageErrorBoxes.Flatten([dashboard.Tabs[3]]).ToList();
+        var motor = Assert.Single(ownTab.OfType<Motor>());
+        Assert.Equal("Dashboard Motor", motor.Name);
+        Assert.Same(motor, Assert.Single(ownTab.OfType<Widget>()).ResolvedSubject);
     }
 
     [Fact]
@@ -194,6 +232,10 @@ public class DemoPagesTests
 
     private static string ReadDemoPage(string fileName) =>
         RepositoryPagesTests.ReadPage(RepositoryPagesTests.DemoFolder + fileName);
+
+    /// <summary>Gets the blocks of this type that stand directly in the tab.</summary>
+    private static IEnumerable<T> FindInTab<T>(Tab tab) =>
+        Assert.IsType<MarkdownFragment>(tab.Content).Children.Values.OfType<T>();
 
     /// <summary>Gets the 1-based line of the block of the page that has this title. A code fence shows no block.</summary>
     private static int FindBlockLine(string fileName, string title) =>
