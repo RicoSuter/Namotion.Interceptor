@@ -52,7 +52,7 @@ public sealed partial class MarkdownContentParser
         if (CanUpdateInPlace(existing, type, configuration.Keys))
         {
             _serializer.UpdateConfiguration(
-                existing, configuration.Json, RememberFirstSkipped, ConfigurationNaming.PropertyName);
+                existing, configuration.Json, RememberFirstSkipped, ConfigurationNaming.CSharpProperty);
 
             if (skipped is null && existing is IConfigurable configurable)
             {
@@ -66,7 +66,7 @@ public sealed partial class MarkdownContentParser
             // Recorded before the configuration is set: when a setter throws, the instance is already attached
             // and this parse is the only one that knows it.
             subject = _serializer.Deserialize(
-                configuration.Json, state.AddCreated, RememberFirstSkipped, ConfigurationNaming.PropertyName) as IInterceptorSubject;
+                configuration.Json, state.AddCreated, RememberFirstSkipped, ConfigurationNaming.CSharpProperty) as IInterceptorSubject;
         }
 
         if (skipped is not null)
@@ -85,7 +85,7 @@ public sealed partial class MarkdownContentParser
     /// <summary>
     /// Records the configuration that was written to the page for a subject, so that the reload
     /// which follows the write updates the subject in place. The JSON must have the naming of a page,
-    /// <see cref="ConfigurationNaming.PropertyName"/>, because its keys are compared with those of the page.
+    /// <see cref="ConfigurationNaming.CSharpProperty"/>, because its keys are compared with those of the page.
     /// </summary>
     internal void RememberConfiguration(IInterceptorSubject subject, string configurationJson)
     {
@@ -138,7 +138,7 @@ public sealed partial class MarkdownContentParser
 
             var node = CreateArgumentNode(argument.Value, propertyType);
             if (node is null ||
-                !_serializer.CanDeserialize(node.ToJsonString(), propertyType, ConfigurationNaming.PropertyName))
+                !_serializer.CanDeserialize(node.ToJsonString(), propertyType, ConfigurationNaming.CSharpProperty))
             {
                 error = FormatInvalidValue(argument.Value, argument.Key, propertyType);
                 return false;

@@ -109,10 +109,10 @@ public class ConfigurableSubjectSerializerSkippedPropertyTests
     }
 
     [Theory]
-    [InlineData(true, ConfigurationNaming.LowerCamelCase, CamelCaseJson)]
-    [InlineData(false, ConfigurationNaming.LowerCamelCase, CamelCaseJson)]
-    [InlineData(true, ConfigurationNaming.PropertyName, PropertyNameJson)]
-    [InlineData(false, ConfigurationNaming.PropertyName, PropertyNameJson)]
+    [InlineData(true, ConfigurationNaming.JsonProperty, CamelCaseJson)]
+    [InlineData(false, ConfigurationNaming.JsonProperty, CamelCaseJson)]
+    [InlineData(true, ConfigurationNaming.CSharpProperty, PropertyNameJson)]
+    [InlineData(false, ConfigurationNaming.CSharpProperty, PropertyNameJson)]
     public void WhenCallerAsksForSkippedPropertiesAndValuesDoNotConvert_ThenDeserializeReportsEachOneAndReadsTheOthers(
         bool hasRegistry, ConfigurationNaming naming, string json)
     {
@@ -144,11 +144,11 @@ public class ConfigurableSubjectSerializerSkippedPropertyTests
         // Arrange
         var serializer = CreateSerializer();
         var subject = Assert.IsType<SubjectWithTypedProperties>(
-            serializer.Deserialize($$"""{ "$type": "{{TypeName}}", "Count": 3 }""", ConfigurationNaming.PropertyName));
+            serializer.Deserialize($$"""{ "$type": "{{TypeName}}", "Count": 3 }""", ConfigurationNaming.CSharpProperty));
         var skipped = new List<SkippedConfigurationProperty>();
 
         // Act
-        serializer.UpdateConfiguration(subject, PropertyNameJson, skipped.Add, ConfigurationNaming.PropertyName);
+        serializer.UpdateConfiguration(subject, PropertyNameJson, skipped.Add, ConfigurationNaming.CSharpProperty);
 
         // Assert
         Assert.Equal(3, subject.Count);
@@ -243,7 +243,7 @@ public class ConfigurableSubjectSerializerSkippedPropertyTests
 
         // Act & Assert
         var exception = Assert.Throws<NotSupportedException>(
-            () => serializer.Deserialize(json, created: null, skipped.Add, ConfigurationNaming.PropertyName));
+            () => serializer.Deserialize(json, created: null, skipped.Add, ConfigurationNaming.CSharpProperty));
         Assert.Equal("The name is not supported.", exception.Message);
         Assert.Empty(skipped);
     }
@@ -264,8 +264,8 @@ public class ConfigurableSubjectSerializerSkippedPropertyTests
 
         // Act
         var subject = Assert.IsType<SubjectWithTypedProperties>(
-            serializer.Deserialize(json, created: null, skipped.Add, ConfigurationNaming.PropertyName));
-        serializer.UpdateConfiguration(subject, json, skipped.Add, ConfigurationNaming.PropertyName);
+            serializer.Deserialize(json, created: null, skipped.Add, ConfigurationNaming.CSharpProperty));
+        serializer.UpdateConfiguration(subject, json, skipped.Add, ConfigurationNaming.CSharpProperty);
 
         // Assert
         Assert.Empty(skipped);

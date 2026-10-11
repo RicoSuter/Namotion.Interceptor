@@ -212,7 +212,7 @@ else
         }
 
         _currentContent = MarkdownBlockWriter.WriteConfiguration(
-            _currentContent, block, Serializer.Serialize(subject, ConfigurationNaming.PropertyName));
+            _currentContent, block, Serializer.Serialize(subject, ConfigurationNaming.CSharpProperty));
 
         // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
@@ -336,7 +336,7 @@ else
         string json;
         try
         {
-            json = Serializer.Serialize(result.Subject, ConfigurationNaming.PropertyName);
+            json = Serializer.Serialize(result.Subject, ConfigurationNaming.CSharpProperty);
         }
         finally
         {

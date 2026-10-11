@@ -16,7 +16,7 @@ public static class MarkdownBlockWriter
     /// <summary>
     /// Replaces the head line arguments and the json fence of <paramref name="block"/> with
     /// <paramref name="configurationJson"/>, a JSON object as the configuration serializer produces it
-    /// with <see cref="ConfigurationNaming.PropertyName"/>. The keys are written as they are.
+    /// with <see cref="ConfigurationNaming.CSharpProperty"/>. The keys are written as they are.
     /// </summary>
     public static string WriteConfiguration(string source, MarkdownBlock block, string configurationJson)
     {

@@ -262,7 +262,7 @@ public class MarkdownShortFormTests
                     break;
 
                 default:
-                    description.Append(indentation).Append(serializer.Serialize(subject, ConfigurationNaming.PropertyName).ReplaceLineEndings(" ")).Append('\n');
+                    description.Append(indentation).Append(serializer.Serialize(subject, ConfigurationNaming.CSharpProperty).ReplaceLineEndings(" ")).Append('\n');
                     foreach (var slot in subject.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
                     {
                         if (slot.GetCustomAttribute<SlotAttribute>(true) is null)

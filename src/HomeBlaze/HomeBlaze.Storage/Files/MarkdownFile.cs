@@ -196,7 +196,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         // The block spans index into the text the page was parsed from, which is the source of the
         // page and not necessarily Content.
-        var json = _serializer.Serialize(blockSubject, ConfigurationNaming.PropertyName);
+        var json = _serializer.Serialize(blockSubject, ConfigurationNaming.CSharpProperty);
         var content = MarkdownBlockWriter.WriteConfiguration(page.Source, page.AllBlocks[blockIndex], json);
 
         // Before the write, because the storage reloads this file from inside WriteAsync. The reload

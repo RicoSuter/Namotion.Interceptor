@@ -133,7 +133,7 @@ public partial class DocumentationSamplesTests
             var subject = page.GetBlockSubject(block.Index);
             Assert.NotNull(subject);
 
-            var read = JsonNode.Parse(serializer.Serialize(subject, ConfigurationNaming.PropertyName));
+            var read = JsonNode.Parse(serializer.Serialize(subject, ConfigurationNaming.CSharpProperty));
             namesNotRead.AddRange(FindNamesNotRead(JsonNode.Parse(block.ConfigurationJson!), read, $"line {block.Line}: "));
         }
 

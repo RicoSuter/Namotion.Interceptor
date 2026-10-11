@@ -318,7 +318,7 @@ public class MarkdownBlockNamingTests
 
         // Act
         var block = MarkdownBlockWriter.CreateBlock(
-            LeafType, "leaf", serializer.Serialize(leaf, ConfigurationNaming.PropertyName), fenceLength: 2);
+            LeafType, "leaf", serializer.Serialize(leaf, ConfigurationNaming.CSharpProperty), fenceLength: 2);
         var page = await fixture.AddPageAsync("page.md", block);
 
         // Assert

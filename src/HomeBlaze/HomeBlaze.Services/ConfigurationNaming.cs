@@ -12,11 +12,11 @@ public enum ConfigurationNaming
     /// level of a subject, a value is read by the lower camel case of the property name only.
     /// This is the naming of configuration files.
     /// </summary>
-    LowerCamelCase,
+    JsonProperty,
 
     /// <summary>
     /// The property name as it is declared, also for a property with an explicit JSON name.
     /// This is the naming of the blocks on a markdown page.
     /// </summary>
-    PropertyName
+    CSharpProperty
 }

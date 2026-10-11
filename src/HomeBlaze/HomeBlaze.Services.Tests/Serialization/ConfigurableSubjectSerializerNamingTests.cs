@@ -63,7 +63,7 @@ public class ConfigurableSubjectSerializerNamingTests
         var json = _serializer.Serialize(parent);
 
         // Assert
-        Assert.Equal(_serializer.Serialize(parent, ConfigurationNaming.LowerCamelCase), json);
+        Assert.Equal(_serializer.Serialize(parent, ConfigurationNaming.JsonProperty), json);
         Assert.Contains("\"childConfig\"", json);
     }
 
@@ -79,7 +79,7 @@ public class ConfigurableSubjectSerializerNamingTests
         };
 
         // Act
-        var json = _serializer.Serialize(parent, ConfigurationNaming.PropertyName);
+        var json = _serializer.Serialize(parent, ConfigurationNaming.CSharpProperty);
 
         // Assert
         Assert.Equal(
@@ -107,8 +107,8 @@ public class ConfigurableSubjectSerializerNamingTests
         };
 
         // Act
-        var json = _serializer.Serialize(original, ConfigurationNaming.PropertyName);
-        var deserialized = _serializer.Deserialize(json, ConfigurationNaming.PropertyName) as ParentWithChildSubject;
+        var json = _serializer.Serialize(original, ConfigurationNaming.CSharpProperty);
+        var deserialized = _serializer.Deserialize(json, ConfigurationNaming.CSharpProperty) as ParentWithChildSubject;
 
         // Assert
         Assert.NotNull(deserialized);
@@ -128,8 +128,8 @@ public class ConfigurableSubjectSerializerNamingTests
         };
 
         // Act
-        var json = _serializer.Serialize(original, ConfigurationNaming.PropertyName);
-        var deserialized = _serializer.Deserialize(json, ConfigurationNaming.PropertyName) as ParentSubject;
+        var json = _serializer.Serialize(original, ConfigurationNaming.CSharpProperty);
+        var deserialized = _serializer.Deserialize(json, ConfigurationNaming.CSharpProperty) as ParentSubject;
 
         // Assert
         Assert.Contains("\"SettingA\"", json);
@@ -146,7 +146,7 @@ public class ConfigurableSubjectSerializerNamingTests
         IInterceptorSubject? created = null;
 
         // Act
-        var result = _serializer.Deserialize(json, subject => created = subject, ConfigurationNaming.PropertyName);
+        var result = _serializer.Deserialize(json, subject => created = subject, ConfigurationNaming.CSharpProperty);
 
         // Assert
         Assert.Same(result, created);
@@ -169,7 +169,7 @@ public class ConfigurableSubjectSerializerNamingTests
             """;
 
         // Act
-        var result = _serializer.Deserialize(json, ConfigurationNaming.PropertyName) as ParentWithChildSubject;
+        var result = _serializer.Deserialize(json, ConfigurationNaming.CSharpProperty) as ParentWithChildSubject;
 
         // Assert
         Assert.NotNull(result);
@@ -218,7 +218,7 @@ public class ConfigurableSubjectSerializerNamingTests
             """;
 
         // Act
-        var result = _serializer.Deserialize(json, ConfigurationNaming.PropertyName) as SubjectWithAnyChild;
+        var result = _serializer.Deserialize(json, ConfigurationNaming.CSharpProperty) as SubjectWithAnyChild;
 
         // Assert
         var child = Assert.IsType<SubjectWithConstructorDependency>(result?.Child);
@@ -238,7 +238,7 @@ public class ConfigurableSubjectSerializerNamingTests
 
         // Act
         _serializer.UpdateConfiguration(
-            subject, """{ "ConfigOne": "updated", "configTwo": 5 }""", ConfigurationNaming.PropertyName);
+            subject, """{ "ConfigOne": "updated", "configTwo": 5 }""", ConfigurationNaming.CSharpProperty);
 
         // Assert
         Assert.Equal("updated", subject.ConfigOne);
@@ -260,7 +260,7 @@ public class ConfigurableSubjectSerializerNamingTests
             """;
 
         // Act
-        _serializer.UpdateConfiguration(subject, json, ConfigurationNaming.PropertyName);
+        _serializer.UpdateConfiguration(subject, json, ConfigurationNaming.CSharpProperty);
 
         // Assert
         var child = Assert.IsType<SubjectWithConstructorDependency>(subject.Child);
@@ -280,9 +280,9 @@ public class ConfigurableSubjectSerializerNamingTests
 
         // Act
         var fileJson = _serializer.Serialize(subject);
-        var pageJson = _serializer.Serialize(subject, ConfigurationNaming.PropertyName);
+        var pageJson = _serializer.Serialize(subject, ConfigurationNaming.CSharpProperty);
         var fromFile = _serializer.Deserialize(fileJson) as SubjectWithJsonNames;
-        var fromPage = _serializer.Deserialize(pageJson, ConfigurationNaming.PropertyName) as SubjectWithJsonNames;
+        var fromPage = _serializer.Deserialize(pageJson, ConfigurationNaming.CSharpProperty) as SubjectWithJsonNames;
 
         // Assert
         Assert.Contains("\"custom_name\": \"value\"", fileJson);
@@ -295,8 +295,8 @@ public class ConfigurableSubjectSerializerNamingTests
     }
 
     [Theory]
-    [InlineData(ConfigurationNaming.LowerCamelCase)]
-    [InlineData(ConfigurationNaming.PropertyName)]
+    [InlineData(ConfigurationNaming.JsonProperty)]
+    [InlineData(ConfigurationNaming.CSharpProperty)]
     public void WhenSingleValueIsChecked_ThenItIsJudgedTheSameInEveryNaming(ConfigurationNaming naming)
     {
         // Arrange
@@ -321,10 +321,10 @@ public class ConfigurableSubjectSerializerNamingTests
 
     // A number for a text property is rejected only by the naming that reads its key.
     [Theory]
-    [InlineData(ConfigurationNaming.LowerCamelCase, "SettingA", true)]
-    [InlineData(ConfigurationNaming.PropertyName, "SettingA", false)]
-    [InlineData(ConfigurationNaming.LowerCamelCase, "settingA", false)]
-    [InlineData(ConfigurationNaming.PropertyName, "settingA", true)]
+    [InlineData(ConfigurationNaming.JsonProperty, "SettingA", true)]
+    [InlineData(ConfigurationNaming.CSharpProperty, "SettingA", false)]
+    [InlineData(ConfigurationNaming.JsonProperty, "settingA", false)]
+    [InlineData(ConfigurationNaming.CSharpProperty, "settingA", true)]
     public void WhenValueObjectIsCheckedInANaming_ThenItIsJudgedWithTheNamesOfThatNaming(
         ConfigurationNaming naming, string key, bool expected)
     {

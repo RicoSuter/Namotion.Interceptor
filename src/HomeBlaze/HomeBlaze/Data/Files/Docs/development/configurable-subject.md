@@ -79,4 +79,4 @@ var options = new JsonSerializerOptions
 };
 ```
 
-The serializer has a second set of options for the blocks of a markdown page, which name every property by its C# property name, like `TargetSpeed`. Each method of `ConfigurableSubjectSerializer` that reads or writes JSON takes a `ConfigurationNaming`: `LowerCamelCase` is the default and the naming of configuration files, and `PropertyName` is the naming of pages. See [Markdown Pages](../administration/pages.md#names) for the page side.
+The serializer has a second set of options for the blocks of a markdown page, which name every property by its C# property name, like `TargetSpeed`. Each method of `ConfigurableSubjectSerializer` that reads or writes JSON takes a `ConfigurationNaming`: `JsonProperty` is the default and the naming of configuration files, and `CSharpProperty` is the naming of pages. See [Markdown Pages](../administration/pages.md#names) for the page side.
