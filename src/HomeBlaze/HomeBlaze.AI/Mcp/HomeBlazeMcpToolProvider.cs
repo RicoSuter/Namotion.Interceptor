@@ -208,21 +208,6 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         _ => $"unit: {unit}"
     };
 
-    private RegisteredSubject? ResolveSubject(string path)
-    {
-        var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject();
-        if (rootRegistered is null)
-        {
-            return null;
-        }
-
-        var isRootPath = string.IsNullOrEmpty(path) || path == "/";
-
-        if (isRootPath)
-        {
-            return rootRegistered;
-        }
-
-        return _pathProvider.TryGetSubjectFromPath(rootRegistered, path);
-    }
+    private RegisteredSubject? ResolveSubject(string path) =>
+        McpSubjectPathResolver.TryResolveSubject(_rootSubjectProvider, _pathProvider, path);
 }

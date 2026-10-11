@@ -5,7 +5,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Tools;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
 
@@ -26,6 +28,64 @@ public class StorageMcpToolProviderTests
 
         // Assert
         Assert.Equal("# Home\n\nWelcome. Grüezi!", Assert.IsType<string>(result));
+    }
+
+    [Fact]
+    public async Task WhenAFileWasRead_ThenItsStreamIsDisposed()
+    {
+        // Arrange
+        var file = new TestStorageFile { Name = "home.md", Content = Encoding.UTF8.GetBytes("Home") };
+        var factory = CreateFactory(isReadOnly: false, file);
+
+        // Act
+        await ReadFileAsync(factory, "/Docs/home.md");
+
+        // Assert
+        Assert.True(file.IsStreamDisposed);
+    }
+
+    [Fact]
+    public async Task WhenTheTokenIsCancelled_ThenCancellationPropagates()
+    {
+        // Arrange
+        var factory = CreateFactory(isReadOnly: false, new TestStorageFile { Name = "home.md", Content = Encoding.UTF8.GetBytes("Home") });
+        var tool = factory.CreateTools().First(candidate => candidate.Name == "read_file");
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            tool.Handler(JsonSerializer.SerializeToElement(new { path = "/Docs/home.md" }), cancellation.Token));
+    }
+
+    [Fact]
+    public async Task WhenTheStorageReturnsNoStream_ThenReturnsFileNotFound()
+    {
+        // Arrange
+        var logger = new RecordingLogger<StorageMcpToolProvider>();
+        var factory = CreateFactory(isReadOnly: false, new TestStorageFile { Name = "gone.md", ReturnsNullStream = true }, logger);
+
+        // Act
+        var result = await ReadFileAsync(factory, "/Docs/gone.md");
+
+        // Assert
+        Assert.Equal("File not found.", GetError(result));
+        Assert.Empty(logger.Errors);
+    }
+
+    [Fact]
+    public async Task WhenTheFullPathIsNotMarkdown_ThenReturnsAnErrorWithoutReading()
+    {
+        // Arrange
+        var file = new TestStorageFile { Name = "notes.md", FullPath = "secrets.json", Content = Encoding.UTF8.GetBytes("SECRET-VALUE") };
+        var factory = CreateFactory(isReadOnly: false, file);
+
+        // Act
+        var result = await ReadFileAsync(factory, "/Docs/notes.md");
+
+        // Assert
+        Assert.Contains("Markdown", GetError(result));
+        Assert.Equal(0, file.BytesRead);
     }
 
     [Fact]
@@ -172,8 +232,9 @@ public class StorageMcpToolProviderTests
     public async Task WhenReadingTheFileFails_ThenTheErrorDoesNotContainTheExceptionMessage()
     {
         // Arrange
-        var file = new TestStorageFile { Name = "broken.md", ReadException = new IOException("SECRET-DETAIL") };
-        var factory = CreateFactory(isReadOnly: false, file);
+        var file = new TestStorageFile { Name = "broken.md", ReadException = new InvalidOperationException("SECRET-DETAIL") };
+        var logger = new RecordingLogger<StorageMcpToolProvider>();
+        var factory = CreateFactory(isReadOnly: false, file, logger);
 
         // Act
         var result = await ReadFileAsync(factory, "/Docs/broken.md");
@@ -181,6 +242,26 @@ public class StorageMcpToolProviderTests
         // Assert
         var error = GetError(result);
         Assert.DoesNotContain("SECRET-DETAIL", error);
+        Assert.Single(logger.Errors);
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public async Task WhenAnInputOutputFailureOccurs_ThenItIsLoggedAsAWarning(Type exceptionType)
+    {
+        // Arrange
+        var exception = (Exception)Activator.CreateInstance(exceptionType, "SECRET-DETAIL")!;
+        var logger = new RecordingLogger<StorageMcpToolProvider>();
+        var factory = CreateFactory(isReadOnly: false, new TestStorageFile { Name = "broken.md", ReadException = exception }, logger);
+
+        // Act
+        var result = await ReadFileAsync(factory, "/Docs/broken.md");
+
+        // Assert
+        Assert.DoesNotContain("SECRET-DETAIL", GetError(result));
+        Assert.Single(logger.Warnings);
+        Assert.Empty(logger.Errors);
     }
 
     [Fact]
@@ -196,7 +277,7 @@ public class StorageMcpToolProviderTests
         Assert.Equal("Home", Assert.IsType<string>(result));
     }
 
-    private static McpToolFactory CreateFactory(bool isReadOnly, TestStorageFile file)
+    private static McpToolFactory CreateFactory(bool isReadOnly, TestStorageFile file, ILogger<StorageMcpToolProvider>? logger = null)
     {
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
@@ -213,7 +294,7 @@ public class StorageMcpToolProviderTests
             PathProvider = pathProvider,
             PathPrefix = "/",
             IsReadOnly = isReadOnly,
-            ToolProviders = { new StorageMcpToolProvider(() => root, pathProvider, NullLogger<StorageMcpToolProvider>.Instance) }
+            ToolProviders = { new StorageMcpToolProvider(() => root, pathProvider, logger ?? NullLogger<StorageMcpToolProvider>.Instance) }
         };
 
         return new McpToolFactory(root, configuration);

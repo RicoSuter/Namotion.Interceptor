@@ -74,7 +74,14 @@ public partial class TestStorageFile : IStorageFile
 {
     public string Name { get; init; } = "";
 
-    public string FullPath => Name;
+    /// <summary>The storage path; defaults to <see cref="Name"/>.</summary>
+    public string FullPath
+    {
+        get => _fullPath ?? Name;
+        init => _fullPath = value;
+    }
+
+    private readonly string? _fullPath;
 
     public IStorageContainer Storage => throw new NotSupportedException();
 
@@ -91,16 +98,28 @@ public partial class TestStorageFile : IStorageFile
     /// <summary>When set, <see cref="ReadAsync"/> throws it.</summary>
     public Exception? ReadException { get; init; }
 
+    /// <summary>Whether <see cref="ReadAsync"/> returns null, as storage does for a missing blob.</summary>
+    public bool ReturnsNullStream { get; init; }
+
     /// <summary>The bytes read from the last returned stream.</summary>
     public long BytesRead => _lastStream?.BytesRead ?? 0;
+
+    /// <summary>Whether the last returned stream was disposed.</summary>
+    public bool IsStreamDisposed => _lastStream?.IsDisposed ?? false;
 
     private CountingStream? _lastStream;
 
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (ReadException is not null)
         {
             throw ReadException;
+        }
+
+        if (ReturnsNullStream)
+        {
+            return Task.FromResult<Stream>(null!);
         }
 
         _lastStream = new CountingStream(new MemoryStream(Content), IsSeekable);
@@ -127,6 +146,8 @@ public sealed class CountingStream : Stream
     }
 
     public long BytesRead { get; private set; }
+
+    public bool IsDisposed { get; private set; }
 
     public override bool CanRead => true;
     public override bool CanSeek => _isSeekable;
@@ -158,6 +179,17 @@ public sealed class CountingStream : Stream
 
     public override void Flush()
     {
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            IsDisposed = true;
+            _inner.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();

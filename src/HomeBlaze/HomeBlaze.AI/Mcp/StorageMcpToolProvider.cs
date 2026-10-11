@@ -6,8 +6,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI.Mcp;
@@ -32,6 +30,10 @@ public class StorageMcpToolProvider : IMcpToolProvider
     {
         error = "Not a Markdown file. read_file only reads files whose name ends with .md."
     };
+
+    private static readonly object FileNotFoundError = new { error = "File not found." };
+
+    private static readonly object ReadFailedError = new { error = "Could not read the file. Check server logs for details." };
 
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly PathProviderBase _pathProvider;
@@ -67,7 +69,7 @@ public class StorageMcpToolProvider : IMcpToolProvider
             return new { error = "Parameter 'path' is required and must be a string." };
         }
 
-        var subject = ResolveSubject(pathElement.GetString()!);
+        var subject = McpSubjectPathResolver.TryResolveSubject(_rootSubjectProvider, _pathProvider, pathElement.GetString()!);
         if (subject is null)
         {
             return new { error = "Subject not found." };
@@ -79,29 +81,48 @@ public class StorageMcpToolProvider : IMcpToolProvider
             return NotMarkdownError;
         }
 
+        // The exception message is never returned: it is not written for the caller and could quote the file.
         try
         {
-            return await ReadTextAsync(file, cancellationToken).ConfigureAwait(false);
+            return await ReadTextAsync(file, cancellationToken).ConfigureAwait(false) ?? FileNotFoundError;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "The read_file tool could not read '{FilePath}'.", file.FullPath);
+            return ReadFailedError;
+        }
         catch (Exception exception)
         {
-            // The exception message is not returned: it is not written for the caller and could quote the file.
             _logger.LogError(exception, "The read_file tool failed to read '{FilePath}'.", file.FullPath);
-            return new { error = "Could not read the file. Check server logs for details." };
+            return ReadFailedError;
         }
     }
 
     private static bool IsMarkdown(string name) =>
         name.EndsWith(FileExtensions.Markdown, StringComparison.OrdinalIgnoreCase);
 
-    private static async Task<string> ReadTextAsync(IStorageFile file, CancellationToken cancellationToken)
+    /// <summary>Reads the capped text, or returns null when the storage has no blob for the file.</summary>
+    private static async Task<string?> ReadTextAsync(IStorageFile file, CancellationToken cancellationToken)
     {
-        await using var stream = await file.ReadAsync(cancellationToken).ConfigureAwait(false);
+        // Storage returns null for a blob deleted after the subject was created, despite the non-nullable signature.
+        Stream? stream = await file.ReadAsync(cancellationToken).ConfigureAwait(false);
+        if (stream is null)
+        {
+            return null;
+        }
 
+        await using (stream.ConfigureAwait(false))
+        {
+            return await ReadCappedTextAsync(stream, file.FileSize, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<string> ReadCappedTextAsync(Stream stream, long fileSize, CancellationToken cancellationToken)
+    {
         // One byte past the cap tells a file of exactly the cap apart from a longer one without reading further.
         var buffer = ArrayPool<byte>.Shared.Rent(MaxContentBytes + 1);
         try
@@ -118,7 +139,7 @@ public class StorageMcpToolProvider : IMcpToolProvider
                 return text;
             }
 
-            var totalBytes = stream.CanSeek ? stream.Length : file.FileSize;
+            var totalBytes = stream.CanSeek ? stream.Length : fileSize;
             var marker = totalBytes > MaxContentBytes
                 ? $"[truncated: file has {totalBytes} bytes]"
                 : $"[truncated: file has more than {MaxContentBytes} bytes]";
@@ -147,17 +168,4 @@ public class StorageMcpToolProvider : IMcpToolProvider
 
     private static bool HasByteOrderMark(byte[] buffer, int length) =>
         length >= 3 && buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF;
-
-    private RegisteredSubject? ResolveSubject(string path)
-    {
-        var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject();
-        if (rootRegistered is null)
-        {
-            return null;
-        }
-
-        return string.IsNullOrEmpty(path) || path == "/"
-            ? rootRegistered
-            : _pathProvider.TryGetSubjectFromPath(rootRegistered, path);
-    }
 }
