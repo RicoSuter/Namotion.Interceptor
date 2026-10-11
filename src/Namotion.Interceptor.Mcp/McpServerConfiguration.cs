@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp;
@@ -56,6 +57,13 @@ public class McpServerConfiguration
     /// Subject types to exclude from browse and search results.
     /// </summary>
     public Type[] ExcludeTypes { get; init; } = [];
+
+    /// <summary>
+    /// Decides whether set_property may write a property, given the property and the path the client sent. Returns
+    /// null to allow the write, or the error message returned to the client, in which case nothing is written.
+    /// Null (the default) allows every writable property. Not consulted when <see cref="IsReadOnly"/> is true.
+    /// </summary>
+    public Func<RegisteredSubjectProperty, string, string?>? PropertyWriteFilter { get; init; }
 
     /// <summary>
     /// When true, set_property is blocked.

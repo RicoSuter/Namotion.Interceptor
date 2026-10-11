@@ -43,6 +43,8 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 
 Markdown pages and documents hold most of the documentation and context of an installation, so the HomeBlaze MCP server sends server instructions (`HomeBlazeMcpInstructions.ServerInstructions`) that tell clients to read the relevant ones first with `invoke_query` and `ReadEvaluatedContent`, and `browse` and `search` carry the same hint through the `ToolDescriptionAdditions` of the configuration. The agent route `/mcp/agents` sends no server instructions, because the preamble of the built-in agents shares that text.
 
+The tools of the built-in agents never write configuration: `set_property` refuses a property marked `[Configuration]` with an error, also when it is `[State]` as well, through the `PropertyWriteFilter` of their configuration. The agents' own settings are configuration only and so not reachable through the MCP tools at all. The external MCP server keeps writing such properties when it is not read-only.
+
 This keeps the interceptor library independently usable. Method tools are HomeBlaze-specific because method discovery uses `MethodMetadata` with `[Operation]`/`[Query]` registry attributes — a HomeBlaze convention, not a core interceptor concept. Property-level metadata (units, position) is already in the registry as `StateMetadata` attributes — included directly in `query` responses when `includeAttributes=true`.
 
 Tool implementations are transport-agnostic `McpToolInfo` instances (metadata + plain function). Consumers wrap them as MCP tools (for external agents) or `AIFunction` objects (for built-in agents). One implementation, any delivery mode.

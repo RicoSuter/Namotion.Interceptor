@@ -18,6 +18,10 @@ public partial class TestThing : ITitleProvider, IIconProvider
     [State]
     public partial decimal Temperature { get; set; }
 
+    [State]
+    [Configuration]
+    public partial decimal TargetTemperature { get; set; }
+
     public partial TestChildThing? Child { get; set; }
 }
 

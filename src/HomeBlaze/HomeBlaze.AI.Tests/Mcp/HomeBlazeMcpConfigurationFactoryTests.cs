@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HomeBlaze.AI;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services;
@@ -91,6 +92,68 @@ public class HomeBlazeMcpConfigurationFactoryTests
 
         // Assert
         Assert.Equal("Host instructions.", options.ServerInstructions);
+    }
+
+    [Fact]
+    public async Task WhenAnAgentSetsAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged()
+    {
+        // Arrange
+        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        room.TargetTemperature = 20m;
+        var setProperty = CreateTools(room, forAgents: true)["set_property"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/TargetTemperature", value = 30 }), CancellationToken.None));
+
+        // Assert
+        Assert.Equal("'/TargetTemperature' is a configuration property; agents cannot change configuration.", result.GetProperty("error").GetString());
+        Assert.Equal(20m, room.TargetTemperature);
+    }
+
+    [Fact]
+    public async Task WhenAnAgentSetsAStateProperty_ThenItIsWritten()
+    {
+        // Arrange
+        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var setProperty = CreateTools(room, forAgents: true)["set_property"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Temperature", value = 23 }), CancellationToken.None));
+
+        // Assert
+        Assert.True(result.GetProperty("success").GetBoolean());
+        Assert.Equal(23m, room.Temperature);
+    }
+
+    [Fact]
+    public async Task WhenTheServerConfigurationIsWritable_ThenConfigurationPropertiesCanStillBeSet()
+    {
+        // Arrange
+        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        room.TargetTemperature = 20m;
+        var setProperty = CreateTools(room, forAgents: false)["set_property"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/TargetTemperature", value = 30 }), CancellationToken.None));
+
+        // Assert
+        Assert.True(result.GetProperty("success").GetBoolean());
+        Assert.Equal(30m, room.TargetTemperature);
+    }
+
+    private static Dictionary<string, Namotion.Interceptor.Mcp.McpToolInfo> CreateTools(TestThing room, bool forAgents)
+    {
+        var services = new ServiceCollection()
+            .AddSingleton(new SubjectTypeRegistry(new TypeProvider()))
+            .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
+            .BuildServiceProvider();
+        var configuration = forAgents
+            ? HomeBlazeMcpConfigurationFactory.CreateForAgents(services, () => room, isReadOnly: false)
+            : HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false);
+        return new McpToolFactory(room, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
     private sealed class StubToolProvider : IMcpToolProvider

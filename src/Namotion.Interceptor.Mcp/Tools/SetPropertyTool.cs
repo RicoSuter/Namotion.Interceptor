@@ -69,6 +69,11 @@ internal class SetPropertyTool
             return Task.FromResult<object?>(new { error = $"Property is not writable: {path}" });
         }
 
+        if (_configuration.PropertyWriteFilter?.Invoke(property, path) is { } filterError)
+        {
+            return Task.FromResult<object?>(new { error = filterError });
+        }
+
         object? newValue;
         try
         {

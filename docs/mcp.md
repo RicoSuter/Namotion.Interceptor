@@ -205,6 +205,8 @@ Read a property value by path. Returns the value, JSON schema type, and optional
 
 Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. A value that cannot be converted returns an error and leaves the property unchanged.
 
+An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and the requested path and returns null to allow the write or the error message for the client, for example to keep a client from changing properties that hold settings.
+
 ### `list_types`
 
 List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces.
@@ -235,6 +237,9 @@ var config = new McpServerConfiguration
 
     // Optional: text appended to a tool's description, keyed by tool name
     ToolDescriptionAdditions = { ["browse"] = "Subjects of type Document hold the manuals." },
+
+    // Optional: refuse writes to some properties; return null to allow, else the error for the client
+    PropertyWriteFilter = (property, path) => property.Name == "Password" ? $"'{path}' cannot be written." : null,
 
     // Safety limits
     MaxDepth = 10,
