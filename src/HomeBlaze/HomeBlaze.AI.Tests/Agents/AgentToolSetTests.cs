@@ -31,6 +31,7 @@ public class AgentToolSetTests
     [InlineData(new[] { "browse" }, true)]
     [InlineData(new[] { "browse", "invoke_method" }, false)]
     [InlineData(new[] { "set_property" }, false)]
+    [InlineData(new[] { "read_file" }, true)]
     public void WhenCheckingAllowedTools_ThenWriteToolsDisableReadOnly(string[] allowedTools, bool expected)
     {
         // Act
@@ -38,6 +39,17 @@ public class AgentToolSetTests
 
         // Assert
         Assert.Equal(expected, isReadOnly);
+    }
+
+    [Fact]
+    public void WhenUsingTheDefaultAllowedTools_ThenReadFileIsAllowedAndTheToolsAreReadOnly()
+    {
+        // Act
+        var isReadOnly = AgentToolSet.IsReadOnly(AgentToolSet.DefaultAllowedTools);
+
+        // Assert
+        Assert.Contains("read_file", AgentToolSet.DefaultAllowedTools);
+        Assert.True(isReadOnly);
     }
 
     [Fact]

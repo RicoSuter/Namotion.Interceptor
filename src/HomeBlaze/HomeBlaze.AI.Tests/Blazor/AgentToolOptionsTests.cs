@@ -77,6 +77,22 @@ public class AgentToolOptionsTests
     }
 
     [Fact]
+    public void WhenReadFileIsOffered_ThenItIsListedWithTheReadOnlyToolsAndASummary()
+    {
+        // Arrange
+        var offeredTools = new[] { CreateTool("invoke_method"), CreateTool("read_file", "Read the text of a Markdown file ...") };
+
+        // Act
+        var options = AgentToolOptions.Create(offeredTools, []);
+
+        // Assert
+        Assert.Equal(["read_file", "invoke_method"], options.Select(option => option.Name));
+        var option = options[0];
+        Assert.False(option.CanChangeState);
+        Assert.Equal("Reads the text of Markdown pages and documents.", option.Description);
+    }
+
+    [Fact]
     public void WhenListingTheToolsFails_ThenTheFallbackNamesAreListed()
     {
         // Arrange
@@ -87,6 +103,7 @@ public class AgentToolOptionsTests
 
         // Assert
         Assert.Equal(AgentToolOptions.FallbackToolNames.Order(), options.Select(option => option.Name).Order());
+        Assert.Contains("read_file", AgentToolOptions.FallbackToolNames);
         Assert.All(options, option => Assert.False(string.IsNullOrEmpty(option.Description)));
         Assert.All(options, option => Assert.True(option.IsOffered));
     }

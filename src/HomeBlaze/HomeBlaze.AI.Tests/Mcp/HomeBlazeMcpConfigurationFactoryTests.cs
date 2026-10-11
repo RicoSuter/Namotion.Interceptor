@@ -30,6 +30,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
         Assert.False(configuration.IsReadOnly);
         Assert.Contains("invoke_method", toolNames);
         Assert.Contains("stub_tool", toolNames);
+        Assert.Contains("read_file", toolNames);
     }
 
     private sealed class StubToolProvider : IMcpToolProvider
