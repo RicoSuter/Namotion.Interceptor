@@ -15,7 +15,7 @@ public static class AnthropicChatOptions
     /// </summary>
     /// <param name="model">The model id.</param>
     /// <param name="maxOutputTokens">The output token limit, including thinking tokens.</param>
-    /// <param name="effort">The effort, or null for the model default without thinking.</param>
+    /// <param name="effort">The effort, or null for the model's default.</param>
     /// <param name="tools">The tools the model may call.</param>
     public static ChatOptions Create(string model, int maxOutputTokens, AgentEffort? effort, IReadOnlyList<McpToolInfo> tools)
     {

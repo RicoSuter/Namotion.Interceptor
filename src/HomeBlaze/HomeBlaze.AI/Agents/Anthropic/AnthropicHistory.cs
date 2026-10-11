@@ -6,14 +6,35 @@ using Microsoft.Extensions.AI;
 namespace HomeBlaze.AI.Agents.Anthropic;
 
 /// <summary>
+/// The outcome of <see cref="AnthropicHistory.CompactAsync"/>.
+/// </summary>
+public enum AnthropicCompactionOutcome
+{
+    /// <summary>The older messages were replaced by a new summary.</summary>
+    Compacted,
+
+    /// <summary>The history holds at most one exchange, so nothing could be summarized and no model call was made.</summary>
+    NothingToCompact,
+
+    /// <summary>The model returned no summary or ran out of output tokens; the history is unchanged.</summary>
+    SummaryIncomplete
+}
+
+/// <summary>
 /// The chat session of an Anthropic agent: the messages since the last compaction plus a summary of everything older.
 /// </summary>
-/// <remarks>Not thread-safe; the owning agent uses it from one turn at a time.</remarks>
+/// <remarks>
+/// Not thread-safe; the owning agent uses it from one turn at a time. Stored messages are normalized so that a
+/// restored history sends the same request bytes as the original, which keeps the prompt cache valid.
+/// </remarks>
 public sealed class AnthropicHistory
 {
     private const int ToolResultPreviewLength = 500;
     private const string SummaryPropertyName = "summary";
     private const string MessagesPropertyName = "messages";
+
+    // FunctionResultContent.Exception is not serialized, but the client sends is_error from it.
+    private const string IsErrorPropertyName = "isError";
 
     private const string SummarizerInstructions =
         "Summarize this conversation between an operator and a home automation agent. Keep facts, decisions, open questions and values the agent may need later. Be concise.";
@@ -53,27 +74,39 @@ public sealed class AnthropicHistory
         return messages;
     }
 
-    /// <summary>Appends a completed exchange.</summary>
+    /// <summary>
+    /// Appends a completed exchange. Reasoning is not kept: its signatures are bound to the exact request it was
+    /// produced for, which a later turn changes. Tool results are stored as the JSON text the client sends.
+    /// </summary>
     public void Append(ChatMessage userMessage, IEnumerable<ChatMessage> responseMessages)
     {
         _messages.Add(userMessage);
-        _messages.AddRange(responseMessages);
+        foreach (var message in responseMessages)
+        {
+            if (ToStoredMessage(message) is { } stored)
+            {
+                _messages.Add(stored);
+            }
+        }
     }
 
     /// <summary>
-    /// Summarizes the older half of the history into <see cref="Summary"/> with one extra model call. The split is
-    /// placed before a plain user message, so a tool call and its result are never separated. The history is left
-    /// unchanged when the call fails or returns no text.
+    /// Summarizes the older messages into <see cref="Summary"/> with one extra model call. The split is placed
+    /// before a plain user message, so a tool call and its result are never separated, and keeps the longest tail
+    /// whose estimated size is at most <paramref name="keepFraction"/> of the history, but at least the last
+    /// exchange. The history is left unchanged when the call fails, returns no text or runs out of output tokens.
     /// </summary>
     /// <param name="client">The client of the summarizing call.</param>
     /// <param name="options">The options of the summarizing call, for example its model and output token limit.</param>
+    /// <param name="keepFraction">The share of the history, by estimated size, to keep unsummarized.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public async Task CompactAsync(IChatClient client, ChatOptions? options = null, CancellationToken cancellationToken = default)
+    public async Task<AnthropicCompactionOutcome> CompactAsync(
+        IChatClient client, ChatOptions? options = null, double keepFraction = 0.5, CancellationToken cancellationToken = default)
     {
-        var split = FindSplit();
+        var split = FindSplit(keepFraction);
         if (split <= 0)
         {
-            return;
+            return AnthropicCompactionOutcome.NothingToCompact;
         }
 
         var transcript = new StringBuilder();
@@ -94,20 +127,21 @@ public sealed class AnthropicHistory
         ], options, cancellationToken);
 
         var summary = response.Text;
-        if (string.IsNullOrWhiteSpace(summary))
+        if (string.IsNullOrWhiteSpace(summary) || response.FinishReason == ChatFinishReason.Length)
         {
-            return;
+            return AnthropicCompactionOutcome.SummaryIncomplete;
         }
 
         Summary = summary;
         _messages.RemoveRange(0, split);
+        return AnthropicCompactionOutcome.Compacted;
     }
 
     /// <summary>Serializes the summary and messages for the session file.</summary>
     public string Serialize()
     {
         using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Encoder = AIJsonUtilities.DefaultOptions.Encoder }))
         {
             writer.WriteStartObject();
             writer.WriteString(SummaryPropertyName, Summary);
@@ -139,32 +173,147 @@ public sealed class AnthropicHistory
         if (root.TryGetProperty(MessagesPropertyName, out var messages) && messages.ValueKind == JsonValueKind.Array &&
             messages.Deserialize(MessagesTypeInfo) is { } restored)
         {
-            history._messages.AddRange(restored);
+            foreach (var message in restored)
+            {
+                if (message is not null)
+                {
+                    RestoreToolResults(message);
+                    history._messages.Add(message);
+                }
+            }
         }
 
         return history;
     }
 
-    private int FindSplit()
+    private static ChatMessage? ToStoredMessage(ChatMessage message)
     {
-        var middle = _messages.Count / 2;
-        for (var index = middle; index > 0; index--)
+        var contents = new List<AIContent>(message.Contents.Count);
+        foreach (var content in message.Contents)
         {
-            if (IsPlainUserMessage(_messages[index]))
+            switch (content)
             {
-                return index;
+                case TextReasoningContent:
+                    break;
+                case FunctionResultContent result:
+                    contents.Add(NormalizeToolResult(result));
+                    break;
+                default:
+                    contents.Add(content);
+                    break;
             }
         }
 
-        for (var index = middle + 1; index < _messages.Count; index++)
+        if (contents.Count == 0)
         {
+            return null;
+        }
+
+        return new ChatMessage(message.Role, contents)
+        {
+            AuthorName = message.AuthorName,
+            MessageId = message.MessageId,
+            CreatedAt = message.CreatedAt,
+            AdditionalProperties = message.AdditionalProperties
+        };
+    }
+
+    private static FunctionResultContent NormalizeToolResult(FunctionResultContent result)
+    {
+        // The client sends strings as they are, content as content blocks, and anything else as its JSON text.
+        var value = result.Result is null or string or AIContent or IEnumerable<AIContent>
+            ? result.Result
+            : JsonSerializer.Serialize(result.Result, ValueTypeInfo);
+
+        var normalized = new FunctionResultContent(result.CallId, value)
+        {
+            Exception = result.Exception,
+            AdditionalProperties = result.AdditionalProperties
+        };
+
+        if (result.Exception is not null)
+        {
+            var properties = result.AdditionalProperties is { } existing ? new AdditionalPropertiesDictionary(existing) : [];
+            properties[IsErrorPropertyName] = true;
+            normalized.AdditionalProperties = properties;
+        }
+
+        return normalized;
+    }
+
+    private static void RestoreToolResults(ChatMessage message)
+    {
+        foreach (var content in message.Contents)
+        {
+            if (content is not FunctionResultContent result)
+            {
+                continue;
+            }
+
+            if (result.Result is JsonElement element)
+            {
+                result.Result = element.ValueKind == JsonValueKind.String ? element.GetString() : element.GetRawText();
+            }
+
+            if (result.AdditionalProperties?.TryGetValue(IsErrorPropertyName, out var isError) == true &&
+                isError is true or JsonElement { ValueKind: JsonValueKind.True })
+            {
+                result.Exception = new RestoredToolCallException();
+            }
+        }
+    }
+
+    private int FindSplit(double keepFraction)
+    {
+        var lengths = new long[_messages.Count];
+        long total = 0;
+        for (var index = 0; index < _messages.Count; index++)
+        {
+            lengths[index] = EstimateLength(_messages[index]);
+            total += lengths[index];
+        }
+
+        var keepLimit = Math.Clamp(keepFraction, 0, 1) * total;
+        var lastPlainUserMessage = 0;
+        long tail = 0;
+        var split = 0;
+        for (var index = _messages.Count - 1; index > 0; index--)
+        {
+            tail += lengths[index];
             if (IsPlainUserMessage(_messages[index]))
             {
-                return index;
+                if (lastPlainUserMessage == 0)
+                {
+                    lastPlainUserMessage = index;
+                }
+
+                if (tail <= keepLimit)
+                {
+                    split = index;
+                }
             }
         }
 
-        return 0;
+        // At least the last exchange stays, even when it alone is larger than the share to keep.
+        return split > 0 ? split : lastPlainUserMessage;
+    }
+
+    private static long EstimateLength(ChatMessage message)
+    {
+        long length = 0;
+        foreach (var content in message.Contents)
+        {
+            length += content switch
+            {
+                TextContent text => text.Text.Length,
+                FunctionCallContent call => call.Name.Length + JsonSerializer.Serialize<object?>(call.Arguments, ValueTypeInfo).Length,
+                FunctionResultContent { Result: string text } => text.Length,
+                FunctionResultContent result => JsonSerializer.Serialize(result.Result, ValueTypeInfo).Length,
+                _ => 0
+            };
+        }
+
+        return length;
     }
 
     private static bool IsPlainUserMessage(ChatMessage message) =>
@@ -184,6 +333,9 @@ public sealed class AnthropicHistory
                     transcript.Append(" [called ").Append(call.Name).Append(' ')
                         .Append(JsonSerializer.Serialize<object?>(call.Arguments, ValueTypeInfo)).Append(']');
                     break;
+                case FunctionResultContent { Result: string text }:
+                    transcript.Append(" [result ").Append(Truncate(text)).Append(']');
+                    break;
                 case FunctionResultContent result:
                     transcript.Append(" [result ").Append(Truncate(JsonSerializer.Serialize(result.Result, ValueTypeInfo))).Append(']');
                     break;
@@ -195,4 +347,13 @@ public sealed class AnthropicHistory
 
     private static string Truncate(string text) =>
         text.Length <= ToolResultPreviewLength ? text : text[..ToolResultPreviewLength] + "...";
+
+    /// <summary>Marks a restored tool result that failed, so the request flags it as an error again.</summary>
+    private sealed class RestoredToolCallException : Exception
+    {
+        public RestoredToolCallException()
+            : base("The tool call failed.")
+        {
+        }
+    }
 }

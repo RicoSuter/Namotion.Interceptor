@@ -36,6 +36,8 @@ public partial class AnthropicAgent : LlmAgentBase
 
     // Only read and written while the base class holds the turn gate.
     private AnthropicHistory _history = new();
+    private bool _isMeasuringCompaction;
+    private long _compactionFloor;
 
     public AnthropicAgent(AgentServices services, ILogger<AnthropicAgent> logger)
         : base(services, logger)
@@ -53,7 +55,9 @@ public partial class AnthropicAgent : LlmAgentBase
     [Configuration]
     public partial int MaxTokens { get; set; }
 
-    /// <summary>Input tokens of a chat request above which the older half of the history is summarized.</summary>
+    /// <summary>
+    /// Input tokens of a chat request above which older chat messages are summarized; zero or less never summarizes.
+    /// </summary>
     [Configuration]
     public partial int HistoryTokenBudget { get; set; }
 
@@ -67,6 +71,7 @@ public partial class AnthropicAgent : LlmAgentBase
 
     protected override async Task OnStartingAsync(CancellationToken cancellationToken)
     {
+        ResetCompactionState();
         var json = await ReadSessionAsync(cancellationToken);
         try
         {
@@ -83,6 +88,7 @@ public partial class AnthropicAgent : LlmAgentBase
     protected override async Task ResetSessionAsync(CancellationToken cancellationToken)
     {
         _history = new AnthropicHistory();
+        ResetCompactionState();
         await WriteSessionAsync(null, cancellationToken);
     }
 
@@ -122,6 +128,7 @@ public partial class AnthropicAgent : LlmAgentBase
         };
 
         var updates = new List<ChatResponseUpdate>();
+        long? firstRequestInputTokens = null;
         long lastRequestInputTokens = 0;
         try
         {
@@ -130,10 +137,12 @@ public partial class AnthropicAgent : LlmAgentBase
                 updates.Add(update);
                 foreach (var content in update.Contents)
                 {
-                    // One usage per model request; the last one measures the context the next chat turn starts from.
+                    // One usage per model request: the first shows the context this turn started from, the last the
+                    // context the next turn starts from. Their sum, as in the response usage, says neither.
                     if (content is UsageContent usageContent)
                     {
                         lastRequestInputTokens = usageContent.Details.InputTokenCount ?? 0;
+                        firstRequestInputTokens ??= lastRequestInputTokens;
                     }
                 }
 
@@ -167,23 +176,43 @@ public partial class AnthropicAgent : LlmAgentBase
         {
             _history.Append(new ChatMessage(ChatRole.User, request.UserMessage), response.Messages);
             await SaveHistoryAsync();
-            if (lastRequestInputTokens > HistoryTokenBudget)
-            {
-                await CompactHistoryAsync(innerClient, request.Model, maxTokens, cancellationToken);
-            }
+            await CompactHistoryIfNeededAsync(
+                innerClient, request.Model, maxTokens, firstRequestInputTokens ?? 0, lastRequestInputTokens, cancellationToken);
         }
 
         return new AgentTurnResult(response.Text, ToAgentUsage(response.Usage), RateLimit: null);
     }
 
-    private async Task CompactHistoryAsync(IChatClient client, string model, int maxTokens, CancellationToken cancellationToken)
+    private async Task CompactHistoryIfNeededAsync(
+        IChatClient client, string model, int maxTokens, long firstRequestInputTokens, long lastRequestInputTokens, CancellationToken cancellationToken)
     {
-        var messageCount = _history.Messages.Count;
+        long budget = HistoryTokenBudget;
+        if (budget <= 0)
+        {
+            return;
+        }
+
+        if (_isMeasuringCompaction)
+        {
+            // The first request after a compaction shows what it achieved. When it stayed over the budget, for example
+            // because the system prompt and tools alone exceed it, summarizing again only pays off after real growth.
+            _isMeasuringCompaction = false;
+            _compactionFloor = firstRequestInputTokens > budget ? firstRequestInputTokens + budget / 2 : 0;
+        }
+
+        if (lastRequestInputTokens <= Math.Max(budget, _compactionFloor))
+        {
+            return;
+        }
+
+        AnthropicCompactionOutcome outcome;
         try
         {
-            await _history.CompactAsync(
+            outcome = await _history.CompactAsync(
                 client,
                 new ChatOptions { ModelId = model, MaxOutputTokens = Math.Min(maxTokens, SummaryMaxOutputTokens) },
+                // Aims at half the budget, so that a few turns fit before the next compaction.
+                keepFraction: Math.Clamp(budget / 2.0 / lastRequestInputTokens, 0, 0.5),
                 cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -199,10 +228,22 @@ public partial class AnthropicAgent : LlmAgentBase
             return;
         }
 
-        if (_history.Messages.Count != messageCount)
+        switch (outcome)
         {
-            await SaveHistoryAsync();
+            case AnthropicCompactionOutcome.Compacted:
+                _isMeasuringCompaction = true;
+                await SaveHistoryAsync();
+                break;
+            case AnthropicCompactionOutcome.SummaryIncomplete:
+                _logger.LogWarning("The chat history of agent {Agent} was not summarized because the summary was empty or cut off.", Title);
+                break;
         }
+    }
+
+    private void ResetCompactionState()
+    {
+        _isMeasuringCompaction = false;
+        _compactionFloor = 0;
     }
 
     private async Task SaveHistoryAsync()

@@ -242,6 +242,26 @@ public class AnthropicAgentTests
     }
 
     [Fact]
+    public async Task WhenACompactionCouldNotGetBelowTheBudget_ThenTheNextTurnDoesNotSummarizeAgain()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HistoryTokenBudget = 1000;
+            agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello"), Usage(5000)];
+        });
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+
+        // Act
+        await test.Agent.SendMessageAsync("third", CancellationToken.None);
+
+        // Assert
+        Assert.Single(test.Agent.Client.SummaryOptions);
+        Assert.Equal("Hello", test.Agent.Timeline.Entries[^1].Text);
+    }
+
+    [Fact]
     public async Task WhenSummarizingFails_ThenTheTurnSucceedsAndTheHistoryIsKept()
     {
         // Arrange
