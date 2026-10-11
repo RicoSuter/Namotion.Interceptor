@@ -6,7 +6,7 @@ position: 6
 
 # Blocks Demo
 
-This page demonstrates blocks that take page content: a card with a footer, a flow layout and tabs.
+This page demonstrates blocks that take page content: a card with a footer, a flow layout and tabs, and the same card with and without its closing lines.
 
 Each area has a page of its own to try things out:
 
@@ -84,3 +84,47 @@ The exhaust fan runs at {{ ../ExhaustFan/CurrentSpeed }} RPM.
 ::::
 :::
 ::
+
+## Closing lines
+
+A closing line is needed only before something that belongs further out. The two cards below are the same card. The first has every closing line. The second has none: the head line of its footer ends the motor, and the end of the page ends the footer and the card. [Closing and Nesting](../Docs/administration/pages.md#closing-and-nesting) has the rule.
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Every Closing Line" Icon=Settings
+The motor runs at {{ closedmotor/CurrentSpeed }} RPM.
+
+::: HomeBlaze.Samples.Motor#closedmotor Name=ClosedMotor TargetSpeed=900 SimulationInterval=00:00:01
+:::
+
+::: Footer
+Target speed: {{ closedmotor/TargetSpeed }} RPM
+:::
+::
+
+:: HomeBlaze.Components.Card Title="Short Form" Icon=Settings
+The motor runs at {{ openmotor/CurrentSpeed }} RPM.
+
+::: HomeBlaze.Samples.Motor#openmotor Name=OpenMotor TargetSpeed=900 SimulationInterval=00:00:01
+
+::: Footer
+Target speed: {{ openmotor/TargetSpeed }} RPM
+~~~~
+
+:: HomeBlaze.Components.Card Title="Every Closing Line" Icon=Settings
+The motor runs at {{ closedmotor/CurrentSpeed }} RPM.
+
+::: HomeBlaze.Samples.Motor#closedmotor Name=ClosedMotor TargetSpeed=900 SimulationInterval=00:00:01
+:::
+
+::: Footer
+Target speed: {{ closedmotor/TargetSpeed }} RPM
+:::
+::
+
+:: HomeBlaze.Components.Card Title="Short Form" Icon=Settings
+The motor runs at {{ openmotor/CurrentSpeed }} RPM.
+
+::: HomeBlaze.Samples.Motor#openmotor Name=OpenMotor TargetSpeed=900 SimulationInterval=00:00:01
+
+::: Footer
+Target speed: {{ openmotor/TargetSpeed }} RPM

@@ -1556,6 +1556,20 @@ public class MarkdownPageParserTests
         Assert.Equal($"{source}\n", PageErrorBoxes.RenderSyntaxOnly(page));
     }
 
+    [Theory]
+    [InlineData("<pre>\ntext\n</pre>\n:: Demo.Card\ninside")]
+    [InlineData("<style>\np { color: red }\n</style>\n:: Demo.Card\ninside")]
+    [InlineData("<!--\ncomment\n-->\n:: Demo.Card\ninside")]
+    public void WhenHeadLineFollowsTheEndOfHtmlThatEndsAtItsOwnEndOutsideOfAnyBlock_ThenItIsAHeadLine(string source)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.AllBlocks);
+        Assert.Equal((MarkdownBlockKind.Widget, 4, 5), (card.Kind, card.Line, card.EndLine));
+    }
+
     [Fact]
     public void WhenHeadLineFollowsHtmlInsideAQuoteInsideABlock_ThenItEndsTheBlockAroundTheQuote()
     {

@@ -57,3 +57,20 @@ Content of the first tab
 Content of the second tab
 :::
 ::
+
+## Closing lines
+
+:: HomeBlaze.Components.Card Title="Every Closing Line"
+::: HomeBlaze.Samples.Motor#closedmotor Name=ClosedMotor TargetSpeed=900 SimulationInterval=00:00:01
+:::
+
+::: Footer
+Footer of the card with every closing line
+:::
+::
+
+:: HomeBlaze.Components.Card Title="Short Form"
+::: HomeBlaze.Samples.Motor#openmotor Name=OpenMotor TargetSpeed=900 SimulationInterval=00:00:01
+
+::: Footer
+Footer of the card in the short form

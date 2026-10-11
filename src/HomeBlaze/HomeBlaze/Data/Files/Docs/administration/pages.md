@@ -163,7 +163,7 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 
 ## Blocks
 
-A block puts a widget on the page: it creates a subject of the type that its head line names and shows the widget of that subject at this place. It starts with a head line of two colons and a type name, and ends with a closing line of two colons.
+A block puts a widget on the page: it creates a subject of the type that its head line names and shows the widget of that subject at this place. It starts with a head line of two colons and a type name. It ends with a closing line of two colons, or without one at the next head line of two colons or at the end of the page.
 
 ### The Syntax at a Glance
 
@@ -193,6 +193,8 @@ Target speed: {{ cardmotor/TargetSpeed }} RPM
 | `:::` | The closing line of the footer |
 | `::` | The closing line of the card |
 
+The three closing lines are written out here, and none of them is needed in this card: the head line of the footer ends the motor, because it has as many colons, and the end of the page ends the footer and the card. [Closing and Nesting](#closing-and-nesting) has the rule and says when a closing line is needed.
+
 The reader sees a box with the title "Motor Card" and an icon, in it the sentence with the live speed and the motor widget, and below a divider the footer with the target speed.
 
 Each of the two widget blocks creates a subject of its type, sets the properties that its arguments name and shows the widget of that subject. The name `cardmotor` makes the motor available to expressions and to other blocks. A subject that a block creates belongs to the page. It is created when the page is loaded, and a subject that is a background service starts then. It is stopped and removed when its block or the page is removed.
@@ -204,18 +206,18 @@ Every form a line of the syntax can take:
 | Head line of a widget block | `:: Full.Type.Name#name Key=Value Key="Some text"` | Opens a block that creates a subject of that type and shows its widget. The name and the arguments are optional |
 | Head line of a slot block | `::: Footer` or `::: Tab#name Title="Some text"` | Opens a block that fills a slot of the widget block directly around it. Only some slots take a name and arguments |
 | Head line of a style block | `:: {.some-class}` | Opens a block that becomes a plain `<div>` with these attributes |
-| Closing line | `::` | Closes the block that was opened with the same number of colons. Colons only |
+| Closing line | `::` | Closes the block that was opened with the same number of colons. Colons only. It is optional where the next head line or the end of the page ends the block |
 | `json` block | A fenced code block with the language `json`, as the first thing inside a block | Configuration of the block that is not a single value. It is not shown |
 | Expression | `{{ path/Property }}` | A live value in the text |
 | Text that starts with colons | `\:: some text` | A backslash before the first colon makes the line ordinary text |
 
-A line that starts with two or more colons is called a colon line on this page. A colon line with something after the colons is a head line, and a colon line with nothing after them is a closing line.
+A line that starts with two or more colons is called a colon line on this page. A colon line with something after the colons is a head line, and a colon line with nothing after them is a closing line. A head line also ends every block before it that has as many colons or more.
 
 The rest of this section is the reference:
 
 - [The Head Line](#the-head-line): colons, type, name and arguments, and how each kind of value is written
 - [Names](#names): type names, property names, block names and slot names
-- [Closing and Nesting](#closing-and-nesting): how many colons a line has, and what a wrong number does
+- [Closing and Nesting](#closing-and-nesting): how many colons a line has, when a closing line is needed, and what a wrong number does
 - [Content and Slots](#content-and-slots): text, expressions and blocks inside a widget
 - [The `json` Block](#the-json-block): configuration that is not a single value
 - [Style Blocks](#style-blocks): a plain `<div>` around content
@@ -339,35 +341,110 @@ Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Availa
 
 ### Closing and Nesting
 
-The rule has three parts:
+A block ends at the first of three things: its closing line, the next head line that has as many colons as its own head line or fewer, or the end of the page. A closing line is therefore needed only before something that belongs further out: text of the block around it, or text of the page.
+
+The rule in full:
 
 1. A block directly on the page has two colons.
 2. A block inside another block has more colons than the block around it. Write one more for each level.
-3. A closing line has exactly as many colons as the head line of its block. Every block needs its closing line, also an empty block.
+3. A head line ends every open block that has as many colons as it has, or more, together with everything that is open inside those blocks. Its own block then stands in the block that is still open, or directly on the page.
+4. A closing line has exactly as many colons as the head line of its block. It ends that block and everything that is open inside it.
+5. The end of the page ends every block that is still open.
 
-Four levels, counted from the outside in: a flow layout with two colons, its item with three, the card in the item with four and the widget in the card with five.
+Headings in markdown work the same way: a heading ends the sections of its own level and of every level below it.
+
+**A layout in the short form.** A layout has no text that is followed by something further out, so it needs no closing line at all. The colons count up from two to seven here: a tab layout, its tabs, a flow layout, its items, the cards and the widgets. The second `Item` ends the first item with its card and its widget, and the second `Tab` ends the first tab with everything in it:
 
 ~~~~markdown
-:: HomeBlaze.Components.FlowLayout MinWidth=320
-::: Item
-:::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt
-The compressor runs at {{ ../Compressor/CurrentSpeed }} RPM.
-
-::::: HomeBlaze.Components.Widget Path=../Compressor
-:::::
-::::
-:::
-::
+:: HomeBlaze.Components.TabLayout
+::: Tab#pumps Title="Pumps" Icon=WaterDrop
+:::: HomeBlaze.Components.FlowLayout MinWidth=320
+::::: Item
+:::::: HomeBlaze.Components.Card Title="Water Pump" Icon=WaterDrop
+::::::: HomeBlaze.Components.Widget Path=../WaterPump
+::::: Item
+:::::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt
+::::::: HomeBlaze.Components.Widget Path=../Compressor
+::: Tab#belt Title="Conveyor Belt" Icon=Settings
+The conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
 ~~~~
 
-- **What a closing line closes**: A closing line closes the innermost open block that has the same number of colons. A block that is still open inside that block is closed with it and is shown as an error, because its own closing line is missing. One case differs: a block whose head line has too few colons for its place is also closed by a line with the number of colons that its place needs, see "A head line with too few colons for its place" below.
+With every closing line the same page has twenty-one lines in place of eleven and gives the same result.
+
+**A card in the short form.** The head line of the footer ends the motor, because both have three colons. The head line of the next card ends the footer and the first card:
+
+~~~~markdown
+:: HomeBlaze.Components.Card#overview Title="Motor Card" Icon=Settings
+The motor runs at {{ cardmotor/CurrentSpeed }} RPM.
+
+::: HomeBlaze.Samples.Motor#cardmotor Name="Card Motor" TargetSpeed=1200
+
+::: Footer
+Target speed: {{ cardmotor/TargetSpeed }} RPM
+
+:: HomeBlaze.Components.Card Title="The Next Card"
+This card stands below the first one, because its head line ended the footer and the card.
+~~~~
+
+- **What a closing line closes**: A closing line closes the innermost open block that has the same number of colons. A block that is still open inside that block ends with it.
 - **More is enough**: The page only requires more colons than the block around it, so a block with four colons directly inside a block with two is fine. One more for each level is the form that is easy to read, and the form that the page editor writes.
-- **No empty lines needed**: A head line and a closing line can follow a line of text directly, and text can follow them directly.
-- **Nothing disappears silently**: A colon line that fits no rule is shown as an error at its line. [Page Errors](page-errors.md) lists the messages.
+- **No empty lines needed**: A head line and a closing line can follow a line of text directly, and text can follow them directly. Raw HTML is the exception: directly after raw HTML, a head line needs an empty line before it when it stands outside of every block, and inside a `<pre>`, a `<script>` or a `<style>` element it is part of the element up to the closing tag.
+- **Nothing disappears silently**: A closing line that fits no open block is shown as an error at its line. [Page Errors](page-errors.md) lists the messages, and the mistakes that give a valid page and show no box.
+
+#### When a Closing Line Is Needed
+
+Two cases need a closing line.
+
+**Text of the page after a block.** The closing line ends the card, so the sentence after it is text of the page:
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Conveyor Belt"
+The conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
+::
+
+This sentence is text of the page, below the card.
+~~~~
+
+**Text of a block after a block inside it.** The closing line ends the widget, so the sentence after it is in the body of the card:
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Conveyor Belt"
+::: HomeBlaze.Components.Widget Path=../Conveyor
+:::
+This sentence is in the body of the card, below the widget.
+~~~~
+
+**A closing line that is forgotten.** The text then belongs to the block that is still open. When that block takes no content, the page shows a box that names the closing line to add. Here the closing line of the widget is missing:
+
+<!-- sample: error -->
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Conveyor Belt"
+::: HomeBlaze.Components.Widget Path=../Conveyor
+This sentence was meant for the body of the card.
+~~~~
+
+~~~~text
+Line 2: Widget has no default slot, so it cannot have content. The content is inside this block because the block is still open there. A closing line ':::' before the content ends the block.
+~~~~
+
+When the open block takes content, the text is shown inside that block and the page shows no box. Here the closing line of the card is missing, so the last sentence is shown in the card:
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Conveyor Belt"
+The conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
+
+This sentence was meant for the page and is shown in the card.
+~~~~
+
+What to write:
+
+- **Layouts in the short form**: Write a `FlowLayout`, a `TabLayout` and the cards and widgets in them without closing lines.
+- **A closing line after text**: Write the closing line whenever a block contains text and something follows that belongs further out, like the text of the page after a card.
+- **Every closing line stays valid**: A page with all its closing lines means the same as the page in the short form. The page editor writes a closing line for every block that it creates.
 
 #### What a Wrong Number of Colons Does
 
-**A closing line with a number of colons that no open block has.** The line gets an error box, and the block around it is still shown with the text before and after the line. Remove the line, or give it the number of colons of the block that it should close. One such line gets no box: the closing line of a block whose head line has too few colons, see "A head line with too few colons for its place" below.
+**A closing line with a number of colons that no open block has.** The line gets an error box, and the block around it is still shown with the text before and after the line. Remove the line, or give it the number of colons of the block that it should close.
 
 <!-- sample: error -->
 ~~~~markdown
@@ -382,7 +459,7 @@ The second paragraph of the card.
 Line 3: This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 1 (2 characters).
 ~~~~
 
-**A closing line with too few colons.** It closes a block further out, and the block that it was meant for ends there as well. The line that was meant to close the outer block then finds no open block. Here line 4 should have three colons:
+**A closing line with too few colons.** It closes a block further out, and the block that it was meant for ends there as well. The line that was written to close the outer block then finds no open block. Here line 4 should have three colons:
 
 <!-- sample: error -->
 ~~~~markdown
@@ -398,12 +475,34 @@ The body of the outer card.
 Line 6: This line of 2 ':' characters closes no block. No block is open here.
 ~~~~
 
-**A head line with too few colons for its place.** The head line ends the block that it was meant to be inside of, and its block stands after that block. The closing line that was written for the outer block then finds no open block. Here the motor needs three colons on both of its lines:
+**A head line with one colon too few in a layout.** The card has three colons like the `Item` before it. Its head line ends the item, so the card stands directly in the layout, which takes no content outside of its items. The box names both lines and the colons to write:
+
+<!-- sample: error -->
+~~~~markdown
+:: HomeBlaze.Components.FlowLayout MinWidth=320
+::: Item
+::: HomeBlaze.Components.Card Title="Water Pump"
+The card was meant for the first cell.
+~~~~
+
+~~~~text
+Line 3: This block has as many ':' characters as the slot block 'Item' at line 2, so it is not inside that block but directly inside FlowLayout, which has no default slot. Write '::::' here to put it inside 'Item'.
+~~~~
+
+**A head line with one colon too few in a card.** The motor has two colons like the card. Its head line ends the card, and the motor is a block of its own below the card. The page cannot tell this from two blocks that are meant to follow each other, so it shows no box. Give the motor three colons to put it into the card:
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Outer Card"
+The body of the card.
+:: HomeBlaze.Samples.Motor#shortmotor Name="Short Motor" TargetSpeed=800
+~~~~
+
+With closing lines the same mistake does show, because the line that was written to close the card finds no open block. Here the motor needs three colons on both of its lines:
 
 <!-- sample: error -->
 ~~~~markdown
 :: HomeBlaze.Components.Card Title="Outer Card"
-:: HomeBlaze.Samples.Motor#shortmotor Name="Short Motor" TargetSpeed=800
+:: HomeBlaze.Samples.Motor#closedmotor Name="Short Motor" TargetSpeed=800
 ::
 The text after the motor.
 ::
@@ -413,7 +512,7 @@ The text after the motor.
 Line 5: This line of 2 ':' characters closes no block. No block is open here.
 ~~~~
 
-**A wrong colon line inside a widget that has no place for content.** In the cases above the card around the mistake is still shown, because the box stands in the content of the card where the block was. A `FlowLayout` and a `TabLayout` take no loose content, and neither does a card whose body stands in a `Content` block. Such a widget has no place for the box, so the box replaces the whole widget. It names the line and has the message of the block that is wrong, and with several such blocks there is one box for each. A head line that cannot be read, like `::: Tab Title = "Cooling Fan"` with spaces around the `=`, replaces its `TabLayout` in the same way. Here the head line of the second `Item` has spaces around the `=`:
+**A wrong colon line inside a widget that has no place for content.** A closing line that closes nothing and a head line that cannot be read get their box where they stand, for example in the body of the card around them. A `FlowLayout` and a `TabLayout` take no loose content, and neither does a card whose body stands in a `Content` block. Such a widget has no place for the box, so the box replaces the whole widget. It names the line and has the message of the block that is wrong, and with several such blocks there is one box for each. A head line that cannot be read, like `::: Tab Title = "Cooling Fan"` with spaces around the `=`, replaces its `TabLayout` in the same way. Here the head line of the second `Item` has spaces around the `=`:
 
 <!-- sample: error -->
 ~~~~markdown
@@ -435,7 +534,7 @@ Line 5: Expected key=value but found 'Width = 2'.
 
 - **Inside markdown code**: A colon line inside a fenced code block or an indented code block is text. It opens and closes nothing, also when the code block is inside a block. One case differs: a code block directly after an item of a definition list, without an empty line between them, is cut short by markdown at the first line that starts with a colon. A colon line there is then read as a colon line of the page: it can open a block, or close the block around the code without any error box. A code block directly after a definition list needs an empty line before it.
 - **Text after the colons that cannot be a name**: A colon line is a head line only when the text after the colons starts with a letter, `_` or `{`. A line like `:: 12:30 lunch` or `::)` is ordinary text.
-- **Text after the colons that starts with a letter**: A line like `:: note` is read as a head line and is shown as an error, because `note` is no type name. Inside a block such a line also ends the block around it and takes the next closing line for itself, see the second sample below.
+- **Text after the colons that starts with a letter**: A line like `:: note` is read as a head line and is shown as an error, because `note` is no type name. Like every head line it ends the blocks before it that have as many colons or more. Inside a card with two colons such a line ends the card and takes the closing line of the card for itself, see the second sample below.
 - **The backslash**: To start a line of text with colons in every case, write a backslash before the first colon: `\:: note`.
 - **One colon**: A line that starts with one colon is never a colon line of a block, and colons inside a line have no meaning.
 
@@ -447,7 +546,7 @@ Line 5: Expected key=value but found 'Width = 2'.
 ::
 ~~~~
 
-Without the backslash, line 2 of this card is read as a head line. It ends the card and takes the closing line of the card:
+Without the backslash, line 2 of this card is read as a head line. It ends the card, so the card is shown empty, and its box replaces the text up to the closing line:
 
 <!-- sample: error -->
 ~~~~markdown
@@ -541,7 +640,7 @@ Rules for all slots:
 
 A mistake in how the slots of a widget are filled replaces the whole widget with one box. The box names the line that has to be fixed.
 
-**Content in a widget without a default slot.** A motor declares no slot, so its block must stay empty. `FlowLayout` and `TabLayout` have no default slot either: all their content stands in `Item` or `Tab` blocks.
+**Content in a widget without a default slot.** A motor declares no slot, so its block must stay empty. `FlowLayout` and `TabLayout` have no default slot either: all their content stands in `Item` or `Tab` blocks. When the block has no closing line, the box also names the closing line that ends it, see [When a Closing Line Is Needed](#when-a-closing-line-is-needed).
 
 <!-- sample: error -->
 ~~~~markdown
@@ -721,12 +820,12 @@ The conveyor next to this page runs at {{ ../Conveyor/CurrentSpeed }} RPM.
 
 A widget block is allowed in three places: directly on the page, directly inside another widget block and directly inside a slot block. A slot block is allowed directly inside the widget block that declares the slot. A style block is allowed everywhere.
 
-- **Lists and quotes**: A widget block inside a list item or a quote is shown as an error, and so is a slot block. A closing line inside a list item or a quote never closes a block outside of it, and it is shown as an error when nothing is open inside the list item or quote. A colon line that is indented like the text of a list item belongs to that list item. Without indentation it ends the list.
+- **Lists and quotes**: A widget block inside a list item or a quote is shown as an error, and so is a slot block. A colon line inside a list item or a quote never ends a block outside of it: a head line there ends no block around the list item or quote, and a closing line there is shown as an error when nothing is open inside the list item or quote. A colon line that is indented like the text of a list item belongs to that list item. Without indentation it ends the list.
 - **Style blocks**: A widget block inside a style block is shown as an error.
 - **Markdown code**: A block inside a fenced code block or an indented code block is shown as text and creates nothing, which is how this page shows its samples.
-- **Between HTML tags**: Do not put a block between an opening HTML tag and its closing tag, for example between `<div>` and `</div>`. The page does not report this, but the widget ends up outside the element and the layout breaks. Without an empty line between the tag and the block, the lines of the block are shown as text. Use a `Card`, a `FlowLayout` or a `TabLayout` to arrange widgets.
-- **HTML inside a block**: HTML inside the content of a block does not need an empty line before the closing line of the block. A colon line with exactly as many colons as an open block around it closes that block also inside a multi-line HTML comment and inside a `<pre>`, a `<script>` or a `<style>` element. Keep such lines out of HTML.
-- **Other colon lines after HTML**: A colon line of another length directly after HTML, without an empty line, is part of the HTML. It is shown as text and gives no error. This includes the closing line of a block whose head line has too few colons: a line with the number of colons that its place needs closes such a block after an empty line or after other content, but directly after HTML it is text. The block then takes the next closing line with its own number of colons, which is usually the one of the block around it.
+- **Between HTML tags**: Do not put a block between an opening HTML tag and its closing tag, for example between `<div>` and `</div>`. The page does not report this, but the widget ends up outside the element and the layout breaks. Outside of every block, the lines of a block that follows the tag without an empty line are shown as text. Use a `Card`, a `FlowLayout` or a `TabLayout` to arrange widgets.
+- **HTML inside a block**: HTML inside the content of a block does not need an empty line before the next colon line. A head line ends the HTML and is read as a head line, and a closing line with exactly as many colons as an open block around it closes that block. Inside a multi-line HTML comment and inside a `<pre>`, a `<script>` or a `<style>` element a head line is part of the element, so a line like `::selection { color: red }` in a `<style>` element stays what it is. A closing line with the colons of an open block closes that block there as well. Keep such closing lines out of HTML.
+- **Other closing lines after HTML**: A closing line of another length directly after HTML, without an empty line, is part of the HTML. It is shown as text and gives no error.
 
 ---
 
@@ -754,7 +853,7 @@ Every other type that can be configured works as a block as well, for example th
 A block that cannot be shown is replaced by a red box with the line number of the block and a message. A closing line that closes nothing gets a box at its own line. The rest of the page still renders.
 
 - **One box per block**: The box replaces the block with everything in it. The blocks inside it are not created, and they are created again once the error is fixed.
-- **Two messages in one box**: A block that has an error and is also not closed shows both messages. For a block that is not closed, "everything in it" is everything up to the end of the block around it, or up to the end of the page.
+- **A block without a closing line**: For such a block, "everything in it" is everything up to the line that ends it: the next head line with as many colons or fewer, the closing line of a block around it, or the end of the page.
 - **Errors in slots**: An error in a slot block, such as a `Tab`, a `Footer` or an `Item`, is shown in a box that names the line of the slot block. The box replaces the whole widget around it. One case differs: when the colon lines or the head line of the slot block are wrong and the widget has a default slot that takes loose content, like a `Card`, the widget is still shown and the box stands in its content where the block was. A widget without a place for loose content has no place for the box, so it is replaced, with one box for each such block in it. That is a `FlowLayout`, a `TabLayout`, and also a `Card` whose body stands in a `Content` block.
 - **Failures of a subject**: When the subject of a block fails while it is created or configured, the box shows the message of that failure, and the log of HomeBlaze has the details.
 
@@ -795,9 +894,9 @@ Give every subject that has state a name, and name the blocks around it too: the
 
 The page editor shows the text of the page. It marks the head line of every widget block and of every slot block that creates a subject, together with its `json` block, and it marks every expression.
 
-- **Edit a block**: With the cursor on a marked head line, the toolbar shows a button "Edit" followed by the name of the block, or by its type when it has no name. It opens the edit dialog of the subject. Saving the dialog writes the configuration back into the block and saves the page. Only the head line and the `json` block change, the content of the block stays as it is.
+- **Edit a block**: With the cursor on a marked head line, the toolbar shows a button "Edit" followed by the name of the block, or by its type when it has no name. It opens the edit dialog of the subject. Saving the dialog writes the configuration back into the block and saves the page. Only the head line and the `json` block change, the content of the block stays as it is, and a block without a closing line gets none.
 - **Edit an expression**: With the cursor in an expression, the toolbar shows the button "Edit Expression". It opens a dialog to choose another path, writes the path into the expression and saves the page.
-- **Create a block**: The "Create" button adds a new block at the line of the cursor and saves the page. The block gets two colons directly on the page, and one colon more than the block around it when the cursor is inside the content of a block. A `json` block stays the first thing inside its block: with the cursor before it, on it or inside it, the new block goes after it. The editor keeps an empty line before and after the new block.
+- **Create a block**: The "Create" button adds a new block at the line of the cursor and saves the page. The block gets a head line and a closing line, with two colons directly on the page and one colon more than the block that it is then inside of. That is the innermost block around the cursor that has a closing line of its own or takes a widget block as content. A block around the cursor that has neither, like a motor or a `Widget` without a closing line, is ended by the head line of the new block, so the new block stands after it and not inside it. A `json` block stays the first thing inside its block: with the cursor before it, on it or inside it, the new block goes after it. The editor keeps an empty line before and after the new block.
 - **Save first**: "Edit" needs the saved page and the text in the editor to be the same from the start of the page to the end of the block's head line and `json` block. When that part has unsaved changes, the editor asks you to save the page first. Unsaved text after the block is saved together with the edit.
 
 The steps of "Create":

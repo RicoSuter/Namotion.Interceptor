@@ -188,6 +188,96 @@ The first paragraph of the card.
 The second paragraph of the card.
 ::
 
+## Content in a block without a closing line
+
+The widget inside the card has no closing line, so the sentence after it belongs to the widget and not to the card, and a widget takes no content. The box says which closing line ends the widget. Add a line of three colons before the sentence.
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Open Widget"
+::: HomeBlaze.Components.Widget Path=../Conveyor
+This sentence was meant for the body of the card.
+::
+~~~~
+
+:: HomeBlaze.Components.Card Title="Open Widget"
+::: HomeBlaze.Components.Widget Path=../Conveyor
+This sentence was meant for the body of the card.
+::
+
+## A block with one colon too few in a layout
+
+The card has three colons like the `Item` before it. Its head line ends the item, so the card stands directly in the layout, which takes no content outside of its items. The box replaces the layout and names both lines. Give the card four colons.
+
+~~~~markdown
+:: HomeBlaze.Components.FlowLayout MinWidth=320
+::: Item
+::: HomeBlaze.Components.Card Title="Short Card"
+The card was meant for the first cell.
+::
+~~~~
+
+:: HomeBlaze.Components.FlowLayout MinWidth=320
+::: Item
+::: HomeBlaze.Components.Card Title="Short Card"
+The card was meant for the first cell.
+::
+
+## A block with one colon too few in a card
+
+This mistake shows no box. The motor has two colons like the card. Its head line ends the card, so the motor is shown below the card and not in it. The page cannot tell this from two blocks that are meant to follow each other. Give the motor three colons on both of its lines.
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Outer Card"
+The body of the card.
+:: HomeBlaze.Samples.Motor#shortmotor Name="Short Motor" TargetSpeed=800
+::
+~~~~
+
+:: HomeBlaze.Components.Card Title="Outer Card"
+The body of the card.
+:: HomeBlaze.Samples.Motor#shortmotor Name="Short Motor" TargetSpeed=800
+::
+
+## A forgotten closing line before text
+
+This mistake shows no box. The first card has no closing line, so the sentence that was meant for the page is shown in the card. The card ends at the head line of the next card. Add a line of two colons after the first sentence.
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Open Card"
+The body of the card.
+
+This sentence was meant for the page and is shown in the card.
+
+:: HomeBlaze.Components.Card Title="Next Card"
+The head line of this card ends the card above.
+::
+~~~~
+
+:: HomeBlaze.Components.Card Title="Open Card"
+The body of the card.
+
+This sentence was meant for the page and is shown in the card.
+
+:: HomeBlaze.Components.Card Title="Next Card"
+The head line of this card ends the card above.
+::
+
+## A line of text that starts with colons and a word
+
+The second line is meant as text, but two colons and a letter make it a head line. It gets a box, because `note` is no type name and the words after it are no arguments. No box says the rest: the line ends the card, so the card is shown empty, and the box hides the text up to the closing line. Write a backslash before the first colon, `\:: note that this line is text`.
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Lunch Plan"
+:: note that this line is text
+The body of the card.
+::
+~~~~
+
+:: HomeBlaze.Components.Card Title="Lunch Plan"
+:: note that this line is text
+The body of the card.
+::
+
 ## A block in a quote
 
 A block is allowed directly on the page, directly inside another widget block and directly inside a slot block. Inside a quote, a list item or a style block it is an error. Move the block out of the quote.
