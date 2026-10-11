@@ -1,4 +1,6 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
@@ -16,12 +18,15 @@ public class SubjectBrowserLayoutTests
     // Root, Demo and the motor: three panes, which is more than the narrow views below show at once.
     private const string MotorPath = "browser/Demo/Motor";
 
-    // Resolves once the last pane lies inside the visible part of the pane row.
-    private const string LastPaneIsInView = """
-        () => {
+    // Takes the number of panes the row should have. Resolves once it has them and no placeholder, the last pane lies
+    // inside the visible part of the row, and snapping is back on, which it is not while the row changes or scrolls.
+    private const string PanesAreSettled = """
+        count => {
             const container = document.getElementById('scrollContainer');
             const panes = container ? [...container.querySelectorAll("[data-testid='subject-pane']")] : [];
-            if (panes.length < 3) {
+            if (panes.length !== count
+                || container.querySelector("[data-testid='subject-pane-placeholder']") !== null
+                || getComputedStyle(container).scrollSnapType !== 'x mandatory') {
                 return false;
             }
 
@@ -31,7 +36,7 @@ public class SubjectBrowserLayoutTests
         }
         """;
 
-    // Returns the panes that are only partly inside the visible part of the pane row.
+    // Counts the panes that are only partly inside the visible part of the pane row.
     private const string CountPartlyVisiblePanes = """
         () => {
             const container = document.getElementById('scrollContainer');
@@ -48,7 +53,33 @@ public class SubjectBrowserLayoutTests
     // The page is prerendered, and a click before its circuit is interactive is lost. The pane width is set by the
     // script the interactive browser runs, so it marks the point from which clicks arrive.
     private const string BrowserIsInteractive =
-        "() => document.getElementById('scrollContainer')?.style.getPropertyValue('--pane-width') !== ''";
+        "() => (document.getElementById('scrollContainer')?.style.getPropertyValue('--pane-width') ?? '') !== ''";
+
+    // Records where the row is when placeholders appear and where its scrolling had got to when they are removed.
+    // The position at removal comes from the scroll events: once the placeholders are gone the row is shorter, and
+    // reading it then says nothing about where it was.
+    private const string WatchPlaceholders = """
+        () => {
+            const container = document.getElementById('scrollContainer');
+            const countPlaceholders = () => container.querySelectorAll("[data-testid='subject-pane-placeholder']").length;
+            const watch = { start: container.scrollLeft, appearedAt: null, removedAt: null, most: 0 };
+            let scrolledTo = container.scrollLeft;
+            container.addEventListener('scroll', () => scrolledTo = container.scrollLeft);
+            new MutationObserver(() => {
+                const count = countPlaceholders();
+                if (count > 0 && watch.appearedAt === null) {
+                    watch.appearedAt = container.scrollLeft;
+                }
+
+                if (count === 0 && watch.most > 0 && watch.removedAt === null) {
+                    watch.removedAt = scrolledTo;
+                }
+
+                watch.most = Math.max(watch.most, count);
+            }).observe(container, { childList: true });
+            window.placeholderWatch = watch;
+        }
+        """;
 
     private readonly PlaywrightFixture _fixture;
 
@@ -57,18 +88,38 @@ public class SubjectBrowserLayoutTests
         _fixture = fixture;
     }
 
+    private sealed record PlaceholderWatch(double Start, double? AppearedAt, double? RemovedAt, int Most);
+
+    private static async Task<PlaceholderWatch> ReadPlaceholderWatchAsync(IPage page)
+    {
+        var values = await page.EvaluateAsync<double?[]>(
+            "() => [window.placeholderWatch.start, window.placeholderWatch.appearedAt, window.placeholderWatch.removedAt, window.placeholderWatch.most]");
+        return new PlaceholderWatch(values[0] ?? double.NaN, values[1], values[2], (int)(values[3] ?? 0));
+    }
+
+    private async Task<IPage> OpenAsync(string path, int width, int height, int paneCount)
+    {
+        var page = await _fixture.CreatePageAsync();
+        await page.SetViewportSizeAsync(width, height);
+        await page.GotoAsync($"{_fixture.ServerAddress}{path}");
+        await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await WaitUntilSettledAsync(page, paneCount);
+        return page;
+    }
+
+    private static Task WaitUntilSettledAsync(IPage page, int paneCount) =>
+        page.WaitForFunctionAsync(PanesAreSettled, paneCount, new() { Timeout = PageLoadTimeout });
+
+    private static ILocator Child(IPage page, string title) =>
+        page.Locator("#scrollContainer .mud-list-item").GetByText(title, new() { Exact = true });
+
     [Fact]
     public async Task WhenADeepPathIsOpened_ThenItsPaneIsInViewAndNoPaneIsCutOff()
     {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await page.SetViewportSizeAsync(800, 700);
-
         // Act
-        await page.GotoAsync($"{_fixture.ServerAddress}{MotorPath}");
+        var page = await OpenAsync(MotorPath, 800, 700, paneCount: 3);
 
         // Assert
-        await page.WaitForFunctionAsync(LastPaneIsInView, null, new() { Timeout = PageLoadTimeout });
         Assert.Equal(0, await page.EvaluateAsync<int>(CountPartlyVisiblePanes));
     }
 
@@ -76,118 +127,146 @@ public class SubjectBrowserLayoutTests
     public async Task WhenAChildIsOpened_ThenItsPaneIsScrolledIntoViewAndNoPaneIsCutOff()
     {
         // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await page.SetViewportSizeAsync(800, 700);
-        await page.GotoAsync($"{_fixture.ServerAddress}browser/Demo");
-        await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
-        var motor = page.Locator("#scrollContainer .mud-list-item:has-text('Test Motor')").First;
-        await Assertions.Expect(motor).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        var page = await OpenAsync("browser/Demo", 800, 700, paneCount: 2);
 
         // Act
-        await motor.ClickAsync();
+        await Child(page, "Test Motor").ClickAsync();
 
         // Assert
-        await page.WaitForFunctionAsync(LastPaneIsInView, null, new() { Timeout = PageLoadTimeout });
+        await WaitUntilSettledAsync(page, paneCount: 3);
         Assert.Equal(0, await page.EvaluateAsync<int>(CountPartlyVisiblePanes));
     }
 
     [Fact]
-    public async Task WhenAPaneIsClosed_ThenAPlaceholderKeepsItsPlaceUntilTheRowHasScrolledBack()
+    public async Task WhenAChildOfAMiddlePaneIsOpened_ThenItReplacesTheDeeperPanes()
     {
         // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await page.SetViewportSizeAsync(800, 700);
-        await page.GotoAsync($"{_fixture.ServerAddress}{MotorPath}");
-        await page.WaitForFunctionAsync(LastPaneIsInView, null, new() { Timeout = PageLoadTimeout });
-        await page.EvaluateAsync("""
-            () => {
-                const container = document.getElementById('scrollContainer');
-                const hasPlaceholder = () => container.querySelector("[data-testid='subject-pane-placeholder']") !== null;
-                window.sawPanePlaceholder = false;
-                new MutationObserver(() => window.sawPanePlaceholder ||= hasPlaceholder())
-                    .observe(container, { childList: true });
-            }
-            """);
+        var page = await OpenAsync(MotorPath, 800, 700, paneCount: 3);
 
         // Act
-        await page.Locator("#scrollContainer [data-testid='subject-pane']").Last.Locator("button.mud-fab").ClickAsync();
+        await Child(page, "Grid Demo").ClickAsync();
 
         // Assert
-        await page.WaitForFunctionAsync("""
-            () => {
-                const container = document.getElementById('scrollContainer');
-                return container.querySelectorAll("[data-testid='subject-pane']").length === 2
-                    && container.querySelector("[data-testid='subject-pane-placeholder']") === null
-                    && container.scrollLeft === 0;
-            }
-            """, null, new() { Timeout = PageLoadTimeout });
-        Assert.True(await page.EvaluateAsync<bool>("() => window.sawPanePlaceholder"));
+        await Assertions.Expect(page.Locator("#scrollContainer [data-testid='subject-pane']").Last.Locator("h1"))
+            .ToContainTextAsync("Grid Demo", new() { Timeout = PageLoadTimeout });
+        await WaitUntilSettledAsync(page, paneCount: 3);
+        Assert.Equal(0, await page.EvaluateAsync<int>(CountPartlyVisiblePanes));
+    }
+
+    [Theory]
+    [InlineData(800, 700)] // Two panes in view: the closed pane is one of them.
+    [InlineData(375, 812)] // One pane in view: the closed pane is the one the row rests on.
+    public async Task WhenAPaneIsClosed_ThenAPlaceholderKeepsItsPlaceUntilTheRowHasScrolledBack(int width, int height)
+    {
+        // Arrange
+        var page = await OpenAsync(MotorPath, width, height, paneCount: 3);
+        await page.EvaluateAsync(WatchPlaceholders);
+
+        // Act
+        await page.Locator("#scrollContainer [data-testid='subject-pane']").Last
+            .Locator("[data-testid='close-pane-button']").ClickAsync();
+
+        // Assert
+        await WaitUntilSettledAsync(page, paneCount: 2);
+        var watch = await ReadPlaceholderWatchAsync(page);
+        var end = await page.EvaluateAsync<double>("() => document.getElementById('scrollContainer').scrollLeft");
+        Assert.Equal(1, watch.Most);
+        Assert.Equal(watch.Start, watch.AppearedAt);
+        Assert.True(end < watch.Start, "The row should have scrolled back.");
+        Assert.InRange(watch.RemovedAt ?? double.NaN, end - 1, end + 1);
         Assert.Equal(0, await page.EvaluateAsync<int>(CountPartlyVisiblePanes));
     }
 
     [Fact]
-    public async Task WhenTheOnlyPaneInViewIsClosed_ThenTheRowScrollsBackInsteadOfJumping()
+    public async Task WhenABreadcrumbLeadsBackSeveralLevels_ThenPlaceholdersKeepThePlacesUntilTheRowHasScrolledBack()
     {
         // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await page.SetViewportSizeAsync(375, 812);
-        await page.GotoAsync($"{_fixture.ServerAddress}{MotorPath}");
-        await page.WaitForFunctionAsync(LastPaneIsInView, null, new() { Timeout = PageLoadTimeout });
-        await page.EvaluateAsync("""
-            () => {
-                const container = document.getElementById('scrollContainer');
-                window.scrollStart = container.scrollLeft;
-                window.scrollPositions = [];
-                container.addEventListener('scroll', () => window.scrollPositions.push(container.scrollLeft));
-            }
-            """);
+        var page = await OpenAsync(MotorPath, 375, 812, paneCount: 3);
+        await page.EvaluateAsync(WatchPlaceholders);
 
         // Act
-        await page.Locator("#scrollContainer [data-testid='subject-pane']").Last.Locator("button.mud-fab").ClickAsync();
+        await page.Locator(".browser-toolbar").GetByRole(AriaRole.Link, new() { Name = "Root", Exact = true }).ClickAsync();
 
         // Assert
-        await page.WaitForFunctionAsync("""
-            () => {
-                const container = document.getElementById('scrollContainer');
-                return container.querySelectorAll("[data-testid='subject-pane']").length === 2
-                    && container.querySelector("[data-testid='subject-pane-placeholder']") === null;
-            }
-            """, null, new() { Timeout = PageLoadTimeout });
-        var positionsOnTheWay = await page.EvaluateAsync<int>("""
-            () => {
-                const end = document.getElementById('scrollContainer').scrollLeft;
-                return window.scrollPositions.filter(position => position > end + 1 && position < window.scrollStart - 1).length;
-            }
-            """);
-        Assert.True(positionsOnTheWay > 0, "The row jumped to the previous pane instead of scrolling to it.");
-        Assert.Equal(0, await page.EvaluateAsync<int>(CountPartlyVisiblePanes));
+        await WaitUntilSettledAsync(page, paneCount: 1);
+        var watch = await ReadPlaceholderWatchAsync(page);
+        Assert.Equal(2, watch.Most);
+        Assert.Equal(watch.Start, watch.AppearedAt);
+        Assert.InRange(watch.RemovedAt ?? double.NaN, -1, 1);
     }
 
     [Fact]
     public async Task WhenTheViewIsNarrowerThanAPane_ThenAPaneIsAsWideAsTheView()
     {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await page.SetViewportSizeAsync(375, 812);
-
         // Act
-        await page.GotoAsync($"{_fixture.ServerAddress}{MotorPath}");
+        var page = await OpenAsync(MotorPath, 375, 812, paneCount: 3);
 
         // Assert
-        await page.WaitForFunctionAsync(LastPaneIsInView, null, new() { Timeout = PageLoadTimeout });
+        var widthDifference = await page.EvaluateAsync<double>("""
+            () => {
+                const container = document.getElementById('scrollContainer');
+                const pane = container.querySelector("[data-testid='subject-pane']");
+                return Math.abs(pane.getBoundingClientRect().width - container.clientWidth);
+            }
+            """);
+        Assert.InRange(widthDifference, 0, 1);
         Assert.Equal(0, await page.EvaluateAsync<int>(CountPartlyVisiblePanes));
+    }
+
+    [Fact]
+    public async Task WhenTheViewIsResized_ThenThePanesAreFittedAgain()
+    {
+        // Arrange
+        const string paneWidth = "() => document.getElementById('scrollContainer').style.getPropertyValue('--pane-width')";
+        var page = await OpenAsync(MotorPath, 1280, 700, paneCount: 3);
+        var widthBefore = await page.EvaluateAsync<string>(paneWidth);
+
+        // Act
+        await page.SetViewportSizeAsync(800, 700);
+
+        // Assert
+        await page.WaitForFunctionAsync(
+            $"before => ({paneWidth})() !== before && ({CountPartlyVisiblePanes})() === 0",
+            widthBefore,
+            new() { Timeout = PageLoadTimeout });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)] // Developer mode puts an element of the tracking scope around the content of a pane.
+    public async Task WhenAPaneHasMoreContentThanFits_ThenTheContentScrollsInsideThePane(bool isDeveloperMode)
+    {
+        // Arrange
+        var developerMode = _fixture.ServerServices.GetRequiredService<DeveloperModeService>();
+        var wasDeveloperMode = developerMode.IsEnabled;
+        developerMode.SetEnabled(isDeveloperMode);
+        try
+        {
+            // Act
+            var page = await OpenAsync("browser", 800, 400, paneCount: 1);
+
+            // Assert
+            var isBounded = await page.EvaluateAsync<bool>("""
+                () => {
+                    const pane = document.querySelector("#scrollContainer [data-testid='subject-pane']");
+                    const content = pane.querySelector("[data-testid='subject-pane-content']");
+                    return content.scrollHeight > content.clientHeight
+                        && content.getBoundingClientRect().bottom <= pane.firstElementChild.getBoundingClientRect().bottom + 1;
+                }
+                """);
+            Assert.True(isBounded, "The content of the root pane should be taller than the pane and end inside it.");
+        }
+        finally
+        {
+            developerMode.SetEnabled(wasDeveloperMode);
+        }
     }
 
     [Fact]
     public async Task WhenASubjectHasChildrenAndMethods_ThenTheMethodsFollowTheChildren()
     {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-
         // Act
-        await page.GotoAsync($"{_fixture.ServerAddress}browser");
-        var createButton = page.Locator("#scrollContainer button:has-text('Create')").First;
-        await Assertions.Expect(createButton).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        var page = await OpenAsync("browser", 1280, 720, paneCount: 1);
 
         // Assert
         var methodsFollowChildren = await page.EvaluateAsync<bool>("""
