@@ -1,0 +1,64 @@
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    _renderedEntry = Entry;
+    _renderedQuietCount = QuietCount;
+    _renderedTimeZoneVersion = TimeZoneVersion;
+}
+@switch (Entry.Kind)
+{
+    case AgentTimelineEntryKind.User:
+        <MudPaper Class="pa-2 my-1 ml-auto" Elevation="0" Outlined="true" Style="max-width: 80%; width: fit-content;">
+            <MudText Style="white-space: pre-wrap;">@Entry.Text</MudText>
+        </MudPaper>
+        break;
+    case AgentTimelineEntryKind.Assistant:
+        <MudPaper Class="pa-2 my-1" Elevation="1" Style="max-width: 80%;" data-testid="agent-reply">
+            <MudText Style="white-space: pre-wrap;">@Entry.Text</MudText>
+            <AgentToolCalls Calls="Entry.ToolCalls" />
+        </MudPaper>
+        break;
+    case AgentTimelineEntryKind.BackgroundRun when Entry.IsQuiet:
+        <MudText Typo="Typo.caption" Class="my-1 d-block" data-testid="agent-quiet-runs">
+            @(QuietCount <= 1 ? "Quiet background run" : $"{QuietCount} quiet background runs, newest")
+            @TimeZone.Format(Entry.Timestamp) · @Entry.Trigger · @Entry.Text
+        </MudText>
+        break;
+    case AgentTimelineEntryKind.BackgroundRun:
+        <MudAlert Severity="Severity.Info" Dense="true" Class="my-1" data-testid="agent-background-run">
+            <MudText Typo="Typo.subtitle2">Background run @TimeZone.Format(Entry.Timestamp) (@Entry.Trigger)</MudText>
+            <MudText Style="white-space: pre-wrap;">@Entry.Text</MudText>
+            <AgentToolCalls Calls="Entry.ToolCalls" />
+        </MudAlert>
+        break;
+    case AgentTimelineEntryKind.Error:
+        <MudAlert Severity="Severity.Error" Dense="true" Class="my-1" data-testid="agent-error">@Entry.Text</MudAlert>
+        break;
+    case AgentTimelineEntryKind.Divider:
+        <MudDivider Class="my-2" />
+        <MudText Typo="Typo.caption" Align="Align.Center" Class="d-block">@Entry.Text</MudText>
+        break;
+}
+
+@code {
+    private AgentTimelineEntry? _renderedEntry;
+    private int _renderedQuietCount;
+    private int _renderedTimeZoneVersion;
+
+    [Parameter, EditorRequired]
+    public AgentTimelineEntry Entry { get; set; } = null!;
+
+    /// <summary>For a quiet background run, how many consecutive quiet runs it stands for, ending with <see cref="Entry"/>.</summary>
+    [Parameter]
+    public int QuietCount { get; set; }
+
+    [Parameter]
+    public int TimeZoneVersion { get; set; }
+
+    // Entries are immutable, so an entry renders again only when it is replaced (a growing quiet group) or the
+    // display time zone changed. Compared by reference: records compare by value, which would cost a deep compare.
+    protected override bool ShouldRender() =>
+        !ReferenceEquals(_renderedEntry, Entry) ||
+        _renderedQuietCount != QuietCount ||
+        _renderedTimeZoneVersion != TimeZoneVersion;
+}

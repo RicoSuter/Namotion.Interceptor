@@ -29,85 +29,34 @@
     <MudItem xs="12" md="6">
         <MudText Typo="Typo.h6">Memory</MudText>
         <MudText Typo="Typo.caption">
-            The agent's own notes, shown to it on every run. Last updated: @(_baseline.LastUpdated is { } lastUpdated ? TimeZone.Format(lastUpdated) : "never")
+            The agent's own notes, shown to it on every run. Last updated: @(Draft.LastUpdated is { } lastUpdated ? TimeZone.Format(lastUpdated) : "never")
         </MudText>
         <div data-testid="agent-memory">
-            <MudTextField T="string" @bind-Value="_memory" Lines="16" Variant="Variant.Outlined" Immediate="true" />
+            <MudTextField T="string" @bind-Value="Draft.Text" Lines="16" Variant="Variant.Outlined" Immediate="true" Disabled="Draft.IsSaving" />
         </div>
-        @if (_isStale)
+        @if (Draft.IsStale)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1">
                 The agent changed its memory while you were editing. Saving replaces its change.
-                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ReloadMemory">Reload</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="Draft.Reload">Reload</MudButton>
             </MudAlert>
         }
-        @if (_error is not null)
+        @if (Draft.Error is not null)
         {
-            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-1">@_error</MudAlert>
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-1">@Draft.Error</MudAlert>
         }
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-2" OnClick="SaveMemoryAsync"
-                   Disabled="@(_isSaving || _memory == _baseline.Content)" data-testid="agent-memory-save">Save memory</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-2" OnClick="Draft.SaveAsync"
+                   Disabled="@(Draft.IsSaving || !Draft.IsModified)" data-testid="agent-memory-save">Save memory</MudButton>
     </MudItem>
 </MudGrid>
 
 @code {
-    private LlmAgentBase? _agent;
-    private AgentMemorySnapshot _baseline = new(string.Empty, null);
-    private string _memory = string.Empty;
-    private bool _isStale;
-    private bool _isSaving;
-    private string? _error;
-
     [Parameter, EditorRequired]
     public LlmAgentBase Agent { get; set; } = null!;
 
-    protected override void OnParametersSet()
-    {
-        // The parent re-renders on every timeline change, which includes the agent's own memory updates.
-        // Untouched editor content follows the agent; edited content is kept and flagged instead.
-        var snapshot = Agent.Memory.GetSnapshot();
-        if (!ReferenceEquals(_agent, Agent) || _memory == _baseline.Content)
-        {
-            _agent = Agent;
-            _baseline = snapshot;
-            _memory = snapshot.Content;
-            _isStale = false;
-        }
-        else
-        {
-            _isStale = snapshot.Content != _baseline.Content;
-        }
-    }
+    [Parameter, EditorRequired]
+    public AgentMemoryDraft Draft { get; set; } = null!;
 
-    private void ReloadMemory()
-    {
-        _baseline = Agent.Memory.GetSnapshot();
-        _memory = _baseline.Content;
-        _isStale = false;
-        _error = null;
-    }
-
-    private async Task SaveMemoryAsync()
-    {
-        _isSaving = true;
-        try
-        {
-            if (await Agent.Memory.TryWriteAsync(_memory, CancellationToken.None))
-            {
-                ReloadMemory();
-            }
-            else
-            {
-                _error = $"The memory is limited to {AgentMemory.MaxBytes} bytes.";
-            }
-        }
-        catch (Exception exception)
-        {
-            _error = $"The memory could not be saved: {exception.Message}";
-        }
-        finally
-        {
-            _isSaving = false;
-        }
-    }
+    // The page re-renders when the agent writes its memory, so the draft follows or flags that write here.
+    protected override void OnParametersSet() => Draft.Refresh();
 }

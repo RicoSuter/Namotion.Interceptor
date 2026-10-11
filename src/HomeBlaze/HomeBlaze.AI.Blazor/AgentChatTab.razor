@@ -1,66 +1,7 @@
-@inject ITimeZoneDisplay TimeZone
-
 @* column-reverse keeps the scroll position anchored at the newest entry without script. *@
 <div style="max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column-reverse;" data-testid="agent-timeline">
     <div>
-        @{
-            var entries = Agent.Timeline.Entries;
-        }
-        @for (var index = 0; index < entries.Count; index++)
-        {
-            var entry = entries[index];
-            switch (entry.Kind)
-            {
-                case AgentTimelineEntryKind.User:
-                    <MudPaper Class="pa-2 my-1 ml-auto" Elevation="0" Outlined="true" Style="max-width: 80%; width: fit-content;">
-                        <MudText Style="white-space: pre-wrap;">@entry.Text</MudText>
-                    </MudPaper>
-                    break;
-                case AgentTimelineEntryKind.Assistant:
-                    <MudPaper Class="pa-2 my-1" Elevation="1" Style="max-width: 80%;" data-testid="agent-reply">
-                        <MudText Style="white-space: pre-wrap;">@entry.Text</MudText>
-                        <AgentToolCalls Calls="entry.ToolCalls" />
-                    </MudPaper>
-                    break;
-                case AgentTimelineEntryKind.BackgroundRun when entry.IsQuiet:
-                    // Consecutive quiet runs collapse into one line showing the newest of them.
-                    var quietCount = 1;
-                    while (index + 1 < entries.Count && entries[index + 1] is { Kind: AgentTimelineEntryKind.BackgroundRun, IsQuiet: true })
-                    {
-                        index++;
-                        quietCount++;
-                    }
-
-                    var newestQuiet = entries[index];
-                    <MudText Typo="Typo.caption" Class="my-1 d-block" data-testid="agent-quiet-runs">
-                        @(quietCount == 1 ? "Quiet background run" : $"{quietCount} quiet background runs, newest")
-                        @TimeZone.Format(newestQuiet.Timestamp) · @newestQuiet.Trigger · @newestQuiet.Text
-                    </MudText>
-                    break;
-                case AgentTimelineEntryKind.BackgroundRun:
-                    <MudAlert Severity="Severity.Info" Dense="true" Class="my-1" data-testid="agent-background-run">
-                        <MudText Typo="Typo.subtitle2">Background run @TimeZone.Format(entry.Timestamp) (@entry.Trigger)</MudText>
-                        <MudText Style="white-space: pre-wrap;">@entry.Text</MudText>
-                        <AgentToolCalls Calls="entry.ToolCalls" />
-                    </MudAlert>
-                    break;
-                case AgentTimelineEntryKind.Error:
-                    <MudAlert Severity="Severity.Error" Dense="true" Class="my-1" data-testid="agent-error">@entry.Text</MudAlert>
-                    break;
-                case AgentTimelineEntryKind.Divider:
-                    <MudDivider Class="my-2" />
-                    <MudText Typo="Typo.caption" Align="Align.Center" Class="d-block">@entry.Text</MudText>
-                    break;
-            }
-        }
-
-        @if (Agent.IsBusy)
-        {
-            <MudPaper Class="pa-2 my-1" Elevation="1" Style="max-width: 80%;" data-testid="agent-streaming">
-                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-1" />
-                <MudText Style="white-space: pre-wrap;">@Agent.StreamingText</MudText>
-            </MudPaper>
-        }
+        <AgentTimelineList Agent="Agent" TimeZoneVersion="TimeZoneVersion" />
     </div>
 </div>
 
@@ -79,6 +20,9 @@
 
     [Parameter, EditorRequired]
     public LlmAgentBase Agent { get; set; } = null!;
+
+    [Parameter]
+    public int TimeZoneVersion { get; set; }
 
     private async Task SendAsync()
     {

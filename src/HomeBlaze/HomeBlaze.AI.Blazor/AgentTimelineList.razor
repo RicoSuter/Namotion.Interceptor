@@ -1,0 +1,57 @@
+@using System.Runtime.CompilerServices
+
+@{
+    var entries = Agent.Timeline.Entries;
+    var isBusy = Agent.IsBusy;
+    _renderedEntries = entries;
+    _renderedIsBusy = isBusy;
+    _renderedTimeZoneVersion = TimeZoneVersion;
+}
+@for (var index = 0; index < entries.Count; index++)
+{
+    var entry = entries[index];
+    var key = _keys.GetValue(entry, _ => new object());
+    if (entry is { Kind: AgentTimelineEntryKind.BackgroundRun, IsQuiet: true })
+    {
+        // Consecutive quiet runs collapse into one row showing the newest, keyed by the oldest so the row stays
+        // in place while the group grows.
+        var quietCount = 1;
+        while (index + 1 < entries.Count && entries[index + 1] is { Kind: AgentTimelineEntryKind.BackgroundRun, IsQuiet: true })
+        {
+            index++;
+            quietCount++;
+        }
+
+        <AgentTimelineEntryView @key="key" Entry="entries[index]" QuietCount="quietCount" TimeZoneVersion="TimeZoneVersion" />
+    }
+    else
+    {
+        <AgentTimelineEntryView @key="key" Entry="entry" TimeZoneVersion="TimeZoneVersion" />
+    }
+}
+
+@if (isBusy)
+{
+    <AgentStreamingBubble Agent="Agent" />
+}
+
+@code {
+    // Rows are keyed by entry reference: records compare by value, so equal entries would collide as keys.
+    private readonly ConditionalWeakTable<AgentTimelineEntry, object> _keys = new();
+
+    private IReadOnlyList<AgentTimelineEntry>? _renderedEntries;
+    private bool _renderedIsBusy;
+    private int _renderedTimeZoneVersion;
+
+    [Parameter, EditorRequired]
+    public LlmAgentBase Agent { get; set; } = null!;
+
+    [Parameter]
+    public int TimeZoneVersion { get; set; }
+
+    // The timeline is an immutable snapshot that is replaced on every change, so a reference compare detects it.
+    protected override bool ShouldRender() =>
+        !ReferenceEquals(_renderedEntries, Agent.Timeline.Entries) ||
+        _renderedIsBusy != Agent.IsBusy ||
+        _renderedTimeZoneVersion != TimeZoneVersion;
+}

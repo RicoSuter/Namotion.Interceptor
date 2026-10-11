@@ -1,0 +1,50 @@
+@implements IDisposable
+
+<MudPaper Class="pa-2 my-1" Elevation="1" Style="max-width: 80%;" data-testid="agent-streaming">
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-1" />
+    <MudText Style="white-space: pre-wrap;">@Agent.StreamingText</MudText>
+</MudPaper>
+
+@code {
+    private LlmAgentBase? _subscribed;
+    private int _isRenderPending;
+
+    [Parameter, EditorRequired]
+    public LlmAgentBase Agent { get; set; } = null!;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_subscribed, Agent))
+        {
+            if (_subscribed is not null)
+            {
+                _subscribed.TimelineChanged -= OnTimelineChanged;
+            }
+
+            _subscribed = Agent;
+            _subscribed.TimelineChanged += OnTimelineChanged;
+        }
+    }
+
+    private void OnTimelineChanged()
+    {
+        // Text deltas arrive faster than the browser can render; coalesce them into one pending render.
+        if (Interlocked.Exchange(ref _isRenderPending, 1) == 0)
+        {
+            _ = InvokeAsync(() =>
+            {
+                Volatile.Write(ref _isRenderPending, 0);
+                StateHasChanged();
+            });
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_subscribed is not null)
+        {
+            _subscribed.TimelineChanged -= OnTimelineChanged;
+            _subscribed = null;
+        }
+    }
+}

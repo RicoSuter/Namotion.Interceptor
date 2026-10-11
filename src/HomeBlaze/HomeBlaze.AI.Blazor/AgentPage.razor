@@ -21,16 +21,24 @@
                        OnClick="NewConversationAsync" Disabled="@agent.IsBusy" data-testid="agent-new-conversation">New conversation</MudButton>
         </MudStack>
         <MudTabs Outlined="true" Border="true" TabPanelsClass="pa-3">
-            <MudTabPanel Text="Chat"><AgentChatTab Agent="agent" /></MudTabPanel>
+            <MudTabPanel Text="Chat"><AgentChatTab Agent="agent" TimeZoneVersion="_timeZoneVersion" /></MudTabPanel>
             <MudTabPanel Text="Activity"><AgentActivityTab Agent="agent" /></MudTabPanel>
-            <MudTabPanel Text="Configuration"><AgentConfigurationTab Agent="agent" /></MudTabPanel>
+            <MudTabPanel Text="Configuration"><AgentConfigurationTab Agent="agent" Draft="_memoryDraft!" /></MudTabPanel>
         </MudTabs>
     </MudStack>
 }
 
 @code {
     private LlmAgentBase? _subscribed;
+    private AgentMemoryDraft? _memoryDraft;
     private int _isRenderPending;
+    private int _timeZoneVersion;
+
+    // The state the next render shows, read on the agent's threads to skip events that only stream text, which
+    // AgentStreamingBubble renders on its own.
+    private IReadOnlyList<AgentTimelineEntry>? _renderedEntries;
+    private AgentMemorySnapshot? _renderedMemory;
+    private volatile bool _renderedIsBusy;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -39,7 +47,7 @@
 
     protected override void OnInitialized()
     {
-        TimeZone.Changed += RequestRender;
+        TimeZone.Changed += OnTimeZoneChanged;
     }
 
     protected override void OnParametersSet()
@@ -48,28 +56,66 @@
         {
             if (_subscribed is not null)
             {
-                _subscribed.TimelineChanged -= RequestRender;
+                _subscribed.TimelineChanged -= OnTimelineChanged;
             }
 
             _subscribed = Agent;
+            _memoryDraft = null;
             if (_subscribed is not null)
             {
-                _subscribed.TimelineChanged += RequestRender;
+                _memoryDraft = new AgentMemoryDraft(_subscribed);
+                CaptureRenderedState(_subscribed);
+                _subscribed.TimelineChanged += OnTimelineChanged;
             }
         }
     }
 
+    private void OnTimelineChanged()
+    {
+        if (_subscribed is { } agent &&
+            (!ReferenceEquals(Volatile.Read(ref _renderedEntries), agent.Timeline.Entries) ||
+             !ReferenceEquals(Volatile.Read(ref _renderedMemory), agent.Memory.GetSnapshot()) ||
+             _renderedIsBusy != agent.IsBusy))
+        {
+            RequestRender();
+        }
+    }
+
+    private void OnTimeZoneChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            // Timeline entries render only when their entry changes, so a new version makes them reformat timestamps.
+            _timeZoneVersion++;
+            StateHasChanged();
+        });
+    }
+
     private void RequestRender()
     {
-        // Text deltas arrive faster than the browser can render; coalesce them into one pending render.
+        // Events arrive faster than the browser can render; coalesce them into one pending render. The state is
+        // captured after the flag is cleared, so a change whose event was skipped while a render was pending is
+        // still part of that render.
         if (Interlocked.Exchange(ref _isRenderPending, 1) == 0)
         {
             _ = InvokeAsync(() =>
             {
                 Volatile.Write(ref _isRenderPending, 0);
+                if (_subscribed is { } agent)
+                {
+                    CaptureRenderedState(agent);
+                }
+
                 StateHasChanged();
             });
         }
+    }
+
+    private void CaptureRenderedState(LlmAgentBase agent)
+    {
+        Volatile.Write(ref _renderedEntries, agent.Timeline.Entries);
+        Volatile.Write(ref _renderedMemory, agent.Memory.GetSnapshot());
+        _renderedIsBusy = agent.IsBusy;
     }
 
     private async Task NewConversationAsync()
@@ -101,10 +147,10 @@
 
     public void Dispose()
     {
-        TimeZone.Changed -= RequestRender;
+        TimeZone.Changed -= OnTimeZoneChanged;
         if (_subscribed is not null)
         {
-            _subscribed.TimelineChanged -= RequestRender;
+            _subscribed.TimelineChanged -= OnTimelineChanged;
             _subscribed = null;
         }
     }
