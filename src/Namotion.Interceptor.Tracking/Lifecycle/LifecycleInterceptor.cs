@@ -424,7 +424,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             // positions may have shifted in the new collection.
             if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
             {
-                var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
+                var subjectContext = context.Property.Subject.Context;
+
+                ChildIndexRefresher.RefreshMovedChildren(
+                    subjectContext, oldCollectedSubjects, newCollectedSubjects, oldTouchedSubjects.Count, newTouchedSubjects.Count);
+
+                var handlers = subjectContext.GetServices<IPropertyLifecycleHandler>();
                 for (var i = 0; i < handlers.Length; i++)
                 {
                     handlers[i].RefreshCollectionProperty(context.Property, newValue);
