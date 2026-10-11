@@ -6,15 +6,21 @@
 @* Laid out like the final reply, with the progress overlaid on the bottom padding, so the reply replaces it
    without a jump. *@
 <MudPaper Class="pa-3 my-2 relative overflow-hidden" Elevation="0" Outlined="true" Style="max-width: min(100%, 56rem);" data-testid="agent-streaming">
-    <AgentMarkdown>@_stableHtml@_tailHtml</AgentMarkdown>
+    <AgentMarkdown>
+        @foreach (var segment in _stableSegments)
+        {
+            @segment.Html
+        }
+        @_tailHtml
+    </AgentMarkdown>
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="position: absolute; left: 0; right: 0; bottom: 0;" />
 </MudPaper>
 
 @code {
     private LlmAgentBase? _subscribed;
     private int _isRenderPending;
-    private string _stableText = string.Empty;
-    private MarkupString _stableHtml;
+    private readonly List<(string Text, MarkupString Html)> _stableSegments = [];
+    private int _stableLength;
     private MarkupString _tailHtml;
 
     [Parameter, EditorRequired]
@@ -47,18 +53,48 @@
         }
     }
 
-    // The completed blocks are converted once per boundary move; only the block being written is converted per render.
+    // Completed blocks are converted once, as one segment per boundary move, so a render sends only the newest
+    // segment and the block being written; unchanged segments keep their markup and are not sent again.
     private void UpdateHtml()
     {
         var text = Agent.StreamingText;
-        var stableLength = AgentStreamingMarkdown.FindStableLength(text);
-        if (!text.AsSpan(0, stableLength).SequenceEqual(_stableText))
+        if (!StartsWithStableSegments(text))
         {
-            _stableText = text[..stableLength];
-            _stableHtml = new MarkupString(AgentMarkdownRenderer.ToHtml(_stableText));
+            // A new turn started streaming while this bubble stayed on the page.
+            _stableSegments.Clear();
+            _stableLength = 0;
         }
 
-        _tailHtml = stableLength < text.Length ? new MarkupString(AgentMarkdownRenderer.ToHtml(text[stableLength..])) : default;
+        var stableLength = AgentStreamingMarkdown.FindStableLength(text);
+        if (stableLength > _stableLength)
+        {
+            var segment = text[_stableLength..stableLength];
+            _stableSegments.Add((segment, new MarkupString(AgentMarkdownRenderer.ToHtml(segment))));
+            _stableLength = stableLength;
+        }
+
+        _tailHtml = _stableLength < text.Length ? new MarkupString(AgentMarkdownRenderer.ToHtml(text[_stableLength..])) : default;
+    }
+
+    private bool StartsWithStableSegments(string text)
+    {
+        if (text.Length < _stableLength)
+        {
+            return false;
+        }
+
+        var position = 0;
+        foreach (var (segment, _) in _stableSegments)
+        {
+            if (!text.AsSpan(position, segment.Length).SequenceEqual(segment))
+            {
+                return false;
+            }
+
+            position += segment.Length;
+        }
+
+        return true;
     }
 
     public void Dispose()

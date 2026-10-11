@@ -8,7 +8,8 @@ public static class AgentStreamingMarkdown
     /// <summary>
     /// Returns the length of the longest prefix of <paramref name="text"/> that ends after a blank line outside a
     /// fenced code block, or 0 when there is none. A blank line ends paragraphs, lists and tables, so the prefix
-    /// renders the same when more text follows; the unfinished last line never counts.
+    /// renders the same when more text follows; the unfinished last line never counts. Loose lists, list
+    /// continuation paragraphs and reference links defined later can still render differently until the final reply.
     /// </summary>
     public static int FindStableLength(ReadOnlySpan<char> text)
     {
