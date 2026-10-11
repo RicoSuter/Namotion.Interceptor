@@ -1,8 +1,10 @@
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Services;
+using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
@@ -78,6 +80,40 @@ public class PlaywrightFixture : IAsyncLifetime
 
         _playwright?.Dispose();
         _factory?.Dispose();
+    }
+
+    /// <summary>
+    /// Puts a subject without an edit component under the root, for which the edit dialog and the page editor
+    /// show the generated properties editor. The serializer does not know the test-only type, so it cannot be
+    /// created through the create dialog, which stores it in a file.
+    /// </summary>
+    /// <returns>The name of the subject under the root, which is its path, and the subject.</returns>
+    public (string Name, PlainConfigurableSubject Subject) AddPlainSubjectToRoot()
+    {
+        var name = $"Plain{Guid.NewGuid():N}";
+        var root = GetRoot();
+        var subject = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
+        subject.Label = "Original label";
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
+        return (name, subject);
+    }
+
+    /// <summary>
+    /// Takes a subject of <see cref="AddPlainSubjectToRoot"/> out of the graph again.
+    /// </summary>
+    public void RemovePlainSubjectFromRoot(string name, PlainConfigurableSubject subject)
+    {
+        var root = GetRoot();
+        var children = new Dictionary<string, IInterceptorSubject>(root.Children);
+        children.Remove(name);
+        root.Children = children;
+        ServerServices.GetRequiredService<SubjectFactory>().DiscardSubject(subject);
+    }
+
+    private FluentStorageContainer GetRoot()
+    {
+        return ServerServices.GetRequiredService<RootManager>().Root as FluentStorageContainer
+            ?? throw new InvalidOperationException("The root of the test server is not a storage container");
     }
 
     /// <summary>

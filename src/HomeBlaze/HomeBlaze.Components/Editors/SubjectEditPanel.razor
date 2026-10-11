@@ -11,22 +11,31 @@
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
     @if (Subject != null)
     {
-        @if (HostedComponentType is { } hostedComponentType)
-        {
-            <SubjectComponent @key="Subject"
-                              Subject="@Subject"
-                              Type="hostedComponentType"
-                              AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
-                              ComponentInstance="_subjectComponent"
-                              ComponentInstanceChanged="OnSubjectComponentRendered" />
-        }
-        else
-        {
-            <ConfigurationPropertiesEditor @key="Subject"
-                                           @ref="_propertiesEditor"
-                                           Subject="@Subject"
-                                           IsValidChanged="OnPropertiesEditorIsValidChanged" />
-        }
+        @* A hosted form may change its validity without raising IsValidChanged, so the panel reads it again after
+           interaction. Blazor does not bubble change, so a control that only changes on change is picked up by
+           the next focus change. *@
+        <div @oninput="_refreshIsValid"
+             @onclick="_refreshIsValid"
+             @onkeyup="_refreshIsValid"
+             @onfocusin="_refreshIsValid"
+             @onfocusout="_refreshIsValid">
+            @if (HostedComponentType is { } hostedComponentType)
+            {
+                <SubjectComponent @key="Subject"
+                                  Subject="@Subject"
+                                  Type="hostedComponentType"
+                                  AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
+                                  ComponentInstance="_subjectComponent"
+                                  ComponentInstanceChanged="OnSubjectComponentRendered" />
+            }
+            else
+            {
+                <ConfigurationPropertiesEditor @key="Subject"
+                                               @ref="_propertiesEditor"
+                                               Subject="@Subject"
+                                               IsValidChanged="OnPropertiesEditorIsValidChanged" />
+            }
+        </div>
     }
 </TrackingScope>
 
@@ -42,6 +51,12 @@
     /// <summary>
     /// Raised with the current validity once the hosted editor is ready, and again whenever the validity changes.
     /// </summary>
+    /// <remarks>
+    /// Nothing is raised before the hosted editor is ready, so a host that enables its confirm button from this
+    /// event keeps it disabled until the first value arrives. A hosted editor that changes its validity without
+    /// raising its own event is only picked up at the next interaction in the panel or by
+    /// <see cref="RefreshIsValidAsync"/>.
+    /// </remarks>
     [Parameter] public EventCallback<bool> IsValidChanged { get; set; }
 
     private IInterceptorSubject? _editedSubject;
@@ -50,6 +65,7 @@
     private ISubjectEditComponent? _subscribedEditComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
+    private Func<Task> _refreshIsValid = () => Task.CompletedTask;
 
     private SubjectComponentType? HostedComponentType
     {
@@ -79,6 +95,13 @@
     /// during which <see cref="ApplyChangesAsync"/> still returns false.
     /// </summary>
     public bool IsValid => (_subjectComponent as ISubjectEditComponent)?.IsValid ?? _propertiesEditor?.IsValid ?? true;
+
+    protected override void OnInitialized()
+    {
+        // These events fire on every keystroke in the hosted form, and a normal handler would re-render the
+        // panel, and with it the form, each time.
+        _refreshIsValid = new NonRenderingEventReceiver(ReportIsValidAsync).HandleAsync;
+    }
 
     protected override void OnParametersSet()
     {

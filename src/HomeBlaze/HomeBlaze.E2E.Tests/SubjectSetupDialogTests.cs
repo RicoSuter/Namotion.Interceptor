@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
-using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -106,6 +105,31 @@ public class SubjectSetupDialogTests
     private static async Task EnterMotorNameAsync(IPage page, string motorName = MotorName)
     {
         await Dialog(page).GetByLabel("Name", new() { Exact = true }).FillAsync(motorName);
+    }
+
+    private static ILocator SaveButton(ILocator editDialog)
+    {
+        return editDialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true });
+    }
+
+    /// <summary>
+    /// Opens the edit dialog of the subject at the path from its pane in the subject browser.
+    /// </summary>
+    private async Task<ILocator> OpenEditDialogAsync(IPage page, string subjectPath)
+    {
+        await page.GotoAsync($"{_fixture.ServerAddress}browser/{subjectPath}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // The edit button is prerendered, and a click before the circuit is connected is lost.
+        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
+            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+
+        // Every pane of the path has an edit button, and the last pane shows the subject at the path.
+        var editButton = page.Locator("#scrollContainer [data-testid='edit-subject-button']").Last;
+        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await editButton.ClickAsync();
+
+        return page.GetByRole(AriaRole.Dialog);
     }
 
     private static bool FileContains(string filePath, string text)
@@ -720,49 +744,31 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(Dialog(page).GetByText("Not a valid number")).ToBeVisibleAsync();
     }
 
-    [Theory]
-    [InlineData("Tags (String[])", "not a list", "Failed to set 'Tags'")]
-    [InlineData("Limit", "1.5", "Not a valid number")]
-    public async Task WhenAValueCannotBeAppliedInTheEditDialog_ThenNothingIsAppliedAndTheDialogStaysOpen(
-        string fieldLabel, string text, string expectedError)
+    [Fact]
+    public async Task WhenAValueCannotBeAppliedInTheEditDialog_ThenNothingIsAppliedAndTheDialogStaysOpen()
     {
-        // Arrange - the subject is put under the root for this test only. The serializer does not know the
-        // test-only type, so it cannot be created through the dialog, which stores it in a file.
-        var name = $"Plain{Guid.NewGuid():N}";
-        var subjectFactory = _fixture.ServerServices.GetRequiredService<SubjectFactory>();
-        var root = Assert.IsType<FluentStorageContainer>(_fixture.ServerServices.GetRequiredService<RootManager>().Root);
-        var subject = subjectFactory.CreateSubject<PlainConfigurableSubject>();
-        subject.Label = "Original label";
-        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
+        // Arrange
+        var (name, subject) = _fixture.AddPlainSubjectToRoot();
         try
         {
-            // The type has no edit component, so the edit dialog shows the generated properties editor.
             var page = await _fixture.CreatePageAsync();
-            await page.GotoAsync($"{_fixture.ServerAddress}browser/{name}");
-            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
-            // The edit button is prerendered, and a click before the circuit is connected is lost.
-            await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
-                .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-
-            var editButton = page.Locator("#scrollContainer button.mud-icon-button.mud-button-filled-primary").Last;
-            await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-            await editButton.ClickAsync();
-
-            var editDialog = page.GetByRole(AriaRole.Dialog);
+            var editDialog = await OpenEditDialogAsync(page, name);
             var labelInput = editDialog.GetByLabel("Label", new() { Exact = true });
             await Assertions.Expect(labelInput).ToHaveValueAsync("Original label", new() { Timeout = ElementVisibilityTimeout });
             await labelInput.FillAsync("Changed label");
-            await editDialog.GetByLabel(fieldLabel).FillAsync(text);
+
+            // The editor has no field for an array and shows it as text, which stays valid until it is applied.
+            await editDialog.GetByLabel("Tags (String[])").FillAsync("not a list");
 
             // Act
-            await editDialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+            await SaveButton(editDialog).ClickAsync();
 
             // Assert
             await Assertions.Expect(page.GetByText("The values could not be applied"))
                 .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-            await Assertions.Expect(editDialog.GetByText(expectedError)).ToBeVisibleAsync();
+            await Assertions.Expect(editDialog.GetByText("Failed to set 'Tags'")).ToBeVisibleAsync();
             await Assertions.Expect(labelInput).ToHaveValueAsync("Changed label");
+            await Assertions.Expect(SaveButton(editDialog)).ToBeEnabledAsync();
             Assert.Equal("Original label", subject.Label);
             Assert.Null(subject.Tags);
             Assert.Null(subject.Limit);
@@ -776,10 +782,168 @@ public class SubjectSetupDialogTests
         }
         finally
         {
-            var children = new Dictionary<string, IInterceptorSubject>(root.Children);
-            children.Remove(name);
-            root.Children = children;
-            subjectFactory.DiscardSubject(subject);
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenANumberFieldOfTheEditDialogHoldsTextThatIsNotANumber_ThenSaveIsDisabledUntilItIsCorrected()
+    {
+        // Arrange
+        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        try
+        {
+            var page = await _fixture.CreatePageAsync();
+            var editDialog = await OpenEditDialogAsync(page, name);
+            var labelInput = editDialog.GetByLabel("Label", new() { Exact = true });
+            var limitInput = editDialog.GetByLabel("Limit");
+            await Assertions.Expect(labelInput).ToHaveValueAsync("Original label", new() { Timeout = ElementVisibilityTimeout });
+
+            // Assert - the subject is valid, so nothing has to be touched before it can be saved.
+            await Assertions.Expect(SaveButton(editDialog)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // Act - Enter commits the text without leaving the field.
+            await labelInput.FillAsync("Changed label");
+            await limitInput.FillAsync("1.5");
+            await limitInput.PressAsync("Enter");
+
+            // Assert
+            await Assertions.Expect(SaveButton(editDialog)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(editDialog.GetByText("Not a valid number")).ToBeVisibleAsync();
+            Assert.Equal("Original label", subject.Label);
+            Assert.Null(subject.Limit);
+
+            // Act
+            await limitInput.FillAsync("3");
+            await limitInput.PressAsync("Enter");
+
+            // Assert
+            await Assertions.Expect(SaveButton(editDialog)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // Act
+            await SaveButton(editDialog).ClickAsync();
+
+            // Assert - the notification is the last step of persisting. The subject has no file of its own,
+            // so there is nothing on disk to read.
+            await Assertions.Expect(editDialog).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(page.GetByText("Configuration saved."))
+                .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            Assert.Equal("Changed label", subject.Label);
+            Assert.Equal(3, subject.Limit);
+        }
+        finally
+        {
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheNameOfAMotorIsClearedInTheEditDialog_ThenSaveIsDisabledUntilANameIsEntered()
+    {
+        // Saving rewrites the motor file in the test output directory, which later runs reuse. Restoring it
+        // only restores the file: file watching is off in testRoot.json, so the live motor keeps the saved
+        // target speed for the rest of the host's life. Its name is entered again unchanged, because the
+        // property history tests find the motor by it.
+        const string motorName = "Test Motor";
+        const int targetSpeed = 1200;
+        var motorFilePath = Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", "Motor.json");
+        var originalMotorFile = await File.ReadAllBytesAsync(motorFilePath);
+        var isCompleted = false;
+        try
+        {
+            // Arrange
+            var root = Assert.IsType<FluentStorageContainer>(_fixture.ServerServices.GetRequiredService<RootManager>().Root);
+            var motor = Assert.IsType<Motor>(Assert.IsType<VirtualFolder>(root.Children["Demo"]).Children["Motor"]);
+
+            var page = await _fixture.CreatePageAsync();
+            var editDialog = await OpenEditDialogAsync(page, "Demo/Motor");
+            var nameInput = editDialog.GetByLabel("Name", new() { Exact = true });
+            await Assertions.Expect(nameInput).ToHaveValueAsync(motorName, new() { Timeout = ElementVisibilityTimeout });
+
+            // Assert - the motor is valid, so nothing has to be touched before it can be saved.
+            await Assertions.Expect(SaveButton(editDialog)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // Act
+            await editDialog.GetByLabel("Target Speed (RPM)").FillAsync(targetSpeed.ToString());
+            await nameInput.FillAsync("");
+
+            // Assert
+            await Assertions.Expect(SaveButton(editDialog)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            Assert.Equal(motorName, motor.Name);
+            Assert.NotEqual(targetSpeed, motor.TargetSpeed);
+
+            // Act
+            await nameInput.FillAsync(motorName);
+
+            // Assert
+            await Assertions.Expect(SaveButton(editDialog)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // Act
+            await SaveButton(editDialog).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(editDialog).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
+            Assert.Equal(motorName, motor.Name);
+            Assert.Equal(targetSpeed, motor.TargetSpeed);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => FileContains(motorFilePath, $"\"targetSpeed\": {targetSpeed}") &&
+                      FileContains(motorFilePath, $"\"name\": \"{motorName}\""),
+                TimeSpan.FromSeconds(10),
+                message: "The motor file does not contain the values that were saved in the edit dialog.");
+            isCompleted = true;
+        }
+        finally
+        {
+            try
+            {
+                await File.WriteAllBytesAsync(motorFilePath, originalMotorFile);
+            }
+            catch (Exception exception) when (!isCompleted)
+            {
+                // The failure of the test itself is the one to report.
+                _output.WriteLine($"Restoring {motorFilePath} failed: {exception}");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheSubjectChangesWhileItIsEdited_ThenOnlyAChangeFromOutsideTheEditorIsReported()
+    {
+        // Arrange
+        const string externalChangeWarning = "Configuration was changed externally";
+        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        try
+        {
+            var page = await _fixture.CreatePageAsync();
+            var editDialog = await OpenEditDialogAsync(page, name);
+            var labelInput = editDialog.GetByLabel("Label", new() { Exact = true });
+            await Assertions.Expect(labelInput).ToHaveValueAsync("Original label", new() { Timeout = ElementVisibilityTimeout });
+            await labelInput.FillAsync("Changed label");
+
+            // The editor does not know the range of the level, so the setter is what rejects the value,
+            // after the label was set, which the editor then sets back.
+            await editDialog.GetByLabel("Level").FillAsync("99");
+
+            // Act
+            await SaveButton(editDialog).ClickAsync();
+
+            // Assert - the editor set and restored the label itself.
+            await Assertions.Expect(editDialog.GetByText("Failed to set 'Level'"))
+                .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            Assert.Equal("Original label", subject.Label);
+            Assert.Equal(1, subject.Level);
+            await Assertions.Expect(editDialog.GetByText(externalChangeWarning)).ToHaveCountAsync(0);
+
+            // Act
+            subject.Interval = 9;
+
+            // Assert
+            await Assertions.Expect(editDialog.GetByText(externalChangeWarning))
+                .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        }
+        finally
+        {
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
         }
     }
 

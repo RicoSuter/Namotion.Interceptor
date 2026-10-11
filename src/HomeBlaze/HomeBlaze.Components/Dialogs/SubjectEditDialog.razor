@@ -5,13 +5,13 @@
 
 <MudDialog>
     <DialogContent>
-        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" />
+        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" IsValidChanged="OnEditPanelIsValidChanged" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
         <MudButton Color="Color.Primary"
                    OnClick="OnSaveClicked"
-                   Disabled="@(!(_editPanel?.IsValid ?? true))">Save</MudButton>
+                   Disabled="@(!_isEditPanelValid)">Save</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -22,6 +22,9 @@
 
     private SubjectEditPanel? _editPanel;
 
+    // Stays false until the panel reports, which it does once its editor is ready and can be saved.
+    private bool _isEditPanelValid;
+
     public MaxWidth GetPreferredDialogSize()
     {
         return MaxWidth.Small;
@@ -29,11 +32,26 @@
 
     private void Cancel() => MudDialog?.Cancel();
 
+    private void OnEditPanelIsValidChanged(bool isValid)
+    {
+        _isEditPanelValid = isValid;
+    }
+
     private async Task OnSaveClicked()
     {
-        if (_editPanel != null && await _editPanel.SaveAsync(CancellationToken.None))
+        if (_editPanel is not { } editPanel)
+        {
+            return;
+        }
+
+        if (await editPanel.SaveAsync(CancellationToken.None))
         {
             MudDialog?.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            // The button may have been enabled from a validity the form no longer has.
+            await editPanel.RefreshIsValidAsync();
         }
     }
 

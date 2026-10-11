@@ -43,20 +43,11 @@
                                   HelperText="Part of the subject's path, which is its ID. Avoid renaming it later."
                                   data-testid="create-name-input" />
                 }
-                @* A hosted form may change its validity without raising IsValidChanged, so the dialog reads it again
-                   after interaction. Blazor does not bubble change, so a control that only changes on change is picked
-                   up by the next focus change or by the pointer entering "Create". *@
-                <div @oninput="_refreshEditPanelIsValid"
-                     @onclick="_refreshEditPanelIsValid"
-                     @onkeyup="_refreshEditPanelIsValid"
-                     @onfocusin="_refreshEditPanelIsValid"
-                     @onfocusout="_refreshEditPanelIsValid">
-                    <SubjectEditPanel @key="_createdSubject"
-                                      @ref="_editPanel"
-                                      Subject="_createdSubject"
-                                      IsCreating="true"
-                                      IsValidChanged="OnEditPanelIsValidChanged" />
-                </div>
+                <SubjectEditPanel @key="_createdSubject"
+                                  @ref="_editPanel"
+                                  Subject="_createdSubject"
+                                  IsCreating="true"
+                                  IsValidChanged="OnEditPanelIsValidChanged" />
             </MudStack>
         }
     </DialogContent>
@@ -152,8 +143,7 @@
 
         _types = TypeCatalog.GetCreatableTypes(existingSubjects);
 
-        // These events fire on every keystroke in the hosted form, and a normal handler would re-render the
-        // dialog, and with it the form, each time.
+        // A normal handler would re-render the dialog, and with it the form, each time the pointer enters the button.
         _refreshEditPanelIsValid = new NonRenderingEventReceiver(RefreshEditPanelIsValidAsync).HandleAsync;
     }
 
@@ -386,15 +376,5 @@
             return null;
 
         return result.Data as CreateSubjectResult;
-    }
-
-    /// <summary>
-    /// Handles an event in place of the dialog, which is then not rendered afterwards.
-    /// </summary>
-    private sealed class NonRenderingEventReceiver(Func<Task> handler) : IHandleEvent
-    {
-        public Task HandleAsync() => handler();
-
-        Task IHandleEvent.HandleEventAsync(EventCallbackWorkItem callback, object? argument) => callback.InvokeAsync(argument);
     }
 }
