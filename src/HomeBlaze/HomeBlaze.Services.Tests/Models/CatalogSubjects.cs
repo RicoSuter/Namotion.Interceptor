@@ -7,8 +7,8 @@ namespace HomeBlaze.Services.Tests.Models;
 
 [InterceptorSubject]
 [Category("Devices")]
-[DisplayName("Zebra sensor")]
 [Description("Counts stripes")]
+[DisplayName("Zebra sensor")]
 [SubjectIcon("Pets")]
 public partial class CatalogAnnotatedSubject : IConfigurable
 {
@@ -121,3 +121,39 @@ public partial class CatalogNotConfigurableSubject
     {
     }
 }
+
+[InterceptorSubject]
+public partial class CatalogDerivedAnnotatedSubject : CatalogAnnotatedSubject
+{
+    public CatalogDerivedAnnotatedSubject()
+    {
+    }
+}
+
+[InterceptorSubject]
+public partial class CatalogDerivedExcludedSubject : CatalogExcludedSubject
+{
+    public CatalogDerivedExcludedSubject()
+    {
+    }
+}
+
+[InterceptorSubject]
+public partial class CatalogDerivedSingleInstanceSubject : CatalogSingleInstanceSubject
+{
+    public CatalogDerivedSingleInstanceSubject()
+    {
+    }
+}
+
+[Category("")]
+[Description("")]
+[DisplayName("")]
+[SubjectIcon("")]
+public class CatalogEmptyAttributesSubject;
+
+[Category(" ")]
+[Description("\t")]
+[DisplayName("  ")]
+[SubjectIcon(" ")]
+public class CatalogBlankAttributesSubject;

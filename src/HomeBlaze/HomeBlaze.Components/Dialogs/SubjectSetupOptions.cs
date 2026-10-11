@@ -15,13 +15,5 @@ public sealed record SubjectSetupOptions
     /// <summary>
     /// How the dialog asks for the name, or null when the created subject has no name of its own.
     /// </summary>
-    public SubjectNameOptions? Name { get; init; }
+    public SubjectNameOptions? NameField { get; init; }
 }
-
-/// <summary>
-/// How the create subject dialog asks for the name of the new subject.
-/// </summary>
-/// <param name="Label">The label of the name field.</param>
-/// <param name="Suffix">A fixed suffix shown after the name, such as ".json", or an empty string.</param>
-/// <param name="ExistingNames">The names that are already used, with or without the suffix. The dialog rejects them.</param>
-public sealed record SubjectNameOptions(string Label, string Suffix, IReadOnlyCollection<string> ExistingNames);

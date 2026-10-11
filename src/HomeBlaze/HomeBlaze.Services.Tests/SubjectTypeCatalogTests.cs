@@ -12,6 +12,16 @@ public class SubjectTypeCatalogTests
         return new SubjectTypeCatalog(new SubjectTypeRegistry(typeProvider));
     }
 
+    private static (string Name, int MatchCount)[] CountMatches(IReadOnlyList<SubjectTypeGroup> groups)
+    {
+        return groups.Select(group => (group.Name, group.Matches.Count)).ToArray();
+    }
+
+    private static IEnumerable<SubjectTypeDescriptor> GetMatches(IReadOnlyList<SubjectTypeGroup> groups)
+    {
+        return groups.SelectMany(group => group.Matches);
+    }
+
     private static IReadOnlyList<SubjectTypeDescriptor> DescribeAll()
     {
         return CreateCatalog(
@@ -108,7 +118,7 @@ public class SubjectTypeCatalogTests
         var descriptor = SubjectTypeCatalog.Describe(typeof(CatalogPlainSubject));
 
         // Assert
-        Assert.Equal("Catalog Plain Subject", descriptor.DisplayName);
+        Assert.Equal("Catalog plain subject", descriptor.DisplayName);
         Assert.Null(descriptor.Description);
         Assert.Equal(SubjectTypeCatalog.OtherGroup, descriptor.Group);
         Assert.Equal("Category", descriptor.IconName);
@@ -132,7 +142,7 @@ public class SubjectTypeCatalogTests
 
         // Assert
         Assert.Equal(
-            ["Alpha relay", "Zebra sensor", "Catalog Server Subject", "Catalog Plain Subject"],
+            ["Alpha relay", "Zebra sensor", "Catalog server subject", "Catalog plain subject"],
             descriptors.Select(descriptor => descriptor.DisplayName));
         Assert.Equal(
             ["Devices", "Devices", "Servers", "Other"],
@@ -152,17 +162,18 @@ public class SubjectTypeCatalogTests
         // Act
         var descriptors = catalog.GetCreatableTypes([]);
         var groups = SubjectTypeCatalog.GetGroups(descriptors, searchText: null);
-        var matches = SubjectTypeCatalog.Filter(descriptors, searchText: null, group: "DEVICES");
 
         // Assert
         Assert.Equal(
-            ["Aardvark feeder", "Alpha relay", "Zebra sensor", "Catalog Server Subject"],
+            ["Aardvark feeder", "Alpha relay", "Zebra sensor", "Catalog server subject"],
             descriptors.Select(descriptor => descriptor.DisplayName));
         Assert.Equal(
             ["devices", "devices", "devices", "Servers"],
             descriptors.Select(descriptor => descriptor.Group));
-        Assert.Equal([new SubjectTypeGroup("devices", 3), new SubjectTypeGroup("Servers", 1)], groups);
-        Assert.Equal(3, matches.Count);
+        Assert.Equal([("devices", 3), ("Servers", 1)], CountMatches(groups));
+        Assert.Equal(
+            [typeof(CatalogLowerCaseGroupSubject), typeof(CatalogSecondDeviceSubject), typeof(CatalogAnnotatedSubject)],
+            groups[0].Matches.Select(descriptor => descriptor.Type));
     }
 
     [Fact]
@@ -179,7 +190,7 @@ public class SubjectTypeCatalogTests
         var groups = SubjectTypeCatalog.GetGroups(descriptors, searchText: null);
 
         // Assert
-        Assert.Equal([new SubjectTypeGroup("Devices", 2)], groups);
+        Assert.Equal([("Devices", 2)], CountMatches(groups));
     }
 
     [Theory]
@@ -194,11 +205,28 @@ public class SubjectTypeCatalogTests
         var descriptors = DescribeAll();
 
         // Act
-        var matches = SubjectTypeCatalog.Filter(descriptors, searchText, group: null);
+        var matches = GetMatches(SubjectTypeCatalog.GetGroups(descriptors, searchText)).ToList();
 
         // Assert
         Assert.Contains(matches, descriptor => descriptor.Type == typeof(CatalogAnnotatedSubject));
         Assert.DoesNotContain(matches, descriptor => descriptor.Type == typeof(CatalogServerSubject));
+    }
+
+    [Theory]
+    [InlineData("zebra servers")]
+    [InlineData("stripes relay")]
+    [InlineData("devices nothing")]
+    public void WhenOnlySomeSearchTermsMatchAType_ThenItIsNotFound(string searchText)
+    {
+        // Arrange
+        var descriptors = DescribeAll();
+
+        // Act
+        var groups = SubjectTypeCatalog.GetGroups(descriptors, searchText);
+
+        // Assert - each term on its own matches a type, or the group of one.
+        Assert.Empty(GetMatches(groups));
+        Assert.Equal(["Devices", "Servers", "Other"], groups.Select(group => group.Name));
     }
 
     [Fact]
@@ -208,25 +236,28 @@ public class SubjectTypeCatalogTests
         var descriptors = DescribeAll();
 
         // Act
-        var matches = SubjectTypeCatalog.Filter(descriptors, searchText: " ", group: null);
+        var groups = SubjectTypeCatalog.GetGroups(descriptors, searchText: " ");
 
         // Assert
-        Assert.Equal(descriptors, matches);
+        Assert.Equal(descriptors, GetMatches(groups));
     }
 
     [Fact]
-    public void WhenGroupIsSelected_ThenOnlyThatGroupIsReturned()
+    public void WhenTypesAreGrouped_ThenEachGroupHoldsOnlyItsOwnTypesInTheListedOrder()
     {
         // Arrange
         var descriptors = DescribeAll();
 
         // Act
-        var matches = SubjectTypeCatalog.Filter(descriptors, searchText: null, group: "Devices");
+        var groups = SubjectTypeCatalog.GetGroups(descriptors, searchText: null);
 
         // Assert
+        Assert.Equal(["Devices", "Servers", "Other"], groups.Select(group => group.Name));
         Assert.Equal(
             [typeof(CatalogSecondDeviceSubject), typeof(CatalogAnnotatedSubject)],
-            matches.Select(descriptor => descriptor.Type));
+            groups[0].Matches.Select(descriptor => descriptor.Type));
+        Assert.Equal([typeof(CatalogServerSubject)], groups[1].Matches.Select(descriptor => descriptor.Type));
+        Assert.Equal([typeof(CatalogPlainSubject)], groups[2].Matches.Select(descriptor => descriptor.Type));
     }
 
     [Fact]
@@ -239,48 +270,91 @@ public class SubjectTypeCatalogTests
         var groups = SubjectTypeCatalog.GetGroups(descriptors, "zebra");
 
         // Assert
-        Assert.Equal(
-            [new SubjectTypeGroup("Devices", 1), new SubjectTypeGroup("Servers", 0), new SubjectTypeGroup("Other", 0)],
-            groups);
+        Assert.Equal([("Devices", 1), ("Servers", 0), ("Other", 0)], CountMatches(groups));
+        Assert.Equal([typeof(CatalogAnnotatedSubject)], groups[0].Matches.Select(descriptor => descriptor.Type));
     }
 
     [Fact]
-    public void WhenNameIsFree_ThenTypeNameIsSuggested()
+    public void WhenTypeDerivesFromAnAnnotatedType_ThenItDoesNotInheritTheDescription()
     {
         // Act
-        var name = SubjectTypeCatalog.SuggestName(typeof(CatalogPlainSubject), ["Other", "Dashboard.md"], ".json");
+        var descriptor = SubjectTypeCatalog.Describe(typeof(CatalogDerivedAnnotatedSubject));
 
         // Assert
-        Assert.Equal("CatalogPlainSubject", name);
+        Assert.Equal("Catalog derived annotated subject", descriptor.DisplayName);
+        Assert.Null(descriptor.Description);
+        Assert.Equal(SubjectTypeCatalog.OtherGroup, descriptor.Group);
+        Assert.Equal("Category", descriptor.IconName);
     }
 
     [Fact]
-    public void WhenNameIsTaken_ThenTheNextFreeNumberIsAppended()
+    public void WhenTypeDerivesFromAnExcludedType_ThenItIsListed()
     {
         // Arrange
-        string[] existingNames = ["CatalogPlainSubject", "catalogplainsubject2.json"];
+        var catalog = CreateCatalog(typeof(CatalogExcludedSubject), typeof(CatalogDerivedExcludedSubject));
 
         // Act
-        var name = SubjectTypeCatalog.SuggestName(typeof(CatalogPlainSubject), existingNames, ".json");
+        var descriptors = catalog.GetCreatableTypes([]);
 
         // Assert
-        Assert.Equal("CatalogPlainSubject3", name);
+        Assert.Equal([typeof(CatalogDerivedExcludedSubject)], descriptors.Select(descriptor => descriptor.Type));
+    }
+
+    [Fact]
+    public void WhenOnlyADerivedTypeOfASingleInstanceTypeHasAnInstance_ThenBothAreListed()
+    {
+        // Arrange
+        var catalog = CreateCatalog(typeof(CatalogSingleInstanceSubject), typeof(CatalogDerivedSingleInstanceSubject));
+
+        // Act
+        var descriptors = catalog.GetCreatableTypes([new CatalogDerivedSingleInstanceSubject()]);
+
+        // Assert - the derived type is not a single instance type itself, and its instance is none of the base type.
+        Assert.Equal(
+            [typeof(CatalogDerivedSingleInstanceSubject), typeof(CatalogSingleInstanceSubject)],
+            descriptors.Select(descriptor => descriptor.Type));
     }
 
     [Theory]
-    [InlineData("history", true)]
-    [InlineData("HISTORY", true)]
-    [InlineData("Dashboard", false)]
-    [InlineData("Other", false)]
-    public void WhenExistingNameMatchesWithOrWithoutSuffixIgnoringCase_ThenNameIsTaken(string name, bool expected)
+    [InlineData(typeof(Relay), "Relay")]
+    [InlineData(typeof(ShellyDevice), "Shelly device")]
+    [InlineData(typeof(HTTPServer), "HTTP server")]
+    [InlineData(typeof(RemoteIOModule), "Remote IO module")]
+    [InlineData(typeof(Sensor2Gateway), "Sensor2 gateway")]
+    [InlineData(typeof(Mqtt5IOTBridge), "Mqtt5 IOT bridge")]
+    public void WhenTypeHasNoDisplayName_ThenTheClassNameIsSplitIntoWordsInSentenceCase(Type type, string expectedDisplayName)
     {
-        // Arrange
-        string[] existingNames = ["History", "Dashboard.md"];
-
         // Act
-        var isTaken = SubjectTypeCatalog.IsNameTaken(name, existingNames, ".json");
+        var descriptor = SubjectTypeCatalog.Describe(type);
 
         // Assert
-        Assert.Equal(expected, isTaken);
+        Assert.Equal(expectedDisplayName, descriptor.DisplayName);
     }
+
+    [Theory]
+    [InlineData(typeof(CatalogEmptyAttributesSubject), "Catalog empty attributes subject")]
+    [InlineData(typeof(CatalogBlankAttributesSubject), "Catalog blank attributes subject")]
+    public void WhenAttributeValuesAreEmptyOrWhitespace_ThenDescriptorUsesFallbacks(Type type, string expectedDisplayName)
+    {
+        // Act
+        var descriptor = SubjectTypeCatalog.Describe(type);
+
+        // Assert
+        Assert.Equal(expectedDisplayName, descriptor.DisplayName);
+        Assert.Null(descriptor.Description);
+        Assert.Equal(SubjectTypeCatalog.OtherGroup, descriptor.Group);
+        Assert.Equal("Category", descriptor.IconName);
+    }
+
+    private sealed class Relay;
+
+    private sealed class ShellyDevice;
+
+    private sealed class HTTPServer;
+
+    private sealed class RemoteIOModule;
+
+    private sealed class Sensor2Gateway;
+
+    private sealed class Mqtt5IOTBridge;
 }

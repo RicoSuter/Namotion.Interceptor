@@ -416,17 +416,17 @@ public class SubjectSetupDialogTests
 
         // Act & Assert - the test root already contains History.json
         await NameInput(page).FillAsync("history");
-        await Assertions.Expect(helperText.Filter(new() { HasText = "A subject with this name already exists" }))
+        await Assertions.Expect(helperText.Filter(new() { HasText = "This file name is already used" }))
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync();
 
         await NameInput(page).FillAsync("invalid/name");
-        await Assertions.Expect(helperText.Filter(new() { HasText = "Name contains invalid characters" }))
+        await Assertions.Expect(helperText.Filter(new() { HasText = "File name contains invalid characters" }))
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync();
 
         await NameInput(page).FillAsync("");
-        await Assertions.Expect(helperText.Filter(new() { HasText = "Name is required" }))
+        await Assertions.Expect(helperText.Filter(new() { HasText = "File name is required" }))
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync();
 

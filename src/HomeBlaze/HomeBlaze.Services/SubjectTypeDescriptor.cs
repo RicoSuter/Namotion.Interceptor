@@ -6,17 +6,12 @@ namespace HomeBlaze.Services;
 public sealed record SubjectTypeDescriptor(Type Type, string DisplayName, string? Description, string Group, string IconName)
 {
     /// <summary>
-    /// Returns whether every whitespace separated term of the search text occurs in the display name,
-    /// the class name, the description or the group, ignoring case. An empty search matches.
+    /// Returns whether every term occurs in the display name, the class name, the description or the group,
+    /// ignoring case. No terms match.
     /// </summary>
-    public bool Matches(string? searchText)
+    public bool Matches(ReadOnlySpan<string> searchTerms)
     {
-        if (string.IsNullOrWhiteSpace(searchText))
-        {
-            return true;
-        }
-
-        foreach (var term in searchText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var term in searchTerms)
         {
             if (!Contains(DisplayName, term) &&
                 !Contains(Type.Name, term) &&

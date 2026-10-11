@@ -8,11 +8,6 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Services;
 
 /// <summary>
-/// A group of creatable subject types and the number of its types that match the current search.
-/// </summary>
-public sealed record SubjectTypeGroup(string Name, int Count);
-
-/// <summary>
 /// Lists the subject types that can be created, with the information the create dialog shows for them.
 /// </summary>
 public partial class SubjectTypeCatalog
@@ -22,15 +17,9 @@ public partial class SubjectTypeCatalog
     /// </summary>
     public const string OtherGroup = "Other";
 
-    /// <summary>
-    /// The comparison that decides whether two group names are the same group.
-    /// </summary>
-    public const StringComparison GroupComparison = StringComparison.OrdinalIgnoreCase;
+    private const StringComparison GroupComparison = StringComparison.OrdinalIgnoreCase;
 
-    /// <summary>
-    /// The comparer that matches <see cref="GroupComparison"/>.
-    /// </summary>
-    public static StringComparer GroupComparer => StringComparer.OrdinalIgnoreCase;
+    private static readonly StringComparer GroupComparer = StringComparer.OrdinalIgnoreCase;
 
     private const string DefaultIconName = "Category";
 
@@ -91,8 +80,8 @@ public partial class SubjectTypeCatalog
     }
 
     /// <summary>
-    /// Describes a type from its attributes, falling back to the class name split into words,
-    /// the <see cref="OtherGroup"/> group and the icon of the group.
+    /// Describes a type from the attributes it declares itself, falling back to the class name split into words
+    /// in sentence case, the <see cref="OtherGroup"/> group and the icon of the group.
     /// </summary>
     public static SubjectTypeDescriptor Describe(Type type)
     {
@@ -105,7 +94,7 @@ public partial class SubjectTypeCatalog
         var displayName = type.GetCustomAttribute<DisplayNameAttribute>(false)?.DisplayName;
         if (string.IsNullOrWhiteSpace(displayName))
         {
-            displayName = WordBoundaryRegex().Replace(type.Name, " ");
+            displayName = GetFallbackDisplayName(type.Name);
         }
 
         var iconName = type.GetCustomAttribute<SubjectIconAttribute>(false)?.IconName;
@@ -124,52 +113,48 @@ public partial class SubjectTypeCatalog
     }
 
     /// <summary>
-    /// Returns the descriptors that match the search text and, when a group is given, belong to it. The order is preserved.
+    /// Returns every group in the order of the descriptors, named after its first descriptor, with those of its
+    /// descriptors that match the search text, in their order. A group without a match is still returned.
     /// </summary>
-    public static IReadOnlyList<SubjectTypeDescriptor> Filter(
-        IReadOnlyList<SubjectTypeDescriptor> descriptors, string? searchText, string? group)
-    {
-        return descriptors
-            .Where(descriptor => group is null || string.Equals(descriptor.Group, group, GroupComparison))
-            .Where(descriptor => descriptor.Matches(searchText))
-            .ToList();
-    }
-
-    /// <summary>
-    /// Returns every group in the order of the descriptors, named after its first descriptor, with the number of
-    /// its types that match the search text.
-    /// </summary>
+    /// <param name="descriptors">The descriptors to group.</param>
+    /// <param name="searchText">Whitespace separated terms that a match must all contain, or nothing to match every descriptor.</param>
     public static IReadOnlyList<SubjectTypeGroup> GetGroups(IReadOnlyList<SubjectTypeDescriptor> descriptors, string? searchText)
     {
-        return descriptors
-            .GroupBy(descriptor => descriptor.Group, GroupComparer)
-            .Select(group => new SubjectTypeGroup(group.Key, group.Count(descriptor => descriptor.Matches(searchText))))
-            .ToList();
-    }
+        var searchTerms = (searchText ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
-    /// <summary>
-    /// Returns whether an existing name equals the name, with or without the suffix, ignoring case.
-    /// </summary>
-    public static bool IsNameTaken(string name, IReadOnlyCollection<string> existingNames, string suffix)
-    {
-        var nameWithSuffix = name + suffix;
-        return existingNames.Any(existingName =>
-            string.Equals(existingName, name, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(existingName, nameWithSuffix, StringComparison.OrdinalIgnoreCase));
-    }
-
-    /// <summary>
-    /// Suggests a name for a new subject of the type: the class name, with a number from 2 appended while it is taken.
-    /// </summary>
-    public static string SuggestName(Type type, IReadOnlyCollection<string> existingNames, string suffix)
-    {
-        var name = type.Name;
-        for (var number = 2; IsNameTaken(name, existingNames, suffix); number++)
+        var groups = new List<SubjectTypeGroup>();
+        var matchesByGroup = new Dictionary<string, List<SubjectTypeDescriptor>>(GroupComparer);
+        foreach (var descriptor in descriptors)
         {
-            name = type.Name + number;
+            if (!matchesByGroup.TryGetValue(descriptor.Group, out var matches))
+            {
+                matches = [];
+                matchesByGroup.Add(descriptor.Group, matches);
+                groups.Add(new SubjectTypeGroup(descriptor.Group, matches));
+            }
+
+            if (descriptor.Matches(searchTerms))
+            {
+                matches.Add(descriptor);
+            }
         }
 
-        return name;
+        return groups;
+    }
+
+    private static string GetFallbackDisplayName(string typeName)
+    {
+        var words = WordBoundaryRegex().Split(typeName);
+        for (var index = 1; index < words.Length; index++)
+        {
+            var word = words[index];
+            if (word.Any(char.IsLower))
+            {
+                words[index] = char.ToLowerInvariant(word[0]) + word[1..];
+            }
+        }
+
+        return string.Join(' ', words);
     }
 
     [GeneratedRegex("(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")]

@@ -309,7 +309,7 @@ else
 
         var result = await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            Name = new SubjectNameOptions("Block name", "", existingNames)
+            NameField = new SubjectNameOptions("Block name", "", existingNames)
         });
 
         if (result?.Name is null)

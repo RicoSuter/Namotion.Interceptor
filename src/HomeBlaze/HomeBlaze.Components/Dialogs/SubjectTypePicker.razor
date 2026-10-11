@@ -19,7 +19,7 @@
                     @onclick="() => SelectGroup(null)"
                     data-testid="type-group-all">
                 <span>All</span>
-                <span>@_matchCount</span>
+                <span>@MatchCount</span>
             </button>
             @foreach (var group in _groups)
             {
@@ -30,13 +30,13 @@
                         @onclick="() => SelectGroup(groupName)"
                         data-testid="@($"type-group-{groupName.ToLowerInvariant()}")">
                     <span>@groupName</span>
-                    <span>@group.Count</span>
+                    <span>@group.Matches.Count</span>
                 </button>
             }
         </div>
 
         <div class="subject-type-list">
-            @if (_sections.Count == 0)
+            @if (!_groups.Any(IsListed))
             {
                 <div class="subject-type-empty" data-testid="type-empty-state">
                     <MudText Typo="Typo.body2">No types match</MudText>
@@ -49,27 +49,30 @@
                     }
                 </div>
             }
-            @foreach (var typeSection in _sections)
+            @foreach (var group in _groups)
             {
-                @if (_selectedGroup is null)
+                @if (IsListed(group))
                 {
-                    <MudText Typo="Typo.caption" Class="subject-type-section-header">@typeSection.Key</MudText>
-                }
-                @foreach (var descriptor in typeSection)
-                {
-                    <button type="button"
-                            class="subject-type-row"
-                            @onclick="() => OnTypeSelected.InvokeAsync(descriptor)"
-                            data-testid="@($"type-row-{descriptor.Type.Name.ToLowerInvariant()}")">
-                        <MudIcon Icon="@MudBlazorIconResolver.Resolve(descriptor.IconName)" />
-                        <span class="subject-type-row-text">
-                            <span>@descriptor.DisplayName</span>
-                            @if (descriptor.Description is not null)
-                            {
-                                <span class="subject-type-row-description">@descriptor.Description</span>
-                            }
-                        </span>
-                    </button>
+                    @if (_selectedGroup is null)
+                    {
+                        <MudText Typo="Typo.caption" Class="subject-type-section-header">@group.Name</MudText>
+                    }
+                    @foreach (var descriptor in group.Matches)
+                    {
+                        <button type="button"
+                                class="subject-type-row"
+                                @onclick="() => OnTypeSelected.InvokeAsync(descriptor)"
+                                data-testid="@($"type-row-{descriptor.Type.Name.ToLowerInvariant()}")">
+                            <MudIcon Icon="@MudBlazorIconResolver.Resolve(descriptor.IconName)" />
+                            <span class="subject-type-row-text">
+                                <span>@descriptor.DisplayName</span>
+                                @if (descriptor.Description is not null)
+                                {
+                                    <span class="subject-type-row-description">@descriptor.Description</span>
+                                }
+                            </span>
+                        </button>
+                    }
                 }
             }
         </div>
@@ -219,18 +222,26 @@
     private IReadOnlyList<SubjectTypeDescriptor>? _refreshedTypes;
     private string _searchText = "";
     private string? _selectedGroup;
-    private int _matchCount;
     private IReadOnlyList<SubjectTypeGroup> _groups = [];
-    private List<IGrouping<string, SubjectTypeDescriptor>> _sections = [];
+    private bool _isRenderPending;
+
+    private int MatchCount => _groups.Sum(group => group.Matches.Count);
 
     protected override void OnParametersSet()
     {
-        // The host renders on every keystroke of its own fields, which sets the parameters again without changing them.
         if (!ReferenceEquals(Types, _refreshedTypes))
         {
             _refreshedTypes = Types;
             Refresh();
         }
+    }
+
+    // The host renders on every keystroke of its own fields, also while the picker is hidden.
+    protected override bool ShouldRender()
+    {
+        var isRenderPending = _isRenderPending;
+        _isRenderPending = false;
+        return isRenderPending;
     }
 
     private void OnSearchChanged(string? searchText)
@@ -262,15 +273,16 @@
     private void Refresh()
     {
         _groups = SubjectTypeCatalog.GetGroups(Types, _searchText);
-        _matchCount = _groups.Sum(group => group.Count);
-        _sections = SubjectTypeCatalog
-            .Filter(Types, _searchText, _selectedGroup)
-            .GroupBy(descriptor => descriptor.Group, SubjectTypeCatalog.GroupComparer)
-            .ToList();
+        _isRenderPending = true;
+    }
+
+    private bool IsListed(SubjectTypeGroup group)
+    {
+        return group.Matches.Count > 0 && (_selectedGroup is null || group.Name == _selectedGroup);
     }
 
     private string GetAriaPressed(string? group)
     {
-        return string.Equals(group, _selectedGroup, SubjectTypeCatalog.GroupComparison) ? "true" : "false";
+        return group == _selectedGroup ? "true" : "false";
     }
 }
