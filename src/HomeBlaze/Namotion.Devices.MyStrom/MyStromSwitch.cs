@@ -14,7 +14,7 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.MyStrom;
 
-[Category("Devices")]
+[Category("Switches")]
 [Description("myStrom WiFi Switch with power metering, temperature sensing, and relay control")]
 [DisplayName("myStrom switch")]
 [SubjectIcon("Power")]

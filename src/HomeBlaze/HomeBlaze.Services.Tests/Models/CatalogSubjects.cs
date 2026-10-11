@@ -49,6 +49,19 @@ public partial class CatalogServerSubject : IConfigurable
 }
 
 [InterceptorSubject]
+[Category("Energy")]
+public partial class CatalogBuiltInGroupSubject : IConfigurable
+{
+    public partial string? Label { get; set; }
+
+    public CatalogBuiltInGroupSubject()
+    {
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
 public partial class CatalogPlainSubject : IConfigurable
 {
     public partial string? Label { get; set; }

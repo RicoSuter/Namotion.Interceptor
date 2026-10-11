@@ -17,7 +17,7 @@ namespace HomeBlaze.OpcUa;
 /// <summary>
 /// OPC UA server subject that exposes other subjects via OPC UA protocol.
 /// </summary>
-[Category("Servers")]
+[Category("Integrations")]
 [Description("Exposes subjects via OPC UA protocol")]
 [DisplayName("OPC UA server")]
 [SubjectIcon("Dns")]

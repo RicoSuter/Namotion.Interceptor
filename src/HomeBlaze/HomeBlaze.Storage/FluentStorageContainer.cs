@@ -18,7 +18,7 @@ namespace HomeBlaze.Storage;
 /// Storage root using FluentStorage. Implements IStorageContainer and IConfigurationWriter.
 /// Supports FileSystemWatcher for reactive file monitoring on disk storage.
 /// </summary>
-[Category("Storage")]
+[Category("System")]
 [Description("Mounts a storage location and loads the files in it as subjects")]
 [DisplayName("Storage")]
 [SubjectIcon("Storage")]

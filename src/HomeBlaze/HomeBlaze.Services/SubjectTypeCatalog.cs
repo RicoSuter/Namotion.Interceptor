@@ -23,16 +23,19 @@ public partial class SubjectTypeCatalog
 
     private const string DefaultIconName = "Category";
 
-    private static readonly Dictionary<string, string> GroupIconNames = new(GroupComparer)
+    internal static readonly Dictionary<string, string> GroupIconNames = new(GroupComparer)
     {
-        ["Devices"] = "DevicesOther",
-        ["Servers"] = "Dns",
-        ["Clients"] = "Cable",
+        ["Integrations"] = "SettingsEthernet",
+        ["Hardware"] = "Memory",
+        ["Switches"] = "ToggleOn",
+        ["Energy"] = "Bolt",
+        ["Climate"] = "Thermostat",
+        ["Lighting"] = "Lightbulb",
+        ["Media"] = "Speaker",
+        ["Dashboard"] = "Dashboard",
         ["History"] = "History",
-        ["Layouts"] = "Dashboard",
-        ["Components"] = "Widgets",
-        ["Samples"] = "Science",
-        ["Storage"] = "Storage"
+        ["System"] = "Settings",
+        ["Samples"] = "Science"
     };
 
     private readonly SubjectTypeRegistry _typeRegistry;

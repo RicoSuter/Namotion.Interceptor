@@ -8,7 +8,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Free-form canvas layout with draggable nodes at arbitrary positions.
 /// </summary>
-[Category("Layouts")]
+[Category("Dashboard")]
 [Description("Free-form canvas layout with draggable widgets")]
 [DisplayName("Canvas layout")]
 [SubjectIcon("Dashboard")]

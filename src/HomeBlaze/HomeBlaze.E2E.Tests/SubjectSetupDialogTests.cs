@@ -162,7 +162,7 @@ public class SubjectSetupDialogTests
         // Arrange
         var page = await _fixture.CreatePageAsync();
         var allGroup = page.Locator("[data-testid='type-group-all']");
-        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
+        var dashboardGroup = page.Locator("[data-testid='type-group-dashboard']");
 
         // Act
         await OpenDialogAsync(page);
@@ -170,15 +170,15 @@ public class SubjectSetupDialogTests
         // Assert - the placeholder alone would also give the input a name, so the attribute itself is read.
         await Assertions.Expect(SearchInput(page)).ToHaveAttributeAsync("aria-label", "Search types");
         await Assertions.Expect(page.GetByRole(AriaRole.Group, new() { Name = "Type groups" })).ToBeVisibleAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Layouts", Exact = true, Level = 3 }))
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Dashboard", Exact = true, Level = 3 }))
             .ToBeVisibleAsync();
 
-        // The visible text stays "Layouts 2", while the name that is read out says what the number counts.
-        var layoutsCount = int.Parse(await layoutsGroup.Locator("span").Last.InnerTextAsync());
-        Assert.True(layoutsCount > 1);
-        await Assertions.Expect(layoutsGroup).ToHaveTextAsync(new Regex($@"^\s*Layouts\s*{layoutsCount}\s*$"));
-        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-label", $"Layouts, {layoutsCount} types");
-        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = $"Layouts, {layoutsCount} types", Exact = true }))
+        // The visible text stays "Dashboard 3", while the name that is read out says what the number counts.
+        var dashboardCount = int.Parse(await dashboardGroup.Locator("span").Last.InnerTextAsync());
+        Assert.True(dashboardCount > 1);
+        await Assertions.Expect(dashboardGroup).ToHaveTextAsync(new Regex($@"^\s*Dashboard\s*{dashboardCount}\s*$"));
+        await Assertions.Expect(dashboardGroup).ToHaveAttributeAsync("aria-label", $"Dashboard, {dashboardCount} types");
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = $"Dashboard, {dashboardCount} types", Exact = true }))
             .ToBeVisibleAsync();
 
         // Act
@@ -186,7 +186,7 @@ public class SubjectSetupDialogTests
 
         // Assert
         await Assertions.Expect(allGroup).ToHaveAttributeAsync("aria-label", "All, 1 type", new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-label", "Layouts, 0 types");
+        await Assertions.Expect(dashboardGroup).ToHaveAttributeAsync("aria-label", "Dashboard, 0 types");
 
         // Act
         await SearchInput(page).FillAsync("no such type anywhere");
@@ -292,20 +292,20 @@ public class SubjectSetupDialogTests
             """);
 
         var allGroup = page.Locator("[data-testid='type-group-all']");
-        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
+        var dashboardGroup = page.Locator("[data-testid='type-group-dashboard']");
 
         // Act - each focus move follows its page from the server, so a later round trip, which the tap on
         // a group is, has it behind it.
         await PaneCreateButton(page).TapAsync();
         await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await layoutsGroup.TapAsync();
-        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = ElementVisibilityTimeout });
+        await dashboardGroup.TapAsync();
+        await Assertions.Expect(dashboardGroup).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = ElementVisibilityTimeout });
 
         // Assert
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync();
         await Assertions.Expect(SearchInput(page)).Not.ToBeFocusedAsync();
         var focusedAfterOpening = await page.EvaluateAsync<string[]>("() => window.focusedTestIds");
-        Assert.Contains("type-group-layouts", focusedAfterOpening);
+        Assert.Contains("type-group-dashboard", focusedAfterOpening);
         Assert.DoesNotContain("type-search-input", focusedAfterOpening);
 
         // Act - picking a type shows the name field, and "Back" shows the search field again.
@@ -375,7 +375,7 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(TypeRows(page)).ToHaveCountAsync(1, new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(TypeRow(page, "motor")).ToBeVisibleAsync();
         await Assertions.Expect(page.Locator("[data-testid='type-group-all']")).ToHaveTextAsync(new Regex(@"^\s*All\s*1\s*$"));
-        await Assertions.Expect(page.Locator("[data-testid='type-group-devices']")).ToHaveTextAsync(new Regex(@"^\s*Devices\s*0\s*$"));
+        await Assertions.Expect(page.Locator("[data-testid='type-group-dashboard']")).ToHaveTextAsync(new Regex(@"^\s*Dashboard\s*0\s*$"));
     }
 
     [Fact]
@@ -408,17 +408,18 @@ public class SubjectSetupDialogTests
         var page = await _fixture.CreatePageAsync();
         await OpenDialogAsync(page);
 
-        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
+        var dashboardGroup = page.Locator("[data-testid='type-group-dashboard']");
 
         // Act
-        await layoutsGroup.ClickAsync();
+        await dashboardGroup.ClickAsync();
 
         // Assert
         await Assertions.Expect(TypeRow(page, "motor")).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync();
         await Assertions.Expect(TypeRow(page, "canvaslayout")).ToBeVisibleAsync();
+        await Assertions.Expect(TypeRow(page, "widget")).ToBeVisibleAsync();
 
-        var groupCount = int.Parse(await layoutsGroup.Locator("span").Last.InnerTextAsync());
+        var groupCount = int.Parse(await dashboardGroup.Locator("span").Last.InnerTextAsync());
         Assert.True(groupCount > 0);
         await Assertions.Expect(TypeRows(page)).ToHaveCountAsync(groupCount);
     }
@@ -430,9 +431,9 @@ public class SubjectSetupDialogTests
         var page = await _fixture.CreatePageAsync();
         await OpenDialogAsync(page);
         var allGroup = page.Locator("[data-testid='type-group-all']");
-        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
-        await layoutsGroup.ClickAsync();
-        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-pressed", "true");
+        var dashboardGroup = page.Locator("[data-testid='type-group-dashboard']");
+        await dashboardGroup.ClickAsync();
+        await Assertions.Expect(dashboardGroup).ToHaveAttributeAsync("aria-pressed", "true");
 
         // Act
         await SearchInput(page).FillAsync("simulated motor");
@@ -440,7 +441,7 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(TypeRow(page, "motor")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(allGroup).ToHaveAttributeAsync("aria-pressed", "true");
-        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-pressed", "false");
+        await Assertions.Expect(dashboardGroup).ToHaveAttributeAsync("aria-pressed", "false");
     }
 
     [Fact]
@@ -449,12 +450,12 @@ public class SubjectSetupDialogTests
         // Arrange
         var page = await _fixture.CreatePageAsync();
         await OpenDialogAsync(page);
-        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
+        var dashboardGroup = page.Locator("[data-testid='type-group-dashboard']");
         await SearchInput(page).FillAsync("simulated motor");
         await Assertions.Expect(TypeRow(page, "motor")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
         // Act
-        await layoutsGroup.ClickAsync();
+        await dashboardGroup.ClickAsync();
 
         // Assert
         await Assertions.Expect(page.Locator("[data-testid='type-empty-state']"))
@@ -467,7 +468,7 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(TypeRow(page, "motor")).ToHaveCountAsync(0);
-        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-pressed", "true");
+        await Assertions.Expect(dashboardGroup).ToHaveAttributeAsync("aria-pressed", "true");
     }
 
     [Fact]

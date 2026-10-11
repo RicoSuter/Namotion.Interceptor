@@ -125,13 +125,25 @@ public class SubjectTypeCatalogTests
     }
 
     [Fact]
-    public void WhenTypeHasCategoryButNoIcon_ThenGroupIconIsUsed()
+    public void WhenTypeHasBuiltInCategoryButNoIcon_ThenGroupIconIsUsed()
+    {
+        // Act
+        var descriptor = SubjectTypeCatalog.Describe(typeof(CatalogBuiltInGroupSubject));
+
+        // Assert
+        Assert.Equal("Energy", descriptor.Group);
+        Assert.Equal("Bolt", descriptor.IconName);
+    }
+
+    [Fact]
+    public void WhenTypeHasOwnCategoryButNoIcon_ThenGenericIconIsUsed()
     {
         // Act
         var descriptor = SubjectTypeCatalog.Describe(typeof(CatalogServerSubject));
 
         // Assert
-        Assert.Equal("Dns", descriptor.IconName);
+        Assert.Equal("Servers", descriptor.Group);
+        Assert.Equal("Category", descriptor.IconName);
     }
 
     [Fact]

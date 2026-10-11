@@ -23,7 +23,7 @@ namespace Namotion.Devices.Sonos;
 /// operation, for example with <c>GetAwaiter().GetResult()</c>, or that wait deadlocks; it may start one without
 /// waiting for it.
 /// </remarks>
-[Category("Devices")]
+[Category("Media")]
 [Description("Sonos household with its room players, satellites and groups")]
 [DisplayName("Sonos system")]
 [SubjectIcon("LibraryMusic")]

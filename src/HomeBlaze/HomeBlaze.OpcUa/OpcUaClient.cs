@@ -18,7 +18,7 @@ namespace HomeBlaze.OpcUa;
 /// <summary>
 /// OPC UA client subject that connects to an OPC UA server and discovers its address space dynamically.
 /// </summary>
-[Category("Clients")]
+[Category("Integrations")]
 [Description("Connects to an OPC UA server and discovers properties dynamically")]
 [DisplayName("OPC UA client")]
 [SubjectIcon("Cable")]

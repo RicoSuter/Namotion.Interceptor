@@ -19,7 +19,7 @@ namespace Namotion.Devices.Gpio;
 /// and optional ADC support. Supports Raspberry Pi, Orange Pi, BeagleBone,
 /// and other Linux-based boards via System.Device.Gpio.
 /// </summary>
-[Category("Devices")]
+[Category("Hardware")]
 [Description("GPIO pins and analog channels for Raspberry Pi and other Linux boards")]
 [DisplayName("GPIO")]
 [SubjectIcon("Memory")]

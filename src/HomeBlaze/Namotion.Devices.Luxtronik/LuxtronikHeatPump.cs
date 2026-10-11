@@ -18,7 +18,7 @@ namespace Namotion.Devices.Luxtronik;
 /// <summary>
 /// A Luxtronik 2.1 heat pump read through the Smart Home Interface (Modbus TCP, port 502). Read only.
 /// </summary>
-[Category("Devices")]
+[Category("Climate")]
 [Description("Luxtronik 2.1 heat pump (Alpha Innotec, Novelan) via the Smart Home Interface, read only")]
 [DisplayName("Luxtronik heat pump")]
 [SubjectIcon("HeatPump")]

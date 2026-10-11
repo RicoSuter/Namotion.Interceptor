@@ -21,7 +21,7 @@ namespace Namotion.Devices.SunSpec;
 /// A SunSpec device (inverter, meter, storage) read over Modbus TCP. Discovers the model chain of every configured
 /// unit ID on each connect, and again periodically while a configured unit is missing. Read only.
 /// </summary>
-[Category("Devices")]
+[Category("Energy")]
 [Description("SunSpec device (inverter, meter, storage) via Modbus TCP, read only")]
 [DisplayName("SunSpec device")]
 [SubjectIcon("SolarPower")]

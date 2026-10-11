@@ -14,7 +14,7 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.Wallbox;
 
-[Category("Devices")]
+[Category("Energy")]
 [Description("Wallbox EV charger (Pulsar, Commander, Quasar) via cloud API")]
 [DisplayName("Wallbox charger")]
 [SubjectIcon("EvStation")]

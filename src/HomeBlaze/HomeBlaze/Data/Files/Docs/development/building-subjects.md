@@ -297,8 +297,8 @@ The dialog describes a type with attributes on the class. All of them are option
 |-----------|---------|------------|
 | `[DisplayName("Motor")]` | Title in the list and in the dialog title, in sentence case | Class name split into words in sentence case: `ShellyDevice` becomes "Shelly device" and `HTTPServer` becomes "HTTP server" |
 | `[Description("...")]` | One sentence below the title, also searched | No description |
-| `[Category("Samples")]` | Group in the sidebar | Group "Other", listed last |
-| `[SubjectIcon("Settings")]` | Icon in the list, using the same names as `IIconProvider.IconName`. An unknown icon name shows the generic article icon | Icon of the group for the built-in groups (Devices, Servers, Clients, History, Layouts, Components, Samples, Storage), otherwise a generic icon |
+| `[Category("Samples")]` | Group in the sidebar, see [Groups](#groups) | Group "Other", listed last |
+| `[SubjectIcon("Settings")]` | Icon in the list, using the same names as `IIconProvider.IconName`. An unknown icon name shows the generic article icon | Icon of the group for a [built-in group](#groups), otherwise a generic icon |
 
 `[DisplayName]`, `[Description]` and `[Category]` come from `System.ComponentModel`, `[SubjectIcon]` from `HomeBlaze.Abstractions.Attributes`. The create dialog attributes, including the two under [Hiding a Type](#hiding-a-type), are read from the class itself and are not inherited from a base class.
 
@@ -321,6 +321,26 @@ public partial class Motor : BackgroundService, IConfigurable
 ```
 
 `[SubjectIcon]` is needed in addition to `IIconProvider` because the dialog has no instance to ask, and an instance's icon often depends on its state.
+
+### Groups
+
+A type belongs to exactly one group, the one that its `[Category]` names. The sidebar lists the groups alphabetically, with "Other" last. Use the built-in group that says what the type is for:
+
+| Group | Use it for |
+|-------|------------|
+| Climate | Heating, cooling and weather |
+| Dashboard | Layouts and the widgets that are placed in them |
+| Energy | Inverters, energy meters, batteries and vehicle chargers |
+| Hardware | Local hardware access, such as GPIO pins |
+| History | Stores that record history |
+| Integrations | Connections to external systems, such as an OPC UA client or server |
+| Lighting | Lights and lighting bridges |
+| Media | Audio and video players |
+| Samples | Examples and simulated devices |
+| Switches | Switches, relays and smart plugs |
+| System | Parts of HomeBlaze itself, such as storage and plugins |
+
+When none of them fits, name a new group in `[Category]`. Using the name is all it takes to create the group, and group names are compared ignoring case. A type in such a group that sets no `[SubjectIcon]` gets a generic icon.
 
 ### Name of a New Subject
 

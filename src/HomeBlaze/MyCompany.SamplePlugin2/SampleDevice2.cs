@@ -8,7 +8,7 @@ using Namotion.Interceptor.Attributes;
 namespace MyCompany.SamplePlugin2;
 
 [InterceptorSubject]
-[Category("Devices")]
+[Category("Samples")]
 [Description("A sample light sensor plugin that simulates ambient light and UV index readings.")]
 [DisplayName("Sample device 2")]
 [SubjectIcon("LightMode")]
