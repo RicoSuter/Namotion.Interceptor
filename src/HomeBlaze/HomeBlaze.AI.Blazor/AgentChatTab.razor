@@ -1,3 +1,7 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JavaScript
+
 @* column-reverse keeps the scroll position anchored at the newest entry without script. *@
 <div style="max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column-reverse;" data-testid="agent-timeline">
     <div>
@@ -6,9 +10,9 @@
 </div>
 
 <MudStack Row="true" AlignItems="AlignItems.End" Class="mt-2">
-    <div style="flex-grow: 1;" data-testid="agent-chat-input">
+    <div style="flex-grow: 1;" data-testid="agent-chat-input" @ref="_inputContainer">
         <MudTextField T="string" @bind-Value="_message" Immediate="true" Lines="2" Variant="Variant.Outlined"
-                      Placeholder="Ask the agent..." Disabled="_isSending" FullWidth="true" />
+                      Placeholder="Ask the agent. Enter to send, Shift+Enter for a new line." FullWidth="true" />
     </div>
     <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendAsync"
                Disabled="@(_isSending || string.IsNullOrWhiteSpace(_message))" data-testid="agent-chat-send">Send</MudButton>
@@ -17,6 +21,10 @@
 @code {
     private string _message = string.Empty;
     private bool _isSending;
+    private ElementReference _inputContainer;
+    private DotNetObjectReference<AgentChatTab>? _dotNetReference;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _enterListener;
 
     [Parameter, EditorRequired]
     public LlmAgentBase Agent { get; set; } = null!;
@@ -24,16 +32,41 @@
     [Parameter]
     public int TimeZoneVersion { get; set; }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetReference = DotNetObjectReference.Create(this);
+            _module = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./_content/HomeBlaze.AI.Blazor/AgentChatTab.razor.js");
+            _enterListener = await _module.InvokeAsync<IJSObjectReference?>("attachEnterToSend", _inputContainer, _dotNetReference);
+        }
+    }
+
+    /// <summary>Sends the message typed into the chat input when Enter is pressed.</summary>
+    [JSInvokable]
+    public async Task SendFromKeyboardAsync(string text)
+    {
+        if (_isSending)
+        {
+            return;
+        }
+
+        // The keydown can overtake the input binding's last update, so the text comes from the textarea itself.
+        _message = text;
+        await SendAsync();
+    }
+
     private async Task SendAsync()
     {
         var text = _message.Trim();
-        if (text.Length == 0)
+        if (_isSending || text.Length == 0)
         {
             return;
         }
 
         _message = string.Empty;
         _isSending = true;
+        StateHasChanged();
         try
         {
             // Failures and the not-running case are recorded in the timeline; only caller cancellation throws.
@@ -42,6 +75,30 @@
         finally
         {
             _isSending = false;
+            StateHasChanged();
         }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_enterListener is not null)
+            {
+                await _enterListener.InvokeVoidAsync("dispose");
+                await _enterListener.DisposeAsync();
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone, and the browser dropped the listener with the page.
+        }
+
+        _dotNetReference?.Dispose();
     }
 }
