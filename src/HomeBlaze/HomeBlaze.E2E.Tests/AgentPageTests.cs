@@ -322,6 +322,10 @@ public class AgentPageTests
             var input = page.GetByTestId("agent-chat-input").Locator("textarea");
             await Assertions.Expect(input).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
 
+            // The prerendered input is visible before the circuit connects, and text filled in then never reaches the
+            // component. The timeline stays hidden until the chat script ran after the first interactive render.
+            await Assertions.Expect(page.GetByTestId("agent-timeline")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+
             var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
             var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + AgentPath, PathStyle.Canonical));
             var originalCliPath = agent.CliPath;
