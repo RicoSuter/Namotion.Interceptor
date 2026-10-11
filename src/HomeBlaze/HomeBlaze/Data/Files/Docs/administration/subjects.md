@@ -29,7 +29,7 @@ Both approaches work on the same underlying files. The UI is a management layer 
 
 ---
 
-## Storage & `Root.json` {#rootjson}
+## Storage and the Root File
 
 `Root.json` at the top of the [data folder](configuration.md#data-folder) defines the storage location. It is `Data/Root.json` when running from source and `/data/Root.json` in the container.
 

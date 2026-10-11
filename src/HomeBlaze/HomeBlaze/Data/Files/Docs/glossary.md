@@ -143,7 +143,7 @@ A subject that provides blob storage access. The default implementation uses Flu
 
 ### `Root.json`
 
-The configuration file at the top of the data folder that defines the storage location and root subject type. See [Subjects: Root.json](administration/subjects.md#rootjson).
+The configuration file at the top of the data folder that defines the storage location and root subject type. See [Subjects: Storage and the Root File](administration/subjects.md#storage-and-the-root-file).
 
 ### File Types
 
@@ -195,11 +195,11 @@ Full prefix table, examples, and resolution order: [Paths](administration/paths.
 
 ### Canonical Notation
 
-For `[InlinePaths]` collections, child keys are inlined as path segments: `/Demo/Conveyor`. See [Paths — Canonical](administration/paths.md#canonical-syntax-and-inlinepaths).
+For `[InlinePaths]` collections, child keys are inlined as path segments: `/Demo/Conveyor`. See [Paths: Canonical Syntax](administration/paths.md#canonical-syntax-and-inlinepaths).
 
 ### Brackets for Collection Indices
 
-Used for non-inlined collections: `/Devices[0]/Temperature`. See [Paths — Brackets](administration/paths.md#brackets-for-collection-indices).
+Used for non-inlined collections: `/Devices[0]/Temperature`. See [Paths: Brackets for Collection Indices](administration/paths.md#brackets-for-collection-indices).
 
 ---
 

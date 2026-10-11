@@ -295,26 +295,43 @@ public class ConfigurableSubjectSerializerNamingTests
     }
 
     [Theory]
-    [InlineData(ConfigurationNaming.CamelCase, "5", typeof(int), true)]
-    [InlineData(ConfigurationNaming.PropertyName, "5", typeof(int), true)]
-    [InlineData(ConfigurationNaming.CamelCase, "1.5", typeof(int), false)]
-    [InlineData(ConfigurationNaming.PropertyName, "1.5", typeof(int), false)]
-    [InlineData(ConfigurationNaming.CamelCase, "\"00:00:01.500\"", typeof(TimeSpan), true)]
-    [InlineData(ConfigurationNaming.PropertyName, "\"00:00:01.500\"", typeof(TimeSpan), true)]
-    [InlineData(ConfigurationNaming.CamelCase, "\"Monday\"", typeof(DayOfWeek), true)]
-    [InlineData(ConfigurationNaming.PropertyName, "\"Monday\"", typeof(DayOfWeek), true)]
-    [InlineData(ConfigurationNaming.CamelCase, "\"Someday\"", typeof(DayOfWeek), false)]
-    [InlineData(ConfigurationNaming.PropertyName, "\"Someday\"", typeof(DayOfWeek), false)]
-    [InlineData(ConfigurationNaming.CamelCase, "true", typeof(string), false)]
-    [InlineData(ConfigurationNaming.PropertyName, "true", typeof(string), false)]
-    // A number for a text property is rejected only by the naming that reads its key.
-    [InlineData(ConfigurationNaming.CamelCase, "{\"SettingA\": 5}", typeof(NestedValueObject), true)]
-    [InlineData(ConfigurationNaming.PropertyName, "{\"SettingA\": 5}", typeof(NestedValueObject), false)]
-    [InlineData(ConfigurationNaming.CamelCase, "{\"settingA\": 5}", typeof(NestedValueObject), false)]
-    [InlineData(ConfigurationNaming.PropertyName, "{\"settingA\": 5}", typeof(NestedValueObject), true)]
-    public void WhenValueIsCheckedInANaming_ThenItIsJudgedWithTheNamesOfThatNaming(
-        ConfigurationNaming naming, string json, Type propertyType, bool expected)
+    [InlineData(ConfigurationNaming.CamelCase)]
+    [InlineData(ConfigurationNaming.PropertyName)]
+    public void WhenSingleValueIsChecked_ThenItIsJudgedTheSameInEveryNaming(ConfigurationNaming naming)
     {
+        // Arrange
+        (string Json, Type PropertyType, bool Fits)[] values =
+        [
+            ("5", typeof(int), true),
+            ("1.5", typeof(int), false),
+            ("\"00:00:01.500\"", typeof(TimeSpan), true),
+            ("\"Monday\"", typeof(DayOfWeek), true),
+            ("\"Someday\"", typeof(DayOfWeek), false),
+            ("true", typeof(string), false)
+        ];
+
+        // Act
+        var results = values
+            .Select(value => (value.Json, Fits: _serializer.CanDeserialize(value.Json, value.PropertyType, naming)))
+            .ToArray();
+
+        // Assert
+        Assert.Equal(values.Select(value => (value.Json, value.Fits)), results);
+    }
+
+    // A number for a text property is rejected only by the naming that reads its key.
+    [Theory]
+    [InlineData(ConfigurationNaming.CamelCase, "SettingA", true)]
+    [InlineData(ConfigurationNaming.PropertyName, "SettingA", false)]
+    [InlineData(ConfigurationNaming.CamelCase, "settingA", false)]
+    [InlineData(ConfigurationNaming.PropertyName, "settingA", true)]
+    public void WhenValueObjectIsCheckedInANaming_ThenItIsJudgedWithTheNamesOfThatNaming(
+        ConfigurationNaming naming, string key, bool expected)
+    {
+        // Arrange
+        var json = $$"""{"{{key}}": 5}""";
+        var propertyType = typeof(NestedValueObject);
+
         // Act
         var canDeserialize = _serializer.CanDeserialize(json, propertyType, naming);
 

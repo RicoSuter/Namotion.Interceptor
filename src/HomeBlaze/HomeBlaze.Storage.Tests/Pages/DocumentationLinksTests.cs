@@ -62,9 +62,15 @@ public class DocumentationLinksTests
     [Fact]
     public void WhenLinkIsListedAsKnownBroken_ThenThePageStillHasItAndItIsStillBroken()
     {
+        // Arrange
+        var linksOfPage = KnownBrokenLinks
+            .Select(known => known.Page)
+            .Distinct()
+            .ToDictionary(page => page, FindLinks);
+
         // Act
         var fixedOrRemoved = KnownBrokenLinks.Where(known =>
-            !FindLinks(known.Page).Exists(link => link.Url == known.Url) ||
+            !linksOfPage[known.Page].Exists(link => link.Url == known.Url) ||
             FindProblem(known.Page, known.Url) is null);
 
         // Assert

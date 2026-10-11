@@ -152,6 +152,7 @@ public partial class DocumentationSamplesTests
     // A path with a prefix leads out of the sample, to the files next to the page or to the root, so a
     // sample alone cannot say whether it is right. Every other path starts at the page: at a block that the
     // sample names, or at a property of the page.
+    // A valid sample that shows a path to nothing on purpose would fail here, and there is no marker to exempt one.
     [Theory]
     [MemberData(nameof(ValidSamplesWithPathsThatStartAtThePage))]
     public async Task WhenSampleHasAPathThatStartsAtThePage_ThenThePathLeadsToSomething(string relativePath, int line)
