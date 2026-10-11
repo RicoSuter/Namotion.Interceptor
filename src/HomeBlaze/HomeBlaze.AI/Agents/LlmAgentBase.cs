@@ -327,14 +327,36 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <summary>Called once storage is available, before the first turn; loads backend session state.</summary>
     protected virtual Task OnStartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    /// <summary>Reads the backend's session file, or null when there is none.</summary>
+    /// <summary>
+    /// Reads the backend's session file, or null when there is none or it cannot be read; read failures are logged.
+    /// </summary>
     protected async Task<string?> ReadSessionAsync(CancellationToken cancellationToken)
     {
         var path = GetStoragePath(".session.json");
-        return path is not null && File.Exists(path) ? await File.ReadAllTextAsync(path, cancellationToken) : null;
+        if (path is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await File.ReadAllTextAsync(path, cancellationToken);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "The session file of agent {Agent} could not be read; a new session starts.", Title);
+            return null;
+        }
     }
 
-    /// <summary>Writes the backend's session file atomically; null deletes it.</summary>
+    /// <summary>
+    /// Writes the backend's session file atomically; null deletes it. Write failures are logged, not thrown, so the
+    /// file may keep its previous content.
+    /// </summary>
     protected async Task WriteSessionAsync(string? content, CancellationToken cancellationToken)
     {
         var path = GetStoragePath(".session.json");
@@ -343,13 +365,20 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             return;
         }
 
-        if (content is null)
+        try
         {
-            File.Delete(path);
-            return;
-        }
+            if (content is null)
+            {
+                File.Delete(path);
+                return;
+            }
 
-        await AtomicFile.WriteAllTextAsync(path, content, cancellationToken);
+            await AtomicFile.WriteAllTextAsync(path, content, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "The session file of agent {Agent} could not be written.", Title);
+        }
     }
 
     /// <summary>Appends a divider, for example when a backend session had to be restarted.</summary>

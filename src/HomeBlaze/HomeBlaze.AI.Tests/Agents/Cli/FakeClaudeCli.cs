@@ -40,6 +40,9 @@ internal sealed class FakeClaudeCli : IDisposable
 
     public string LastMcpConfiguration => File.ReadAllText(Path.Combine(Directory, "mcp.json"));
 
+    /// <summary>The octal permission bits of the last MCP configuration file, for example <c>600</c>.</summary>
+    public string LastMcpConfigurationMode => File.ReadAllText(Path.Combine(Directory, "mcp-mode.txt")).Trim();
+
     public int? LastProcessId
     {
         get
@@ -96,7 +99,10 @@ internal sealed class FakeClaudeCli : IDisposable
             printf '%s\n' '---END---' >> '{directory}/arguments.txt'
             previous=''
             for argument in "$@"; do
-              if [ "$previous" = '--mcp-config' ]; then cp "$argument" '{directory}/mcp.json'; fi
+              if [ "$previous" = '--mcp-config' ]; then
+                cp "$argument" '{directory}/mcp.json'
+                stat -c %a "$argument" > '{directory}/mcp-mode.txt' 2>/dev/null || stat -f %Lp "$argument" > '{directory}/mcp-mode.txt'
+              fi
               previous="$argument"
             done
             cat > '{directory}/stdin.txt'

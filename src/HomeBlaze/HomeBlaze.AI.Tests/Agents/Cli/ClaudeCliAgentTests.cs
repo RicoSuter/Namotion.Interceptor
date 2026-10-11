@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
+using System.Text.Json;
 using HomeBlaze.AI.Agents.Cli;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
@@ -20,6 +21,16 @@ public class ClaudeCliAgentTests
                 configure?.Invoke(agent);
             },
             Endpoint);
+
+    private static string SessionPath(AgentTestContext<ClaudeCliAgent> test) =>
+        Path.Combine(test.DataDirectory, "Agents", "Agent.session.json");
+
+    // A directory at the session path makes reading, replacing and deleting the session file fail.
+    private static void ReplaceSessionFileWithDirectory(AgentTestContext<ClaudeCliAgent> test)
+    {
+        File.Delete(SessionPath(test));
+        Directory.CreateDirectory(SessionPath(test));
+    }
 
     private static string? ValueAfter(IReadOnlyList<string> arguments, string flag)
     {
@@ -83,6 +94,69 @@ public class ClaudeCliAgentTests
         // Assert
         Assert.Null(ValueAfter(cli.Invocations[1], "--resume"));
         Assert.Equal("Hello world", test.Agent.Timeline.Entries[^1].Text);
+    }
+
+    [UnixFact]
+    public async Task WhenTheSessionFileCannotBeReadOrWritten_ThenTurnsSucceedAndTheSessionIsKeptInMemory()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("success.jsonl");
+        await using var test = await StartAsync(cli);
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        await test.Agent.StopAsync(CancellationToken.None);
+        ReplaceSessionFileWithDirectory(test);
+        await test.Agent.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Running);
+
+        // Act
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+        await test.Agent.SendMessageAsync("third", CancellationToken.None);
+
+        // Assert
+        Assert.Null(ValueAfter(cli.Invocations[1], "--resume"));
+        Assert.Equal("d57c5029-b6b6-4e1a-8767-6df4d71bb4ba", ValueAfter(cli.Invocations[2], "--resume"));
+        Assert.DoesNotContain(test.Agent.Timeline.Entries, entry => entry.Kind == AgentTimelineEntryKind.Error);
+        Assert.Equal(ServiceStatus.Running, test.Agent.Status);
+    }
+
+    [UnixFact]
+    public async Task WhenTheSessionFileCannotBeDeleted_ThenANewConversationStillStarts()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("success.jsonl");
+        await using var test = await StartAsync(cli);
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        ReplaceSessionFileWithDirectory(test);
+
+        // Act
+        await test.Agent.NewConversationAsync(CancellationToken.None);
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+
+        // Assert
+        Assert.Contains(test.Agent.Timeline.Entries, entry => entry is { Kind: AgentTimelineEntryKind.Divider, Text: "New conversation" });
+        Assert.Null(ValueAfter(cli.Invocations[1], "--resume"));
+        Assert.DoesNotContain(test.Agent.Timeline.Entries, entry => entry.Kind == AgentTimelineEntryKind.Error);
+    }
+
+    [UnixFact]
+    public async Task WhenATurnEnds_ThenTheMcpConfigurationWasOwnerOnlyAndTheTokenIsRevoked()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("success.jsonl");
+        await using var test = await StartAsync(cli);
+
+        // Act
+        await test.Agent.SendMessageAsync("hello", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("600", cli.LastMcpConfigurationMode);
+        using var configuration = JsonDocument.Parse(cli.LastMcpConfiguration);
+        var authorization = configuration.RootElement
+            .GetProperty("mcpServers").GetProperty(ClaudeCliArguments.McpServerName)
+            .GetProperty("headers").GetProperty("Authorization").GetString()!;
+        var token = authorization["Bearer ".Length..];
+        Assert.NotEmpty(token);
+        Assert.False(test.Services.TokenRegistry.TryGetToolSet(token, out _));
     }
 
     [UnixFact]
@@ -156,6 +230,7 @@ public class ClaudeCliAgentTests
         Assert.Null(ValueAfter(cli.Invocations[2], "--resume"));
         Assert.Contains(test.Agent.Timeline.Entries, entry => entry is { Kind: AgentTimelineEntryKind.Divider, Text: "Session restarted" });
         Assert.Equal(AgentTimelineEntryKind.Assistant, test.Agent.Timeline.Entries[^1].Kind);
+        Assert.Contains("d57c5029", await File.ReadAllTextAsync(SessionPath(test)));
     }
 
     [UnixFact]

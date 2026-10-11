@@ -25,9 +25,19 @@ public static class ClaudeCliFailure
             : !string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardError.Trim()
             : $"The Claude CLI exited with code {result.ExitCode} without a result.";
 
+        var resultText = result.ResultText ?? string.Empty;
+
+        // Overload is checked first: a capacity problem must back off and retry, not pause the agent.
+        if (result.ErrorCode?.Contains("overloaded", StringComparison.OrdinalIgnoreCase) == true ||
+            ContainsOverloadedStatusCode(resultText))
+        {
+            return new AgentTurnException(AgentFailureKind.Transient, message);
+        }
+
+        // Standard error is not searched: it may echo prompts or hints that mention logging in.
         if (result.ErrorCode == "authentication_failed" ||
-            message.Contains("/login", StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("Invalid API key", StringComparison.OrdinalIgnoreCase))
+            resultText.Contains("/login", StringComparison.OrdinalIgnoreCase) ||
+            resultText.Contains("Invalid API key", StringComparison.OrdinalIgnoreCase))
         {
             return new AgentTurnException(
                 AgentFailureKind.Configuration,
@@ -53,6 +63,21 @@ public static class ClaudeCliFailure
         }
 
         return new AgentTurnException(AgentFailureKind.Transient, message);
+    }
+
+    // Matches 529 as a standalone number, so a token count like 15290 does not read as an overload.
+    private static bool ContainsOverloadedStatusCode(string text)
+    {
+        for (var index = text.IndexOf("529", StringComparison.Ordinal); index >= 0; index = text.IndexOf("529", index + 1, StringComparison.Ordinal))
+        {
+            var end = index + 3;
+            if ((index == 0 || !char.IsAsciiDigit(text[index - 1])) && (end == text.Length || !char.IsAsciiDigit(text[end])))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static DateTimeOffset? GetResetTime(AgentRateLimit? rateLimit)
