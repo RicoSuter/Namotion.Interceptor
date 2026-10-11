@@ -1,0 +1,111 @@
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(ClaudeCliAgent))]
+@implements ISubjectComponent
+@implements IDisposable
+@inject ITimeZoneDisplay TimeZone
+@inject IDialogService DialogService
+
+@if (Agent is { } agent)
+{
+    <MudStack Spacing="2" Class="pa-4">
+        @* The right padding keeps the buttons clear of the page's edit mode menu, which floats over the top right corner. *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="pr-12">
+            <MudIcon Icon="@Icons.Material.Filled.SmartToy" />
+            <MudText Typo="Typo.h5">@agent.Title</MudText>
+            <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(agent.Status)" data-testid="agent-status">
+                @(agent.StatusMessage is { Length: > 0 } statusMessage ? $"{agent.Status} · {statusMessage}" : agent.Status.ToString())
+            </MudChip>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow"
+                       OnClick="@agent.RunNow" Disabled="@agent.IsBusy" data-testid="agent-run-now">Run now</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt"
+                       OnClick="NewConversationAsync" Disabled="@agent.IsBusy" data-testid="agent-new-conversation">New conversation</MudButton>
+        </MudStack>
+        <MudTabs Outlined="true" Border="true" TabPanelsClass="pa-3">
+            <MudTabPanel Text="Chat"><AgentChatTab Agent="agent" /></MudTabPanel>
+            <MudTabPanel Text="Activity"><AgentActivityTab Agent="agent" /></MudTabPanel>
+            <MudTabPanel Text="Configuration"><AgentConfigurationTab Agent="agent" /></MudTabPanel>
+        </MudTabs>
+    </MudStack>
+}
+
+@code {
+    private LlmAgentBase? _subscribed;
+    private int _isRenderPending;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private LlmAgentBase? Agent => Subject as LlmAgentBase;
+
+    protected override void OnInitialized()
+    {
+        TimeZone.Changed += RequestRender;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_subscribed, Agent))
+        {
+            if (_subscribed is not null)
+            {
+                _subscribed.TimelineChanged -= RequestRender;
+            }
+
+            _subscribed = Agent;
+            if (_subscribed is not null)
+            {
+                _subscribed.TimelineChanged += RequestRender;
+            }
+        }
+    }
+
+    private void RequestRender()
+    {
+        // Text deltas arrive faster than the browser can render; coalesce them into one pending render.
+        if (Interlocked.Exchange(ref _isRenderPending, 1) == 0)
+        {
+            _ = InvokeAsync(() =>
+            {
+                Volatile.Write(ref _isRenderPending, 0);
+                StateHasChanged();
+            });
+        }
+    }
+
+    private async Task NewConversationAsync()
+    {
+        if (Agent is not { } agent)
+        {
+            return;
+        }
+
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "New conversation",
+            "Discard the chat session? Memory and timeline stay.",
+            yesText: "New conversation",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            await agent.NewConversationAsync(CancellationToken.None);
+        }
+    }
+
+    private static Color GetStatusColor(ServiceStatus status) => status switch
+    {
+        ServiceStatus.Running => Color.Success,
+        ServiceStatus.Unavailable => Color.Warning,
+        ServiceStatus.Error => Color.Error,
+        _ => Color.Default
+    };
+
+    public void Dispose()
+    {
+        TimeZone.Changed -= RequestRender;
+        if (_subscribed is not null)
+        {
+            _subscribed.TimelineChanged -= RequestRender;
+            _subscribed = null;
+        }
+    }
+}

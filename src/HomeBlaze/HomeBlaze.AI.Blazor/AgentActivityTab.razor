@@ -1,0 +1,43 @@
+@inject ITimeZoneDisplay TimeZone
+
+<MudStack Row="true" Spacing="6" Wrap="Wrap.Wrap" Class="mb-3">
+    <MudText>Runs: <b>@Agent.RunCount</b></MudText>
+    <MudText>Last run: <b>@(Agent.LastRunTime is { } lastRun ? TimeZone.Format(lastRun) : "never")</b></MudText>
+    @if (Agent.FiveHourUsage is { } fiveHour)
+    {
+        <MudText>Subscription usage: <b>@fiveHour.ToString("P0")</b> (5 hours), <b>@(Agent.SevenDayUsage?.ToString("P0") ?? "?")</b> (7 days)</MudText>
+    }
+</MudStack>
+
+<MudSimpleTable Dense="true" Hover="true" data-testid="agent-runs">
+    <thead>
+        <tr><th>Time</th><th>Trigger</th><th>Duration</th><th>Tokens (in/out)</th><th>Tools</th><th>Result</th></tr>
+    </thead>
+    <tbody>
+        @{
+            var entries = Agent.Timeline.Entries;
+        }
+        @for (var index = entries.Count - 1; index >= 0; index--)
+        {
+            var entry = entries[index];
+            if (entry.Kind is not (AgentTimelineEntryKind.BackgroundRun or AgentTimelineEntryKind.Error))
+            {
+                continue;
+            }
+
+            <tr>
+                <td>@TimeZone.Format(entry.Timestamp)</td>
+                <td>@(entry.Kind == AgentTimelineEntryKind.Error ? "error" : entry.Trigger)</td>
+                <td>@(entry.Duration is { } duration ? $"{duration.TotalSeconds:0.0} s" : "")</td>
+                <td>@(entry.Usage is { } usage ? $"{usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens}/{usage.OutputTokens}" : "")</td>
+                <td>@entry.ToolCalls.Count</td>
+                <td style="max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="@entry.Text">@entry.Text</td>
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+
+@code {
+    [Parameter, EditorRequired]
+    public LlmAgentBase Agent { get; set; } = null!;
+}
