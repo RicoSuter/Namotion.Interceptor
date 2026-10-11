@@ -10,38 +10,57 @@
 @implements IDisposable
 @implements IAsyncDisposable
 
-<MudStack Row="true" Class="browser-toolbar mb-2">
-    <MudBreadcrumbs Items="_breadcrumbs" />
-    <MudSpacer />
-</MudStack>
+@* The panes take the height the breadcrumbs leave, which wrap on a narrow view. 66px is the top padding of the main
+   content below the app bar plus 2px of slack. *@
+<div style="display: flex; flex-direction: column; height: calc(100vh - 66px);">
+    <MudStack Row="true" Class="browser-toolbar mb-2" Style="flex-shrink: 0;">
+        <MudBreadcrumbs Items="_breadcrumbs" />
+        <MudSpacer />
+    </MudStack>
 
-<div id="scrollContainer" style="height: calc(100vh - 130px); width: 100%; overflow-x: auto; overflow-y: hidden; display: flex;">
-    @for (var i = 0; i < _panes.Count; i++)
-    {
-        var pane = _panes[i];
-        var isFirst = i == 0;
-        var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
+    @* The row always has its scrollbar: one that appears with the pane that makes the row scroll takes its height
+       from the panes, which then all jump shorter. *@
+    <div id="scrollContainer" @ref="_paneContainer"
+         style="@($"flex: 1 1 auto; min-height: 0; width: 100%; overflow-x: scroll; overflow-y: hidden; display: flex; gap: {PaneGap}px; scroll-snap-type: var(--pane-snap, x mandatory);")">
+        @for (var i = 0; i < _panes.Count; i++)
+        {
+            var pane = _panes[i];
+            var isFirst = i == 0;
+            var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
 
-        <div style="display: flex; flex-direction: column;" class="pb-4">
-            <MudPaper @key="pane.Subject" Width="@((PaneWidth - 16) + "px")"
-                      Class="mr-4"
-                      Style="@($"min-width: {PaneWidth - 16}px; flex-shrink: 0; height: 100%;")">
-                <SubjectPropertyPanel @key="pane.Subject"
-                                      Subject="@pane.Subject"
-                                      SubjectRegistry="@_subjectRegistry"
-                                      Path="@pane.Path"
-                                      SelectedChild="@selectedChild"
-                                      CanClose="@(!isFirst)"
-                                      OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))"
-                                      OnClose="@(() => OnPaneClose(pane))"
-                                      OnDelete="@(() => OnPaneDelete(pane))" />
-            </MudPaper>
-        </div>
-    }
+            <div @key="pane.Subject" data-testid="subject-pane" class="pb-4"
+                 style="@PaneStyle">
+                <MudPaper Style="height: 100%; overflow: hidden;">
+                    <SubjectPropertyPanel @key="pane.Subject"
+                                          Subject="@pane.Subject"
+                                          SubjectRegistry="@_subjectRegistry"
+                                          Path="@pane.Path"
+                                          SelectedChild="@selectedChild"
+                                          CanClose="@(!isFirst)"
+                                          OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))"
+                                          OnClose="@(() => OnPaneClose(pane))"
+                                          OnDelete="@(() => OnPaneDelete(pane))" />
+                </MudPaper>
+            </div>
+        }
+
+        @* Closed panes keep their place until the row has scrolled back, see RemovePanesFrom. A placeholder snaps like
+           a pane: otherwise the row jumps off it at once when it replaces the pane the view rests on. *@
+        @for (var i = 0; i < _placeholderCount; i++)
+        {
+            <div @key="@($"placeholder-{i}")" data-testid="subject-pane-placeholder" style="@PaneStyle"></div>
+        }
+    </div>
 </div>
 
 @code {
-    private const decimal PaneWidth = 400;
+    // A pane is at least this wide, and wider when that lets a whole number of panes fill the view.
+    private const int MinimumPaneWidth = 360;
+    private const int PaneGap = 16;
+
+    // The script sets --pane-width; until it has run, a pane is at most as wide as the view.
+    private static readonly string PaneStyle =
+        $"flex: 0 0 var(--pane-width, min({MinimumPaneWidth}px, 100%)); min-width: 0; scroll-snap-align: start;";
 
     [Parameter]
     public string? Path { get; set; }
@@ -51,8 +70,12 @@
 
     private string? _lastNavigatedUrl;
     private bool _scrollToLastPane;
+    private int _placeholderCount;
+    private int _scrollVersion;
 
+    private ElementReference _paneContainer;
     private IJSObjectReference? _jsModule;
+    private IJSObjectReference? _paneFitting;
     private ISubjectRegistry? _subjectRegistry;
 
     protected override void OnInitialized()
@@ -75,15 +98,25 @@
     {
         if (firstRender)
         {
-            _jsModule = await JsRuntime.InvokeAsync<IJSObjectReference>(
+            var module = await JsRuntime.InvokeAsync<IJSObjectReference>(
                 "import", "./_content/HomeBlaze.Host/Components/Browser/SubjectBrowser.razor.js");
+            _paneFitting = await module.InvokeAsync<IJSObjectReference>("fitPanes", _paneContainer, MinimumPaneWidth, PaneGap);
+            _jsModule = module;
         }
 
+        // The panes are fitted before the first scroll, which a render during the import above leaves to this one.
         if (_scrollToLastPane && _jsModule != null)
         {
             _scrollToLastPane = false;
-            var scrollLeft = PaneWidth * (_panes.Count - 1);
-            await _jsModule.InvokeVoidAsync("scrollIntoView", "scrollContainer", scrollLeft);
+            var scrollVersion = ++_scrollVersion;
+            await _jsModule.InvokeVoidAsync("scrollToPane", _paneContainer, _panes.Count - 1, !firstRender);
+
+            // The row has scrolled back to the remaining panes, unless the panes changed again in the meantime.
+            if (scrollVersion == _scrollVersion && _placeholderCount > 0)
+            {
+                _placeholderCount = 0;
+                StateHasChanged();
+            }
         }
 
         await base.OnAfterRenderAsync(firstRender);
@@ -113,6 +146,16 @@
     }
 
     private void RebuildFromPath()
+    {
+        var previousPaneCount = _panes.Count + _placeholderCount;
+        BuildPanesFromPath();
+
+        // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom.
+        _placeholderCount = Math.Max(0, previousPaneCount - _panes.Count);
+        _scrollToLastPane = true;
+    }
+
+    private void BuildPanesFromPath()
     {
         _panes.Clear();
         _breadcrumbs.Clear();
@@ -232,11 +275,7 @@
         var paneIndex = _panes.IndexOf(clickedPane);
         if (paneIndex < 0) return;
 
-        // Remove all panes after the clicked one
-        while (_panes.Count > paneIndex + 1)
-        {
-            _panes.RemoveAt(_panes.Count - 1);
-        }
+        RemovePanesFrom(paneIndex + 1);
 
         // Build display name and path using slash notation
         var isInlinePathsProperty = InlinePathsAttribute.IsInlinePathsProperty(
@@ -262,6 +301,8 @@
             Index = index
         });
 
+        // The new pane takes the place of the first pane it replaced.
+        _placeholderCount = Math.Max(0, _placeholderCount - 1);
         _scrollToLastPane = true;
         UpdateUrl();
         StateHasChanged();
@@ -272,14 +313,23 @@
         var paneIndex = _panes.IndexOf(pane);
         if (paneIndex <= 0) return; // Can't close the root pane
 
-        // Remove this pane and all panes after it
-        while (_panes.Count > paneIndex)
-        {
-            _panes.RemoveAt(_panes.Count - 1);
-        }
-
+        RemovePanesFrom(paneIndex);
         UpdateUrl();
         StateHasChanged();
+    }
+
+    // Removes the pane at the index and all panes after it. Invisible placeholders keep their place until the row has
+    // scrolled back to the remaining panes, see OnAfterRenderAsync: a row that gets shorter at once makes them jump.
+    private void RemovePanesFrom(int index)
+    {
+        if (index >= _panes.Count)
+        {
+            return;
+        }
+
+        _placeholderCount += _panes.Count - index;
+        _panes.RemoveRange(index, _panes.Count - index);
+        _scrollToLastPane = true;
     }
 
     private async Task OnPaneDelete(SubjectPane pane)
@@ -334,11 +384,7 @@
             var paneIndex = _panes.IndexOf(pane);
             if (paneIndex > 0)
             {
-                while (_panes.Count > paneIndex)
-                {
-                    _panes.RemoveAt(_panes.Count - 1);
-                }
-
+                RemovePanesFrom(paneIndex);
                 UpdateUrl();
                 StateHasChanged();
             }
@@ -436,16 +482,22 @@
 
     public async ValueTask DisposeAsync()
     {
-        if (_jsModule != null)
+        try
         {
-            try
+            if (_paneFitting != null)
+            {
+                await _paneFitting.InvokeVoidAsync("dispose");
+                await _paneFitting.DisposeAsync();
+            }
+
+            if (_jsModule != null)
             {
                 await _jsModule.DisposeAsync();
             }
-            catch (JSDisconnectedException)
-            {
-                // Circuit already disconnected, nothing to clean up
-            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already disconnected, nothing to clean up
         }
         Dispose();
     }
