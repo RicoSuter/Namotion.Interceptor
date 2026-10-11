@@ -126,6 +126,41 @@ public class AgentPageTests
         });
     }
 
+    [Fact]
+    public async Task WhenAddingAndDeletingAMemoryEntry_ThenTheMemoryTableShowsEachChange()
+    {
+        // Arrange - the key is unique per run, so an entry left behind by an earlier run cannot satisfy the assertion.
+        var key = "e2e/" + Guid.NewGuid().ToString("N");
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{AgentPath}");
+        await Assertions.Expect(page.GetByTestId("agent-chat-input")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
+        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + AgentPath, PathStyle.Canonical));
+        var table = page.GetByTestId("agent-memory");
+
+        try
+        {
+            // Act & Assert
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Configuration" }).ClickAsync();
+            await page.GetByTestId("agent-memory-add").ClickAsync();
+            await page.GetByTestId("agent-memory-key").Locator("input").FillAsync(key);
+            await page.GetByTestId("agent-memory-value").Locator("textarea").FillAsync("noted by the end-to-end test");
+            await page.GetByTestId("agent-memory-save").ClickAsync();
+            await Assertions.Expect(table).ToContainTextAsync(key, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(table).ToContainTextAsync("noted by the end-to-end test");
+            Assert.Equal("noted by the end-to-end test", agent.Memory.GetSnapshot().TryGetEntry(key)?.Value);
+
+            await page.GetByRole(AriaRole.Button, new() { Name = "Delete " + key }).ClickAsync();
+            await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+            await Assertions.Expect(table).Not.ToContainTextAsync(key, new() { Timeout = PageLoadTimeout });
+            Assert.Null(agent.Memory.GetSnapshot().TryGetEntry(key));
+        }
+        finally
+        {
+            DeleteAgentData(resolver, agent);
+        }
+    }
+
     // Where the content sits in the timeline's view, read after two animation frames so the resize observations
     // that scroll the timeline have been delivered.
     private static Task<double> ReadContentOffsetAfterLayoutAsync(IPage page, IElementHandle timeline) =>
