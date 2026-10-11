@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Collections.Immutable;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Mcp;
@@ -26,43 +28,62 @@ public sealed class AgentMemory
     /// <summary>The key a memory document of the earlier Markdown format is migrated into.</summary>
     public const string LegacyKey = "notes/legacy";
 
-    private static readonly JsonElement UpdateToolSchema = JsonSerializer.SerializeToElement(new
-    {
-        type = "object",
-        properties = new
-        {
-            changes = new
-            {
-                type = "array",
-                description = "The changes, applied in order and all or nothing.",
-                minItems = 1,
-                items = new
-                {
-                    type = "object",
-                    properties = new
-                    {
-                        key = new
-                        {
-                            type = "string",
-                            description = "A slash path such as alerts/freezer-temperature. Segments use letters, digits, '-', '_' and '.'. " +
-                                "When removing, a key ending in '/' removes that entry and every entry below it."
-                        },
-                        value = new { type = "string", description = $"The new value, at most {MaxValueLength} characters. Omit it when removing." },
-                        remove = new { type = "boolean", description = "true to remove the key instead of setting it." }
-                    },
-                    required = new[] { "key" }
-                }
-            }
-        },
-        required = new[] { "changes" }
-    });
+    /// <summary>The version written to the memory file.</summary>
+    internal const int FileVersion = 1;
 
-    private readonly string? _filePath;
+    private const int MaxEchoedKeyLength = 140;
+
+    private static readonly JsonElement UpdateToolSchema = JsonDocument.Parse($$"""
+        {
+          "type": "object",
+          "properties": {
+            "changes": {
+              "type": "array",
+              "description": "The changes, applied in order and all or nothing.",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "maxLength": {{MaxKeyLength}},
+                    "description": "A slash path such as alerts/freezer-temperature. Segments use letters, digits, '-', '_' and '.'. When removing, a key ending in '/' removes that entry and every entry below it."
+                  },
+                  "value": {
+                    "type": "string",
+                    "maxLength": {{MaxValueLength}},
+                    "description": "The new value. Omit it when removing."
+                  },
+                  "remove": {
+                    "type": "boolean",
+                    "description": "true to remove the key instead of setting it."
+                  }
+                },
+                "required": ["key"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["changes"],
+          "additionalProperties": false
+        }
+        """).RootElement.Clone();
+
+    private static readonly JsonWriterOptions FileWriterOptions = new()
+    {
+        Indented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
     private readonly string? _legacyFilePath;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private volatile AgentMemorySnapshot _snapshot = AgentMemorySnapshot.Empty;
+
+    // Only read and written while holding _writeLock. A file-backed memory loads before its first write, so a write
+    // cannot replace the stored entries with a memory that never saw them.
+    private bool _isLoaded;
 
     /// <param name="filePath">The JSON file, or null to keep memory in-process only.</param>
     /// <param name="timeProvider">The clock for the update time of entries.</param>
@@ -70,19 +91,24 @@ public sealed class AgentMemory
     /// <param name="legacyFilePath">A Markdown memory file of the earlier format, migrated when <paramref name="filePath"/> does not exist yet.</param>
     public AgentMemory(string? filePath, TimeProvider timeProvider, ILogger? logger = null, string? legacyFilePath = null)
     {
-        _filePath = filePath;
+        FilePath = filePath;
         _legacyFilePath = legacyFilePath;
         _timeProvider = timeProvider;
         _logger = logger;
+        _isLoaded = filePath is null;
     }
+
+    /// <summary>The JSON file, null when the memory is kept in-process only.</summary>
+    public string? FilePath { get; }
 
     /// <summary>Returns the entries of the latest write as one immutable snapshot.</summary>
     public AgentMemorySnapshot GetSnapshot() => _snapshot;
 
     /// <summary>
-    /// Normalizes a key: trimmed, without leading or trailing slashes. Returns the reason when the key is invalid, otherwise null.
+    /// Validates a key and normalizes it: trimmed, without leading or trailing slashes.
     /// </summary>
-    public static string? TryNormalizeKey(string key, out string normalizedKey)
+    /// <returns>Why the key is invalid, or null when it is valid.</returns>
+    public static string? ValidateKey(string key, out string normalizedKey)
     {
         normalizedKey = key.Trim().Trim('/');
         if (normalizedKey.Length == 0)
@@ -118,27 +144,15 @@ public sealed class AgentMemory
 
     /// <summary>
     /// Loads the memory file, or migrates the legacy Markdown file into <see cref="LegacyKey"/> when only that exists.
-    /// A damaged file is logged, kept aside as <c>.damaged</c> and the memory starts empty. Serialized with
-    /// <see cref="UpdateAsync"/> so a load cannot overwrite the snapshot of a concurrent write with older file content.
+    /// A damaged file is logged and kept aside as <c>.damaged</c>; its valid entries are kept, or the memory starts
+    /// empty when it cannot be parsed at all.
     /// </summary>
     public async Task LoadAsync(CancellationToken cancellationToken)
     {
-        if (_filePath is null)
-        {
-            return;
-        }
-
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            if (File.Exists(_filePath))
-            {
-                _snapshot = await ReadFileAsync(_filePath, cancellationToken);
-            }
-            else if (_legacyFilePath is not null && File.Exists(_legacyFilePath))
-            {
-                await MigrateLegacyFileAsync(_filePath, _legacyFilePath, cancellationToken);
-            }
+            await LoadLockedAsync(cancellationToken);
         }
         finally
         {
@@ -148,8 +162,8 @@ public sealed class AgentMemory
 
     /// <summary>
     /// Applies the changes in order, all or nothing. A change that is invalid, or a result beyond <see cref="MaxEntries"/>
-    /// or <see cref="MaxSize"/> that is also larger than the current memory, rejects the whole update. A file write
-    /// failure throws and leaves the memory unchanged.
+    /// or <see cref="MaxSize"/> that is also larger than the current memory, rejects the whole update. A file-backed
+    /// memory that was not loaded yet loads first. A file write failure throws and leaves the memory unchanged.
     /// </summary>
     public async Task<AgentMemoryUpdateResult> UpdateAsync(IReadOnlyList<AgentMemoryChange> changes, CancellationToken cancellationToken)
     {
@@ -163,17 +177,19 @@ public sealed class AgentMemory
         {
             var change = changes[index];
             var value = change.Value?.Trim();
-            var error = TryNormalizeKey(change.Key, out var key) ?? value switch
+            var error = ValidateKey(change.Key, out var key) ?? value switch
             {
                 null => null,
                 { Length: 0 } => "The value is empty; remove the key instead.",
-                { Length: > MaxValueLength } => $"The value has {value.Length} characters; the limit is {MaxValueLength}.",
+                { Length: > MaxValueLength } =>
+                    $"The value has {value.Length} characters; the limit is {MaxValueLength}. Split it across several keys such as notes/legacy/1.",
                 _ => null
             };
 
             if (error is not null)
             {
-                return AgentMemoryUpdateResult.Failure($"Change {index + 1} (key '{change.Key}'): {error} Nothing was applied.", _snapshot);
+                return AgentMemoryUpdateResult.Failure(
+                    $"Change {index + 1} (key '{TruncateKey(change.Key)}'): {error} Nothing was applied.", _snapshot);
             }
 
             normalizedChanges[index] = (key, value, value is null && change.Key.TrimEnd().EndsWith('/'));
@@ -182,6 +198,11 @@ public sealed class AgentMemory
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
+            if (!_isLoaded)
+            {
+                await LoadLockedAsync(cancellationToken);
+            }
+
             var current = _snapshot;
             var now = _timeProvider.GetUtcNow();
             var entries = current.EntriesByKey.ToBuilder();
@@ -227,9 +248,9 @@ public sealed class AgentMemory
                     "Remove or shorten entries first. Nothing was applied.", current);
             }
 
-            if (_filePath is not null)
+            if (FilePath is not null)
             {
-                await WriteFileAsync(_filePath, updated, cancellationToken);
+                await WriteFileAsync(FilePath, updated, cancellationToken);
             }
 
             _snapshot = updated;
@@ -250,8 +271,8 @@ public sealed class AgentMemory
         Description =
             "Change your memory: key-value entries whose keys are slash paths forming a tree, such as alerts/freezer-temperature, " +
             "issues/garage-door or preferences/quiet-hours. Every entry is shown to you with its last update time at the start of " +
-            "every run. Each change sets a key to a value (the update time is set for you) or removes a key; removing a key that " +
-            "ends in '/' removes its whole subtree. Changes apply in order, all or nothing. " +
+            "every run, with the value exactly as stored (JSON-escaped). Each change sets a key to a value (the update time is set " +
+            "for you) or removes a key; removing a key that ends in '/' removes its whole subtree. Changes apply in order, all or nothing. " +
             $"Limits: keys {MaxKeyLength} characters, values {MaxValueLength} characters, {MaxEntries} entries and {MaxSize} bytes " +
             "over all keys and values; remove resolved or outdated entries to stay within them.",
         InputSchema = UpdateToolSchema,
@@ -314,9 +335,40 @@ public sealed class AgentMemory
         return changes.Count == 0 ? (null, "Pass at least one change.") : (changes, null);
     }
 
+    private static string TruncateKey(string key) => key.Length <= MaxEchoedKeyLength ? key : key[..MaxEchoedKeyLength] + "...";
+
     private static bool IsInSubtree(string key, string root) =>
         key.Equals(root, StringComparison.OrdinalIgnoreCase) ||
         (key.Length > root.Length && key[root.Length] == '/' && key.StartsWith(root, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Caller must hold <see cref="_writeLock"/>.</summary>
+    private async Task LoadLockedAsync(CancellationToken cancellationToken)
+    {
+        if (FilePath is null)
+        {
+            return;
+        }
+
+        if (File.Exists(FilePath))
+        {
+            _snapshot = await ReadFileAsync(FilePath, cancellationToken);
+            if (_legacyFilePath is not null && File.Exists(_legacyFilePath))
+            {
+                // Left behind by a migration that was interrupted after writing the new file.
+                RetireLegacyFile(_legacyFilePath);
+            }
+        }
+        else if (_legacyFilePath is not null && File.Exists(_legacyFilePath))
+        {
+            _snapshot = await MigrateLegacyFileAsync(FilePath, _legacyFilePath, cancellationToken);
+        }
+        else
+        {
+            _snapshot = AgentMemorySnapshot.Empty;
+        }
+
+        _isLoaded = true;
+    }
 
     private async Task<AgentMemorySnapshot> ReadFileAsync(string filePath, CancellationToken cancellationToken)
     {
@@ -339,35 +391,51 @@ public sealed class AgentMemory
         catch (JsonException exception)
         {
             _logger?.LogWarning(exception, "The memory file {Path} is damaged; it is kept as .damaged and the memory starts empty.", filePath);
-            try
-            {
-                File.Copy(filePath, filePath + ".damaged", overwrite: true);
-            }
-            catch (IOException copyException)
-            {
-                _logger?.LogWarning(copyException, "The damaged memory file {Path} could not be kept aside.", filePath);
-            }
-
+            KeepDamagedCopy(filePath);
             return AgentMemorySnapshot.Empty;
         }
 
+        if (file?.Version > FileVersion)
+        {
+            _logger?.LogWarning("The memory file {Path} has the newer version {Version}; it is read as version {FileVersion}.", filePath, file.Version, FileVersion);
+        }
+
         var entries = ImmutableSortedDictionary.CreateBuilder<string, AgentMemoryEntry>(AgentMemoryKeyComparer.Instance);
+        var skippedCount = 0;
         foreach (var entry in file?.Entries ?? [])
         {
             // Entries loaded from the file are not held to the value and size limits, so a migrated document stays whole.
-            if (entry?.Key is null || entry.Value is null || TryNormalizeKey(entry.Key, out var key) is not null || key != entry.Key)
+            if (entry?.Key is null || entry.Value is null || ValidateKey(entry.Key, out var key) is not null)
             {
-                _logger?.LogWarning("The memory file {Path} has an invalid entry {Key}, which is skipped.", filePath, entry?.Key);
+                skippedCount++;
                 continue;
             }
 
-            entries[key] = entry;
+            entries[key] = key == entry.Key ? entry : entry with { Key = key };
+        }
+
+        if (skippedCount > 0)
+        {
+            _logger?.LogWarning("The memory file {Path} has {Count} invalid entries, which are skipped; the file is kept as .damaged.", filePath, skippedCount);
+            KeepDamagedCopy(filePath);
         }
 
         return new AgentMemorySnapshot(entries.ToImmutable());
     }
 
-    private async Task MigrateLegacyFileAsync(string filePath, string legacyFilePath, CancellationToken cancellationToken)
+    private void KeepDamagedCopy(string filePath)
+    {
+        try
+        {
+            File.Copy(filePath, filePath + ".damaged", overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger?.LogWarning(exception, "The damaged memory file {Path} could not be kept aside.", filePath);
+        }
+    }
+
+    private async Task<AgentMemorySnapshot> MigrateLegacyFileAsync(string filePath, string legacyFilePath, CancellationToken cancellationToken)
     {
         var content = (await File.ReadAllTextAsync(legacyFilePath, cancellationToken)).Trim();
         var updated = new DateTimeOffset(File.GetLastWriteTimeUtc(legacyFilePath), TimeSpan.Zero);
@@ -378,19 +446,36 @@ public sealed class AgentMemory
         }
 
         // The new file is written before the old one is moved away, so an interruption loses nothing; the next load
-        // then finds the new file and leaves the old one in place.
+        // then finds the new file and retires the old one.
         var snapshot = new AgentMemorySnapshot(entries);
         await WriteFileAsync(filePath, snapshot, cancellationToken);
-        File.Move(legacyFilePath, legacyFilePath + ".migrated", overwrite: true);
-        _snapshot = snapshot;
+        RetireLegacyFile(legacyFilePath);
         _logger?.LogInformation("The memory file {LegacyPath} was migrated to {Path} under the key {Key}.", legacyFilePath, filePath, LegacyKey);
+        return snapshot;
     }
 
-    private static Task WriteFileAsync(string filePath, AgentMemorySnapshot snapshot, CancellationToken cancellationToken) =>
-        AtomicFile.WriteAllTextAsync(
-            filePath,
-            JsonSerializer.Serialize(new AgentMemoryFile(snapshot.Entries), AgentJsonContext.Default.AgentMemoryFile),
-            cancellationToken);
+    private void RetireLegacyFile(string legacyFilePath)
+    {
+        try
+        {
+            File.Move(legacyFilePath, legacyFilePath + ".migrated", overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger?.LogWarning(exception, "The migrated memory file {Path} could not be renamed; it is ignored while the new file exists.", legacyFilePath);
+        }
+    }
+
+    private static Task WriteFileAsync(string filePath, AgentMemorySnapshot snapshot, CancellationToken cancellationToken)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer, FileWriterOptions))
+        {
+            JsonSerializer.Serialize(writer, new AgentMemoryFile(FileVersion, snapshot.Entries), AgentJsonContext.Default.AgentMemoryFile);
+        }
+
+        return AtomicFile.WriteAllTextAsync(filePath, Encoding.UTF8.GetString(buffer.WrittenSpan), cancellationToken);
+    }
 }
 
 /// <summary>One memory entry. <paramref name="Updated"/> is set by the memory on every write of the key.</summary>
@@ -441,12 +526,13 @@ public sealed class AgentMemorySnapshot
 
     internal ImmutableSortedDictionary<string, AgentMemoryEntry> EntriesByKey { get; }
 
-    /// <summary>Returns the entry with the key, compared ignoring case, or null.</summary>
-    public AgentMemoryEntry? TryGetEntry(string key) => EntriesByKey.GetValueOrDefault(key);
+    /// <summary>Returns the entry with the key, normalized and compared ignoring case, or null.</summary>
+    public AgentMemoryEntry? TryGetEntry(string key) =>
+        AgentMemory.ValidateKey(key, out var normalizedKey) is null ? EntriesByKey.GetValueOrDefault(normalizedKey) : null;
 }
 
 /// <summary>The on-disk format of the memory file.</summary>
-internal sealed record AgentMemoryFile(IReadOnlyList<AgentMemoryEntry> Entries);
+internal sealed record AgentMemoryFile(int Version, IReadOnlyList<AgentMemoryEntry>? Entries);
 
 /// <summary>
 /// Orders keys ignoring case, with '/' before every other character so a subtree sorts directly after its root.

@@ -555,9 +555,16 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
 
         Timeline = new AgentTimeline(GetStoragePath(".timeline.jsonl"));
-        Memory = new AgentMemory(GetStoragePath(".memory.json"), _services.TimeProvider, _logger, legacyFilePath: GetStoragePath(".memory.md"));
         await Timeline.LoadAsync(cancellationToken);
-        await Memory.LoadAsync(cancellationToken);
+
+        // Loaded before it is published, so the memory editor never writes to a memory that has not read its file.
+        // A restart keeps the instance of an unchanged path, so two instances never write the same file.
+        var memoryPath = GetStoragePath(".memory.json");
+        var memory = memoryPath is not null && Memory.FilePath == memoryPath
+            ? Memory
+            : new AgentMemory(memoryPath, _services.TimeProvider, _logger, legacyFilePath: GetStoragePath(".memory.md"));
+        await memory.LoadAsync(cancellationToken);
+        Memory = memory;
         await RestoreRunStatisticsAsync(cancellationToken);
         RaiseTimelineChanged();
     }

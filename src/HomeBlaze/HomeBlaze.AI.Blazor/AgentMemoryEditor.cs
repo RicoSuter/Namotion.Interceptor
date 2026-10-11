@@ -40,13 +40,18 @@ public sealed class AgentMemoryEditor
     /// <summary>Why the last save or delete failed; null after a success or when the form opens.</summary>
     public string? Error { get; private set; }
 
+    /// <summary>Why the value in the form cannot be saved as it is, null when it fits.</summary>
+    public string? ValueError => Value.Trim().Length > AgentMemory.MaxValueLength
+        ? $"The value has {Value.Trim().Length} characters; the limit is {AgentMemory.MaxValueLength}. Split it across several keys."
+        : null;
+
     /// <summary>Whether the agent changed or removed the edited entry after editing started.</summary>
     public bool IsStale => _editedEntry is { } edited && !Equals(Snapshot.TryGetEntry(edited.Key), edited);
 
     /// <summary>Whether saving would overwrite another existing entry with the key in the form.</summary>
     public bool ReplacesExisting =>
         IsEditing &&
-        AgentMemory.TryNormalizeKey(Key, out var key) is null &&
+        AgentMemory.ValidateKey(Key, out var key) is null &&
         !string.Equals(key, OriginalKey, StringComparison.OrdinalIgnoreCase) &&
         Snapshot.TryGetEntry(key) is not null;
 
@@ -93,9 +98,9 @@ public sealed class AgentMemoryEditor
     /// <summary>Writes the form; a changed key also removes the original entry in the same update.</summary>
     public async Task SaveAsync()
     {
-        if (AgentMemory.TryNormalizeKey(Key, out var key) is { } keyError)
+        if ((AgentMemory.ValidateKey(Key, out var key) ?? ValueError) is { } error)
         {
-            Error = keyError;
+            Error = error;
             return;
         }
 

@@ -20,7 +20,7 @@ public class AgentMemoryTests : IDisposable
     public void WhenNormalizingAValidKey_ThenItIsTrimmedWithoutOuterSlashes(string key, string expected)
     {
         // Act
-        var error = AgentMemory.TryNormalizeKey(key, out var normalized);
+        var error = AgentMemory.ValidateKey(key, out var normalized);
 
         // Assert
         Assert.Null(error);
@@ -36,7 +36,7 @@ public class AgentMemoryTests : IDisposable
     public void WhenNormalizingAnInvalidKey_ThenTheErrorSaysWhy(string key, string expectedError)
     {
         // Act
-        var error = AgentMemory.TryNormalizeKey(key, out _);
+        var error = AgentMemory.ValidateKey(key, out _);
 
         // Assert
         Assert.Contains(expectedError, error);
@@ -46,7 +46,7 @@ public class AgentMemoryTests : IDisposable
     public void WhenNormalizingATooLongKey_ThenTheErrorStatesTheLimit()
     {
         // Act
-        var error = AgentMemory.TryNormalizeKey(new string('a', AgentMemory.MaxKeyLength + 1), out _);
+        var error = AgentMemory.ValidateKey(new string('a', AgentMemory.MaxKeyLength + 1), out _);
 
         // Assert
         Assert.Contains(AgentMemory.MaxKeyLength.ToString(), error);
@@ -186,6 +186,7 @@ public class AgentMemoryTests : IDisposable
 
         // Assert
         Assert.Contains(AgentMemory.MaxValueLength.ToString(), result.Error);
+        Assert.Contains("notes/legacy/1", result.Error);
         Assert.Empty(memory.GetSnapshot().Entries);
     }
 
@@ -312,6 +313,187 @@ public class AgentMemoryTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenUpdatingAFileBackedMemoryBeforeItWasLoaded_ThenTheStoredEntriesAreKept()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.memory.json");
+        await WriteMemoryFileAsync(path, ("alerts/freezer", "notified"));
+        var memory = new AgentMemory(path, _time);
+
+        // Act
+        await memory.UpdateAsync([AgentMemoryChange.Set("trends/power", "rising")], CancellationToken.None);
+        var reloaded = new AgentMemory(path, _time);
+        await reloaded.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["alerts/freezer", "trends/power"], reloaded.GetSnapshot().Entries.Select(entry => entry.Key));
+    }
+
+    [Fact]
+    public async Task WhenUpdatingBeforeTheLegacyFileWasMigrated_ThenTheMigrationRunsFirst()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.memory.json");
+        var legacyPath = Path.Combine(_directory, "agent.memory.md");
+        await File.WriteAllTextAsync(legacyPath, "- old note");
+        var memory = new AgentMemory(path, _time, legacyFilePath: legacyPath);
+
+        // Act
+        await memory.UpdateAsync([AgentMemoryChange.Set("trends/power", "rising")], CancellationToken.None);
+
+        // Assert
+        Assert.Equal([AgentMemory.LegacyKey, "trends/power"], memory.GetSnapshot().Entries.Select(entry => entry.Key));
+    }
+
+    [Fact]
+    public async Task WhenTheLegacyFileIsOverTheLimits_ThenItIsMigratedWhole()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.memory.json");
+        var legacyPath = Path.Combine(_directory, "agent.memory.md");
+        var content = string.Join('\n', Enumerable.Range(0, 1000).Select(index => $"- note {index}"));
+        await File.WriteAllTextAsync(legacyPath, content);
+        var memory = new AgentMemory(path, _time, legacyFilePath: legacyPath);
+
+        // Act
+        await memory.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(content, Assert.Single(memory.GetSnapshot().Entries).Value);
+        Assert.True(memory.GetSnapshot().Size > AgentMemory.MaxSize);
+    }
+
+    [Fact]
+    public async Task WhenTheMemoryIsOverTheSizeLimit_ThenAShrinkingChangeSucceedsAndAGrowingOneIsRejected()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.memory.json");
+        await WriteMemoryFileAsync(path, ("notes/legacy", new string('x', AgentMemory.MaxSize)), ("notes/small", "abc"));
+        var memory = new AgentMemory(path, _time);
+        await memory.LoadAsync(CancellationToken.None);
+
+        // Act
+        var shrinking = await memory.UpdateAsync([AgentMemoryChange.Remove("notes/small")], CancellationToken.None);
+        var growing = await memory.UpdateAsync([AgentMemoryChange.Set("notes/new", "x")], CancellationToken.None);
+
+        // Assert
+        Assert.True(shrinking.Succeeded);
+        Assert.False(growing.Succeeded);
+        Assert.Contains($"currently {memory.GetSnapshot().Size}", growing.Error);
+        Assert.Equal([AgentMemory.LegacyKey], memory.GetSnapshot().Entries.Select(entry => entry.Key));
+    }
+
+    [Fact]
+    public async Task WhenEntriesHoldMultiByteCharacters_ThenTheSizeCountsUtf8Bytes()
+    {
+        // Arrange
+        var memory = new AgentMemory(filePath: null, _time);
+
+        // Act
+        await memory.UpdateAsync([AgentMemoryChange.Set("räume/küche", "-8 °C")], CancellationToken.None);
+
+        // Assert
+        Assert.Equal(System.Text.Encoding.UTF8.GetByteCount("räume/küche-8 °C"), memory.GetSnapshot().Size);
+        Assert.NotEqual("räume/küche-8 °C".Length, memory.GetSnapshot().Size);
+    }
+
+    [Fact]
+    public async Task WhenTheFileWriteFails_ThenTheUpdateThrowsAndTheSnapshotIsUnchanged()
+    {
+        // Arrange
+        var blockingFile = Path.Combine(_directory, "blocking");
+        await File.WriteAllTextAsync(blockingFile, string.Empty);
+        var memory = new AgentMemory(Path.Combine(blockingFile, "agent.memory.json"), _time);
+        await memory.LoadAsync(CancellationToken.None);
+        var before = memory.GetSnapshot();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<IOException>(() => memory.UpdateAsync([AgentMemoryChange.Set("alerts/freezer", "notified")], CancellationToken.None));
+        Assert.Same(before, memory.GetSnapshot());
+    }
+
+    [Fact]
+    public async Task WhenBothTheFileAndTheLegacyFileExist_ThenTheLegacyFileIsRetiredWithoutMigratingAgain()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.memory.json");
+        var legacyPath = Path.Combine(_directory, "agent.memory.md");
+        await WriteMemoryFileAsync(path, ("alerts/freezer", "notified"));
+        await File.WriteAllTextAsync(legacyPath, "- old note");
+        var memory = new AgentMemory(path, _time, legacyFilePath: legacyPath);
+
+        // Act
+        await memory.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["alerts/freezer"], memory.GetSnapshot().Entries.Select(entry => entry.Key));
+        Assert.False(File.Exists(legacyPath));
+        Assert.True(File.Exists(legacyPath + ".migrated"));
+    }
+
+    [Fact]
+    public async Task WhenTheFileHasInvalidEntries_ThenTheyAreSkippedOuterSlashesAreNormalizedAndTheFileIsKeptAside()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.memory.json");
+        await WriteMemoryFileAsync(path, ("/alerts/freezer/", "notified"), ("bad key", "dropped"));
+        var memory = new AgentMemory(path, _time);
+
+        // Act
+        await memory.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["alerts/freezer"], memory.GetSnapshot().Entries.Select(entry => entry.Key));
+        Assert.Contains("bad key", await File.ReadAllTextAsync(path + ".damaged"));
+    }
+
+    [Fact]
+    public async Task WhenMemoryIsWritten_ThenTheFileIsIndentedWithAVersion()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.memory.json");
+        var memory = new AgentMemory(path, _time);
+
+        // Act
+        await memory.UpdateAsync([AgentMemoryChange.Set("räume/küche", "-8 °C")], CancellationToken.None);
+
+        // Assert
+        var json = await File.ReadAllTextAsync(path);
+        Assert.Equal(1, JsonDocument.Parse(json).RootElement.GetProperty("version").GetInt32());
+        Assert.Contains("\n  ", json);
+        Assert.Contains("küche", json);
+    }
+
+    [Fact]
+    public async Task WhenGettingAnEntryByAnUnnormalizedKey_ThenTheKeyIsNormalized()
+    {
+        // Arrange
+        var memory = new AgentMemory(filePath: null, _time);
+        await memory.UpdateAsync([AgentMemoryChange.Set("alerts/freezer", "notified")], CancellationToken.None);
+
+        // Act
+        var entry = memory.GetSnapshot().TryGetEntry(" /Alerts/Freezer/ ");
+
+        // Assert
+        Assert.Equal("notified", entry?.Value);
+    }
+
+    [Fact]
+    public async Task WhenAKeyInAnErrorIsVeryLong_ThenItIsTruncated()
+    {
+        // Arrange
+        var memory = new AgentMemory(filePath: null, _time);
+        var key = new string('a', 500) + " b";
+
+        // Act
+        var result = await memory.UpdateAsync([AgentMemoryChange.Set(key, "x")], CancellationToken.None);
+
+        // Assert
+        Assert.DoesNotContain(key, result.Error);
+        Assert.Contains(new string('a', 140) + "...", result.Error);
+    }
+
+    [Fact]
     public async Task WhenTheUpdateMemoryToolIsCalled_ThenTheChangesAreAppliedAndTheResultListsThem()
     {
         // Arrange
@@ -357,12 +539,13 @@ public class AgentMemoryTests : IDisposable
         Assert.Empty(memory.GetSnapshot().Entries);
     }
 
-    private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
+    private async Task WriteMemoryFileAsync(string path, params (string Key, string Value)[] entries)
     {
-        private DateTimeOffset _now = now;
-
-        public void Advance(TimeSpan time) => _now += time;
-
-        public override DateTimeOffset GetUtcNow() => _now;
+        var file = new
+        {
+            version = 1,
+            entries = entries.Select(entry => new { key = entry.Key, value = entry.Value, updated = Start }).ToArray()
+        };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(file));
     }
 }
