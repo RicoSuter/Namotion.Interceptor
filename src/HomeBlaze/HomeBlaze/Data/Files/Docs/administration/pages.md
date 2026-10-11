@@ -379,7 +379,7 @@ Line 6: This line of 2 ':' characters closes no block. No block is open here.
 Line 2: This block is not closed. The line ':::' that ends it is missing.
 ~~~~
 
-**A head line with too few colons for its place.** The block is shown as an error and still ends at its own closing line, so the block around it is shown with the rest of its content. Here the motor needs three colons on both of its lines:
+**A head line with too few colons for its place.** The block is shown as an error and still ends at its own closing line, so the block around it is shown with the rest of its content. This holds for both forms of the mistake: the closing line of the block can have the same too few colons, or the number of colons that its place needs. Here the motor needs three colons on both of its lines:
 
 <!-- sample: error -->
 ~~~~markdown

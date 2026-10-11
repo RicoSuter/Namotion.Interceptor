@@ -278,6 +278,155 @@ public class MarkdownPageParserTests
     }
 
     [Fact]
+    public void WhenOnlyTheHeadLineOfANestedBlockHasTooFewCharacters_ThenItsClosingLineClosesItWithoutAnErrorOfItsOwn()
+    {
+        // Arrange
+        var source = Normalize("""
+            :: Demo.Card
+            :: Demo.Motor#m
+            :::
+            text
+            ::
+            more page text
+            """);
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.Blocks);
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Equal((1, 5), (card.Line, card.EndLine));
+        var motor = Assert.Single(card.Children);
+        Assert.Equal(MarkdownBlockKind.Invalid, motor.Kind);
+        Assert.Equal((2, 3), (motor.Line, motor.EndLine));
+        Assert.Equal(
+            "A block inside another block needs more ':' characters than the block around it. " +
+            "This block has 2 and the block around it, at line 1, has 2. Write ':::' here and on its closing line.",
+            motor.Error);
+        Assert.Equal(2, page.AllBlocks.Count);
+    }
+
+    [Theory]
+    [InlineData(":::: Demo.Card\n::: Demo.Motor\n:::::\ntext\n::::", 2, 3)]
+    [InlineData(":: Demo.Card\n:: Demo.Motor\n:::::\ntext\n::", 2, 3)]
+    [InlineData(":: Demo.Flow\n::: Item\n::: Demo.Card\ninside\n::::\ntext\n:::\n::", 3, 5)]
+    [InlineData(":: Demo.Card\n:: {.band}\ninside\n:::\ntext\n::", 2, 4)]
+    [InlineData(":: Demo.Card\n:: Please note this\n:::\ntext\n::", 2, 3)]
+    public void WhenClosingLineHasMoreCharactersThanTheBlockAroundABlockWithTooFew_ThenItClosesThatBlock(
+        string source, int expectedLine, int expectedEndLine)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var outer = Assert.Single(page.Blocks);
+        Assert.Equal(MarkdownBlockKind.Widget, outer.Kind);
+        Assert.Equal(source.Split('\n').Length, outer.EndLine);
+        var invalid = Assert.Single(page.AllBlocks, block => block.Kind == MarkdownBlockKind.Invalid);
+        Assert.Equal((expectedLine, expectedEndLine), (invalid.Line, invalid.EndLine));
+        Assert.DoesNotContain("closes no block", invalid.Error);
+        Assert.DoesNotContain("not closed", invalid.Error);
+    }
+
+    [Theory]
+    // The innermost open block has enough characters for its place.
+    [InlineData(":: Demo.Card\n::: Demo.Motor\n::::\n:::\n::", 3, "Open here: line 1 (2 characters), line 2 (3 characters).")]
+    // A block directly on the page has no block around it.
+    [InlineData(":: Demo.Card\n:::\n::", 2, "Open here: line 1 (2 characters).")]
+    public void WhenClosingLineFitsNoBlockAndNoBlockWithTooFewCharactersIsItsTarget_ThenItStaysAnError(
+        string source, int expectedLine, string expectedEnding)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var closingLine = Assert.Single(page.AllBlocks, block => block.Error?.Contains("closes no block") == true);
+        Assert.Equal(expectedLine, closingLine.Line);
+        Assert.EndsWith(expectedEnding, closingLine.Error);
+        Assert.DoesNotContain(page.AllBlocks, block => block.Error?.Contains("not closed") == true);
+    }
+
+    [Theory]
+    // The line has no more characters than the block around the block with too few.
+    [InlineData(":::: Demo.Card\n:: Demo.Motor\n:::\n::\n::::")]
+    // The line is inside a quote, which it does not reach out of.
+    [InlineData(":: Demo.Card\n:: Demo.Motor\n> :::\n::\n::")]
+    public void WhenClosingLineIsNoneThatCouldBeMeantForTheBlockWithTooFewCharacters_ThenThatBlockRunsToTheLineOfItsOwnLength(
+        string source)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.Blocks);
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Equal((1, 5), (card.Line, card.EndLine));
+        var motor = Assert.Single(card.Children);
+        Assert.Equal(MarkdownBlockKind.Invalid, motor.Kind);
+        Assert.Equal((2, 4), (motor.Line, motor.EndLine));
+    }
+
+    [Fact]
+    public void WhenBlockIsNotClosedBecauseABlockInsideItWithAsManyCharactersTookTheClosingLine_ThenTheErrorNamesBothLines()
+    {
+        // Arrange
+        var source = Normalize("""
+            intro
+
+            :: Demo.Card
+            :: note that this is text
+            more
+            ::
+            after
+            """);
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.AllBlocks);
+        Assert.Equal(MarkdownBlockKind.Invalid, card.Kind);
+        Assert.Equal(3, card.Line);
+        Assert.Equal(
+            "This block is not closed. The line '::' that ends it is missing. " +
+            "The '::' at line 6 closed the block at line 4, which is inside this block and has 2 characters as well.",
+            card.Error);
+    }
+
+    [Theory]
+    // The first closing line that a block inside took is the one that is named.
+    [InlineData(":: Demo.Card\n:: Demo.A\n:: Demo.B\n::\n::\n:: Demo.C\n::", "The '::' at line 4 closed the block at line 3,")]
+    // Also a block deeper inside takes a closing line of that length.
+    [InlineData(":: Demo.Card\n::: Footer\n:: Demo.B\n::\n:::", "The '::' at line 4 closed the block at line 3,")]
+    public void WhenSeveralBlocksInsideAnUnclosedBlockTookAClosingLine_ThenTheErrorNamesTheFirstOne(string source, string expectedPart)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.AllBlocks);
+        Assert.Contains(expectedPart, card.Error);
+    }
+
+    [Theory]
+    // No block inside it took a closing line.
+    [InlineData(":: note that this is text\nmore\nafter", "Expected key=value but found 'that this is text'. This block is not closed. The line '::' that ends it is missing.")]
+    [InlineData(":: Demo.Card\n::: Demo.Motor\n:::\ntext", "This block is not closed. The line '::' that ends it is missing.")]
+    // The block inside it was closed by a line with more characters, which could not have closed this block.
+    [InlineData("::: Demo.Card\n::: Demo.Motor\n::::\ntext", "This block is not closed. The line ':::' that ends it is missing.")]
+    // The closing line was inside a quote, which it does not reach out of.
+    [InlineData(":: Demo.Card\n> :: Demo.Motor\n> ::\n\ntext", "This block is not closed. The line '::' that ends it is missing.")]
+    public void WhenBlockIsNotClosedAndNoBlockInsideItTookItsClosingLine_ThenTheErrorIsAsBefore(string source, string expectedError)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal(expectedError, page.Blocks[0].Error);
+    }
+
+    [Fact]
     public void WhenStyleBlockInsideABlockHasNoMoreCharacters_ThenItIsInvalid()
     {
         // Arrange

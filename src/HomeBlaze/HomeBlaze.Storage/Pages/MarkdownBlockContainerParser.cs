@@ -13,7 +13,8 @@ namespace HomeBlaze.Storage.Pages;
 /// underscore or an opening brace opens a block, and a fence followed by other text is no fence line.
 /// A fence alone closes the innermost open block that was opened with the same number of characters,
 /// together with every block that is still open inside it. It closes no block from inside a quote, a
-/// list item or another container that is not a block.
+/// list item or another container that is not a block. A fence alone that fits no open block still
+/// closes the innermost one when only the head line of that block has too few characters for its place.
 /// </summary>
 internal sealed class MarkdownBlockContainerParser : BlockParser
 {
@@ -217,14 +218,22 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
 
             if (block.FenceLength == fenceLength)
             {
-                block.IsClosed = true;
-                block.UpdateSpanEnd(processor.Line.End);
-                processor.Close(block);
-                return BlockState.BreakDiscard;
+                return CloseWithLine(processor, block);
             }
 
             openBlocks ??= [];
             openBlocks.Insert(0, block);
+        }
+
+        // The innermost block has too few characters for its place and is shown with that error. A line
+        // with enough characters for that place is its closing line, written as the head line should
+        // have been. Without this the line of the block around it would close the block instead.
+        if (openBlocks is [.., { Parent: MarkdownBlockContainer outer } innermost] &&
+            innermost.FenceLength <= outer.FenceLength &&
+            fenceLength > outer.FenceLength)
+        {
+            innermost.IsClosedByLongerLine = true;
+            return CloseWithLine(processor, innermost);
         }
 
         processor.NewBlocks.Push(new MarkdownBlockContainer(this)
@@ -237,6 +246,14 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
             Span = new SourceSpan(fenceStart, processor.Line.End)
         });
 
+        return BlockState.BreakDiscard;
+    }
+
+    private static BlockState CloseWithLine(BlockProcessor processor, MarkdownBlockContainer block)
+    {
+        block.IsClosed = true;
+        block.UpdateSpanEnd(processor.Line.End);
+        processor.Close(block);
         return BlockState.BreakDiscard;
     }
 }

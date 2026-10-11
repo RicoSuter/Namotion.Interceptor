@@ -33,6 +33,12 @@ internal sealed class MarkdownBlockContainer(BlockParser parser) : ContainerBloc
     public bool IsClosed { get; set; }
 
     /// <summary>
+    /// Whether the closing line that ended the block has more characters than its head line, which is
+    /// accepted for a block whose head line has too few characters for its place.
+    /// </summary>
+    public bool IsClosedByLongerLine { get; set; }
+
+    /// <summary>
     /// 0-based line at which the block ended: its closing line, or the line that ended it in another way,
     /// which is one after the last line when the page ended first.
     /// </summary>

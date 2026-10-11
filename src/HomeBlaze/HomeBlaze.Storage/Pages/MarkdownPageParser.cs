@@ -325,8 +325,14 @@ public static class MarkdownPageParser
             // The box replaces the block with everything in it, so it also says why that is more than expected.
             if (!container.IsClosed)
             {
-                var notClosed =
-                    $"This block is not closed. The line '{MarkdownBlockFence.Create(container.FenceLength)}' that ends it is missing.";
+                var fence = MarkdownBlockFence.Create(container.FenceLength);
+                var notClosed = $"This block is not closed. The line '{fence}' that ends it is missing.";
+                if (FindFirstBlockClosedByLineOfLength(container, container.FenceLength) is { } inner)
+                {
+                    notClosed =
+                        $"{notClosed} The '{fence}' at line {inner.EndLine + 1} closed the block at line {inner.Line + 1}, " +
+                        $"which is inside this block and has {container.FenceLength} characters as well.";
+                }
 
                 error = error is null ? notClosed : $"{error} {notClosed}";
                 kind = MarkdownBlockKind.Invalid;
@@ -354,6 +360,35 @@ public static class MarkdownPageParser
             ConfigurationJson = configurationJson,
             ConfigurationSpan = configurationSpan
         };
+    }
+
+    /// <summary>
+    /// Gets the block inside <paramref name="container"/> that was the first to be closed by a line of
+    /// <paramref name="fenceLength"/> characters. Only blocks that such a line reaches from the container
+    /// count, so none inside a quote or a list item.
+    /// </summary>
+    private static MarkdownBlockContainer? FindFirstBlockClosedByLineOfLength(MarkdownBlockContainer container, int fenceLength)
+    {
+        // In document order with the blocks inside a block before that block, which is the order of the closing lines.
+        foreach (var child in container)
+        {
+            if (child is not MarkdownBlockContainer { IsClosingLine: false } inner)
+            {
+                continue;
+            }
+
+            if (FindFirstBlockClosedByLineOfLength(inner, fenceLength) is { } nested)
+            {
+                return nested;
+            }
+
+            if (inner is { IsClosed: true, IsClosedByLongerLine: false } && inner.FenceLength == fenceLength)
+            {
+                return inner;
+            }
+        }
+
+        return null;
     }
 
     private static string? FindNestingError(MarkdownBlockContainer container)

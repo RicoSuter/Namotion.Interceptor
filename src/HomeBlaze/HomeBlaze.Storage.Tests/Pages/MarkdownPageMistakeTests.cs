@@ -307,4 +307,87 @@ public class MarkdownPageMistakeTests
         Assert.Contains("The body of the card.", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(card.Content).Children));
         Assert.Contains("The footer of the card.", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(card.Footer).Children));
     }
+
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public async Task WhenHeadLineOfANestedBlockHasTooFewCharacters_ThenOnlyThatBlockIsAnErrorAndTheBlockAroundItIsShown(
+        string closingLineOfTheMotor)
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", $"""
+            :: HomeBlaze.Components.Card#card
+            :: HomeBlaze.Samples.Motor#m
+            {closingLineOfTheMotor}
+            text
+            ::
+            more page text
+            """);
+
+        // Assert
+        Assert.Equal(
+            [
+                "Line 2: A block inside another block needs more ':' characters than the block around it. " +
+                "This block has 2 and the block around it, at line 1, has 2. Write ':::' here and on its closing line."
+            ],
+            DocumentationSamplesTests.FindErrorBoxes(page));
+
+        var card = Assert.IsType<Card>(page.Children["card"]);
+        Assert.Contains("text", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(card.Content).Children));
+        Assert.Contains("more page text", MarkdownPageFixture.Html(page.Children));
+    }
+
+    [Fact]
+    public async Task WhenTextInsideABlockIsReadAsAHeadLineAndTakesItsClosingLine_ThenTheBoxOfTheBlockNamesBothLines()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", """
+            Text before.
+
+            :: HomeBlaze.Components.Card Title="Notes"
+            :: note that this line is text
+            The body of the card.
+            ::
+
+            Text after.
+            """);
+
+        // Assert
+        Assert.Equal(
+            [
+                "Line 3: This block is not closed. The line '::' that ends it is missing. " +
+                "The '::' at line 6 closed the block at line 4, which is inside this block and has 2 characters as well."
+            ],
+            DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Contains("Text before.", MarkdownPageFixture.Html(page.Children));
+    }
+
+    [Fact]
+    public async Task WhenHeadLineDirectlyOnThePageHasNoClosingLine_ThenItsBoxSaysOnlyThatTheBlockIsNotClosed()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", """
+            Text before.
+
+            :: HomeBlaze.Components.Card Title="Notes"
+            The body of the card.
+
+            Text after.
+            """);
+
+        // Assert
+        Assert.Equal(
+            ["Line 3: This block is not closed. The line '::' that ends it is missing."],
+            DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Contains("Text before.", MarkdownPageFixture.Html(page.Children));
+    }
 }
