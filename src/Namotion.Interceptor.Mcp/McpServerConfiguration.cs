@@ -24,7 +24,7 @@ public class McpServerConfiguration
     public IList<IMcpTypeProvider> TypeProviders { get; init; } = [];
 
     /// <summary>
-    /// Additional tools beyond the 5 core tools (e.g., list_methods, invoke_method).
+    /// Additional tools beyond the 5 core tools, for example tools that call methods of subjects.
     /// </summary>
     public IList<IMcpToolProvider> ToolProviders { get; init; } = [];
 
@@ -51,7 +51,7 @@ public class McpServerConfiguration
     public Type[] ExcludeTypes { get; init; } = [];
 
     /// <summary>
-    /// When true, set_property is blocked and invoke_method only allows Query methods.
+    /// When true, set_property is blocked.
     /// </summary>
     public bool IsReadOnly { get; init; } = true;
 }

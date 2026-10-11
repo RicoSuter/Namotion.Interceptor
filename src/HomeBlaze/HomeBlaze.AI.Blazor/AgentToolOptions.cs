@@ -19,7 +19,7 @@ public static class AgentToolOptions
 {
     /// <summary>The tool names shown when the offered tools cannot be listed.</summary>
     public static IReadOnlyList<string> FallbackToolNames { get; } =
-        ["browse", "search", "get_property", "list_types", "list_methods", "get_property_history", "invoke_method", "set_property"];
+        ["browse", "search", "get_property", "list_types", "list_methods", "invoke_query", "get_property_history", "invoke_operation", "set_property"];
 
     private const string MemoryToolName = "update_memory";
 
@@ -31,8 +31,9 @@ public static class AgentToolOptions
         ["get_property"] = "Reads a single property value.",
         ["list_types"] = "Lists the known types and interfaces, so subjects can be found by capability.",
         ["list_methods"] = "Lists the operations and queries a subject offers.",
+        ["invoke_query"] = "Calls read-only query methods, for example to read Markdown pages.",
         ["get_property_history"] = "Reads the recorded history of property values.",
-        ["invoke_method"] = "Runs operations on subjects, such as switching a device or sending a notification.",
+        ["invoke_operation"] = "Runs operations on subjects, such as switching a device or sending a notification.",
         ["set_property"] = "Writes property values of subjects."
     };
 

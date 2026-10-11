@@ -34,12 +34,12 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 | Package | Tools | Scope |
 |---------|-------|-------|
 | `Namotion.Interceptor.Mcp` | `query`, `get_property`, `set_property`, `list_types` | Any Namotion.Interceptor application |
-| `HomeBlaze.AI` | `list_methods`, `invoke_method` (via `IMcpToolProvider`) + subject enrichment (`$type`, `$icon`, `$title` via `IMcpSubjectEnricher`) + concrete type discovery (via `IMcpTypeProvider`) | HomeBlaze-specific features |
+| `HomeBlaze.AI` | `list_methods`, `invoke_query`, `invoke_operation` (via `IMcpToolProvider`) + subject enrichment (`$type`, `$icon`, `$title` via `IMcpSubjectEnricher`) + concrete type discovery (via `IMcpTypeProvider`) | HomeBlaze-specific features |
 | `HomeBlaze.History.Mcp` | `get_property_history`, and the planned `get_event_history` and `get_command_history` (see [Messages](messages.md)) | Ships with the history packages |
 
-`list_methods` lists each operation and query of a subject with its name, kind, title, description and return type. Its parameters use the `McpMethodParameter` shape of the core library: JSON Schema `type`, `format`, `enum` names and `nullable`. HomeBlaze adds the unit of an `[OperationParameter(Unit = ...)]` as the `description`; a `Percent` parameter reads "fraction where 1 = 100% (0.2 = 20%)", since agents pass the fraction and only the operation dialog takes 0 to 100.
+`list_methods` lists each operation and query of a subject with its name, kind (`query` or `operation`, matching the tool that calls it), title, description and return type. Its parameters use the `McpMethodParameter` shape of the core library: JSON Schema `type`, `format`, `enum` names and `nullable`. HomeBlaze adds the unit of an `[OperationParameter(Unit = ...)]` as the `description`; a `Percent` parameter reads "fraction where 1 = 100% (0.2 = 20%)", since agents pass the fraction and only the operation dialog takes 0 to 100.
 
-`invoke_method` takes the arguments by parameter name in a `parameters` object and converts them with `McpValueConverter`, so an enum accepts its name (ignoring case) or a defined number, and a `TimeSpan` its `hh:mm:ss` string. An unknown parameter, a missing non-nullable one or a value that does not convert returns an error that names the expected parameters, and the method is not invoked; a missing nullable parameter is passed as null. When the method itself rejects an argument with an `ArgumentException`, its message is returned, for example the list of known values; any other failure returns a generic error and is logged. In read-only mode only queries can be invoked.
+`invoke_query` calls only `[Query]` methods and `invoke_operation` only `[Operation]` methods, so each permission is exactly one tool; calling a method of the other kind returns an error naming the right tool, and nothing is invoked. A read-only configuration does not offer `invoke_operation`. Both tools take the arguments by parameter name in a `parameters` object and convert them with `McpValueConverter`, so an enum accepts its name (ignoring case) or a defined number, and a `TimeSpan` its `hh:mm:ss` string. An unknown parameter, a missing non-nullable one or a value that does not convert returns an error that names the expected parameters, and the method is not invoked; a missing nullable parameter is passed as null. When the method itself rejects an argument with an `ArgumentException`, its message is returned, for example the list of known values; any other failure returns a generic error and is logged. A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line naming the characters cut off.
 
 This keeps the interceptor library independently usable. Method tools are HomeBlaze-specific because method discovery uses `MethodMetadata` with `[Operation]`/`[Query]` registry attributes — a HomeBlaze convention, not a core interceptor concept. Property-level metadata (units, position) is already in the registry as `StateMetadata` attributes — included directly in `query` responses when `includeAttributes=true`.
 
@@ -66,8 +66,8 @@ Agent writes are local writes — they flow through the normal write path (local
 | Stage | Description |
 |-------|-------------|
 | Stage 1 | `LlmAgentBase` + `LlmAgent`. Read-only + notify. Poll + change-triggered with filter rules. Queue-one concurrency |
-| Stage 2 | Agent-to-agent calls via `invoke_method` on `ILlmAgent` (with recursion limits) |
-| Stage 3 | Full write access (`set_property`, unrestricted `invoke_method`) with per-agent authorization scopes |
+| Stage 2 | Agent-to-agent calls via `invoke_operation` on `ILlmAgent` (with recursion limits) |
+| Stage 3 | Full write access (`set_property`, unrestricted `invoke_operation`) with per-agent authorization scopes |
 
 ## Key Decisions
 

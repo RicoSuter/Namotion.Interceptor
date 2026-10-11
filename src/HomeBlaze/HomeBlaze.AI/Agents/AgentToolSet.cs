@@ -14,7 +14,7 @@ public sealed class AgentToolSet
 {
     /// <summary>The graph tools a new agent allows by default. An empty allowed list allows no graph tools.</summary>
     public static readonly IReadOnlyList<string> DefaultAllowedTools =
-        ["browse", "search", "get_property", "list_types", "list_methods", "get_property_history"];
+        ["browse", "search", "get_property", "list_types", "list_methods", "invoke_query", "get_property_history"];
 
     private const int PreviewLength = 2000;
 
@@ -45,10 +45,10 @@ public sealed class AgentToolSet
     public IReadOnlyList<AgentToolCall> Calls => Volatile.Read(ref _calls);
 
     /// <summary>
-    /// Whether tools built for these allowed names must run in read-only mode, i.e. neither set_property nor invoke_method is allowed.
+    /// Whether tools built for these allowed names must run in read-only mode, i.e. neither set_property nor invoke_operation is allowed.
     /// </summary>
     public static bool IsReadOnly(IReadOnlyCollection<string> allowedTools) =>
-        !allowedTools.Contains("set_property") && !allowedTools.Contains("invoke_method");
+        !allowedTools.Contains("set_property") && !allowedTools.Contains("invoke_operation");
 
     /// <summary>
     /// Creates the tool set of a turn.

@@ -36,7 +36,7 @@ Each channel is a separate subject with its own `[Configuration]` properties (e.
 
 Since `SendNotificationAsync` is marked with `[Operation]`, it is:
 - Invocable from the Blazor UI (operators can send test notifications)
-- Discoverable via the registry and MCP tools (`list_methods`, `invoke_method`)
+- Discoverable via the registry and MCP tools (`list_methods`, `invoke_operation`)
 - Callable by built-in AI agents for automated notifications
 
 ### From Other Subjects

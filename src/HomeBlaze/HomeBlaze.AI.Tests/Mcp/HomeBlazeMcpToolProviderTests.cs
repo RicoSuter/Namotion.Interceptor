@@ -146,7 +146,7 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
-    public async Task WhenInvokeMethodWithTimeSpanArgument_ThenConvertsDocumentedFormat()
+    public async Task WhenInvokeOperationWithTimeSpanArgument_ThenConvertsDocumentedFormat()
     {
         // Arrange
         var (room, _, factory) = CreateTestSetup(isReadOnly: false);
@@ -162,7 +162,7 @@ public class HomeBlazeMcpToolProviderTests
             Parameters = [new MethodParameter { Name = "position", Type = typeof(TimeSpan) }]
         });
 
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { path = "", method = "Seek", parameters = new { position = "00:01:30" } });
@@ -174,7 +174,7 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
-    public async Task WhenInvokeMethodWithEnumName_ThenConvertsToEnumValue()
+    public async Task WhenInvokeOperationWithEnumName_ThenConvertsToEnumValue()
     {
         // Arrange
         var (room, _, factory) = CreateTestSetup(isReadOnly: false);
@@ -190,7 +190,7 @@ public class HomeBlazeMcpToolProviderTests
             Parameters = [new MethodParameter { Name = "mode", Type = typeof(TestMode) }]
         });
 
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { path = "", method = "SetMode", parameters = new { mode = "All" } });
@@ -205,7 +205,7 @@ public class HomeBlazeMcpToolProviderTests
     [InlineData("""{"level": 0.3}""", "Unknown parameter 'level'.")]
     [InlineData("""{}""", "Missing parameter 'volume'.")]
     [InlineData(null, "Missing parameter 'volume'.")]
-    public async Task WhenInvokeMethodArgumentIsMissingOrMisspelled_ThenReturnsErrorNamingTheParametersWithoutInvoking(string? parameters, string expectedError)
+    public async Task WhenInvokeOperationArgumentIsMissingOrMisspelled_ThenReturnsErrorNamingTheParametersWithoutInvoking(string? parameters, string expectedError)
     {
         // Arrange
         var (room, _, factory) = CreateTestSetup(isReadOnly: false);
@@ -235,7 +235,7 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
-    public async Task WhenInvokeMethodWithoutNullableArgument_ThenItIsPassedAsNull()
+    public async Task WhenInvokeOperationWithoutNullableArgument_ThenItIsPassedAsNull()
     {
         // Arrange
         var (room, _, factory) = CreateTestSetup(isReadOnly: false);
@@ -255,7 +255,7 @@ public class HomeBlazeMcpToolProviderTests
             ]
         });
 
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { path = "", method = "PlayStream", parameters = new { uri = "http://example.com/live" } });
@@ -270,7 +270,7 @@ public class HomeBlazeMcpToolProviderTests
     [InlineData("""{"mode": 42}""")]
     [InlineData("""{"mode": "Off, One"}""")]
     [InlineData("""{"mode": "Sometimes"}""")]
-    public async Task WhenInvokeMethodEnumArgumentIsUndefined_ThenReturnsErrorListingTheValuesWithoutInvoking(string parameters)
+    public async Task WhenInvokeOperationEnumArgumentIsUndefined_ThenReturnsErrorListingTheValuesWithoutInvoking(string parameters)
     {
         // Arrange
         var (room, _, factory) = CreateTestSetup(isReadOnly: false);
@@ -316,57 +316,188 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
-    public async Task WhenInvokeQueryMethodInReadOnlyMode_ThenAllowed()
+    public async Task WhenInvokeQueryCallsAQueryInReadOnlyMode_ThenItIsInvoked()
     {
         // Arrange
-        var (room, config, factory) = CreateTestSetup(isReadOnly: true);
-
-        var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("GetStatus", _ => new MethodMetadata(_ => "OK")
+        var (room, _, factory) = CreateTestSetup(isReadOnly: true);
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("GetStatus", _ => new MethodMetadata(_ => "OK")
         {
             Kind = MethodKind.Query,
             Title = "Get Status",
             PropertyName = "GetStatus",
-            ResultType = typeof(string),
-            Parameters = []
+            ResultType = typeof(string)
         });
 
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_query");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { path = "", method = "GetStatus" });
-        var result = await tool.Handler(input, CancellationToken.None);
-        var json = JsonSerializer.SerializeToElement(result);
+        var json = JsonSerializer.SerializeToElement(await tool.Handler(input, CancellationToken.None));
 
         // Assert
         Assert.True(json.GetProperty("success").GetBoolean());
+        Assert.Equal("OK", json.GetProperty("result").GetString());
+    }
+
+    [Theory]
+    [InlineData(false, "'TurnOn' is an operation; call it with invoke_operation.")]
+    [InlineData(true, "'TurnOn' is an operation; it can only be called with invoke_operation, which is not available in read-only mode.")]
+    public async Task WhenInvokeQueryCallsAnOperation_ThenErrorNamesInvokeOperationWithoutInvoking(bool isReadOnly, string expectedError)
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly);
+        var isInvoked = false;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ =>
+        {
+            isInvoked = true;
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "TurnOn"
+        });
+
+        // Act
+        var error = await InvokeForErrorAsync(factory, "TurnOn", parameters: null, toolName: "invoke_query");
+
+        // Assert
+        Assert.Equal(expectedError, error);
+        Assert.False(isInvoked);
     }
 
     [Fact]
-    public async Task WhenInvokeOperationMethodInReadOnlyMode_ThenBlocked()
+    public async Task WhenInvokeOperationCallsAQuery_ThenErrorNamesInvokeQueryWithoutInvoking()
     {
         // Arrange
-        var (room, config, factory) = CreateTestSetup(isReadOnly: true);
-
-        var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ => "done")
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("GetStatus", _ => new MethodMetadata(_ =>
         {
-            Kind = MethodKind.Operation,
-            Title = "Turn On",
-            PropertyName = "TurnOn",
-            Parameters = []
+            isInvoked = true;
+            return "OK";
+        })
+        {
+            Kind = MethodKind.Query,
+            PropertyName = "GetStatus",
+            ResultType = typeof(string)
         });
 
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
-
         // Act
-        var input = JsonSerializer.SerializeToElement(new { path = "", method = "TurnOn" });
-        var result = await tool.Handler(input, CancellationToken.None);
-        var json = JsonSerializer.SerializeToElement(result);
+        var error = await InvokeForErrorAsync(factory, "GetStatus", parameters: null, toolName: "invoke_operation");
 
         // Assert
-        Assert.True(json.TryGetProperty("error", out var error));
-        Assert.Contains("read-only", error.GetString());
+        Assert.Equal("'GetStatus' is a query; call it with invoke_query.", error);
+        Assert.False(isInvoked);
+    }
+
+    [Fact]
+    public void WhenReadOnly_ThenInvokeQueryIsOfferedAndInvokeOperationIsNot()
+    {
+        // Arrange
+        var (_, _, factory) = CreateTestSetup(isReadOnly: true);
+
+        // Act
+        var toolNames = factory.CreateTools().Select(tool => tool.Name).ToArray();
+
+        // Assert
+        Assert.Contains("list_methods", toolNames);
+        Assert.Contains("invoke_query", toolNames);
+        Assert.DoesNotContain("invoke_operation", toolNames);
+        Assert.DoesNotContain("invoke_method", toolNames);
+    }
+
+    [Fact]
+    public void WhenNotReadOnly_ThenInvokeQueryAndInvokeOperationAreOffered()
+    {
+        // Arrange
+        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
+
+        // Act
+        var toolNames = factory.CreateTools().Select(tool => tool.Name).ToArray();
+
+        // Assert
+        Assert.Contains("invoke_query", toolNames);
+        Assert.Contains("invoke_operation", toolNames);
+        Assert.DoesNotContain("invoke_method", toolNames);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenListMethods_ThenEachMethodReportsItsKind(bool isReadOnly)
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly);
+        var registered = room.TryGetRegisteredSubject()!;
+        registered.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ => null) { Kind = MethodKind.Operation, PropertyName = "TurnOn" });
+        registered.AddProperty<MethodMetadata>("GetStatus", _ => new MethodMetadata(_ => "OK") { Kind = MethodKind.Query, PropertyName = "GetStatus" });
+
+        // Act
+        var operation = await ListMethodAsync(factory, "TurnOn");
+        var query = await ListMethodAsync(factory, "GetStatus");
+
+        // Assert
+        Assert.Equal("operation", operation.GetProperty("kind").GetString());
+        Assert.Equal("query", query.GetProperty("kind").GetString());
+    }
+
+    [Fact]
+    public void WhenNotReadOnly_ThenTheMethodToolDescriptionsNameEachOther()
+    {
+        // Arrange
+        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
+
+        // Act
+        var tools = factory.CreateTools().ToDictionary(tool => tool.Name, tool => tool.Description);
+
+        // Assert
+        Assert.Contains("invoke_query", tools["list_methods"]);
+        Assert.Contains("invoke_operation", tools["list_methods"]);
+        Assert.Contains("kind", tools["list_methods"]);
+        Assert.Contains("Find methods and their kind with list_methods", tools["invoke_query"]);
+        Assert.Contains("Find methods and their kind with list_methods", tools["invoke_operation"]);
+    }
+
+    [Fact]
+    public void WhenReadOnly_ThenListMethodsDescriptionSaysOperationsCannotBeCalled()
+    {
+        // Arrange
+        var (_, _, factory) = CreateTestSetup(isReadOnly: true);
+
+        // Act
+        var description = factory.CreateTools().First(tool => tool.Name == "list_methods").Description;
+
+        // Assert
+        Assert.Contains("invoke_query", description);
+        Assert.Contains("operations are listed for information but cannot be called", description);
+        Assert.DoesNotContain("invoke_operation", description);
+    }
+
+    [Theory]
+    [InlineData("invoke_query", MethodKind.Query)]
+    [InlineData("invoke_operation", MethodKind.Operation)]
+    public async Task WhenAMethodReturnsALongString_ThenTheResultIsCutWithAMarker(string toolName, MethodKind kind)
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var text = new string('a', MethodResultLimit.MaxStringLength + 10);
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("Read", _ => new MethodMetadata(_ => text)
+        {
+            Kind = kind,
+            PropertyName = "Read",
+            ResultType = typeof(string)
+        });
+
+        var tool = factory.CreateTools().First(t => t.Name == toolName);
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "Read" });
+        var json = JsonSerializer.SerializeToElement(await tool.Handler(input, CancellationToken.None));
+
+        // Assert
+        var result = json.GetProperty("result").GetString()!;
+        Assert.StartsWith(new string('a', MethodResultLimit.MaxStringLength), result);
+        Assert.EndsWith("[truncated: 10 characters]", result);
     }
 
     [Fact]
@@ -374,7 +505,7 @@ public class HomeBlazeMcpToolProviderTests
     {
         // Arrange
         var (room, config, factory) = CreateTestSetup(isReadOnly: false);
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { path = "", method = "DoesNotExist" });
@@ -391,7 +522,7 @@ public class HomeBlazeMcpToolProviderTests
     {
         // Arrange
         var (room, config, factory) = CreateTestSetup(isReadOnly: false);
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { path = "NonExistent", method = "DoSomething" });
@@ -403,7 +534,7 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
-    public async Task WhenInvokeMethodWithParameters_ThenParametersArePassedCorrectly()
+    public async Task WhenInvokeOperationWithParameters_ThenParametersArePassedCorrectly()
     {
         // Arrange
         var (room, config, factory) = CreateTestSetup(isReadOnly: false);
@@ -425,7 +556,7 @@ public class HomeBlazeMcpToolProviderTests
             ]
         });
 
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new
@@ -458,7 +589,7 @@ public class HomeBlazeMcpToolProviderTests
             Parameters = []
         });
 
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { path = "", method = "FailMethod" });
@@ -499,9 +630,9 @@ public class HomeBlazeMcpToolProviderTests
         return (room, config, factory);
     }
 
-    private static async Task<string> InvokeForErrorAsync(McpToolFactory factory, string methodName, string? parameters)
+    private static async Task<string> InvokeForErrorAsync(McpToolFactory factory, string methodName, string? parameters, string toolName = "invoke_operation")
     {
-        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var tool = factory.CreateTools().First(t => t.Name == toolName);
         var input = parameters is null
             ? JsonSerializer.SerializeToElement(new { path = "", method = methodName })
             : JsonSerializer.SerializeToElement(new { path = "", method = methodName, parameters = JsonDocument.Parse(parameters).RootElement });

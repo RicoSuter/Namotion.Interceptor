@@ -28,7 +28,8 @@ public class HomeBlazeMcpConfigurationFactoryTests
 
         // Assert
         Assert.False(configuration.IsReadOnly);
-        Assert.Contains("invoke_method", toolNames);
+        Assert.Contains("invoke_query", toolNames);
+        Assert.Contains("invoke_operation", toolNames);
         Assert.Contains("stub_tool", toolNames);
     }
 

@@ -198,7 +198,7 @@ When an agent runs (timer or property change trigger):
    - User: "Current state of watched paths:" + pre-fetched state
 5. Call ChatClientAgent.RunAsync() — MAF handles the tool-calling loop internally:
    - May call read tools (query, get_property) to dig deeper
-   - May call invoke_method to send notifications
+   - May call invoke_operation to send notifications
    - Returns AgentResponse with analysis text
 6. Store result in LastAnalysis, update Status, LastRunTime, RunCount
 ```
@@ -216,7 +216,7 @@ Stage 1 restricts write access:
 | `set_property` | **No** | Deferred until authorization |
 | `list_types` | Yes | Discover capabilities and concrete types |
 | `list_methods` | Yes | Notification channels only |
-| `invoke_method` | **Restricted** | Only on `INotificationChannel` subjects |
+| `invoke_operation` | **Restricted** | Only on `INotificationChannel` subjects |
 
 ### Pre-fetching Watched State
 
@@ -224,7 +224,7 @@ The agent calls `query(path, depth=2, includeProperties=true)` for each watch pa
 
 ### Notification Integration
 
-The agent's only action channel (stage 1) is sending notifications via `INotificationChannel`. The `invoke_method` tool is restricted to methods on subjects implementing `INotificationChannel`:
+The agent's only action channel (stage 1) is sending notifications via `INotificationChannel`. The `invoke_operation` tool is restricted to methods on subjects implementing `INotificationChannel`:
 
 ```csharp
 // Tool filter (pseudo-code)
@@ -250,8 +250,8 @@ On failure (LLM API down, rate limited, timeout), set `Status` to error message,
 | Stage | Description |
 |---|---|
 | **Stage 1** | `LlmAgentBase` + `LlmAgent`. Read-only + notify. Poll + change-triggered with filter rules. Queue-one concurrency. Fresh `ChatClientAgent` per run |
-| **Stage 2** | Agent-to-agent calls via `invoke_method` on `ILlmAgent` (with recursion limits) |
-| **Stage 3** | Full write access (`set_property`, unrestricted `invoke_method`) with per-agent authorization scopes |
+| **Stage 2** | Agent-to-agent calls via `invoke_operation` on `ILlmAgent` (with recursion limits) |
+| **Stage 3** | Full write access (`set_property`, unrestricted `invoke_operation`) with per-agent authorization scopes |
 
 ## Key Decisions
 

@@ -194,18 +194,18 @@ The **Unified Namespace (UNS)** is the live state layer: all subject properties 
 |-------|----------|--------|
 | Unified Namespace (live) | Typed properties, derived properties, metadata attributes, operations | Registry, MCP tools, connectors |
 | Time-Series Store | Property history, configurable retention | `get_property_history` MCP tool, plugin-based (see [History](design/history.md)) |
-| File Storage | **Subject files** (`.json` with `$type`) are deserialized into typed subjects — the file is the persistence format. **Documents** (Markdown, PDFs, images, manuals) become document subjects visible as-is in the graph. See [Storage](design/storage.md) | Subject files via configuration system, documents via `query` + `invoke_method` |
+| File Storage | **Subject files** (`.json` with `$type`) are deserialized into typed subjects — the file is the persistence format. **Documents** (Markdown, PDFs, images, manuals) become document subjects visible as-is in the graph. See [Storage](design/storage.md) | Subject files via configuration system, documents via `query` + `invoke_query` (for example `ReadEvaluatedContent` of a Markdown page) |
 
 Subjects can also carry user-defined metadata — annotations, tags, and links to other subjects — stored as dynamic attributes on the registry. These are persisted in configuration files and reapplied on restart, allowing operators to enrich the knowledge graph without modifying subject code. See [Storage](design/storage.md) for details.
 
 **How each consumer accesses the knowledge graph:**
 
-The knowledge graph is accessed through two layers of MCP tools. The base layer (`Namotion.Interceptor.Mcp`) provides subject browsing (`query`), property read/write (`get_property`, `set_property`) and type listing (`list_types`), usable with any Namotion.Interceptor application. The HomeBlaze layer (`HomeBlaze.AI`) adds method discovery (`list_methods`, with each parameter's type, format, enum names and unit) and method invocation (`invoke_method`, which accepts enum names and rejects missing or unknown arguments), and enriches the base tools with domain-specific metadata (`$type`, `$icon`, `$title`, units via `[State]`, methods via `[Operation]`/`[Query]`); see [AI](design/ai.md). History queries ship with the history packages instead: `HomeBlaze.History.Mcp` provides `get_property_history`, with `get_event_history` and `get_command_history` planned.
+The knowledge graph is accessed through two layers of MCP tools. The base layer (`Namotion.Interceptor.Mcp`) provides subject browsing (`query`), property read/write (`get_property`, `set_property`) and type listing (`list_types`), usable with any Namotion.Interceptor application. The HomeBlaze layer (`HomeBlaze.AI`) adds method discovery (`list_methods`, with each parameter's type, format, enum names and unit) and method invocation (`invoke_query` for queries and `invoke_operation` for operations, which accept enum names and reject missing or unknown arguments), and enriches the base tools with domain-specific metadata (`$type`, `$icon`, `$title`, units via `[State]`, methods via `[Operation]`/`[Query]`); see [AI](design/ai.md). History queries ship with the history packages instead: `HomeBlaze.History.Mcp` provides `get_property_history`, with `get_event_history` and `get_command_history` planned.
 
 | Consumer | Access Pattern |
 |----------|---------------|
 | Operator UI | TrackingScope for live updates, subject browser for navigation, operations for actions |
-| AI agents | Base MCP tools (`query`, `get_property`, `set_property`, `list_types`) + HomeBlaze MCP tools (`list_methods`, `invoke_method`, `get_property_history`, `get_event_history`, `get_command_history`, enriched metadata) |
+| AI agents | Base MCP tools (`query`, `get_property`, `set_property`, `list_types`) + HomeBlaze MCP tools (`list_methods`, `invoke_query`, `invoke_operation`, `get_property_history`, `get_event_history`, `get_command_history`, enriched metadata) |
 | Connectors | Read/write interceptors feed property changes in and out, operations map to protocol methods (e.g. OPC UA methods) |
 | WebSocket sync | SubjectUpdate messages replicate the subject graph and proxy operations between instances |
 
@@ -348,8 +348,8 @@ AI Agent                  Knowledge Graph              Time-Series         Docum
      |------------------------->|------------------------->|                    |
      |<-- time-series data -----|<-------------------------|                    |
      |                          |                          |                    |
-     |  4. invoke_method(path,  |                          |                    |
-     |     "Read")              |                          |                    |
+     |  4. invoke_query(path,   |                          |                    |
+     |     method)              |                          |                    |
      |------------------------->|---------------------------------------------->|
      |<-- document content -----|<----------------------------------------------|
      |                          |                          |                    |

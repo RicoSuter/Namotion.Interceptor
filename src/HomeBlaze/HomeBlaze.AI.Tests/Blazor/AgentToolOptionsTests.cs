@@ -27,13 +27,13 @@ public class AgentToolOptionsTests
     public void WhenStateChangingToolsAreOffered_ThenTheyAreMarkedAndListedAfterReadOnlyTools()
     {
         // Arrange
-        var offeredTools = new[] { CreateTool("set_property"), CreateTool("browse"), CreateTool("invoke_method"), CreateTool("search") };
+        var offeredTools = new[] { CreateTool("set_property"), CreateTool("browse"), CreateTool("invoke_operation"), CreateTool("search") };
 
         // Act
         var options = AgentToolOptions.Create(offeredTools, []);
 
         // Assert
-        Assert.Equal(["browse", "search", "set_property", "invoke_method"], options.Select(option => option.Name));
+        Assert.Equal(["browse", "search", "set_property", "invoke_operation"], options.Select(option => option.Name));
         Assert.Equal([false, false, true, true], options.Select(option => option.CanChangeState));
     }
 
@@ -55,10 +55,10 @@ public class AgentToolOptionsTests
     public void WhenAStateChangingToolIsNotOffered_ThenItIsStillMarkedAsChangingState()
     {
         // Act
-        var options = AgentToolOptions.Create([CreateTool("browse")], ["invoke_method"]);
+        var options = AgentToolOptions.Create([CreateTool("browse")], ["invoke_operation"]);
 
         // Assert
-        var option = Assert.Single(options, option => option.Name == "invoke_method");
+        var option = Assert.Single(options, option => option.Name == "invoke_operation");
         Assert.False(option.IsOffered);
         Assert.True(option.CanChangeState);
     }
@@ -77,6 +77,22 @@ public class AgentToolOptionsTests
     }
 
     [Fact]
+    public void WhenInvokeQueryIsOffered_ThenItIsListedWithTheReadOnlyToolsAndASummary()
+    {
+        // Arrange
+        var offeredTools = new[] { CreateTool("invoke_operation"), CreateTool("invoke_query", "Call a query method ...") };
+
+        // Act
+        var options = AgentToolOptions.Create(offeredTools, []);
+
+        // Assert
+        Assert.Equal(["invoke_query", "invoke_operation"], options.Select(option => option.Name));
+        Assert.False(options[0].CanChangeState);
+        Assert.Equal("Calls read-only query methods, for example to read Markdown pages.", options[0].Description);
+        Assert.True(options[1].CanChangeState);
+    }
+
+    [Fact]
     public void WhenListingTheToolsFails_ThenTheFallbackNamesAreListed()
     {
         // Arrange
@@ -87,6 +103,9 @@ public class AgentToolOptionsTests
 
         // Assert
         Assert.Equal(AgentToolOptions.FallbackToolNames.Order(), options.Select(option => option.Name).Order());
+        Assert.Contains("invoke_query", AgentToolOptions.FallbackToolNames);
+        Assert.Contains("invoke_operation", AgentToolOptions.FallbackToolNames);
+        Assert.DoesNotContain("invoke_method", AgentToolOptions.FallbackToolNames);
         Assert.All(options, option => Assert.False(string.IsNullOrEmpty(option.Description)));
         Assert.All(options, option => Assert.True(option.IsOffered));
     }

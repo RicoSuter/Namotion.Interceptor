@@ -52,7 +52,7 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Building Block | Status | Notes |
 |---|---|---|
 | MCP server (core tools) | Implemented | `Namotion.Interceptor.Mcp` — `query`, `get_property`, `set_property`, `list_types` |
-| MCP server (HomeBlaze extensions) | Implemented | Subject enrichment, type discovery, `list_methods`, `invoke_method` via `McpServerConfiguration` extension points |
+| MCP server (HomeBlaze extensions) | Implemented | Subject enrichment, type discovery, `list_methods`, `invoke_query`, `invoke_operation` via `McpServerConfiguration` extension points |
 | Built-in agents | Planned | Agent subjects with LLM integration. See [AI Agents plan](../plans/ai-agents.md) |
 
 ## Platform

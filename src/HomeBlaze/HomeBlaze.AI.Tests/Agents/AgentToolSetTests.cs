@@ -29,7 +29,9 @@ public class AgentToolSetTests
 
     [Theory]
     [InlineData(new[] { "browse" }, true)]
-    [InlineData(new[] { "browse", "invoke_method" }, false)]
+    [InlineData(new[] { "browse", "invoke_operation" }, false)]
+    [InlineData(new[] { "browse", "invoke_query" }, true)]
+    [InlineData(new[] { "invoke_method" }, true)]
     [InlineData(new[] { "set_property" }, false)]
     public void WhenCheckingAllowedTools_ThenWriteToolsDisableReadOnly(string[] allowedTools, bool expected)
     {
@@ -41,12 +43,14 @@ public class AgentToolSetTests
     }
 
     [Fact]
-    public void WhenUsingTheDefaultAllowedTools_ThenTheToolsAreReadOnly()
+    public void WhenUsingTheDefaultAllowedTools_ThenInvokeQueryIsAllowedAndTheToolsAreReadOnly()
     {
         // Act
         var isReadOnly = AgentToolSet.IsReadOnly(AgentToolSet.DefaultAllowedTools);
 
         // Assert
+        Assert.Contains("invoke_query", AgentToolSet.DefaultAllowedTools);
+        Assert.DoesNotContain("invoke_operation", AgentToolSet.DefaultAllowedTools);
         Assert.True(isReadOnly);
     }
 

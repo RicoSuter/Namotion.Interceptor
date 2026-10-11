@@ -15,10 +15,34 @@ using Namotion.Interceptor.Registry.Paths;
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// Provides the list_methods and invoke_method tools for HomeBlaze subjects.
+/// Provides the list_methods, invoke_query and invoke_operation tools for HomeBlaze subjects. invoke_operation is
+/// only offered when the configuration is not read-only.
 /// </summary>
 public class HomeBlazeMcpToolProvider : IMcpToolProvider
 {
+    /// <summary>The name of the tool that calls query methods.</summary>
+    public const string InvokeQueryToolName = "invoke_query";
+
+    /// <summary>The name of the tool that calls operation methods.</summary>
+    public const string InvokeOperationToolName = "invoke_operation";
+
+    private const string ListMethodsDescription =
+        "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
+        "(reads, no side effects; call it with invoke_query) or an operation (changes devices or sends something; " +
+        "call it with invoke_operation). The kind field of each method says which.";
+
+    private const string ReadOnlyListMethodsDescription =
+        "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
+        "(reads, no side effects; call it with invoke_query) or an operation (changes devices or sends something). " +
+        "The kind field of each method says which; operations are listed for information but cannot be called on this server.";
+
+    private const string InvokeQueryDescription =
+        "Call a query method of a subject: it reads and has no side effects. Find methods and their kind with list_methods.";
+
+    private const string InvokeOperationDescription =
+        "Call an operation method of a subject: it can change devices or send something, for example SendNotification. " +
+        "Find methods and their kind with list_methods.";
+
     private static readonly JsonElement ListMethodsSchema = JsonSerializer.SerializeToElement(new
     {
         type = "object",
@@ -63,18 +87,29 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         yield return new McpToolInfo
         {
             Name = "list_methods",
-            Description = "List operations and queries available on a subject at the given path, with each parameter's type, format and unit.",
+            Description = _isReadOnly ? ReadOnlyListMethodsDescription : ListMethodsDescription,
             InputSchema = ListMethodsSchema,
             Handler = HandleListMethodsAsync
         };
 
         yield return new McpToolInfo
         {
-            Name = "invoke_method",
-            Description = "Execute a method on a subject. When server is read-only, only query methods are allowed.",
+            Name = InvokeQueryToolName,
+            Description = InvokeQueryDescription,
             InputSchema = InvokeMethodSchema,
-            Handler = HandleInvokeMethodAsync
+            Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Query, cancellationToken)
         };
+
+        if (!_isReadOnly)
+        {
+            yield return new McpToolInfo
+            {
+                Name = InvokeOperationToolName,
+                Description = InvokeOperationDescription,
+                InputSchema = InvokeMethodSchema,
+                Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Operation, cancellationToken)
+            };
+        }
     }
 
     private Task<object?> HandleListMethodsAsync(JsonElement input, CancellationToken cancellationToken)
@@ -102,7 +137,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         return Task.FromResult<object?>(new { methods });
     }
 
-    private async Task<object?> HandleInvokeMethodAsync(JsonElement input, CancellationToken cancellationToken)
+    private async Task<object?> HandleInvokeAsync(JsonElement input, MethodKind allowedKind, CancellationToken cancellationToken)
     {
         var subject = ResolveSubject(input.GetProperty("path").GetString()!);
         if (subject is null)
@@ -117,9 +152,9 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return new { error = $"Method not found: {methodName}" };
         }
 
-        if (_isReadOnly && method.Kind != MethodKind.Query)
+        if (method.Kind != allowedKind)
         {
-            return new { error = "Operations are not allowed in read-only mode." };
+            return new { error = DescribeWrongKind(methodName, method.Kind) };
         }
 
         var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
@@ -131,7 +166,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
         try
         {
-            var result = await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
+            var result = MethodResultLimit.Apply(await method.InvokeAsync(arguments, _serviceProvider, cancellationToken));
             return result is not null ? new { success = true, result } : new { success = true };
         }
         catch (ArgumentException exception)
@@ -146,6 +181,13 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return new { error = "Method invocation failed. Check server logs for details." };
         }
     }
+
+    private string DescribeWrongKind(string methodName, MethodKind kind) => kind switch
+    {
+        MethodKind.Query => $"'{methodName}' is a query; call it with {InvokeQueryToolName}.",
+        _ when _isReadOnly => $"'{methodName}' is an operation; it can only be called with {InvokeOperationToolName}, which is not available in read-only mode.",
+        _ => $"'{methodName}' is an operation; call it with {InvokeOperationToolName}."
+    };
 
     private static (object?[]? Arguments, string? Error) ReadArguments(JsonElement input, MethodParameter[] inputParameters)
     {

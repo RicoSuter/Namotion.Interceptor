@@ -102,7 +102,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
     private async Task<object?> HandleGetPropertyHistoryAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        // Mirrors invoke_method: anything unexpected becomes a structured error rather than reaching the
+        // Mirrors invoke_query and invoke_operation: anything unexpected becomes a structured error rather than reaching the
         // MCP layer, which returns the raw exception message and so leaks internals to the caller.
         try
         {
