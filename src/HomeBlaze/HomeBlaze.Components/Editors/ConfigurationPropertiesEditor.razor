@@ -24,7 +24,7 @@ else
         </MudAlert>
     }
 
-    <MudForm IsValid="@_isFormValid" IsValidChanged="OnFormValidChanged">
+    <MudForm ErrorsChanged="OnFormErrorsChanged">
         @foreach (var prop in _configurationProperties)
         {
             var isSecret = prop.GetConfigurationMetadata()?.IsSecret == true;
@@ -37,7 +37,8 @@ else
 }
 
 @code {
-    private bool _isFormValid;
+    private bool _hasFormErrors;
+    private bool? _reportedIsValid;
     private bool _isSaving;
     private bool _externalChangeDetected;
     private List<string> _errors = [];
@@ -53,16 +54,63 @@ else
     [Parameter]
     public EventCallback<bool> IsValidChanged { get; set; }
 
-    public bool IsValid => _isFormValid || !_configurationProperties.Any();
-
-    private async Task OnFormValidChanged(bool isFormValid)
+    /// <summary>
+    /// Gets whether no field shows an error and every property that cannot hold null has a value.
+    /// </summary>
+    public bool IsValid
     {
-        _isFormValid = isFormValid;
-        await IsValidChanged.InvokeAsync(IsValid);
+        get
+        {
+            // Not the validity of the MudForm: it stays invalid until every required field was touched,
+            // although all of them are prefilled from the subject.
+            if (_hasFormErrors)
+            {
+                return false;
+            }
+
+            foreach (var property in _configurationProperties)
+            {
+                if (_editValues[property.Name] is null &&
+                    property.Type.IsValueType &&
+                    Nullable.GetUnderlyingType(property.Type) is null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
     }
 
+    private Task OnFormErrorsChanged(string[] errors)
+    {
+        _hasFormErrors = errors.Length > 0;
+        return ReportIsValidAsync();
+    }
+
+    private async Task ReportIsValidAsync()
+    {
+        var isValid = IsValid;
+        if (_reportedIsValid != isValid)
+        {
+            _reportedIsValid = isValid;
+            await IsValidChanged.InvokeAsync(isValid);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ReportIsValidAsync();
+        }
+    }
+
+    /// <summary>
+    /// Gets whether the last <see cref="ApplyChanges"/> could not set every value.
+    /// </summary>
     public bool HasErrors => _errors.Any();
-    
+
     protected override void OnInitialized()
     {
         _changeSubscription?.Dispose();
@@ -122,10 +170,13 @@ else
         {
             _modifiedSecrets.Add(propertyName);
         }
+
+        await ReportIsValidAsync();
     }
 
     /// <summary>
-    /// Applies all edited values to the subject.
+    /// Applies the edited values to the subject. A value that cannot be set is skipped and reported through
+    /// <see cref="HasErrors"/>, while the other values are still applied.
     /// </summary>
     public void ApplyChanges()
     {

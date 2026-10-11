@@ -11,25 +11,19 @@
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
     @if (Subject != null)
     {
-        @if (IsCreating && ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Setup))
+        @if (HostedComponentType is { } hostedComponentType)
         {
-            <SubjectComponent Subject="@Subject"
-                              Type="SubjectComponentType.Setup"
-                              AdditionalParameters="@(new Dictionary<string, object?> { ["IsCreating"] = IsCreating })"
-                              ComponentInstance="_subjectComponent"
-                              ComponentInstanceChanged="OnSubjectComponentRendered" />
-        }
-        else if (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit))
-        {
-            <SubjectComponent Subject="@Subject"
-                              Type="SubjectComponentType.Edit"
-                              AdditionalParameters="@(new Dictionary<string, object?> { ["IsCreating"] = IsCreating })"
+            <SubjectComponent @key="Subject"
+                              Subject="@Subject"
+                              Type="hostedComponentType"
+                              AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
                               ComponentInstance="_subjectComponent"
                               ComponentInstanceChanged="OnSubjectComponentRendered" />
         }
         else
         {
-            <ConfigurationPropertiesEditor @ref="_propertiesEditor"
+            <ConfigurationPropertiesEditor @key="Subject"
+                                           @ref="_propertiesEditor"
                                            Subject="@Subject"
                                            IsValidChanged="OnPropertiesEditorIsValidChanged" />
         }
@@ -37,6 +31,10 @@
 </TrackingScope>
 
 @code {
+    // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance.
+    private static readonly Dictionary<string, object?> CreatingParameters = new() { ["IsCreating"] = true };
+    private static readonly Dictionary<string, object?> EditingParameters = new() { ["IsCreating"] = false };
+
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
     [Parameter] public bool IsCreating { get; set; }
@@ -46,20 +44,35 @@
     /// </summary>
     [Parameter] public EventCallback<bool> IsValidChanged { get; set; }
 
+    private IInterceptorSubject? _editedSubject;
     private ISubjectComponent? _subjectComponent;
     private bool _isSubjectComponentRendered;
     private ISubjectEditComponent? _subscribedEditComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
 
-    private bool UsesSubjectComponent => Subject is not null &&
-        ((IsCreating && ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Setup)) ||
-         ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit));
+    private SubjectComponentType? HostedComponentType
+    {
+        get
+        {
+            if (Subject is null)
+            {
+                return null;
+            }
 
-    // The hosted component is reported one render after this panel. Until then there is no editor to ask or
-    // to apply. A null instance cannot stand for "not reported yet", because a registered component that is
-    // not an ISubjectComponent is reported as null and has nothing to apply.
-    private bool IsSubjectComponentPending => UsesSubjectComponent && !_isSubjectComponentRendered;
+            var subjectType = Subject.GetType();
+            if (IsCreating && ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Setup))
+            {
+                return SubjectComponentType.Setup;
+            }
+
+            return ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Edit) ? SubjectComponentType.Edit : null;
+        }
+    }
+
+    // A null instance cannot stand for "not reported yet": a registered component that is not an
+    // ISubjectComponent is reported as null and has nothing to apply.
+    private bool IsSubjectComponentPending => HostedComponentType is not null && !_isSubjectComponentRendered;
 
     /// <summary>
     /// Gets whether the hosted editor is valid. Also true while a registered component has not rendered yet,
@@ -67,28 +80,37 @@
     /// </summary>
     public bool IsValid => (_subjectComponent as ISubjectEditComponent)?.IsValid ?? _propertiesEditor?.IsValid ?? true;
 
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Subject, _editedSubject))
+        {
+            _editedSubject = Subject;
+
+            // The editor of the previous subject is replaced with the next render, and must not answer for the new one until then.
+            SubscribeTo(null);
+            _subjectComponent = null;
+            _isSubjectComponentRendered = false;
+            _propertiesEditor = null;
+            _reportedIsValid = null;
+        }
+    }
+
     private void OnSubjectComponentRendered(ISubjectComponent? subjectComponent)
     {
         _subjectComponent = subjectComponent;
         _isSubjectComponentRendered = true;
+        SubscribeTo(subjectComponent as ISubjectEditComponent);
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        await base.OnAfterRenderAsync(firstRender);
-
-        var editComponent = _subjectComponent as ISubjectEditComponent;
-        if (_subscribedEditComponent != editComponent)
-        {
-            SubscribeTo(editComponent);
-            StateHasChanged();
-        }
-
-        await ReportIsValidAsync();
-    }
+    protected override Task OnAfterRenderAsync(bool firstRender) => ReportIsValidAsync();
 
     private void SubscribeTo(ISubjectEditComponent? editComponent)
     {
+        if (ReferenceEquals(_subscribedEditComponent, editComponent))
+        {
+            return;
+        }
+
         if (_subscribedEditComponent is not null)
         {
             _subscribedEditComponent.IsValidChanged -= OnIsValidChanged;
@@ -114,8 +136,7 @@
 
     /// <summary>
     /// Reads the validity of the hosted editor again and raises <see cref="IsValidChanged"/> when it differs
-    /// from the last value that was raised. For a host that cannot rely on the hosted editor announcing
-    /// every change of its validity.
+    /// from the last value that was raised.
     /// </summary>
     public Task RefreshIsValidAsync() => ReportIsValidAsync();
 
@@ -160,7 +181,11 @@
     /// <summary>
     /// Applies the buffered edits to the subject without persisting them.
     /// </summary>
-    /// <returns>False when there is no subject, the editor is not ready yet or the edits are invalid, in which case nothing was applied.</returns>
+    /// <returns>
+    /// False when there is no subject, the editor is not ready yet, the edit component is invalid, or the generated
+    /// properties editor could not set every value. Only in the last case the subject has changed: the values that
+    /// could be set are applied.
+    /// </returns>
     public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
     {
         if (Subject == null || IsSubjectComponentPending) return false;
@@ -174,14 +199,10 @@
 
             await editComponent.SaveAsync(cancellationToken);
         }
-        else
+        else if (_propertiesEditor is { } propertiesEditor)
         {
-            if (_propertiesEditor?.HasErrors == true)
-            {
-                return false;
-            }
-
-            _propertiesEditor?.ApplyChanges();
+            propertiesEditor.ApplyChanges();
+            return !propertiesEditor.HasErrors;
         }
 
         return true;

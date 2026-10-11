@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -360,6 +361,41 @@ public class SubjectSetupDialogTests
 
         // Act
         await page.GetByLabel("Host Address (IP or hostname)").FillAsync("192.0.2.1");
+
+        // Assert
+        await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    [Fact]
+    public async Task WhenTheGeneratedPropertiesEditorIsUntouched_ThenCreateFollowsItsPrefilledValues()
+    {
+        // Arrange - no type of the application is without an edit component, so one of this assembly is
+        // registered. Resolving a qualified name adds the type to the registry for the rest of the host's life.
+        var typeRegistry = _fixture.ServerServices.GetRequiredService<SubjectTypeRegistry>();
+        Assert.NotNull(typeRegistry.ResolveType(typeof(PlainConfigurableSubject).AssemblyQualifiedName!));
+
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        var intervalInput = Dialog(page).GetByLabel("Interval");
+
+        // Act
+        await PickTypeAsync(page, "plainconfigurablesubject");
+
+        // Assert - the required number is prefilled, so nothing has to be touched first.
+        await Assertions.Expect(intervalInput).ToHaveValueAsync("5", new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(Dialog(page).GetByText("Required")).ToHaveCountAsync(0);
+
+        // Act
+        await intervalInput.FillAsync("");
+        await intervalInput.BlurAsync();
+
+        // Assert
+        await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Act
+        await intervalInput.FillAsync("7");
+        await intervalInput.BlurAsync();
 
         // Assert
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
