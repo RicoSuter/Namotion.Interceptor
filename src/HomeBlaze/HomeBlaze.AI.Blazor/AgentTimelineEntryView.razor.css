@@ -81,12 +81,12 @@
     border: 1px solid var(--mud-palette-table-lines);
     padding: 0.25rem 0.6rem;
     text-align: left;
-    white-space: nowrap;
 }
 
 .agent-markdown ::deep th {
     background: var(--mud-palette-action-default-hover);
     font-weight: 500;
+    white-space: nowrap;
 }
 
 .agent-markdown ::deep blockquote {
