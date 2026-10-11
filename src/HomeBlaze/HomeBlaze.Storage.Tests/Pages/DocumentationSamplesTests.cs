@@ -23,7 +23,8 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// A sample of page source is a fenced code block with the language <c>markdown</c>. A sample that is
 /// meant to show an error has the comment <see cref="ErrorMarker"/> on the line above it, and the fenced
 /// code block with the language <c>text</c> after it lists the error boxes as the page shows them, one
-/// per line.
+/// per line. A sample that the page shows at work has the comment <see cref="LiveMarker"/> on the line
+/// above it, and the lines after it are the same lines again as blocks of the page.
 /// </remarks>
 [Collection(MarkdownPageFixture.StorageCollection)]
 public partial class DocumentationSamplesTests
@@ -32,6 +33,10 @@ public partial class DocumentationSamplesTests
     private const string SampleLanguage = "markdown";
     private const string ExpectedErrorsLanguage = "text";
     private const string ErrorMarker = "<!-- sample: error -->";
+    private const string LiveMarker = "<!-- sample: live -->";
+
+    // Every sample of this page is shown at work or shows an error, so each one needs one of the two markers.
+    private const string PageWidgetsPage = DocumentationFolder + "/administration/page-widgets.md";
 
     // The types of this file are in the test assembly, which every fixture knows.
     private const string SampleWidgetSource = "src/HomeBlaze/HomeBlaze.Storage.Tests/Pages/DocumentationSampleWidget.cs";
@@ -45,6 +50,8 @@ public partial class DocumentationSamplesTests
     public static TheoryData<string, int> ValidSamples() => ToTheoryData(sample => sample.ExpectedErrors is null);
 
     public static TheoryData<string, int> ErrorSamples() => ToTheoryData(sample => sample.ExpectedErrors is not null);
+
+    public static TheoryData<string, int> LiveSamples() => ToTheoryData(sample => sample.IsLive);
 
     public static TheoryData<string, int> ValidSamplesWithJsonBlock() => ToTheoryData(sample =>
         sample.ExpectedErrors is null &&
@@ -149,9 +156,110 @@ public partial class DocumentationSamplesTests
         Assert.Equal(sample.ExpectedErrors, PageErrorBoxes.FindSortedByLine(page));
     }
 
+    [Theory]
+    [MemberData(nameof(LiveSamples))]
+    public void WhenSampleIsMarkedAsLive_ThenTheLinesAfterItRepeatItExactly(string relativePath, int line)
+    {
+        // Arrange
+        var pageLines = RepositoryPagesTests.ReadPage(relativePath).Split('\n');
+
+        // Act
+        var difference = FindLiveBlockDifference(relativePath, pageLines, line);
+
+        // Assert
+        Assert.True(difference is null, difference);
+    }
+
+    // Text of the page follows every live block. Without the closing line it would be inside the block.
+    [Theory]
+    [MemberData(nameof(LiveSamples))]
+    public void WhenSampleIsMarkedAsLive_ThenItsLastBlockEndsWithItsClosingLine(string relativePath, int line)
+    {
+        // Arrange
+        var sample = FindSample(relativePath, line);
+
+        // Act
+        var blocks = MarkdownPageParser.Parse(sample.Source).Blocks;
+
+        // Assert
+        Assert.NotEmpty(blocks);
+        Assert.True(blocks[^1].HasClosingLine, $"The block at line {blocks[^1].Line} of the sample has no closing line.");
+    }
+
+    [Fact]
+    public void WhenPageWidgetsPageHasASample_ThenTheSampleIsMarkedAsLiveOrAsAnError()
+    {
+        // Arrange
+        var samples = AllSamples.Value.Where(sample => sample.RelativePath == PageWidgetsPage).ToList();
+
+        // Act
+        var samplesWithoutMarker = samples
+            .Where(sample => !sample.IsLive && sample.ExpectedErrors is null)
+            .Select(sample => $"line {sample.Line}");
+
+        // Assert
+        Assert.NotEmpty(samples);
+        Assert.Empty(samplesWithoutMarker);
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("")]
+    public void WhenLiveBlockRepeatsItsSample_ThenNoDifferenceIsFound(string separator)
+    {
+        // Arrange
+        var pageLines = $"~~~~markdown\n:: Sample.Card\nText\n::\n~~~~\n{separator}:: Sample.Card\nText\n::\n\nMore text".Split('\n');
+
+        // Act
+        var difference = FindLiveBlockDifference("Docs/page.md", pageLines, sampleLine: 1);
+
+        // Assert
+        Assert.Null(difference);
+    }
+
+    [Fact]
+    public void WhenLiveBlockDiffersFromItsSample_ThenThePageTheLineAndTheFirstDifferingLineAreNamed()
+    {
+        // Arrange
+        var pageLines = "Text\n\n~~~~markdown\n:: Sample.Card\nText\nMore\n::\n~~~~\n\n:: Sample.Card\nOther text\nOther\n::".Split('\n');
+
+        // Act
+        var difference = FindLiveBlockDifference("Docs/page.md", pageLines, sampleLine: 3);
+
+        // Assert
+        Assert.Equal("Docs/page.md line 11: expected 'Text', which is line 5 of the page, but found 'Other text'.", difference);
+    }
+
+    [Fact]
+    public void WhenLiveBlockHasALineMoreThanItsSample_ThenTheLineIsNamed()
+    {
+        // Arrange
+        var pageLines = "~~~~markdown\n:: Sample.Card\nText\n~~~~\n\n:: Sample.Card\nText\n::\n\nMore text".Split('\n');
+
+        // Act
+        var difference = FindLiveBlockDifference("Docs/page.md", pageLines, sampleLine: 1);
+
+        // Assert
+        Assert.Equal("Docs/page.md line 8: expected an empty line after the live block, but found '::'.", difference);
+    }
+
+    [Fact]
+    public void WhenPageEndsInsideTheLiveBlock_ThenTheMissingLineIsNamed()
+    {
+        // Arrange
+        var pageLines = "~~~~markdown\n:: Sample.Card\nText\n::\n~~~~\n\n:: Sample.Card\nText".Split('\n');
+
+        // Act
+        var difference = FindLiveBlockDifference("Docs/page.md", pageLines, sampleLine: 1);
+
+        // Assert
+        Assert.Equal("Docs/page.md line 9: expected '::', which is line 4 of the page, but the page ends there.", difference);
+    }
+
     // A path with a prefix leads out of the sample, to the files next to the page or to the root, so a
     // sample alone cannot say whether it is right. Every other path starts at the page: at a block that the
-    // sample names, or at a property of the page.
+    // sample names, or at a property of the page. A live sample may also use a name of another live sample
+    // of its page, so its paths are looked up on that page, where its lines stand as blocks.
     // A valid sample that shows a path to nothing on purpose would fail here, and there is no marker to exempt one.
     [Theory]
     [MemberData(nameof(ValidSamplesWithPathsThatStartAtThePage))]
@@ -163,7 +271,8 @@ public partial class DocumentationSamplesTests
         var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
 
         // Act
-        var page = await fixture.AddPageAsync("Sample.md", sample.Source);
+        var page = await fixture.AddPageAsync(
+            "Sample.md", sample.IsLive ? RepositoryPagesTests.ReadPage(sample.RelativePath) : sample.Source);
 
         // Assert
         var pathsToNothing = FindPathsThatStartAtThePage(MarkdownPageParser.Parse(sample.Source))
@@ -201,9 +310,8 @@ public partial class DocumentationSamplesTests
             {
                 var siblings = code.Parent!;
                 var index = siblings.IndexOf(code);
-                var isError = index > 0 &&
-                    siblings[index - 1] is HtmlBlock comment &&
-                    comment.Lines.ToString().Trim() == ErrorMarker;
+                var marker = index > 0 && siblings[index - 1] is HtmlBlock comment ? comment.Lines.ToString().Trim() : null;
+                var isError = marker == ErrorMarker;
 
                 IReadOnlyList<string>? expectedErrors = null;
                 if (isError)
@@ -213,11 +321,54 @@ public partial class DocumentationSamplesTests
                         : [];
                 }
 
-                samples.Add(new Sample(relativePath, code.Line + 1, code.Lines.ToString(), expectedErrors));
+                samples.Add(new Sample(relativePath, code.Line + 1, code.Lines.ToString(), expectedErrors, marker == LiveMarker));
             }
         }
 
         return samples;
+    }
+
+    /// <summary>
+    /// Gets what differs between a live sample and the lines after its closing fence, where one empty line
+    /// may stand between them, or null when those lines repeat the sample exactly.
+    /// </summary>
+    /// <param name="relativePath">The page, for the message.</param>
+    /// <param name="pageLines">The lines of the page.</param>
+    /// <param name="sampleLine">The 1-based line of the opening fence of the sample.</param>
+    private static string? FindLiveBlockDifference(string relativePath, string[] pageLines, int sampleLine)
+    {
+        var closingFence = pageLines[sampleLine - 1].TrimStart()[..^SampleLanguage.Length];
+        var closingIndex = Array.IndexOf(pageLines, closingFence, sampleLine);
+        if (closingIndex < 0)
+        {
+            return $"{relativePath} line {sampleLine}: the sample has no closing fence '{closingFence}'.";
+        }
+
+        var liveIndex = closingIndex + 1;
+        if (liveIndex < pageLines.Length && pageLines[liveIndex].Length == 0)
+        {
+            liveIndex++;
+        }
+
+        for (var offset = 0; sampleLine + offset < closingIndex; offset++)
+        {
+            var expected = $"expected '{pageLines[sampleLine + offset]}', which is line {sampleLine + offset + 1} of the page";
+            if (liveIndex + offset >= pageLines.Length)
+            {
+                return $"{relativePath} line {liveIndex + offset + 1}: {expected}, but the page ends there.";
+            }
+
+            if (pageLines[liveIndex + offset] != pageLines[sampleLine + offset])
+            {
+                return $"{relativePath} line {liveIndex + offset + 1}: {expected}, but found '{pageLines[liveIndex + offset]}'.";
+            }
+        }
+
+        // A line that follows the repeated lines directly would be a line of the live block that the sample does not show.
+        var endIndex = liveIndex + closingIndex - sampleLine;
+        return endIndex < pageLines.Length && pageLines[endIndex].Length > 0
+            ? $"{relativePath} line {endIndex + 1}: expected an empty line after the live block, but found '{pageLines[endIndex]}'."
+            : null;
     }
 
     /// <summary>Creates a fixture that knows the widget types that ship and the sample subjects.</summary>
@@ -344,7 +495,7 @@ public partial class DocumentationSamplesTests
     }
 
     /// <summary>One sample of page source. <see cref="Line"/> is the 1-based line of its opening fence.</summary>
-    private sealed record Sample(string RelativePath, int Line, string Source, IReadOnlyList<string>? ExpectedErrors);
+    private sealed record Sample(string RelativePath, int Line, string Source, IReadOnlyList<string>? ExpectedErrors, bool IsLive);
 
     /// <summary>One path in a sample. The last segment of the path of an expression is the name of a property.</summary>
     private readonly record struct SamplePath(string Text, bool IsExpression);

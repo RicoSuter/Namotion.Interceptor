@@ -10,7 +10,7 @@ This page demonstrates blocks that take page content: a card with a footer, a fl
 
 Each area has a page of its own to try things out:
 
-- [Layouts](Layouts.md): flows, tabs and cards, alone and inside each other
+- [Page Widgets](../Docs/administration/page-widgets.md): the reference of the widgets, which shows flows, tabs, cards, a grid and a canvas live, alone and inside each other
 - [References](References.md): names, relative and absolute paths, and what a reference cannot show
 - [Configuration](Configuration.md): values on the head line, the `json` block, style blocks and the page editor
 - [Errors](Errors.md): the common error boxes, each with the block that causes it and how to fix it

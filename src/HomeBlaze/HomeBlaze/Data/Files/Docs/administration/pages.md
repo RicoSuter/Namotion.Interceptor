@@ -224,7 +224,7 @@ The rest of this section is the reference:
 - [Names and the Page](#names-and-the-page): what a name and a relative path refer to
 - [Where a Block Is Allowed](#where-a-block-is-allowed)
 
-The sample data of a development checkout has demo pages to try each area: `Demo/Blocks.md` for an overview, `Demo/Layouts.md` for cards, flows and tabs, `Demo/References.md` for names and paths, `Demo/Configuration.md` for arguments, the `json` block, style blocks and the page editor, and `Demo/Errors.md` for the common error boxes. An installed HomeBlaze does not ship these pages.
+[Page Widgets](page-widgets.md) shows every widget for pages live, with the source of each sample above its result. The sample data of a development checkout also has demo pages to try each area: `Demo/Blocks.md` for an overview, `Demo/Dashboard.md` as the full example of a dashboard, `Demo/References.md` for names and paths, `Demo/Configuration.md` for arguments, the `json` block, style blocks and the page editor, and `Demo/Errors.md` for the common error boxes. An installed HomeBlaze does not ship the demo pages.
 
 ### The Head Line
 
@@ -831,7 +831,7 @@ A widget block is allowed in three places: directly on the page, directly inside
 
 ## Widgets
 
-These widgets ship with HomeBlaze and are made for pages. [Page Widgets](page-widgets.md) is their reference: the arguments, the slots, a sample and the limits of each.
+These widgets ship with HomeBlaze and are made for pages. [Page Widgets](page-widgets.md) is their reference: the arguments, the slots, the samples and the limits of each. That page shows each widget live, with the source of every sample above its result.
 
 | Widget | What it is for | Reference |
 |--------|----------------|-----------|

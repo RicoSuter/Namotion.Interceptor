@@ -22,7 +22,6 @@ public class DemoPagesTests
     // renders and is no block error, and the sample motors next to the pages are not part of the fixture.
     [Theory]
     [InlineData("Blocks.md")]
-    [InlineData("Layouts.md")]
     [InlineData("References.md")]
     [InlineData("Configuration.md")]
     public async Task WhenDemoPageIsLoaded_ThenNoBlockIsShownAsError(string fileName)
@@ -43,9 +42,6 @@ public class DemoPagesTests
     [InlineData("Blocks.md", "exhaust", typeof(Tab))]
     [InlineData("Blocks.md", "closedmotor", typeof(Motor))]
     [InlineData("Blocks.md", "openmotor", typeof(Motor))]
-    [InlineData("Layouts.md", "notes", typeof(Tab))]
-    [InlineData("Layouts.md", "pumps", typeof(Tab))]
-    [InlineData("Layouts.md", "cardexhaust", typeof(Tab))]
     [InlineData("References.md", "refmotor", typeof(Motor))]
     [InlineData("References.md", "depth", typeof(Tab))]
     [InlineData("References.md", "secondcard", typeof(Card))]
