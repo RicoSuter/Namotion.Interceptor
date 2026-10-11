@@ -11,6 +11,13 @@ public sealed record ClaudeInitEvent(string SessionId) : ClaudeStreamEvent;
 /// <summary>A chunk of answer text.</summary>
 public sealed record ClaudeTextDeltaEvent(string Text) : ClaudeStreamEvent;
 
+/// <summary>A model message or one of its content blocks started, so the next text starts a new segment.</summary>
+public sealed record ClaudeBlockStartEvent : ClaudeStreamEvent
+{
+    /// <summary>The shared instance; the event carries no data.</summary>
+    public static readonly ClaudeBlockStartEvent Instance = new();
+}
+
 /// <summary>Subscription utilization.</summary>
 public sealed record ClaudeRateLimitEvent(AgentRateLimit RateLimit) : ClaudeStreamEvent;
 
@@ -89,10 +96,19 @@ public static class ClaudeStreamJsonParser
         return type.ValueEquals("result"u8) ? ParseResult(root) : null;
     }
 
-    private static ClaudeTextDeltaEvent? ParseStreamEvent(JsonElement root)
+    private static ClaudeStreamEvent? ParseStreamEvent(JsonElement root)
     {
-        if (!TryGetObject(root, "event"u8, out var streamEvent) ||
-            !HasString(streamEvent, "type"u8, "content_block_delta"u8) ||
+        if (!TryGetObject(root, "event"u8, out var streamEvent))
+        {
+            return null;
+        }
+
+        if (HasString(streamEvent, "type"u8, "content_block_start"u8) || HasString(streamEvent, "type"u8, "message_start"u8))
+        {
+            return ClaudeBlockStartEvent.Instance;
+        }
+
+        if (!HasString(streamEvent, "type"u8, "content_block_delta"u8) ||
             !TryGetObject(streamEvent, "delta"u8, out var delta))
         {
             return null;

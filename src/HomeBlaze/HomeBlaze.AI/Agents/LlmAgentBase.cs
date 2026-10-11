@@ -647,7 +647,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 started.Value);
 
             var result = await RunTurnAsync(AgentTurnKind.Background, message, tools, progress, cancellationToken);
-            var isQuiet = AgentPromptBuilder.IsQuiet(result.Text);
+            var isQuiet = AgentPromptBuilder.IsQuiet(result.FinalText);
             await AppendAsync(new AgentTimelineEntry
             {
                 Kind = AgentTimelineEntryKind.BackgroundRun,
@@ -662,7 +662,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
             if (!isQuiet)
             {
-                LastAnalysis = result.Text;
+                LastAnalysis = result.FinalText;
             }
 
             isCounted = true;

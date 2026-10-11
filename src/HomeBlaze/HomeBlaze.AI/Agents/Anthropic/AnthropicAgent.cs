@@ -131,6 +131,7 @@ public partial class AnthropicAgent : LlmAgentBase
         };
 
         var updates = new List<ChatResponseUpdate>();
+        var answer = new StreamedAnswer();
         long? firstRequestInputTokens = null;
         long lastRequestInputTokens = 0;
         try
@@ -139,11 +140,7 @@ public partial class AnthropicAgent : LlmAgentBase
             {
                 updates.Add(update);
                 TrackRequestInputTokens(update, ref firstRequestInputTokens, ref lastRequestInputTokens);
-
-                if (!string.IsNullOrEmpty(update.Text))
-                {
-                    progress.Report(new AgentTextDelta(update.Text));
-                }
+                answer.Append(update, progress);
             }
         }
         catch (Exception exception) when (Classify(exception, apiKey, cancellationToken) is { } failure)
@@ -152,8 +149,8 @@ public partial class AnthropicAgent : LlmAgentBase
         }
 
         var response = updates.ToChatResponse();
-        var text = GetFinalText(response);
-        if (string.IsNullOrWhiteSpace(text))
+        var finalText = GetFinalText(response);
+        if (string.IsNullOrWhiteSpace(finalText))
         {
             ThrowIfNotAnswered(response.FinishReason, maxTokens);
         }
@@ -166,7 +163,7 @@ public partial class AnthropicAgent : LlmAgentBase
                 innerClient, apiKey, model, maxTokens, firstRequestInputTokens ?? 0, lastRequestInputTokens, cancellationToken);
         }
 
-        return new AgentTurnResult(text, ToAgentUsage(response.Usage), RateLimit: null);
+        return new AgentTurnResult(answer.Text, ToAgentUsage(response.Usage), RateLimit: null) { FinalText = finalText };
     }
 
     private (string ApiKey, string Model, int MaxTokens) GetValidatedConfiguration(AgentTurnRequest request)
@@ -452,4 +449,41 @@ public partial class AnthropicAgent : LlmAgentBase
     // The SDK does not put the key into exception messages; this guards against a response that echoes it.
     private static string Redact(string message, string? apiKey) =>
         string.IsNullOrEmpty(apiKey) ? message : message.Replace(apiKey, "[redacted]", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The whole answer of a turn as streamed: text after a tool call or tool result starts a new segment, separated
+    /// by a blank line that is streamed too, so the live text and the stored answer read the same.
+    /// </summary>
+    private sealed class StreamedAnswer
+    {
+        private const string SegmentSeparator = "\n\n";
+
+        private readonly StringBuilder _text = new();
+        private bool _isAfterTool;
+
+        public string Text => _text.ToString();
+
+        public void Append(ChatResponseUpdate update, IProgress<AgentTurnUpdate> progress)
+        {
+            foreach (var content in update.Contents)
+            {
+                if (content is FunctionCallContent or FunctionResultContent)
+                {
+                    _isAfterTool = true;
+                }
+                else if (content is TextContent { Text.Length: > 0 } text)
+                {
+                    if (_isAfterTool && _text.Length > 0)
+                    {
+                        _text.Append(SegmentSeparator);
+                        progress.Report(new AgentTextDelta(SegmentSeparator));
+                    }
+
+                    _isAfterTool = false;
+                    _text.Append(text.Text);
+                    progress.Report(new AgentTextDelta(text.Text));
+                }
+            }
+        }
+    }
 }

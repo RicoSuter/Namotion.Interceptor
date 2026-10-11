@@ -32,6 +32,21 @@ public class ClaudeStreamJsonParserTests
     }
 
     [Fact]
+    public void WhenParsingTextAroundAToolCall_ThenBlockStartsSeparateTheTextDeltas()
+    {
+        // Act
+        var events = ParseFixture("text-tool-text.jsonl");
+
+        // Assert
+        var sequence = events
+            .Where(streamEvent => streamEvent is ClaudeBlockStartEvent or ClaudeTextDeltaEvent)
+            .Select(streamEvent => streamEvent is ClaudeTextDeltaEvent delta ? delta.Text : "|")
+            .ToList();
+        Assert.Equal(["|", "|", "Checking the ", "sensors.", "|", "|", "|", "Both logged."], sequence);
+        Assert.Equal("Both logged.", Assert.IsType<ClaudeResultEvent>(events[^1]).Text);
+    }
+
+    [Fact]
     public void WhenParsingANotLoggedInRun_ThenTheAuthenticationErrorIsReported()
     {
         // Act

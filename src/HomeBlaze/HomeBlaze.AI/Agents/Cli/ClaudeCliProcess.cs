@@ -21,6 +21,11 @@ public sealed record ClaudeCliInvocation(string FileName, IReadOnlyList<string> 
 /// <param name="Usage">Token usage of the result line.</param>
 /// <param name="RateLimit">The last reported subscription utilization.</param>
 /// <param name="StandardError">Standard error, truncated to a size limit.</param>
+/// <param name="StreamedText">
+/// The streamed answer text, with a blank line between text segments of different content blocks, or null when no
+/// text was streamed.
+/// </param>
+/// <param name="LastStreamedSegment">The last streamed text segment, or null when no text was streamed.</param>
 public sealed record ClaudeCliRunResult(
     int ExitCode,
     string? SessionId,
@@ -30,7 +35,9 @@ public sealed record ClaudeCliRunResult(
     string? ErrorCode,
     AgentUsage? Usage,
     AgentRateLimit? RateLimit,
-    string StandardError);
+    string StandardError,
+    string? StreamedText = null,
+    string? LastStreamedSegment = null);
 
 /// <summary>
 /// Runs the Claude CLI, streams its text deltas and collects its result. Cancellation kills the whole process tree.
@@ -263,9 +270,14 @@ public static class ClaudeCliProcess
         return builder.ToString();
     }
 
-    // A mutable struct local of the async caller, so collecting the output lines allocates nothing.
+    // A mutable struct local of the async caller, so collecting the output lines allocates nothing beyond the text.
     private struct OutputCollector
     {
+        private const string SegmentSeparator = "\n\n";
+
+        private StringBuilder? _text;
+        private int _lastSegmentStart;
+        private bool _isNewBlock;
         private string? _sessionId;
         private string? _errorCode;
         private AgentRateLimit? _rateLimit;
@@ -278,8 +290,11 @@ public static class ClaudeCliProcess
                 case ClaudeInitEvent init:
                     _sessionId = init.SessionId;
                     break;
+                case ClaudeBlockStartEvent:
+                    _isNewBlock = true;
+                    break;
                 case ClaudeTextDeltaEvent delta:
-                    progress.Report(new AgentTextDelta(delta.Text));
+                    AppendText(delta.Text, progress);
                     break;
                 case ClaudeRateLimitEvent limit:
                     _rateLimit = limit.RateLimit;
@@ -302,6 +317,29 @@ public static class ClaudeCliProcess
             _errorCode,
             _result?.Usage,
             _rateLimit,
-            standardError);
+            standardError,
+            _text?.ToString(),
+            _text?.ToString(_lastSegmentStart, _text.Length - _lastSegmentStart));
+
+        // The separator is streamed too, so the live text and the stored answer read the same.
+        private void AppendText(string text, IProgress<AgentTurnUpdate> progress)
+        {
+            if (text.Length == 0)
+            {
+                return;
+            }
+
+            _text ??= new StringBuilder();
+            if (_isNewBlock && _text.Length > 0)
+            {
+                _text.Append(SegmentSeparator);
+                _lastSegmentStart = _text.Length;
+                progress.Report(new AgentTextDelta(SegmentSeparator));
+            }
+
+            _isNewBlock = false;
+            _text.Append(text);
+            progress.Report(new AgentTextDelta(text));
+        }
     }
 }

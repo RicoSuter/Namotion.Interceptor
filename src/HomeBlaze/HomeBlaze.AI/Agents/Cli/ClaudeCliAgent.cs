@@ -89,12 +89,20 @@ public partial class ClaudeCliAgent : LlmAgentBase
                 await RememberSessionAsync(result.SessionId, cancellationToken);
             }
 
-            return new AgentTurnResult(result.ResultText ?? string.Empty, result.Usage, result.RateLimit);
+            return ToTurnResult(result);
         }
         finally
         {
             DeleteConfiguration(configurationPath);
         }
+    }
+
+    // The result line holds only the text after the last tool call; the timeline keeps the whole answer.
+    private static AgentTurnResult ToTurnResult(ClaudeCliRunResult result)
+    {
+        var finalText = result.ResultText ?? result.LastStreamedSegment ?? string.Empty;
+        var text = string.IsNullOrEmpty(result.StreamedText) ? finalText : result.StreamedText;
+        return new AgentTurnResult(text, result.Usage, result.RateLimit) { FinalText = finalText };
     }
 
     private async Task RememberSessionAsync(string? sessionId, CancellationToken cancellationToken)

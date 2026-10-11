@@ -51,6 +51,54 @@ public class AgentPageTests
     }
 
     [Fact]
+    public async Task WhenTheAnswerHasTextAroundAToolCall_ThenNoTextDisappearsWhenTheReplyLands()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // The fake CLI is a shell script.
+        }
+
+        // Arrange - the CLI result holds only the text after the tool call; the script waits for a signal file before
+        // writing it, so the test sees the streamed answer first and then the stored reply.
+        var before = "Checking the sensors " + Guid.NewGuid().ToString("N");
+        var after = "Both logged " + Guid.NewGuid().ToString("N");
+
+        static string StreamEvent(string streamEvent) =>
+            $$$"""{"type":"stream_event","event":{{{streamEvent}}},"session_id":"e2e-session"}""";
+
+        string CreateScript(string directory) =>
+            "#!/bin/sh\ncat > /dev/null\ncat <<'EOF'\n" +
+            """{"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}""" + "\n" +
+            StreamEvent("""{"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[]}}""") + "\n" +
+            StreamEvent("""{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""") + "\n" +
+            StreamEvent($$$"""{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{{before}}}"}}""") + "\n" +
+            StreamEvent("""{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"mcp__homeblaze__get_property","input":{}}}""") + "\n" +
+            """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"21.5"}]},"session_id":"e2e-session"}""" + "\n" +
+            StreamEvent("""{"type":"message_start","message":{"id":"msg_2","role":"assistant","content":[]}}""") + "\n" +
+            StreamEvent("""{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""") + "\n" +
+            StreamEvent($$$"""{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{{after}}}"}}""") + "\n" +
+            "EOF\n" +
+            $"while [ -d '{directory}' ] && [ ! -f '{directory}/finish' ]; do sleep 0.05; done\n" +
+            "cat <<'EOF'\n" +
+            $$$"""{"type":"result","subtype":"success","is_error":false,"result":"{{{after}}}","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""" +
+            "\nEOF\n";
+
+        // Act & Assert
+        await RunChatAsync(CreateScript, async (page, directory) =>
+        {
+            var streaming = page.GetByTestId("agent-streaming");
+            await Assertions.Expect(streaming).ToContainTextAsync(before, new() { Timeout = ReplyTimeout });
+            await Assertions.Expect(streaming).ToContainTextAsync(after, new() { Timeout = ReplyTimeout });
+
+            Signal(directory, "finish");
+            await Assertions.Expect(streaming).ToHaveCountAsync(0, new() { Timeout = ReplyTimeout });
+            var reply = page.GetByTestId("agent-reply").Last;
+            await Assertions.Expect(reply).ToContainTextAsync(before, new() { Timeout = ReplyTimeout });
+            await Assertions.Expect(reply).ToContainTextAsync(after, new() { Timeout = ReplyTimeout });
+        });
+    }
+
+    [Fact]
     public async Task WhenTheCliIsNotLoggedIn_ThenTheChatShowsTheLoginError()
     {
         if (OperatingSystem.IsWindows())
@@ -101,7 +149,7 @@ public class AgentPageTests
             WaitFor(directory, "far") + "cat <<'EOF'\n" + Delta(Paragraphs("far", 10)) + "\nEOF\n" +
             WaitFor(directory, "back") + "cat <<'EOF'\n" + Delta(Paragraphs("back", 10)) + "\nEOF\n" +
             WaitFor(directory, "finish") +
-            "cat <<'EOF'\n" +
+            "cat <<'EOF'\n" + Delta("done") + "\n" +
             $$$"""{"type":"result","subtype":"success","is_error":false,"result":"{{{Paragraphs("line", 40)}}}done","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""" +
             "\nEOF\n";
 

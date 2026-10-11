@@ -58,6 +58,49 @@ public class ClaudeCliAgentTests
     }
 
     [UnixFact]
+    public async Task WhenAChatAnswerHasTextAroundAToolCall_ThenTheEntryKeepsTheWholeStreamedAnswer()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("text-tool-text.jsonl");
+        await using var test = await StartAsync(cli);
+        var streamed = string.Empty;
+        test.Agent.TimelineChanged += () =>
+        {
+            if (test.Agent.StreamingText is { Length: > 0 } text)
+            {
+                streamed = text;
+            }
+        };
+
+        // Act
+        await test.Agent.SendMessageAsync("Log both sensors.", CancellationToken.None);
+
+        // Assert
+        var reply = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(AgentTimelineEntryKind.Assistant, reply.Kind);
+        Assert.Equal("Checking the sensors.\n\nBoth logged.", reply.Text);
+        Assert.Equal(reply.Text, streamed);
+    }
+
+    [UnixFact]
+    public async Task WhenAQuietBackgroundRunHasTextBeforeAToolCall_ThenItIsQuietAndKeepsTheWholeAnswer()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("text-tool-quiet.jsonl");
+        await using var test = await StartAsync(cli);
+
+        // Act
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+
+        // Assert
+        var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
+        Assert.True(run.IsQuiet);
+        Assert.Equal("Checking the sensors.\n\n[quiet] nothing new", run.Text);
+        Assert.Null(test.Agent.LastAnalysis);
+    }
+
+    [UnixFact]
     public async Task WhenTheAgentRestarts_ThenTheSessionFromTheSessionFileIsResumed()
     {
         // Arrange

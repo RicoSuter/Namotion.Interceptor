@@ -189,21 +189,23 @@ public class AnthropicAgentTests
         Assert.Contains("21.5", call.ResultPreview);
     }
 
+    private static void RespondWithTextToolCallAndText(TestableAnthropicAgent agent, string before, string after)
+    {
+        agent.AllowedTools = ["get_property"];
+        agent.Client.Respond = (messages, _) => messages[^1].Contents.OfType<FunctionResultContent>().Any()
+            ? [new ChatResponseUpdate(ChatRole.Assistant, after)]
+            :
+            [
+                new ChatResponseUpdate(ChatRole.Assistant, before),
+                new ChatResponseUpdate(ChatRole.Assistant, [new FunctionCallContent("call1", "get_property", new Dictionary<string, object?> { ["path"] = "/Temperature" })])
+            ];
+    }
+
     [Fact]
-    public async Task WhenTextPrecedesAToolCall_ThenOnlyTheFinalTextIsTheAnswer()
+    public async Task WhenTextPrecedesAToolCallInAQuietRun_ThenTheRunIsQuietAndKeepsTheWholeAnswer()
     {
         // Arrange
-        await using var test = await StartAsync(agent =>
-        {
-            agent.AllowedTools = ["get_property"];
-            agent.Client.Respond = (messages, _) => messages[^1].Contents.OfType<FunctionResultContent>().Any()
-                ? [new ChatResponseUpdate(ChatRole.Assistant, "[quiet] nothing new")]
-                :
-                [
-                    new ChatResponseUpdate(ChatRole.Assistant, "Let me check the temperature."),
-                    new ChatResponseUpdate(ChatRole.Assistant, [new FunctionCallContent("call1", "get_property", new Dictionary<string, object?> { ["path"] = "/Temperature" })])
-                ];
-        });
+        await using var test = await StartAsync(agent => RespondWithTextToolCallAndText(agent, "Let me check the temperature.", "[quiet] nothing new"));
 
         // Act
         test.Agent.RunNow();
@@ -212,7 +214,49 @@ public class AnthropicAgentTests
         // Assert
         var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
         Assert.True(run.IsQuiet);
-        Assert.Equal("[quiet] nothing new", run.Text);
+        Assert.Equal("Let me check the temperature.\n\n[quiet] nothing new", run.Text);
+        Assert.Null(test.Agent.LastAnalysis);
+    }
+
+    [Fact]
+    public async Task WhenTextPrecedesAToolCallInABackgroundRun_ThenTheLastAnalysisIsTheFinalText()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => RespondWithTextToolCallAndText(agent, "Let me check the temperature.", "It is too warm."));
+
+        // Act
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+
+        // Assert
+        var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
+        Assert.False(run.IsQuiet);
+        Assert.Equal("Let me check the temperature.\n\nIt is too warm.", run.Text);
+        Assert.Equal("It is too warm.", test.Agent.LastAnalysis);
+    }
+
+    [Fact]
+    public async Task WhenAChatAnswerHasTextAroundAToolCall_ThenTheEntryKeepsTheWholeStreamedAnswer()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => RespondWithTextToolCallAndText(agent, "Checking the sensors.", "Both logged."));
+        var streamed = string.Empty;
+        test.Agent.TimelineChanged += () =>
+        {
+            if (test.Agent.StreamingText is { Length: > 0 } text)
+            {
+                streamed = text;
+            }
+        };
+
+        // Act
+        await test.Agent.SendMessageAsync("Log both sensors.", CancellationToken.None);
+
+        // Assert
+        var reply = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(AgentTimelineEntryKind.Assistant, reply.Kind);
+        Assert.Equal("Checking the sensors.\n\nBoth logged.", reply.Text);
+        Assert.Equal(reply.Text, streamed);
     }
 
     [Fact]

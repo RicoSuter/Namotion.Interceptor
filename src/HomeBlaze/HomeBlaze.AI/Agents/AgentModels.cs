@@ -60,7 +60,18 @@ public sealed record AgentTurnRequest(
 /// <summary>
 /// The outcome of a successful turn.
 /// </summary>
-public sealed record AgentTurnResult(string Text, AgentUsage? Usage, AgentRateLimit? RateLimit);
+/// <param name="Text">
+/// The whole answer as streamed: every text segment of the turn in order, separated by a blank line.
+/// </param>
+/// <param name="Usage">Token usage, if reported.</param>
+/// <param name="RateLimit">Subscription utilization, if reported.</param>
+public sealed record AgentTurnResult(string Text, AgentUsage? Usage, AgentRateLimit? RateLimit)
+{
+    /// <summary>
+    /// The text after the last tool call, which decides whether a background run is quiet; defaults to <see cref="Text"/>.
+    /// </summary>
+    public string FinalText { get; init; } = Text;
+}
 
 /// <summary>
 /// Token usage of a turn.
