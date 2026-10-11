@@ -3,8 +3,9 @@
 @inject IJSRuntime JavaScript
 
 <div class="d-flex flex-column mud-height-full">
-    @* The script keeps this scrolled to the newest entry while the reader is at the bottom. *@
-    <div class="flex-grow-1 overflow-y-auto" data-testid="agent-timeline" @ref="_timeline">
+    @* The script keeps this scrolled to the newest entry while the reader is at the bottom, and shows it once it is
+       scrolled there. *@
+    <div class="flex-grow-1 overflow-y-auto" style="@(_isTimelineHidden ? "visibility: hidden;" : null)" data-testid="agent-timeline" @ref="_timeline">
         <div>
             <AgentTimelineList Agent="Agent" TimeZoneVersion="TimeZoneVersion" />
         </div>
@@ -31,6 +32,7 @@
     private IJSObjectReference? _enterListener;
     private IJSObjectReference? _bottomFollower;
     private bool _sendsOnEnter;
+    private bool _isTimelineHidden = true;
     private bool _isDisposed;
 
     [Parameter, EditorRequired]
@@ -85,6 +87,15 @@
         {
             // The circuit is gone or the script failed to load; the Send button still works.
         }
+        finally
+        {
+            // The script shows the timeline itself; this keeps the render in line and shows it when the script failed.
+            if (!_isDisposed && _isTimelineHidden)
+            {
+                _isTimelineHidden = false;
+                StateHasChanged();
+            }
+        }
     }
 
     /// <summary>Shows or hides the keyboard hint when the device's primary pointer changes.</summary>
@@ -123,7 +134,7 @@
         _message = string.Empty;
         _isSending = true;
         StateHasChanged();
-        await PinToBottomAsync();
+        _ = PinToBottomAsync();
         try
         {
             // Failures and the not-running case are recorded in the timeline; only caller cancellation throws.

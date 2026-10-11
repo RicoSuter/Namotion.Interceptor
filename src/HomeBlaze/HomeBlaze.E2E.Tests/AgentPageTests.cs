@@ -80,51 +80,107 @@ public class AgentPageTests
         }
 
         // Arrange - the script streams enough paragraphs to overflow the timeline, then waits for a signal file before
-        // streaming more, so the test controls when content grows. Deleting the directory ends the waits.
+        // each further batch, so the test controls when content grows. Deleting the directory ends the waits.
         static string Delta(string text) =>
             $$$"""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{{text}}}"}},"session_id":"e2e-session"}""";
 
-        var firstLines = string.Concat(Enumerable.Range(1, 40).Select(index => $"line {index}\\n\\n"));
-        var moreLines = string.Concat(Enumerable.Range(1, 20).Select(index => $"more {index}\\n\\n"));
+        static string Paragraphs(string name, int count) =>
+            string.Concat(Enumerable.Range(1, count).Select(index => $"{name} {index}\\n\\n"));
+
+        static string WaitFor(string directory, string signal) =>
+            $"while [ -d '{directory}' ] && [ ! -f '{directory}/{signal}' ]; do sleep 0.05; done\n";
+
         string CreateScript(string directory) =>
             "#!/bin/sh\ncat > /dev/null\n" +
             "cat <<'EOF'\n" +
             """{"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}""" + "\n" +
-            Delta(firstLines) + "\nEOF\n" +
-            $"while [ -d '{directory}' ] && [ ! -f '{directory}/more' ]; do sleep 0.05; done\n" +
-            "cat <<'EOF'\n" + Delta(moreLines) + "\nEOF\n" +
-            $"while [ -d '{directory}' ] && [ ! -f '{directory}/finish' ]; do sleep 0.05; done\n" +
+            Delta(Paragraphs("line", 40)) + "\nEOF\n" +
+            WaitFor(directory, "small") + "cat <<'EOF'\n" + Delta(Paragraphs("small", 10)) + "\nEOF\n" +
+            WaitFor(directory, "far") + "cat <<'EOF'\n" + Delta(Paragraphs("far", 10)) + "\nEOF\n" +
+            WaitFor(directory, "back") + "cat <<'EOF'\n" + Delta(Paragraphs("back", 10)) + "\nEOF\n" +
+            WaitFor(directory, "finish") +
             "cat <<'EOF'\n" +
-            """{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""" +
+            $$$"""{"type":"result","subtype":"success","is_error":false,"result":"{{{Paragraphs("line", 40)}}}done","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""" +
             "\nEOF\n";
 
         // Act & Assert
         await RunChatAsync(CreateScript, async (page, directory) =>
         {
             var streaming = page.GetByTestId("agent-streaming");
-            var timeline = await page.GetByTestId("agent-timeline").ElementHandleAsync();
+            var timelineLocator = page.GetByTestId("agent-timeline");
+            var timeline = await timelineLocator.ElementHandleAsync();
 
-            // At the bottom, the streamed lines keep the timeline scrolled to the newest one.
+            // At the bottom, the streamed paragraphs keep the timeline scrolled to the newest one.
             await Assertions.Expect(streaming).ToContainTextAsync("line 40", new() { Timeout = ReplyTimeout });
-            await page.WaitForFunctionAsync(
-                "timeline => timeline.scrollHeight > timeline.clientHeight + 200 && timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 32",
-                timeline, new() { Timeout = ReplyTimeout });
+            await WaitForDistanceToBottomAsync(page, timeline, "<= 32", "timeline.scrollHeight > timeline.clientHeight + 200");
 
-            // Scrolled up, further lines leave the view where the reader put it.
-            await page.GetByTestId("agent-timeline").HoverAsync();
+            // Even a small scroll up releases the view, so further paragraphs leave it where the reader put it.
+            await timelineLocator.HoverAsync();
+            await page.Mouse.WheelAsync(0, -10);
+            await WaitForDistanceToBottomAsync(page, timeline, ">= 9");
+            await AssertContentStaysAsync(page, timeline, () => Signal(directory, "small"), streaming, "small 10");
+
+            // So does a far scroll up.
             await page.Mouse.WheelAsync(0, -300);
-            await page.WaitForFunctionAsync(
-                "timeline => timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight > 200", timeline, new() { Timeout = ReplyTimeout });
-            var contentOffset = await ReadContentOffsetAfterLayoutAsync(page, timeline);
+            await WaitForDistanceToBottomAsync(page, timeline, "> 200");
+            await AssertContentStaysAsync(page, timeline, () => Signal(directory, "far"), streaming, "far 10");
 
-            await File.WriteAllTextAsync(Path.Combine(directory, "more"), string.Empty);
-            await Assertions.Expect(streaming).ToContainTextAsync("more 20", new() { Timeout = ReplyTimeout });
-            Assert.Equal(contentOffset, await ReadContentOffsetAfterLayoutAsync(page, timeline), 1.0);
+            // Back at the bottom, the timeline follows again.
+            await page.Mouse.WheelAsync(0, 100000);
+            await WaitForDistanceToBottomAsync(page, timeline, "<= 1");
+            Signal(directory, "back");
+            await Assertions.Expect(streaming).ToContainTextAsync("back 10", new() { Timeout = ReplyTimeout });
+            await WaitForDistanceToBottomAsync(page, timeline, "<= 32");
 
-            await File.WriteAllTextAsync(Path.Combine(directory, "finish"), string.Empty);
+            Signal(directory, "finish");
             await Assertions.Expect(page.GetByTestId("agent-reply").Last).ToContainTextAsync("done", new() { Timeout = ReplyTimeout });
+
+            // Sending scrolls a reader who scrolled up back to the bottom; the reply is long enough to scroll, and the
+            // script runs through on the second turn because its signals exist.
+            await page.Mouse.WheelAsync(0, -300);
+            await WaitForDistanceToBottomAsync(page, timeline, "> 200");
+            await page.GetByTestId("agent-chat-input").Locator("textarea").FillAsync("Again?");
+            await page.GetByTestId("agent-chat-send").ClickAsync();
+            await Assertions.Expect(page.GetByTestId("agent-reply")).ToHaveCountAsync(2, new() { Timeout = ReplyTimeout });
+            await WaitForDistanceToBottomAsync(page, timeline, "<= 32");
         });
     }
+
+    private static void Signal(string directory, string signal) =>
+        File.WriteAllText(Path.Combine(directory, signal), string.Empty);
+
+    private static async Task WaitForDistanceToBottomAsync(IPage page, IElementHandle timeline, string condition, string? alsoRequired = null)
+    {
+        try
+        {
+            await page.WaitForFunctionAsync(
+                $"timeline => timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight {condition}" +
+                (alsoRequired is null ? string.Empty : " && " + alsoRequired),
+                timeline, new() { Timeout = ReplyTimeout });
+        }
+        catch (TimeoutException exception)
+        {
+            var state = await timeline.EvaluateAsync<string>(
+                "timeline => `scrollTop ${timeline.scrollTop}, scrollHeight ${timeline.scrollHeight}, clientHeight ${timeline.clientHeight}, visibility ${getComputedStyle(timeline).visibility}`");
+            throw new TimeoutException($"The timeline's distance to the bottom never became {condition}: {state}", exception);
+        }
+    }
+
+    private static async Task AssertContentStaysAsync(IPage page, IElementHandle timeline, Action growContent, ILocator streaming, string grownText)
+    {
+        var contentOffset = await ReadContentOffsetAfterLayoutAsync(page, timeline);
+        growContent();
+        await Assertions.Expect(streaming).ToContainTextAsync(grownText, new() { Timeout = ReplyTimeout });
+        Assert.Equal(contentOffset, await ReadContentOffsetAfterLayoutAsync(page, timeline), 1.0);
+    }
+
+    // Where the content sits in the timeline's view, read after two animation frames so the resize observations
+    // that scroll the timeline have been delivered.
+    private static Task<double> ReadContentOffsetAfterLayoutAsync(IPage page, IElementHandle timeline) =>
+        page.EvaluateAsync<double>(
+            "timeline => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => " +
+            "resolve(timeline.firstElementChild.getBoundingClientRect().top - timeline.getBoundingClientRect().top))))",
+            timeline);
 
     [Fact]
     public async Task WhenAddingAndDeletingAMemoryEntry_ThenTheMemoryTableShowsEachChange()
@@ -161,13 +217,6 @@ public class AgentPageTests
         }
     }
 
-    // Where the content sits in the timeline's view, read after two animation frames so the resize observations
-    // that scroll the timeline have been delivered.
-    private static Task<double> ReadContentOffsetAfterLayoutAsync(IPage page, IElementHandle timeline) =>
-        page.EvaluateAsync<double>(
-            "timeline => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => " +
-            "resolve(timeline.firstElementChild.getBoundingClientRect().top - timeline.getBoundingClientRect().top))))",
-            timeline);
 
     /// <summary>
     /// Points the test agent at a script that replays <paramref name="output"/>, sends a chat message from its

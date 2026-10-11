@@ -45,19 +45,23 @@ export function attachStickToBottom(scroller) {
     let isPinned = true;
     let lastTop = scroller.scrollTop;
 
-    const isAtBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= bottomThreshold;
+    const distanceToBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
 
     const scrollToBottom = () => {
         scroller.scrollTop = scroller.scrollHeight;
         lastTop = scroller.scrollTop;
     };
 
-    // Only scrolling up releases the pin. A scroll event can be dispatched after content grew, so judging every
-    // event by its distance from the bottom would release the pin after a programmatic scroll to the bottom.
+    // Any upward scroll that leaves the bottom releases the pin, however small, so a short wheel or touch move is not
+    // pulled back by the next growth; the threshold only applies to coming back. Programmatic scrolls go down, and
+    // the browser clamps a shrinking timeline to the bottom, so neither releases it. Scroll events can arrive after
+    // content grew, which is why the direction, not the distance alone, decides.
     const onScroll = () => {
         const top = scroller.scrollTop;
-        if (top < lastTop || !isPinned) {
-            isPinned = isAtBottom();
+        if (top < lastTop) {
+            isPinned = distanceToBottom() <= 1;
+        } else if (!isPinned) {
+            isPinned = distanceToBottom() <= bottomThreshold;
         }
 
         lastTop = top;
@@ -75,6 +79,9 @@ export function attachStickToBottom(scroller) {
     resizeObserver.observe(scroller);
     scroller.addEventListener('scroll', onScroll, { passive: true });
     scrollToBottom();
+
+    // The timeline is hidden until it starts at the bottom, so it does not show its top first.
+    scroller.style.visibility = '';
 
     return {
         pin: () => {
