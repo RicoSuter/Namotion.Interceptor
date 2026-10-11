@@ -3,13 +3,13 @@
 <MudGrid Spacing="2" Class="mb-3">
     <MudItem xs="6" md="3">
         <MudPaper Outlined="true" Class="pa-3 mud-height-full">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Runs</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Background runs</MudText>
             <MudText Typo="Typo.h6">@Agent.RunCount</MudText>
         </MudPaper>
     </MudItem>
     <MudItem xs="6" md="3">
         <MudPaper Outlined="true" Class="pa-3 mud-height-full">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Last run</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Last background run</MudText>
             <MudText Typo="Typo.h6">@(Agent.LastRunTime is { } lastRun ? TimeZone.Format(lastRun) : "never")</MudText>
         </MudPaper>
     </MudItem>
@@ -43,12 +43,13 @@
     </HeaderContent>
     <RowTemplate>
         <MudTd DataLabel="Time">@TimeZone.Format(context.Timestamp)</MudTd>
-        <MudTd DataLabel="Trigger">@(context.Kind == AgentTimelineEntryKind.Error ? "error" : context.Trigger)</MudTd>
+        <MudTd DataLabel="Trigger">@AgentTriggerLabels.Format(context.Trigger)</MudTd>
         <MudTd DataLabel="Duration">@(context.Duration is { } duration ? $"{duration.TotalSeconds:0.0} s" : "")</MudTd>
         <MudTd DataLabel="Tokens (in/out)">@(context.Usage is { } usage ? $"{usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens}/{usage.OutputTokens}" : "")</MudTd>
         <MudTd DataLabel="Tools">@context.ToolCalls.Count</MudTd>
         <MudTd DataLabel="Result">
             <MudText Typo="Typo.body2" title="@context.Text"
+                     Color="@(context.Kind == AgentTimelineEntryKind.Error ? Color.Error : Color.Inherit)"
                      Style="max-width: 40ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;">@context.Text</MudText>
         </MudTd>
     </RowTemplate>
@@ -75,7 +76,7 @@
             var runs = new List<AgentTimelineEntry>();
             for (var index = entries.Count - 1; index >= 0; index--)
             {
-                if (entries[index].Kind is AgentTimelineEntryKind.BackgroundRun or AgentTimelineEntryKind.Error)
+                if (AgentTimeline.IsBackgroundRun(entries[index]))
                 {
                     runs.Add(entries[index]);
                 }

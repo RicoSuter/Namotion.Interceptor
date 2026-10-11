@@ -266,7 +266,7 @@ public class LlmAgentBaseTests
         test.Agent.RunNow();
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Timeline.Entries.Count == 1);
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2);
 
         // Assert
         Assert.Equal(
@@ -478,6 +478,133 @@ public class LlmAgentBaseTests
         });
         Assert.Equal(ServiceStatus.Running, test.Agent.Status);
         Assert.Equal("Idle", test.Agent.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenABackgroundRunFails_ThenItIsCountedWithItsTriggerAndSetsTheLastRun()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = (_, _, _) =>
+            throw new AgentTurnException(AgentFailureKind.Transient, "backend broke"));
+
+        // Act
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
+
+        // Assert
+        var entry = Assert.Single(test.Agent.Timeline.Entries);
+        Assert.Equal(AgentTimelineEntryKind.Error, entry.Kind);
+        Assert.Equal("manual", entry.Trigger);
+        Assert.Equal(1, test.Agent.RunCount);
+        Assert.Equal(entry.Timestamp, test.Agent.LastRunTime);
+    }
+
+    [Fact]
+    public async Task WhenTheAgentStopsDuringABackgroundRun_ThenTheCancelledRunIsCountedAndRecorded()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = WaitForCancellationAsync);
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
+
+        // Act
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+
+        // Assert
+        var entry = Assert.Single(test.Agent.Timeline.Entries);
+        Assert.Equal(AgentTimelineEntryKind.Error, entry.Kind);
+        Assert.Equal("manual", entry.Trigger);
+        Assert.Equal(1, test.Agent.RunCount);
+        Assert.NotNull(test.Agent.LastRunTime);
+    }
+
+    [Fact]
+    public async Task WhenAChatTurnRuns_ThenItIsNotCountedAsABackgroundRun()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(0, test.Agent.RunCount);
+        Assert.Null(test.Agent.LastRunTime);
+    }
+
+    [Fact]
+    public async Task WhenTheAgentRestarts_ThenTheRunCountComesFromTheStatsFileAndTheLastRunFromTheTimeline()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = (_, _, _) =>
+            agent.Requests.Count == 1
+                ? Task.FromResult(new AgentTurnResult("[quiet] ok", null, null))
+                : throw new AgentTurnException(AgentFailureKind.Transient, "backend broke"));
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2 && !test.Agent.IsBusy);
+        var lastRun = test.Agent.LastRunTime;
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        var statsPath = Path.Combine(test.DataDirectory, "Agents", "Agent.stats.json");
+        Assert.Equal(2, JsonDocument.Parse(await File.ReadAllTextAsync(statsPath)).RootElement.GetProperty("backgroundRunCount").GetInt32());
+        await File.WriteAllTextAsync(statsPath, """{"backgroundRunCount":7}""");
+
+        // Act
+        await RestartAsync(test.Agent);
+
+        // Assert
+        Assert.Equal(7, test.Agent.RunCount);
+        Assert.Equal(lastRun, test.Agent.LastRunTime);
+        Assert.Equal(test.Agent.Timeline.Entries[^1].Timestamp, test.Agent.LastRunTime);
+    }
+
+    [Fact]
+    public async Task WhenTheAgentRestartsWithoutAStatsFile_ThenTheRunCountIsTakenFromTheTimeline()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        var statsPath = Path.Combine(test.DataDirectory, "Agents", "Agent.stats.json");
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await File.WriteAllTextAsync(statsPath, """{"backgroundRunCount":7}""");
+        await RestartAsync(test.Agent);
+        Assert.Equal(7, test.Agent.RunCount);
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        File.Delete(statsPath);
+
+        // Act
+        await RestartAsync(test.Agent);
+
+        // Assert
+        Assert.Equal(1, test.Agent.RunCount);
+    }
+
+    [Fact]
+    public async Task WhenANewConversationStarts_ThenTheRunCountAndLastRunAreKept()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        var lastRun = test.Agent.LastRunTime;
+
+        // Act
+        await test.Agent.NewConversationAsync(CancellationToken.None);
+        await RestartAsync(test.Agent);
+
+        // Assert
+        Assert.Equal(1, test.Agent.RunCount);
+        Assert.Equal(lastRun, test.Agent.LastRunTime);
+    }
+
+    private static async Task RestartAsync(FakeAgent agent)
+    {
+        await ((IHostedService)agent).StopAsync(CancellationToken.None);
+        await ((IHostedService)agent).StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => agent.Status is not (ServiceStatus.Stopped or ServiceStatus.Starting));
     }
 
     private static async Task<AgentTurnResult> WaitForCancellationAsync(

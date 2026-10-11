@@ -24,6 +24,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     public const string CancelledText = "Cancelled before a reply.";
 
     private const int RecentResultCount = 5;
+    private const string StatsSuffix = ".stats.json";
     private const string WaitingStatusMessage = "Waiting for the background run";
     private static readonly TimeSpan ChangeBufferTime = TimeSpan.FromMilliseconds(100);
 
@@ -115,10 +116,15 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     [State("Last Analysis", Position = 4)]
     public partial string? LastAnalysis { get; internal set; }
 
-    [State("Last Run", Position = 5)]
+    /// <summary>The start of the newest background run, also of one that failed or was cancelled; chat turns do not count.</summary>
+    [State("Last Background Run", Position = 5)]
     public partial DateTimeOffset? LastRunTime { get; internal set; }
 
-    [State("Run Count", Position = 6)]
+    /// <summary>
+    /// The number of background runs, also those that failed or were cancelled; chat turns do not count. Kept across
+    /// restarts and new conversations; deleting the agent's data files resets it.
+    /// </summary>
+    [State("Background Runs", Position = 6)]
     public partial int RunCount { get; internal set; }
 
     [State("Usage (5 hours)", Position = 7)]
@@ -552,6 +558,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         Memory = new AgentMemory(GetStoragePath(".memory.md"), _services.TimeProvider);
         await Timeline.LoadAsync(cancellationToken);
         await Memory.LoadAsync(cancellationToken);
+        await RestoreRunStatisticsAsync(cancellationToken);
         RaiseTimelineChanged();
     }
 
@@ -611,13 +618,13 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     }
 
     // The scheduler callback: an exception escaping it ends the scheduler loop, so only cancellation of the
-    // stopping token may leave this method.
+    // stopping token may leave this method. Every started run counts, also one that fails or is cancelled.
     private async Task RunBackgroundAsync(string reason, CancellationToken cancellationToken)
     {
         await _turnGate.WaitAsync(cancellationToken);
+        var started = BeginTurn("Running");
         try
         {
-            var started = BeginTurn("Running");
             var progress = CreateProgress();
             var tools = CreateToolSet(progress);
             var message = AgentPromptBuilder.BuildBackgroundMessage(
@@ -646,8 +653,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 LastAnalysis = result.Text;
             }
 
-            LastRunTime = started;
-            RunCount++;
+            await CountBackgroundRunAsync(started);
             lock (_stateLock)
             {
                 _scheduler?.ReportSuccess();
@@ -657,13 +663,17 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            await AppendAsync(CreateBackgroundErrorEntry(CancelledText, reason, started));
+            await CountBackgroundRunAsync(started);
             throw;
         }
         catch (Exception exception)
         {
             try
             {
-                await HandleFailureAsync(ToTurnException(exception));
+                var turnException = ToTurnException(exception);
+                await CountBackgroundRunAsync(started);
+                await HandleFailureAsync(turnException, CreateBackgroundErrorEntry(turnException.Message, reason, started));
             }
             catch (Exception handlerException)
             {
@@ -676,6 +686,74 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             _turnGate.Release();
         }
     }
+
+    private AgentTimelineEntry CreateBackgroundErrorEntry(string text, string trigger, DateTimeOffset started) => new()
+    {
+        Kind = AgentTimelineEntryKind.Error,
+        Timestamp = started,
+        Text = text,
+        Trigger = trigger,
+        Duration = _services.TimeProvider.GetUtcNow() - started
+    };
+
+    /// <summary>Counts a background run and persists the count; the caller holds the turn gate.</summary>
+    private async Task CountBackgroundRunAsync(DateTimeOffset started)
+    {
+        LastRunTime = started;
+        RunCount++;
+        var path = GetStoragePath(StatsSuffix);
+        if (path is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // Not cancellable: the count of a finished run is written even while the host stops.
+            var content = JsonSerializer.Serialize(new AgentStats(RunCount), JsonSerializerOptions.Web);
+            await AtomicFile.WriteAllTextAsync(path, content, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "The run count of agent {Agent} could not be written.", Title);
+        }
+    }
+
+    /// <summary>
+    /// Restores the run count from the stats file, or counts the background runs in the timeline when there is
+    /// none, and the last run from the timeline; the caller holds the turn gate.
+    /// </summary>
+    private async Task RestoreRunStatisticsAsync(CancellationToken cancellationToken)
+    {
+        LastRunTime = Timeline.GetLastBackgroundRunTime();
+        RunCount = await ReadRunCountAsync(cancellationToken) ?? Timeline.Entries.Count(AgentTimeline.IsBackgroundRun);
+    }
+
+    private async Task<int?> ReadRunCountAsync(CancellationToken cancellationToken)
+    {
+        var path = GetStoragePath(StatsSuffix);
+        if (path is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var content = await File.ReadAllTextAsync(path, cancellationToken);
+            return JsonSerializer.Deserialize<AgentStats>(content, JsonSerializerOptions.Web)?.BackgroundRunCount;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _logger.LogWarning(exception, "The stats file of agent {Agent} could not be read; the run count is taken from the timeline.", Title);
+            return null;
+        }
+    }
+
+    private sealed record AgentStats(int BackgroundRunCount);
 
     private async Task<AgentTurnResult> RunTurnAsync(
         AgentTurnKind kind, string message, AgentToolSet tools, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
@@ -889,7 +967,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         return new AgentTurnException(AgentFailureKind.Transient, exception.Message, innerException: exception);
     }
 
-    private async Task HandleFailureAsync(AgentTurnException exception)
+    private async Task HandleFailureAsync(AgentTurnException exception, AgentTimelineEntry? errorEntry = null)
     {
         _logger.LogWarning("The turn of agent {Agent} failed: {Message}", Title, exception.Message);
         lock (_stateLock)
@@ -898,7 +976,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
 
         // Recorded before the status changes, so a reader that sees the failure status also sees the entry.
-        await AppendErrorAsync(exception.Message);
+        await (errorEntry is null ? AppendErrorAsync(exception.Message) : AppendAsync(errorEntry));
         SetStatusIfStarted(
             exception.Kind is AgentFailureKind.Configuration or AgentFailureKind.UsageLimit
                 ? ServiceStatus.Unavailable

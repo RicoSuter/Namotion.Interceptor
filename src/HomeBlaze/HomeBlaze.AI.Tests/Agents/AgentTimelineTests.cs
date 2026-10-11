@@ -202,6 +202,25 @@ public class AgentTimelineTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTheTimelineHasBackgroundRunsFailuresAndChat_ThenOnlyBackgroundEntriesCountAsRuns()
+    {
+        // Arrange
+        var timeline = new AgentTimeline(filePath: null);
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.BackgroundRun, 0, "ok") with { Trigger = "poll" }, CancellationToken.None);
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.Error, 1, "broke") with { Trigger = "change" }, CancellationToken.None);
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.User, 2, "hello"), CancellationToken.None);
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.Error, 3, LlmAgentBase.CancelledText), CancellationToken.None);
+
+        // Act
+        var runs = timeline.Entries.Where(AgentTimeline.IsBackgroundRun).ToList();
+        var lastRun = timeline.GetLastBackgroundRunTime();
+
+        // Assert
+        Assert.Equal(["ok", "broke"], runs.Select(entry => entry.Text));
+        Assert.Equal(Start.AddMinutes(1), lastRun);
+    }
+
+    [Fact]
     public void WhenCapacityIsNotPositive_ThenConstructionThrows()
     {
         // Act & Assert

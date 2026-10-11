@@ -26,7 +26,10 @@ public sealed record AgentTimelineEntry
     /// <summary>Whether a background run reported nothing noteworthy.</summary>
     public bool IsQuiet { get; init; }
 
-    /// <summary>Why a background run started, for example <c>poll</c>, <c>change</c> or <c>manual</c>.</summary>
+    /// <summary>
+    /// Why a background run started, for example <c>poll</c>, <c>change</c> or <c>manual</c>; also set on the error
+    /// entry of a background run that failed or was cancelled, and null on chat entries.
+    /// </summary>
     public string? Trigger { get; init; }
 
     public IReadOnlyList<AgentToolCall> ToolCalls { get; init; } = [];

@@ -137,6 +137,17 @@ public sealed class AgentTimeline
         _fileLineCount = entries.Count;
     }
 
+    /// <summary>
+    /// Whether an entry records a background run: a finished run, or the error of a run that failed or was
+    /// cancelled, which carries the run's trigger. Chat errors carry no trigger.
+    /// </summary>
+    public static bool IsBackgroundRun(AgentTimelineEntry entry) =>
+        entry.Kind == AgentTimelineEntryKind.BackgroundRun ||
+        (entry.Kind == AgentTimelineEntryKind.Error && entry.Trigger is not null);
+
+    /// <summary>The start time of the newest background run, successful or not.</summary>
+    public DateTimeOffset? GetLastBackgroundRunTime() => Entries.LastOrDefault(IsBackgroundRun)?.Timestamp;
+
     /// <summary>The newest non-quiet background runs, oldest first.</summary>
     public IReadOnlyList<AgentTimelineEntry> GetRecentBackgroundResults(int count)
     {
