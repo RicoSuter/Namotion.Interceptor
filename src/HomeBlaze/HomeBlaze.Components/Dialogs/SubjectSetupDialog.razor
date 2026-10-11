@@ -141,6 +141,7 @@
     private string? _nameError;
     private bool _isNameEdited;
     private bool _isCreating;
+    private bool _isDisposed;
     private Func<Task> _refreshEditPanelIsValid = () => Task.CompletedTask;
 
     private bool CanCreate => _createdSubject is not null && _nameError is null && _isEditPanelValid && !_isCreating;
@@ -292,13 +293,28 @@
                 return;
             }
 
-            // From here on the subject may hang in the graph, even when BeforeSave fails halfway.
-            _isCreatedSubjectHandedOver = true;
-
             // Persisting finds its writer through the parents BeforeSave establishes.
-            Options.BeforeSave?.Invoke(createdSubject);
+            if (Options.BeforeSave is { } beforeSave)
+            {
+                try
+                {
+                    beforeSave(createdSubject);
+                }
+                finally
+                {
+                    // A BeforeSave that fails halfway may have attached the subject already, and discarding
+                    // it then would take it out of the graph again.
+                    _isCreatedSubjectHandedOver = createdSubject.GetParents().Length > 0;
+                }
+            }
 
             await editPanel.PersistAsync(CancellationToken.None);
+
+            if (Options.BeforeSave is null)
+            {
+                // The caller attaches the subject, which it takes from the result.
+                _isCreatedSubjectHandedOver = true;
+            }
 
             MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(createdSubject, name)));
         }
@@ -309,15 +325,26 @@
         finally
         {
             _isCreating = false;
+
+            if (_isDisposed)
+            {
+                DiscardCreatedSubject();
+            }
         }
     }
 
     private void DiscardCreatedSubject()
     {
+        // A running create may be about to hand the subject over. When the dialog is disposed by the time
+        // it ends, it calls this again.
+        if (_isCreating)
+        {
+            return;
+        }
+
         // The factory attaches the subject that backs the form to the root context, where a hosted subject
-        // already runs. Discarding one that was handed over, or that a running create is about to hand over,
-        // would take it out of the graph again.
-        if (_createdSubject is { } createdSubject && !_isCreatedSubjectHandedOver && !_isCreating)
+        // already runs. Discarding one that was handed over would take it out of the graph again.
+        if (_createdSubject is { } createdSubject && !_isCreatedSubjectHandedOver)
         {
             SubjectFactory.DiscardSubject(createdSubject);
         }
@@ -328,6 +355,7 @@
 
     public void Dispose()
     {
+        _isDisposed = true;
         DiscardCreatedSubject();
     }
 
