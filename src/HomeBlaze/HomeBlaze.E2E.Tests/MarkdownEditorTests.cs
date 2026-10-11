@@ -24,7 +24,7 @@ public class MarkdownEditorTests
         // Arrange
         var page = await _fixture.CreatePageAsync();
 
-        // Navigate to Inline.md (has the :::HomeBlaze.Samples.Motor#mymotor block)
+        // Navigate to Inline.md (has the :: HomeBlaze.Samples.Motor#mymotor block)
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 

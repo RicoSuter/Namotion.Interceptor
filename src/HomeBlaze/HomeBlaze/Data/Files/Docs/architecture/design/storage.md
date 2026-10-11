@@ -85,7 +85,7 @@ File subjects are created based on file extension via `FileExtensionAttribute`:
 
 | Type | Extension | Description |
 |------|-----------|-------------|
-| `MarkdownFile` | `.md` | Markdown with YAML frontmatter, widget blocks (`:::Full.Type.Name`) and live expressions (`{{ path }}`) |
+| `MarkdownFile` | `.md` | Markdown with YAML frontmatter, widget blocks (`:: Full.Type.Name`) and live expressions (`{{ path }}`) |
 | `JsonFile` | `.json` | Plain JSON files (non-configurable subjects) |
 | `GenericFile` | Other | Fallback for unknown extensions — metadata only |
 
@@ -98,6 +98,7 @@ A `MarkdownFile` turns its text into child subjects when the file is loaded and 
 | Unit | Location | Responsibility |
 |------|----------|----------------|
 | `MarkdownPageParser` | `HomeBlaze.Storage/Pages` | Page text to a tree of blocks with their positions in the source. Owns the grammar of the head line (`MarkdownBlockHead`) and reports the errors that are visible from the syntax alone. Knows nothing about subjects |
+| `MarkdownBlockContainerParser` | `HomeBlaze.Storage/Pages` | The Markdig block parser for the fence lines, which replaces Markdig's custom containers in the pipeline. A fence is a run of two or more fence characters, and `MarkdownBlockFence` is the one place that names the character. A fence with text after it opens a block. A fence alone closes the innermost open block with the same number of characters, together with the blocks that are still open inside it. A block is never closed when Markdig asks it to continue, so the blocks inside it see the line first and a code block keeps a fence line as text. An HTML block would keep the closing line as well, so it is ended when the line is the closing line of a block around it. A closing line that closes nothing becomes a node of its own, which the page parser reports as an invalid block of one line |
 | `MarkdownSegmentBuilder` | `HomeBlaze.Storage/Pages` | Renders the parsed page to HTML once and cuts the HTML into segments that follow the nesting of the blocks: HTML, expressions and blocks with their content. Writes the error boxes for syntax errors and for the old `subject(name)` fence. Writes the braces inside markdown code as character references, so an expression in code is shown as written. `FindExpressions` gives the editor and the "Read Evaluated Content" query the expressions in the page text by the same rule: a path between two pairs of braces without a brace or a `<` in it, and no brace inside markdown code counts. It reads the text and not the rendered page, so it also finds an expression that the page does not render: one in the front matter, in the content of an invalid block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block |
 | `MarkdownContentParser` | `HomeBlaze.Storage/Internal` | Segments to subjects. Creates the subject of a block or updates the existing one in place, fills its slots, and reports the errors that need the types |
 | `SlotMap` | `HomeBlaze.Storage/Pages` | Reads the `[Slot]` declarations of a type for the content parser and reports a declaration that cannot be used |

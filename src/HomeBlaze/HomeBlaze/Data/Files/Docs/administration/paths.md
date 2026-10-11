@@ -72,20 +72,20 @@ Every relative path on a markdown page starts at the page. This holds for the pa
 A block gets a name with `#name` on its head line. The name is known anywhere on the page, also inside other blocks and above the block that declares it. See [Markdown Pages](pages.md) for the block syntax.
 
 ~~~~markdown
-::::HomeBlaze.Components.Card title="Motor Card" icon=Settings
-:::HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1200 simulationInterval=00:00:01
+:: HomeBlaze.Components.Card title="Motor Card" icon=Settings
+::: HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1200 simulationInterval=00:00:01
 :::
-::::
+::
 
-::::HomeBlaze.Components.Card title="Reference Card" icon=Link
-:::HomeBlaze.Components.Widget path=cardmotor
+:: HomeBlaze.Components.Card title="Reference Card" icon=Link
+::: HomeBlaze.Components.Widget path=cardmotor
 :::
 
-:::HomeBlaze.Components.Widget path=../Conveyor
+::: HomeBlaze.Components.Widget path=../Conveyor
 :::
 
 The named motor has a temperature of {{ cardmotor/Temperature }} °C.
-::::
+::
 ~~~~
 
 ### Resolution Order

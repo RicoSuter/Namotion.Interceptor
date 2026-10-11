@@ -59,7 +59,9 @@ public class RepositoryPagesTests
         var html = Flatten(MarkdownSegmentBuilder.Build(page));
 
         // Assert
-        Assert.Contains("A block needs a name.", html);
+        Assert.Contains("closes no block.", html);
+        Assert.Contains("This block is not closed.", html);
+        Assert.Contains("A block inside another block needs more", html);
         Assert.Contains("The subject(name) fence is no longer supported.", html);
     }
 

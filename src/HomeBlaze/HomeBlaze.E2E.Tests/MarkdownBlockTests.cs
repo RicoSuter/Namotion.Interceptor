@@ -304,7 +304,7 @@ public class MarkdownBlockTests
         await WriteScratchPageAsync(CreateTabsPage(
             string.Empty,
             CreateTab("text", "Text", "Static text"),
-            CreateTab("motor", "Motor", ":::HomeBlaze.Components.Widget path=../Motor\n:::")));
+            CreateTab("motor", "Motor", ":::: HomeBlaze.Components.Widget path=../Motor\n::::")));
 
         var page = await OpenPageAsync(ScratchPage);
         var tabs = page.GetByTestId("tab-layout");
@@ -329,7 +329,7 @@ public class MarkdownBlockTests
 
         // Act
         await WriteScratchPageAsync(CreateTabsPage(
-            ":::HomeBlaze.Components.Card title=\"Inserted Card\"\nInserted\n:::\n\n",
+            ":: HomeBlaze.Components.Card title=\"Inserted Card\"\nInserted\n::\n\n",
             CreateTab("first", "First"),
             CreateTab("alpha", "Alpha"),
             CreateTab("beta", "Beta"),
@@ -422,10 +422,10 @@ public class MarkdownBlockTests
 
         var changedLine = Assert.Single(changedLines);
         Assert.Equal(
-            ":::HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1200 simulationInterval=00:00:01",
+            "::: HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1200 simulationInterval=00:00:01",
             sourceBefore[changedLine]);
         Assert.Equal(
-            ":::HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1500 simulationInterval=00:00:01",
+            "::: HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1500 simulationInterval=00:00:01",
             sourceAfter[changedLine]);
     }
 
@@ -478,8 +478,51 @@ public class MarkdownBlockTests
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
 
         var source = await File.ReadAllTextAsync(GetPagePath(ScratchPage));
-        Assert.Contains(":::HomeBlaze.Samples.Motor#livingroom name=\"Living Room Motor\"", source);
+        Assert.Contains("\n:: HomeBlaze.Samples.Motor#livingroom name=\"Living Room Motor\"", source);
         Assert.Contains("Text before the block", source);
+    }
+
+    [Fact]
+    public async Task WhenABlockIsCreatedWithTheCursorInsideACard_ThenItGetsOneMoreFenceCharacterAndIsShownInTheCard()
+    {
+        // Arrange
+        await WriteScratchPageAsync(
+            "# Scratch\n\n:: HomeBlaze.Components.Card title=\"Outer Card\"\nText inside the card\n::\n\nText after the card\n");
+
+        var page = await OpenPageAsync(ScratchPage);
+        var card = GetCard(page, "Outer Card");
+        await Assertions.Expect(card.GetByText("Text inside the card")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await SelectEditModeAsync(page, "Split");
+
+        var textLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "Text inside the card" });
+        await Assertions.Expect(textLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await textLine.ClickAsync();
+
+        // Act
+        await page.GetByTestId("create-subject-button").ClickAsync();
+        var wizard = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(wizard.GetByTestId("type-card-motor")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await wizard.GetByLabel("Name").FillAsync("innermotor");
+        await wizard.GetByTestId("type-card-motor").ClickAsync();
+        await Assertions.Expect(wizard.GetByText("Step 2: Create Motor")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await wizard.GetByLabel("Name").FillAsync("Inner Motor");
+        await wizard.GetByTestId("create-button").ClickAsync();
+
+        // Assert: the block is in the file with the fence of a block inside the card, and the card shows it
+        await Assertions.Expect(wizard).ToBeHiddenAsync(new() { Timeout = 30000 });
+        await SelectEditModeAsync(page, "View");
+        await Assertions.Expect(card).ToContainTextAsync("Inner Motor", new() { Timeout = 30000 });
+        await Assertions.Expect(card.GetByText("Text inside the card")).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+
+        var source = (await File.ReadAllTextAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n");
+        var lines = source.Split('\n');
+        var headLine = Array.FindIndex(lines, line => line.Contains("#innermotor", StringComparison.Ordinal));
+        Assert.StartsWith("::: HomeBlaze.Samples.Motor#innermotor name=\"Inner Motor\"", lines[headLine]);
+        Assert.Equal(":::", lines[headLine + 1]);
+        Assert.True(headLine > Array.IndexOf(lines, ":: HomeBlaze.Components.Card title=\"Outer Card\""));
+        Assert.True(headLine < Array.IndexOf(lines, "Text inside the card"));
+        Assert.Contains("Text inside the card\n::\n\nText after the card", source);
     }
 
     private static ILocator GetTab(ILocator tabLayout, string title)
@@ -505,14 +548,14 @@ public class MarkdownBlockTests
 
     private static string CreateTab(string id, string title, string? content = null)
     {
-        return $"::::Tab#{id} title=\"{title}\"\n{content ?? $"Content of {id}"}\n::::\n";
+        return $"::: Tab#{id} title=\"{title}\"\n{content ?? $"Content of {id}"}\n:::\n";
     }
 
     // The layout has a name, so it stays the same subject when a block is inserted before it.
     private static string CreateTabsPage(string contentBefore, params string[] tabs)
     {
         return "---\ntitle: Scratch\n---\n\n# Scratch\n\n" + contentBefore +
-            ":::::HomeBlaze.Components.TabLayout#tabs\n" + string.Concat(tabs) + ":::::\n";
+            ":: HomeBlaze.Components.TabLayout#tabs\n" + string.Concat(tabs) + "::\n";
     }
 
     // Writes through the page like an editor does, which also loads the page again.

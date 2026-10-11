@@ -110,8 +110,8 @@ A group reports its coordinator's playback, track, source, play mode and sleep t
 `SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, playback controls, mute and volume, with night mode and speech enhancement switches on a home theater player, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them with a `Widget` block as described in [Markdown Pages](../administration/pages.md#widget), for example a room of a system stored as `Devices/Sonos.json`:
 
 ~~~~markdown
-:::HomeBlaze.Components.Widget#livingRoom path=/Devices/Sonos/Players[RINCON_000E58A0B1C201400]
-:::
+:: HomeBlaze.Components.Widget#livingRoom path=/Devices/Sonos/Players[RINCON_000E58A0B1C201400]
+::
 ~~~~
 
 Prefer player or system widgets over group widgets: a group widget shows "Cannot resolve path" once its coordinator changes, while a player shows what its group plays on a path that stays.

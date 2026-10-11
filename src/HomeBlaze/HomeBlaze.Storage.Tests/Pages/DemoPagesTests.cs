@@ -79,6 +79,8 @@ public partial class DemoPagesTests
         var page = await AddDemoPageAsync(fixture, "Errors.md");
 
         // Assert
+        var strayCardLine = FindBlockLine("Errors.md", "Stray Closing Line");
+        var outerCardLine = FindBlockLine("Errors.md", "Outer Card");
         string[] expectedMessages =
         [
             "Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace.",
@@ -90,16 +92,44 @@ public partial class DemoPagesTests
             "Motor has no default slot, so it cannot have content.",
             "The slot 'Footer' takes one block, but there are 2.",
             "The name 'twin' is used twice on this page.",
-            "A block needs a name. If this line was meant to close a block, the fence of the outer block must be longer than the fences inside it.",
+            "This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line of its block. " +
+            $"Open here: line {strayCardLine} (2 characters).",
+            "This block is not closed. The line ':::' that ends it is missing.",
+            "A block inside another block needs more ':' characters than the block around it. " +
+            $"This block has 2 and the block around it, at line {outerCardLine}, has 2. Write ':::' here and on its closing line.",
             "A block is only allowed directly on the page or directly inside another block.",
             BrokenJsonError,
-            "The subject(name) fence is no longer supported. Write the subject as a block: a line with :::Full.Type.Name#name key=value, then a closing ::: line."
+            "The subject(name) fence is no longer supported. Write the subject as a block: a line with :: Full.Type.Name#name key=value, then a closing :: line."
         ];
 
         var messages = FindErrorMessages(page)
             .Select(message => message.StartsWith(BrokenJsonError, StringComparison.Ordinal) ? BrokenJsonError : message);
 
         Assert.Equal(expectedMessages, messages);
+    }
+
+    [Fact]
+    public async Task WhenErrorsPageIsLoaded_ThenTheBlocksAroundAFenceErrorAreStillShown()
+    {
+        // Arrange
+        var fixture = await CreateFixtureAsync();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Errors.md");
+
+        // Assert
+        var cards = page.Children.Values.OfType<Card>().ToDictionary(card => card.Title!);
+        var strayCard = MarkdownPageFixture.Html(((MarkdownFragment)cards["Stray Closing Line"].Content!).Children);
+        Assert.Contains("The first paragraph of the card.", strayCard);
+        Assert.Contains("closes no block", strayCard);
+        Assert.Contains("The second paragraph of the card.", strayCard);
+
+        var openCard = MarkdownPageFixture.Html(((MarkdownFragment)cards["Open Motor"].Content!).Children);
+        Assert.Contains("This block is not closed.", openCard);
+
+        var outerCard = MarkdownPageFixture.Html(((MarkdownFragment)cards["Outer Card"].Content!).Children);
+        Assert.Contains("needs more", outerCard);
+        Assert.Contains("The text after the motor.", outerCard);
     }
 
     [Fact]
@@ -142,6 +172,12 @@ public partial class DemoPagesTests
 
     private static string ReadDemoPage(string fileName) =>
         RepositoryPagesTests.ReadPage(RepositoryPagesTests.DemoFolder + fileName);
+
+    /// <summary>Gets the 1-based line of the block of the page that has this title. A code fence shows no block.</summary>
+    private static int FindBlockLine(string fileName, string title) =>
+        MarkdownPageParser.Parse(ReadDemoPage(fileName)).AllBlocks
+            .Single(block => block.Head is not null && block.Head.Arguments.Any(argument => argument.Key == "title" && argument.Value == title))
+            .Line;
 
     /// <summary>Gets the messages of all error boxes of the page, in the order of the page, without the line numbers.</summary>
     /// <remarks>

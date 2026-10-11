@@ -99,11 +99,11 @@ See [Paths](paths.md) for full path documentation including `./`, `../`, bracket
 
 ## Blocks
 
-A block puts a widget on the page. It starts with a head line that names a type and ends with a line of colons:
+A block puts a widget on the page. It starts with a head line of two colons and a type name, and ends with a closing line of two colons:
 
 ~~~~markdown
-:::HomeBlaze.Samples.Motor#mymotor name="My Motor" targetSpeed=2000 simulationInterval=00:00:01
-:::
+:: HomeBlaze.Samples.Motor#mymotor name="My Motor" targetSpeed=2000 simulationInterval=00:00:01
+::
 
 The motor runs at {{ mymotor/CurrentSpeed }} RPM.
 ~~~~
@@ -116,8 +116,10 @@ The sample data of a development checkout has a page `Demo/Blocks.md` that shows
 
 ### Block Syntax
 
-- **Fence**: The head line starts with at least three colons. The block ends with a line of colons only, with at least as many colons as the head line. Write the same number. Every block needs its closing line, also an empty one. Without it, the block takes the rest of the page as its content.
-- **Type**: The full type name with its namespace follows the colons without a space. It is the name that the `$type` property has in the JSON file of a subject.
+- **Fence**: The run of colons at the start of a line is the fence. A block directly on the page has two colons. A block inside another block has more colons than the block around it: write one more for each level. A fence may be indented by up to three spaces.
+- **Head line**: A fence and then the type name, or the slot name of a slot block. Write one space between them. The page also reads a head line without that space.
+- **Closing line**: A fence and nothing else, with exactly as many colons as the head line of the block. Every block needs its closing line, also an empty block. A line of colons with nothing after them is always a closing line.
+- **Type**: The full type name with its namespace. It is the name that the `$type` property has in the JSON file of a subject.
 - **Name**: An optional `#name` follows the type without a space. It starts with a letter or `_` and continues with letters, digits, `_` or `-`. A name is unique on the page, however deeply the blocks are nested.
 - **Arguments**: Any number of `key=value` pairs follow, separated by spaces. Each one sets a configuration property of the subject. The keys are the property names in camelCase, the same as in the JSON file of a subject.
 - **Case**: Type names, slot names and argument keys are case-sensitive.
@@ -141,11 +143,11 @@ The sample data of a development checkout has a page `Demo/Blocks.md` that shows
 A list or an object does not fit on the head line. Write such configuration as a JSON object in a `json` code fence that is the first thing inside the block:
 
 ~~~~markdown
-:::HomeBlaze.Components.GridLayout#grid rows=1 columns=4
+:: HomeBlaze.Components.GridLayout#grid rows=1 columns=4
 ```json
 { "cells": [] }
 ```
-:::
+::
 ~~~~
 
 The keys of the object are configuration properties like the arguments, and an unknown key is an error here too. When an argument and the fence set the same key, the argument wins. The fence is not shown on the page.
@@ -155,16 +157,16 @@ The keys of the object are configuration properties like the arguments, and an u
 A widget can take page content: text, expressions and other blocks. Its type declares the places for content as slots. There is at most one default slot and any number of named slots.
 
 ~~~~markdown
-::::HomeBlaze.Components.Card title="Motor Card" icon=Settings
+:: HomeBlaze.Components.Card title="Motor Card" icon=Settings
 Card body with a live value: speed is {{ cardmotor/CurrentSpeed }} RPM.
 
-:::HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1200 simulationInterval=00:00:01
+::: HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1200 simulationInterval=00:00:01
 :::
 
-:::Footer
+::: Footer
 Card footer text
 :::
-::::
+::
 ~~~~
 
 - **Default slot**: Everything inside a widget block that is not a slot block goes to the default slot of the widget. Here that is the text, the expression and the motor.
@@ -173,7 +175,14 @@ Card footer text
 - **Slot blocks with arguments**: Some slot blocks create a subject and take arguments and a `#name`, like `Tab` with `title` and `icon`. All others hold content only and take no arguments, no name and no `json` fence, like `Footer` and `Item`.
 - **Widgets without a default slot**: A type that declares no default slot cannot have content. The motor above is such a type, so its block stays empty.
 
-A block that contains other blocks needs a longer fence than every block inside it. Count from the inside out: the innermost block has three colons, and each block around it has at least one more. With fences of equal length, the first closing line closes the outer block, and the line that was meant to close it is shown as an error. That line opens a block without a name, which takes everything up to the next line of colons with it, also when that line is inside a code fence, and none of it is shown.
+### Blocks Inside Blocks
+
+A block inside another block has more colons than the block around it. Count from the outside in: a block directly on the page has two colons, a block inside it has three, and so on. In the card above, the card has two colons, and the motor and the footer inside it have three.
+
+- **What a closing line closes**: A closing line closes the innermost open block that has the same number of colons. A block that is still open inside that block is closed with it and is shown as an error, because its own closing line is missing.
+- **More is enough**: The page only requires more colons than the block around it, so a block with four colons directly inside a block with two is fine. One more for each level is the form that is easy to read, and the form that the page editor writes.
+- **Inside markdown code**: A line of colons inside a fenced code block or an indented code block is text. It opens and closes nothing, also when the code block is inside a block.
+- **Nothing disappears silently**: A line of colons that fits no rule is shown as an error at its line, and the text around it is still shown. The section "Errors" below lists the messages.
 
 ### Card
 
@@ -198,24 +207,24 @@ Lays its cells out from left to right and wraps them to as many rows as the widt
 | `Item` | Slot block, any number | One cell. Holds any page content |
 
 ~~~~markdown
-::::::HomeBlaze.Components.FlowLayout minWidth=320
-:::::Item
-::::HomeBlaze.Components.Card title="Compressor" icon=Bolt
-:::HomeBlaze.Components.Widget path=../Compressor
-:::
-::::
+:: HomeBlaze.Components.FlowLayout minWidth=320
+::: Item
+:::: HomeBlaze.Components.Card title="Compressor" icon=Bolt
+::::: HomeBlaze.Components.Widget path=../Compressor
 :::::
-:::::Item
-::::HomeBlaze.Components.Card title="Notes"
+::::
+:::
+::: Item
+:::: HomeBlaze.Components.Card title="Notes"
 A cell can hold any page content, not only widgets.
 
 The compressor runs at {{ ../Compressor/CurrentSpeed }} RPM.
 ::::
-:::::
-::::::
+:::
+::
 ~~~~
 
-The fences show the nesting rule: a flow with items that hold cards that hold widgets needs six, five, four and three colons.
+The fences show the nesting rule: the flow has two colons, its items have three, the cards in the items have four and the widgets in the cards have five.
 
 Choose `minWidth` at least as large as the widest widget in the cells needs. A cell can get as narrow as `minWidth`, and a widget that needs more room then paints over the next cell. The sample motor widget needs 280 pixels, and 312 pixels inside a card.
 
@@ -228,20 +237,20 @@ Shows one of several tabs at a time.
 | `Tab` | Slot block, any number | One tab. Takes the arguments `title` and `icon`, an optional `#name`, and any page content |
 
 ~~~~markdown
-:::::HomeBlaze.Components.TabLayout
-::::Tab#cooling title="Cooling Fan" icon=Home
+:: HomeBlaze.Components.TabLayout
+::: Tab#cooling title="Cooling Fan" icon=Home
 The cooling fan has a temperature of {{ ../CoolingFan/Temperature }} °C.
 
-:::HomeBlaze.Components.Widget path=../CoolingFan
-:::
+:::: HomeBlaze.Components.Widget path=../CoolingFan
 ::::
-::::Tab#exhaust title="Exhaust Fan"
+:::
+::: Tab#exhaust title="Exhaust Fan"
 The exhaust fan runs at {{ ../ExhaustFan/CurrentSpeed }} RPM.
 
-:::HomeBlaze.Components.Widget path=../ExhaustFan
-:::
+:::: HomeBlaze.Components.Widget path=../ExhaustFan
 ::::
-:::::
+:::
+::
 ~~~~
 
 - All tabs are rendered and kept up to date, also the hidden ones. A subject in a hidden tab keeps running.
@@ -258,17 +267,17 @@ Shows the widget of a subject that exists somewhere else: in a file of its own, 
 The example continues the card under "Content and Slots" above, which declares the motor `cardmotor`. On a page without that block, the first widget shows "Cannot resolve path".
 
 ~~~~markdown
-::::HomeBlaze.Components.Card title="Reference Card" icon=Link
+:: HomeBlaze.Components.Card title="Reference Card" icon=Link
 The motor of the first card, referenced by its name:
 
-:::HomeBlaze.Components.Widget path=cardmotor
+::: HomeBlaze.Components.Widget path=cardmotor
 :::
 
 A motor next to this page, referenced by a relative path:
 
-:::HomeBlaze.Components.Widget path=../Conveyor
+::: HomeBlaze.Components.Widget path=../Conveyor
 :::
-::::
+::
 ~~~~
 
 - A path that leads to no subject shows the message "Cannot resolve path".
@@ -280,31 +289,36 @@ The `icon` of a card and of a tab is the name of a MudBlazor Material icon, for 
 
 ### Style Blocks
 
-A block without a name and with attributes in braces is not a widget. It becomes a plain `<div>` with those attributes around its content:
+A block with attributes in braces in place of a type name is not a widget. It becomes a plain `<div>` with those attributes around its content:
 
 ~~~~markdown
-::: {.my-class}
+:: {.my-class}
 This text is inside a `div` with the class `my-class`.
-:::
+::
 ~~~~
 
-A style block can hold text and expressions. A widget block inside a style block is an error.
+A style block can hold text and expressions. A widget block inside a style block is an error. The rules for the colons are the same as for every block.
 
 ### Where a Block Is Allowed
 
 A widget block is allowed in three places: directly on the page, directly inside another widget block and directly inside a slot block. A slot block is allowed directly inside the widget block that declares the slot.
 
 - A block inside a list item, a quote or a style block is shown as an error.
-- A block inside a fenced code block is shown as text and creates nothing, which is how this page shows its examples.
+- A block inside a fenced code block or an indented code block is shown as text and creates nothing, which is how this page shows its examples.
 - Do not put a block between an opening HTML tag and its closing tag, for example between `<div>` and `</div>`. The page does not report this, but the widget ends up outside the element and the layout breaks. Without an empty line between the tag and the block, the lines of the block are shown as text. Use a `Card`, a `FlowLayout` or a `TabLayout` to arrange widgets.
+- HTML inside the content of a block does not need an empty line before the closing line of the block.
 
 ### Errors
 
-A block that cannot be shown is replaced by a red box with the line number of the block and a message. The rest of the page still renders. The common errors:
+A block that cannot be shown is replaced by a red box with the line number of the block and a message. A closing line that closes nothing gets a box at its own line. The rest of the page still renders. The common errors:
 
 | Situation | Message |
 |-----------|---------|
-| A line of colons without a type name or a slot name. This is what a miscounted fence produces | A block needs a name. If this line was meant to close a block, the fence of the outer block must be longer than the fences inside it. |
+| A closing line whose number of colons fits no open block | This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 12 (2 characters). |
+| A closing line where no block is open | This line of 2 ':' characters closes no block. No block is open here. |
+| A block without its closing line. It ends where the block around it ends, or at the end of the page | This block is not closed. The line ':::' that ends it is missing. |
+| A block inside another block that does not have more colons than the block around it | A block inside another block needs more ':' characters than the block around it. This block has 2 and the block around it, at line 12, has 2. Write ':::' here and on its closing line. |
+| A head line that is not a type name with arguments, for example text that happens to start with two colons | '1' is not a valid block name. |
 | The type does not exist or is misspelled | Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace. |
 | The type exists but is not made to be configured, so a page cannot create it | The type 'HomeBlaze.Storage.Files.MarkdownFile' cannot be used as a block because it does not implement IConfigurable. |
 | A type name without its namespace at the top level of the page, or a slot block there | 'Card' is not a type name. A slot block is only allowed directly inside a widget block. |
@@ -317,6 +331,8 @@ A block that cannot be shown is replaced by a red box with the line number of th
 | A block in a list item, a quote or a style block | A block is only allowed directly on the page or directly inside another block. |
 
 When the subject of a block fails while it is created or configured, the box shows the message of that failure.
+
+A block that has an error and is also not closed shows both messages in one box. The box replaces the block with everything in it, which for a block that is not closed is everything up to the end of the block around it, or up to the end of the page.
 
 An error in a slot block, such as a `Tab`, a `Footer` or an `Item`, replaces the whole widget around it with one box. The box names the line of the slot block. Everything inside that widget is created again once the error is fixed.
 
@@ -340,9 +356,9 @@ A subject that is created again starts from its configuration, the same as after
 The page editor marks the head line of every widget block and of every slot block that creates a subject, together with its `json` fence.
 
 - **Edit**: With the cursor on a marked head line, the toolbar shows a button that opens the edit dialog of the subject. Saving the dialog writes the configuration back into the block and saves the page. Only the head line and the `json` fence change, the content of the block stays as it is.
-- **Create**: The "Create" button adds a new block with three colons at the line of the cursor and saves the page. The name you enter becomes the `#name` of the block. The wizard checks it while you type: it must start with a letter or `_`, contain only letters, digits, `_` and `-`, and not be used on the page yet.
+- **Create**: The "Create" button adds a new block at the line of the cursor and saves the page. The block gets two colons directly on the page, and one colon more than the block around it when the cursor is inside the content of a block. The name you enter becomes the `#name` of the block. The wizard checks it while you type: it must start with a letter or `_`, contain only letters, digits, `_` and `-`, and not be used on the page yet.
 - **Save first**: "Edit" needs the saved page and the text in the editor to be the same from the start of the page to the end of the block's head line and `json` fence. When that part has unsaved changes, the editor asks you to save the page first. Unsaved text after the block is saved together with the edit.
-- **What is written**: Single values are written on the head line. Lists, objects and text with a line break are written into the `json` fence. Values that are not set are left out.
+- **What is written**: Single values are written on the head line. Lists, objects and text with a line break are written into the `json` fence. Values that are not set are left out. The head line keeps its number of colons and gets one space after them.
 
 Editing a subject elsewhere in the UI, for example through the edit button of its widget, writes its block in the same way.
 
@@ -366,8 +382,8 @@ Before:
 After:
 
 ~~~~markdown
-:::HomeBlaze.Samples.Motor#mymotor name="My Motor" targetSpeed=2000 simulationInterval=00:00:01
-:::
+:: HomeBlaze.Samples.Motor#mymotor name="My Motor" targetSpeed=2000 simulationInterval=00:00:01
+::
 ~~~~
 
 The name in parentheses becomes the `#name`, the value of `$type` becomes the type name, and every single value becomes an argument. Lists and objects go into a `json` fence inside the block.
@@ -415,33 +431,33 @@ position: 0
 
 # Factory Status
 
-::::::HomeBlaze.Components.FlowLayout minWidth=320
-:::::Item
-::::HomeBlaze.Components.Card title="Conveyor Belt" icon=Settings
-:::HomeBlaze.Components.Widget path=/Demo/Conveyor
-:::
+:: HomeBlaze.Components.FlowLayout minWidth=320
+::: Item
+:::: HomeBlaze.Components.Card title="Conveyor Belt" icon=Settings
+::::: HomeBlaze.Components.Widget path=/Demo/Conveyor
+:::::
 
-:::Footer
+::::: Footer
 Current speed: **{{ /Demo/Conveyor/CurrentSpeed }}** RPM
-:::
-::::
 :::::
-:::::Item
-::::HomeBlaze.Components.Card title="Cooling Fan" icon=Bolt
-:::HomeBlaze.Components.Widget path=/Demo/CoolingFan
+::::
 :::
+::: Item
+:::: HomeBlaze.Components.Card title="Cooling Fan" icon=Bolt
+::::: HomeBlaze.Components.Widget path=/Demo/CoolingFan
+:::::
 
-:::Footer
+::::: Footer
 Temperature: **{{ /Demo/CoolingFan/Temperature }}** °C
-:::
-::::
 :::::
-::::::
+::::
+:::
+::
 
 ## Test Motor
 
-:::HomeBlaze.Samples.Motor#testmotor name="Test Motor" targetSpeed=1800 simulationInterval=00:00:01
-:::
+:: HomeBlaze.Samples.Motor#testmotor name="Test Motor" targetSpeed=1800 simulationInterval=00:00:01
+::
 
 The test motor runs at **{{ testmotor/CurrentSpeed }}** RPM.
 
@@ -455,7 +471,7 @@ For more details, see [Motor Setup Guide](../samples/MotorSetup.md).
 ## Tips
 
 1. **Name the subjects that have state**: A subject with a `#name` survives edits elsewhere on the page. Names like `primaryMotor` are clearer than `m1`
-2. **Count the colons from the inside out**: Three for the innermost block, one more for each block around it
+2. **Count the colons from the outside in**: Two for a block directly on the page, one more for each level inside it
 3. **Show shared subjects by path**: Keep a device in a file of its own and show it with a `Widget` block. Create a subject in a block only when it belongs to this page
 4. **Fit `minWidth` to the widgets**: A flow layout needs a `minWidth` that is at least as wide as its widest widget
 5. **Order your pages**: Use `position` in the frontmatter to control the place in the navigation

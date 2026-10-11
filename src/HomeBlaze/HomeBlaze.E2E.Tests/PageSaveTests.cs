@@ -116,7 +116,7 @@ public class PageSaveTests
 
             var savedContent = await File.ReadAllTextAsync(pageFilePath);
             Assert.Multiple(
-                () => Assert.Contains($":::HomeBlaze.Samples.Motor#editablemotor name={motorName} targetSpeed=3000", savedContent),
+                () => Assert.Contains($":: HomeBlaze.Samples.Motor#editablemotor name={motorName} targetSpeed=3000", savedContent),
                 () => Assert.Equal(UntouchedTime, File.GetLastWriteTimeUtc(rootManager.ConfigurationPath)),
                 () => Assert.Same(pageSubject, GetPageSubject(rootManager)));
         }

@@ -13,31 +13,31 @@ This page shows how a block is configured: with values on its head line, with a 
 Each `key=value` pair on the head line sets one configuration property of the subject. The motor below gets a text with a space in double quotes, a number and a duration.
 
 ~~~~markdown
-:::HomeBlaze.Samples.Motor#valuemotor name="Value Motor" targetSpeed=1500 simulationInterval=00:00:00.500
-:::
+:: HomeBlaze.Samples.Motor#valuemotor name="Value Motor" targetSpeed=1500 simulationInterval=00:00:00.500
+::
 ~~~~
 
-:::HomeBlaze.Samples.Motor#valuemotor name="Value Motor" targetSpeed=1500 simulationInterval=00:00:00.500
-:::
+:: HomeBlaze.Samples.Motor#valuemotor name="Value Motor" targetSpeed=1500 simulationInterval=00:00:00.500
+::
 
 The page reads two of the values back: the motor is called {{ valuemotor/Name }} and its target speed is {{ valuemotor/TargetSpeed }} RPM.
 
 A yes or no is written as `true` or `false`. The block below is a `CanvasLayout`, an area on which widgets are placed at any position, and it is empty here. Its `isSnapToGridEnabled` is such a value: with `true`, a widget that is placed or moved on the canvas snaps to a grid. `gridSize=20` gives that grid a step of 20 pixels, and `minHeight=120` makes the canvas 120 pixels high. The page reads the yes or no back as {{ canvas/IsSnapToGridEnabled }}.
 
 ~~~~markdown
-:::HomeBlaze.Components.CanvasLayout#canvas minHeight=120 isSnapToGridEnabled=true gridSize=20
-:::
+:: HomeBlaze.Components.CanvasLayout#canvas minHeight=120 isSnapToGridEnabled=true gridSize=20
+::
 ~~~~
 
-:::HomeBlaze.Components.CanvasLayout#canvas minHeight=120 isSnapToGridEnabled=true gridSize=20
-:::
+:: HomeBlaze.Components.CanvasLayout#canvas minHeight=120 isSnapToGridEnabled=true gridSize=20
+::
 
 ## Configuration in a json fence
 
 A list or an object does not fit on the head line. The cells of a `GridLayout` are a list, so they are written as a JSON object in a `json` fence that is the first thing inside the block. Each cell here holds a `Widget` that refers to a motor next to this page. The fence itself is not shown on the page.
 
 ~~~~markdown
-:::HomeBlaze.Components.GridLayout#grid rows=1 columns=2
+:: HomeBlaze.Components.GridLayout#grid rows=1 columns=2
 ```json
 {
   "cells": [
@@ -54,10 +54,10 @@ A list or an object does not fit on the head line. The cells of a `GridLayout` a
   ]
 }
 ```
-:::
+::
 ~~~~
 
-:::HomeBlaze.Components.GridLayout#grid rows=1 columns=2
+:: HomeBlaze.Components.GridLayout#grid rows=1 columns=2
 ```json
 {
   "cells": [
@@ -74,7 +74,7 @@ A list or an object does not fit on the head line. The cells of a `GridLayout` a
   ]
 }
 ```
-:::
+::
 
 ## Style blocks
 
@@ -85,34 +85,34 @@ A block without a type and with attributes in braces is not a widget. It becomes
 .demo-note { border-left: 4px solid var(--mud-palette-primary); padding: 0.25rem 1rem; }
 </style>
 
-::: {.demo-note}
+:: {.demo-note}
 This text is inside a `div` with the class `demo-note`. The value motor runs at {{ valuemotor/CurrentSpeed }} RPM.
-:::
+::
 ~~~~
 
 <style>
 .demo-note { border-left: 4px solid var(--mud-palette-primary); padding: 0.25rem 1rem; }
 </style>
 
-::: {.demo-note}
+:: {.demo-note}
 This text is inside a `div` with the class `demo-note`. The value motor runs at {{ valuemotor/CurrentSpeed }} RPM.
-:::
+::
 
 ## Try editing
 
 The page editor writes the configuration of a block for you. Try it on this motor:
 
-:::HomeBlaze.Samples.Motor#editmotor name="Edit Me" targetSpeed=900 simulationInterval=00:00:01
-:::
+:: HomeBlaze.Samples.Motor#editmotor name="Edit Me" targetSpeed=900 simulationInterval=00:00:01
+::
 
 1. Open the menu with the eye icon at the top right of the page and choose "Split". The text of the page opens in an editor next to the page.
-2. Find the line that starts with `:::HomeBlaze.Samples.Motor#editmotor`. The editor marks it, because it is the head line of a block.
+2. Find the line that starts with `:: HomeBlaze.Samples.Motor#editmotor`. The editor marks it, because it is the head line of a block.
 3. Put the cursor on that line. The toolbar above the editor now shows the button "Edit editmotor".
 4. Click "Edit editmotor", change "Target Speed (RPM)" and click "Save" in the dialog.
 5. Look at the text of the page again. Only the head line of this block changed, and the page is saved already.
-6. Put the cursor on an empty line and click "Create". The dialog "Step 1: Select Type" opens.
+6. Put the cursor on an empty line outside of every block, for example the last line of the page, and click "Create". The dialog "Step 1: Select Type" opens.
 7. Type a name for the block into the field "Name", for example `trymotor`. It starts with a letter or `_`, contains only letters, digits, `_` and `-`, and is not used on this page yet. Then click the type "Motor" in the group "Samples". The dialog goes on to "Step 2: Create Motor" by itself. If you click the type before the name is valid, the dialog stays where it is, and you go on with "Next" once the name is valid.
-8. Fill in the field "Name" of this second step before you click "Create". It is the name that the motor shows, it is required, and it may contain spaces. A click on "Create" while the field is empty creates nothing. Then click "Create". The new block stands at the line of the cursor with three colons, the name from step 7 is its `#name`, and the page is saved already.
+8. Fill in the field "Name" of this second step before you click "Create". It is the name that the motor shows, it is required, and it may contain spaces. A click on "Create" while the field is empty creates nothing. Then click "Create". The new block stands at the line of the cursor with two colons, the name from step 7 is its `#name`, and the page is saved already. With the cursor inside the content of a block, the new block gets one colon more than the block around it.
 
 Steps 4 and 8 change the file `Demo/Configuration.md` of your checkout. The same menu, which is now in the toolbar of the editor, has "View" to leave the editor.
 
@@ -134,12 +134,12 @@ In a fence:
 
 When the text of a page changes, the page is read again. A subject that is still on the page is updated and not created again, as long as the page can tell that it is the same one.
 
-:::HomeBlaze.Samples.Motor#keptmotor name="Named Motor" targetSpeed=2000 simulationInterval=00:00:01
-:::
+:: HomeBlaze.Samples.Motor#keptmotor name="Named Motor" targetSpeed=2000 simulationInterval=00:00:01
+::
 
 The motor above has the name `keptmotor`. It keeps running when the page is edited, as long as its block keeps its name and its type and stays directly on the page. Changing or adding an argument updates it, and removing an argument creates it again.
 
-:::HomeBlaze.Samples.Motor name="Unnamed Motor" targetSpeed=2000 simulationInterval=00:00:01
-:::
+:: HomeBlaze.Samples.Motor name="Unnamed Motor" targetSpeed=2000 simulationInterval=00:00:01
+::
 
 The motor above has no name, so the page knows it by its position. Add a block or an expression anywhere before it and save the page: the motor is created again and starts at a speed of zero, while the named motor keeps its speed.
