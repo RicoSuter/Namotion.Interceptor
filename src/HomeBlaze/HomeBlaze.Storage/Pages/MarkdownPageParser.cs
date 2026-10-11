@@ -45,6 +45,7 @@ public sealed class MarkdownBlock
     /// 1-based last line of the block: its closing line, or without one the last line of its content
     /// that is not empty, which is its head line when it has no content.
     /// </summary>
+    /// <remarks><see cref="MarkdownBlockContainer.EndLine"/> says where the value is exact without a closing line.</remarks>
     internal int EndLine { get; init; }
 
     /// <summary>
@@ -147,9 +148,10 @@ public sealed class MarkdownPage
     /// of, and two directly on the page.
     /// </summary>
     /// <remarks>
-    /// The new block is inside the innermost block around the line that has a closing line of its own
-    /// or takes a widget block as content. A block further in has neither, so the head line of the new
-    /// block ends it: a widget whose type has no default slot, a style block or a block that is an error.
+    /// The new block is inside the innermost block around the line that has a closing line of its own,
+    /// takes a widget block as content, or has a block of its own at or after the line. A block further
+    /// in has none of these, so the head line of the new block ends it: a widget whose type has no
+    /// default slot, a style block or a block that is an error, with nothing of it after the line.
     /// </remarks>
     /// <param name="line">The line that <see cref="GetLineForNewBlock"/> returned.</param>
     /// <param name="findType">Gets the type that a widget block names with its full name, or null when there is none.</param>
@@ -171,7 +173,12 @@ public sealed class MarkdownPage
                 type = slot.IsOpen ? null : slot.ValueType;
             }
 
-            if (block.HasClosingLine || takesBlocks || (type is not null && SlotMap.For(type).Default is not null))
+            // The head line of the new block would end a block that is left here. With a block of its own
+            // after the line, such as the next item of a layout, that would put those blocks outside of it.
+            if (block.HasClosingLine ||
+                takesBlocks ||
+                (type is not null && SlotMap.For(type).Default is not null) ||
+                block.ChildList.Exists(child => child.Line >= line))
             {
                 outer = block;
             }

@@ -19,7 +19,7 @@ namespace HomeBlaze.Storage.Tests.Pages;
 [Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownShortFormTests
 {
-    private const string LayoutWithEveryClosingLine = """
+    internal const string LayoutWithEveryClosingLine = """
         :: HomeBlaze.Components.TabLayout
         ::: Tab#pumps Title="Pumps" Icon=WaterDrop
         :::: HomeBlaze.Components.FlowLayout MinWidth=320
@@ -43,7 +43,7 @@ public class MarkdownShortFormTests
         ::
         """;
 
-    private const string LayoutInTheShortForm = """
+    internal const string LayoutInTheShortForm = """
         :: HomeBlaze.Components.TabLayout
         ::: Tab#pumps Title="Pumps" Icon=WaterDrop
         :::: HomeBlaze.Components.FlowLayout MinWidth=320
@@ -186,6 +186,52 @@ public class MarkdownShortFormTests
         Assert.Same(leaf, scope.TryGetNamedSubject("leaf"));
         Assert.Equal(2, Assert.IsType<TestLeaf>(scope.TryGetNamedSubject("other")).Count);
         Assert.Equal(2, Assert.IsType<TestPanel>(scope.TryGetNamedSubject("panel")).Items.Length);
+    }
+
+    [Theory]
+    // The cursor on the second item: the new block is in the card of the first item, which takes a block.
+    [InlineData(4, 5, new string[0])]
+    // The cursor on the first item: the new block is directly in the layout, which takes none, and the layout keeps its items.
+    [InlineData(2, 3, new[] { "Line 1: FlowLayout has no default slot, so it cannot have content." })]
+    public async Task WhenBlockIsCreatedBetweenTheItemsOfALayoutWithoutClosingLines_ThenTheLayoutKeepsItsItems(
+        int cursorLine, int expectedFenceLength, string[] expectedBoxes)
+    {
+        // Arrange
+        string[] lines =
+        [
+            ":: HomeBlaze.Components.FlowLayout#flow",
+            "::: Item",
+            ":::: HomeBlaze.Components.Card#first Title=A",
+            "::: Item",
+            ":::: HomeBlaze.Components.Card#second Title=B"
+        ];
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var typeProvider = fixture.Services.GetRequiredService<TypeProvider>();
+        var editorPage = MarkdownPageParser.Parse(string.Join('\n', lines));
+
+        // Act: what "Create" does with the cursor on that line
+        var insertLine = editorPage.GetLineForNewBlock(cursorLine);
+        var fenceLength = editorPage.GetFenceLengthForNewBlock(
+            insertLine, name => typeProvider.Types.FirstOrDefault(type => type.FullName == name));
+        var block = MarkdownBlockWriter.CreateBlock("HomeBlaze.Samples.Motor", "created", """{ "Name": "Created" }""", fenceLength);
+        string[] written = [.. lines[..(insertLine - 1)], .. block.Split('\n'), .. lines[(insertLine - 1)..]];
+        var page = await fixture.AddPageAsync("page.md", string.Join('\n', written));
+
+        // Assert
+        Assert.Equal(expectedFenceLength, fenceLength);
+        Assert.Equal(expectedBoxes, PageErrorBoxes.FindSortedByLine(page));
+
+        // Both items are still slot blocks of the layout, whether the layout is shown or is a box.
+        var layout = Assert.Single(MarkdownPageParser.Parse(string.Join('\n', written)).Blocks);
+        Assert.Equal(2, layout.Children.Count(child => child.Kind == MarkdownBlockKind.Slot));
+
+        if (expectedBoxes.Length == 0)
+        {
+            IPathScope scope = page;
+            Assert.Equal(2, Assert.IsType<FlowLayout>(scope.TryGetNamedSubject("flow")).Items.Length);
+            var first = Assert.IsType<MarkdownFragment>(Assert.IsType<Card>(scope.TryGetNamedSubject("first")).Content);
+            Assert.Same(scope.TryGetNamedSubject("created"), first.Children["created"]);
+        }
     }
 
     /// <summary>

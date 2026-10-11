@@ -8,11 +8,14 @@ namespace HomeBlaze.Storage.Pages;
 /// up to its last line of content when it has no closing line. A closing line that closes no block is
 /// a node of its own without content.
 /// </summary>
+/// <remarks>
+/// The span of a block ends with its closing line. Without a closing line it ends where Markdig leaves
+/// it, which is not always the last line of the block, so read <see cref="EndLine"/> for that.
+/// </remarks>
 internal sealed class MarkdownBlockContainer(BlockParser parser) : ContainerBlock(parser)
 {
-    // The values of EndLine and Span.End before the last call of AddLine.
+    // The value of EndLine before the last call of AddLine.
     private int _endLineBeforeLastLine;
-    private int _spanEndBeforeLastLine;
 
     public required int FenceLength { get; init; }
 
@@ -41,21 +44,20 @@ internal sealed class MarkdownBlockContainer(BlockParser parser) : ContainerBloc
     /// 0-based last line of the block: its closing line, or without one the last line of its content
     /// that is not empty, which is its head line when it has no content.
     /// </summary>
+    /// <remarks>
+    /// Without a closing line the value is exact for a block that is reached through blocks alone. Inside
+    /// a quote, a list item or a table cell it can be an earlier line of the block, because Markdig does
+    /// not ask the block for every line there.
+    /// </remarks>
     public required int EndLine { get; set; }
 
-    /// <summary>Makes a line that is not empty the last line of the block. <paramref name="end"/> is the position of its last character.</summary>
-    public void AddLine(int line, int end)
+    /// <summary>Makes a line that is not empty the last line of the block.</summary>
+    public void AddLine(int line)
     {
         _endLineBeforeLastLine = EndLine;
-        _spanEndBeforeLastLine = Span.End;
         EndLine = line;
-        Span.End = end;
     }
 
     /// <summary>Takes the last line off the block again, when it turned out to be the line that ended the block.</summary>
-    public void RemoveLastLine()
-    {
-        EndLine = _endLineBeforeLastLine;
-        Span.End = _spanEndBeforeLastLine;
-    }
+    public void RemoveLastLine() => EndLine = _endLineBeforeLastLine;
 }

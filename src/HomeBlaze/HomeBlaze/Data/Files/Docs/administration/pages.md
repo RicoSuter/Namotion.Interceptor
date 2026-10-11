@@ -341,7 +341,7 @@ Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Availa
 
 ### Closing and Nesting
 
-A block ends at the first of three things: its closing line, the next head line that has as many colons as its own head line or fewer, or the end of the page. A closing line is therefore needed only before something that belongs further out: text of the block around it, or text of the page.
+A block ends at the first of four things: its closing line, the next head line that has as many colons as its own head line or fewer, the closing line of a block around it, or the end of the page. A closing line is therefore needed only before something that belongs further out: text of the block around it, or text of the page.
 
 The rule in full:
 
@@ -497,7 +497,7 @@ The body of the card.
 :: HomeBlaze.Samples.Motor#shortmotor Name="Short Motor" TargetSpeed=800
 ~~~~
 
-With closing lines the same mistake does show, because the line that was written to close the card finds no open block. Here the motor needs three colons on both of its lines:
+When both blocks have their closing lines, the same mistake does show, because the line that was written to close the card finds no open block. Here the motor needs three colons on both of its lines:
 
 <!-- sample: error -->
 ~~~~markdown
@@ -640,7 +640,7 @@ Rules for all slots:
 
 A mistake in how the slots of a widget are filled replaces the whole widget with one box. The box names the line that has to be fixed.
 
-**Content in a widget without a default slot.** A motor declares no slot, so its block must stay empty. `FlowLayout` and `TabLayout` have no default slot either: all their content stands in `Item` or `Tab` blocks. When the block has no closing line, the box also names the closing line that ends it, see [When a Closing Line Is Needed](#when-a-closing-line-is-needed).
+**Content in a widget without a default slot.** A motor declares no slot, so its block must stay empty. `FlowLayout` and `TabLayout` have no default slot either: all their content stands in `Item` or `Tab` blocks. When the block has no closing line and no slot block follows the content, the box also names the closing line that ends it, see [When a Closing Line Is Needed](#when-a-closing-line-is-needed).
 
 <!-- sample: error -->
 ~~~~markdown
@@ -896,7 +896,7 @@ The page editor shows the text of the page. It marks the head line of every widg
 
 - **Edit a block**: With the cursor on a marked head line, the toolbar shows a button "Edit" followed by the name of the block, or by its type when it has no name. It opens the edit dialog of the subject. Saving the dialog writes the configuration back into the block and saves the page. Only the head line and the `json` block change, the content of the block stays as it is, and a block without a closing line gets none.
 - **Edit an expression**: With the cursor in an expression, the toolbar shows the button "Edit Expression". It opens a dialog to choose another path, writes the path into the expression and saves the page.
-- **Create a block**: The "Create" button adds a new block at the line of the cursor and saves the page. The block gets a head line and a closing line, with two colons directly on the page and one colon more than the block that it is then inside of. That is the innermost block around the cursor that has a closing line of its own or takes a widget block as content. A block around the cursor that has neither, like a motor or a `Widget` without a closing line, is ended by the head line of the new block, so the new block stands after it and not inside it. A `json` block stays the first thing inside its block: with the cursor before it, on it or inside it, the new block goes after it. The editor keeps an empty line before and after the new block.
+- **Create a block**: The "Create" button adds a new block at the line of the cursor and saves the page. The block gets a head line and a closing line, with two colons directly on the page and one colon more than the block that it is then inside of. That is the innermost block around the cursor that has a closing line of its own or takes a widget block as content. A block around the cursor that has neither, like a motor or a `Widget` without a closing line, is ended by the head line of the new block, so the new block stands after it and not inside it. A block that still has blocks of its own after the cursor is never ended, so a layout keeps its `Item` and `Tab` blocks: with the cursor between them the new block stands in the item or tab before the cursor when that one is still open, and otherwise directly in the layout, which takes no content there. A `json` block stays the first thing inside its block: with the cursor before it, on it or inside it, the new block goes after it. The editor keeps an empty line before and after the new block.
 - **Save first**: "Edit" needs the saved page and the text in the editor to be the same from the start of the page to the end of the block's head line and `json` block. When that part has unsaved changes, the editor asks you to save the page first. Unsaved text after the block is saved together with the edit.
 
 The steps of "Create":

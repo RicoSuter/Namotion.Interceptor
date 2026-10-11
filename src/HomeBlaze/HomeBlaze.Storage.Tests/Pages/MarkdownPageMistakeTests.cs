@@ -394,6 +394,46 @@ public class MarkdownPageMistakeTests
     };
 
     [Theory]
+    [InlineData(":: HomeBlaze.Components.FlowLayout\nLoose text.\n::: Item\none")]
+    [InlineData(":: HomeBlaze.Components.FlowLayout\n::: Item\none\n:::\nLoose text.\n::: Item\ntwo")]
+    [InlineData(":: HomeBlaze.Components.FlowLayout\n::: Item\none\n:::\nLoose text.\n::: Item\ntwo\n:::\nMore loose text.")]
+    [InlineData(":: HomeBlaze.Components.TabLayout\n{{ /x/y }}\n<!-- the first tab -->\n::: Tab Title=One\none")]
+    public async Task WhenSlotBlockFollowsTheContentOfAWidgetWithoutDefaultSlotAndWithoutClosingLine_ThenTheBoxNamesNoClosingLine(
+        string source)
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var typeName = source.Contains("FlowLayout", StringComparison.Ordinal) ? "FlowLayout" : "TabLayout";
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", source);
+
+        // Assert: a closing line before the content would leave the slot block outside of the widget
+        Assert.Equal(
+            [$"Line 1: {typeName} has no default slot, so it cannot have content."],
+            PageErrorBoxes.FindSortedByLine(page));
+    }
+
+    [Fact]
+    public async Task WhenOnlyAnHtmlCommentFollowsTheContentOfAWidgetWithoutClosingLine_ThenTheBoxStillNamesTheClosingLine()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(
+            "page.md", ":: HomeBlaze.Components.FlowLayout\n::: Item\none\n:::\n\nText for the page.\n\n<!-- the end -->\n");
+
+        // Assert
+        Assert.Equal(
+            [
+                "Line 1: FlowLayout has no default slot, so it cannot have content. The content is inside this block " +
+                "because the block is still open there. A closing line '::' before the content ends the block."
+            ],
+            PageErrorBoxes.FindSortedByLine(page));
+    }
+
+    [Theory]
     [MemberData(nameof(WidgetBlocksBesideTheSlotBlockTheyWereMeantFor))]
     public async Task WhenWidgetBlockEndedTheSlotBlockBeforeItInAWidgetWithoutDefaultSlot_ThenTheBoxNamesBothLinesAndTheCharactersToWrite(
         string widget, string[] expectedBoxes)

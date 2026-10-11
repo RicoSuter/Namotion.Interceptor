@@ -164,6 +164,31 @@ public class MarkdownBlockWriterTests
     }
 
     [Fact]
+    public void WhenJsonFenceIsNotClosedOnAPageWithWindowsLineEndings_ThenItsSpanEndsBeforeTheLineEndingAndTheWriteKeepsTheLineEndings()
+    {
+        // Arrange
+        const string source = "before\r\n\r\n:: Demo.Card Title=Old\r\n```json\r\n{ \"Tags\": [1] }\r\n";
+        var page = MarkdownPageParser.Parse(source);
+        var card = Assert.Single(page.AllBlocks);
+        var lastCharacter = source.LastIndexOf('}');
+
+        // Act
+        var replaced = MarkdownBlockWriter.WriteConfiguration(source, card, NewTitleAndTags);
+        var removed = MarkdownBlockWriter.WriteConfiguration(source, card, NewTitle);
+
+        // Assert
+        var span = card.ConfigurationSpan!.Value;
+        Assert.Equal("```json\r\n{ \"Tags\": [1] }", source.Substring(span.Start, span.Length));
+        Assert.True(page.IsInsideCode(lastCharacter));
+        Assert.False(page.IsInsideCode(lastCharacter + 1));
+
+        Assert.Equal($"before\r\n\r\n:: Demo.Card Title=New\r\n{TagsTwo.Replace("\n", "\r\n")}\r\n", replaced);
+        Assert.Equal("before\r\n\r\n:: Demo.Card Title=New\r\n", removed);
+        AssertOnlyWindowsLineEndings(replaced);
+        AssertOnlyWindowsLineEndings(removed);
+    }
+
+    [Fact]
     public void WhenBlockIsCreated_ThenItIsAClosedBlockWithAFenceOfTheGivenLength()
     {
         // Act

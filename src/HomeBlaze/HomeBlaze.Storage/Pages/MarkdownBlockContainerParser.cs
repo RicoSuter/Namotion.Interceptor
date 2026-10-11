@@ -95,7 +95,7 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
         // takes the line off again when it does.
         if (!processor.IsBlankLine)
         {
-            container.AddLine(processor.LineIndex, processor.Line.End);
+            container.AddLine(processor.LineIndex);
         }
 
         // Back before the indentation, which belongs to the content: it can make a line code.

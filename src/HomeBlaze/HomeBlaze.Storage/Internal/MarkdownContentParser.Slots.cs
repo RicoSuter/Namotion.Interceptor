@@ -104,7 +104,7 @@ public sealed partial class MarkdownContentParser
             {
                 error = slots.Default is null
                     ? FindErrorOfBlocksBesideTheirSlotBlock(type, owner.Block) ??
-                      new BlockError(owner.Block.Line, FormatNoDefaultSlot(type, owner.Block))
+                      new BlockError(owner.Block.Line, FormatNoDefaultSlot(type, owner))
                     : new BlockError(owner.Block.Line, $"The slot '{slots.Default.Name}' is filled by a block and by loose content.");
                 return false;
             }
@@ -117,16 +117,38 @@ public sealed partial class MarkdownContentParser
         return true;
     }
 
-    private static string FormatNoDefaultSlot(Type type, MarkdownBlock owner)
+    private static string FormatNoDefaultSlot(Type type, BlockMarkdownSegment owner)
     {
         var message = $"{type.Name} has no default slot, so it cannot have content.";
 
         // Without a closing line the block takes everything up to the next head line that ends it, so
-        // the content is most likely meant for the block around this one.
-        return owner.HasClosingLine
+        // the content is most likely meant for the block around this one. The hint is left out when a
+        // slot block follows the content: a closing line before the content would leave it outside.
+        return owner.Block.HasClosingLine || HasSlotBlockAfterLooseContent(owner.Content)
             ? message
             : $"{message} The content is inside this block because the block is still open there. " +
-              $"A closing line '{MarkdownBlockFence.Create(owner.FenceLength)}' before the content ends the block.";
+              $"A closing line '{MarkdownBlockFence.Create(owner.Block.FenceLength)}' before the content ends the block.";
+    }
+
+    private static bool HasSlotBlockAfterLooseContent(IReadOnlyList<MarkdownSegment> content)
+    {
+        var hasLooseContent = false;
+        foreach (var segment in content)
+        {
+            if (segment is BlockMarkdownSegment { Block.Kind: MarkdownBlockKind.Slot })
+            {
+                if (hasLooseContent)
+                {
+                    return true;
+                }
+            }
+            else if (segment is not HtmlMarkdownSegment html || !IsCommentOnly(html))
+            {
+                hasLooseContent = true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -182,8 +204,10 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>Gets whether the content is nothing but HTML comments and white space, which shows nothing.</summary>
     private static bool IsCommentOnly(List<MarkdownSegment> content) =>
-        content.TrueForAll(segment =>
-            segment is HtmlMarkdownSegment html && string.IsNullOrWhiteSpace(HtmlCommentRegex().Replace(html.Html, string.Empty)));
+        content.TrueForAll(segment => segment is HtmlMarkdownSegment html && IsCommentOnly(html));
+
+    private static bool IsCommentOnly(HtmlMarkdownSegment html) =>
+        string.IsNullOrWhiteSpace(HtmlCommentRegex().Replace(html.Html, string.Empty));
 
     /// <summary>
     /// Fills the slots of <paramref name="subject"/> from the content of its block: slot blocks fill the slot

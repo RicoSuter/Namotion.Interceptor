@@ -1131,44 +1131,6 @@ public class MarkdownPageParserTests
         Assert.Contains("closes no block. No block is open here.", page.AllBlocks[1].Error);
     }
 
-    private const string LayoutWithEveryClosingLine = """
-        :: HomeBlaze.Components.TabLayout
-        ::: Tab#pumps Title="Pumps" Icon=WaterDrop
-        :::: HomeBlaze.Components.FlowLayout MinWidth=320
-        ::::: Item
-        :::::: HomeBlaze.Components.Card Title="Water Pump" Icon=WaterDrop
-        ::::::: HomeBlaze.Components.Widget Path=../WaterPump
-        :::::::
-        ::::::
-        :::::
-        ::::: Item
-        :::::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt
-        ::::::: HomeBlaze.Components.Widget Path=../Compressor
-        :::::::
-        ::::::
-        :::::
-        ::::
-        :::
-        ::: Tab#belt Title="Conveyor Belt" Icon=Settings
-        The conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
-        :::
-        ::
-        """;
-
-    private const string LayoutInTheShortForm = """
-        :: HomeBlaze.Components.TabLayout
-        ::: Tab#pumps Title="Pumps" Icon=WaterDrop
-        :::: HomeBlaze.Components.FlowLayout MinWidth=320
-        ::::: Item
-        :::::: HomeBlaze.Components.Card Title="Water Pump" Icon=WaterDrop
-        ::::::: HomeBlaze.Components.Widget Path=../WaterPump
-        ::::: Item
-        :::::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt
-        ::::::: HomeBlaze.Components.Widget Path=../Compressor
-        ::: Tab#belt Title="Conveyor Belt" Icon=Settings
-        The conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
-        """;
-
     /// <summary>
     /// Gets the tree of the blocks, one block per line: its kind and its head line or its error. With
     /// <paramref name="withLines"/> also its first and its last line, and "closed" when the last one is its closing line.
@@ -1192,10 +1154,10 @@ public class MarkdownPageParserTests
     public void WhenLayoutIsWrittenInTheShortForm_ThenItHasTheTreeOfTheSamePageWithEveryClosingLine()
     {
         // Arrange
-        var withEveryClosingLine = MarkdownPageParser.Parse(Normalize(LayoutWithEveryClosingLine));
+        var withEveryClosingLine = MarkdownPageParser.Parse(Normalize(MarkdownShortFormTests.LayoutWithEveryClosingLine));
 
         // Act
-        var shortForm = MarkdownPageParser.Parse(Normalize(LayoutInTheShortForm));
+        var shortForm = MarkdownPageParser.Parse(Normalize(MarkdownShortFormTests.LayoutInTheShortForm));
 
         // Assert
         Assert.Equal(DescribeTree(withEveryClosingLine.Blocks), DescribeTree(shortForm.Blocks));
@@ -1584,27 +1546,8 @@ public class MarkdownPageParserTests
         Assert.Equal([(1, 3, false), (4, 4, false)], DescribeLines(page));
     }
 
-    [Theory]
-    [InlineData(":: Demo.Card\ntext\n\n:: Demo.Motor", "text")]
-    [InlineData(":: Demo.Card\none\ntwo\n:: Demo.Motor", "two")]
-    [InlineData(":: Demo.Card\n::: Footer\ninside\n\n\n:: Demo.Motor", "inside")]
-    [InlineData(":: Demo.Card\n::: Demo.Widget Path=/x\n:: Demo.Motor", "Path=/x")]
-    [InlineData(":: Demo.Card\n- one\n- two\n", "- two")]
-    [InlineData(":: Demo.Card\n```\ncode\n", "code")]
-    [InlineData(":: Demo.Card\ntext\n> ::\n", "> ::")]
-    public void WhenBlockHasNoClosingLine_ThenItsSpanEndsWithItsLastLineOfContent(string source, string expectedEnd)
-    {
-        // Act
-        var page = MarkdownPageParser.Parse(source);
-
-        // Assert
-        var card = page.Document.Descendants<MarkdownBlockContainer>().First();
-        Assert.Equal(0, card.Span.Start);
-        Assert.Equal(source.IndexOf(expectedEnd, StringComparison.Ordinal) + expectedEnd.Length - 1, card.Span.End);
-    }
-
     [Fact]
-    public void WhenBlockHasAClosingLine_ThenItsSpanEndsWithThatLineAndTheSpanOfAnOpenBlockInsideItEndsBefore()
+    public void WhenBlockHasAClosingLine_ThenItsSpanEndsWithThatLine()
     {
         // Arrange
         const string source = ":: Demo.Card\n::: Demo.Widget Path=/x\ninside\n\n::\nrest";
@@ -1613,9 +1556,9 @@ public class MarkdownPageParserTests
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var containers = page.Document.Descendants<MarkdownBlockContainer>().ToList();
-        Assert.Equal(source.IndexOf("\nrest", StringComparison.Ordinal) - 1, containers[0].Span.End);
-        Assert.Equal(source.IndexOf("inside", StringComparison.Ordinal) + "inside".Length - 1, containers[1].Span.End);
+        var card = page.Document.Descendants<MarkdownBlockContainer>().First();
+        Assert.Equal(0, card.Span.Start);
+        Assert.Equal(source.IndexOf("\nrest", StringComparison.Ordinal) - 1, card.Span.End);
     }
 
     [Theory]
@@ -1827,6 +1770,72 @@ public class MarkdownPageParserTests
 
         // Act
         var fenceLength = page.GetFenceLengthForNewBlock(line, FindTestType);
+
+        // Assert
+        Assert.Equal(expectedFenceLength, fenceLength);
+    }
+
+    [Theory]
+    // The cursor on the first slot block and on the second one: the widget is not left, although it takes no widget block.
+    [InlineData(2, 3, "Widget :: {0}.TestFaultyHost\n  Widget ::: Demo.Motor#m\n  Slot ::: Faulty Mode=a\n  Slot ::: Faulty Mode=b\n")]
+    [InlineData(3, 3, "Widget :: {0}.TestFaultyHost\n  Slot ::: Faulty Mode=a\n  Widget ::: Demo.Motor#m\n  Slot ::: Faulty Mode=b\n")]
+    // After the last slot block nothing of the widget follows, so the new block ends the widget and stands after it.
+    [InlineData(4, 2, "Widget :: {0}.TestFaultyHost\n  Slot ::: Faulty Mode=a\n  Slot ::: Faulty Mode=b\nWidget :: Demo.Motor#m\n")]
+    public void WhenNewBlockIsInsertedBetweenTheSlotBlocksOfAWidgetWithoutDefaultSlotAndWithoutClosingLine_ThenTheWidgetKeepsItsSlotBlocks(
+        int line, int expectedFenceLength, string expectedTree)
+    {
+        // Arrange
+        var source = $":: {TestNamespace}.TestFaultyHost\n::: Faulty Mode=a\n::: Faulty Mode=b\n";
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var insertLine = page.GetLineForNewBlock(line);
+        var fenceLength = page.GetFenceLengthForNewBlock(insertLine, FindTestType);
+
+        // Assert
+        Assert.Equal((line, expectedFenceLength), (insertLine, fenceLength));
+
+        var lines = source.Split('\n').ToList();
+        lines.InsertRange(insertLine - 1, MarkdownBlockWriter.CreateBlock("Demo.Motor", "m", "{}", fenceLength).Split('\n'));
+        var written = MarkdownPageParser.Parse(string.Join('\n', lines));
+        Assert.Equal(string.Format(expectedTree, TestNamespace), DescribeTree(written.Blocks));
+    }
+
+    [Theory]
+    // On the first item: directly inside the layout.
+    [InlineData(2, 3)]
+    // On the second item and on the empty line before it: inside the panel of the first item, which takes a block.
+    [InlineData(4, 5)]
+    [InlineData(5, 5)]
+    // Between two items that have their closing lines: directly inside the layout.
+    [InlineData(10, 3)]
+    [InlineData(11, 3)]
+    // After the last item nothing of the layout follows, so the new block ends the layout and is directly on the page.
+    [InlineData(14, 2)]
+    public void WhenNewBlockIsInsertedBetweenTheItemsOfALayoutWithoutClosingLine_ThenTheLayoutIsNotLeft(
+        int line, int expectedFenceLength)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(Normalize($"""
+            :: HomeBlaze.Components.FlowLayout
+            ::: Item
+            :::: {TestNamespace}.TestPanel
+
+            ::: Item
+            :::: {TestNamespace}.TestPanel
+            ::: Item
+            one
+            :::
+
+            ::: Item
+            two
+            :::
+
+            """));
+
+        // Act
+        var fenceLength = page.GetFenceLengthForNewBlock(
+            line, name => FindTestType(name) ?? typeof(HomeBlaze.Components.FlowLayout).Assembly.GetType(name));
 
         // Assert
         Assert.Equal(expectedFenceLength, fenceLength);
