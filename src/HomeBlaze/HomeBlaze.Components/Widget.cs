@@ -11,8 +11,10 @@ namespace HomeBlaze.Components;
 /// A subject that references another subject by path and renders its widget component.
 /// Enables embedding widgets by reference in markdown instead of defining them inline.
 /// </summary>
-[Category("Components")]
+[Category("Dashboard")]
 [Description("References another subject by path and renders its widget")]
+[DisplayName("Widget")]
+[SubjectIcon("Widgets")]
 [InterceptorSubject]
 public partial class Widget : ITitleProvider, IConfigurable
 {
