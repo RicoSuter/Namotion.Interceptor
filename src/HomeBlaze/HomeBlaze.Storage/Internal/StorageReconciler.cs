@@ -28,8 +28,13 @@ internal sealed class StorageReconciler
     // Cancelled when the connection ends. Nothing is assigned to the tree after that.
     private readonly CancellationToken _connectionToken;
 
-    // True while a pass runs, and after one that ended before it applied its result.
-    private bool _hasUnfinishedPass;
+    // What the pass that runs was asked to look at. Kept after a pass that ended before it applied its result,
+    // for the pass after it.
+    private IReadOnlySet<string>? _unfinishedNamedPaths;
+    private bool _isEveryFileNamedByUnfinishedPass;
+
+    // True from the move of a subject to another entry until the tree was assigned from the index.
+    private bool _hasUnappliedMove;
 
     public StorageReconciler(
         IBlobStorage client,
@@ -61,13 +66,21 @@ internal sealed class StorageReconciler
     /// The storage did not answer in time. The pass ends without applying anything, and the next pass does the
     /// work again.
     /// </exception>
+    /// <remarks>
+    /// A pass that ends early leaves what it was asked to look at to the next pass, which looks at that as well.
+    /// </remarks>
     public async Task ReconcileAsync(IReadOnlySet<string> namedPaths, bool allNamed, CancellationToken cancellationToken)
     {
-        // A pass that ended early took with it which paths were named and whether it moved a subject. The pass
-        // after it therefore compares every file, and applies as if a subject had moved.
-        var followsUnfinishedPass = _hasUnfinishedPass;
-        var isEveryFileNamed = allNamed || followsUnfinishedPass;
-        _hasUnfinishedPass = true;
+        var isEveryFileNamed = allNamed || _isEveryFileNamedByUnfinishedPass;
+        if (_unfinishedNamedPaths is { Count: > 0 } unfinishedNamedPaths)
+        {
+            namedPaths = namedPaths.Count == 0
+                ? unfinishedNamedPaths
+                : new HashSet<string>(unfinishedNamedPaths.Concat(namedPaths), StringComparer.Ordinal);
+        }
+
+        _unfinishedNamedPaths = namedPaths;
+        _isEveryFileNamedByUnfinishedPass = isEveryFileNamed;
 
         var listing = await ListAsync(cancellationToken);
         var movableEntries = RemoveMissingEntries(listing);
@@ -77,7 +90,6 @@ internal sealed class StorageReconciler
         listing.Keys.CopyTo(paths, 0);
         Array.Sort(paths, StringComparer.Ordinal);
 
-        var hasMovedSubjects = followsUnfinishedPass;
         foreach (var path in paths)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -99,7 +111,7 @@ internal sealed class StorageReconciler
                 var isNamed = isEveryFileNamed || namedPaths.Contains(listed.Path);
                 if (!_index.TryGet(listed.Path, out var entry) || NeedsLoad(entry, listed, isNamed))
                 {
-                    hasMovedSubjects |= await AddAsync(listed, movableEntries, cancellationToken);
+                    await AddAsync(listed, movableEntries, cancellationToken);
                 }
                 else if (entry.Subject != null && (entry.Version != listed.Version || isNamed))
                 {
@@ -108,26 +120,28 @@ internal sealed class StorageReconciler
             }
             // By the token and not by the kind of exception: subject code that gives up throws a cancellation of
             // its own. An unresponsive storage ends the pass, because every file after this one would fail as well.
-            catch (Exception exception) when (exception is not StorageUnresponsiveException && !cancellationToken.IsCancellationRequested)
+            // Another storage that is unresponsive, such as one that is a file of this one, fails only its file.
+            catch (Exception exception) when (!IsOwnStorageUnresponsive(exception) && !cancellationToken.IsCancellationRequested)
             {
                 _logger?.LogWarning(exception, "Failed to load: {Path}", listed.Path);
                 RecordFailure(listed, exception);
             }
         }
 
-        Apply(hasMovedSubjects);
-        _hasUnfinishedPass = false;
+        Apply();
+
+        _unfinishedNamedPaths = null;
+        _isEveryFileNamedByUnfinishedPass = false;
     }
+
+    private bool IsOwnStorageUnresponsive(Exception exception)
+        => exception is StorageUnresponsiveException unresponsive && ReferenceEquals(unresponsive.Storage, _client);
 
     /// <summary>
     /// Builds the children of every folder from the index and assigns those that changed. Does nothing when no
     /// entry was added, replaced or removed since the last time it completed.
     /// </summary>
-    /// <param name="keepRemovedUntilAdded">
-    /// Assigns in two steps: first everything that is added, then everything that is removed. Needed when a
-    /// subject moved, because an assignment detaches before it attaches and would stop and restart the subject.
-    /// </param>
-    public void Apply(bool keepRemovedUntilAdded = false)
+    public void Apply()
     {
         if (!_index.HasUnappliedChanges)
         {
@@ -188,7 +202,9 @@ internal sealed class StorageReconciler
         // Without the flow of this item, work that a lifecycle handler starts here queues its calls into the storage instead of running them inline.
         using (ExecutionContext.SuppressFlow())
         {
-            if (keepRemovedUntilAdded)
+            // In two steps when a subject moved, first everything that is added and then everything that is
+            // removed: one assignment detaches before it attaches, which would stop and restart the subject.
+            if (_hasUnappliedMove)
             {
                 foreach (var folder in folders)
                 {
@@ -210,6 +226,7 @@ internal sealed class StorageReconciler
 
         // Only here: an assignment that throws leaves the rest of the tree to the next call.
         _index.MarkApplied();
+        _hasUnappliedMove = false;
     }
 
     /// <summary>
@@ -383,14 +400,12 @@ internal sealed class StorageReconciler
                IsKeyFree(entry.Parent, entry.Key);
     }
 
-    /// <returns>True when an existing subject was moved to the path instead of creating one.</returns>
-    private async Task<bool> AddAsync(
+    private async Task AddAsync(
         StorageListing listed,
         Dictionary<string, List<StorageEntry>> movableEntries,
         CancellationToken cancellationToken)
     {
         var entry = new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version };
-        var isMoved = false;
 
         if (IsJson(listed.Path))
         {
@@ -403,7 +418,7 @@ internal sealed class StorageReconciler
                 candidates[0].Parent != entry.Parent)
             {
                 entry.Subject = candidates[0].Subject;
-                isMoved = true;
+                _hasUnappliedMove = true;
             }
             else
             {
@@ -437,7 +452,6 @@ internal sealed class StorageReconciler
         }
 
         _index.Set(entry);
-        return isMoved;
     }
 
     private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
@@ -489,6 +503,9 @@ internal sealed class StorageReconciler
             SetMetadata(file, version);
             if (hash != entry.Hash)
             {
+                // A load that fails half way has changed the subject, which then holds neither content.
+                entry.Hash = null;
+
                 await file.OnFileChangedAsync(cancellationToken);
                 _logger?.LogInformation("Reloaded: {Path}", entry.Path);
             }
@@ -526,6 +543,10 @@ internal sealed class StorageReconciler
         // a file that is being written is no reason to stop a device.
         if (entry.Subject is IConfigurable configurable && (!IsJson(entry.Path) || FileSubjectFactory.DescribesTypeOf(entry.Subject, json)))
         {
+            // From here on the subject holds neither content until the configuration is applied. Not earlier:
+            // text that was rejected above has not touched the subject.
+            entry.Hash = null;
+
             // Can attach nested subjects, see the creation of a subject from JSON.
             using (ExecutionContext.SuppressFlow())
             {

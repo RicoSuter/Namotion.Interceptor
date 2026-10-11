@@ -95,7 +95,7 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
         if (IsUnresponsive)
         {
             throw new StorageUnresponsiveException(
-                $"The storage is unresponsive, {Describe(operation, target)} was not started: an earlier call was given up and has not returned yet.");
+                $"The storage is unresponsive, {Describe(operation, target)} was not started: an earlier call was given up and has not returned yet.", this);
         }
 
         // On the thread pool, because a storage can do its work before it returns its task.
@@ -110,7 +110,7 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
 
         cancellationToken.ThrowIfCancellationRequested();
         throw new StorageUnresponsiveException(
-            $"The storage did not complete {Describe(operation, target)} within {StorageCallTimeout.Limit.TotalSeconds:0} seconds.");
+            $"The storage did not complete {Describe(operation, target)} within {StorageCallTimeout.Limit.TotalSeconds:0} seconds.", this);
     }
 
     private static string Describe(string operation, object? target)

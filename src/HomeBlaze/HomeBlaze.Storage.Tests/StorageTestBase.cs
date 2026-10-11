@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
@@ -97,6 +98,19 @@ public abstract class StorageTestBase : IDisposable
         var motor = new Samples.Motor(serviceProvider.GetRequiredService<IInterceptorSubjectContext>()) { Name = name };
         return serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>().Serialize(motor);
     }
+
+    /// <summary>The JSON file of a storage that is nested in another one and follows nothing by itself.</summary>
+    protected static string SerializeStorage(string directory, string? containerName = null, string storageType = "disk")
+        => $$"""
+            {
+              "$type": "{{typeof(FluentStorageContainer).FullName}}",
+              "storageType": "{{storageType}}",
+              "connectionString": {{JsonSerializer.Serialize(directory)}},
+              "containerName": {{JsonSerializer.Serialize(containerName)}},
+              "enableFileWatching": false,
+              "reconcileIntervalSeconds": 0
+            }
+            """;
 
     protected string GetFullPath(string relativePath)
         => Path.Combine(StorageDirectory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));

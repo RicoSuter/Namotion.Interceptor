@@ -421,6 +421,84 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenJsonSubjectFileIsPutBackAfterBeingInvalid_ThenConfigurationIsNotAppliedAgain()
+    {
+        // Arrange
+        var content = CallbackSubject.Serialize("first");
+        WriteFile("Valve.json", content);
+        var storage = await ConnectAsync();
+        var valve = Assert.IsType<CallbackSubject>(storage.Children["Valve"]);
+        WriteFile("Valve.json", "{");
+        await storage.ReconcileAsync();
+        var applyCount = 0;
+        CallbackSubject.RunOnNextApply((_, _) =>
+        {
+            applyCount++;
+            return Task.CompletedTask;
+        });
+
+        // Act
+        WriteFile("Valve.json", content);
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Same(valve, storage.Children["Valve"]);
+        Assert.Equal("first", valve.Name);
+        Assert.Equal(0, applyCount);
+    }
+
+    [Fact]
+    public async Task WhenJsonSubjectFileIsPutBackAfterFailedApply_ThenSubjectHoldsThePreviousConfigurationAndSaveKeepsIt()
+    {
+        // Arrange
+        WriteFile("Valve.json", CallbackSubject.Serialize("first"));
+        var storage = await ConnectAsync();
+        var valve = Assert.IsType<CallbackSubject>(storage.Children["Valve"]);
+        CallbackSubject.RunOnNextApply((_, _) => throw new InvalidOperationException("The endpoint is unreachable."));
+        WriteFile("Valve.json", CallbackSubject.Serialize("second, rejected"));
+        await storage.ReconcileAsync(Named("Valve.json"));
+        var nameAfterFailedApply = valve.Name;
+
+        // Act
+        WriteFile("Valve.json", CallbackSubject.Serialize("first"));
+        await storage.ReconcileAsync(Named("Valve.json"));
+        var nameAfterFileWasPutBack = valve.Name;
+        await storage.WriteConfigurationAsync(valve, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("second, rejected", nameAfterFailedApply);
+        Assert.Equal("first", nameAfterFileWasPutBack);
+        Assert.DoesNotContain("second, rejected", File.ReadAllText(GetFullPath("Valve.json")));
+    }
+
+    [Fact]
+    public async Task WhenMarkdownFileIsPutBackAfterFailedLoad_ThenPageHoldsThePreviousContentAndSaveKeepsIt()
+    {
+        // Arrange
+        var content = $"# Page\n\n```subject(valve)\n{CallbackSubject.Serialize("first")}\n```\n";
+        var rejectedContent = content + "\n```subject(broken)\n{ \"$type\": \"typo, }\n```\n";
+        WriteFile("Page.md", content);
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Page.md"]);
+        var valve = Assert.IsType<CallbackSubject>(page.Children["valve"]);
+        WriteFile("Page.md", rejectedContent);
+        await storage.ReconcileAsync(Named("Page.md"));
+        var contentAfterFailedLoad = page.Content;
+
+        // Act
+        WriteFile("Page.md", content);
+        await storage.ReconcileAsync(Named("Page.md"));
+        var contentAfterFileWasPutBack = page.Content;
+        valve.Name = "saved in the UI";
+        await page.WriteConfigurationAsync(valve, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(rejectedContent, contentAfterFailedLoad);
+        Assert.Equal(content, contentAfterFileWasPutBack);
+        Assert.DoesNotContain("subject(broken)", File.ReadAllText(GetFullPath("Page.md")));
+    }
+
+    [Fact]
     public async Task WhenPlainJsonFileChanges_ThenItsInstanceIsKeptWithTheNewSize()
     {
         // Arrange

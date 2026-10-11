@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor.Testing;
@@ -177,17 +176,6 @@ public class StorageReentrancyTests : StorageTestBase
             nested.Dispose();
         }
     }
-
-    private static string SerializeStorage(string directory)
-        => $$"""
-            {
-              "$type": "{{typeof(FluentStorageContainer).FullName}}",
-              "storageType": "disk",
-              "connectionString": {{JsonSerializer.Serialize(directory)}},
-              "enableFileWatching": false,
-              "reconcileIntervalSeconds": 0
-            }
-            """;
 
     private static async Task WriteBlobAsync(
         IStorageContainer storage, string path, string content, CancellationToken cancellationToken)

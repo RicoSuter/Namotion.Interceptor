@@ -7,6 +7,9 @@ namespace HomeBlaze.Storage.Tests;
 
 public class StorageTimeoutTests : StorageTestBase
 {
+    // A pass that waits for a call that never returns never completes, so the wait for it ends the test instead.
+    private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
+
     private readonly ManualTimeProvider _timeProvider = new();
     private PausableBlobStorage? _client;
     private int _idleTimerCount;
@@ -114,15 +117,13 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenNamedPassFails_ThenNextPassComparesEveryFileByContent()
+    public async Task WhenNamedPassFails_ThenNextPassStillComparesTheNamedFileByContent()
     {
         // Arrange
         WriteFile("Data.gated", "first");
         var storage = await ConnectPausableAsync();
         var file = (GatedFile)storage.Children["Data.gated"];
-        var originalTime = File.GetLastWriteTimeUtc(GetFullPath("Data.gated"));
-        WriteFile("Data.gated", "other");
-        File.SetLastWriteTimeUtc(GetFullPath("Data.gated"), originalTime);
+        ChangeContentOnly("Data.gated", "other");
         var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
         var pass = storage.ReconcileAsync(Named("Data.gated"));
         await listingReached;
@@ -135,6 +136,128 @@ public class StorageTimeoutTests : StorageTestBase
 
         // Assert
         Assert.Equal("other", file.Content);
+    }
+
+    [Fact]
+    public async Task WhenNamedPassFails_ThenNextNamedPassComparesTheNamedFilesOfBoth()
+    {
+        // Arrange
+        WriteFile("First.gated", "first");
+        WriteFile("Second.gated", "first");
+        var storage = await ConnectPausableAsync();
+        var first = (GatedFile)storage.Children["First.gated"];
+        var second = (GatedFile)storage.Children["Second.gated"];
+        ChangeContentOnly("First.gated", "other");
+        ChangeContentOnly("Second.gated", "other");
+        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var pass = storage.ReconcileAsync(Named("First.gated"));
+        await listingReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync(Named("Second.gated"));
+
+        // Assert
+        Assert.Equal("other", first.Content);
+        Assert.Equal("other", second.Content);
+    }
+
+    [Fact]
+    public async Task WhenPassWithEveryFileNamedFails_ThenNextPassComparesEveryFileByContent()
+    {
+        // Arrange
+        WriteFile("Data.gated", "first");
+        var storage = await ConnectPausableAsync();
+        var file = (GatedFile)storage.Children["Data.gated"];
+        ChangeContentOnly("Data.gated", "other");
+        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var pass = storage.ReconcileAsync(allNamed: true);
+        await listingReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("other", file.Content);
+    }
+
+    [Fact]
+    public async Task WhenPassFailsAtItsListing_ThenNextPassOpensNoUnchangedFile()
+    {
+        // Arrange
+        WriteFile("First.md");
+        WriteFile("Second.md");
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectPausableAsync();
+        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var pass = storage.ReconcileAsync();
+        await listingReached;
+        _client.FailHangingCall(new IOException("The share did not answer."));
+        await pass;
+        var statusAfterFailedPass = storage.Status;
+        var openCountBeforeNextPass = _client.GetCallCount(nameof(IBlobStorage.OpenReadAsync));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(openCountBeforeNextPass, _client.GetCallCount(nameof(IBlobStorage.OpenReadAsync)));
+    }
+
+    [Fact]
+    public async Task WhenNestedStorageStallsWhileItsChangedFileIsApplied_ThenPassOfParentCompletesAndDoesNotApplyTheFileAgain()
+    {
+        // Arrange
+        var nestedDirectory = CreateTemporaryDirectory();
+        WriteFile("Alpha.md");
+        WriteFile("Nested.json", SerializeStorage(nestedDirectory.FullName, containerName: "first"));
+        var parent = await ConnectAsync();
+        var nested = Assert.IsType<FluentStorageContainer>(parent.Children["Nested"]);
+        var nestedConnectCount = 0;
+        Task? nestedListingReached = null;
+        nested.TimeProvider = _timeProvider;
+        nested.ClientDecorator = client =>
+        {
+            nestedConnectCount++;
+            var nestedClient = new PausableBlobStorage(client);
+            nestedListingReached = nestedClient.PauseNext(nameof(IBlobStorage.ListAsync));
+            return nestedClient;
+        };
+
+        try
+        {
+            WriteFile("Nested.json", SerializeStorage(nestedDirectory.FullName, containerName: "second"));
+            File.Delete(GetFullPath("Alpha.md"));
+            WriteFile("Zulu.md");
+
+            // Act: the pass of the parent connects the nested storage again, whose listing never returns.
+            var pass = parent.ReconcileAsync();
+            await AsyncTestHelpers.WaitUntilAsync(() => nestedConnectCount == 1 && _timeProvider.ArmedTimerCount == 1);
+            await nestedListingReached!;
+            _timeProvider.Advance(StorageCallTimeout.Limit);
+            await pass.WaitAsync(DeadlockTimeout);
+            var statusAfterPass = parent.Status;
+            var childrenAfterPass = parent.Children.Keys.Order().ToList();
+            await parent.ReconcileAsync().WaitAsync(DeadlockTimeout);
+
+            // Assert
+            Assert.Equal(StorageStatus.Error, nested.Status);
+            Assert.False(parent.IsStorageUnresponsive);
+            Assert.Equal(StorageStatus.Connected, statusAfterPass);
+            Assert.Equal(["Nested", "Zulu.md"], childrenAfterPass);
+            Assert.Equal(1, nestedConnectCount);
+        }
+        finally
+        {
+            nested.Dispose();
+        }
     }
 
     [Fact]
@@ -418,6 +541,17 @@ public class StorageTimeoutTests : StorageTestBase
 
         _idleTimerCount = _timeProvider.ArmedTimerCount;
         return storage;
+    }
+
+    /// <summary>
+    /// Replaces the content of a file with content of the same length and keeps its modification time, so that
+    /// a listing shows no change.
+    /// </summary>
+    private void ChangeContentOnly(string relativePath, string content)
+    {
+        var modified = File.GetLastWriteTimeUtc(GetFullPath(relativePath));
+        WriteFile(relativePath, content);
+        File.SetLastWriteTimeUtc(GetFullPath(relativePath), modified);
     }
 
     private async Task LetHangingCallTimeOutAsync()

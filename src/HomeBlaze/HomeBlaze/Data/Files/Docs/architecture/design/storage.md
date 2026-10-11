@@ -92,7 +92,7 @@ The subject tree follows the storage through reconcile passes. A pass lists the 
 | size or modification time differs, or an event named it | yes | The file is hashed and the subject reloaded only if the hash differs. The size and time that a file subject shows follow the listing either way. |
 | same size and time, not named | yes | Nothing. The file is not opened. |
 
-After a lost event, and in the pass after one that failed or was cancelled, every file counts as named, so the content of every file is compared once.
+After a lost event every file counts as named, so the content of every file is compared once. A pass that failed or was cancelled hands the paths it was asked to compare to the pass after it.
 
 - **Exact names.** Paths are compared exactly as the storage reports them, on every platform. A rename is the old path gone and the new one present, which includes a rename that only changes the casing.
 - **Moved JSON subjects keep their instance.** A configurable JSON subject keeps its instance when its file moves to another folder or its folder is renamed: in the same pass, exactly one JSON subject with that content disappears and a new `.json` file with the same content appears in another folder. The subject is neither stopped nor recreated. A rename within the same folder creates a new instance.
@@ -100,7 +100,7 @@ After a lost event, and in the pass after one that failed or was cancelled, ever
 - **JSON files.** What a `.json` file is follows its content. A file that was first read as plain or invalid JSON becomes its subject once its content describes one, a subject whose file names another type is replaced by a subject of that type, and a subject whose file loses its type becomes a plain JSON file. Content that is not valid JSON, such as a file that is still being written, leaves a subject as it is.
 - **Plain files.** A generic file and a plain JSON file hold only size and time, which come from the listing without a call per file.
 - **Keys.** A subject that is in the tree keeps its key. A file whose key is taken (`Docs.json` next to a `Docs` folder) is left out with a warning and loaded again in the first pass in which the key is free. The same holds for a folder. Its files are loaded in the pass that places it or in the one after it.
-- **Failed loads.** A file that cannot be loaded is retried when it changes or when an event names it. After an IO error, such as a file that its writer still holds, the next pass tries again.
+- **Failed loads.** A file that cannot be loaded is retried when it changes or when an event names it. After an IO error, such as a file that its writer still holds, the next pass tries again. A subject that is in the tree and fails half way through a reload can hold part of the rejected content, and is loaded again when its file changes, which includes a file that is put back to what it was.
 - **Folders.** The children of a folder are assigned once per pass, and only when they changed. When a subject moved, they are assigned in two steps, first everything that is added and then everything that is removed, so the moved subject is not stopped and restarted.
 
 **One thing at a time**
@@ -113,7 +113,7 @@ Code that runs on the worker, such as the load of a subject or its `ApplyConfigu
 
 **An unresponsive storage**
 
-Every call on the storage client is started on the thread pool and limited to 30 seconds. When such a call hits the limit, a pass ends without changing the tree and sets the status of the storage to `Error`, and an operation fails with an exception. No file is marked as failed because of it: the next pass tries everything again and compares the content of every file once. While a call that hit the limit has not returned, further calls fail at once instead of waiting again.
+Every call on the storage client is started on the thread pool and limited to 30 seconds. When such a call hits the limit, a pass ends without changing the tree and sets the status of the storage to `Error`, and an operation fails with an exception. No file is marked as failed because of it: the next pass does the work again and compares what the failed pass was asked to compare. While a call that hit the limit has not returned, further calls fail at once instead of waiting again. This is about the storage's own client: a storage that is a file of another storage and does not answer fails only its own file in the pass of that other storage.
 
 Reading the content of a file to its end on the worker has the same limit, but there it is a failure of that one file: the pass goes on with the other files, the status stays `Connected`, and the file is loaded when it changes or an event names it. A new file is left out until then, and a file that is in the tree keeps the content it has.
 
@@ -140,7 +140,6 @@ A connection to the storage owns its worker, its index and its timers. Connectin
 - **No periodic pass, no retry.** With `reconcileIntervalSeconds` at zero, a failed pass is retried only when the next event arrives.
 - **File watcher that cannot restart.** A file watcher that fails and cannot restart leaves the storage on the periodic pass until it reconnects.
 - **Cancelled calls.** A call that was given up because its caller was cancelled also makes the client refuse calls until it returns, so a pass in that moment fails and the status shows `Error` until the next pass.
-- **After an unfinished pass.** After a pass that did not finish, the next one compares the content of every file once.
 - **Cancelled operations.** A queued operation whose caller cancels is only dropped when the worker reaches it.
 
 ### File Hierarchy
