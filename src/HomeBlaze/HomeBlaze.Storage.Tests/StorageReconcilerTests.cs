@@ -82,6 +82,30 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenFilesWereReloadedOnce_ThenLaterPassesOpenNoFile()
+    {
+        // Arrange
+        PausableBlobStorage? client = null;
+        WriteFile("Notes.md", "first");
+        WriteFile("Data.gated", "first");
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectAsync(configure: container =>
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        WriteFile("Notes.md", "second version");
+        WriteFile("Data.gated", "second version");
+        WriteFile("Motor.json", SerializeMotor("Pump, changed"));
+        await storage.ReconcileAsync();
+        var openCountAfterReload = client!.GetCallCount(nameof(IBlobStorage.OpenReadAsync));
+
+        // Act
+        await storage.ReconcileAsync();
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(openCountAfterReload, client.GetCallCount(nameof(IBlobStorage.OpenReadAsync)));
+    }
+
+    [Fact]
     public async Task WhenContentChangesWithSameSizeAndTime_ThenOnlyNamedPassReloadsIt()
     {
         // Arrange
@@ -212,6 +236,37 @@ public class StorageReconcilerTests : StorageTestBase
         // Assert
         Assert.Equal(["Fourth", "Third"], storage.Children.Keys.Order());
         Assert.DoesNotContain(storage.Children.Values, subject => ReferenceEquals(subject, first) || ReferenceEquals(subject, second));
+    }
+
+    [Fact]
+    public async Task WhenTwoJsonSubjectsWithSameContentMoveToOtherFolders_ThenNeitherInstanceIsKept()
+    {
+        // Arrange: into other folders, where one subject with that content alone would keep its instance.
+        WriteFile("A/Pump.json", SerializeMotor("Same"));
+        WriteFile("B/Pump.json", SerializeMotor("Same"));
+        var storage = await ConnectAsync();
+        var first = ((VirtualFolder)storage.Children["A"]).Children["Pump"];
+        var second = ((VirtualFolder)storage.Children["B"]).Children["Pump"];
+        Directory.CreateDirectory(GetFullPath("C"));
+        Directory.CreateDirectory(GetFullPath("D"));
+        File.Move(GetFullPath("A/Pump.json"), GetFullPath("C/Pump.json"));
+        File.Move(GetFullPath("B/Pump.json"), GetFullPath("D/Pump.json"));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        IInterceptorSubject[] moved =
+        [
+            ((VirtualFolder)storage.Children["C"]).Children["Pump"],
+            ((VirtualFolder)storage.Children["D"]).Children["Pump"]
+        ];
+        Assert.All(moved, subject =>
+        {
+            Assert.IsType<Samples.Motor>(subject);
+            Assert.NotSame(first, subject);
+            Assert.NotSame(second, subject);
+        });
     }
 
     [Fact]
@@ -1168,6 +1223,106 @@ public class StorageReconcilerTests : StorageTestBase
         // Assert
         Assert.Empty(docs.Children);
         Assert.False(File.Exists(GetFullPath("Docs/Motor.json")));
+    }
+
+    [Fact]
+    public async Task WhenAssignmentToTreeFails_ThenPassFailsAndNextPassAssignsAgain()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        var failingWrite = new FailingWrite(nameof(FluentStorageContainer.Children));
+        Context!.AddService<IWriteInterceptor>(failingWrite);
+        failingWrite.FailNext();
+        WriteFile("Notes.md");
+
+        // Act
+        await storage.ReconcileAsync();
+        var statusAfterFailedPass = storage.Status;
+        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
+        Assert.Empty(childrenAfterFailedPass);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenOneFolderChanges_ThenOnlyThatFolderIsAssigned()
+    {
+        // Arrange
+        WriteFile("A/First.md");
+        WriteFile("B/Second.md");
+        var storage = await ConnectAsync();
+        var changedFolder = (VirtualFolder)storage.Children["A"];
+        var otherFolder = (VirtualFolder)storage.Children["B"];
+        var assignmentsOfRoot = new ChildrenAssignmentRecorder(storage);
+        var assignmentsOfChangedFolder = new ChildrenAssignmentRecorder(changedFolder);
+        var assignmentsOfOtherFolder = new ChildrenAssignmentRecorder(otherFolder);
+        Context!.AddService<IWriteInterceptor>(assignmentsOfRoot);
+        Context.AddService<IWriteInterceptor>(assignmentsOfChangedFolder);
+        Context.AddService<IWriteInterceptor>(assignmentsOfOtherFolder);
+        WriteFile("A/Added.md");
+
+        // Act
+        await storage.ReconcileAsync();
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal([["Added.md", "First.md"]], assignmentsOfChangedFolder.AssignedKeys);
+        Assert.Empty(assignmentsOfOtherFolder.AssignedKeys);
+        Assert.Empty(assignmentsOfRoot.AssignedKeys);
+    }
+
+    [Fact]
+    public async Task WhenConnectIsCancelledWhileItsLastFileLoads_ThenNextPassLoadsThatFile()
+    {
+        // Arrange: the load ends with the cancellation of the connect, which is no failure of the file.
+        var storage = await ConnectAsync();
+        WriteFile("Only.gated");
+        var loadReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        GatedFile.RunOnNextLoad(async (_, cancellationToken) =>
+        {
+            loadReached.SetResult();
+            await new TaskCompletionSource().Task.WaitAsync(cancellationToken);
+        });
+        using var cancellation = new CancellationTokenSource();
+        var reconnect = storage.ConnectAsync(cancellation.Token);
+        await loadReached.Task.WaitAsync(DeadlockTimeout);
+
+        // Act
+        await cancellation.CancelAsync();
+        var exception = await Record.ExceptionAsync(() => reconnect);
+        var childrenAfterCancelledConnect = storage.Children.Keys.ToList();
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.IsType<OperationCanceledException>(exception, exactMatch: false);
+        Assert.Empty(childrenAfterCancelledConnect);
+        Assert.Equal(["Only.gated"], storage.Children.Keys);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenRefreshAfterBlobWriteFailsAndFileKeepsSizeAndTime_ThenNextPassStillReloadsIt()
+    {
+        // Arrange
+        WriteFile("Data.gated", "aaaa");
+        var storage = await ConnectAsync();
+        var file = (GatedFile)storage.Children["Data.gated"];
+        var modified = File.GetLastWriteTimeUtc(GetFullPath("Data.gated"));
+        GatedFile.FailNextLoad();
+
+        // Act: the write leaves the file with the size and, set back here, the time that are recorded for it.
+        await WriteBlobAsync(storage, "Data.gated", "bbbb");
+        File.SetLastWriteTimeUtc(GetFullPath("Data.gated"), modified);
+        var contentAfterWrite = file.Content;
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("aaaa", contentAfterWrite);
+        Assert.Equal("bbbb", file.Content);
     }
 
     [Fact]

@@ -247,6 +247,23 @@ public class ReconcileTriggerTests
         Assert.Equal(["Home.md"], _passes[1].NamedPaths);
     }
 
+    [Fact]
+    public void WhenPathChangesAfterEventsWereLostAndBeforeThePassRuns_ThenPassStillNamesEveryFile()
+    {
+        // Arrange
+        using var trigger = CreateTrigger();
+
+        // Act
+        trigger.NotifyEventsLost();
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+
+        // Assert
+        var pass = Assert.Single(_passes);
+        Assert.True(pass.AllNamed);
+        Assert.Equal(["Home.md"], pass.NamedPaths);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

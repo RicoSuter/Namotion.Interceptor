@@ -115,6 +115,30 @@ public sealed class TimeLimitedBlobStorageTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenOneOfTwoAbandonedCallsReturns_ThenCallsAreRefusedUntilTheOtherHasReturnedToo()
+    {
+        // Arrange
+        var client = new TwoCallBlobStorage();
+        using var storage = new TimeLimitedBlobStorage(client, _timeProvider, logger: null);
+        var listing = storage.ListAsync();
+        var exists = storage.ExistsAsync(["Notes.md"]);
+        await client.WhenBothCallsHaveArrivedAsync();
+        await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == 2);
+        _timeProvider.Advance(StorageCallTimeout.Limit);
+        await Assert.ThrowsAsync<StorageUnresponsiveException>(() => listing);
+        await Assert.ThrowsAsync<StorageUnresponsiveException>(() => exists);
+
+        // Act: released on a thread of the pool, which then also runs what follows from the return of the call.
+        await Task.Run(client.ReleaseListing);
+        var isUnresponsiveAfterFirstReturn = storage.IsUnresponsive;
+        await Task.Run(client.ReleaseExists);
+
+        // Assert
+        Assert.True(isUnresponsiveAfterFirstReturn);
+        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsUnresponsive);
+    }
+
+    [Fact]
     public async Task WhenCallExceedsTheLimit_ThenExceptionNamesOperationAndPath()
     {
         // Arrange
@@ -182,6 +206,64 @@ public sealed class TimeLimitedBlobStorageTests : IDisposable
         // The call can arrive in the storage before its caller has started the wait that the limit ends.
         await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == 1);
         _timeProvider.Advance(StorageCallTimeout.Limit);
+    }
+
+    /// <summary>
+    /// A storage whose listing and whose check for existence each hang until the test lets them return.
+    /// </summary>
+    private sealed class TwoCallBlobStorage : IBlobStorage
+    {
+        private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+
+        private readonly TaskCompletionSource _listingArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _existsArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Without asynchronous continuations: the thread that completes one of them runs the rest of the call.
+        private readonly TaskCompletionSource _listingReleased = new();
+        private readonly TaskCompletionSource _existsReleased = new();
+
+        public Task WhenBothCallsHaveArrivedAsync()
+            => Task.WhenAll(_listingArrived.Task, _existsArrived.Task).WaitAsync(Timeout);
+
+        public void ReleaseListing() => _listingReleased.SetResult();
+
+        public void ReleaseExists() => _existsReleased.SetResult();
+
+        public async Task<IReadOnlyCollection<Blob>> ListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            _listingArrived.SetResult();
+            await _listingReleased.Task;
+            return [];
+        }
+
+        public async Task<IReadOnlyCollection<bool>> ExistsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
+        {
+            _existsArrived.TrySetResult();
+            await _existsReleased.Task;
+            return [false];
+        }
+
+        public Task WriteAsync(string fullPath, Stream dataStream, bool append = false, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<Stream> OpenReadAsync(string fullPath, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DeleteAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyCollection<Blob>> GetBlobsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task SetBlobsAsync(IEnumerable<Blob> blobs, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<ITransaction> OpenTransactionAsync() => throw new NotSupportedException();
+
+        public void Dispose()
+        {
+            // Nothing to release.
+        }
     }
 
     private sealed class RecordingLogger : ILogger

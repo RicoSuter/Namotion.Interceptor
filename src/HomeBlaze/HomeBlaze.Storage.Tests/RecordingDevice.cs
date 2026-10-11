@@ -62,7 +62,7 @@ public partial class RecordingDevice : BackgroundService, IConfigurable
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
-        => Task.Delay(System.Threading.Timeout.Infinite, stoppingToken);
+        => new TaskCompletionSource().Task.WaitAsync(stoppingToken);
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
