@@ -8,7 +8,9 @@
     var registration = ComponentRegistry.GetComponent(Subject.GetType(), Type);
     if (registration?.ComponentType != null)
     {
-        <div class="subject-component-wrapper" style="position: relative;">
+        @* A page fills a container of definite height, such as the split editor's pane, and keeps its natural
+           height elsewhere. *@
+        <div class="subject-component-wrapper" style="position: relative;@(Type == SubjectComponentType.Page ? " height: 100%;" : null)">
             @if (IsEditing && Type == SubjectComponentType.Widget && (ActionButtons != null || HasEditComponent))
             {
                 <div class="subject-edit-overlay">

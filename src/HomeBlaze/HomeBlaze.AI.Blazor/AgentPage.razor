@@ -6,39 +6,43 @@
 
 @if (Agent is { } agent)
 {
-    @* Fills the viewport below the app bar, so the chat input stays in view and the tab content scrolls on its own. *@
-    <div class="d-flex flex-column gap-2 pt-2 pt-sm-4 pb-2 px-sm-4" style="height: calc(100dvh - var(--mud-appbar-height));">
+    @* Fills the viewport below the app bar, so the chat input stays in view and the tab content scrolls on its own.
+       The max height caps it to the pane when the page is shown next to its editor; 100vh is the fallback for
+       browsers without dvh. *@
+    <div class="d-flex flex-column gap-2 pt-2 pt-sm-4 pb-2"
+         style="height: calc(100vh - var(--mud-appbar-height)); height: calc(100dvh - var(--mud-appbar-height)); max-height: 100%;">
         @* The right padding keeps the buttons clear of the page's edit mode menu, which floats over the top right corner. *@
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="pr-12 flex-shrink-0">
             <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="2" Class="flex-grow-1" Style="min-width: 0;">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="min-width: 0;">
                     <MudIcon Icon="@Icons.Material.Filled.SmartToy" />
-                    <MudText Typo="Typo.h5">@agent.Title</MudText>
+                    <MudText Typo="Typo.h5" Style="overflow-wrap: anywhere;">@agent.Title</MudText>
                 </MudStack>
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" data-testid="agent-status">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Style="min-width: 0;" data-testid="agent-status">
                     <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(agent.Status)" Class="ma-0">@agent.Status</MudChip>
                     @if (agent.StatusMessage is { Length: > 0 } statusMessage)
                     {
-                        <MudText Typo="Typo.body2" Class="mud-text-secondary">@statusMessage</MudText>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">@statusMessage</MudText>
                     }
                 </MudStack>
             </MudStack>
-            <MudHidden Breakpoint="Breakpoint.Xs" Invert="true">
+            @* Both variants render, so neither flashes in after prerendering; CSS shows one per breakpoint. *@
+            <div class="d-flex d-sm-none gap-2">
                 <MudTooltip Text="Run now">
                     <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Variant="Variant.Outlined" aria-label="Run now"
-                                   OnClick="@agent.RunNow" Disabled="@agent.IsBusy" data-testid="agent-run-now" />
+                                   OnClick="@agent.RunNow" Disabled="@agent.IsBusy" data-testid="agent-run-now-icon" />
                 </MudTooltip>
                 <MudTooltip Text="New conversation">
                     <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Variant="Variant.Outlined" aria-label="New conversation"
-                                   OnClick="NewConversationAsync" Disabled="@agent.IsBusy" data-testid="agent-new-conversation" />
+                                   OnClick="NewConversationAsync" Disabled="@agent.IsBusy" data-testid="agent-new-conversation-icon" />
                 </MudTooltip>
-            </MudHidden>
-            <MudHidden Breakpoint="Breakpoint.Xs">
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow" Class="flex-shrink-0"
+            </div>
+            <div class="d-none d-sm-flex gap-2 flex-shrink-0">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow"
                            OnClick="@agent.RunNow" Disabled="@agent.IsBusy" data-testid="agent-run-now">Run now</MudButton>
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt" Class="flex-shrink-0"
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt"
                            OnClick="NewConversationAsync" Disabled="@agent.IsBusy" data-testid="agent-new-conversation">New conversation</MudButton>
-            </MudHidden>
+            </div>
         </MudStack>
         <MudTabs Elevation="0" Outlined="true" Rounded="true" ApplyEffectsToContainer="true" MinimumTabWidth="96px"
                  Class="flex-grow-1 overflow-hidden" TabPanelsClass="pa-2 pa-sm-3 overflow-y-auto">
