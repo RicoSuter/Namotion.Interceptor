@@ -52,8 +52,8 @@ public static class AgentMcpEndpoint
     }
 
     /// <summary>
-    /// Replaces the tools of a request to the agent route with only the turn's tools and removes all prompts,
-    /// resources and completions. Stateless transport calls this per request with a fresh options copy, so other
+    /// Replaces the tools of a request to the agent route with only the turn's tools and removes the server
+    /// instructions and all prompts, resources and completions. Stateless transport calls this per request with a fresh options copy, so other
     /// routes are unaffected.
     /// </summary>
     public static Task ConfigureSessionOptions(HttpContext context, McpServerOptions options, CancellationToken cancellationToken)
@@ -65,6 +65,8 @@ public static class AgentMcpEndpoint
 
         // A request that bypassed the gate carries no tool set and gets no tools.
         IReadOnlyList<McpToolInfo> tools = context.Items[ToolSetItemKey] is AgentToolSet toolSet ? toolSet.Tools : [];
+        // The agent preamble already orients the agent, and the instructions could name tools the turn does not have.
+        options.ServerInstructions = null;
         options.ToolCollection = null;
         options.PromptCollection = null;
         options.ResourceCollection = null;

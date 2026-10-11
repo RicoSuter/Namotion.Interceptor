@@ -459,6 +459,20 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
+    public void WhenListingTools_ThenInvokeQueryDescribesReadingMarkdownPages()
+    {
+        // Arrange
+        var (_, _, factory) = CreateTestSetup(isReadOnly: true);
+
+        // Act
+        var description = factory.CreateTools().First(tool => tool.Name == "invoke_query").Description;
+
+        // Assert
+        Assert.Contains("ReadEvaluatedContent on a Markdown page or document (*.md)", description);
+        Assert.Contains("includeSourcePaths=true", description);
+    }
+
+    [Fact]
     public void WhenReadOnly_ThenListMethodsDescriptionSaysOperationsCannotBeCalled()
     {
         // Arrange

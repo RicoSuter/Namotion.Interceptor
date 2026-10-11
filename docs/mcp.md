@@ -233,12 +233,17 @@ var config = new McpServerConfiguration
     // Optional: additional tools
     ToolProviders = { new MyToolProvider() },
 
+    // Optional: text appended to a tool's description, keyed by tool name
+    ToolDescriptionAdditions = { ["browse"] = "Subjects of type Document hold the manuals." },
+
     // Safety limits
     MaxDepth = 10,
     MaxSubjectsPerResponse = 500,
     IsReadOnly = true
 };
 ```
+
+`ToolDescriptionAdditions` describes conventions of the application to the client without replacing the generic description of a tool, for example which subjects hold its documentation. Each text is appended after a space; names of tools that are not offered are ignored.
 
 ### Access Control
 

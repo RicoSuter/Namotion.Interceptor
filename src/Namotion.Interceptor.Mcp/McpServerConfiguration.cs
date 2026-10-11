@@ -29,6 +29,13 @@ public class McpServerConfiguration
     public IList<IMcpToolProvider> ToolProviders { get; init; } = [];
 
     /// <summary>
+    /// Text appended to the description of a tool, keyed by tool name, separated by a space. Lets an application
+    /// describe its own conventions, for example which subjects hold its documentation, while keeping the generic
+    /// description. Names of tools that are not offered are ignored.
+    /// </summary>
+    public IDictionary<string, string> ToolDescriptionAdditions { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
     /// Maximum subject tree traversal depth (default: 10).
     /// </summary>
     public int MaxDepth { get; init; } = 10;

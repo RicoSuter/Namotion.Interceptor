@@ -35,6 +35,25 @@ public class McpToolFactory
             tools.AddRange(provider.GetTools());
         }
 
+        var descriptionAdditions = _configuration.ToolDescriptionAdditions;
+        if (descriptionAdditions.Count > 0)
+        {
+            for (var i = 0; i < tools.Count; i++)
+            {
+                var tool = tools[i];
+                if (descriptionAdditions.TryGetValue(tool.Name, out var addition))
+                {
+                    tools[i] = new McpToolInfo
+                    {
+                        Name = tool.Name,
+                        Description = tool.Description + " " + addition,
+                        InputSchema = tool.InputSchema,
+                        Handler = tool.Handler
+                    };
+                }
+            }
+        }
+
         return tools;
     }
 }

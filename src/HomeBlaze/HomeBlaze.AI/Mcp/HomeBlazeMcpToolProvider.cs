@@ -37,7 +37,9 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         "The kind field of each method says which; operations are listed for information but cannot be called on this server.";
 
     private const string InvokeQueryDescription =
-        "Call a query method of a subject: it reads and has no side effects. Find methods and their kind with list_methods.";
+        "Call a query method of a subject: it reads and has no side effects, for example ReadEvaluatedContent on a " +
+        "Markdown page or document (*.md) to read it, with includeSourcePaths=true to see where each value comes from. " +
+        "Find methods and their kind with list_methods.";
 
     private const string InvokeOperationDescription =
         "Call an operation method of a subject: it can change devices or send something, for example SendNotification. " +

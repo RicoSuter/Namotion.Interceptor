@@ -21,6 +21,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
     private const string ExternalRoute = "/mcp";
     private const string RemoteAddressTestHeader = "X-Test-Remote-Address";
     private const string LocalAddressTestHeader = "X-Test-Local-Address";
+    private const string ExternalServerInstructions = "Read the documentation pages first.";
 
     private WebApplication? _app;
     private string _baseAddress = string.Empty;
@@ -32,7 +33,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(_registry);
         builder.Services.AddHomeBlazeAgents();
-        builder.Services.AddMcpServer()
+        builder.Services.AddMcpServer(options => options.ServerInstructions = ExternalServerInstructions)
             .WithHttpTransport(options => options.Stateless = true)
             // Production always has global handlers (the external MCP server); mirror that.
             .WithListToolsHandler((_, _) => ValueTask.FromResult(new ListToolsResult
@@ -125,6 +126,21 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         Assert.Equal(["browse", "update_memory"], tools.Select(tool => tool.Name).Order());
         Assert.Equal("browsed /Kitchen", Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text);
         Assert.Single(toolSet.Calls);
+    }
+
+    [Fact]
+    public async Task WhenConnectingToTheAgentRoute_ThenTheServerInstructionsOfTheExternalRouteAreNotSent()
+    {
+        // Arrange
+        using var registration = _registry.Register(CreateToolSet());
+        await using var externalClient = await ConnectAsync(ExternalRoute, authorization: null);
+
+        // Act
+        await using var agentClient = await ConnectAsync(registration.Token);
+
+        // Assert
+        Assert.Equal(ExternalServerInstructions, externalClient.ServerInstructions);
+        Assert.Null(agentClient.ServerInstructions);
     }
 
     [Fact]

@@ -14,8 +14,8 @@ namespace HomeBlaze.AI.Mcp;
 public static class HomeBlazeMcpConfigurationFactory
 {
     /// <summary>
-    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools and every
-    /// registered <see cref="McpToolProviderRegistration"/>.
+    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, the
+    /// Markdown page hints of browse and search and every registered <see cref="McpToolProviderRegistration"/>.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
@@ -54,6 +54,11 @@ public static class HomeBlazeMcpConfigurationFactory
                     pathProvider, serviceProvider,
                     loggerFactory.CreateLogger<HomeBlazeMcpToolProvider>(),
                     isReadOnly)
+            },
+            ToolDescriptionAdditions =
+            {
+                ["browse"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint,
+                ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint
             },
             IsReadOnly = isReadOnly
         };
