@@ -29,8 +29,10 @@ public sealed class AgentMemoryDraft
     /// <summary>Whether the agent changed its memory after the draft was modified.</summary>
     public bool IsStale { get; private set; }
 
+    /// <summary>Whether <see cref="SaveAsync"/> is writing the draft.</summary>
     public bool IsSaving { get; private set; }
 
+    /// <summary>Why the last save failed; null after a successful save or a reload.</summary>
     public string? Error { get; private set; }
 
     /// <summary>Follows the agent's memory while the draft is unmodified, otherwise flags a newer agent write.</summary>
