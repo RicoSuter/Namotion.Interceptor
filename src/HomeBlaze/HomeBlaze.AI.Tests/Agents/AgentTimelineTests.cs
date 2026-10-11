@@ -3,7 +3,7 @@ using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
 
-public class AgentTimelineTests : IDisposable
+public sealed class AgentTimelineTests : IDisposable
 {
     private static readonly DateTimeOffset Start = new(2026, 10, 10, 12, 0, 0, TimeSpan.Zero);
     private readonly string _directory = Directory.CreateTempSubdirectory("agent-timeline").FullName;
@@ -71,7 +71,7 @@ public class AgentTimelineTests : IDisposable
         // Assert
         Assert.Equal(10, reloaded.Entries.Count);
         Assert.Equal("5", reloaded.Entries[0].Text);
-        Assert.Equal(10, File.ReadAllLines(path).Length);
+        Assert.Equal(10, (await File.ReadAllLinesAsync(path)).Length);
     }
 
     [Fact]
@@ -193,7 +193,7 @@ public class AgentTimelineTests : IDisposable
         }
 
         // Assert
-        Assert.True(File.ReadAllLines(path).Length <= 20);
+        Assert.True((await File.ReadAllLinesAsync(path)).Length <= 20);
 
         var reloaded = new AgentTimeline(path, capacity: 10);
         await reloaded.LoadAsync(CancellationToken.None);

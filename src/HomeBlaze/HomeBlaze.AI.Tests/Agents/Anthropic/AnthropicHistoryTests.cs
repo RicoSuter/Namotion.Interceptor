@@ -325,7 +325,8 @@ public class AnthropicHistoryTests
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            Assert.NotNull(request.Content);
+            Body = await request.Content.ReadAsStringAsync(cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.BadRequest)
             {
                 Content = new StringContent("""{"type":"error","error":{"type":"invalid_request_error","message":"captured"}}""")

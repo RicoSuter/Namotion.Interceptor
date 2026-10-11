@@ -55,6 +55,7 @@ public class AnthropicChatOptionsTests
                 [new ChatMessage(ChatRole.System, "SYSTEM"), new ChatMessage(ChatRole.User, "first"), new ChatMessage(ChatRole.Assistant, "reply"), new ChatMessage(ChatRole.User, "second")],
                 options))
             {
+                // Only the captured request matters; the stub handler answers with an error.
             }
         });
 
@@ -108,7 +109,8 @@ public class AnthropicChatOptionsTests
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            Assert.NotNull(request.Content);
+            Body = await request.Content.ReadAsStringAsync(cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.BadRequest)
             {
                 Content = new StringContent("""{"type":"error","error":{"type":"invalid_request_error","message":"captured"}}""")

@@ -61,6 +61,8 @@ public class AgentMarkdownRendererTests
     [InlineData("<https://example.com/x>", "https://example.com/x")]
     [InlineData("Visit https://example.com/y now", "https://example.com/y")]
     [InlineData("[mail](mailto:operator@example.com)", "mailto:operator@example.com")]
+    [InlineData("<a@b.c>", "mailto:a@b.c")]
+    [InlineData("See www.example.com today", "http://www.example.com/")]
     public void WhenLinkTargetIsAllowed_ThenLinkOpensInNewTabWithoutReferrer(string markdown, string expectedUrl)
     {
         // Act
@@ -153,20 +155,6 @@ public class AgentMarkdownRendererTests
         Assert.Contains("title=\"b' onclick='alert(1)\"", html);
         Assert.DoesNotContain("\" onmouseover=", html);
         Assert.DoesNotContain("\" onclick=", html);
-    }
-
-    [Theory]
-    [InlineData("<a@b.c>", "mailto:a@b.c")]
-    [InlineData("See www.example.com today", "http://www.example.com/")]
-    public void WhenAutolinkIsAllowed_ThenItIsRenderedAsExternalLink(string markdown, string expectedUrl)
-    {
-        // Act
-        var html = AgentMarkdownRenderer.ToHtml(markdown);
-
-        // Assert
-        Assert.Contains($"href=\"{expectedUrl}\"", html);
-        Assert.Contains("rel=\"noopener noreferrer nofollow\"", html);
-        Assert.Contains("target=\"_blank\"", html);
     }
 
     [Fact]

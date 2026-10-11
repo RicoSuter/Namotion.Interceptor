@@ -40,9 +40,10 @@ public class AgentServiceCollectionExtensionsTests
 
         await using var serviceProvider = services.BuildServiceProvider();
         var transportOptions = serviceProvider.GetRequiredService<IOptions<HttpServerTransportOptions>>().Value;
+        Assert.NotNull(transportOptions.ConfigureSessionOptions);
 
         // Act
-        await transportOptions.ConfigureSessionOptions!(new DefaultHttpContext(), new McpServerOptions(), CancellationToken.None);
+        await transportOptions.ConfigureSessionOptions(new DefaultHttpContext(), new McpServerOptions(), CancellationToken.None);
 
         // Assert
         Assert.Equal(1, previousCallCount);

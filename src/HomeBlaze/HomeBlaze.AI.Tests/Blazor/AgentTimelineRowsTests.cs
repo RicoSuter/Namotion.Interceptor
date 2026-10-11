@@ -98,6 +98,6 @@ public class AgentTimelineRowsTests
             "A" => new AgentTimelineEntry { Kind = AgentTimelineEntryKind.Assistant, Timestamp = Start.AddMinutes(index) },
             "Q" => new AgentTimelineEntry { Kind = AgentTimelineEntryKind.BackgroundRun, IsQuiet = true, Timestamp = Start.AddMinutes(index) },
             "D" => new AgentTimelineEntry { Kind = AgentTimelineEntryKind.Divider, Timestamp = Start.AddMinutes(index) },
-            _ => throw new ArgumentOutOfRangeException(nameof(kinds), kind, null)
+            _ => throw new ArgumentException($"Unknown entry kind '{kind}'.")
         }).ToList();
 }

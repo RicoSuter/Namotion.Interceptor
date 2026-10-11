@@ -21,7 +21,7 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenListMethods_ThenReturnsMethodMetadata()
     {
         // Arrange
-        var (room, config, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
 
         // Add a method property to the room
         var registered = room.TryGetRegisteredSubject()!;
@@ -300,8 +300,11 @@ public class HomeBlazeMcpToolProviderTests
     {
         // Arrange
         var (room, _, factory) = CreateTestSetup(isReadOnly: false);
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("PlayFavorite", _ => new MethodMetadata(_ =>
-            throw new ArgumentException("Unknown favorite 'Jazz'. Known favorites: Rock, Pop.", "title"))
+        static object? PlayFavorite(string? title) =>
+            throw new ArgumentException($"Unknown favorite '{title}'. Known favorites: Rock, Pop.", nameof(title));
+
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("PlayFavorite", _ => new MethodMetadata(arguments =>
+            PlayFavorite((string?)arguments![0]))
         {
             Kind = MethodKind.Operation,
             PropertyName = "PlayFavorite",
@@ -577,7 +580,7 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeNonExistentMethod_ThenReturnsError()
     {
         // Arrange
-        var (room, config, factory) = CreateTestSetup(isReadOnly: false);
+        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
         var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
@@ -594,7 +597,7 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOnInvalidPath_ThenReturnsError()
     {
         // Arrange
-        var (room, config, factory) = CreateTestSetup(isReadOnly: false);
+        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
         var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
@@ -610,7 +613,7 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOperationWithParameters_ThenParametersArePassedCorrectly()
     {
         // Arrange
-        var (room, config, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
 
         string? capturedInput = null;
         var registered = room.TryGetRegisteredSubject()!;
@@ -650,7 +653,7 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenMethodThrows_ThenReturnsGenericError()
     {
         // Arrange
-        var (room, config, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
 
         var registered = room.TryGetRegisteredSubject()!;
         registered.AddProperty<MethodMetadata>("FailMethod", _ => new MethodMetadata(_ =>

@@ -382,7 +382,7 @@ public class AnthropicAgentTests
         Assert.DoesNotContain(ApiKey, test.Agent.StatusMessage);
         Assert.Equal(expectedStatus, test.Agent.Status);
         var request = Assert.Single(handler.Requests);
-        Assert.Equal(ApiKey, request.ApiKey);
+        Assert.Equal(ApiKey, request.ApiKeyHeader);
         Assert.False(request.HasAuthorization);
     }
 
@@ -422,7 +422,7 @@ public class AnthropicAgentTests
 
         // Assert
         Assert.Equal(2, test.Agent.CreatedClientCount);
-        Assert.Equal([ApiKey, ApiKey, "sk-ant-other-key"], handler.Requests.Select(request => request.ApiKey));
+        Assert.Equal([ApiKey, ApiKey, "sk-ant-other-key"], handler.Requests.Select(request => request.ApiKeyHeader));
     }
 
     [Fact]
@@ -469,7 +469,7 @@ public class AnthropicAgentTests
             ["error"] = new Dictionary<string, string> { ["type"] = type, ["message"] = message }
         });
 
-    private sealed record CapturedRequest(string? ApiKey, bool HasAuthorization, string Body);
+    private sealed record CapturedRequest(string? ApiKeyHeader, bool HasAuthorization, string Body);
 
     private sealed class StubHandler : HttpMessageHandler
     {
@@ -488,10 +488,11 @@ public class AnthropicAgentTests
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            Assert.NotNull(request.Content);
             Requests.Add(new CapturedRequest(
                 request.Headers.TryGetValues("x-api-key", out var values) ? values.Single() : null,
                 request.Headers.Authorization is not null,
-                await request.Content!.ReadAsStringAsync(cancellationToken)));
+                await request.Content.ReadAsStringAsync(cancellationToken)));
 
             var response = new HttpResponseMessage(_statusCode) { Content = new StringContent(_body, System.Text.Encoding.UTF8, _mediaType) };
             // Keeps the SDK from retrying, which would wait between attempts.

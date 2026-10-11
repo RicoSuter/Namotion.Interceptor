@@ -6,6 +6,7 @@ namespace HomeBlaze.AI.Tests.Agents.Anthropic;
 /// A fact that runs only when <see cref="OptInVariable"/> is set to 1 and <see cref="ApiKeyVariable"/> holds an API
 /// key, because it spends API credits.
 /// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
 public sealed class AnthropicApiFactAttribute : FactAttribute
 {
     /// <summary>The environment variable that opts in to running the test.</summary>

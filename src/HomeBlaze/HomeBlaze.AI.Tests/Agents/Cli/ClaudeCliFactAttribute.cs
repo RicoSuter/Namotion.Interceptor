@@ -6,6 +6,7 @@ namespace HomeBlaze.AI.Tests.Agents.Cli;
 /// A fact that runs only when <see cref="OptInVariable"/> is set to 1 and a <c>claude</c> executable is on PATH,
 /// because it spends the local Claude subscription.
 /// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
 public sealed class ClaudeCliFactAttribute : FactAttribute
 {
     /// <summary>The environment variable that opts in to running the test.</summary>

@@ -4,7 +4,7 @@ using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
 
-public class AgentMemoryTests : IDisposable
+public sealed class AgentMemoryTests : IDisposable
 {
     private static readonly DateTimeOffset Start = new(2026, 10, 11, 8, 0, 0, TimeSpan.Zero);
 
