@@ -1047,6 +1047,9 @@ Edit components provide configuration forms:
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    [Parameter]
+    public bool IsCreating { get; set; }
+
     private Motor? MotorSubject => Subject as Motor;
 
     private string _name = string.Empty;
@@ -1092,6 +1095,7 @@ Edit components provide configuration forms:
 | `IsDirty` | Have changes been made? |
 | `IsValidChanged` | Event fired when validity changes |
 | `IsDirtyChanged` | Event fired when dirty state changes |
+| `IsCreating` | Set by the hosting panel: `true` while the subject is being created, `false` while it is edited |
 | `SaveAsync` | Persist changes |
 
 In the create dialog the "Create" button follows the component's `IsValid`, so a component raises `IsValidChanged` whenever `IsValid` changes. Binding with `@bind-Value:after` covers every way a value can change (typing, pasting, autofill), which a key handler such as `OnKeyUp` does not, and `Immediate="true"` on a text field updates the value on every keystroke instead of when the field loses focus.

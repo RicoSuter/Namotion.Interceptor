@@ -50,12 +50,10 @@
                                   HelperText="Part of the subject's path, which is its ID. Avoid renaming it later."
                                   data-testid="create-name-input" />
                 }
-                @* A hosted form is not required to announce every change of its validity, and one that renders
-                   only itself leaves the panel's last report stale. These events bubble up from the form after
-                   its own handlers have run, so its validity is current when it is read here. The focus events
-                   cover a control whose choice is clicked outside this element, such as the popover of a select. *@
+                @* A hosted form may change its validity without raising IsValidChanged, so the dialog reads it again
+                   after interaction. Blazor does not bubble change, so a control that only changes on change is picked
+                   up by the next focus change or by the pointer entering "Create". *@
                 <div @oninput="_refreshEditPanelIsValid"
-                     @onchange="_refreshEditPanelIsValid"
                      @onclick="_refreshEditPanelIsValid"
                      @onkeyup="_refreshEditPanelIsValid"
                      @onfocusin="_refreshEditPanelIsValid"
@@ -77,7 +75,7 @@
         {
             @* A validity that changed without any event in the form, such as a delayed validation, is read
                again before the pointer can reach the button. *@
-            <span @onpointerenter="_refreshEditPanelIsValid">
+            <span @onpointerenter="_refreshEditPanelIsValid" style="display: inline-block;">
                 <MudButton Color="Color.Primary"
                            Variant="Variant.Filled"
                            Disabled="@(!CanCreate)"

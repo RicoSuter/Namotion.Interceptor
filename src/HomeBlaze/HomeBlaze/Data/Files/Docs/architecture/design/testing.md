@@ -146,6 +146,7 @@ Concrete performance targets should be established after initial baseline measur
 Follow-ups:
 
 - `NavigationTests.OpenWithDemoFolderExpandedAsync` clicks the folder header as soon as it is visible, without that wait. A click before the page is interactive would be lost and the test would time out. No failing run is known.
+- `PageEditTests`, `PageSaveTests` and `MarkdownEditorTests` click the prerendered edit mode menu as soon as it is visible, without that wait.
 
 ## Open Questions
 
