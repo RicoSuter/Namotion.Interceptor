@@ -262,6 +262,10 @@ public sealed class AgentMemory
         }
     }
 
+    // Changes only the agent's own memory, so it is neither read-only nor destructive to the environment.
+    private static readonly McpToolAnnotations UpdateToolAnnotations =
+        new() { ReadOnlyHint = false, DestructiveHint = false, OpenWorldHint = false };
+
     /// <summary>
     /// Creates the agent-local <c>update_memory</c> tool.
     /// </summary>
@@ -276,6 +280,7 @@ public sealed class AgentMemory
             $"Limits: keys {MaxKeyLength} characters, values {MaxValueLength} characters, {MaxEntries} entries and {MaxSize} bytes " +
             "over all keys and values; remove resolved or outdated entries to stay within them.",
         InputSchema = UpdateToolSchema,
+        Annotations = UpdateToolAnnotations,
         Handler = async (input, cancellationToken) =>
         {
             var (changes, error) = ParseChanges(input);

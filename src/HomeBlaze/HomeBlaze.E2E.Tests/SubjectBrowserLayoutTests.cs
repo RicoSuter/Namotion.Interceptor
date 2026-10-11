@@ -50,11 +50,6 @@ public class SubjectBrowserLayoutTests
         }
         """;
 
-    // The page is prerendered, and a click before its circuit is interactive is lost. The pane width is set by the
-    // script the interactive browser runs, so it marks the point from which clicks arrive.
-    private const string BrowserIsInteractive =
-        "() => (document.getElementById('scrollContainer')?.style.getPropertyValue('--pane-width') ?? '') !== ''";
-
     // Records where the row is when placeholders appear, the positions it scrolls through, and where its scrolling had
     // got to when they are removed. The position at removal comes from the scroll events: once the placeholders are
     // gone the row is shorter, and reading it then says nothing about where it was.
@@ -110,7 +105,7 @@ public class SubjectBrowserLayoutTests
         var page = await _fixture.CreatePageAsync();
         await page.SetViewportSizeAsync(width, height);
         await page.GotoAsync($"{_fixture.ServerAddress}{path}");
-        await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
         await WaitUntilSettledAsync(page, paneCount);
         return page;
     }

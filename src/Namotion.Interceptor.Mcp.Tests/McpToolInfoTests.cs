@@ -23,8 +23,8 @@ public class McpToolInfoTests
         // Assert
         Assert.All(typeof(McpToolInfo).GetProperties(), property =>
         {
-            Assert.NotNull(property.GetValue(source));
             var sourceValue = property.GetValue(source);
+            Assert.NotNull(sourceValue);
             var copyValue = property.GetValue(copy);
             if (sourceValue is JsonElement sourceElement)
             {

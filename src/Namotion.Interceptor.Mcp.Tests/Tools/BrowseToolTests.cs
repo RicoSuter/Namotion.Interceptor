@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
@@ -69,7 +70,7 @@ public class BrowseToolTests
 
         var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
         room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
-        var filteredPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var filteredPaths = new ConcurrentBag<string>();
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
@@ -91,6 +92,39 @@ public class BrowseToolTests
         Assert.False(properties.GetProperty("IsOn").TryGetProperty("isWritable", out var isOnWritable) && isOnWritable.GetBoolean());
         Assert.True(properties.GetProperty("DeviceName").GetProperty("isWritable").GetBoolean());
         Assert.Contains("Device.IsOn", filteredPaths);
+    }
+
+    [Fact]
+    public async Task WhenTheWriteFilterRunsForBrowseWithAPathPrefix_ThenItGetsThePathsTheSubjectNodesShow()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+        var filteredPaths = new ConcurrentBag<string>();
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            PathPrefix = "/",
+            IsReadOnly = false,
+            PropertyWriteFilter = (_, path) =>
+            {
+                filteredPaths.Add(path);
+                return null;
+            }
+        };
+        var browseTool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1, includeProperties = true });
+        await browseTool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.Contains("/Name", filteredPaths);
+        Assert.Contains("/Device.IsOn", filteredPaths);
     }
 
     [Fact]

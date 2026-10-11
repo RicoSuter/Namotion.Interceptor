@@ -112,7 +112,7 @@ internal static class McpToolHelper
                 }
 
                 var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-                properties[segment] = BuildScalarPropertyDto(property, pathProvider, rootSubject, configuration, includeAttributes);
+                properties[segment] = BuildScalarPropertyDto(property, path, segment, pathProvider, configuration, includeAttributes);
             }
         }
 
@@ -150,8 +150,9 @@ internal static class McpToolHelper
 
     private static ScalarProperty BuildScalarPropertyDto(
         RegisteredSubjectProperty property,
+        string? subjectPath,
+        string segment,
         PathProviderBase pathProvider,
-        IInterceptorSubject rootSubject,
         McpServerConfiguration configuration,
         bool includeAttributes)
     {
@@ -173,13 +174,13 @@ internal static class McpToolHelper
         return new ScalarProperty(
             property.GetValue(),
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
-            IsWritable: IsWritable(property, pathProvider, rootSubject, configuration),
+            IsWritable: IsWritable(property, subjectPath, segment, pathProvider, configuration),
             Attributes: attributes);
     }
 
-    // The path is built only when a filter needs it, since browse reports many properties.
+    // The path, as the subject node shows it, is built only when a filter needs it, since browse reports many properties.
     private static bool IsWritable(
-        RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject rootSubject, McpServerConfiguration configuration)
+        RegisteredSubjectProperty property, string? subjectPath, string segment, PathProviderBase pathProvider, McpServerConfiguration configuration)
     {
         if (configuration.IsReadOnly || !property.HasSetter || !HasPublicSetter(property))
         {
@@ -191,8 +192,11 @@ internal static class McpToolHelper
             return true;
         }
 
-        var path = property.TryGetPath(pathProvider, rootSubject);
-        return filter(property, path is null ? property.Name : configuration.PathPrefix + path) is null;
+        // The root's path is the prefix alone, so its properties follow the prefix without a separator.
+        var path = string.IsNullOrEmpty(subjectPath) ? segment
+            : subjectPath == configuration.PathPrefix ? string.Concat(subjectPath, segment)
+            : $"{subjectPath}{pathProvider.PathSeparator}{segment}";
+        return filter(property, path) is null;
     }
 
     // TODO: Clean up when HasSetter in registry respects access modifiers (see #102)

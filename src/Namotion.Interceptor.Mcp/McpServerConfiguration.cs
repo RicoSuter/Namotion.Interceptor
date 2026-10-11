@@ -59,8 +59,10 @@ public class McpServerConfiguration
     public Type[] ExcludeTypes { get; init; } = [];
 
     /// <summary>
-    /// Decides whether set_property may write a property, given the property and the path the client sent. Returns
-    /// null to allow the write, or the error message returned to the client, in which case nothing is written.
+    /// Decides whether set_property may write a property. Returns null to allow the write, or the error message
+    /// returned to the client, in which case nothing is written. Decide on the property; the path is only for the
+    /// message: the client's text for get_property and set_property, the path the subject node shows for browse and
+    /// search.
     /// Null (the default) allows every writable property. Not consulted when <see cref="IsReadOnly"/> is true.
     /// Also decides whether get_property, browse and search report a property as writable. May be called
     /// concurrently, so it must be thread-safe.

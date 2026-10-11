@@ -13,11 +13,6 @@ public class MethodConfirmationTests
     private const int PageLoadTimeout = 30000;
     private const int ElementVisibilityTimeout = 15000;
 
-    // The page is prerendered, and a click before its circuit is interactive is lost. The pane width is set by the
-    // script the interactive browser runs, so it marks the point from which clicks arrive.
-    private const string BrowserIsInteractive =
-        "() => (document.getElementById('scrollContainer')?.style.getPropertyValue('--pane-width') ?? '') !== ''";
-
     private readonly PlaywrightFixture _fixture;
 
     public MethodConfirmationTests(PlaywrightFixture fixture)
@@ -62,7 +57,7 @@ public class MethodConfirmationTests
     {
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}browser/{path}");
-        await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
         return page;
     }
 }

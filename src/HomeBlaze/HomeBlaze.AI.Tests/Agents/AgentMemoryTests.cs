@@ -13,6 +13,23 @@ public class AgentMemoryTests : IDisposable
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
+    [Fact]
+    public void WhenCreatingTheUpdateTool_ThenItIsAnnotatedAsChangingButNotDestructive()
+    {
+        // Arrange
+        var memory = new AgentMemory(filePath: null, _time);
+
+        // Act
+        var annotations = memory.CreateUpdateTool().Annotations;
+
+        // Assert
+        Assert.NotNull(annotations);
+        Assert.False(annotations.ReadOnlyHint);
+        Assert.False(annotations.DestructiveHint);
+        Assert.Null(annotations.IdempotentHint);
+        Assert.False(annotations.OpenWorldHint);
+    }
+
     [Theory]
     [InlineData("alerts/freezer-temperature", "alerts/freezer-temperature")]
     [InlineData("  /alerts/freezer/  ", "alerts/freezer")]

@@ -13,11 +13,6 @@ public class MarkdownQueryTests
     private const int PageLoadTimeout = 30000;
     private const int ElementVisibilityTimeout = 15000;
 
-    // The page is prerendered, and a click before its circuit is interactive is lost. The pane width is set by the
-    // script the interactive browser runs, so it marks the point from which clicks arrive.
-    private const string BrowserIsInteractive =
-        "() => (document.getElementById('scrollContainer')?.style.getPropertyValue('--pane-width') ?? '') !== ''";
-
     private readonly PlaywrightFixture _fixture;
 
     public MarkdownQueryTests(PlaywrightFixture fixture)
@@ -31,7 +26,7 @@ public class MarkdownQueryTests
         // Arrange
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}browser/Dashboard.md");
-        await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
 
         var queryButton = page.GetByRole(AriaRole.Button, new() { Name = "Read Evaluated Content" });
         await Assertions.Expect(queryButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
