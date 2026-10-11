@@ -1,5 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.AI.Agents;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -29,12 +31,13 @@ public static class HomeBlazeMcpConfigurationFactory
         bool isReadOnly,
         IEnumerable<Func<McpToolProviderContext, IMcpToolProvider>>? additionalToolProviders = null)
     {
-        return Create(serviceProvider, rootSubjectProvider, isReadOnly, additionalToolProviders, propertyWriteFilter: null);
+        return Create(serviceProvider, rootSubjectProvider, isReadOnly, additionalToolProviders, propertyWriteFilter: null, operationFilter: null);
     }
 
     /// <summary>
     /// Creates the configuration of the built-in agents' tools: the same as <see cref="Create(IServiceProvider, Func{IInterceptorSubject}, bool, IEnumerable{Func{McpToolProviderContext, IMcpToolProvider}}?)"/>,
-    /// except that set_property refuses every property marked with <see cref="ConfigurationAttribute"/>.
+    /// except that set_property refuses every property marked with <see cref="ConfigurationAttribute"/> and
+    /// invoke_operation refuses every operation of an agent (<see cref="LlmAgentBase"/>).
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
@@ -44,8 +47,11 @@ public static class HomeBlazeMcpConfigurationFactory
         Func<IInterceptorSubject> rootSubjectProvider,
         bool isReadOnly)
     {
-        return Create(serviceProvider, rootSubjectProvider, isReadOnly, additionalToolProviders: null, RefuseConfigurationWrite);
+        return Create(serviceProvider, rootSubjectProvider, isReadOnly, additionalToolProviders: null, RefuseConfigurationWrite, RefuseAgentOperation);
     }
+
+    private static string? RefuseAgentOperation(RegisteredSubject subject, MethodMetadata method) =>
+        subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
 
     private static string? RefuseConfigurationWrite(RegisteredSubjectProperty property, string path) =>
         property.TryGetAttribute(KnownAttributes.Configuration) is not null
@@ -57,7 +63,8 @@ public static class HomeBlazeMcpConfigurationFactory
         Func<IInterceptorSubject> rootSubjectProvider,
         bool isReadOnly,
         IEnumerable<Func<McpToolProviderContext, IMcpToolProvider>>? additionalToolProviders,
-        Func<RegisteredSubjectProperty, string, string?>? propertyWriteFilter)
+        Func<RegisteredSubjectProperty, string, string?>? propertyWriteFilter,
+        Func<RegisteredSubject, MethodMetadata, string?>? operationFilter)
     {
         var typeRegistry = serviceProvider.GetRequiredService<SubjectTypeRegistry>();
         var pathProvider = new StateAttributePathProvider();
@@ -85,7 +92,8 @@ public static class HomeBlazeMcpConfigurationFactory
                     rootSubjectProvider,
                     pathProvider, serviceProvider,
                     loggerFactory.CreateLogger<HomeBlazeMcpToolProvider>(),
-                    isReadOnly)
+                    isReadOnly,
+                    operationFilter)
             },
             ToolDescriptionAdditions =
             {

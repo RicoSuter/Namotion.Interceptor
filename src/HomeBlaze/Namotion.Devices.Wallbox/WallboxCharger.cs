@@ -276,7 +276,7 @@ public partial class WallboxCharger : BackgroundService,
         }
     }
 
-    [Operation(Title = "Set Maximum Charging Current", RequiresConfirmation = true)]
+    [Operation(Title = "Set Maximum Charging Current")]
     public async Task SetMaximumChargingCurrentAsync(int amperes, CancellationToken cancellationToken)
     {
         if (_client is not null && amperes is >= 6 and <= 32)

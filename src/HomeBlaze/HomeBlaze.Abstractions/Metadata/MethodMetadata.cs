@@ -71,6 +71,7 @@ public class MethodMetadata
 
     /// <summary>
     /// Whether the UI should show a confirmation dialog before invoking this method.
+    /// Such operations cannot be invoked through MCP, by agents or external clients.
     /// </summary>
     public bool RequiresConfirmation { get; init; }
 

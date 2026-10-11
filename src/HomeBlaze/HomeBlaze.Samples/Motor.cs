@@ -173,7 +173,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// <summary>
     /// Immediately stops the motor by setting target speed to zero.
     /// </summary>
-    [Operation(Title = "Emergency Stop", Description = "Immediately stops the motor", Icon = "Stop", Position = 2, RequiresConfirmation = true)]
+    [Operation(Title = "Emergency Stop", Description = "Immediately stops the motor", Icon = "Stop", Position = 2)]
     public void EmergencyStop()
     {
         TargetSpeed = 0;

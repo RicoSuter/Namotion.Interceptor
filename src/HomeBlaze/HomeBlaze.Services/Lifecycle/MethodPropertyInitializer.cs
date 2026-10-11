@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
@@ -12,6 +13,8 @@ namespace HomeBlaze.Services.Lifecycle;
 /// </summary>
 public class MethodPropertyInitializer : ILifecycleHandler
 {
+    private static readonly ConcurrentDictionary<Type, HashSet<string>> ConfirmedThroughInterfacesCache = new();
+
     [ThreadStatic]
     private static NullabilityInfoContext? _nullabilityContext;
 
@@ -26,11 +29,12 @@ public class MethodPropertyInitializer : ILifecycleHandler
 
             var type = change.Subject.GetType();
             var discoveredMethods = new HashSet<string>();
+            var confirmedThroughInterfaces = ConfirmedThroughInterfacesCache.GetOrAdd(type, GetMethodsConfirmedThroughInterfaces);
 
             // Discover methods from the concrete type
             foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
             {
-                TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods);
+                TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods, confirmedThroughInterfaces);
             }
 
             // Discover methods from interfaces (for default interface implementations or attribute on interface)
@@ -38,17 +42,40 @@ public class MethodPropertyInitializer : ILifecycleHandler
             {
                 foreach (var method in interfaceType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
                 {
-                    TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods);
+                    TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods, confirmedThroughInterfaces);
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// The public methods of <paramref name="type"/> that implement an interface operation requiring confirmation, so
+    /// an own <see cref="OperationAttribute"/> on the implementation cannot drop the requirement.
+    /// </summary>
+    private static HashSet<string> GetMethodsConfirmedThroughInterfaces(Type type)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var interfaceType in type.GetInterfaces())
+        {
+            var map = type.GetInterfaceMap(interfaceType);
+            for (var index = 0; index < map.InterfaceMethods.Length; index++)
+            {
+                if (map.InterfaceMethods[index].GetCustomAttribute<OperationAttribute>() is { RequiresConfirmation: true })
+                {
+                    names.Add(map.TargetMethods[index].Name);
+                }
+            }
+        }
+
+        return names;
     }
 
     private static void TryRegisterMethod(
         Namotion.Interceptor.Registry.Abstractions.RegisteredSubject registeredSubject,
         Namotion.Interceptor.IInterceptorSubject subject,
         MethodInfo method,
-        HashSet<string> discoveredMethods)
+        HashSet<string> discoveredMethods,
+        HashSet<string> confirmedThroughInterfaces)
     {
         // Skip if already discovered — deduplicates by name (overloaded methods register only once)
         if (discoveredMethods.Contains(method.Name))
@@ -108,7 +135,8 @@ public class MethodPropertyInitializer : ILifecycleHandler
             .ToArray();
 
         var resultType = GetUnwrappedResultType(method.ReturnType);
-        var requiresConfirmation = attribute is OperationAttribute { RequiresConfirmation: true };
+        var requiresConfirmation = attribute is OperationAttribute { RequiresConfirmation: true } ||
+            (kind == MethodKind.Operation && confirmedThroughInterfaces.Contains(method.Name));
 
         var metadata = new MethodMetadata(subject, method)
         {

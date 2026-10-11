@@ -19,4 +19,15 @@ public class WallboxChargerOperationTests
         Assert.NotNull(attribute);
         Assert.True(attribute.RequiresConfirmation);
     }
+
+    [Fact]
+    public void WhenSettingTheMaximumChargingCurrent_ThenNoConfirmationIsRequired()
+    {
+        // Act
+        var attribute = typeof(WallboxCharger).GetMethod(nameof(WallboxCharger.SetMaximumChargingCurrentAsync))!.GetCustomAttribute<OperationAttribute>();
+
+        // Assert
+        Assert.NotNull(attribute);
+        Assert.False(attribute.RequiresConfirmation);
+    }
 }

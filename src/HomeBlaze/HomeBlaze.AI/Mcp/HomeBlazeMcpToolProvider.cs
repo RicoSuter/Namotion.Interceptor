@@ -71,14 +71,24 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<HomeBlazeMcpToolProvider> _logger;
     private readonly bool _isReadOnly;
+    private readonly Func<RegisteredSubject, MethodMetadata, string?>? _operationFilter;
 
+    /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
+    /// <param name="pathProvider">Resolves subject paths.</param>
+    /// <param name="serviceProvider">Services for [FromServices] method parameters.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="isReadOnly">Whether invoke_operation is left out.</param>
+    /// <param name="operationFilter">Decides whether invoke_operation may call an operation of a subject: returns
+    /// null to allow it, or the error message for the client, in which case nothing is invoked. Null allows all.</param>
     public HomeBlazeMcpToolProvider(
         Func<IInterceptorSubject> rootSubjectProvider,
         PathProviderBase pathProvider,
         IServiceProvider serviceProvider,
         ILogger<HomeBlazeMcpToolProvider> logger,
-        bool isReadOnly)
+        bool isReadOnly,
+        Func<RegisteredSubject, MethodMetadata, string?>? operationFilter = null)
     {
+        _operationFilter = operationFilter;
         _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
         _serviceProvider = serviceProvider;
@@ -163,6 +173,11 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         if (method.Kind != allowedKind)
         {
             return new { error = DescribeWrongKind(methodName, method.Kind) };
+        }
+
+        if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method) is { } filterError)
+        {
+            return new { error = filterError };
         }
 
         if (method.RequiresConfirmation)

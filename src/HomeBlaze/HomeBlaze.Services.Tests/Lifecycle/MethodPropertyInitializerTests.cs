@@ -545,6 +545,23 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
+    public void WhenAConcreteOperationImplementsAnInterfaceOperationThatRequiresConfirmation_ThenItStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new OwnUnlockDoorLockTestSubject(CreateContext());
+
+        // Act
+        var unlock = (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty("Unlock")!.GetValue()!;
+        var lockMethod = (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty("Lock")!.GetValue()!;
+
+        // Assert
+        Assert.Equal("Open", unlock.Title);
+        Assert.True(unlock.RequiresConfirmation);
+        Assert.Equal("Close", lockMethod.Title);
+        Assert.False(lockMethod.RequiresConfirmation);
+    }
+
+    [Fact]
     public void WhenASubjectHasNoMethods_ThenNoMethodPropertiesAreRegistered()
     {
         // Arrange
@@ -689,5 +706,15 @@ public partial class DoorLockTestSubject : HomeBlaze.Abstractions.Devices.Locks.
 {
     public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    public Task UnlockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class OwnUnlockDoorLockTestSubject : HomeBlaze.Abstractions.Devices.Locks.IDoorLockController
+{
+    [Operation(Title = "Close")]
+    public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    [Operation(Title = "Open")]
     public Task UnlockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
