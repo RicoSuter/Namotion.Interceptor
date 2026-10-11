@@ -98,9 +98,34 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
         {
             container = definition.Parent;
             processor.Discard(definition);
+
+            // What Markdig does itself when a definition declines a line: the empty line before the
+            // line is no part of the definition, and the list ends with its last definition.
+            if (container is { LastChild: DefinitionItem previous })
+            {
+                if (previous.LastChild is BlankLineBlock)
+                {
+                    previous.RemoveAt(previous.Count - 1);
+                }
+
+                container.Span.End = previous.Span.End;
+            }
         }
 
         return container;
+    }
+
+    private static bool HasBlockAround(ContainerBlock container)
+    {
+        for (var outer = container.Parent; outer is not null; outer = outer.Parent)
+        {
+            if (outer is MarkdownBlockContainer)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Gets whether every container between <paramref name="inner"/> and <paramref name="outer"/> is a block.</summary>
@@ -168,6 +193,7 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
     private BlockState CloseBlock(BlockProcessor processor, int fenceStart, int fenceLength)
     {
         List<MarkdownBlockContainer>? openBlocks = null;
+        var hasOpenBlockOutOfReach = false;
 
         // A container that this line did not continue is still open in the processor and is closed after
         // this call. It is open for this line only when a container inside it continued. A definition
@@ -185,6 +211,7 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
             // block, so a closing line there closes none of the blocks around that container either.
             if (container is not MarkdownBlockContainer block)
             {
+                hasOpenBlockOutOfReach = HasBlockAround(container);
                 break;
             }
 
@@ -205,6 +232,7 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
             FenceLength = fenceLength,
             IsClosingLine = true,
             OpenBlocks = openBlocks ?? [],
+            HasOpenBlockOutOfReach = hasOpenBlockOutOfReach,
             Column = processor.Column - (processor.Start - fenceStart),
             Span = new SourceSpan(fenceStart, processor.Line.End)
         });

@@ -14,8 +14,17 @@ internal sealed class MarkdownBlockContainer(BlockParser parser) : ContainerBloc
     /// <summary>Whether the node is a closing line that closes no block.</summary>
     public bool IsClosingLine { get; init; }
 
-    /// <summary>The blocks that were open at a closing line that closes no block, outermost first.</summary>
+    /// <summary>
+    /// The blocks that a closing line that closes no block could have closed, outermost first: the open
+    /// blocks that it is directly inside of.
+    /// </summary>
     public IReadOnlyList<MarkdownBlockContainer> OpenBlocks { get; init; } = [];
+
+    /// <summary>
+    /// Whether a closing line that closes no block is inside a quote, a list item or another container
+    /// that is not a block, with an open block around that container which it does not reach.
+    /// </summary>
+    public bool HasOpenBlockOutOfReach { get; init; }
 
     /// <summary>Whether the head line has attributes in braces in place of a name.</summary>
     public bool IsStyle { get; init; }

@@ -377,13 +377,18 @@ public static class MarkdownPageParser
     private static string FormatClosesNothing(MarkdownBlockContainer closingLine)
     {
         var message = $"This line of {closingLine.FenceLength} '{MarkdownBlockFence.Character}' characters closes no block.";
-        if (closingLine.OpenBlocks.Count == 0)
+        if (closingLine.OpenBlocks.Count > 0)
         {
-            return $"{message} No block is open here.";
+            var openBlocks = closingLine.OpenBlocks.Select(block => $"line {block.Line + 1} ({block.FenceLength} characters)");
+            message = $"{message} A closing line needs as many characters as the head line of its block. " +
+                      $"Open here: {string.Join(", ", openBlocks)}.";
         }
 
-        var openBlocks = closingLine.OpenBlocks.Select(block => $"line {block.Line + 1} ({block.FenceLength} characters)");
-        return $"{message} A closing line needs as many characters as the head line of its block. " +
-               $"Open here: {string.Join(", ", openBlocks)}.";
+        if (closingLine.HasOpenBlockOutOfReach)
+        {
+            return $"{message} A closing line inside a quote or a list item closes no block outside of it.";
+        }
+
+        return closingLine.OpenBlocks.Count > 0 ? message : $"{message} No block is open here.";
     }
 }

@@ -305,7 +305,7 @@ public class MarkdownSegmentBuilderTests
         var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
         var content = WebUtility.HtmlDecode(AllHtml(card.Content));
         Assert.Contains("<p>before</p>", content);
-        Assert.Contains("<blockquote>\n<div class=\"markdown-block-error\" role=\"alert\">Line 3: This line of 2 ':' characters closes no block. No block is open here.</div>", content);
+        Assert.Contains("<blockquote>\n<div class=\"markdown-block-error\" role=\"alert\">Line 3: This line of 2 ':' characters closes no block. A closing line inside a quote or a list item closes no block outside of it.</div>", content);
         Assert.Contains("<p>after</p>", content);
         Assert.Contains("<p>last</p>", AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment)));
     }

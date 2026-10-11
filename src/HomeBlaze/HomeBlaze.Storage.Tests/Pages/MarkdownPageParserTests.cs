@@ -1,4 +1,6 @@
 using HomeBlaze.Storage.Pages;
+using Markdig.Extensions.DefinitionLists;
+using Markdig.Syntax;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -711,23 +713,108 @@ public class MarkdownPageParserTests
     }
 
     [Theory]
-    [InlineData(":: A.B\ntext\n> ::\nafter\n::")]
-    [InlineData(":: A.B\ntext\n- ::\nafter\n::")]
-    [InlineData(":: A.B\n- item\n  ::\nafter\n::")]
-    [InlineData(":: A.B\n1. item\n   ::\nafter\n::")]
-    public void WhenClosingLineIsInsideAQuoteOrAListItem_ThenItClosesNothingAndTheBlockAroundItStaysOpen(string source)
+    [InlineData(":: A.B\ntext\n> ::\nafter\n::", 3)]
+    [InlineData(":: A.B\ntext\n- ::\nafter\n::", 3)]
+    [InlineData(":: A.B\n- item\n  ::\nafter\n::", 3)]
+    [InlineData(":: A.B\n1. item\n   ::\nafter\n::", 3)]
+    [InlineData(":: A.B\n1. item\n\n   ::\nafter\n::", 4)]
+    [InlineData(":: A.B\nTerm\n:   Definition\n\n    ::\n\nafter\n::", 5)]
+    public void WhenClosingLineIsInsideAQuoteOrAListItem_ThenItClosesNothingAndSaysThatItReachesNoBlockOutside(
+        string source, int expectedLine)
     {
+        // Arrange
+        var lineCount = source.Split('\n').Length;
+
         // Act
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
         var outer = Assert.Single(page.Blocks);
         Assert.Equal(MarkdownBlockKind.Widget, outer.Kind);
-        Assert.Equal((1, 5), (outer.Line, outer.EndLine));
+        Assert.Equal((1, lineCount), (outer.Line, outer.EndLine));
         var closingLine = Assert.Single(outer.Children);
         Assert.Equal(MarkdownBlockKind.Invalid, closingLine.Kind);
-        Assert.Equal((3, 3), (closingLine.Line, closingLine.EndLine));
+        Assert.Equal((expectedLine, expectedLine), (closingLine.Line, closingLine.EndLine));
+        Assert.Equal(
+            "This line of 2 ':' characters closes no block. " +
+            "A closing line inside a quote or a list item closes no block outside of it.",
+            closingLine.Error);
+    }
+
+    [Theory]
+    [InlineData("> text\n> ::\n\nafter")]
+    [InlineData("- item\n  ::\n\nafter")]
+    [InlineData(":: A.B\n::\n\n> ::\n\nafter")]
+    public void WhenClosingLineIsInsideAQuoteOrAListItemAndNoBlockIsOpenAnywhere_ThenItSaysThatNoBlockIsOpen(string source)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var closingLine = Assert.Single(page.AllBlocks, block => block.Kind == MarkdownBlockKind.Invalid);
         Assert.Equal("This line of 2 ':' characters closes no block. No block is open here.", closingLine.Error);
+    }
+
+    [Fact]
+    public void WhenClosingLineInsideAQuoteFitsNoBlockOfTheQuote_ThenItNamesTheBlocksOfTheQuoteAndSaysThatItReachesNoBlockOutside()
+    {
+        // Arrange
+        const string source = ":: A.B\n> ::: {.band}\n> text\n> ::\n> more\n> :::\nafter\n::";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var outer = Assert.Single(page.Blocks);
+        Assert.Equal(MarkdownBlockKind.Widget, outer.Kind);
+        Assert.Equal((1, 8), (outer.Line, outer.EndLine));
+        var band = Assert.Single(outer.Children);
+        Assert.Equal(MarkdownBlockKind.Style, band.Kind);
+        Assert.Equal((2, 6), (band.Line, band.EndLine));
+        var closingLine = Assert.Single(band.Children);
+        Assert.Equal(
+            "This line of 2 ':' characters closes no block. A closing line needs as many characters as the head line " +
+            "of its block. Open here: line 2 (3 characters). " +
+            "A closing line inside a quote or a list item closes no block outside of it.",
+            closingLine.Error);
+    }
+
+    [Theory]
+    [InlineData("   ::")]
+    [InlineData("   ::: C.D\ninside\n:::\n::")]
+    public void WhenFenceWithThreeSpacesFollowsADefinitionAndAnEmptyLine_ThenTheDefinitionListIsAsWithTheFenceAtTheLineStart(
+        string fenceLines)
+    {
+        // Arrange
+        var indented = $":: A.B\nTerm\n:   One\n\n{fenceLines}\nafter\n";
+        var plain = $":: A.B\nTerm\n:   One\n\n{fenceLines.TrimStart()}\nafter\n";
+
+        // Act
+        var indentedPage = MarkdownPageParser.Parse(indented);
+        var plainPage = MarkdownPageParser.Parse(plain);
+
+        // Assert
+        static string Render(IEnumerable<MarkdownSegment> segments) => string.Concat(segments.Select(segment => segment switch
+        {
+            HtmlMarkdownSegment html => html.Html,
+            BlockMarkdownSegment block => $"[{Render(block.Content)}]",
+            _ => string.Empty
+        }));
+
+        var rendered = Render(MarkdownSegmentBuilder.Build(indentedPage));
+        Assert.Equal(Render(MarkdownSegmentBuilder.Build(plainPage)), rendered);
+        Assert.Contains("<dd>One</dd>", rendered);
+        Assert.All(indentedPage.AllBlocks, block => Assert.Null(block.Error));
+
+        var definitionList = Assert.Single(indentedPage.Document.Descendants<DefinitionList>());
+        var endOfDefinition = indented.IndexOf("One", StringComparison.Ordinal) + "One".Length - 1;
+        Assert.Equal(endOfDefinition, definitionList.Span.End);
+        Assert.Equal(
+            Assert.Single(plainPage.Document.Descendants<DefinitionList>()).Span.End,
+            definitionList.Span.End);
+        Assert.All(
+            indentedPage.AllBlocks.Where(block => block.Line > 3),
+            block => Assert.True(block.HeadSpan.Start > definitionList.Span.End));
     }
 
     [Fact]
@@ -748,7 +835,7 @@ public class MarkdownPageParserTests
         Assert.Contains("only allowed directly on the page", outer.Children[0].Error);
         Assert.DoesNotContain("not closed", outer.Children[0].Error);
         Assert.Equal(5, outer.Children[1].Line);
-        Assert.Contains("closes no block. No block is open here.", outer.Children[1].Error);
+        Assert.Contains("closes no block. A closing line inside a quote or a list item closes no block outside of it.", outer.Children[1].Error);
     }
 
     [Fact]
