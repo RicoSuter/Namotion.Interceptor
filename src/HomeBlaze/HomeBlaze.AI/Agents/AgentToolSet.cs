@@ -12,7 +12,7 @@ namespace HomeBlaze.AI.Agents;
 /// </summary>
 public sealed class AgentToolSet
 {
-    /// <summary>The graph tools an agent gets when it configures none.</summary>
+    /// <summary>The graph tools a new agent allows by default. An empty allowed list allows no graph tools.</summary>
     public static readonly IReadOnlyList<string> DefaultAllowedTools =
         ["browse", "search", "get_property", "list_types", "list_methods", "get_property_history"];
 

@@ -10,6 +10,7 @@ public class AgentTimeSpanInputTests
     [InlineData(" 1:30 ", 0, 1, 30, 0)]
     [InlineData("2.03:00:00", 2, 3, 0, 0)]
     [InlineData("00:00:00", 0, 0, 0, 0)]
+    [InlineData("365.00:00:00", 365, 0, 0, 0)]
     public void WhenTextIsATimeOfDayFormat_ThenItParses(string text, int days, int hours, int minutes, int seconds)
     {
         // Act

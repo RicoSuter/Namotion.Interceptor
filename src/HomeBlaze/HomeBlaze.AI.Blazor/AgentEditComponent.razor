@@ -11,7 +11,7 @@
         <MudTextField T="string" Label="Instructions" @bind-Value="_instructions" @bind-Value:after="OnChanged" Lines="6" Immediate="true"
                       HelperText="What the agent watches for and how it should react." Class="mt-4" data-testid="agent-edit-instructions" />
 
-        <MudText Typo="Typo.subtitle2" Class="mt-6">Model</MudText>
+        <MudText Typo="Typo.subtitle2" Class="mt-6">Models</MudText>
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="6">
                 <MudTextField T="string" Label="Model" @bind-Value="_model" @bind-Value:after="OnChanged" Immediate="true" HelperText="@ModelHelperText" />
@@ -86,7 +86,8 @@
                 }
                 else if (tool.Description is not null)
                 {
-                    <MudText Typo="Typo.caption" Class="d-block ml-14 mud-text-secondary">@tool.Description</MudText>
+                    <MudText Typo="Typo.caption" Class="ml-14 mud-text-secondary"
+                             Style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">@tool.Description</MudText>
                 }
             </div>
         }
@@ -110,7 +111,7 @@
 }
 
 @code {
-    private const string TimeSpanErrorText = "Use hh:mm:ss, at most 365 days";
+    private const string TimeSpanErrorText = "Use [d.]hh:mm:ss, at most 365 days";
 
     private static readonly AgentEffort?[] EffortValues = [null, .. Enum.GetValues<AgentEffort>().Cast<AgentEffort?>()];
 
@@ -155,7 +156,6 @@
 
     private LlmAgentBase? Agent => Subject as LlmAgentBase;
 
-
     private string ModelHelperText => Agent is ClaudeCliAgent ? "Empty: CLI default. Aliases such as opus, sonnet or haiku work." : "Empty: default model.";
 
     protected override void OnInitialized()
@@ -174,7 +174,9 @@
         _watchPaths = string.Join('\n', agent.WatchPaths);
         _pollInterval = agent.PollInterval is { } pollInterval ? AgentTimeSpanInput.Format(pollInterval) : null;
         _minRunInterval = AgentTimeSpanInput.Format(agent.MinRunInterval);
-        _turnTimeout = AgentTimeSpanInput.Format(agent.TurnTimeout);
+        // The runtime treats zero, negative and over int.MaxValue milliseconds as no limit, which the form writes as 00:00:00.
+        var turnTimeout = agent.TurnTimeout;
+        _turnTimeout = AgentTimeSpanInput.Format(turnTimeout > TimeSpan.Zero && turnTimeout.TotalMilliseconds <= int.MaxValue ? turnTimeout : TimeSpan.Zero);
         _allowedTools = new HashSet<string>(agent.AllowedTools, StringComparer.Ordinal);
         _toolOptions = AgentToolOptions.Create(ToolSource, agent.AllowedTools);
         _maxToolCalls = agent.MaxToolCallsPerTurn;
@@ -183,6 +185,8 @@
             _cliPath = cliAgent.CliPath;
             _fallbackModel = cliAgent.FallbackModel;
         }
+
+        _wasValid = IsValid;
     }
 
     public Task SaveAsync(CancellationToken cancellationToken)
@@ -199,7 +203,7 @@
         agent.BackgroundModel = NullIfBlank(_backgroundModel);
         agent.BackgroundEffort = _backgroundEffort;
         agent.WatchPaths = _watchPaths.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        agent.PollInterval = AgentTimeSpanInput.TryParse(_pollInterval, out var pollInterval) ? pollInterval : null;
+        agent.PollInterval = AgentTimeSpanInput.TryParse(_pollInterval, out var pollInterval) && pollInterval > TimeSpan.Zero ? pollInterval : null;
         AgentTimeSpanInput.TryParse(_minRunInterval, out var minRunInterval);
         agent.MinRunInterval = minRunInterval;
         AgentTimeSpanInput.TryParse(_turnTimeout, out var turnTimeout);

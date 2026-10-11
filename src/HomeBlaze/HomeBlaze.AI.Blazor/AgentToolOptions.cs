@@ -7,7 +7,7 @@ namespace HomeBlaze.AI.Blazor;
 /// One allowed-tools toggle of the agent edit form.
 /// </summary>
 /// <param name="Name">The tool name stored in <see cref="LlmAgentBase.AllowedTools"/>.</param>
-/// <param name="Description">The tool description, null when unknown.</param>
+/// <param name="Description">A short summary for known tools, else the tool description; null when unknown.</param>
 /// <param name="IsOffered">Whether the installation currently offers the tool.</param>
 /// <param name="CanChangeState">Whether the tool can change devices, including sending notifications.</param>
 public sealed record AgentToolOption(string Name, string? Description, bool IsOffered, bool CanChangeState);
@@ -23,9 +23,21 @@ public static class AgentToolOptions
 
     private const string MemoryToolName = "update_memory";
 
+    // Operator-facing summaries; the MCP descriptions are written for the model and are long.
+    private static readonly Dictionary<string, string> Summaries = new(StringComparer.Ordinal)
+    {
+        ["browse"] = "Browses the subject tree and reads the properties of subjects.",
+        ["search"] = "Finds subjects by type, title or path.",
+        ["get_property"] = "Reads a single property value.",
+        ["list_types"] = "Lists the known types and interfaces, so subjects can be found by capability.",
+        ["list_methods"] = "Lists the operations and queries a subject offers.",
+        ["get_property_history"] = "Reads the recorded history of property values.",
+        ["invoke_method"] = "Runs operations on subjects, such as switching a device or sending a notification.",
+        ["set_property"] = "Writes property values of subjects."
+    };
+
     /// <summary>
-    /// Lists the tools of <paramref name="toolSource"/>, or <see cref="FallbackToolNames"/> when listing fails,
-    /// for example while the root subject is still loading.
+    /// Lists the tools of <paramref name="toolSource"/>, or <see cref="FallbackToolNames"/> when listing fails.
     /// </summary>
     public static IReadOnlyList<AgentToolOption> Create(IAgentToolSource toolSource, IEnumerable<string> allowedTools)
     {
@@ -44,7 +56,8 @@ public static class AgentToolOptions
 
     /// <summary>
     /// Creates a toggle per offered tool, read-only tools first, followed by a toggle per allowed name that is not
-    /// offered, so it can be turned off. update_memory is excluded because it is always available.
+    /// offered, so it can be turned off. update_memory is excluded because it is always available. Known tools
+    /// are described by a short summary instead of their tool description.
     /// </summary>
     /// <param name="offeredTools">The offered tools, null to use <see cref="FallbackToolNames"/>.</param>
     /// <param name="allowedTools">The configured allowed tool names.</param>
@@ -59,7 +72,7 @@ public static class AgentToolOptions
         {
             if (names.Add(name))
             {
-                options.Add(new AgentToolOption(name, description, IsOffered: true, CanChangeState(name)));
+                options.Add(new AgentToolOption(name, Summaries.GetValueOrDefault(name) ?? description, IsOffered: true, CanChangeState(name)));
             }
         }
 

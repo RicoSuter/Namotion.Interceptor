@@ -12,14 +12,14 @@ public class AgentToolOptionsTests
     public void WhenToolsAreOffered_ThenEachIsListedWithItsDescriptionExceptUpdateMemory()
     {
         // Arrange
-        var offeredTools = new[] { CreateTool("browse", "Browse the tree"), CreateTool("update_memory", "Memory"), CreateTool("search", "Find subjects") };
+        var offeredTools = new[] { CreateTool("custom_tool", "Custom description"), CreateTool("update_memory", "Memory"), CreateTool("other_tool", "Other description") };
 
         // Act
-        var options = AgentToolOptions.Create(offeredTools, ["browse"]);
+        var options = AgentToolOptions.Create(offeredTools, ["custom_tool"]);
 
         // Assert
-        Assert.Equal(["browse", "search"], options.Select(option => option.Name));
-        Assert.Equal(["Browse the tree", "Find subjects"], options.Select(option => option.Description));
+        Assert.Equal(["custom_tool", "other_tool"], options.Select(option => option.Name));
+        Assert.Equal(["Custom description", "Other description"], options.Select(option => option.Description));
         Assert.All(options, option => Assert.True(option.IsOffered));
     }
 
@@ -52,6 +52,31 @@ public class AgentToolOptionsTests
     }
 
     [Fact]
+    public void WhenAStateChangingToolIsNotOffered_ThenItIsStillMarkedAsChangingState()
+    {
+        // Act
+        var options = AgentToolOptions.Create([CreateTool("browse")], ["invoke_method"]);
+
+        // Assert
+        var option = Assert.Single(options, option => option.Name == "invoke_method");
+        Assert.False(option.IsOffered);
+        Assert.True(option.CanChangeState);
+    }
+
+    [Fact]
+    public void WhenAKnownToolIsOffered_ThenItsShortSummaryIsTheDescription()
+    {
+        // Arrange
+        var offeredTools = new[] { CreateTool("browse", "Browse the subject tree at a path with configurable depth. Use depth=0 ...") };
+
+        // Act
+        var options = AgentToolOptions.Create(offeredTools, []);
+
+        // Assert
+        Assert.Equal("Browses the subject tree and reads the properties of subjects.", Assert.Single(options).Description);
+    }
+
+    [Fact]
     public void WhenListingTheToolsFails_ThenTheFallbackNamesAreListed()
     {
         // Arrange
@@ -62,7 +87,7 @@ public class AgentToolOptionsTests
 
         // Assert
         Assert.Equal(AgentToolOptions.FallbackToolNames.Order(), options.Select(option => option.Name).Order());
-        Assert.All(options, option => Assert.Null(option.Description));
+        Assert.All(options, option => Assert.False(string.IsNullOrEmpty(option.Description)));
         Assert.All(options, option => Assert.True(option.IsOffered));
     }
 

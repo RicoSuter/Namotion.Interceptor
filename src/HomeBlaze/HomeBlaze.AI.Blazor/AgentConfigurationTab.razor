@@ -12,7 +12,7 @@
                 <tr><td>Watch paths</td><td>@string.Join(", ", Agent.WatchPaths)</td></tr>
                 <tr><td>Poll interval</td><td>@(Agent.PollInterval?.ToString() ?? "none")</td></tr>
                 <tr><td>Minimum run interval</td><td>@Agent.MinRunInterval</td></tr>
-                <tr><td>Allowed tools</td><td>@(Agent.AllowedTools.Length > 0 ? string.Join(", ", Agent.AllowedTools) : "all")</td></tr>
+                <tr><td>Allowed tools</td><td>@(Agent.AllowedTools.Length > 0 ? string.Join(", ", Agent.AllowedTools) : "none (memory only)")</td></tr>
                 <tr><td>Turn timeout</td><td>@Agent.TurnTimeout</td></tr>
                 <tr><td>Tool calls per turn</td><td>@Agent.MaxToolCallsPerTurn</td></tr>
                 @if (Agent is ClaudeCliAgent cliAgent)
