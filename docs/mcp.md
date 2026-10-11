@@ -205,7 +205,7 @@ Read a property value by path. Returns the value, JSON schema type, and optional
 
 Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. A value that cannot be converted returns an error and leaves the property unchanged.
 
-An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and the requested path and returns null to allow the write or the error message for the client, for example to keep a client from changing properties that hold settings. A refused property is not reported as writable by `get_property`, `browse` and `search`. The filter may be called concurrently.
+An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and a path and returns null to allow the write or the error message for the client, for example to keep a client from changing properties that hold settings. Decide on the property; the path only serves the message and is the client's text for `get_property` and `set_property` and the path of the subject node for `browse` and `search`. A refused property is not reported as writable by `get_property`, `browse` and `search`. The filter may be called concurrently.
 
 ### `list_types`
 
@@ -320,6 +320,45 @@ public class MyToolProvider : IMcpToolProvider
 Tools are transport-agnostic `McpToolInfo` instances registered via `WithSubjectRegistryTools`.
 
 `Annotations` carries the MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) that clients may use to decide which calls need the user's approval. They are hints, not enforcement. `McpToolAnnotations.ReadOnly` marks a tool that only reads and `McpToolAnnotations.Destructive` one that can change state; both set `openWorldHint` to false. The core tools carry these: `set_property` is destructive, the other core tools are read-only.
+
+## Using the Tools In-Process
+
+The tools do not depend on the MCP transport, so an application can hand them to its own AI agent directly or serve a selection of them on another route.
+
+```csharp
+// The core tools and those of the tool providers, with ToolDescriptionAdditions applied
+var tools = new McpToolFactory(() => rootSubject, configuration).CreateTools();
+
+// Function calling with Microsoft.Extensions.AI
+var options = new ChatOptions { Tools = [.. tools.Select(tool => tool.ToAIFunction())] };
+var client = new FunctionInvokingChatClient(innerChatClient);
+var response = await client.GetResponseAsync(messages, options, cancellationToken);
+```
+
+`ToAIFunction()` wraps a tool as an `AIFunction` with the tool's name, description and input schema; invoking it calls the tool's handler with the arguments as a JSON object.
+
+`McpToolDispatcher` serves any list of tools through the MCP list and call requests, which `WithSubjectRegistryTools` uses as well. It lets a custom route offer a different tool list, for example only the tools one client may use:
+
+```csharp
+handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
+handlers.CallToolHandler = (request, cancellationToken) =>
+    McpToolDispatcher.CallToolAsync(tools, request.Params!, logger, cancellationToken);
+```
+
+`ListTools` maps the annotations of each tool. `CallToolAsync` returns a string result as text and any other result as indented JSON, and turns an unknown tool or a throwing handler into an error result.
+
+To change one member of a tool, for example to wrap its handler with a budget or logging, copy it with the copy constructor, which keeps all other members including the annotations:
+
+```csharp
+var counted = new McpToolInfo(tool)
+{
+    Handler = async (input, cancellationToken) =>
+    {
+        Interlocked.Increment(ref callCount);
+        return await tool.Handler(input, cancellationToken);
+    }
+};
+```
 
 ## Connecting Claude Desktop (Local Development)
 
