@@ -281,17 +281,15 @@ public partial class Motor : ITitleProvider
 ### IIconProvider
 
 ```csharp
-using MudBlazor;
-
 public partial class Motor : IIconProvider
 {
-    public string? Icon => Icons.Material.Filled.Settings;
+    public string? IconName => "Settings";  // Name of a Material filled icon, shown in navigation, browser, etc.
 }
 ```
 
 ## Create Dialog
 
-Every subject type that implements `IConfigurable` is offered in the create dialog, which is opened from a storage folder, from the markdown editor and from the grid and canvas layouts. The dialog shows a searchable list of types with a group sidebar, and then the setup or edit component of the chosen type. Typing in the search box selects the group "All" so that a match is never hidden behind a group that was selected before, and selecting a group during a search narrows the matches to it.
+Every registered, non-abstract subject type that implements `IConfigurable` is offered in the create dialog, which is opened from a storage folder, from the markdown editor and from the grid and canvas layouts. The dialog shows a searchable list of types with a group sidebar, and then the setup or edit component of the chosen type. Typing in the search box selects the group "All" so that a match is never hidden behind a group that was selected before, and selecting a group during a search narrows the matches to it.
 
 The dialog describes a type with attributes on the class. All of them are optional:
 
@@ -300,9 +298,9 @@ The dialog describes a type with attributes on the class. All of them are option
 | `[DisplayName("Motor")]` | Title in the list and in the dialog title, in sentence case | Class name split into words |
 | `[Description("...")]` | One sentence below the title, also searched | No description |
 | `[Category("Samples")]` | Group in the sidebar | Group "Other", listed last |
-| `[SubjectIcon("Settings")]` | Icon in the list, using the same names as `IIconProvider.IconName` | Default icon of the group |
+| `[SubjectIcon("Settings")]` | Icon in the list, using the same names as `IIconProvider.IconName` | Icon of the group for the built-in groups (Devices, Servers, Clients, History, Layouts, Components, Samples, Storage), otherwise a generic icon |
 
-`[DisplayName]`, `[Description]` and `[Category]` come from `System.ComponentModel`, `[SubjectIcon]` from `HomeBlaze.Abstractions.Attributes`.
+`[DisplayName]`, `[Description]` and `[Category]` come from `System.ComponentModel`, `[SubjectIcon]` from `HomeBlaze.Abstractions.Attributes`. The create dialog attributes, including the two under [Hiding a Type](#hiding-a-type), are read from the class itself and are not inherited from a base class.
 
 ```csharp
 using System.ComponentModel;
@@ -1039,8 +1037,11 @@ Edit components provide configuration forms:
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
 @implements ISubjectEditComponent
 
-<MudTextField @bind-Value="MotorSubject.Name" Label="Name" />
-<MudNumericField @bind-Value="MotorSubject.TargetSpeed" Label="Target Speed" />
+<MudTextField @bind-Value="_name"
+              @bind-Value:after="OnFieldChanged"
+              Label="Name"
+              Required="true"
+              Immediate="true" />
 
 @code {
     [Parameter]
@@ -1048,17 +1049,36 @@ Edit components provide configuration forms:
 
     private Motor? MotorSubject => Subject as Motor;
 
-    public bool IsValid => !string.IsNullOrWhiteSpace(MotorSubject?.Name);
-    public bool IsDirty { get; private set; }
+    private string _name = string.Empty;
+    private string _originalName = string.Empty;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_name);
+    public bool IsDirty => _name != _originalName;
 
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
 
-    public Task SaveAsync(CancellationToken cancellationToken = default)
+    protected override void OnInitialized()
     {
-        // Save logic here
-        IsDirty = false;
-        IsDirtyChanged?.Invoke(false);
+        _name = MotorSubject?.Name ?? string.Empty;
+        _originalName = _name;
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (MotorSubject != null && IsValid)
+        {
+            MotorSubject.Name = _name;
+            _originalName = _name;
+            IsDirtyChanged?.Invoke(false);
+        }
+
         return Task.CompletedTask;
     }
 }
@@ -1073,6 +1093,8 @@ Edit components provide configuration forms:
 | `IsValidChanged` | Event fired when validity changes |
 | `IsDirtyChanged` | Event fired when dirty state changes |
 | `SaveAsync` | Persist changes |
+
+In the create dialog the "Create" button follows the component's `IsValid`, so a component raises `IsValidChanged` whenever `IsValid` changes. Binding with `@bind-Value:after` covers every way a value can change (typing, pasting, autofill), which a key handler such as `OnKeyUp` does not, and `Immediate="true"` on a text field updates the value on every keystroke instead of when the field loses focus.
 
 ### Edit Component Lifecycle: OnInitialized vs OnParametersSet
 
@@ -1093,15 +1115,16 @@ Edit components provide configuration forms:
 
 <MudForm>
     <MudTextField @bind-Value="_name"
+                  @bind-Value:after="OnFieldChanged"
                   Label="Name"
                   Required="true"
-                  OnKeyUp="OnFieldChanged" />
+                  Immediate="true" />
 
     <MudNumericField @bind-Value="_targetSpeed"
+                     @bind-Value:after="OnFieldChanged"
                      Label="Target Speed (RPM)"
                      Min="0" Max="10000"
-                     Class="mt-4"
-                     OnChange="OnFieldChanged" />
+                     Class="mt-4" />
 </MudForm>
 
 @code {
