@@ -47,6 +47,7 @@
     private ISubjectEditComponent? _editComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private IInterceptorSubject? _previousSubject;
+    private ISubjectEditComponent? _reportedEditComponent;
     private bool? _lastReportedIsValid;
 
     public bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
@@ -88,6 +89,17 @@
             _editComponent.IsValidChanged += OnIsValidChanged;
             _editComponent.IsDirtyChanged += OnIsDirtyChanged;
             StateHasChanged();
+
+            // The same instance is subscribed again after every parameter update, so only a new instance resets
+            // the reported value; reporting an unchanged value is then dropped, which keeps the host's re-render
+            // from looping back here.
+            if (!ReferenceEquals(_reportedEditComponent, editComponent))
+            {
+                _reportedEditComponent = editComponent;
+                _lastReportedIsValid = null;
+            }
+
+            OnIsValidChanged(editComponent.IsValid);
         }
     }
 
