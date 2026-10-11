@@ -112,7 +112,7 @@ internal static class McpToolHelper
                 }
 
                 var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-                properties[segment] = BuildScalarPropertyDto(property, includeAttributes, configuration.IsReadOnly);
+                properties[segment] = BuildScalarPropertyDto(property, pathProvider, rootSubject, configuration, includeAttributes);
             }
         }
 
@@ -149,7 +149,11 @@ internal static class McpToolHelper
     }
 
     private static ScalarProperty BuildScalarPropertyDto(
-        RegisteredSubjectProperty property, bool includeAttributes, bool isReadOnly)
+        RegisteredSubjectProperty property,
+        PathProviderBase pathProvider,
+        IInterceptorSubject rootSubject,
+        McpServerConfiguration configuration,
+        bool includeAttributes)
     {
         List<PropertyAttribute>? attributes = null;
         if (includeAttributes)
@@ -169,8 +173,26 @@ internal static class McpToolHelper
         return new ScalarProperty(
             property.GetValue(),
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
-            IsWritable: !isReadOnly && property.HasSetter && HasPublicSetter(property),
+            IsWritable: IsWritable(property, pathProvider, rootSubject, configuration),
             Attributes: attributes);
+    }
+
+    // The path is built only when a filter needs it, since browse reports many properties.
+    private static bool IsWritable(
+        RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject rootSubject, McpServerConfiguration configuration)
+    {
+        if (configuration.IsReadOnly || !property.HasSetter || !HasPublicSetter(property))
+        {
+            return false;
+        }
+
+        if (configuration.PropertyWriteFilter is not { } filter)
+        {
+            return true;
+        }
+
+        var path = property.TryGetPath(pathProvider, rootSubject);
+        return filter(property, path is null ? property.Name : configuration.PathPrefix + path) is null;
     }
 
     // TODO: Clean up when HasSetter in registry respects access modifiers (see #102)

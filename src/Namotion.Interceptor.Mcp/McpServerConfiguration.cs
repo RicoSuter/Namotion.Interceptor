@@ -62,6 +62,8 @@ public class McpServerConfiguration
     /// Decides whether set_property may write a property, given the property and the path the client sent. Returns
     /// null to allow the write, or the error message returned to the client, in which case nothing is written.
     /// Null (the default) allows every writable property. Not consulted when <see cref="IsReadOnly"/> is true.
+    /// Also decides whether get_property, browse and search report a property as writable. May be called
+    /// concurrently, so it must be thread-safe.
     /// </summary>
     public Func<RegisteredSubjectProperty, string, string?>? PropertyWriteFilter { get; init; }
 

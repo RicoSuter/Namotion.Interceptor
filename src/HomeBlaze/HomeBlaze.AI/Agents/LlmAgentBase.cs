@@ -629,9 +629,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private async Task RunBackgroundAsync(string reason, CancellationToken cancellationToken)
     {
         await _turnGate.WaitAsync(cancellationToken);
-        var started = BeginTurn("Running");
+        DateTimeOffset? started = null;
+        var isCounted = false;
         try
         {
+            started = BeginTurn("Running");
             var progress = CreateProgress();
             var tools = CreateToolSet(progress);
             var message = AgentPromptBuilder.BuildBackgroundMessage(
@@ -639,14 +641,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 Timeline.GetRecentBackgroundResults(RecentResultCount),
                 Timeline.GetLastQuietRunTime(),
                 await FetchWatchedStateAsync(cancellationToken),
-                started);
+                started.Value);
 
             var result = await RunTurnAsync(AgentTurnKind.Background, message, tools, progress, cancellationToken);
             var isQuiet = AgentPromptBuilder.IsQuiet(result.Text);
             await AppendAsync(new AgentTimelineEntry
             {
                 Kind = AgentTimelineEntryKind.BackgroundRun,
-                Timestamp = started,
+                Timestamp = started.Value,
                 Text = result.Text,
                 IsQuiet = isQuiet,
                 Trigger = reason,
@@ -660,7 +662,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 LastAnalysis = result.Text;
             }
 
-            await CountBackgroundRunAsync(started);
+            isCounted = true;
+            await CountBackgroundRunAsync(started.Value);
             lock (_stateLock)
             {
                 _scheduler?.ReportSuccess();
@@ -670,8 +673,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await AppendAsync(CreateBackgroundErrorEntry(CancelledText, reason, started));
-            await CountBackgroundRunAsync(started);
+            if (started is { } cancelledStart && !isCounted)
+            {
+                await AppendAsync(CreateBackgroundErrorEntry(CancelledText, reason, cancelledStart));
+                await CountBackgroundRunAsync(cancelledStart);
+            }
+
             throw;
         }
         catch (Exception exception)
@@ -679,8 +686,15 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             try
             {
                 var turnException = ToTurnException(exception);
-                await CountBackgroundRunAsync(started);
-                await HandleFailureAsync(turnException, CreateBackgroundErrorEntry(turnException.Message, reason, started));
+                if (started is { } failedStart && !isCounted)
+                {
+                    await CountBackgroundRunAsync(failedStart);
+                    await HandleFailureAsync(turnException, CreateBackgroundErrorEntry(turnException.Message, reason, failedStart));
+                }
+                else
+                {
+                    await HandleFailureAsync(turnException);
+                }
             }
             catch (Exception handlerException)
             {

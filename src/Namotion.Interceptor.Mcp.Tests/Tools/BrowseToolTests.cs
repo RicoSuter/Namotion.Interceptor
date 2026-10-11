@@ -60,6 +60,40 @@ public class BrowseToolTests
     }
 
     [Fact]
+    public async Task WhenTheWriteFilterRefusesAProperty_ThenBrowseReportsItAsNotWritable()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+        var filteredPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            IsReadOnly = false,
+            PropertyWriteFilter = (_, path) =>
+            {
+                filteredPaths.Add(path);
+                return path == "Device.IsOn" ? "Protected." : null;
+            }
+        };
+        var browseTool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", path = "Device", depth = 0, includeProperties = true });
+        var json = JsonSerializer.SerializeToElement(await browseTool.Handler(input, CancellationToken.None));
+
+        // Assert
+        var properties = json.GetProperty("result").GetProperty("properties");
+        Assert.False(properties.GetProperty("IsOn").TryGetProperty("isWritable", out var isOnWritable) && isOnWritable.GetBoolean());
+        Assert.True(properties.GetProperty("DeviceName").GetProperty("isWritable").GetBoolean());
+        Assert.Contains("Device.IsOn", filteredPaths);
+    }
+
+    [Fact]
     public async Task WhenIncludePropertiesIsTrue_ThenPropertyValuesAreIncluded()
     {
         // Arrange
