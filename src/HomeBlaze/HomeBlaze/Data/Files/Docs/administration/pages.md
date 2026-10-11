@@ -518,7 +518,7 @@ Rules for all slots:
 
 - **Directly inside the widget**: A slot block stands directly inside the widget block that declares the slot. One level deeper, for example a `Footer` inside an `Item`, it is an error.
 - **Content only**: A slot that holds content takes no arguments, no `#name` and no `json` block. `Footer`, `Content` and `Item` are such slots.
-- **Empty lines are no content**: A block with nothing but empty lines in it has no content. Everything else is content, also an HTML comment.
+- **Empty lines are no content**: A block with nothing but empty lines in it has no content. Everything else is content, also an HTML comment. One case differs: where a widget has no place for loose content, for example between the `Item` blocks of a `FlowLayout`, an HTML comment is left out and is no error.
 - **An empty slot block**: A slot block without content still fills its slot. A card with an empty `Footer` block shows the divider of the footer with nothing below it.
 
 #### Slot Errors
@@ -915,7 +915,7 @@ A block that cannot be shown is replaced by a red box with the line number of th
 
 - **One box per block**: The box replaces the block with everything in it. The blocks inside it are not created, and they are created again once the error is fixed.
 - **Two messages in one box**: A block that has an error and is also not closed shows both messages. For a block that is not closed, "everything in it" is everything up to the end of the block around it, or up to the end of the page.
-- **Errors in slots**: An error in a slot block, such as a `Tab`, a `Footer` or an `Item`, replaces the whole widget around it with one box. The box names the line of the slot block.
+- **Errors in slots**: An error in a slot block, such as a `Tab`, a `Footer` or an `Item`, is shown in a box that names the line of the slot block. The box replaces the whole widget around it. One case differs: when the colon lines or the head line of the slot block are wrong and the widget has a default slot that takes loose content, like a `Card`, the widget is still shown and the box stands in its content where the block was. A widget without a default slot, like a `FlowLayout` or a `TabLayout`, has no place for the box, so it is replaced, with one box for each such block in it.
 - **Failures of a subject**: When the subject of a block fails while it is created or configured, the box shows the message of that failure, and the log of HomeBlaze has the details.
 
 The names, numbers and lines in the messages below are examples.

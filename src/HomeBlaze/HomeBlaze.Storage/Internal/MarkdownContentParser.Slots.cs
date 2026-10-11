@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 
@@ -11,6 +12,9 @@ public sealed partial class MarkdownContentParser
     // The #id of the slot block that created a slot value. A value keeps it for its lifetime, because a block
     // with a name only ever reuses the value of that name. See FindExistingSlotValue.
     private readonly ConditionalWeakTable<IInterceptorSubject, string> _slotValueNames = new();
+
+    [GeneratedRegex("<!--.*?-->", RegexOptions.Singleline)]
+    private static partial Regex HtmlCommentRegex();
 
     /// <summary>
     /// Sorts the content of a block by the slot it fills and checks everything that needs no instance: the
@@ -85,26 +89,53 @@ public sealed partial class MarkdownContentParser
         var hasDefaultContent = defaultContent.Exists(
             segment => segment is not HtmlMarkdownSegment html || !string.IsNullOrWhiteSpace(html.Html));
 
-        if (hasDefaultContent)
+        var hasNoPlaceForDefaultContent = slots.Default is null || defaultIsFilledByBlock;
+        if (hasDefaultContent && hasNoPlaceForDefaultContent)
         {
-            if (slots.Default is null)
+            // The box of an invalid block is part of the loose content. Where that has no place, the block
+            // is the mistake and not content, so its own box is shown in place of the widget.
+            error = FindErrorOfInvalidBlocks(owner.Block);
+            if (error is not null)
             {
-                error = new BlockError(owner.Block.Line, $"{type.Name} has no default slot, so it cannot have content.");
                 return false;
             }
 
-            if (defaultIsFilledByBlock)
+            if (!IsCommentOnly(defaultContent))
             {
-                error = new BlockError(
-                    owner.Block.Line, $"The slot '{slots.Default.Name}' is filled by a block and by loose content.");
+                error = new BlockError(owner.Block.Line, slots.Default is null
+                    ? $"{type.Name} has no default slot, so it cannot have content."
+                    : $"The slot '{slots.Default.Name}' is filled by a block and by loose content.");
                 return false;
             }
+
+            hasDefaultContent = false;
         }
 
         content = new BlockContent(slotGroups, hasDefaultContent ? defaultContent : []);
         error = null;
         return true;
     }
+
+    /// <summary>Gets one box for every invalid block directly inside <paramref name="owner"/>, in document order.</summary>
+    private static BlockError? FindErrorOfInvalidBlocks(MarkdownBlock owner)
+    {
+        BlockError? error = null;
+        for (var index = owner.Children.Count - 1; index >= 0; index--)
+        {
+            var child = owner.Children[index];
+            if (child.Kind == MarkdownBlockKind.Invalid)
+            {
+                error = new BlockError(child.Line, child.Error!) { Next = error };
+            }
+        }
+
+        return error;
+    }
+
+    /// <summary>Gets whether the content is nothing but HTML comments and white space, which shows nothing.</summary>
+    private static bool IsCommentOnly(List<MarkdownSegment> content) =>
+        content.TrueForAll(segment =>
+            segment is HtmlMarkdownSegment html && string.IsNullOrWhiteSpace(HtmlCommentRegex().Replace(html.Html, string.Empty)));
 
     /// <summary>
     /// Fills the slots of <paramref name="subject"/> from the content of its block: slot blocks fill the slot

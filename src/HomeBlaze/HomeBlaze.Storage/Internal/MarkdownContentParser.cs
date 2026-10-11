@@ -237,7 +237,7 @@ public sealed partial class MarkdownContentParser
                     var (key, subject, error) = await CreateWidgetAsync(block, children, existingChildren, index, state, cancellationToken);
                     if (subject is null)
                     {
-                        AddHtml(children, existingChildren, index, MarkdownErrorBox.Render(error!.Line, error.Message));
+                        AddHtml(children, existingChildren, index, error!.Render());
                     }
                     else
                     {
@@ -443,7 +443,17 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>What an error box shows: the line of the block to fix and the message.</summary>
-    private sealed record BlockError(int Line, string Message);
+    private sealed record BlockError(int Line, string Message)
+    {
+        /// <summary>The box after this one, when several boxes replace a block.</summary>
+        public BlockError? Next { get; init; }
+
+        public string Render()
+        {
+            var box = MarkdownErrorBox.Render(Line, Message);
+            return Next is null ? box : box + Next.Render();
+        }
+    }
 
     private sealed class ParseState
     {

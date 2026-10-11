@@ -213,7 +213,8 @@ public partial class DocumentationSamplesTests
         return samples;
     }
 
-    private static Task<MarkdownPageFixture> CreateFixtureAsync() =>
+    /// <summary>Creates a fixture that knows the widget types that ship and the sample subjects.</summary>
+    internal static Task<MarkdownPageFixture> CreateFixtureAsync() =>
         MarkdownPageFixture.CreateAsync(services =>
         {
             // The type registry reads the provider on first use, so the assemblies are added before anything is created.
@@ -227,7 +228,7 @@ public partial class DocumentationSamplesTests
         });
 
     /// <summary>Gets the texts of all error boxes of the page as the page shows them, ordered by their line.</summary>
-    private static List<string> FindErrorBoxes(MarkdownFile page) =>
+    internal static List<string> FindErrorBoxes(MarkdownFile page) =>
         SortByLine(
             Flatten(page.Children.Values)
                 .OfType<HtmlSegment>()
