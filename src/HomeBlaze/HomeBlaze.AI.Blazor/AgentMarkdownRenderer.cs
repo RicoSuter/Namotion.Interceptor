@@ -1,7 +1,4 @@
 using Markdig;
-using Markdig.Extensions.AutoIdentifiers;
-using Markdig.Extensions.GenericAttributes;
-using Markdig.Extensions.MediaLinks;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
@@ -31,22 +28,27 @@ public static class AgentMarkdownRenderer
             SanitizeAutolink(autolink);
         }
 
+        // The parser turns the info string of a fenced code block into a class name.
+        foreach (var codeBlock in document.Descendants<FencedCodeBlock>())
+        {
+            codeBlock.TryGetAttributes()?.Classes?.Clear();
+        }
+
         return document.ToHtml(Pipeline);
     }
 
-    private static MarkdownPipeline CreatePipeline()
-    {
-        var builder = new MarkdownPipelineBuilder()
-            .UseAdvancedExtensions()
-            .DisableHtml();
-
-        // Generic attributes let the text set any HTML attribute, including event handlers; media links embed
-        // iframes; heading identifiers would repeat across timeline entries.
-        builder.Extensions.TryRemove<GenericAttributesExtension>();
-        builder.Extensions.TryRemove<MediaLinkExtension>();
-        builder.Extensions.TryRemove<AutoIdentifierExtension>();
-        return builder.Build();
-    }
+    // An allow list: extensions that copy text into class, id or style attributes (custom containers, generic
+    // attributes, footnotes, heading identifiers) or embed content (media links) must stay out, because a class
+    // can apply page styles such as a full-viewport overlay and repeated ids collide across timeline entries. The
+    // remaining extensions only emit fixed attributes, such as a table column's text alignment.
+    private static MarkdownPipeline CreatePipeline() => new MarkdownPipelineBuilder()
+        .UsePipeTables()
+        .UseEmphasisExtras()
+        .UseAutoLinks()
+        .UseTaskLists()
+        .UseListExtras()
+        .DisableHtml()
+        .Build();
 
     private static void SanitizeLink(LinkInline link)
     {

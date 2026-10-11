@@ -24,6 +24,14 @@ public class AgentMarkdownRendererTests
     [InlineData("[click](vbscript:msgbox)")]
     [InlineData("[click](/pages/Devices)")]
     [InlineData("[click][target]\n\n[target]: javascript:alert(1)")]
+    [InlineData("[click](&#106;avascript:alert(1))")]
+    [InlineData("[click](&#x6A;avascript:alert(1))")]
+    [InlineData("[click](java&#09;script:alert(1))")]
+    [InlineData("[click](java&#10;script:alert(1))")]
+    [InlineData("[click](&#32;javascript:alert(1))")]
+    [InlineData("[click](<\tjavascript:alert(1)>)")]
+    [InlineData("[click](%20javascript:alert(1))")]
+    [InlineData("[click](&#1;javascript:alert(1))")]
     public void WhenLinkTargetIsNotAllowed_ThenOnlyTheLinkTextIsRendered(string markdown)
     {
         // Act
@@ -119,5 +127,92 @@ public class AgentMarkdownRendererTests
         Assert.Contains("<ul>", html);
         Assert.Contains("<strong>one</strong>", html);
         Assert.Contains("<pre><code>var x = 1 &lt; 2;", html);
+    }
+
+    [Theory]
+    [InlineData("[click](java\u0001script:alert(1))")]
+    [InlineData("[click](\u0000javascript:alert(1))")]
+    public void WhenLinkTargetContainsControlCharacters_ThenNoLinkIsRendered(string markdown)
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml(markdown);
+
+        // Assert
+        Assert.DoesNotContain("<a", html);
+        Assert.DoesNotContain("href=", html);
+    }
+
+    [Fact]
+    public void WhenLinkTitleContainsQuotes_ThenTheTitleCannotAddAttributes()
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml("[x](https://example.com \"a\\\" onmouseover=\\\"alert(1)\") and [y](https://example.com 'b\\' onclick=\\'alert(1)')");
+
+        // Assert
+        Assert.Contains("title=\"a&quot; onmouseover=&quot;alert(1)\"", html);
+        Assert.Contains("title=\"b' onclick='alert(1)\"", html);
+        Assert.DoesNotContain("\" onmouseover=", html);
+        Assert.DoesNotContain("\" onclick=", html);
+    }
+
+    [Theory]
+    [InlineData("<a@b.c>", "mailto:a@b.c")]
+    [InlineData("See www.example.com today", "http://www.example.com/")]
+    public void WhenAutolinkIsAllowed_ThenItIsRenderedAsExternalLink(string markdown, string expectedUrl)
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml(markdown);
+
+        // Assert
+        Assert.Contains($"href=\"{expectedUrl}\"", html);
+        Assert.Contains("rel=\"noopener noreferrer nofollow\"", html);
+        Assert.Contains("target=\"_blank\"", html);
+    }
+
+    [Fact]
+    public void WhenAutolinkUsesAnotherScheme_ThenItIsRenderedAsText()
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml("Get ftp://example.com/file now");
+
+        // Assert
+        Assert.DoesNotContain("<a", html);
+        Assert.Contains("ftp://example.com/file", html);
+    }
+
+    [Theory]
+    [InlineData("::: fixed\nOverlay\n:::")]
+    [InlineData("::: mud-dialog-container\nOverlay\n:::")]
+    [InlineData("# Title {.mud-overlay #main}")]
+    [InlineData("```mud-overlay\ncode\n```")]
+    public void WhenMarkdownTriesToSetClassesOrIds_ThenNoneAreRendered(string markdown)
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml(markdown);
+
+        // Assert
+        Assert.DoesNotContain("class=", html);
+        Assert.DoesNotContain("id=", html);
+    }
+
+    [Fact]
+    public void WhenMarkdownContainsFootnotes_ThenNoIdsAreRendered()
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml("Value[^1]\n\n[^1]: The note.");
+
+        // Assert
+        Assert.DoesNotContain("id=", html);
+        Assert.DoesNotContain("href=\"#", html);
+    }
+
+    [Fact]
+    public void WhenMarkdownContainsHeading_ThenNoIdIsRendered()
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml("## Status");
+
+        // Assert
+        Assert.Equal("<h2>Status</h2>\n", html);
     }
 }
