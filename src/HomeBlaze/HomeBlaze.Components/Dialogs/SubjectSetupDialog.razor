@@ -6,7 +6,7 @@
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
 
-<MudDialog data-testid="create-subject-wizard"
+<MudDialog data-testid="create-subject-dialog"
            Style="height: calc(100vh - 200px);"
            DefaultFocus="DefaultFocus.FirstChild">
     <TitleContent>
@@ -16,6 +16,7 @@
                 <MudIconButton Icon="@Icons.Material.Filled.ArrowBack"
                                Size="Size.Small"
                                OnClick="GoBack"
+                               Disabled="_isCreating"
                                aria-label="Back to type selection"
                                data-testid="back-button" />
             }
@@ -49,24 +50,40 @@
                                   HelperText="Part of the subject's path, which is its ID. Avoid renaming it later."
                                   data-testid="create-name-input" />
                 }
-                <SubjectEditPanel @key="_createdSubject"
-                                  @ref="_editPanel"
-                                  Subject="_createdSubject"
-                                  IsCreating="true"
-                                  IsValidChanged="OnEditPanelIsValidChanged" />
+                @* A hosted form is not required to announce every change of its validity, and one that renders
+                   only itself leaves the panel's last report stale. These events bubble up from the form after
+                   its own handlers have run, so its validity is current when it is read here. The focus events
+                   cover a control whose choice is clicked outside this element, such as the popover of a select. *@
+                <div @oninput="_refreshEditPanelIsValid"
+                     @onchange="_refreshEditPanelIsValid"
+                     @onclick="_refreshEditPanelIsValid"
+                     @onkeyup="_refreshEditPanelIsValid"
+                     @onfocusin="_refreshEditPanelIsValid"
+                     @onfocusout="_refreshEditPanelIsValid">
+                    <SubjectEditPanel @key="_createdSubject"
+                                      @ref="_editPanel"
+                                      Subject="_createdSubject"
+                                      IsCreating="true"
+                                      IsValidChanged="OnEditPanelIsValidChanged" />
+                </div>
             </MudStack>
         }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel"
+                   Disabled="_isCreating"
                    data-testid="cancel-button">Cancel</MudButton>
         @if (_selectedType is not null)
         {
-            <MudButton Color="Color.Primary"
-                       Variant="Variant.Filled"
-                       Disabled="@(!CanCreate)"
-                       OnClick="Create"
-                       data-testid="create-button">Create</MudButton>
+            @* A validity that changed without any event in the form, such as a delayed validation, is read
+               again before the pointer can reach the button. *@
+            <span @onpointerenter="_refreshEditPanelIsValid">
+                <MudButton Color="Color.Primary"
+                           Variant="Variant.Filled"
+                           Disabled="@(!CanCreate)"
+                           OnClick="Create"
+                           data-testid="create-button">Create</MudButton>
+            </span>
         }
     </DialogActions>
 </MudDialog>
@@ -93,6 +110,7 @@
     private string? _nameError;
     private bool _isNameEdited;
     private bool _isCreating;
+    private Func<Task> _refreshEditPanelIsValid = () => Task.CompletedTask;
 
     private bool CanCreate => _createdSubject is not null && _nameError is null && _isEditPanelValid && !_isCreating;
 
@@ -103,6 +121,11 @@
             ?? Enumerable.Empty<IInterceptorSubject>();
 
         _types = TypeCatalog.GetCreatableTypes(existingSubjects);
+
+        // An event that the dialog handles renders it, and with it the hosted form, whose parameters are then
+        // set again. These events fire for every key stroke in that form, and a render is only needed once
+        // the validity has changed, which the panel reports through IsValidChanged.
+        _refreshEditPanelIsValid = new NonRenderingEventReceiver(RefreshEditPanelIsValidAsync).HandleAsync;
     }
 
     private string GetTitle()
@@ -161,6 +184,21 @@
         RefreshDialog();
     }
 
+    private Task RefreshEditPanelIsValidAsync()
+    {
+        return _editPanel?.RefreshIsValidAsync() ?? Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Handles an event in place of the dialog, which is then not rendered afterwards.
+    /// </summary>
+    private sealed class NonRenderingEventReceiver(Func<Task> handler) : IHandleEvent
+    {
+        public Task HandleAsync() => handler();
+
+        Task IHandleEvent.HandleEventAsync(EventCallbackWorkItem callback, object? argument) => callback.InvokeAsync(argument);
+    }
+
     private string? ValidateName(string? name)
     {
         if (Options.Name is not { } nameOptions)
@@ -201,10 +239,16 @@
 
     private async Task Create()
     {
-        if (_createdSubject is null || _editPanel is null || !CanCreate)
+        // Read once, before the first await: whatever changes these fields while the create is in flight
+        // must not swap the subject that is attached and returned.
+        var createdSubject = _createdSubject;
+        var editPanel = _editPanel;
+        if (createdSubject is null || editPanel is null || !CanCreate)
         {
             return;
         }
+
+        var name = Options.Name is null ? null : _subjectName.Trim();
 
         // A second click while the awaits below are pending would run BeforeSave again and attach the subject twice.
         _isCreating = true;
@@ -214,18 +258,20 @@
         {
             // Attaching can start a hosted subject right away, and it reads its configuration once it
             // starts, so the edits must be applied before BeforeSave attaches it.
-            if (!await _editPanel.ApplyChangesAsync(CancellationToken.None))
+            if (!await editPanel.ApplyChangesAsync(CancellationToken.None))
             {
+                // The button was enabled from a validity the form no longer has.
+                Snackbar.Add("Complete the required fields first", Severity.Warning);
+                await editPanel.RefreshIsValidAsync();
                 return;
             }
 
             // Persisting finds its writer through the parents BeforeSave establishes.
-            Options.BeforeSave?.Invoke(_createdSubject);
+            Options.BeforeSave?.Invoke(createdSubject);
 
-            await _editPanel.PersistAsync(CancellationToken.None);
+            await editPanel.PersistAsync(CancellationToken.None);
 
-            var name = Options.Name is null ? null : _subjectName.Trim();
-            MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(_createdSubject, name)));
+            MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(createdSubject, name)));
         }
         catch (Exception exception)
         {

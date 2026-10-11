@@ -65,6 +65,7 @@
 
 @code {
     private DynamicComponent? _dynamicComponent;
+    private object? _reportedInstance;
     private Dictionary<string, object?>? _cachedParameters;
     private IInterceptorSubject? _previousSubject;
     private Dictionary<string, object?>? _previousAdditionalParameters;
@@ -98,6 +99,10 @@
     [Parameter]
     public ISubjectComponent? ComponentInstance { get; set; }
 
+    /// <summary>
+    /// Raised once after each registered component has rendered for the first time, with null when
+    /// that component does not implement <see cref="ISubjectComponent"/>.
+    /// </summary>
     [Parameter]
     public EventCallback<ISubjectComponent?> ComponentInstanceChanged { get; set; }
 
@@ -135,11 +140,15 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var instance = _dynamicComponent?.Instance as ISubjectComponent;
-        if (instance != ComponentInstance)
+        // Compared as the rendered object rather than as ISubjectComponent: the registry accepts any
+        // component type, and a host that waits for this callback must also hear from one that is not
+        // an ISubjectComponent.
+        var renderedInstance = _dynamicComponent?.Instance;
+        if (!ReferenceEquals(renderedInstance, _reportedInstance))
         {
-            ComponentInstance = instance;
-            await ComponentInstanceChanged.InvokeAsync(instance);
+            _reportedInstance = renderedInstance;
+            ComponentInstance = renderedInstance as ISubjectComponent;
+            await ComponentInstanceChanged.InvokeAsync(ComponentInstance);
         }
     }
 

@@ -1,5 +1,8 @@
 using System.Text.RegularExpressions;
+using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor.Testing;
 
@@ -32,7 +35,7 @@ public class SubjectSetupDialogTests
         return page.Locator("#scrollContainer button:has-text('Create')").First;
     }
 
-    private static ILocator Dialog(IPage page) => page.Locator("[data-testid='create-subject-wizard']");
+    private static ILocator Dialog(IPage page) => page.Locator("[data-testid='create-subject-dialog']");
 
     private static ILocator DialogTitle(IPage page) => page.Locator("[data-testid='create-dialog-title']");
 
@@ -87,8 +90,7 @@ public class SubjectSetupDialogTests
     /// </summary>
     private static async Task EnterMotorNameAsync(IPage page)
     {
-        // The motor form reports its validity on key up, which a fill does not raise.
-        await Dialog(page).GetByLabel("Name", new() { Exact = true }).PressSequentiallyAsync(MotorName);
+        await Dialog(page).GetByLabel("Name", new() { Exact = true }).FillAsync(MotorName);
     }
 
     private static bool FileContains(string filePath, string text)
@@ -102,6 +104,26 @@ public class SubjectSetupDialogTests
             // The writer can still hold the file, or has not created it yet.
             return false;
         }
+    }
+
+    [Fact]
+    public void WhenTypesAreOfferedForCreation_ThenEveryIconNameResolves()
+    {
+        // Arrange
+        var catalog = _fixture.ServerServices.GetRequiredService<SubjectTypeCatalog>();
+        var fallbackIcon = MudBlazorIconResolver.Resolve(null);
+
+        // Act
+        var descriptors = catalog.GetCreatableTypes([]);
+        var unresolvedIcons = descriptors
+            .Where(descriptor => descriptor.IconName != "Article" &&
+                                 MudBlazorIconResolver.Resolve(descriptor.IconName) == fallbackIcon)
+            .Select(descriptor => $"{descriptor.Type.Name}: {descriptor.IconName}")
+            .ToList();
+
+        // Assert - an unknown name silently shows the fallback icon instead of failing.
+        Assert.NotEmpty(descriptors);
+        Assert.Empty(unresolvedIcons);
     }
 
     [Fact]
@@ -206,13 +228,19 @@ public class SubjectSetupDialogTests
         var page = await _fixture.CreatePageAsync();
         await OpenDialogAsync(page);
 
+        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
+
         // Act
-        await page.Locator("[data-testid='type-group-layouts']").ClickAsync();
+        await layoutsGroup.ClickAsync();
 
         // Assert
         await Assertions.Expect(TypeRow(page, "motor")).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync();
         await Assertions.Expect(TypeRow(page, "canvaslayout")).ToBeVisibleAsync();
+
+        var groupCount = int.Parse(await layoutsGroup.Locator("span").Last.InnerTextAsync());
+        Assert.True(groupCount > 0);
+        await Assertions.Expect(TypeRows(page)).ToHaveCountAsync(groupCount);
     }
 
     [Fact]
@@ -327,8 +355,8 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
 
-        // Act - the Shelly form reports its validity on key up, which a fill does not raise.
-        await page.GetByLabel("Host Address (IP or hostname)").PressSequentiallyAsync("192.0.2.1");
+        // Act
+        await page.GetByLabel("Host Address (IP or hostname)").FillAsync("192.0.2.1");
 
         // Assert
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
@@ -432,6 +460,10 @@ public class SubjectSetupDialogTests
             var page = await _fixture.CreatePageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Grid.md");
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+            // The edit menu is prerendered, and a click before the circuit is connected is lost.
+            await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
+                .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
 
             var editMenu = page.Locator("[data-testid='edit-mode-menu']");
             await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });

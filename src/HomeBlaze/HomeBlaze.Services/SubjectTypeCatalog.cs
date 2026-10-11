@@ -22,9 +22,19 @@ public partial class SubjectTypeCatalog
     /// </summary>
     public const string OtherGroup = "Other";
 
+    /// <summary>
+    /// The comparison that decides whether two group names are the same group.
+    /// </summary>
+    public const StringComparison GroupComparison = StringComparison.OrdinalIgnoreCase;
+
+    /// <summary>
+    /// The comparer that matches <see cref="GroupComparison"/>.
+    /// </summary>
+    public static StringComparer GroupComparer => StringComparer.OrdinalIgnoreCase;
+
     private const string DefaultIconName = "Category";
 
-    private static readonly Dictionary<string, string> GroupIconNames = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, string> GroupIconNames = new(GroupComparer)
     {
         ["Devices"] = "DevicesOther",
         ["Servers"] = "Dns",
@@ -45,21 +55,39 @@ public partial class SubjectTypeCatalog
 
     /// <summary>
     /// Gets the creatable types, ordered by group (alphabetically, <see cref="OtherGroup"/> last) and then by display name.
+    /// Groups are compared ignoring case, and every type of a group carries the spelling of the first one listed.
     /// </summary>
     /// <param name="existingSubjects">The subjects of the current graph, used to hide single instance types that already exist.</param>
     public IReadOnlyList<SubjectTypeDescriptor> GetCreatableTypes(IEnumerable<IInterceptorSubject> existingSubjects)
     {
         var existingTypes = existingSubjects.Select(subject => subject.GetType()).ToHashSet();
 
-        return _typeRegistry.RegisteredTypes
+        var descriptors = _typeRegistry.RegisteredTypes
             .Where(type => typeof(IConfigurable).IsAssignableFrom(type) && !type.IsAbstract)
             .Where(type => !type.IsDefined(typeof(ExcludeFromCreationAttribute), false))
             .Where(type => !type.IsDefined(typeof(SingleInstanceAttribute), false) || !existingTypes.Contains(type))
             .Select(Describe)
-            .OrderBy(descriptor => descriptor.Group == OtherGroup)
-            .ThenBy(descriptor => descriptor.Group, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(descriptor => string.Equals(descriptor.Group, OtherGroup, GroupComparison))
+            .ThenBy(descriptor => descriptor.Group, GroupComparer)
             .ThenBy(descriptor => descriptor.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        // One spelling per group, so that the sidebar entry and the section header of a group cannot differ.
+        var groupNames = new Dictionary<string, string>(GroupComparer);
+        for (var index = 0; index < descriptors.Count; index++)
+        {
+            var descriptor = descriptors[index];
+            if (!groupNames.TryGetValue(descriptor.Group, out var groupName))
+            {
+                groupNames.Add(descriptor.Group, descriptor.Group);
+            }
+            else if (groupName != descriptor.Group)
+            {
+                descriptors[index] = descriptor with { Group = groupName };
+            }
+        }
+
+        return descriptors;
     }
 
     /// <summary>
@@ -102,18 +130,19 @@ public partial class SubjectTypeCatalog
         IReadOnlyList<SubjectTypeDescriptor> descriptors, string? searchText, string? group)
     {
         return descriptors
-            .Where(descriptor => group is null || string.Equals(descriptor.Group, group, StringComparison.OrdinalIgnoreCase))
+            .Where(descriptor => group is null || string.Equals(descriptor.Group, group, GroupComparison))
             .Where(descriptor => descriptor.Matches(searchText))
             .ToList();
     }
 
     /// <summary>
-    /// Returns every group in the order of the descriptors, with the number of its types that match the search text.
+    /// Returns every group in the order of the descriptors, named after its first descriptor, with the number of
+    /// its types that match the search text.
     /// </summary>
     public static IReadOnlyList<SubjectTypeGroup> GetGroups(IReadOnlyList<SubjectTypeDescriptor> descriptors, string? searchText)
     {
         return descriptors
-            .GroupBy(descriptor => descriptor.Group)
+            .GroupBy(descriptor => descriptor.Group, GroupComparer)
             .Select(group => new SubjectTypeGroup(group.Key, group.Count(descriptor => descriptor.Matches(searchText))))
             .ToList();
     }

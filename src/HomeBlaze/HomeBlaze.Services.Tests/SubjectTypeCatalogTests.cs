@@ -36,6 +36,19 @@ public class SubjectTypeCatalogTests
     }
 
     [Fact]
+    public void WhenTypeIsAbstract_ThenItIsNotListed()
+    {
+        // Arrange
+        var catalog = CreateCatalog(typeof(CatalogPlainSubject), typeof(CatalogAbstractSubject));
+
+        // Act
+        var descriptors = catalog.GetCreatableTypes([]);
+
+        // Assert
+        Assert.Equal([typeof(CatalogPlainSubject)], descriptors.Select(descriptor => descriptor.Type));
+    }
+
+    [Fact]
     public void WhenTypeIsExcludedFromCreation_ThenItIsNotListed()
     {
         // Arrange
@@ -126,11 +139,55 @@ public class SubjectTypeCatalogTests
             descriptors.Select(descriptor => descriptor.Group));
     }
 
+    [Fact]
+    public void WhenCategoriesDifferOnlyInCase_ThenTheyFormOneGroupNamedAfterTheFirstOccurrence()
+    {
+        // Arrange
+        var catalog = CreateCatalog(
+            typeof(CatalogAnnotatedSubject),
+            typeof(CatalogSecondDeviceSubject),
+            typeof(CatalogLowerCaseGroupSubject),
+            typeof(CatalogServerSubject));
+
+        // Act
+        var descriptors = catalog.GetCreatableTypes([]);
+        var groups = SubjectTypeCatalog.GetGroups(descriptors, searchText: null);
+        var matches = SubjectTypeCatalog.Filter(descriptors, searchText: null, group: "DEVICES");
+
+        // Assert
+        Assert.Equal(
+            ["Aardvark feeder", "Alpha relay", "Zebra sensor", "Catalog Server Subject"],
+            descriptors.Select(descriptor => descriptor.DisplayName));
+        Assert.Equal(
+            ["devices", "devices", "devices", "Servers"],
+            descriptors.Select(descriptor => descriptor.Group));
+        Assert.Equal([new SubjectTypeGroup("devices", 3), new SubjectTypeGroup("Servers", 1)], groups);
+        Assert.Equal(3, matches.Count);
+    }
+
+    [Fact]
+    public void WhenDescriptorsSpellAGroupDifferently_ThenTheyAreCountedAsOneGroup()
+    {
+        // Arrange
+        IReadOnlyList<SubjectTypeDescriptor> descriptors =
+        [
+            SubjectTypeCatalog.Describe(typeof(CatalogAnnotatedSubject)),
+            SubjectTypeCatalog.Describe(typeof(CatalogLowerCaseGroupSubject))
+        ];
+
+        // Act
+        var groups = SubjectTypeCatalog.GetGroups(descriptors, searchText: null);
+
+        // Assert
+        Assert.Equal([new SubjectTypeGroup("Devices", 2)], groups);
+    }
+
     [Theory]
     [InlineData("zebra")]
     [InlineData("CatalogAnnotated")]
     [InlineData("stripes")]
     [InlineData("  ZEBRA   devices ")]
+    [InlineData("zebra\tdevices\nstripes")]
     public void WhenSearchMatchesNameClassDescriptionOrGroup_ThenTypeIsFound(string searchText)
     {
         // Arrange

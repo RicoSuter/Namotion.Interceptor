@@ -16,7 +16,7 @@ public sealed record SubjectTypeDescriptor(Type Type, string DisplayName, string
             return true;
         }
 
-        foreach (var term in searchText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var term in searchText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             if (!Contains(DisplayName, term) &&
                 !Contains(Type.Name, term) &&

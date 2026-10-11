@@ -87,6 +87,32 @@ public partial class CatalogSingleInstanceSubject : IConfigurable
 }
 
 [InterceptorSubject]
+[Category("devices")]
+[DisplayName("Aardvark feeder")]
+public partial class CatalogLowerCaseGroupSubject : IConfigurable
+{
+    public partial string? Label { get; set; }
+
+    public CatalogLowerCaseGroupSubject()
+    {
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public abstract partial class CatalogAbstractSubject : IConfigurable
+{
+    public partial string? Label { get; set; }
+
+    protected CatalogAbstractSubject()
+    {
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
 public partial class CatalogNotConfigurableSubject
 {
     public partial string? Label { get; set; }

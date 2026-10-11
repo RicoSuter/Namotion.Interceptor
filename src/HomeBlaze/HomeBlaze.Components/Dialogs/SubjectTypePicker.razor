@@ -265,12 +265,12 @@
         _matchCount = _groups.Sum(group => group.Count);
         _sections = SubjectTypeCatalog
             .Filter(Types, _searchText, _selectedGroup)
-            .GroupBy(descriptor => descriptor.Group)
+            .GroupBy(descriptor => descriptor.Group, SubjectTypeCatalog.GroupComparer)
             .ToList();
     }
 
     private string GetAriaPressed(string? group)
     {
-        return string.Equals(group, _selectedGroup, StringComparison.Ordinal) ? "true" : "false";
+        return string.Equals(group, _selectedGroup, SubjectTypeCatalog.GroupComparison) ? "true" : "false";
     }
 }
