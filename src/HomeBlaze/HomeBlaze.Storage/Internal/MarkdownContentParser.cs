@@ -26,7 +26,7 @@ public sealed partial class MarkdownContentParser
     /// <summary>
     /// Rewrites relative .md links to /pages/... route format with Children segments.
     /// A fragment after the page stays on the link. A link that is only a fragment gets the route of the
-    /// page itself, whose file name is <paramref name="pageName"/>.
+    /// page itself, which a link names with <paramref name="pageName"/>.
     /// </summary>
     private static string RewriteLink(string url, string basePath, string pageName)
     {
@@ -72,6 +72,14 @@ public sealed partial class MarkdownContentParser
 
         return result.ToString();
     }
+
+    /// <summary>
+    /// Gets a file name as a link has to write it: with the characters escaped that end the path of a URL
+    /// or start an escape. Spaces and other characters are escaped when the link is rendered, as for a
+    /// link that is written on the page.
+    /// </summary>
+    private static string EscapeFileNameForLink(string fileName) =>
+        fileName.Replace("%", "%25").Replace("#", "%23").Replace("?", "%3F");
 
     /// <summary>
     /// Computes the base path used to resolve relative links in markdown.
@@ -196,7 +204,7 @@ public sealed partial class MarkdownContentParser
 
         var page = MarkdownPageParser.Parse(content);
         var basePath = GetLinkBasePath(parent);
-        var pageName = Path.GetFileName(parent.FullPath);
+        var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
         var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName));
 
         var state = new ParseState(parent, page.AllBlocks);

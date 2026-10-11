@@ -387,6 +387,9 @@ public partial class TestChildHost : IConfigurable
     [Configuration]
     public partial List<IInterceptorSubject> Children { get; set; }
 
+    [Configuration]
+    public partial IInterceptorSubject? Child { get; set; }
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 

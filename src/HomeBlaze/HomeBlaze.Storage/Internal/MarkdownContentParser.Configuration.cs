@@ -17,6 +17,12 @@ public sealed partial class MarkdownContentParser
 {
     private const string TypeDiscriminator = ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName;
 
+    // How the reader of the JSON ends the message of an exception, and what it says when a subject has no
+    // type. See FormatSkippedProperty.
+    private const string ReaderPathLabel = " Path: ";
+    private const string ReaderPositionLabel = " | LineNumber: ";
+    private const string ReaderMissingDiscriminatorText = "must specify a type discriminator";
+
     private static readonly ConcurrentDictionary<Type, IReadOnlyDictionary<string, Type>> ConfigurationPropertyCache = new();
 
     // A JsonObject with a duplicate key parses and then throws on the first write, so the duplicate is rejected while parsing.
@@ -235,17 +241,33 @@ public sealed partial class MarkdownContentParser
             return FormatInvalidValue(text, property.PropertyName, property.PropertyType);
         }
 
-        // The serializer appends where it stopped: a path from the value on and a position in JSON text that
-        // is not the text of the page. The path is kept, counted from the property.
-        var exception = property.Exception;
-        var reason = exception.Message;
-        var positionStart = reason.LastIndexOf(" Path: ", StringComparison.Ordinal);
-        if (positionStart >= 0)
+        // The reader of the JSON appends where it stopped: a path from the value on and a position in JSON
+        // text that is not the text of the page. The path is kept, counted from the property.
+        var message = property.Exception.Message;
+        var reason = message;
+        var path = (property.Exception as JsonException)?.Path;
+        var tailStart = message.LastIndexOf(ReaderPathLabel, StringComparison.Ordinal);
+        if (tailStart >= 0)
         {
-            reason = reason[..positionStart];
+            reason = message[..tailStart];
+
+            // Only a JsonException has the path as a property.
+            var pathStart = tailStart + ReaderPathLabel.Length;
+            var pathEnd = message.IndexOf(ReaderPositionLabel, pathStart, StringComparison.Ordinal);
+            if (path is null && pathEnd >= 0)
+            {
+                path = message[pathStart..pathEnd];
+            }
         }
 
-        var place = exception.Path is { Length: > 1 } path && path[0] == '$'
+        // The reader has no exception type of its own for this, and its message names an interface. It
+        // says the same when the type is there but is not the first name of the subject.
+        if (property.Exception is NotSupportedException && reason.Contains(ReaderMissingDiscriminatorText, StringComparison.Ordinal))
+        {
+            reason = $"A subject in the json block needs a '{TypeDiscriminator}' with its full type name, as the first name in its braces.";
+        }
+
+        var place = path is { Length: > 1 } && path[0] == '$'
             ? $" at {property.PropertyName}{path[1..]}"
             : string.Empty;
 

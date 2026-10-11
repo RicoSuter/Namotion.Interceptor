@@ -17,6 +17,9 @@ public class MarkdownPageMistakeTests
 
     private const string HeadError = "Expected key=value but found 'Title = \"x\"'.";
 
+    private const string MissingTypeError =
+        "A subject in the json block needs a '$type' with its full type name, as the first name in its braces.";
+
     public static TheoryData<string, string[]> InvalidBlocksInAWidgetWithoutDefaultSlot() => new()
     {
         {
@@ -487,6 +490,76 @@ public class MarkdownPageMistakeTests
         var box = Assert.Single(PageErrorBoxes.FindSortedByLine(page));
         Assert.StartsWith(expectedStart, box);
         Assert.DoesNotContain("LineNumber", box);
+    }
+
+    [Theory]
+    [InlineData(
+        """{ "Cells": [ { "Child": { "Path": "../a" } } ] }""",
+        "Cells[0].Child")]
+    [InlineData(
+        """{ "Cells": [ { "Child": { "Path": "../a", "$type": "HomeBlaze.Components.Widget" } } ] }""",
+        "Cells[0].Child")]
+    [InlineData(
+        """{ "Cells": [ { "Row": 0 }, { "Child": { "$type": "HomeBlaze.Components.GridLayout", "Cells": [ { "Child": { "Path": "../a" } } ] } } ] }""",
+        "Cells[1].Child.Cells[0].Child")]
+    public async Task WhenSubjectInsideAValueOfTheJsonBlockHasNoTypeAsItsFirstName_ThenTheBoxNamesThePropertyThePlaceAndTheMissingType(
+        string json, string expectedPlace)
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(
+            "page.md", $"Text before.\n\n:: HomeBlaze.Components.GridLayout#grid\n```json\n{json}\n```\n::\n\nText after.");
+
+        // Assert
+        Assert.Equal(
+            [$"Line 3: The value of 'Cells' in the json block cannot be read at {expectedPlace}: {MissingTypeError}"],
+            PageErrorBoxes.FindSortedByLine(page));
+        Assert.False(page.Children.ContainsKey("grid"));
+        Assert.Contains("Text after.", MarkdownPageFixture.Html(page.Children));
+    }
+
+    [Fact]
+    public async Task WhenValueOfTheJsonBlockIsItselfASubjectWithoutType_ThenTheBoxNamesThePropertyAndTheMissingType()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(
+            "page.md", $":: {TestNamespace}.TestChildHost\n```json\n{{ \"Child\": {{ \"Name\": \"one\" }} }}\n```\n::");
+
+        // Assert
+        Assert.Equal(
+            [$"Line 1: The value of 'Child' in the json block cannot be read: {MissingTypeError}"],
+            PageErrorBoxes.FindSortedByLine(page));
+    }
+
+    [Fact]
+    public async Task WhenBlockIsUpdatedInPlaceWithASubjectWithoutTypeInTheJsonBlock_ThenItIsABoxAndItsSubjectLeavesThePage()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync(services => services.AddSingleton(new TestCreationCounter()));
+        var source = $$"""
+            :: {{TestNamespace}}.TestChildHost#host Count=1
+            ```json
+            { "Children": [ { "$type": "{{TestNamespace}}.TestCountedChild", "Name": "one" } ] }
+            ```
+            ::
+            """;
+        var page = await fixture.AddPageAsync("page.md", source);
+        var host = Assert.IsType<TestChildHost>(page.Children["host"]);
+
+        // Act
+        await fixture.UpdatePageAsync(page, source.Replace($"\"$type\": \"{TestNamespace}.TestCountedChild\", ", string.Empty));
+
+        // Assert
+        Assert.Equal(
+            [$"Line 1: The value of 'Children' in the json block cannot be read at Children[0]: {MissingTypeError}"],
+            PageErrorBoxes.FindSortedByLine(page));
+        Assert.False(page.Children.ContainsKey("host"));
+        Assert.Null(host.TryGetRegisteredSubject());
     }
 
     [Fact]

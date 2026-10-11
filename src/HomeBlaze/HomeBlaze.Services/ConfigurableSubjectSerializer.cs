@@ -103,6 +103,9 @@ public class ConfigurableSubjectSerializer
     /// Such a property is skipped and keeps its default, with and without the callback. A subject that was
     /// created inside its value before the conversion failed is in no property. If its constructor attached
     /// it to the context, <see cref="Release"/> of the returned subject does not detach it.
+    /// A value that the JSON reader does not support, such as a subject without a type discriminator, makes
+    /// this method throw a <see cref="NotSupportedException"/> without the callback. With the callback the
+    /// property is skipped and handed to it like the others.
     /// </remarks>
     public IConfigurable? Deserialize(
         string json,
@@ -202,8 +205,10 @@ public class ConfigurableSubjectSerializer
                         var valueJson = jsonValue.GetRawText();
                         try
                         {
-                            var value = JsonSerializer.Deserialize(valueJson, property.Type, options);
-                            property.SetValue(value);
+                            if (TryConvert(valueJson, property.Name, property.Type, options, skipped, out var value))
+                            {
+                                property.SetValue(value);
+                            }
                         }
                         catch (JsonException exception)
                         {
@@ -229,8 +234,10 @@ public class ConfigurableSubjectSerializer
                 var valueJson = jsonValue.GetRawText();
                 try
                 {
-                    var value = JsonSerializer.Deserialize(valueJson, property.PropertyType, options);
-                    property.SetValue(subject, value);
+                    if (TryConvert(valueJson, property.Name, property.PropertyType, options, skipped, out var value))
+                    {
+                        property.SetValue(subject, value);
+                    }
                 }
                 catch (JsonException exception)
                 {
@@ -238,6 +245,32 @@ public class ConfigurableSubjectSerializer
                     skipped?.Invoke(new SkippedConfigurationProperty(property.Name, property.PropertyType, valueJson, exception));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Converts the JSON value of one configuration property. A value that the JSON reader does not support
+    /// is handed to <paramref name="skipped"/> and gives false. Without the callback it throws, like every
+    /// value that does not convert.
+    /// </summary>
+    private static bool TryConvert(
+        string valueJson,
+        string propertyName,
+        Type propertyType,
+        JsonSerializerOptions options,
+        Action<SkippedConfigurationProperty>? skipped,
+        out object? value)
+    {
+        try
+        {
+            value = JsonSerializer.Deserialize(valueJson, propertyType, options);
+            return true;
+        }
+        catch (NotSupportedException exception) when (skipped is not null)
+        {
+            skipped(new SkippedConfigurationProperty(propertyName, propertyType, valueJson, exception));
+            value = null;
+            return false;
         }
     }
 
@@ -280,7 +313,9 @@ public class ConfigurableSubjectSerializer
     /// </summary>
     /// <remarks>
     /// Such a property is skipped and keeps its value, with and without the callback. The properties
-    /// before and after it are updated.
+    /// before and after it are updated. A value that the JSON reader does not support, such as a subject
+    /// without a type discriminator, makes this method throw a <see cref="NotSupportedException"/> without
+    /// the callback. With the callback the property is skipped and handed to it like the others.
     /// </remarks>
     public void UpdateConfiguration(
         IInterceptorSubject subject,
@@ -301,8 +336,10 @@ public class ConfigurableSubjectSerializer
                 try
                 {
                     // Use the options of Serialize/Deserialize for consistent deserialization behavior
-                    var value = JsonSerializer.Deserialize(valueJson, property.Type, options);
-                    property.SetValue(value);
+                    if (TryConvert(valueJson, property.Name, property.Type, options, skipped, out var value))
+                    {
+                        property.SetValue(value);
+                    }
                 }
                 catch (JsonException exception)
                 {

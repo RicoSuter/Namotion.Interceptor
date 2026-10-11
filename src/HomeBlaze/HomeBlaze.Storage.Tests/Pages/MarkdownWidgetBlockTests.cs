@@ -536,4 +536,28 @@ public class MarkdownWidgetBlockTests
         Assert.Contains($"<a href=\"{expectedUrl}\">fragment only</a>", html);
         Assert.Contains($"<a href=\"{expectedUrl}\">with page name</a>", html);
     }
+
+    [Theory]
+    // A character that ends the path of a URL or starts an escape is escaped in the name of the page.
+    [InlineData("Docs/C# notes.md", "C%23%20notes.md", "/pages/Docs/C%23%20notes.md#h")]
+    [InlineData("Docs/100% done.md", "100%25%20done.md", "/pages/Docs/100%25%20done.md#h")]
+    [InlineData("Docs/Was? Wo.md", "Was%3F%20Wo.md", "/pages/Docs/Was%3F%20Wo.md#h")]
+    [InlineData("Docs/a%23b#c?.md", "a%2523b%23c%3F.md", "/pages/Docs/a%2523b%23c%3F.md#h")]
+    // Spaces and letters outside of ASCII are escaped when the link is rendered, as for every link.
+    [InlineData("Docs/My notes.md", "My%20notes.md", "/pages/Docs/My%20notes.md#h")]
+    [InlineData("Docs/\u00dcbersicht.md", "\u00dcbersicht.md", "/pages/Docs/%C3%9Cbersicht.md#h")]
+    public async Task WhenLinkIsOnlyAFragmentAndThePageNameHasSpecialCharacters_ThenItIsTheUrlOfALinkThatNamesThePage(
+        string pagePath, string pageNameAsWrittenInALink, string expectedUrl)
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(pagePath, $"[fragment only](#h)\n\n[with page name]({pageNameAsWrittenInALink}#h)");
+
+        // Assert
+        var html = MarkdownPageFixture.Html(page.Children);
+        Assert.Contains($"<a href=\"{expectedUrl}\">fragment only</a>", html);
+        Assert.Contains($"<a href=\"{expectedUrl}\">with page name</a>", html);
+    }
 }

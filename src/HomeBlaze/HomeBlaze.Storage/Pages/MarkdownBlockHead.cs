@@ -20,9 +20,6 @@ public sealed partial record MarkdownBlockHead(
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")]
     private static partial Regex NameRegex();
 
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$")]
-    private static partial Regex SlotNameRegex();
-
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_-]*$")]
     private static partial Regex IdRegex();
 
@@ -32,7 +29,7 @@ public sealed partial record MarkdownBlockHead(
     public static bool IsValidId(string id) => IdRegex().IsMatch(id);
 
     /// <summary>Gets whether a head line can have the name as the name of a slot block: a block name without a dot.</summary>
-    internal static bool IsValidSlotName(string name) => SlotNameRegex().IsMatch(name);
+    internal static bool IsValidSlotName(string name) => !name.Contains('.') && NameRegex().IsMatch(name);
 
     public static bool TryParse(
         string line,

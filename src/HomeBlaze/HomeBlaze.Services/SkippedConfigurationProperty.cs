@@ -9,6 +9,9 @@ namespace HomeBlaze.Services;
 /// <param name="PropertyName">The name of the property as it is declared, whatever the naming of the JSON is.</param>
 /// <param name="PropertyType">The type of the property.</param>
 /// <param name="Json">The JSON text of the value.</param>
-/// <param name="Exception">Why the value does not convert.</param>
+/// <param name="Exception">
+/// Why the value does not convert: a <see cref="JsonException"/>, or a <see cref="NotSupportedException"/>
+/// for a value that the JSON reader does not support, such as a subject without a type discriminator.
+/// </param>
 public sealed record SkippedConfigurationProperty(
-    string PropertyName, Type PropertyType, string Json, JsonException Exception);
+    string PropertyName, Type PropertyType, string Json, Exception Exception);

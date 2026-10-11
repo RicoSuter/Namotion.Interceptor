@@ -28,6 +28,16 @@ public class ConfigurableSubjectSerializerSkippedPropertyTests
         }
         """;
 
+    // The JSON reader does not skip this like a value that does not convert. It throws another exception.
+    private const string SubjectWithoutTypeJson = $$"""
+        {
+            "$type": "{{TypeName}}",
+            "count": 3,
+            "child": { "childConfig": "child" },
+            "name": "after"
+        }
+        """;
+
     private const string PropertyNameJson = $$"""
         {
             "$type": "{{TypeName}}",
@@ -147,6 +157,97 @@ public class ConfigurableSubjectSerializerSkippedPropertyTests
         Assert.Equal(["Child", "Count"], skipped.Select(property => property.PropertyName).Order());
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenSubjectInAConfigurationFileHasNoType_ThenDeserializeThrows(bool hasRegistry)
+    {
+        // Arrange
+        var serializer = CreateSerializer(hasRegistry);
+        IInterceptorSubject? created = null;
+
+        // Act & Assert
+        Assert.Throws<NotSupportedException>(() => serializer.Deserialize(SubjectWithoutTypeJson));
+        Assert.Throws<NotSupportedException>(() => serializer.Deserialize(SubjectWithoutTypeJson, subject => created = subject));
+        Assert.Throws<NotSupportedException>(() => serializer.Deserialize(SubjectWithoutTypeJson, created: null, skipped: null));
+        Assert.NotNull(created);
+    }
+
+    [Fact]
+    public void WhenConfigurationFileUpdatesASubjectAndASubjectInItHasNoType_ThenUpdateConfigurationThrows()
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var subject = Assert.IsType<SubjectWithTypedProperties>(
+            serializer.Deserialize($$"""{ "$type": "{{TypeName}}", "name": "before" }"""));
+
+        // Act & Assert
+        Assert.Throws<NotSupportedException>(() => serializer.UpdateConfiguration(subject, SubjectWithoutTypeJson));
+        Assert.Throws<NotSupportedException>(() => serializer.UpdateConfiguration(subject, SubjectWithoutTypeJson, skipped: null));
+        Assert.Null(subject.Child);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenCallerAsksForSkippedPropertiesAndASubjectHasNoType_ThenDeserializeReportsThePropertyAndReadsTheOthers(
+        bool hasRegistry)
+    {
+        // Arrange
+        var serializer = CreateSerializer(hasRegistry);
+        var skipped = new List<SkippedConfigurationProperty>();
+
+        // Act
+        var subject = Assert.IsType<SubjectWithTypedProperties>(
+            serializer.Deserialize(SubjectWithoutTypeJson, created: null, skipped.Add));
+
+        // Assert
+        var property = Assert.Single(skipped);
+        Assert.Equal("Child", property.PropertyName);
+        Assert.Equal(typeof(IInterceptorSubject), property.PropertyType);
+        Assert.Contains("childConfig", property.Json);
+        Assert.IsType<NotSupportedException>(property.Exception);
+        Assert.Null(subject.Child);
+        Assert.Equal(3, subject.Count);
+        Assert.Equal("after", subject.Name);
+    }
+
+    [Fact]
+    public void WhenCallerAsksForSkippedPropertiesAndASubjectHasNoType_ThenUpdateConfigurationReportsThePropertyAndReadsTheOthers()
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var subject = Assert.IsType<SubjectWithTypedProperties>(
+            serializer.Deserialize($$"""{ "$type": "{{TypeName}}", "name": "before" }"""));
+        var skipped = new List<SkippedConfigurationProperty>();
+
+        // Act
+        serializer.UpdateConfiguration(subject, SubjectWithoutTypeJson, skipped.Add);
+
+        // Assert
+        var property = Assert.Single(skipped);
+        Assert.Equal("Child", property.PropertyName);
+        Assert.IsType<NotSupportedException>(property.Exception);
+        Assert.Null(subject.Child);
+        Assert.Equal(3, subject.Count);
+        Assert.Equal("after", subject.Name);
+    }
+
+    [Fact]
+    public void WhenCallerAsksForSkippedPropertiesAndASetterDoesNotSupportTheValue_ThenTheExceptionIsThrownAndNotReported()
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var skipped = new List<SkippedConfigurationProperty>();
+        const string json = $$"""{ "$type": "{{TypeName}}", "Name": "{{SubjectWithTypedProperties.UnsupportedName}}" }""";
+
+        // Act & Assert
+        var exception = Assert.Throws<NotSupportedException>(
+            () => serializer.Deserialize(json, created: null, skipped.Add, ConfigurationNaming.PropertyName));
+        Assert.Equal("The name is not supported.", exception.Message);
+        Assert.Empty(skipped);
+    }
+
     [Fact]
     public void WhenCallerAsksForSkippedPropertiesAndEveryValueConverts_ThenNothingIsReported()
     {
@@ -184,8 +285,19 @@ public partial class SubjectWithTypedProperties : IConfigurable
     [Configuration]
     public partial int Count { get; set; }
 
+    /// <summary>A name that the subject rejects when its configuration is applied to its properties.</summary>
+    public const string UnsupportedName = "unsupported";
+
     [Configuration]
     public partial string? Name { get; set; }
+
+    partial void OnNameChanging(ref string? newValue, ref bool cancel)
+    {
+        if (newValue == UnsupportedName)
+        {
+            throw new NotSupportedException("The name is not supported.");
+        }
+    }
 
     [Configuration]
     public partial IInterceptorSubject? Child { get; set; }
