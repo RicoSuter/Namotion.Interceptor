@@ -48,32 +48,7 @@ public static class AgentWatchPaths
         var subjectPart = subjectPath == "/" ? ReadOnlySpan<char>.Empty : subjectPath.AsSpan();
         foreach (var watchPath in normalizedWatchPaths)
         {
-            if (watchPath == "/")
-            {
-                return true;
-            }
-
-            var watch = watchPath.AsSpan();
-            if (watch.Length <= subjectPart.Length)
-            {
-                // The subject part continues with "/" when it is used up exactly.
-                if (subjectPart.StartsWith(watch, StringComparison.Ordinal) &&
-                    (watch.Length == subjectPart.Length || IsSegmentBoundary(subjectPart[watch.Length])))
-                {
-                    return true;
-                }
-
-                continue;
-            }
-
-            if (!watch.StartsWith(subjectPart, StringComparison.Ordinal) || watch[subjectPart.Length] != '/')
-            {
-                continue;
-            }
-
-            var propertyPart = watch[(subjectPart.Length + 1)..];
-            if (propertyName.AsSpan().StartsWith(propertyPart, StringComparison.Ordinal) &&
-                (propertyName.Length == propertyPart.Length || IsSegmentBoundary(propertyName[propertyPart.Length])))
+            if (watchPath == "/" || MatchesWatchPath(subjectPart, propertyName, watchPath.AsSpan()))
             {
                 return true;
             }
@@ -104,6 +79,23 @@ public static class AgentWatchPaths
 
         return new string(characters);
     }
+
+    private static bool MatchesWatchPath(ReadOnlySpan<char> subjectPart, string propertyName, ReadOnlySpan<char> watch)
+    {
+        if (watch.Length <= subjectPart.Length)
+        {
+            // The subject part continues with "/" when it is used up exactly.
+            return StartsWithSegment(subjectPart, watch);
+        }
+
+        return watch.StartsWith(subjectPart, StringComparison.Ordinal) &&
+            watch[subjectPart.Length] == '/' &&
+            StartsWithSegment(propertyName, watch[(subjectPart.Length + 1)..]);
+    }
+
+    private static bool StartsWithSegment(ReadOnlySpan<char> text, ReadOnlySpan<char> prefix) =>
+        text.StartsWith(prefix, StringComparison.Ordinal) &&
+        (prefix.Length == text.Length || IsSegmentBoundary(text[prefix.Length]));
 
     private static bool IsSegmentBoundary(char character) => character is '/' or '[';
 }

@@ -173,26 +173,10 @@ public sealed class AgentMemory
         }
 
         var normalizedChanges = new (string Key, string? Value, bool IsSubtree)[changes.Count];
-        for (var index = 0; index < changes.Count; index++)
+        var normalizeError = NormalizeChanges(changes, normalizedChanges);
+        if (normalizeError is not null)
         {
-            var change = changes[index];
-            var value = change.Value?.Trim();
-            var error = ValidateKey(change.Key, out var key) ?? value switch
-            {
-                null => null,
-                { Length: 0 } => "The value is empty; remove the key instead.",
-                { Length: > MaxValueLength } =>
-                    $"The value has {value.Length} characters; the limit is {MaxValueLength}. Split it across several keys such as notes/legacy/1.",
-                _ => null
-            };
-
-            if (error is not null)
-            {
-                return AgentMemoryUpdateResult.Failure(
-                    $"Change {index + 1} (key '{TruncateKey(change.Key)}'): {error} Nothing was applied.", _snapshot);
-            }
-
-            normalizedChanges[index] = (key, value, value is null && change.Key.TrimEnd().EndsWith('/'));
+            return AgentMemoryUpdateResult.Failure(normalizeError, _snapshot);
         }
 
         await _writeLock.WaitAsync(cancellationToken);
@@ -209,43 +193,14 @@ public sealed class AgentMemory
             var applied = ImmutableArray.CreateBuilder<string>(changes.Count);
             foreach (var (key, value, isSubtree) in normalizedChanges)
             {
-                if (value is not null)
-                {
-                    // Removed first so the key takes the casing of this write.
-                    entries.Remove(key);
-                    entries.Add(key, new AgentMemoryEntry(key, value, now));
-                    applied.Add("set " + key);
-                }
-                else if (isSubtree)
-                {
-                    var removed = entries.Keys.Where(existing => IsInSubtree(existing, key)).ToList();
-                    entries.RemoveRange(removed);
-                    applied.Add(removed.Count switch
-                    {
-                        0 => $"nothing to remove under {key}/",
-                        1 => $"removed 1 entry under {key}/",
-                        _ => $"removed {removed.Count} entries under {key}/"
-                    });
-                }
-                else
-                {
-                    applied.Add(entries.Remove(key) ? "removed " + key : "nothing to remove at " + key);
-                }
+                applied.Add(ApplyChange(entries, key, value, isSubtree, now));
             }
 
             var updated = new AgentMemorySnapshot(entries.ToImmutable());
-            if (updated.Entries.Length > MaxEntries && updated.Entries.Length > current.Entries.Length)
+            var limitError = GetLimitError(updated, current);
+            if (limitError is not null)
             {
-                return AgentMemoryUpdateResult.Failure(
-                    $"The memory would hold {updated.Entries.Length} entries; the limit is {MaxEntries} (currently {current.Entries.Length}). " +
-                    "Remove entries first. Nothing was applied.", current);
-            }
-
-            if (updated.Size > MaxSize && updated.Size > current.Size)
-            {
-                return AgentMemoryUpdateResult.Failure(
-                    $"The memory would hold {updated.Size} bytes; the limit is {MaxSize} (currently {current.Size}). " +
-                    "Remove or shorten entries first. Nothing was applied.", current);
+                return AgentMemoryUpdateResult.Failure(limitError, current);
             }
 
             if (FilePath is not null)
@@ -260,6 +215,77 @@ public sealed class AgentMemory
         {
             _writeLock.Release();
         }
+    }
+
+    private static string? NormalizeChanges(
+        IReadOnlyList<AgentMemoryChange> changes, (string Key, string? Value, bool IsSubtree)[] normalizedChanges)
+    {
+        for (var index = 0; index < changes.Count; index++)
+        {
+            var change = changes[index];
+            var value = change.Value?.Trim();
+            var error = ValidateKey(change.Key, out var key) ?? ValidateValue(value);
+            if (error is not null)
+            {
+                return $"Change {index + 1} (key '{TruncateKey(change.Key)}'): {error} Nothing was applied.";
+            }
+
+            normalizedChanges[index] = (key, value, value is null && change.Key.TrimEnd().EndsWith('/'));
+        }
+
+        return null;
+    }
+
+    private static string? ValidateValue(string? value) => value switch
+    {
+        null => null,
+        { Length: 0 } => "The value is empty; remove the key instead.",
+        { Length: > MaxValueLength } =>
+            $"The value has {value.Length} characters; the limit is {MaxValueLength}. Split it across several keys such as notes/legacy/1.",
+        _ => null
+    };
+
+    private static string ApplyChange(
+        ImmutableSortedDictionary<string, AgentMemoryEntry>.Builder entries, string key, string? value, bool isSubtree, DateTimeOffset now)
+    {
+        if (value is not null)
+        {
+            // Removed first so the key takes the casing of this write.
+            entries.Remove(key);
+            entries.Add(key, new AgentMemoryEntry(key, value, now));
+            return "set " + key;
+        }
+
+        if (isSubtree)
+        {
+            var removed = entries.Keys.Where(existing => IsInSubtree(existing, key)).ToList();
+            entries.RemoveRange(removed);
+            return removed.Count switch
+            {
+                0 => $"nothing to remove under {key}/",
+                1 => $"removed 1 entry under {key}/",
+                _ => $"removed {removed.Count} entries under {key}/"
+            };
+        }
+
+        return entries.Remove(key) ? "removed " + key : "nothing to remove at " + key;
+    }
+
+    private static string? GetLimitError(AgentMemorySnapshot updated, AgentMemorySnapshot current)
+    {
+        if (updated.Entries.Length > MaxEntries && updated.Entries.Length > current.Entries.Length)
+        {
+            return $"The memory would hold {updated.Entries.Length} entries; the limit is {MaxEntries} (currently {current.Entries.Length}). " +
+                "Remove entries first. Nothing was applied.";
+        }
+
+        if (updated.Size > MaxSize && updated.Size > current.Size)
+        {
+            return $"The memory would hold {updated.Size} bytes; the limit is {MaxSize} (currently {current.Size}). " +
+                "Remove or shorten entries first. Nothing was applied.";
+        }
+
+        return null;
     }
 
     // Changes only the agent's own memory, so it is neither read-only nor destructive to the environment.
@@ -308,36 +334,48 @@ public sealed class AgentMemory
         var changes = new List<AgentMemoryChange>();
         foreach (var element in changesElement.EnumerateArray())
         {
-            var prefix = $"Change {changes.Count + 1}: ";
-            if (element.ValueKind != JsonValueKind.Object ||
-                !element.TryGetProperty("key", out var keyElement) ||
-                keyElement.ValueKind != JsonValueKind.String)
+            var error = ParseChange(element, out var change);
+            if (error is not null)
             {
-                return (null, prefix + "'key' must be a string. Nothing was applied.");
+                return (null, $"Change {changes.Count + 1}: " + error);
             }
 
-            var hasValue = element.TryGetProperty("value", out var valueElement) && valueElement.ValueKind != JsonValueKind.Null;
-            var remove = element.TryGetProperty("remove", out var removeElement) && removeElement.ValueKind == JsonValueKind.True;
-            if (hasValue && remove)
-            {
-                return (null, prefix + "pass either 'value' or \"remove\": true, not both. Nothing was applied.");
-            }
-
-            if (remove)
-            {
-                changes.Add(AgentMemoryChange.Remove(keyElement.GetString()!));
-            }
-            else if (hasValue && valueElement.ValueKind == JsonValueKind.String)
-            {
-                changes.Add(AgentMemoryChange.Set(keyElement.GetString()!, valueElement.GetString()!));
-            }
-            else
-            {
-                return (null, prefix + "'value' must be a string, or pass \"remove\": true. Nothing was applied.");
-            }
+            changes.Add(change!);
         }
 
         return changes.Count == 0 ? (null, "Pass at least one change.") : (changes, null);
+    }
+
+    private static string? ParseChange(JsonElement element, out AgentMemoryChange? change)
+    {
+        change = null;
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty("key", out var keyElement) ||
+            keyElement.ValueKind != JsonValueKind.String)
+        {
+            return "'key' must be a string. Nothing was applied.";
+        }
+
+        var hasValue = element.TryGetProperty("value", out var valueElement) && valueElement.ValueKind != JsonValueKind.Null;
+        var remove = element.TryGetProperty("remove", out var removeElement) && removeElement.ValueKind == JsonValueKind.True;
+        if (remove)
+        {
+            if (hasValue)
+            {
+                return "pass either 'value' or \"remove\": true, not both. Nothing was applied.";
+            }
+
+            change = AgentMemoryChange.Remove(keyElement.GetString()!);
+            return null;
+        }
+
+        if (!hasValue || valueElement.ValueKind != JsonValueKind.String)
+        {
+            return "'value' must be a string, or pass \"remove\": true. Nothing was applied.";
+        }
+
+        change = AgentMemoryChange.Set(keyElement.GetString()!, valueElement.GetString()!);
+        return null;
     }
 
     private static string TruncateKey(string key) => key.Length <= MaxEchoedKeyLength ? key : key[..MaxEchoedKeyLength] + "...";
@@ -405,9 +443,22 @@ public sealed class AgentMemory
             _logger?.LogWarning("The memory file {Path} has the newer version {Version}; it is read as version {FileVersion}.", filePath, file.Version, FileVersion);
         }
 
+        var entries = ToValidEntries(file?.Entries, out var skippedCount);
+        if (skippedCount > 0)
+        {
+            _logger?.LogWarning("The memory file {Path} has {Count} invalid entries, which are skipped; the file is kept as .damaged.", filePath, skippedCount);
+            KeepDamagedCopy(filePath);
+        }
+
+        return new AgentMemorySnapshot(entries);
+    }
+
+    private static ImmutableSortedDictionary<string, AgentMemoryEntry> ToValidEntries(
+        IReadOnlyList<AgentMemoryEntry>? fileEntries, out int skippedCount)
+    {
         var entries = ImmutableSortedDictionary.CreateBuilder<string, AgentMemoryEntry>(AgentMemoryKeyComparer.Instance);
-        var skippedCount = 0;
-        foreach (var entry in file?.Entries ?? [])
+        skippedCount = 0;
+        foreach (var entry in fileEntries ?? [])
         {
             // Entries loaded from the file are not held to the value and size limits, so a migrated document stays whole.
             if (entry?.Key is null || entry.Value is null || ValidateKey(entry.Key, out var key) is not null)
@@ -419,13 +470,7 @@ public sealed class AgentMemory
             entries[key] = key == entry.Key ? entry : entry with { Key = key };
         }
 
-        if (skippedCount > 0)
-        {
-            _logger?.LogWarning("The memory file {Path} has {Count} invalid entries, which are skipped; the file is kept as .damaged.", filePath, skippedCount);
-            KeepDamagedCopy(filePath);
-        }
-
-        return new AgentMemorySnapshot(entries.ToImmutable());
+        return entries.ToImmutable();
     }
 
     private void KeepDamagedCopy(string filePath)
@@ -548,9 +593,14 @@ internal sealed class AgentMemoryKeyComparer : IComparer<string>
 
     public int Compare(string? x, string? y)
     {
-        if (x is null || y is null)
+        if (x is null)
         {
-            return x is null ? (y is null ? 0 : -1) : 1;
+            return y is null ? 0 : -1;
+        }
+
+        if (y is null)
+        {
+            return 1;
         }
 
         var length = Math.Min(x.Length, y.Length);

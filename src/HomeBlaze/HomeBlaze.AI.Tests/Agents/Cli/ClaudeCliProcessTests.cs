@@ -16,7 +16,7 @@ public class ClaudeCliProcessTests
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hello there");
 
         // Act
-        var result = await new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(updates.Add), CancellationToken.None);
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(updates.Add), CancellationToken.None);
 
         // Assert
         Assert.Equal(0, result.ExitCode);
@@ -37,7 +37,7 @@ public class ClaudeCliProcessTests
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
 
         // Act
-        var result = await new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
 
         // Assert
         Assert.Equal(1, result.ExitCode);
@@ -53,7 +53,7 @@ public class ClaudeCliProcessTests
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p", "--resume", "x"], cli.Directory, "hi");
 
         // Act
-        var result = await new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
 
         // Assert
         Assert.Equal(1, result.ExitCode);
@@ -70,7 +70,7 @@ public class ClaudeCliProcessTests
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, input);
 
         // Act
-        var result = await new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
 
         // Assert
         Assert.Equal(0, result.ExitCode);
@@ -85,7 +85,7 @@ public class ClaudeCliProcessTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
-            new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
         Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
     }
 
@@ -97,7 +97,7 @@ public class ClaudeCliProcessTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
-            new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
         Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
         Assert.Equal("The Claude CLI path is not set.", exception.Message);
     }
@@ -112,7 +112,7 @@ public class ClaudeCliProcessTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
-            new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
         Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
         Assert.Contains(workingDirectory, exception.Message);
         Assert.Empty(cli.Invocations);
@@ -125,7 +125,7 @@ public class ClaudeCliProcessTests
         using var cli = FakeClaudeCli.Create("success.jsonl", sleepSeconds: 30);
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
         using var cancellation = new CancellationTokenSource();
-        var run = new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), cancellation.Token);
+        var run = ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), cancellation.Token);
         await AsyncTestHelpers.WaitUntilAsync(() => cli.LastProcessId is not null);
 
         // Act

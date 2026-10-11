@@ -16,7 +16,6 @@ namespace HomeBlaze.AI.Agents.Cli;
 [InterceptorSubject]
 public partial class ClaudeCliAgent : LlmAgentBase
 {
-    private readonly ClaudeCliProcess _process = new();
     private readonly ILogger<ClaudeCliAgent> _logger;
 
     // Only read and written while the base class holds the turn gate.
@@ -85,12 +84,9 @@ public partial class ClaudeCliAgent : LlmAgentBase
                 throw failure;
             }
 
-            if (isChat && result.SessionId is { } sessionId && sessionId != _sessionId)
+            if (isChat)
             {
-                _sessionId = sessionId;
-                await WriteSessionAsync(
-                    JsonSerializer.Serialize(new ClaudeCliSessionFile(sessionId), AgentJsonContext.Default.ClaudeCliSessionFile),
-                    cancellationToken);
+                await RememberSessionAsync(result.SessionId, cancellationToken);
             }
 
             return new AgentTurnResult(result.ResultText ?? string.Empty, result.Usage, result.RateLimit);
@@ -99,6 +95,19 @@ public partial class ClaudeCliAgent : LlmAgentBase
         {
             DeleteConfiguration(configurationPath);
         }
+    }
+
+    private async Task RememberSessionAsync(string? sessionId, CancellationToken cancellationToken)
+    {
+        if (sessionId is null || sessionId == _sessionId)
+        {
+            return;
+        }
+
+        _sessionId = sessionId;
+        await WriteSessionAsync(
+            JsonSerializer.Serialize(new ClaudeCliSessionFile(sessionId), AgentJsonContext.Default.ClaudeCliSessionFile),
+            cancellationToken);
     }
 
     private Task<ClaudeCliRunResult> RunCliAsync(
@@ -113,7 +122,7 @@ public partial class ClaudeCliAgent : LlmAgentBase
             resumeSessionId,
             PersistSession: request.Kind == AgentTurnKind.Chat);
         var invocation = new ClaudeCliInvocation(CliPath, ClaudeCliArguments.Build(options), WorkingDirectory, request.UserMessage);
-        return _process.RunAsync(invocation, progress, cancellationToken);
+        return ClaudeCliProcess.RunAsync(invocation, progress, cancellationToken);
     }
 
     private void DeleteConfiguration(string path)

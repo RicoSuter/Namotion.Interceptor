@@ -99,10 +99,8 @@ public sealed class AgentTriggerScheduler
     /// <remarks>An exception thrown by the run callback ends the loop and propagates from the returned task.</remarks>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        while (true)
+        while (!cancellationToken.IsCancellationRequested)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
             string? reason = null;
             DateTimeOffset? wakeAt;
             Task wakeSignal;
@@ -134,6 +132,8 @@ public sealed class AgentTriggerScheduler
 
             await WaitAsync(wakeSignal, wakeAt, cancellationToken);
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private async Task WaitAsync(Task wakeSignal, DateTimeOffset? wakeAt, CancellationToken cancellationToken)

@@ -104,7 +104,7 @@ public static class AgentMarkdownRenderer
     {
         if (string.IsNullOrWhiteSpace(url) ||
             !Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeMailto))
+            !IsAllowedScheme(uri))
         {
             return null;
         }
@@ -112,6 +112,9 @@ public static class AgentMarkdownRenderer
         // The normalized form is rendered, so a browser cannot read the original text as a different target.
         return uri.AbsoluteUri;
     }
+
+    private static bool IsAllowedScheme(Uri uri) =>
+        uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeMailto;
 
     private static void AddExternalLinkAttributes(Inline link)
     {

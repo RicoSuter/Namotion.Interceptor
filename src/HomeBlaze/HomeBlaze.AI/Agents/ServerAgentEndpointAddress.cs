@@ -66,17 +66,7 @@ public sealed class ServerAgentEndpointAddress : IAgentEndpointAddress
             return null;
         }
 
-        bool isLocal;
-        if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
-        {
-            isLocal = true;
-        }
-        else if (uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6 &&
-            IPAddress.TryParse(uri.Host.Trim('[', ']'), out var ipAddress))
-        {
-            isLocal = IPAddress.IsLoopback(ipAddress) || ipAddress.Equals(IPAddress.Any) || ipAddress.Equals(IPAddress.IPv6Any);
-        }
-        else
+        if (!TryGetIsLocal(uri, out var isLocal))
         {
             return null;
         }
@@ -90,5 +80,24 @@ public sealed class ServerAgentEndpointAddress : IAgentEndpointAddress
         }
 
         return builder;
+    }
+
+    private static bool TryGetIsLocal(Uri uri, out bool isLocal)
+    {
+        if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            isLocal = true;
+            return true;
+        }
+
+        if (uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6 &&
+            IPAddress.TryParse(uri.Host.Trim('[', ']'), out var ipAddress))
+        {
+            isLocal = IPAddress.IsLoopback(ipAddress) || ipAddress.Equals(IPAddress.Any) || ipAddress.Equals(IPAddress.IPv6Any);
+            return true;
+        }
+
+        isLocal = false;
+        return false;
     }
 }

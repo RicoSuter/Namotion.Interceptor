@@ -101,9 +101,11 @@ public sealed class AgentTriggerPolicy
     {
         ExpireUsageLimitPauseIfDue(now);
 
-        DateTimeOffset? pendingDue = _pendingReason is null
-            ? null
-            : _pendingIsManual ? now : GetEarliestAutomaticStart(now);
+        DateTimeOffset? pendingDue = null;
+        if (_pendingReason is not null)
+        {
+            pendingDue = _pendingIsManual ? now : GetEarliestAutomaticStart(now);
+        }
 
         return (pendingDue, _nextPoll) switch
         {

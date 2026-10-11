@@ -23,8 +23,7 @@ public static class AgentTimeSpanInput
     public static bool TryParse(string? text, out TimeSpan value)
     {
         if (string.IsNullOrWhiteSpace(text) || !text.Contains(':') ||
-            !TimeSpan.TryParse(text.Trim(), CultureInfo.InvariantCulture, out value) ||
-            value < TimeSpan.Zero || value > Maximum)
+            !TimeSpan.TryParse(text.Trim(), CultureInfo.InvariantCulture, out value) || !IsInRange(value))
         {
             value = TimeSpan.Zero;
             return false;
@@ -32,6 +31,8 @@ public static class AgentTimeSpanInput
 
         return true;
     }
+
+    private static bool IsInRange(TimeSpan value) => value >= TimeSpan.Zero && value <= Maximum;
 
     /// <summary>
     /// Parses a turn timeout like <see cref="TryParse"/>, but at most <see cref="MaximumTurnTimeout"/>. Zero means

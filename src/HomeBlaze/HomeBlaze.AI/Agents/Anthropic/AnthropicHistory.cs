@@ -170,20 +170,7 @@ public sealed class AnthropicHistory
             history.Summary = summary.GetString();
         }
 
-        IList<ChatMessage>? restored = null;
-        if (root.TryGetProperty(MessagesPropertyName, out var messages) && messages.ValueKind == JsonValueKind.Array)
-        {
-            try
-            {
-                restored = messages.Deserialize(MessagesTypeInfo);
-            }
-            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or InvalidOperationException)
-            {
-                // Content constructors reject invalid values, for example a null or empty role.
-                throw new JsonException("The history contains an invalid message: " + exception.Message, exception);
-            }
-        }
-
+        var restored = DeserializeMessages(root);
         if (restored is not null)
         {
             foreach (var message in restored)
@@ -255,6 +242,24 @@ public sealed class AnthropicHistory
         return normalized;
     }
 
+    private static IList<ChatMessage>? DeserializeMessages(JsonElement root)
+    {
+        if (!root.TryGetProperty(MessagesPropertyName, out var messages) || messages.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        try
+        {
+            return messages.Deserialize(MessagesTypeInfo);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or InvalidOperationException)
+        {
+            // Content constructors reject invalid values, for example a null or empty role.
+            throw new JsonException("The history contains an invalid message: " + exception.Message, exception);
+        }
+    }
+
     private static void RestoreToolResults(ChatMessage message)
     {
         foreach (var content in message.Contents)
@@ -272,7 +277,8 @@ public sealed class AnthropicHistory
             if (result.AdditionalProperties?.TryGetValue(IsErrorPropertyName, out var isError) == true &&
                 isError is true or JsonElement { ValueKind: JsonValueKind.True })
             {
-                result.Exception = new RestoredToolCallException();
+                // Only marks the restored result as failed, so the request flags it as an error again.
+                result.Exception = new InvalidOperationException("The tool call failed.");
             }
         }
     }
@@ -361,13 +367,4 @@ public sealed class AnthropicHistory
 
     private static string Truncate(string text) =>
         text.Length <= ToolResultPreviewLength ? text : text[..ToolResultPreviewLength] + "...";
-
-    /// <summary>Marks a restored tool result that failed, so the request flags it as an error again.</summary>
-    private sealed class RestoredToolCallException : Exception
-    {
-        public RestoredToolCallException()
-            : base("The tool call failed.")
-        {
-        }
-    }
 }

@@ -415,6 +415,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+            // A requested stop; the agent ends as stopped.
         }
         catch (Exception exception)
         {
@@ -509,6 +510,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
         catch (OperationCanceledException)
         {
+            // The loop ended through the cancellation that stops it.
         }
         catch (Exception exception)
         {
@@ -939,7 +941,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// </summary>
     private async Task<bool> TryEnterGateForChatAsync(CancellationToken cancellationToken)
     {
-        if (_turnGate.Wait(0))
+        if (await _turnGate.WaitAsync(0, CancellationToken.None))
         {
             return true;
         }

@@ -21,40 +21,25 @@ public static class ClaudeCliFailure
             return null;
         }
 
-        var message = !string.IsNullOrWhiteSpace(result.ResultText) ? result.ResultText.Trim()
-            : !string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardError.Trim()
-            : $"The Claude CLI exited with code {result.ExitCode} without a result.";
-
+        var message = GetMessage(result);
         var resultText = result.ResultText ?? string.Empty;
 
         // Overload is checked first: a capacity problem must back off and retry, not pause the agent.
-        if (result.ErrorCode?.Contains("overloaded", StringComparison.OrdinalIgnoreCase) == true ||
-            ContainsOverloadedStatusCode(resultText))
+        if (IsOverloaded(result, resultText))
         {
             return new AgentTurnException(AgentFailureKind.Transient, message);
         }
 
-        // Standard error is not searched: it may echo prompts or hints that mention logging in.
-        if (result.ErrorCode == "authentication_failed" ||
-            resultText.Contains("/login", StringComparison.OrdinalIgnoreCase) ||
-            resultText.Contains("Invalid API key", StringComparison.OrdinalIgnoreCase))
+        if (IsNotLoggedIn(result, resultText))
         {
             return new AgentTurnException(
                 AgentFailureKind.Configuration,
                 "The Claude CLI is not logged in. Run claude once as the HomeBlaze user and log in.");
         }
 
-        if (result.RateLimit?.Status == "rejected" ||
-            result.ErrorCode?.Contains("rate_limit", StringComparison.OrdinalIgnoreCase) == true ||
-            message.Contains("usage limit", StringComparison.OrdinalIgnoreCase))
+        if (IsUsageLimitReached(result, message))
         {
-            var resetTime = GetResetTime(result.RateLimit);
-            return new AgentTurnException(
-                AgentFailureKind.UsageLimit,
-                resetTime is { } resetsAt
-                    ? "The Claude usage limit is reached until " + resetsAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) + "."
-                    : "The Claude usage limit is reached.",
-                resetTime);
+            return CreateUsageLimitException(result.RateLimit);
         }
 
         if (IsSessionMissing(result))
@@ -63,6 +48,47 @@ public static class ClaudeCliFailure
         }
 
         return new AgentTurnException(AgentFailureKind.Transient, message);
+    }
+
+    private static string GetMessage(ClaudeCliRunResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result.ResultText))
+        {
+            return result.ResultText.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.StandardError))
+        {
+            return result.StandardError.Trim();
+        }
+
+        return $"The Claude CLI exited with code {result.ExitCode} without a result.";
+    }
+
+    private static bool IsOverloaded(ClaudeCliRunResult result, string resultText) =>
+        result.ErrorCode?.Contains("overloaded", StringComparison.OrdinalIgnoreCase) == true ||
+        ContainsOverloadedStatusCode(resultText);
+
+    // Standard error is not searched: it may echo prompts or hints that mention logging in.
+    private static bool IsNotLoggedIn(ClaudeCliRunResult result, string resultText) =>
+        result.ErrorCode == "authentication_failed" ||
+        resultText.Contains("/login", StringComparison.OrdinalIgnoreCase) ||
+        resultText.Contains("Invalid API key", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsUsageLimitReached(ClaudeCliRunResult result, string message) =>
+        result.RateLimit?.Status == "rejected" ||
+        result.ErrorCode?.Contains("rate_limit", StringComparison.OrdinalIgnoreCase) == true ||
+        message.Contains("usage limit", StringComparison.OrdinalIgnoreCase);
+
+    private static AgentTurnException CreateUsageLimitException(AgentRateLimit? rateLimit)
+    {
+        var resetTime = GetResetTime(rateLimit);
+        return new AgentTurnException(
+            AgentFailureKind.UsageLimit,
+            resetTime is { } resetsAt
+                ? "The Claude usage limit is reached until " + resetsAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) + "."
+                : "The Claude usage limit is reached.",
+            resetTime);
     }
 
     // Matches 529 as a standalone number, so a token count like 15290 does not read as an overload.

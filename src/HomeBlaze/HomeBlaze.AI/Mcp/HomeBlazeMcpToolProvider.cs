@@ -170,19 +170,10 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return new { error = $"Method not found: {methodName}" };
         }
 
-        if (method.Kind != allowedKind)
+        var callError = GetCallError(subject, methodName, method, allowedKind);
+        if (callError is not null)
         {
-            return new { error = DescribeWrongKind(methodName, method.Kind) };
-        }
-
-        if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method) is { } filterError)
-        {
-            return new { error = filterError };
-        }
-
-        if (method.RequiresConfirmation)
-        {
-            return new { error = $"'{methodName}' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI." };
+            return new { error = callError };
         }
 
         var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
@@ -210,6 +201,26 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         }
     }
 
+    private string? GetCallError(RegisteredSubject subject, string methodName, MethodMetadata method, MethodKind allowedKind)
+    {
+        if (method.Kind != allowedKind)
+        {
+            return DescribeWrongKind(methodName, method.Kind);
+        }
+
+        if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method) is { } filterError)
+        {
+            return filterError;
+        }
+
+        if (method.RequiresConfirmation)
+        {
+            return $"'{methodName}' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI.";
+        }
+
+        return null;
+    }
+
     private string DescribeWrongKind(string methodName, MethodKind kind) => kind switch
     {
         MethodKind.Query => $"'{methodName}' is a query; call it with {InvokeQueryToolName}.",
@@ -219,23 +230,10 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private static (object?[]? Arguments, string? Error) ReadArguments(JsonElement input, MethodParameter[] inputParameters)
     {
-        JsonElement? argumentsObject = null;
-        if (input.TryGetProperty("parameters", out var argumentsElement) && argumentsElement.ValueKind != JsonValueKind.Null)
+        var objectError = TryGetArgumentsObject(input, inputParameters, out var argumentsObject);
+        if (objectError is not null)
         {
-            if (argumentsElement.ValueKind != JsonValueKind.Object)
-            {
-                return (null, $"'parameters' must be an object. {DescribeExpectedParameters(inputParameters)}");
-            }
-
-            foreach (var argument in argumentsElement.EnumerateObject())
-            {
-                if (!inputParameters.Any(parameter => parameter.Name == argument.Name))
-                {
-                    return (null, $"Unknown parameter '{argument.Name}'. {DescribeExpectedParameters(inputParameters)}");
-                }
-            }
-
-            argumentsObject = argumentsElement;
+            return (null, objectError);
         }
 
         var arguments = new object?[inputParameters.Length];
@@ -264,6 +262,31 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         }
 
         return (arguments, null);
+    }
+
+    private static string? TryGetArgumentsObject(JsonElement input, MethodParameter[] inputParameters, out JsonElement? argumentsObject)
+    {
+        argumentsObject = null;
+        if (!input.TryGetProperty("parameters", out var argumentsElement) || argumentsElement.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (argumentsElement.ValueKind != JsonValueKind.Object)
+        {
+            return $"'parameters' must be an object. {DescribeExpectedParameters(inputParameters)}";
+        }
+
+        foreach (var argument in argumentsElement.EnumerateObject())
+        {
+            if (!inputParameters.Any(parameter => parameter.Name == argument.Name))
+            {
+                return $"Unknown parameter '{argument.Name}'. {DescribeExpectedParameters(inputParameters)}";
+            }
+        }
+
+        argumentsObject = argumentsElement;
+        return null;
     }
 
     private static string DescribeExpectedParameters(MethodParameter[] inputParameters) =>

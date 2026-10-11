@@ -109,28 +109,12 @@ public partial class AnthropicAgent : LlmAgentBase
     protected override async Task<AgentTurnResult> ExecuteTurnAsync(
         AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
-        var apiKey = ApiKey;
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            throw new AgentTurnException(AgentFailureKind.Configuration, "Set the API key of the agent.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Model))
-        {
-            throw new AgentTurnException(AgentFailureKind.Configuration, "Set the model of the agent.");
-        }
-
-        var maxTokens = MaxTokens;
-        if (maxTokens <= 0)
-        {
-            throw new AgentTurnException(AgentFailureKind.Configuration, "Set the output token limit of the agent to a positive number.");
-        }
-
+        var (apiKey, model, maxTokens) = GetValidatedConfiguration(request);
         var isChat = request.Kind == AgentTurnKind.Chat;
         var messages = isChat
             ? _history.BuildRequestMessages(request.SystemPrompt, request.UserMessage)
             : [new ChatMessage(ChatRole.System, request.SystemPrompt), new ChatMessage(ChatRole.User, request.UserMessage)];
-        var options = AnthropicChatOptions.Create(request.Model, maxTokens, request.Effort, request.Tools.Tools);
+        var options = AnthropicChatOptions.Create(model, maxTokens, request.Effort, request.Tools.Tools);
 
         var innerClient = GetChatClient(apiKey, maxTokens);
 
@@ -153,16 +137,7 @@ public partial class AnthropicAgent : LlmAgentBase
             await foreach (var update in client.GetStreamingResponseAsync(messages, options, cancellationToken))
             {
                 updates.Add(update);
-                foreach (var content in update.Contents)
-                {
-                    // One usage per model request: the first shows the context this turn started from, the last the
-                    // context the next turn starts from. Their sum, as in the response usage, says neither.
-                    if (content is UsageContent usageContent)
-                    {
-                        lastRequestInputTokens = usageContent.Details.InputTokenCount ?? 0;
-                        firstRequestInputTokens ??= lastRequestInputTokens;
-                    }
-                }
+                TrackRequestInputTokens(update, ref firstRequestInputTokens, ref lastRequestInputTokens);
 
                 if (!string.IsNullOrEmpty(update.Text))
                 {
@@ -179,16 +154,7 @@ public partial class AnthropicAgent : LlmAgentBase
         var text = GetFinalText(response);
         if (string.IsNullOrWhiteSpace(text))
         {
-            if (response.FinishReason == ChatFinishReason.ContentFilter)
-            {
-                throw new AgentTurnException(AgentFailureKind.Transient, "The model declined to answer.");
-            }
-
-            if (response.FinishReason == ChatFinishReason.Length)
-            {
-                throw new AgentTurnException(
-                    AgentFailureKind.Transient, $"The model reached the output token limit of {maxTokens} tokens before answering.");
-            }
+            ThrowIfNotAnswered(response.FinishReason, maxTokens);
         }
 
         if (isChat)
@@ -196,10 +162,61 @@ public partial class AnthropicAgent : LlmAgentBase
             _history.Append(new ChatMessage(ChatRole.User, request.UserMessage), response.Messages);
             await SaveHistoryAsync();
             await CompactHistoryIfNeededAsync(
-                innerClient, apiKey, request.Model, maxTokens, firstRequestInputTokens ?? 0, lastRequestInputTokens, cancellationToken);
+                innerClient, apiKey, model, maxTokens, firstRequestInputTokens ?? 0, lastRequestInputTokens, cancellationToken);
         }
 
         return new AgentTurnResult(text, ToAgentUsage(response.Usage), RateLimit: null);
+    }
+
+    private (string ApiKey, string Model, int MaxTokens) GetValidatedConfiguration(AgentTurnRequest request)
+    {
+        var apiKey = ApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new AgentTurnException(AgentFailureKind.Configuration, "Set the API key of the agent.");
+        }
+
+        var model = request.Model;
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            throw new AgentTurnException(AgentFailureKind.Configuration, "Set the model of the agent.");
+        }
+
+        var maxTokens = MaxTokens;
+        if (maxTokens <= 0)
+        {
+            throw new AgentTurnException(AgentFailureKind.Configuration, "Set the output token limit of the agent to a positive number.");
+        }
+
+        return (apiKey, model, maxTokens);
+    }
+
+    private static void TrackRequestInputTokens(ChatResponseUpdate update, ref long? firstRequestInputTokens, ref long lastRequestInputTokens)
+    {
+        foreach (var content in update.Contents)
+        {
+            // One usage per model request: the first shows the context this turn started from, the last the
+            // context the next turn starts from. Their sum, as in the response usage, says neither.
+            if (content is UsageContent usageContent)
+            {
+                lastRequestInputTokens = usageContent.Details.InputTokenCount ?? 0;
+                firstRequestInputTokens ??= lastRequestInputTokens;
+            }
+        }
+    }
+
+    private static void ThrowIfNotAnswered(ChatFinishReason? finishReason, int maxTokens)
+    {
+        if (finishReason == ChatFinishReason.ContentFilter)
+        {
+            throw new AgentTurnException(AgentFailureKind.Transient, "The model declined to answer.");
+        }
+
+        if (finishReason == ChatFinishReason.Length)
+        {
+            throw new AgentTurnException(
+                AgentFailureKind.Transient, $"The model reached the output token limit of {maxTokens} tokens before answering.");
+        }
     }
 
     private IChatClient GetChatClient(string apiKey, int maxTokens)
@@ -354,25 +371,38 @@ public partial class AnthropicAgent : LlmAgentBase
         {
             AgentTurnException => null,
             OperationCanceledException when cancellationToken.IsCancellationRequested => null,
-            OperationCanceledException => Failure(AgentFailureKind.Transient, "The Anthropic API did not answer in time."),
-            AnthropicUnauthorizedException => Failure(AgentFailureKind.Configuration, "The Anthropic API rejected the API key."),
-            AnthropicForbiddenException api => Failure(AgentFailureKind.Configuration, "The API key may not use this model or feature: " + Describe(api)),
-            AnthropicNotFoundException api => Failure(AgentFailureKind.Configuration, "The Anthropic API did not find the model: " + Describe(api)),
-            AnthropicRateLimitException api => Failure(AgentFailureKind.UsageLimit, "The Anthropic API rate limit is reached: " + Describe(api)),
-            // Transient: background runs do not use the chat history, and a chat recovers with a new conversation.
-            AnthropicBadRequestException api when IsPromptTooLong(api) => Failure(
-                AgentFailureKind.Transient,
-                "The request is too long for the model: " + Describe(api) + ". In the chat, start a new conversation."),
-            AnthropicApiException api => Failure(AgentFailureKind.Transient, "The Anthropic API failed: " + Describe(api)),
+            OperationCanceledException => Failure(AgentFailureKind.Transient, "The Anthropic API did not answer in time.", apiKey, exception),
+            AnthropicApiException api => ClassifyApiException(api, apiKey),
             AnthropicSseException or AnthropicInvalidDataException => Failure(
-                AgentFailureKind.Transient, "The Anthropic API failed while answering: " + DescribeEmbeddedError(exception.Message)),
-            AnthropicException or HttpRequestException => Failure(AgentFailureKind.Transient, "The Anthropic API could not be reached: " + exception.Message),
+                AgentFailureKind.Transient, "The Anthropic API failed while answering: " + DescribeEmbeddedError(exception.Message), apiKey, exception),
+            AnthropicException or HttpRequestException => Failure(
+                AgentFailureKind.Transient, "The Anthropic API could not be reached: " + exception.Message, apiKey, exception),
             _ => null
         };
-
-        AgentTurnException Failure(AgentFailureKind kind, string message) =>
-            new(kind, Redact(message, apiKey), innerException: exception);
     }
+
+    private static AgentTurnException ClassifyApiException(AnthropicApiException exception, string apiKey)
+    {
+        return exception switch
+        {
+            AnthropicUnauthorizedException => Failure(AgentFailureKind.Configuration, "The Anthropic API rejected the API key.", apiKey, exception),
+            AnthropicForbiddenException => Failure(
+                AgentFailureKind.Configuration, "The API key may not use this model or feature: " + Describe(exception), apiKey, exception),
+            AnthropicNotFoundException => Failure(
+                AgentFailureKind.Configuration, "The Anthropic API did not find the model: " + Describe(exception), apiKey, exception),
+            AnthropicRateLimitException => Failure(
+                AgentFailureKind.UsageLimit, "The Anthropic API rate limit is reached: " + Describe(exception), apiKey, exception),
+            // Transient: background runs do not use the chat history, and a chat recovers with a new conversation.
+            AnthropicBadRequestException when IsPromptTooLong(exception) => Failure(
+                AgentFailureKind.Transient,
+                "The request is too long for the model: " + Describe(exception) + ". In the chat, start a new conversation.",
+                apiKey, exception),
+            _ => Failure(AgentFailureKind.Transient, "The Anthropic API failed: " + Describe(exception), apiKey, exception)
+        };
+    }
+
+    private static AgentTurnException Failure(AgentFailureKind kind, string message, string apiKey, Exception exception) =>
+        new(kind, Redact(message, apiKey), innerException: exception);
 
     private static bool IsPromptTooLong(AnthropicApiException exception) =>
         TryGetErrorMessage(exception.ResponseBody) is { } message &&
@@ -394,20 +424,24 @@ public partial class AnthropicAgent : LlmAgentBase
             : message;
     }
 
+    private static bool TryGetProperty(JsonElement element, string name, JsonValueKind kind, out JsonElement value) =>
+        element.TryGetProperty(name, out value) && value.ValueKind == kind;
+
     private static string? TryGetErrorMessage(string json)
     {
         try
         {
             using var document = JsonDocument.Parse(json);
             if (document.RootElement.ValueKind == JsonValueKind.Object &&
-                document.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object &&
-                error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
+                TryGetProperty(document.RootElement, "error", JsonValueKind.Object, out var error) &&
+                TryGetProperty(error, "message", JsonValueKind.String, out var message))
             {
                 return message.GetString();
             }
         }
         catch (JsonException)
         {
+            // Not an error object; the caller describes the failure without it.
         }
 
         return null;

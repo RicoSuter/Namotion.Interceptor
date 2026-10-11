@@ -54,29 +54,7 @@ public static class ClaudeStreamJsonParser
                 return null;
             }
 
-            if (type.ValueEquals("stream_event"u8))
-            {
-                return ParseStreamEvent(root);
-            }
-
-            if (type.ValueEquals("system"u8))
-            {
-                return HasString(root, "subtype"u8, "init"u8) && GetString(root, "session_id"u8) is { } sessionId
-                    ? new ClaudeInitEvent(sessionId)
-                    : null;
-            }
-
-            if (type.ValueEquals("rate_limit_event"u8))
-            {
-                return ParseRateLimit(root);
-            }
-
-            if (type.ValueEquals("assistant"u8))
-            {
-                return GetString(root, "error"u8) is { } code ? new ClaudeAssistantErrorEvent(code) : null;
-            }
-
-            return type.ValueEquals("result"u8) ? ParseResult(root) : null;
+            return ParseByType(root, type);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
@@ -84,20 +62,45 @@ public static class ClaudeStreamJsonParser
         }
     }
 
-    private static ClaudeTextDeltaEvent? ParseStreamEvent(JsonElement root)
+    private static ClaudeStreamEvent? ParseByType(JsonElement root, JsonElement type)
     {
-        if (root.TryGetProperty("event"u8, out var streamEvent) &&
-            streamEvent.ValueKind == JsonValueKind.Object &&
-            HasString(streamEvent, "type"u8, "content_block_delta"u8) &&
-            streamEvent.TryGetProperty("delta"u8, out var delta) &&
-            delta.ValueKind == JsonValueKind.Object &&
-            HasString(delta, "type"u8, "text_delta"u8) &&
-            GetString(delta, "text"u8) is { } text)
+        if (type.ValueEquals("stream_event"u8))
         {
-            return new ClaudeTextDeltaEvent(text);
+            return ParseStreamEvent(root);
         }
 
-        return null;
+        if (type.ValueEquals("system"u8))
+        {
+            return HasString(root, "subtype"u8, "init"u8) && GetString(root, "session_id"u8) is { } sessionId
+                ? new ClaudeInitEvent(sessionId)
+                : null;
+        }
+
+        if (type.ValueEquals("rate_limit_event"u8))
+        {
+            return ParseRateLimit(root);
+        }
+
+        if (type.ValueEquals("assistant"u8))
+        {
+            return GetString(root, "error"u8) is { } code ? new ClaudeAssistantErrorEvent(code) : null;
+        }
+
+        return type.ValueEquals("result"u8) ? ParseResult(root) : null;
+    }
+
+    private static ClaudeTextDeltaEvent? ParseStreamEvent(JsonElement root)
+    {
+        if (!TryGetObject(root, "event"u8, out var streamEvent) ||
+            !HasString(streamEvent, "type"u8, "content_block_delta"u8) ||
+            !TryGetObject(streamEvent, "delta"u8, out var delta))
+        {
+            return null;
+        }
+
+        return HasString(delta, "type"u8, "text_delta"u8) && GetString(delta, "text"u8) is { } text
+            ? new ClaudeTextDeltaEvent(text)
+            : null;
     }
 
     private static ClaudeRateLimitEvent? ParseRateLimit(JsonElement root)
@@ -127,16 +130,18 @@ public static class ClaudeStreamJsonParser
             return (null, null);
         }
 
-        double? utilization = window.TryGetProperty("utilization"u8, out var value) && value.ValueKind == JsonValueKind.Number &&
+        double? utilization = TryGetNumber(window, "utilization"u8, out var value) &&
             value.TryGetDouble(out var fraction) && double.IsFinite(fraction)
             ? Math.Clamp(fraction, 0, 1)
             : null;
-        DateTimeOffset? resetsAt = window.TryGetProperty("resetsAt"u8, out var reset) && reset.ValueKind == JsonValueKind.Number &&
-            reset.TryGetInt64(out var seconds) && seconds >= MinimumUnixSeconds && seconds <= MaximumUnixSeconds
+        DateTimeOffset? resetsAt = TryGetNumber(window, "resetsAt"u8, out var reset) &&
+            reset.TryGetInt64(out var seconds) && IsInUnixSecondsRange(seconds)
             ? DateTimeOffset.FromUnixTimeSeconds(seconds)
             : null;
         return (utilization, resetsAt);
     }
+
+    private static bool IsInUnixSecondsRange(long seconds) => seconds >= MinimumUnixSeconds && seconds <= MaximumUnixSeconds;
 
     private static ClaudeResultEvent ParseResult(JsonElement root)
     {
@@ -157,6 +162,12 @@ public static class ClaudeStreamJsonParser
             GetString(root, "result"u8),
             usage);
     }
+
+    private static bool TryGetObject(JsonElement element, ReadOnlySpan<byte> name, out JsonElement value) =>
+        element.TryGetProperty(name, out value) && value.ValueKind == JsonValueKind.Object;
+
+    private static bool TryGetNumber(JsonElement element, ReadOnlySpan<byte> name, out JsonElement value) =>
+        element.TryGetProperty(name, out value) && value.ValueKind == JsonValueKind.Number;
 
     private static bool HasString(JsonElement element, ReadOnlySpan<byte> name, ReadOnlySpan<byte> expected) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.ValueEquals(expected);

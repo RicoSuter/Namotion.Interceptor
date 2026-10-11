@@ -73,7 +73,7 @@ public static class AgentMcpEndpoint
 
         var handlers = options.Handlers;
         handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
-        handlers.CallToolHandler = (request, token) => McpToolDispatcher.CallToolAsync(tools, request.Params!, logger: null, token);
+        handlers.CallToolHandler = (request, token) => McpToolDispatcher.CallToolAsync(tools, request.Params, logger: null, token);
         handlers.ListPromptsHandler = null;
         handlers.GetPromptHandler = null;
         handlers.ListResourcesHandler = null;
