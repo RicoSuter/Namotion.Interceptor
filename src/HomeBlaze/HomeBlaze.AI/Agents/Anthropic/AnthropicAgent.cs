@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Anthropic;
 using Anthropic.Exceptions;
@@ -13,6 +14,10 @@ namespace HomeBlaze.AI.Agents.Anthropic;
 /// <summary>
 /// An agent that calls the Anthropic API with an API key and runs the tool loop in-process.
 /// </summary>
+/// <remarks>
+/// Requests go to the URL in the <c>ANTHROPIC_BASE_URL</c> environment variable when it is set, for example a proxy,
+/// and carry the API key there.
+/// </remarks>
 [Category("AI")]
 [Description("AI agent using the Anthropic API with an API key.")]
 [InterceptorSubject]
@@ -36,6 +41,9 @@ public partial class AnthropicAgent : LlmAgentBase
 
     // Only read and written while the base class holds the turn gate.
     private AnthropicHistory _history = new();
+    private IChatClient? _chatClient;
+    private string? _chatClientApiKey;
+    private int _chatClientMaxTokens;
     private bool _isMeasuringCompaction;
     private long _compactionFloor;
 
@@ -61,12 +69,18 @@ public partial class AnthropicAgent : LlmAgentBase
     [Configuration]
     public partial int HistoryTokenBudget { get; set; }
 
-    /// <summary>Creates the chat client of one turn; the caller disposes it.</summary>
+    /// <summary>The HTTP client that sends the API requests; it is not disposed by the agent.</summary>
+    protected virtual HttpClient HttpClient => SharedHttpClient;
+
+    /// <summary>
+    /// Creates the chat client for an API key and output token limit. The agent reuses it while both stay the same
+    /// and never disposes it.
+    /// </summary>
     /// <param name="apiKey">The API key, never empty.</param>
     /// <param name="maxOutputTokens">The default output token limit of a request.</param>
     protected virtual IChatClient CreateChatClient(string apiKey, int maxOutputTokens) =>
         // An explicit null auth token keeps the SDK from picking up a token from the environment.
-        new AnthropicClient { ApiKey = apiKey, AuthToken = null, HttpClient = SharedHttpClient }
+        new AnthropicClient { ApiKey = apiKey, AuthToken = null, HttpClient = HttpClient }
             .AsIChatClient(defaultModelId: null, defaultMaxOutputTokens: maxOutputTokens);
 
     protected override async Task OnStartingAsync(CancellationToken cancellationToken)
@@ -118,13 +132,17 @@ public partial class AnthropicAgent : LlmAgentBase
             : [new ChatMessage(ChatRole.System, request.SystemPrompt), new ChatMessage(ChatRole.User, request.UserMessage)];
         var options = AnthropicChatOptions.Create(request.Model, maxTokens, request.Effort, request.Tools.Tools);
 
-        using var innerClient = CreateChatClient(apiKey, maxTokens);
-        using var client = new FunctionInvokingChatClient(innerClient)
+        var innerClient = GetChatClient(apiKey, maxTokens);
+
+        // The tool set's budget governs: over it, calls get an error result. The client's own limits only stop a
+        // model that ignores those errors, because its last iteration drops the tools, and a request whose tools
+        // change mid-turn invalidates the thinking blocks the API expects back. Not disposed: that would dispose
+        // the reused inner client.
+        var iterationLimit = (int)Math.Min((long)Math.Max(MaxToolCallsPerTurn, 0) + ExtraToolIterations, int.MaxValue);
+        var client = new FunctionInvokingChatClient(innerClient)
         {
-            // The tool set's budget governs: over it, calls get an error result. The client's own limit only stops a
-            // model that ignores those errors, because its last iteration drops the tools, and a request whose tools
-            // change mid-turn invalidates the thinking blocks the API expects back.
-            MaximumIterationsPerRequest = (int)Math.Min((long)Math.Max(MaxToolCallsPerTurn, 0) + ExtraToolIterations, int.MaxValue)
+            MaximumIterationsPerRequest = iterationLimit,
+            MaximumConsecutiveErrorsPerRequest = iterationLimit
         };
 
         var updates = new List<ChatResponseUpdate>();
@@ -158,7 +176,8 @@ public partial class AnthropicAgent : LlmAgentBase
         }
 
         var response = updates.ToChatResponse();
-        if (string.IsNullOrWhiteSpace(response.Text))
+        var text = GetFinalText(response);
+        if (string.IsNullOrWhiteSpace(text))
         {
             if (response.FinishReason == ChatFinishReason.ContentFilter)
             {
@@ -177,14 +196,56 @@ public partial class AnthropicAgent : LlmAgentBase
             _history.Append(new ChatMessage(ChatRole.User, request.UserMessage), response.Messages);
             await SaveHistoryAsync();
             await CompactHistoryIfNeededAsync(
-                innerClient, request.Model, maxTokens, firstRequestInputTokens ?? 0, lastRequestInputTokens, cancellationToken);
+                innerClient, apiKey, request.Model, maxTokens, firstRequestInputTokens ?? 0, lastRequestInputTokens, cancellationToken);
         }
 
-        return new AgentTurnResult(response.Text, ToAgentUsage(response.Usage), RateLimit: null);
+        return new AgentTurnResult(text, ToAgentUsage(response.Usage), RateLimit: null);
+    }
+
+    private IChatClient GetChatClient(string apiKey, int maxTokens)
+    {
+        if (_chatClient is null || _chatClientApiKey != apiKey || _chatClientMaxTokens != maxTokens)
+        {
+            _chatClient = CreateChatClient(apiKey, maxTokens);
+            _chatClientApiKey = apiKey;
+            _chatClientMaxTokens = maxTokens;
+        }
+
+        return _chatClient;
+    }
+
+    /// <summary>
+    /// The answer of a turn: the assistant text after the last tool results. Text written before a tool call is
+    /// streamed but is not the answer, which must start with the quiet marker of a background run, for example.
+    /// </summary>
+    private static string GetFinalText(ChatResponse response)
+    {
+        var messages = response.Messages;
+        var start = 0;
+        for (var index = messages.Count - 1; index >= 0; index--)
+        {
+            if (messages[index].Role == ChatRole.Tool)
+            {
+                start = index + 1;
+                break;
+            }
+        }
+
+        var text = new StringBuilder();
+        for (var index = start; index < messages.Count; index++)
+        {
+            if (messages[index].Role == ChatRole.Assistant)
+            {
+                text.Append(messages[index].Text);
+            }
+        }
+
+        return text.ToString();
     }
 
     private async Task CompactHistoryIfNeededAsync(
-        IChatClient client, string model, int maxTokens, long firstRequestInputTokens, long lastRequestInputTokens, CancellationToken cancellationToken)
+        IChatClient client, string apiKey, string model, int maxTokens, long firstRequestInputTokens, long lastRequestInputTokens,
+        CancellationToken cancellationToken)
     {
         long budget = HistoryTokenBudget;
         if (budget <= 0)
@@ -210,22 +271,30 @@ public partial class AnthropicAgent : LlmAgentBase
         {
             outcome = await _history.CompactAsync(
                 client,
-                new ChatOptions { ModelId = model, MaxOutputTokens = Math.Min(maxTokens, SummaryMaxOutputTokens) },
+                // Low effort rather than no thinking, which some models reject.
+                new ChatOptions
+                {
+                    ModelId = model,
+                    MaxOutputTokens = Math.Min(maxTokens, SummaryMaxOutputTokens),
+                    Reasoning = new ReasoningOptions { Effort = ReasoningEffort.Low }
+                },
                 // Aims at half the budget, so that a few turns fit before the next compaction.
                 keepFraction: Math.Clamp(budget / 2.0 / lastRequestInputTokens, 0, 0.5),
                 cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            throw;
+            // The answer is saved and must reach the timeline; the history is summarized after a later turn.
+            _logger.LogInformation("Summarizing the chat history of agent {Agent} was cancelled.", Title);
+            return;
         }
         catch (Exception exception)
         {
-            // The turn already has its answer; the history stays as it was and is summarized after a later turn.
+            // The turn already has its answer; the history stays as it was.
             _logger.LogWarning(
                 "The chat history of agent {Agent} could not be summarized: {Message}",
-                Title, Redact(exception.Message, ApiKey));
-            return;
+                Title, Redact(exception.Message, apiKey));
+            outcome = AnthropicCompactionOutcome.SummaryIncomplete;
         }
 
         switch (outcome)
@@ -235,7 +304,9 @@ public partial class AnthropicAgent : LlmAgentBase
                 await SaveHistoryAsync();
                 break;
             case AnthropicCompactionOutcome.SummaryIncomplete:
-                _logger.LogWarning("The chat history of agent {Agent} was not summarized because the summary was empty or cut off.", Title);
+                // A failing summary would otherwise cost a model call on every turn; retried after real growth.
+                _compactionFloor = lastRequestInputTokens + budget / 2;
+                _logger.LogWarning("The chat history of agent {Agent} was not summarized; it is retried once the chat has grown.", Title);
                 break;
         }
     }
@@ -288,7 +359,13 @@ public partial class AnthropicAgent : LlmAgentBase
             AnthropicForbiddenException api => Failure(AgentFailureKind.Configuration, "The API key may not use this model or feature: " + Describe(api)),
             AnthropicNotFoundException api => Failure(AgentFailureKind.Configuration, "The Anthropic API did not find the model: " + Describe(api)),
             AnthropicRateLimitException api => Failure(AgentFailureKind.UsageLimit, "The Anthropic API rate limit is reached: " + Describe(api)),
+            // Transient: background runs do not use the chat history, and a chat recovers with a new conversation.
+            AnthropicBadRequestException api when IsPromptTooLong(api) => Failure(
+                AgentFailureKind.Transient,
+                "The request is too long for the model: " + Describe(api) + ". In the chat, start a new conversation."),
             AnthropicApiException api => Failure(AgentFailureKind.Transient, "The Anthropic API failed: " + Describe(api)),
+            AnthropicSseException or AnthropicInvalidDataException => Failure(
+                AgentFailureKind.Transient, "The Anthropic API failed while answering: " + DescribeEmbeddedError(exception.Message)),
             AnthropicException or HttpRequestException => Failure(AgentFailureKind.Transient, "The Anthropic API could not be reached: " + exception.Message),
             _ => null
         };
@@ -297,24 +374,43 @@ public partial class AnthropicAgent : LlmAgentBase
             new(kind, Redact(message, apiKey), innerException: exception);
     }
 
+    private static bool IsPromptTooLong(AnthropicApiException exception) =>
+        TryGetErrorMessage(exception.ResponseBody) is { } message &&
+        message.Contains("prompt is too long", StringComparison.OrdinalIgnoreCase);
+
     private static string Describe(AnthropicApiException exception)
     {
         var status = (int)exception.StatusCode;
+        return TryGetErrorMessage(exception.ResponseBody) is { } message ? $"{message} ({status})" : $"status code {status}";
+    }
+
+    // A stream error carries the API's error object inside its message, for example an overloaded error mid-answer.
+    private static string DescribeEmbeddedError(string message)
+    {
+        var start = message.IndexOf('{');
+        var end = message.LastIndexOf('}');
+        return start >= 0 && end > start && TryGetErrorMessage(message[start..(end + 1)]) is { } errorMessage
+            ? errorMessage
+            : message;
+    }
+
+    private static string? TryGetErrorMessage(string json)
+    {
         try
         {
-            using var document = JsonDocument.Parse(exception.ResponseBody);
+            using var document = JsonDocument.Parse(json);
             if (document.RootElement.ValueKind == JsonValueKind.Object &&
                 document.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object &&
                 error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
             {
-                return $"{message.GetString()} ({status})";
+                return message.GetString();
             }
         }
         catch (JsonException)
         {
         }
 
-        return $"status code {status}";
+        return null;
     }
 
     // The SDK does not put the key into exception messages; this guards against a response that echoes it.

@@ -11,7 +11,8 @@ public static class AnthropicChatOptions
 {
     /// <summary>
     /// Creates the options for one model request of a turn. Any effort enables adaptive thinking and is sent as
-    /// <c>output_config.effort</c>; <paramref name="maxOutputTokens"/> is sent unchanged as <c>max_tokens</c>.
+    /// <c>output_config.effort</c>; <paramref name="maxOutputTokens"/> is sent unchanged as <c>max_tokens</c>, and
+    /// the request enables automatic prompt caching.
     /// </summary>
     /// <param name="model">The model id.</param>
     /// <param name="maxOutputTokens">The output token limit, including thinking tokens.</param>
@@ -36,7 +37,7 @@ public static class AnthropicChatOptions
         if (effort is { } value)
         {
             // ReasoningEffort has no max level: ExtraHigh makes the client add adaptive thinking, and the client keeps
-            // the raw effort. With raw parameters the client takes model and max_tokens from them, not from the options.
+            // the max effort of the raw parameters below.
             options.Reasoning = new ReasoningOptions
             {
                 Effort = value switch
@@ -48,18 +49,20 @@ public static class AnthropicChatOptions
                     _ => throw new ArgumentOutOfRangeException(nameof(effort), effort, null)
                 }
             };
-
-            if (value == AgentEffort.Max)
-            {
-                options.RawRepresentationFactory = _ => new MessageCreateParams
-                {
-                    Model = model,
-                    MaxTokens = maxOutputTokens,
-                    Messages = [],
-                    OutputConfig = new OutputConfig { Effort = Effort.Max }
-                };
-            }
         }
+
+        // Automatic prompt caching marks the end of each request, so the tool rounds of a turn and the next chat turn
+        // read the shared prefix from the cache. With raw parameters the client takes model and max_tokens from them
+        // instead of the options, and appends the chat messages to the empty message list.
+        var outputConfig = effort == AgentEffort.Max ? new OutputConfig { Effort = Effort.Max } : null;
+        options.RawRepresentationFactory = _ => new MessageCreateParams
+        {
+            Model = model,
+            MaxTokens = maxOutputTokens,
+            Messages = [],
+            CacheControl = new CacheControlEphemeral(),
+            OutputConfig = outputConfig
+        };
 
         return options;
     }

@@ -170,8 +170,21 @@ public sealed class AnthropicHistory
             history.Summary = summary.GetString();
         }
 
-        if (root.TryGetProperty(MessagesPropertyName, out var messages) && messages.ValueKind == JsonValueKind.Array &&
-            messages.Deserialize(MessagesTypeInfo) is { } restored)
+        IList<ChatMessage>? restored = null;
+        if (root.TryGetProperty(MessagesPropertyName, out var messages) && messages.ValueKind == JsonValueKind.Array)
+        {
+            try
+            {
+                restored = messages.Deserialize(MessagesTypeInfo);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or InvalidOperationException)
+            {
+                // Content constructors reject invalid values, for example a null or empty role.
+                throw new JsonException("The history contains an invalid message: " + exception.Message, exception);
+            }
+        }
+
+        if (restored is not null)
         {
             foreach (var message in restored)
             {
@@ -221,6 +234,7 @@ public sealed class AnthropicHistory
     private static FunctionResultContent NormalizeToolResult(FunctionResultContent result)
     {
         // The client sends strings as they are, content as content blocks, and anything else as its JSON text.
+        // Content results are restored as JSON text, which the client sends differently; no tool returns content today.
         var value = result.Result is null or string or AIContent or IEnumerable<AIContent>
             ? result.Result
             : JsonSerializer.Serialize(result.Result, ValueTypeInfo);

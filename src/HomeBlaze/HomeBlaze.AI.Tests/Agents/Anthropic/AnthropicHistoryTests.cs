@@ -296,6 +296,20 @@ public class AnthropicHistoryTests
         Assert.ThrowsAny<JsonException>(() => AnthropicHistory.Deserialize("{ broken"));
     }
 
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"\"")]
+    public void WhenAStoredRoleIsInvalid_ThenDeserializeThrowsAJsonException(string role)
+    {
+        // Arrange
+        var json = CreateHistory(1).Serialize();
+        Assert.Contains("\"role\":\"user\"", json);
+        json = json.Replace("\"role\":\"user\"", "\"role\":" + role, StringComparison.Ordinal);
+
+        // Act & Assert
+        Assert.ThrowsAny<JsonException>(() => AnthropicHistory.Deserialize(json));
+    }
+
     private static async Task<string> CaptureRequestMessagesAsync(AnthropicHistory history)
     {
         var handler = new CapturingHandler();

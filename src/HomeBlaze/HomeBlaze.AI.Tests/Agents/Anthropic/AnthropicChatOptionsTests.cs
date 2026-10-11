@@ -37,6 +37,7 @@ public class AnthropicChatOptionsTests
         Assert.Equal("user", message.GetProperty("role").GetString());
         Assert.Equal(expected, body.GetProperty("output_config").GetProperty("effort").GetString());
         Assert.Equal("adaptive", body.GetProperty("thinking").GetProperty("type").GetString());
+        Assert.Equal("ephemeral", body.GetProperty("cache_control").GetProperty("type").GetString());
     }
 
     [Fact]
@@ -66,6 +67,7 @@ public class AnthropicChatOptionsTests
         Assert.Equal(["user", "assistant", "user"], body.GetProperty("messages").EnumerateArray().Select(message => message.GetProperty("role").GetString()));
         Assert.Equal("browse", Assert.Single(body.GetProperty("tools").EnumerateArray()).GetProperty("name").GetString());
         Assert.Equal("max", body.GetProperty("output_config").GetProperty("effort").GetString());
+        Assert.Equal("ephemeral", body.GetProperty("cache_control").GetProperty("type").GetString());
     }
 
     [Fact]
@@ -85,6 +87,7 @@ public class AnthropicChatOptionsTests
         Assert.Equal(1000, body.GetProperty("max_tokens").GetInt32());
         Assert.False(body.TryGetProperty("output_config", out var outputConfig) && outputConfig.TryGetProperty("effort", out _));
         Assert.False(body.TryGetProperty("thinking", out _));
+        Assert.Equal("ephemeral", body.GetProperty("cache_control").GetProperty("type").GetString());
     }
 
     private static IChatClient CreateClient(HttpMessageHandler handler) =>

@@ -1,6 +1,6 @@
 using System.Net;
 using System.Runtime.CompilerServices;
-using Anthropic;
+using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Anthropic;
@@ -20,14 +20,19 @@ public class TestableAnthropicAgent : AnthropicAgent
 
     public ScriptedChatClient Client { get; } = new();
 
-    /// <summary>When set, turns use the real Anthropic client over this handler instead of <see cref="Client"/>.</summary>
+    /// <summary>When set, turns use the production Anthropic client over this handler instead of <see cref="Client"/>.</summary>
     public HttpMessageHandler? HttpHandler { get; set; }
 
-    protected override IChatClient CreateChatClient(string apiKey, int maxOutputTokens) =>
-        HttpHandler is { } handler
-            ? new AnthropicClient { ApiKey = apiKey, HttpClient = new HttpClient(handler, disposeHandler: false), MaxRetries = 0 }
-                .AsIChatClient(defaultModelId: null, defaultMaxOutputTokens: maxOutputTokens)
-            : Client;
+    public int CreatedClientCount { get; private set; }
+
+    protected override HttpClient HttpClient =>
+        HttpHandler is { } handler ? new HttpClient(handler, disposeHandler: false) : base.HttpClient;
+
+    protected override IChatClient CreateChatClient(string apiKey, int maxOutputTokens)
+    {
+        CreatedClientCount++;
+        return HttpHandler is null ? Client : base.CreateChatClient(apiKey, maxOutputTokens);
+    }
 }
 
 public sealed class ScriptedChatClient : IChatClient
@@ -44,7 +49,9 @@ public sealed class ScriptedChatClient : IChatClient
     public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         SummaryOptions.Add(options);
-        return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, Summarize())));
+        var summary = Summarize();
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, summary)));
     }
 
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -183,6 +190,32 @@ public class AnthropicAgentTests
     }
 
     [Fact]
+    public async Task WhenTextPrecedesAToolCall_ThenOnlyTheFinalTextIsTheAnswer()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent =>
+        {
+            agent.AllowedTools = ["get_property"];
+            agent.Client.Respond = (messages, _) => messages[^1].Contents.OfType<FunctionResultContent>().Any()
+                ? [new ChatResponseUpdate(ChatRole.Assistant, "[quiet] nothing new")]
+                :
+                [
+                    new ChatResponseUpdate(ChatRole.Assistant, "Let me check the temperature."),
+                    new ChatResponseUpdate(ChatRole.Assistant, [new FunctionCallContent("call1", "get_property", new Dictionary<string, object?> { ["path"] = "/Temperature" })])
+                ];
+        });
+
+        // Act
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+
+        // Assert
+        var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
+        Assert.True(run.IsQuiet);
+        Assert.Equal("[quiet] nothing new", run.Text);
+    }
+
+    [Fact]
     public async Task WhenNoApiKeyIsSet_ThenTheAgentIsUnavailable()
     {
         // Arrange
@@ -233,7 +266,7 @@ public class AnthropicAgentTests
         var options = Assert.Single(test.Agent.Client.SummaryOptions);
         Assert.Equal("claude-sonnet-5", options!.ModelId);
         Assert.Equal(4096, options.MaxOutputTokens);
-        Assert.Null(options.Reasoning);
+        Assert.Equal(ReasoningEffort.Low, options.Reasoning?.Effort);
         var session = await File.ReadAllTextAsync(SessionPath(test));
         Assert.Contains("\"summary\":\"summary\"", session);
         Assert.DoesNotContain("\"first\"", session);
@@ -249,6 +282,51 @@ public class AnthropicAgentTests
         {
             agent.HistoryTokenBudget = 1000;
             agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello"), Usage(5000)];
+        });
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+
+        // Act
+        await test.Agent.SendMessageAsync("third", CancellationToken.None);
+
+        // Assert
+        Assert.Single(test.Agent.Client.SummaryOptions);
+        Assert.Equal("Hello", test.Agent.Timeline.Entries[^1].Text);
+    }
+
+    [Fact]
+    public async Task WhenTheTurnIsCancelledWhileSummarizing_ThenTheAnswerReachesTheTimeline()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.HistoryTokenBudget = 1000);
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        using var cancellation = new CancellationTokenSource();
+        test.Agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello again"), Usage(5000)];
+        test.Agent.Client.Summarize = () =>
+        {
+            cancellation.Cancel();
+            return "summary";
+        };
+
+        // Act
+        await test.Agent.SendMessageAsync("second", cancellation.Token);
+
+        // Assert
+        Assert.Single(test.Agent.Client.SummaryOptions);
+        Assert.Equal(AgentTimelineEntryKind.Assistant, test.Agent.Timeline.Entries[^1].Kind);
+        Assert.Equal("Hello again", test.Agent.Timeline.Entries[^1].Text);
+        Assert.Contains("\"second\"", await File.ReadAllTextAsync(SessionPath(test)));
+    }
+
+    [Fact]
+    public async Task WhenSummarizingFailed_ThenTheNextTurnDoesNotSummarizeAgain()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HistoryTokenBudget = 1000;
+            agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello"), Usage(5000)];
+            agent.Client.Summarize = () => throw new HttpRequestException("summary failed");
         });
         await test.Agent.SendMessageAsync("first", CancellationToken.None);
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
@@ -290,9 +368,7 @@ public class AnthropicAgentTests
         HttpStatusCode statusCode, string errorType, ServiceStatus expectedStatus, string expectedText)
     {
         // Arrange
-        var handler = new StatusCodeHandler(
-            statusCode,
-            $$$"""{"type":"error","error":{"type":"{{{errorType}}}","message":"Request with key {{{ApiKey}}} failed"}}""");
+        var handler = new StubHandler(statusCode, ErrorBody(errorType, $"Request with key {ApiKey} failed"));
         await using var test = await StartAsync(agent => agent.HttpHandler = handler);
 
         // Act
@@ -305,26 +381,122 @@ public class AnthropicAgentTests
         Assert.DoesNotContain(ApiKey, entry.Text);
         Assert.DoesNotContain(ApiKey, test.Agent.StatusMessage);
         Assert.Equal(expectedStatus, test.Agent.Status);
-        Assert.Equal(ApiKey, handler.SentApiKey);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(ApiKey, request.ApiKey);
+        Assert.False(request.HasAuthorization);
     }
 
-    private sealed class StatusCodeHandler : HttpMessageHandler
+    [Fact]
+    public async Task WhenTheRequestIsSent_ThenItEnablesPromptCachingAndUsesTheConfiguredModelAndLimit()
+    {
+        // Arrange
+        var handler = new StubHandler(HttpStatusCode.InternalServerError, ErrorBody("api_error", "failed"));
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HttpHandler = handler;
+            agent.MaxTokens = 3000;
+        });
+
+        // Act
+        await test.Agent.SendMessageAsync("hello", CancellationToken.None);
+
+        // Assert
+        var body = JsonDocument.Parse(Assert.Single(handler.Requests).Body).RootElement;
+        Assert.Equal("ephemeral", body.GetProperty("cache_control").GetProperty("type").GetString());
+        Assert.Equal("claude-sonnet-5", body.GetProperty("model").GetString());
+        Assert.Equal(3000, body.GetProperty("max_tokens").GetInt32());
+    }
+
+    [Fact]
+    public async Task WhenTheApiKeyChanges_ThenANewClientSendsTheNewKey()
+    {
+        // Arrange
+        var handler = new StubHandler(HttpStatusCode.InternalServerError, ErrorBody("api_error", "failed"));
+        await using var test = await StartAsync(agent => agent.HttpHandler = handler);
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+
+        // Act
+        test.Agent.ApiKey = "sk-ant-other-key";
+        await test.Agent.SendMessageAsync("third", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, test.Agent.CreatedClientCount);
+        Assert.Equal([ApiKey, ApiKey, "sk-ant-other-key"], handler.Requests.Select(request => request.ApiKey));
+    }
+
+    [Fact]
+    public async Task WhenThePromptIsTooLong_ThenTheErrorPointsToANewConversation()
+    {
+        // Arrange
+        var handler = new StubHandler(HttpStatusCode.BadRequest, ErrorBody("invalid_request_error", "prompt is too long: 210000 tokens > 200000 maximum"));
+        await using var test = await StartAsync(agent => agent.HttpHandler = handler);
+
+        // Act
+        await test.Agent.SendMessageAsync("hello", CancellationToken.None);
+
+        // Assert
+        var entry = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(AgentTimelineEntryKind.Error, entry.Kind);
+        Assert.Contains("new conversation", entry.Text);
+        Assert.Equal(ServiceStatus.Error, test.Agent.Status);
+    }
+
+    [Fact]
+    public async Task WhenTheStreamReportsAnError_ThenTheErrorMessageIsShown()
+    {
+        // Arrange
+        var handler = new StubHandler(
+            HttpStatusCode.OK,
+            "event: error\ndata: " + ErrorBody("overloaded_error", "Overloaded") + "\n\n",
+            "text/event-stream");
+        await using var test = await StartAsync(agent => agent.HttpHandler = handler);
+
+        // Act
+        await test.Agent.SendMessageAsync("hello", CancellationToken.None);
+
+        // Assert
+        var entry = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(AgentTimelineEntryKind.Error, entry.Kind);
+        Assert.Equal("The Anthropic API failed while answering: Overloaded", entry.Text);
+        Assert.Equal(ServiceStatus.Error, test.Agent.Status);
+    }
+
+    private static string ErrorBody(string type, string message) =>
+        JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["type"] = "error",
+            ["error"] = new Dictionary<string, string> { ["type"] = type, ["message"] = message }
+        });
+
+    private sealed record CapturedRequest(string? ApiKey, bool HasAuthorization, string Body);
+
+    private sealed class StubHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _statusCode;
         private readonly string _body;
+        private readonly string _mediaType;
 
-        public StatusCodeHandler(HttpStatusCode statusCode, string body)
+        public StubHandler(HttpStatusCode statusCode, string body, string mediaType = "application/json")
         {
             _statusCode = statusCode;
             _body = body;
+            _mediaType = mediaType;
         }
 
-        public string? SentApiKey { get; private set; }
+        public List<CapturedRequest> Requests { get; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            SentApiKey = request.Headers.TryGetValues("x-api-key", out var values) ? values.Single() : null;
-            return Task.FromResult(new HttpResponseMessage(_statusCode) { Content = new StringContent(_body) });
+            Requests.Add(new CapturedRequest(
+                request.Headers.TryGetValues("x-api-key", out var values) ? values.Single() : null,
+                request.Headers.Authorization is not null,
+                await request.Content!.ReadAsStringAsync(cancellationToken)));
+
+            var response = new HttpResponseMessage(_statusCode) { Content = new StringContent(_body, System.Text.Encoding.UTF8, _mediaType) };
+            // Keeps the SDK from retrying, which would wait between attempts.
+            response.Headers.Add("x-should-retry", "false");
+            return response;
         }
     }
 }
