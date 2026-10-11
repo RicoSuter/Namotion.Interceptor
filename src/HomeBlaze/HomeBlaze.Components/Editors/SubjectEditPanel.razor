@@ -27,7 +27,7 @@
         }
         else
         {
-            <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
+            <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" IsValidChanged="OnIsValidChanged" />
         }
     }
 </TrackingScope>
@@ -38,19 +38,28 @@
     [Parameter] public bool IsCreating { get; set; }
 
     /// <summary>
-    /// Invoked when the validity of an edit component changes, so the host can re-render its save button.
+    /// Invoked when the validity of the edit component or the generic editor changes, so the host can re-render
+    /// its save button.
     /// </summary>
     [Parameter] public EventCallback<bool> IsValidChanged { get; set; }
 
     private ISubjectComponent? _subjectComponent;
     private ISubjectEditComponent? _editComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
+    private IInterceptorSubject? _previousSubject;
+    private bool? _lastReportedIsValid;
 
     public bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
 
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
+
+        if (Subject != _previousSubject)
+        {
+            _previousSubject = Subject;
+            _lastReportedIsValid = null;
+        }
 
         // TODO: Extract event subscription/unsubscription to helper method - logic duplicated in OnParametersSet, OnAfterRender, and DisposeAsync
         // Unsubscribe from previous edit component
@@ -85,6 +94,14 @@
     private void OnIsValidChanged(bool isValid) => InvokeAsync(() =>
     {
         StateHasChanged();
+
+        // Edit components may raise this on every keystroke; the host only needs the transitions.
+        if (_lastReportedIsValid == isValid)
+        {
+            return Task.CompletedTask;
+        }
+
+        _lastReportedIsValid = isValid;
         return IsValidChanged.InvokeAsync(isValid);
     });
 
