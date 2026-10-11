@@ -1,4 +1,5 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(ClaudeCliAgent))]
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(AnthropicAgent))]
 @implements ISubjectEditComponent
 
 @inject IAgentToolSource ToolSource
@@ -112,6 +113,25 @@
                 </MudItem>
             </MudGrid>
         }
+
+        @if (Agent is AnthropicAgent)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-6">Anthropic API</MudText>
+            @* The stored key is never loaded into the form; an empty field keeps it. *@
+            <MudTextField T="string" Label="API key" @bind-Value="_apiKey" @bind-Value:after="OnChanged" InputType="InputType.Password" Immediate="true"
+                          HelperText="@(_hasStoredApiKey ? "A key is stored. Leave empty to keep it." : "Required.")" autocomplete="new-password"
+                          data-testid="agent-edit-api-key" />
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="int" Label="Max output tokens" @bind-Value="_maxTokens" @bind-Value:after="OnChanged" Min="256"
+                                     HelperText="Per model request, including thinking." />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="int" Label="History token budget" @bind-Value="_historyTokenBudget" @bind-Value:after="OnChanged" Min="1000"
+                                     HelperText="Above this many input tokens the older half of the chat is summarized." />
+                </MudItem>
+            </MudGrid>
+        }
     </MudForm>
 }
 
@@ -136,6 +156,10 @@
     private int _maxToolCalls;
     private string _cliPath = string.Empty;
     private string? _fallbackModel;
+    private string? _apiKey;
+    private bool _hasStoredApiKey;
+    private int _maxTokens;
+    private int _historyTokenBudget;
     private bool _isDirty;
     private bool _wasValid = true;
 
@@ -158,11 +182,18 @@
         AgentTimeSpanInput.TryParse(_minRunInterval, out _) &&
         AgentTimeSpanInput.TryParseTurnTimeout(_turnTimeout, out _) &&
         _maxToolCalls > 0 &&
-        (Agent is not ClaudeCliAgent || !string.IsNullOrWhiteSpace(_cliPath));
+        (Agent is not ClaudeCliAgent || !string.IsNullOrWhiteSpace(_cliPath)) &&
+        (Agent is not AnthropicAgent ||
+            ((_hasStoredApiKey || !string.IsNullOrWhiteSpace(_apiKey)) && !string.IsNullOrWhiteSpace(_model) && _maxTokens >= 256 && _historyTokenBudget >= 1000));
 
     private LlmAgentBase? Agent => Subject as LlmAgentBase;
 
-    private string ModelHelperText => Agent is ClaudeCliAgent ? "Empty: CLI default. Aliases such as opus, sonnet or haiku work." : "Empty: default model.";
+    private string ModelHelperText => Agent switch
+    {
+        ClaudeCliAgent => "Empty: CLI default. Aliases such as opus, sonnet or haiku work.",
+        AnthropicAgent => "Required. A model id such as claude-sonnet-5.",
+        _ => "Empty: default model."
+    };
 
     protected override void OnInitialized()
     {
@@ -193,6 +224,13 @@
             _fallbackModel = cliAgent.FallbackModel;
         }
 
+        if (agent is AnthropicAgent anthropicAgent)
+        {
+            _hasStoredApiKey = !string.IsNullOrWhiteSpace(anthropicAgent.ApiKey);
+            _maxTokens = anthropicAgent.MaxTokens;
+            _historyTokenBudget = anthropicAgent.HistoryTokenBudget;
+        }
+
         _wasValid = IsValid;
     }
 
@@ -221,6 +259,19 @@
         {
             cliAgent.CliPath = _cliPath.Trim();
             cliAgent.FallbackModel = NullIfBlank(_fallbackModel);
+        }
+
+        if (agent is AnthropicAgent anthropicAgent)
+        {
+            if (!string.IsNullOrWhiteSpace(_apiKey))
+            {
+                anthropicAgent.ApiKey = _apiKey.Trim();
+                _apiKey = null;
+                _hasStoredApiKey = true;
+            }
+
+            anthropicAgent.MaxTokens = _maxTokens;
+            anthropicAgent.HistoryTokenBudget = _historyTokenBudget;
         }
 
         _isDirty = false;

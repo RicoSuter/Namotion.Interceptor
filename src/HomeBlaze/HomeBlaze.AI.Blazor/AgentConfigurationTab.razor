@@ -43,6 +43,11 @@
                     @SettingRow("CLI path", cliAgent.CliPath)
                     @SettingRow("Fallback model", cliAgent.FallbackModel ?? "none")
                 }
+                @if (Agent is AnthropicAgent anthropicAgent)
+                {
+                    @SettingRow("Max output tokens", anthropicAgent.MaxTokens.ToString())
+                    @SettingRow("History token budget", anthropicAgent.HistoryTokenBudget.ToString())
+                }
             </tbody>
         </MudSimpleTable>
         <MudText Typo="Typo.caption" Class="d-block mt-1 mud-text-secondary">Change settings with the subject's Edit action.</MudText>
