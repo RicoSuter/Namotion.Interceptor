@@ -603,7 +603,7 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Opens the create subject wizard to add a new subject to this storage.
+    /// Opens the create subject dialog to add a new subject to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)

@@ -289,6 +289,60 @@ public partial class Motor : IIconProvider
 }
 ```
 
+## Create Dialog
+
+Every subject type that implements `IConfigurable` is offered in the create dialog, which is opened from a storage folder, from the markdown editor and from the grid and canvas layouts. The dialog shows a searchable list of types with a group sidebar, and then the setup or edit component of the chosen type. Typing in the search box selects the group "All" so that a match is never hidden behind a group that was selected before, and selecting a group during a search narrows the matches to it.
+
+The dialog describes a type with attributes on the class. All of them are optional:
+
+| Attribute | Purpose | Without it |
+|-----------|---------|------------|
+| `[DisplayName("Motor")]` | Title in the list and in the dialog title, in sentence case | Class name split into words |
+| `[Description("...")]` | One sentence below the title, also searched | No description |
+| `[Category("Samples")]` | Group in the sidebar | Group "Other", listed last |
+| `[SubjectIcon("Settings")]` | Icon in the list, using the same names as `IIconProvider.IconName` | Default icon of the group |
+
+`[DisplayName]`, `[Description]` and `[Category]` come from `System.ComponentModel`, `[SubjectIcon]` from `HomeBlaze.Abstractions.Attributes`.
+
+```csharp
+using System.ComponentModel;
+using HomeBlaze.Abstractions.Attributes;
+
+[Category("Samples")]
+[DisplayName("Motor")]
+[Description("Simulated motor with speed control and temperature monitoring")]
+[SubjectIcon("Settings")]
+[InterceptorSubject]
+public partial class Motor : BackgroundService, IConfigurable
+{
+}
+```
+
+`[SubjectIcon]` is needed in addition to `IIconProvider` because the dialog has no instance to ask, and an instance's icon often depends on its state.
+
+### Name of a New Subject
+
+Where the new subject needs a name, the dialog asks for it on the configure page and suggests the class name, with a number appended when it is already used (`Motor`, `Motor2`). A name that already exists in the same place is rejected.
+
+- In a storage folder the field is labelled "File name" and shows the suffix `.json`. The file name is part of the subject's path, and the path is its ID, so it should not be changed later.
+- In the markdown editor the field is labelled "Block name" and has no suffix. It becomes the name in the `subject(Name)` block.
+- The grid and canvas layouts ask for no name.
+
+### Hiding a Type
+
+Two attributes from `HomeBlaze.Abstractions.Attributes` control whether a type is offered:
+
+- `[ExcludeFromCreation]`: the type is never offered. Use it for a type that only exists as part of another subject, such as the cell of a grid.
+- `[SingleInstance]`: the type is offered only while no instance of it exists in the subject graph.
+
+```csharp
+[InterceptorSubject]
+[ExcludeFromCreation]
+public partial class GridCell : IConfigurable
+{
+}
+```
+
 ## Configuration Lifecycle
 
 Implement `IConfigurable` to react when configuration changes:
@@ -705,6 +759,8 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
+| `[DisplayName]`, `[Description]`, `[Category]`, `[SubjectIcon]` | Describe the type in the create dialog | No | In the create dialog |
+| `[ExcludeFromCreation]`, `[SingleInstance]` | Hide the type from the create dialog | No | No |
 
 | Interface | Purpose |
 |-----------|---------|
@@ -1166,7 +1222,7 @@ protected override void OnParametersSet()
 
 This pattern applies to:
 - **Edit components** (opened via SubjectEditDialog)
-- **Setup/creation wizards** (SubjectSetupDialog uses the same edit components with `IsCreating = true`)
+- **The create dialog** (SubjectSetupDialog hosts the same edit components with `IsCreating = true`)
 - **Widget components** (if they use local state for inline editing)
 - **Configuration editors** (ConfigurationPropertiesEditor pattern)
 
