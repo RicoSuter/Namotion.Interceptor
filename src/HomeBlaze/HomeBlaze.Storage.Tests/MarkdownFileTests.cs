@@ -1,10 +1,12 @@
 using System.Text;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests;
 
@@ -343,6 +345,55 @@ public class MarkdownFileTests
     }
 
     [Fact]
+    public async Task WhenReadingEvaluatedContentWithSourcePaths_ThenEachResolvedValueIsFollowedByItsAbsolutePath()
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync(
+            "Relative: {{ ../../Devices/motor/CurrentSpeed }}, absolute: {{ /Devices/motor/CurrentSpeed }}, missing: {{ does/not/exist }}");
+
+        // Act
+        var result = markdown.ReadEvaluatedContent(includeSourcePaths: true);
+
+        // Assert
+        Assert.Equal(
+            "Relative: 750 (/Devices/motor/CurrentSpeed), absolute: 750 (/Devices/motor/CurrentSpeed), missing: ",
+            result);
+    }
+
+    [Fact]
+    public async Task WhenReadingEvaluatedContentWithoutSourcePaths_ThenOnlyTheValuesAreRendered()
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync(
+            "Relative: {{ ../../Devices/motor/CurrentSpeed }}, absolute: {{ /Devices/motor/CurrentSpeed }}");
+
+        // Act
+        var defaultResult = markdown.ReadEvaluatedContent();
+        var explicitResult = markdown.ReadEvaluatedContent(includeSourcePaths: false);
+
+        // Assert
+        Assert.Equal("Relative: 750, absolute: 750", defaultResult);
+        Assert.Equal(defaultResult, explicitResult);
+    }
+
+    [Fact]
+    public async Task WhenAPageIsInTheGraph_ThenReadEvaluatedContentTakesAnOptionalSourcePathsParameter()
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync("Text");
+
+        // Act
+        var method = (MethodMetadata)markdown.TryGetRegisteredSubject()!.TryGetProperty("ReadEvaluatedContent")!.GetValue()!;
+
+        // Assert
+        Assert.Equal(MethodKind.Query, method.Kind);
+        var parameter = Assert.Single(method.Parameters, parameter => parameter.RequiresInput);
+        Assert.Equal("includeSourcePaths", parameter.Name);
+        Assert.True(parameter.IsNullable);
+        Assert.Equal("Text", await method.InvokeAsync([null], serviceProvider: null, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task WhenPageIsReloadedWithUnrelatedChange_ThenEmbeddedSubjectIsKept()
     {
         // Arrange
@@ -457,6 +508,38 @@ public class MarkdownFileTests
         storage.StorageType = "inmemory";
         await storage.ConnectAsync(CancellationToken.None);
         return (storage, serviceProvider);
+    }
+
+    /// <summary>
+    /// Creates the graph /Devices/motor (CurrentSpeed 750) and /Docs/page.md with the given page content.
+    /// </summary>
+    private static async Task<MarkdownFile> CreatePageInGraphAsync(string content)
+    {
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
+        await WriteFileAsync(storage, "Docs/page.md", content);
+
+        VirtualFolder? root = null;
+        var pathResolver = new SubjectPathResolver(() => root);
+        var parser = new MarkdownContentParser(serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(), pathResolver);
+        var markdown = new MarkdownFile(storage, "Docs/page.md", parser, serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>());
+
+        root = new VirtualFolder(storage, "");
+        ((IInterceptorSubject)root).Context.AddFallbackContext(context);
+        root.Children = new Dictionary<string, IInterceptorSubject>
+        {
+            ["Devices"] = new VirtualFolder(storage, "Devices/")
+            {
+                Children = new Dictionary<string, IInterceptorSubject> { ["motor"] = new Motor { CurrentSpeed = 750 } }
+            },
+            ["Docs"] = new VirtualFolder(storage, "Docs/")
+            {
+                Children = new Dictionary<string, IInterceptorSubject> { ["page.md"] = markdown }
+            }
+        };
+
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+        return markdown;
     }
 
     private static MarkdownFile CreateMarkdownFile(IServiceProvider serviceProvider, FluentStorageContainer storage, string path)

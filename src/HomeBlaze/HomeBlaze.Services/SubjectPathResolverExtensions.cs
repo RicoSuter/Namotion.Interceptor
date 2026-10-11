@@ -24,6 +24,25 @@ public static class SubjectPathResolverExtensions
         PathStyle style,
         IInterceptorSubject? relativeTo = null)
     {
+        return resolver.ResolveProperty(path, style, relativeTo)?.GetValue();
+    }
+
+    /// <summary>
+    /// Resolves a property from a path.
+    /// Splits on last '/' to separate subject path from property name,
+    /// resolves the subject, then gets the registered property.
+    /// </summary>
+    /// <param name="resolver">The path resolver.</param>
+    /// <param name="path">Path to resolve (e.g., "/Demo/Conveyor/Temperature" or "motor/Speed").</param>
+    /// <param name="style">Path style (Canonical or Route).</param>
+    /// <param name="relativeTo">Base subject for relative paths.</param>
+    /// <returns>The resolved property, or null if not found.</returns>
+    public static RegisteredSubjectProperty? ResolveProperty(
+        this SubjectPathResolver resolver,
+        string path,
+        PathStyle style,
+        IInterceptorSubject? relativeTo = null)
+    {
         if (string.IsNullOrEmpty(path))
             return null;
 
@@ -33,7 +52,7 @@ public static class SubjectPathResolverExtensions
         {
             // No slash - just a property name on relativeTo or root
             var subject = relativeTo ?? resolver.ResolveSubject("/", style);
-            return subject?.TryGetRegisteredProperty(path)?.GetValue();
+            return subject?.TryGetRegisteredProperty(path);
         }
 
         // Split: subject path up to last slash, property name after
@@ -44,7 +63,7 @@ public static class SubjectPathResolverExtensions
             return null; // Path ends with '/' - no property name
 
         var resolvedSubject = resolver.ResolveSubject(subjectPath, style, relativeTo);
-        return resolvedSubject?.TryGetRegisteredProperty(propertyName)?.GetValue();
+        return resolvedSubject?.TryGetRegisteredProperty(propertyName);
     }
 
     /// <summary>

@@ -98,7 +98,7 @@ Files in storage become subjects in the knowledge graph through two different pa
 - **Subject files** — `.json` files with a `$type` discriminator are deserialized into typed subjects (e.g., `Motor`, `OpcUaServer`). The file is the persistence format; the subject is what appears in the graph. Only `[Configuration]` properties are persisted.
 - **Documents** — all other files (Markdown, PDFs, images, plain JSON without `$type`) become document subjects (`MarkdownFile`, `JsonFile`, `GenericFile`, or custom types via `[FileExtension]` plugins). The file content is the document itself, visible as-is in the knowledge graph.
 
-Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools (`query` to find them, `invoke_query` to read them, for example `ReadEvaluatedContent` of a Markdown page). Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is handled via dynamic metadata / annotations (planned — see below).
+Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools (`query` to find them, `invoke_query` to read them, for example `ReadEvaluatedContent` of a Markdown page, which with `includeSourcePaths` set to true follows each value with the absolute path of its property, such as `21.5 (/Devices/Kitchen/Temperature)`). Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is handled via dynamic metadata / annotations (planned — see below).
 
 ## Subject Configuration [Implemented]
 

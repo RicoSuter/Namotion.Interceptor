@@ -9,6 +9,7 @@ using HomeBlaze.Storage.Files;
 using Markdig;
 using Markdig.Renderers;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
 
@@ -176,24 +177,41 @@ public sealed partial class MarkdownContentParser
     /// Embedded subject blocks are kept as-is. Frontmatter is preserved.
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (relative to the markdown file).
     /// </summary>
-    public string? RenderContent(string? content, MarkdownFile parent)
+    /// <param name="content">The markdown content.</param>
+    /// <param name="parent">The markdown file the expressions are relative to.</param>
+    /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute canonical path of
+    /// its property in parentheses. An expression that does not resolve to a property renders as without it.</param>
+    public string? RenderContent(string? content, MarkdownFile parent, bool includeSourcePaths = false)
     {
         if (string.IsNullOrEmpty(content))
             return content;
 
         return ExpressionRegex().Replace(content, match =>
         {
-            var path = match.Groups[1].Value;
+            // The pattern's capture group keeps the whitespace before the closing braces.
+            var path = match.Groups[1].Value.Trim();
             try
             {
-                var value = _pathResolver.ResolveValue(path, PathStyle.Canonical, relativeTo: parent);
-                return value?.ToString() ?? string.Empty;
+                var property = _pathResolver.ResolveProperty(path, PathStyle.Canonical, relativeTo: parent);
+                var valueText = property?.GetValue()?.ToString() ?? string.Empty;
+                if (!includeSourcePaths || property is null || GetAbsolutePath(property) is not { } sourcePath)
+                {
+                    return valueText;
+                }
+
+                return $"{valueText} ({sourcePath})";
             }
             catch
             {
                 return match.Value;
             }
         });
+    }
+
+    private string? GetAbsolutePath(RegisteredSubjectProperty property)
+    {
+        var subjectPath = _pathResolver.GetPath(property.Subject, PathStyle.Canonical);
+        return subjectPath is null ? null : $"{subjectPath.TrimEnd('/')}/{property.Name}";
     }
 
     /// <summary>

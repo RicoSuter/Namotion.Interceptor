@@ -112,8 +112,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions", Icon = "Description")]
     public string? ReadRawContent() => Content;
 
-    [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph", Icon = "Preview")]
-    public string? ReadEvaluatedContent() => _parser.RenderContent(Content, this);
+    /// <summary>
+    /// Returns the content with each {{ path }} expression replaced by its current value.
+    /// </summary>
+    /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute path of its
+    /// property in parentheses, for example "21.5 (/Devices/Kitchen/Temperature)". Null is treated as false.</param>
+    [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph. With includeSourcePaths set to true, each value is followed by the absolute path of its property in parentheses", Icon = "Preview")]
+    public string? ReadEvaluatedContent(bool? includeSourcePaths = null) =>
+        _parser.RenderContent(Content, this, includeSourcePaths == true);
 
     public Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
