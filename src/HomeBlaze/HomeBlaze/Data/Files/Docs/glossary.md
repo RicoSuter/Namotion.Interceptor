@@ -67,7 +67,7 @@ Marks a method as an executable action from the UI. Options: `Title`, `Descripti
 Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically non-mutating.
 
 ### `[Slot]`
-Marks a property of a widget type that a markdown page fills with the content of a block. A slot is not configuration and is not saved.
+Marks a property of a widget type that a markdown page fills with the content of a block. A slot is not configuration and is not saved. See [Building Subjects: Content Slots](development/building-subjects.md#content-slots).
 
 ### `[PropertyAttribute]`
 Associates metadata with another property (e.g., minimum/maximum values).
@@ -169,11 +169,11 @@ A path in double curly braces in the text of a markdown page, like `{{ mymotor/C
 
 ### Block
 
-A part of a markdown page between a head line that starts with two or more colons and a closing line of as many colons. A block inside another block has more colons than the block around it. A widget block has a full type name on its head line. It creates a subject of that type and shows its widget. Its arguments and the keys of its `json` fence are the property names of the type, like `TargetSpeed`. Configuration files keep camelCase, and a page uses the property names. A slot block has a name without a dot and fills the slot of that name on the widget around it. See [Markdown Pages: Blocks](administration/pages.md#blocks).
+A part of a markdown page between a head line that starts with two or more colons and a closing line of as many colons. A block inside another block has more colons than the block around it. A widget block has a full type name on its head line. It creates a subject of that type and shows its widget. Its arguments and the names in its `json` block are the property names of the type, like `TargetSpeed`. Configuration files keep camelCase, and a page uses the property names. A slot block has a name without a dot and fills the slot of that name on the widget block directly around it. A style block has attributes in braces in place of a name and becomes a plain `<div>`. See [Markdown Pages: Blocks](administration/pages.md#blocks).
 
 ### Slot
 
-A property of a widget type that a markdown page fills with the content of a block, declared with `[Slot]`. A type has at most one default slot, which takes everything in its block that is not a slot block, and any number of named slots. See [Markdown Pages: Blocks](administration/pages.md#blocks) for the page side and [Building Subjects](development/building-subjects.md) for the declaration.
+A property of a widget type that a markdown page fills with the content of a block, declared with `[Slot]`. A type has at most one default slot, which takes everything in its block that is not a slot block, and any number of named slots. A slot of the type `IInterceptorSubject` holds content. A slot with a subject class as its type gets one instance of that class per block, configured by the arguments of the block. See [Markdown Pages: Content and Slots](administration/pages.md#slots) for the page side and [Building Subjects: Content Slots](development/building-subjects.md#content-slots) for the declaration.
 
 ### Fragment
 

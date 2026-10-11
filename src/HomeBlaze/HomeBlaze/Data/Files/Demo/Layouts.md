@@ -153,7 +153,7 @@ The second tab has no name and no icon.
 
 ## Cards in a flow inside a tab
 
-A block inside another block has more colons than the block around it. Here a tab layout holds a tab, the tab holds a flow, the flow holds items, an item holds a card and the card holds a widget, so the fences count up from two colons to seven.
+A block inside another block has more colons than the block around it. Here a tab layout holds a tab, the tab holds a flow, the flow holds items, an item holds a card and the card holds a widget, so the colons count up from two to seven.
 
 ~~~~markdown
 :: HomeBlaze.Components.TabLayout

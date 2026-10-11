@@ -307,11 +307,19 @@ public class ConfigurableSubjectSerializerNamingTests
     [InlineData(ConfigurationNaming.PropertyName, "\"Someday\"", typeof(DayOfWeek), false)]
     [InlineData(ConfigurationNaming.CamelCase, "true", typeof(string), false)]
     [InlineData(ConfigurationNaming.PropertyName, "true", typeof(string), false)]
-    public void WhenValueIsCheckedInANaming_ThenTheResultIsTheSameInBothNamings(
+    // A number for a text property is rejected only by the naming that reads its key.
+    [InlineData(ConfigurationNaming.CamelCase, "{\"SettingA\": 5}", typeof(NestedValueObject), true)]
+    [InlineData(ConfigurationNaming.PropertyName, "{\"SettingA\": 5}", typeof(NestedValueObject), false)]
+    [InlineData(ConfigurationNaming.CamelCase, "{\"settingA\": 5}", typeof(NestedValueObject), false)]
+    [InlineData(ConfigurationNaming.PropertyName, "{\"settingA\": 5}", typeof(NestedValueObject), true)]
+    public void WhenValueIsCheckedInANaming_ThenItIsJudgedWithTheNamesOfThatNaming(
         ConfigurationNaming naming, string json, Type propertyType, bool expected)
     {
+        // Arrange
+        var serializer = _serializer;
+
         // Act
-        var canDeserialize = _serializer.CanDeserialize(json, propertyType, naming);
+        var canDeserialize = serializer.CanDeserialize(json, propertyType, naming);
 
         // Assert
         Assert.Equal(expected, canDeserialize);

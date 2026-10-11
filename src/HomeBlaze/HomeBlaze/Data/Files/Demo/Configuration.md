@@ -6,11 +6,11 @@ position: 9
 
 # Configuration Demo
 
-This page shows how a block is configured: with values on its head line, with a `json` fence for what does not fit there, and with the page editor that writes both. It also shows style blocks, expressions in code and what an edit of the page keeps.
+This page shows how a block is configured: with values on its head line, with a `json` block for what does not fit there, and with the page editor that writes both. It also shows style blocks, expressions in code and what an edit of the page keeps.
 
 ## Values on the head line
 
-Each `key=value` pair on the head line sets one configuration property of the subject. The key is the name of the property, written exactly as in a path: `TargetSpeed` on the head line and in `{{ valuemotor/TargetSpeed }}`. The motor below gets a text with a space in double quotes, a number and a duration.
+Each `Key=Value` pair on the head line is an argument and sets one configuration property of the subject. The key is the name of the property, written exactly as in a path: `TargetSpeed` on the head line and in `{{ valuemotor/TargetSpeed }}`. The motor below gets a text with a space in double quotes, a number and a duration.
 
 ~~~~markdown
 :: HomeBlaze.Samples.Motor#valuemotor Name="Value Motor" TargetSpeed=1500 SimulationInterval=00:00:00.500
@@ -32,9 +32,9 @@ A yes or no is written as `true` or `false`. The block below is a `CanvasLayout`
 :: HomeBlaze.Components.CanvasLayout#canvas MinHeight=120 IsSnapToGridEnabled=true GridSize=20
 ::
 
-## Configuration in a json fence
+## Configuration in a json block
 
-A list or an object does not fit on the head line. The cells of a `GridLayout` are a list, so they are written as a JSON object in a `json` fence that is the first thing inside the block. Each cell here holds a `Widget` that refers to a motor next to this page. The keys in the fence are property names like the keys on the head line, also inside a cell and inside the widget of a cell. Only `$type` is written as it is in a JSON file. The fence itself is not shown on the page.
+A list or an object does not fit on the head line. The cells of a `GridLayout` are a list, so they are written as a JSON object in a `json` block: a fenced code block with the language `json` that is the first thing inside the block. Each cell here holds a `Widget` that refers to a motor next to this page. The names in the `json` block are property names like the keys on the head line, also inside a cell and inside the widget of a cell. Only `$type` is written as it is in a JSON file. Below the top level a name that is no property is skipped without a message, so a name in the camelCase of a JSON file, like `"path"`, leaves the widget without a path. The `json` block itself is not shown on the page.
 
 ~~~~markdown
 :: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
@@ -124,7 +124,7 @@ Live: {{ valuemotor/CurrentSpeed }}
 
 In inline code: `{{ valuemotor/CurrentSpeed }}`
 
-In a fence:
+In a fenced code block:
 
 ~~~~markdown
 {{ valuemotor/CurrentSpeed }}

@@ -7,7 +7,9 @@ namespace HomeBlaze.Services;
 public enum ConfigurationNaming
 {
     /// <summary>
-    /// The property name in camelCase, or the explicit JSON name of a property that has one.
+    /// The property name in camelCase. A property with an explicit JSON name is written with that name
+    /// and is read by it below the top level of a subject. At the top level of a subject, a value is
+    /// read by the camelCase of the property name only.
     /// This is the naming of configuration files.
     /// </summary>
     CamelCase,

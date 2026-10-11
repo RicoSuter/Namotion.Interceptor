@@ -12,8 +12,8 @@ Each area has a page of its own to try things out:
 
 - [Layouts](Layouts.md): flows, tabs and cards, alone and inside each other
 - [References](References.md): names, relative and absolute paths, and what a reference cannot show
-- [Configuration](Configuration.md): values on the head line, the `json` fence, style blocks and the page editor
-- [Errors](Errors.md): every error box with the block that causes it and how to fix it
+- [Configuration](Configuration.md): values on the head line, the `json` block, style blocks and the page editor
+- [Errors](Errors.md): the common error boxes, each with the block that causes it and how to fix it
 
 :: HomeBlaze.Components.Card Title="Motor Card" Icon=Settings
 Card body with a live value: speed is {{ cardmotor/CurrentSpeed }} RPM.

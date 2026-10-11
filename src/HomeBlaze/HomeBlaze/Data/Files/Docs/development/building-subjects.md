@@ -980,13 +980,94 @@ When a widget has a corresponding Edit component, the host automatically renders
 
 ### Content Slots
 
-A widget type can take content from the markdown page it is used on: text, expressions and other widgets. The type declares where the content goes with `[Slot]` on properties, and the page fills these properties from the content of the block. The attribute is in `HomeBlaze.Abstractions.Attributes`. [Markdown Pages](../administration/pages.md) describes the page side.
+A widget type can take content from the markdown page it is used on: text, expressions and other widgets. The type declares where the content goes with `[Slot]` on properties, and the page fills these properties from the content of the block. The attribute is in `HomeBlaze.Abstractions.Attributes`.
 
-The `Card` subject has a body and a footer:
+[Markdown Pages](../administration/pages.md) is the reference for the page side: the colon lines that open and close a block, the arguments and what a page author sees when something is wrong. This section is the side of the widget author. Its samples of page source use the names of that reference: a block starts with a head line of colons and a name, and a block whose name has no dot is a slot block.
+
+#### Declaring Slots
+
+The type of the property decides what a block produces, and the name of the slot decides what a block is called on the page.
+
+| Declaration | Blocks on the page | Value of the property |
+|-------------|--------------------|-----------------------|
+| `[Slot(IsDefault = true)] IInterceptorSubject? Content` | Everything in the widget block that is not a slot block | The content, or `null` when there is none |
+| `[Slot] IInterceptorSubject? Footer` | One `Footer` block | The content of that block, or `null` without a block |
+| `[Slot("Item")] IInterceptorSubject[] Items` | Any number of `Item` blocks | One content value per block, in page order |
+| `[Slot] Sidebar? Sidebar` | One `Sidebar` block with arguments | One `Sidebar` that the page created, or `null` without a block |
+| `[Slot("Tab")] Tab[] Tabs` | Any number of `Tab` blocks with arguments | One `Tab` per block, in page order |
+
+**The default slot.** `IsDefault = true` makes a slot the place for everything in the widget block that is not a slot block. `Card` declares its body this way:
+
+```csharp
+[Slot(IsDefault = true)]
+public partial IInterceptorSubject? Content { get; set; }
+```
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Conveyor Belt"
+This text, the expression {{ ../Conveyor/CurrentSpeed }} and the widget below are the value of `Content`.
+
+::: HomeBlaze.Components.Widget Path=../Conveyor
+:::
+::
+~~~~
+
+**A named slot.** Without a name in the attribute, the slot has the name of the property. `Card` declares its footer this way, and the page fills it with a `Footer` block:
+
+```csharp
+[Slot]
+public partial IInterceptorSubject? Footer { get; set; }
+```
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Conveyor Belt"
+The body of the card.
+
+::: Footer
+This text is the value of `Footer`.
+:::
+::
+~~~~
+
+**A block name that differs from the property name, and a list of content.** The name in the attribute is what one block is called on the page. An array takes one value per block, so the property has a plural name and the block the singular. `FlowLayout` declares its cells this way:
+
+```csharp
+[Slot("Item")]
+public partial IInterceptorSubject[] Items { get; set; }
+```
+
+~~~~markdown
+:: HomeBlaze.Components.FlowLayout
+::: Item
+The first value of `Items`.
+:::
+::: Item
+The second value of `Items`.
+:::
+::
+~~~~
+
+**A list of typed values.** When the type of the slot is a subject class of your own, the page creates one instance of that class per block. The arguments of the block set the `[Configuration]` properties of the instance, the block can have a `#name`, and the content of the block goes to the default slot of the instance. `TabLayout` gets its tabs this way, and `Tab` is the class of one tab:
 
 ```csharp
 [InterceptorSubject]
-public partial class Card : IConfigurable, ITitleProvider
+public partial class TabLayout : IConfigurable, ITitleProvider
+{
+    public TabLayout()
+    {
+        Tabs = [];
+    }
+
+    [Slot("Tab")]
+    public partial Tab[] Tabs { get; set; }
+
+    public string? Title => null;
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class Tab : IConfigurable
 {
     [Configuration]
     public partial string? Title { get; set; }
@@ -997,20 +1078,78 @@ public partial class Card : IConfigurable, ITitleProvider
     [Slot(IsDefault = true)]
     public partial IInterceptorSubject? Content { get; set; }
 
-    [Slot]
-    public partial IInterceptorSubject? Footer { get; set; }
-
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 ```
 
-Its widget component renders each slot with `SubjectComponent` and does not need to know what the content is (shortened):
+~~~~markdown
+:: HomeBlaze.Components.TabLayout
+::: Tab#cooling Title="Cooling Fan" Icon=AcUnit
+The value of `Content` of the first `Tab`.
+:::
+::: Tab#exhaust Title="Exhaust Fan"
+The value of `Content` of the second `Tab`.
+:::
+::
+~~~~
+
+**A single typed value.** The same without an array: one block creates one instance. None of the widgets that ship has such a slot. The `SidebarLayout` of ["A Complete Widget"](building-subjects.md#complete-widget) below declares one:
+
+```csharp
+[Slot]
+public partial Sidebar? Sidebar { get; set; }
+```
+
+~~~~markdown
+:: MyCompany.Widgets.SidebarLayout
+::: Sidebar#menu Width=200
+The value of `Content` of the `Sidebar`.
+:::
+
+The value of `Content` of the layout.
+::
+~~~~
+
+What a page author cannot do with each kind:
+
+- **Content slots take no arguments**: A block for a slot of the type `IInterceptorSubject` takes no arguments, no `#name` and no `json` block. The page shows an error for them.
+- **Typed slots are configured like widget blocks**: A block for a slot with a class of your own takes the `[Configuration]` properties of that class as arguments and in a `json` block, with the same checks as a widget block.
+- **One block for a single value**: A second block for a slot that is no array is an error on the page.
+
+#### Rules for a Slot Property
+
+A slot property must meet these rules. A declaration that breaks one cannot be used: every block of that type then shows an error box with the message of the table, with the short type name and a colon before it, like "Gauge: the slot 'Content' needs a setter." No instance is created.
+
+| Rule | Message when it is broken |
+|------|---------------------------|
+| The property is a `partial` property of an `[InterceptorSubject]` class. The page writes through the intercepted property, which is what attaches the content to the object graph | `the slot 'Content' must be a partial property of a subject class.` |
+| The property has a setter | `the slot 'Content' needs a setter.` |
+| The type is `IInterceptorSubject`, a subject class, or an array of one of them | `the slot 'Content' must hold subjects.` |
+| A subject class as slot type can be created, so it is no interface and no abstract class | `the type GaugeBase of the slot 'Scale' cannot be created because it is abstract or an interface.` |
+| The slot name is not empty | `the slot of the property 'Content' needs a name.` |
+| The slot name contains no dot, because a name with a dot is a type name on a page | `the slot name 'My.Slot' must not contain a dot.` |
+| Each slot name is declared once per type | `the slot 'Content' is declared twice.` |
+| A type has at most one default slot | `there is more than one default slot.` |
+| The default slot has the type `IInterceptorSubject` and is no array | `the default slot 'Content' must be of type IInterceptorSubject.` |
+
+More that a declaration should follow:
+
+- **Name**: The slot name defaults to the property name and is case-sensitive. For an array, set the singular explicitly, like `[Slot("Item")]` on `Items`.
+- **Arrays**: Initialize an array property with an empty array in the constructor. All values of one slot have the same type. Mixed types in one list slot are not supported.
+- **The class of a typed slot**: It must implement `IConfigurable` and be known to HomeBlaze like every subject type. Otherwise the page shows "The type 'MyCompany.Widgets.Sidebar' of the slot 'Sidebar' could not be created. It must be a registered configurable subject type." Give it a default slot of its own when its blocks should take content.
+- **Not configuration**: A slot property is not configuration and is not saved. The content lives in the text of the page. Do not put `[Configuration]` on it.
+
+#### Rendering Slots
+
+A widget component renders a slot with `SubjectComponent` and does not need to know what the content is. The value of a content slot is a subject that stands for the content of the block. Treat it as opaque and render it.
+
+**One slot.** `CardWidget.razor` renders the body and the footer of a card (shortened):
 
 ```razor
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Card))]
 @implements ISubjectComponent
 
-<MudPaper Class="pa-4" Elevation="2">
+<MudPaper Class="pa-4 card-widget" Elevation="2">
     <MudText Typo="Typo.h6">@CardSubject?.Title</MudText>
 
     <SubjectComponent Subject="@CardSubject?.Content" Type="SubjectComponentType.Widget" />
@@ -1030,40 +1169,200 @@ Its widget component renders each slot with `SubjectComponent` and does not need
 }
 ```
 
-**Declaring slots:**
+**A list slot.** `FlowLayoutWidget.razor` renders one cell per value of `Items` (shortened):
 
-| Declaration | Block on the page | Value of the property |
-|-------------|-------------------|-----------------------|
-| `[Slot(IsDefault = true)] IInterceptorSubject? Content` | Everything in the widget block that is not a slot block | The content, or `null` when there is none |
-| `[Slot] IInterceptorSubject? Footer` | One `Footer` block | The content of that block, or `null` without a block |
-| `[Slot("Item")] IInterceptorSubject[] Items` | Any number of `Item` blocks | One content value per block, in page order |
-| `[Slot("Tab")] Tab[] Tabs` | Any number of `Tab` blocks | One `Tab` per block, in page order |
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FlowLayout))]
+@implements ISubjectComponent
 
-- **Name**: The slot name is what one block is called on the page. It defaults to the property name. For a list, set the singular explicitly, like `[Slot("Item")]` on `Items`. A slot name is case-sensitive and contains no dot, because a name with a dot is a type name on a page.
-- **Property type `IInterceptorSubject`**: The slot holds content. The page assigns a subject that stands for the content of the block. Treat it as opaque and render it. A block for such a slot takes no arguments, no `#name` and no `json` fence.
-- **Property type is a concrete subject type**: The page creates one instance of that type per block. The arguments of the block set its `[Configuration]` properties, and the content of the block goes into the default slot of that type. The type must implement `IConfigurable` and must be a class that can be created, so not an interface and not an abstract class. This is how `TabLayout` gets one `Tab` with a `Title` per `Tab` block.
-- **Arrays**: An array of either kind takes one value per block. The page assigns a new array on every change. Initialize the property with an empty array in the constructor. All values of one slot have the same type. Mixed types in one list slot are not supported.
-- **Default slot**: A type has at most one default slot. Its type is `IInterceptorSubject` and it is not an array. It is filled by the loose content of the block or by a block with its name, not by both. A type without a default slot cannot have content on a page.
-- **Partial property with a setter**: A slot property must be a `partial` property with a setter on an `[InterceptorSubject]` class. The page writes through the intercepted property, which is what attaches the content to the object graph.
-- **Not configuration**: A slot property is not configuration and is not saved. The content lives in the text of the page.
+<div class="flow-layout" style="display: grid; gap: 16px;">
+    @foreach (var item in Flow?.Items ?? [])
+    {
+        <div class="flow-layout-item">
+            <SubjectComponent Subject="@item" Type="SubjectComponentType.Widget" />
+        </div>
+    }
+</div>
 
-A declaration that breaks one of these rules cannot be used. Every block of that type then shows an error box that names the problem, and no instance is created.
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
 
-**Rendering slots:**
+    private FlowLayout? Flow => Subject as FlowLayout;
+}
+```
 
-- Render a slot with `<SubjectComponent Subject="..." Type="SubjectComponentType.Widget" />`. A slot that is `null` renders nothing.
-- Read slot properties inside the render and do not keep their values in fields. The page renders again when a property changes that was read while it rendered, and a change of the page text assigns new values and new arrays.
-- Content inside a child component that renders on its own later is not tracked that way, for example a tab panel that is only created when it is first opened. `TabLayout` keeps all its panels alive for this reason.
+**Typed slot values.** `TabLayoutWidget.razor` reads the configuration of each `Tab` and renders its content (shortened):
 
-**Rules for a subject that is used on a page:**
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(TabLayout))]
+@implements ISubjectComponent
 
-- A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `TabLayout`. For a type without it, the page shows an error that says the type cannot be used as a block.
-- A page names a `[Configuration]` property by its property name, for example `TargetSpeed=1200` on the head line and `"TargetSpeed"` in the `json` fence, also for the properties of nested objects and subjects. Configuration files keep camelCase, and a page uses the property names. An explicit JSON name on a property, such as `[JsonPropertyName]`, applies to configuration files only.
-- A page updates the subject of a block in place while the block stays. When an argument is removed from the block, the page creates a new instance.
-- The page does not call `ApplyConfigurationAsync` when it first creates the subject of a block. It calls it on every reload of the page for a subject that it keeps, also when the arguments of that block did not change. A reload happens with every change of the page text, so expect the method to run often.
-- The subject of a block that ends as an error is released again, so a hosted subject can get `StopAsync` without a preceding `StartAsync`.
-- A subject must not wait for a write or a reload of its own page from its constructor, from a property setter or from `ApplyConfigurationAsync`. The reloads of one page run one after the other, so such a wait would never end.
-- A subject that resolves a path from its configuration should call `ResolveScopedSubject` or `ResolveScopedValue`, so that the path starts at the page. See "Referencing Other Subjects" above.
+@{
+    // Read once per render and never kept: a reload assigns a new array.
+    var tabs = Layout?.Tabs ?? [];
+}
+
+<MudTabs KeepPanelsAlive="true">
+    @foreach (var tab in tabs)
+    {
+        <MudTabPanel Text="@tab.Title">
+            <SubjectComponent @key="tab" Subject="@tab.Content" Type="SubjectComponentType.Widget" />
+        </MudTabPanel>
+    }
+</MudTabs>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private TabLayout? Layout => Subject as TabLayout;
+}
+```
+
+Rules for rendering:
+
+- **`null` renders nothing**: `SubjectComponent` with a slot that is `null` renders nothing. Test for `null` only when the widget shows something around the slot, like the divider of the card. A slot block without content gives a value that is not `null` and renders nothing.
+- **Read in the render, keep nothing**: Read slot properties inside the render and do not keep their values in fields. The page renders again when a property changes that was read while it rendered, and a change of the page text assigns new values and new arrays.
+- **Content that renders later is not tracked**: Content inside a child component that renders on its own later is not tracked that way, for example a tab panel that is only created when it is first opened. `TabLayout` keeps all its panels alive for this reason.
+- **Identity of typed values**: A typed value whose block has a `#name` stays the same instance when the page text changes, so a component can compare instances to keep its state. `TabLayoutWidget.razor` keeps the selected tab this way and compares it with the tabs of the current render only.
+
+#### A Subject on a Page: Identity and Lifecycle
+
+What a widget author must know about the life of a subject that a page creates. It holds for the subject of a widget block and for a typed slot value alike.
+
+- **`IConfigurable` is required**: A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `TabLayout`. For a type without it, the page shows an error that says the type cannot be used as a block.
+- **Names of the configuration**: A page names a `[Configuration]` property by its property name, for example `TargetSpeed=1200` on the head line and `"TargetSpeed"` in the `json` block, also for the properties of nested objects and subjects. Configuration files keep camelCase, and a page uses the property names. An explicit JSON name on a property, such as `[JsonPropertyName]`, applies to configuration files only.
+- **Creation**: The page creates the subject through the service provider, so constructor injection works, then sets the `[Configuration]` properties that the block names and then fills the slots. It does not call `ApplyConfigurationAsync` for a new subject.
+- **Kept across reloads**: The page is read again with every change of its text. While the block stays, the page keeps the instance and updates it in place: it sets every `[Configuration]` property that the block names again, also when the value did not change, calls `ApplyConfigurationAsync`, and assigns the slots again. Expect all of this to run often.
+- **A new instance**: The page creates a new instance when the name, the position or the type of the block changes, when an argument is removed from the block, and when the block around it gets a new instance. The section "What an Edit of the Page Keeps" of [Markdown Pages](../administration/pages.md#identity) has the rules as a page author sees them.
+- **Slot values**: A content slot keeps its value while its block stays, and a list slot gets a new array on every reload. A slot whose block was removed is set to `null`, or to an empty array.
+- **Subjects in the configuration**: A subject that is a value of a `[Configuration]` property, like the child of a grid cell, is created again on every reload, because the configuration is applied again.
+- **Release after an error**: The subject of a block that ends as an error box is released again. This also holds for the typed slot values and nested subjects that were created for it. A hosted subject can therefore get `StopAsync` without a preceding `StartAsync`.
+- **Failures are shown**: An exception from the constructor, from a property setter or from `ApplyConfigurationAsync` does not take the page down. The block shows an error box with the message of the exception, and the log has the stack trace.
+- **Never wait for the own page**: A subject must not wait for a write or a reload of its own page from its constructor, from a property setter or from `ApplyConfigurationAsync`. The reloads of one page run one after the other, so such a wait would never end.
+- **Paths**: A subject that resolves a path from its configuration should call `ResolveScopedSubject` or `ResolveScopedValue`, so that the path starts at the page and can use the names of blocks. See "Referencing Other Subjects" above.
+
+#### A Complete Widget {#complete-widget}
+
+A layout that shows page content next to a sidebar, from the subject to the component to the page. The sidebar is a typed slot value with a width, and the main content is the default slot.
+
+The subjects, in a subject project as [Project Structure](building-subjects.md#project-structure) describes it:
+
+```csharp
+using System.ComponentModel;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
+
+namespace MyCompany.Widgets;
+
+/// <summary>
+/// The sidebar of a <see cref="SidebarLayout"/>.
+/// </summary>
+[InterceptorSubject]
+public partial class Sidebar : IConfigurable
+{
+    public Sidebar()
+    {
+        Width = 240;
+    }
+
+    /// <summary>
+    /// The width of the sidebar in pixels.
+    /// </summary>
+    [Configuration]
+    public partial int Width { get; set; }
+
+    /// <summary>
+    /// What the sidebar shows.
+    /// </summary>
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Content { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>
+/// Shows page content next to a sidebar.
+/// </summary>
+[Category("Components")]
+[Description("Shows page content next to a sidebar")]
+[InterceptorSubject]
+public partial class SidebarLayout : IConfigurable
+{
+    /// <summary>
+    /// The main content.
+    /// </summary>
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Content { get; set; }
+
+    /// <summary>
+    /// The sidebar, created from the <c>Sidebar</c> block.
+    /// </summary>
+    [Slot]
+    public partial Sidebar? Sidebar { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+```
+
+The widget component, in the UI project next to it. `SubjectComponent` is in `HomeBlaze.Components`:
+
+```razor
+@using HomeBlaze.Components
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SidebarLayout))]
+@implements ISubjectComponent
+
+@{
+    // Read once per render and never kept: a reload can assign another sidebar.
+    var sidebar = Layout?.Sidebar;
+}
+
+<div style="display: flex; gap: 16px;">
+    @if (sidebar is not null)
+    {
+        <div style="flex: 0 0 @(sidebar.Width)px; min-width: 0;">
+            <SubjectComponent Subject="@sidebar.Content" Type="SubjectComponentType.Widget" />
+        </div>
+    }
+
+    <div style="flex: 1; min-width: 0;">
+        <SubjectComponent Subject="@Layout?.Content" Type="SubjectComponentType.Widget" />
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SidebarLayout? Layout => Subject as SidebarLayout;
+}
+```
+
+A page that uses it:
+
+~~~~markdown
+:: MyCompany.Widgets.SidebarLayout#factory
+::: Sidebar#menu Width=200
+**Motors**
+
+The conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
+:::
+
+::: HomeBlaze.Components.Card Title="Conveyor Belt"
+:::: HomeBlaze.Components.Widget Path=../Conveyor
+::::
+:::
+::
+~~~~
+
+The page author sees the sidebar with a width of 200 pixels at the left and the card at its right. `Width=200` sets `Sidebar.Width`, the text in the `Sidebar` block is `Sidebar.Content`, and the card is `SidebarLayout.Content`.
 
 ### Edit Components
 

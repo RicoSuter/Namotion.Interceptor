@@ -210,14 +210,14 @@ A block inside another block needs more colons than the block around it. The car
 
 ~~~~markdown
 :: HomeBlaze.Components.Card Title="Outer Card"
-:: HomeBlaze.Samples.Motor#fencemotor Name="Fence Motor" TargetSpeed=800
+:: HomeBlaze.Samples.Motor#shortmotor Name="Short Motor" TargetSpeed=800
 ::
 The text after the motor.
 ::
 ~~~~
 
 :: HomeBlaze.Components.Card Title="Outer Card"
-:: HomeBlaze.Samples.Motor#fencemotor Name="Fence Motor" TargetSpeed=800
+:: HomeBlaze.Samples.Motor#shortmotor Name="Short Motor" TargetSpeed=800
 ::
 The text after the motor.
 ::
@@ -234,9 +234,9 @@ A block is allowed directly on the page, directly inside another widget block an
 > :: HomeBlaze.Samples.Motor#quotedmotor Name="Quoted Motor"
 > ::
 
-## A json fence with broken JSON
+## A json block with broken JSON
 
-The list of cells is opened and never closed. The message ends with what the reader of the JSON found and where. The fence must hold one valid JSON object.
+The list of cells is opened and never closed. The message ends with what the reader of the JSON found and where. The `json` block must hold one valid JSON object.
 
 ~~~~markdown
 :: HomeBlaze.Components.GridLayout#brokengrid Rows=1 Columns=2
@@ -252,9 +252,9 @@ The list of cells is opened and never closed. The message ends with what the rea
 ```
 ::
 
-## The old subject fence
+## The old subject(name) form
 
-Earlier versions embedded a subject with a code fence that held JSON. This fence is no longer supported. Write the subject as a block: the name in parentheses becomes the `#name`, the `$type` becomes the type name and every value becomes an argument. The key of an argument is the name of the property, so `"targetSpeed": 2000` becomes `TargetSpeed=2000`.
+Earlier versions embedded a subject with a fenced code block that had `subject(name)` as its language and held JSON. This form is no longer supported. Write the subject as a block: the name in parentheses becomes the `#name`, the `$type` becomes the type name and every value becomes an argument. The key of an argument is the name of the property, so `"targetSpeed": 2000` becomes `TargetSpeed=2000`.
 
 ~~~~markdown
 ```subject(oldmotor)
