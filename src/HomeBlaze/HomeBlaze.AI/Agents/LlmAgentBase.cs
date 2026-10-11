@@ -141,7 +141,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <summary>The timeline of background runs and chat.</summary>
     public AgentTimeline Timeline { get; private set; }
 
-    /// <summary>The agent's memory document.</summary>
+    /// <summary>The agent's memory entries.</summary>
     public AgentMemory Memory { get; private set; }
 
     /// <summary>The text streamed so far by the running turn, empty when idle.</summary>
@@ -555,7 +555,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
 
         Timeline = new AgentTimeline(GetStoragePath(".timeline.jsonl"));
-        Memory = new AgentMemory(GetStoragePath(".memory.md"), _services.TimeProvider);
+        Memory = new AgentMemory(GetStoragePath(".memory.json"), _services.TimeProvider, _logger, legacyFilePath: GetStoragePath(".memory.md"));
         await Timeline.LoadAsync(cancellationToken);
         await Memory.LoadAsync(cancellationToken);
         await RestoreRunStatisticsAsync(cancellationToken);
@@ -759,10 +759,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         AgentTurnKind kind, string message, AgentToolSet tools, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
         var isBackground = kind == AgentTurnKind.Background;
-        var memory = Memory.GetSnapshot();
         var request = new AgentTurnRequest(
             kind,
-            AgentPromptBuilder.BuildSystemPrompt(kind, Instructions, memory.Content, memory.LastUpdated),
+            AgentPromptBuilder.BuildSystemPrompt(kind, Instructions, Memory.GetSnapshot()),
             message,
             isBackground ? BackgroundModel ?? Model : Model,
             isBackground ? BackgroundEffort ?? Effort : Effort,

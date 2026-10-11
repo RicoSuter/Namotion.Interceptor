@@ -28,7 +28,7 @@ public static class AgentPromptBuilder
         - invoke_operation calls an operation method, which can change devices or send something, when it is available to you.
         - set_property changes a value, when it is available to you.
         - To notify the operator, find the INotificationPublisher interface with list_types, find the subjects implementing it with search (types parameter), check the exact method name and parameters with list_methods, then call SendNotification through invoke_operation, if invoke_operation is available to you.
-        - update_memory replaces your memory document. Your memory is shown to you on every run, so keep there what you must remember across runs: notifications already sent, trends, open issues. Keep it short and current.
+        - update_memory changes your memory: key-value entries whose keys are slash paths such as alerts/freezer-temperature, shown to you with their update time on every run. Keep there what you must remember across runs: notifications sent and when, trends, open issues, the operator's preferences. Keep values short and remove entries once they are resolved.
 
         {HomeBlazeMcpInstructions.DataIsNotInstructions}
         """;
@@ -45,9 +45,10 @@ public static class AgentPromptBuilder
         """;
 
     /// <summary>
-    /// Builds the system prompt: preamble with the mode section, the configured instructions, then the memory.
+    /// Builds the system prompt: preamble with the mode section, the configured instructions, then the memory
+    /// entries sorted by key, one per line with their update time.
     /// </summary>
-    public static string BuildSystemPrompt(AgentTurnKind kind, string? instructions, string memory, DateTimeOffset? memoryLastUpdated)
+    public static string BuildSystemPrompt(AgentTurnKind kind, string? instructions, AgentMemorySnapshot memory)
     {
         var builder = new StringBuilder();
 
@@ -61,14 +62,21 @@ public static class AgentPromptBuilder
         builder.AppendLine("# Instructions");
         builder.AppendLine(string.IsNullOrWhiteSpace(instructions) ? "(none)" : instructions.Trim());
         builder.AppendLine();
-        builder.Append("# Memory");
-        if (memoryLastUpdated is { } updated)
+        builder.Append(CultureInfo.InvariantCulture,
+            $"# Memory ({memory.Entries.Length} of {AgentMemory.MaxEntries} entries, {memory.Size} of {AgentMemory.MaxSize} bytes)");
+        if (memory.Entries.Length == 0)
         {
-            builder.Append(" (last updated ").Append(FormatTime(updated)).Append(')');
+            builder.AppendLine().Append("(empty)");
         }
 
-        builder.AppendLine();
-        builder.Append(string.IsNullOrWhiteSpace(memory) ? "(empty)" : memory.Trim());
+        foreach (var entry in memory.Entries)
+        {
+            // Continuation lines of a multi-line value are indented so every entry still starts at a line start.
+            builder.AppendLine().Append(entry.Key).Append(": ")
+                .Append(entry.Value.ReplaceLineEndings("\n  "))
+                .Append(" (updated ").Append(FormatTime(entry.Updated)).Append(')');
+        }
+
         return builder.ToString();
     }
 

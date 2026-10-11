@@ -49,14 +49,14 @@
                  Class="flex-grow-1 overflow-hidden" TabPanelsClass="pa-2 pa-sm-3 overflow-y-auto">
             <MudTabPanel Text="Chat" PanelClass="mud-height-full"><AgentChatTab Agent="agent" TimeZoneVersion="_timeZoneVersion" /></MudTabPanel>
             <MudTabPanel Text="Activity"><AgentActivityTab Agent="agent" /></MudTabPanel>
-            <MudTabPanel Text="Configuration"><AgentConfigurationTab Agent="agent" Draft="_memoryDraft!" /></MudTabPanel>
+            <MudTabPanel Text="Configuration"><AgentConfigurationTab Agent="agent" MemoryEditor="_memoryEditor!" /></MudTabPanel>
         </MudTabs>
     </div>
 }
 
 @code {
     private LlmAgentBase? _subscribed;
-    private AgentMemoryDraft? _memoryDraft;
+    private AgentMemoryEditor? _memoryEditor;
     private int _isRenderPending;
     private int _timeZoneVersion;
 
@@ -86,12 +86,12 @@
             }
 
             _subscribed = Agent;
-            _memoryDraft = null;
-            if (_subscribed is not null)
+            _memoryEditor = null;
+            if (_subscribed is { } agent)
             {
-                _memoryDraft = new AgentMemoryDraft(_subscribed);
-                CaptureRenderedState(_subscribed);
-                _subscribed.TimelineChanged += OnTimelineChanged;
+                _memoryEditor = new AgentMemoryEditor(() => agent.Memory);
+                CaptureRenderedState(agent);
+                agent.TimelineChanged += OnTimelineChanged;
             }
         }
     }

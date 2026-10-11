@@ -132,7 +132,7 @@ public class LlmAgentBaseTests
             var tool = request.Tools.Tools.First(tool => tool.Name == "update_memory");
             if (agent.Requests.Count == 1)
             {
-                await tool.Handler(JsonSerializer.SerializeToElement(new { content = "- remember the freezer" }), cancellationToken);
+                await tool.Handler(JsonSerializer.SerializeToElement(new { changes = new[] { new { key = "alerts/freezer", value = "remember the freezer" } } }), cancellationToken);
             }
 
             return new AgentTurnResult("[quiet] ok", null, null);
@@ -145,8 +145,29 @@ public class LlmAgentBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2);
 
         // Assert
-        Assert.Contains("- remember the freezer", test.Agent.Requests[1].SystemPrompt);
-        Assert.Equal("- remember the freezer", await File.ReadAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.memory.md")));
+        Assert.Contains("alerts/freezer: remember the freezer", test.Agent.Requests[1].SystemPrompt);
+        Assert.Contains("remember the freezer", await File.ReadAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.memory.json")));
+    }
+
+    [Fact]
+    public async Task WhenAnOldMarkdownMemoryExists_ThenTheAgentMigratesItAndShowsItInThePrompt()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        var legacyPath = Path.Combine(test.DataDirectory, "Agents", "Agent.memory.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(legacyPath)!);
+        await File.WriteAllTextAsync(legacyPath, "- remember the freezer");
+
+        // Act
+        await RestartAsync(test.Agent);
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+
+        // Assert
+        Assert.Contains("notes/legacy: - remember the freezer", test.Agent.Requests[0].SystemPrompt);
+        Assert.True(File.Exists(Path.Combine(test.DataDirectory, "Agents", "Agent.memory.json")));
+        Assert.True(File.Exists(legacyPath + ".migrated"));
     }
 
     [Fact]

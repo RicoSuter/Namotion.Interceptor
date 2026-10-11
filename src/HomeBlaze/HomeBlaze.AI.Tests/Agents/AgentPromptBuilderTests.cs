@@ -8,22 +8,31 @@ public class AgentPromptBuilderTests
     private static readonly DateTimeOffset Now = new(2026, 10, 10, 14, 30, 0, TimeSpan.Zero);
 
     [Fact]
-    public Task WhenBuildingABackgroundSystemPrompt_ThenPreambleInstructionsAndMemoryAreInOrder()
+    public async Task WhenBuildingABackgroundSystemPrompt_ThenPreambleInstructionsAndMemoryAreInOrder()
     {
+        // Arrange
+        var memory = new AgentMemory(filePath: null, new FixedTimeProvider(Now.AddMinutes(-25)));
+        await memory.UpdateAsync(
+        [
+            AgentMemoryChange.Set("trends/freezer", "rising slowly"),
+            AgentMemoryChange.Set("alerts/kitchen-freezer", "notified the operator at -8 C"),
+            AgentMemoryChange.Set("notes/legacy", "# Memory\n- first line\n- second line"),
+        ], CancellationToken.None);
+
         // Act
-        var prompt = AgentPromptBuilder.BuildSystemPrompt(
-            AgentTurnKind.Background, "Watch the freezer.", "- alerted at 14:05", Now.AddMinutes(-25));
+        var prompt = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Background, "Watch the freezer.", memory.GetSnapshot());
 
         // Assert
-        Assert.True(prompt.IndexOf("Watch the freezer.", StringComparison.Ordinal) < prompt.IndexOf("- alerted at 14:05", StringComparison.Ordinal));
-        return Verifier.Verify(prompt);
+        Assert.True(prompt.IndexOf("Watch the freezer.", StringComparison.Ordinal) < prompt.IndexOf("alerts/kitchen-freezer", StringComparison.Ordinal));
+        Assert.True(prompt.IndexOf("alerts/kitchen-freezer", StringComparison.Ordinal) < prompt.IndexOf("trends/freezer", StringComparison.Ordinal));
+        await Verifier.Verify(prompt);
     }
 
     [Fact]
     public Task WhenBuildingAChatSystemPromptWithoutMemory_ThenMemorySectionSaysEmpty()
     {
         // Act
-        var prompt = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Chat, null, string.Empty, null);
+        var prompt = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty);
 
         // Assert
         return Verifier.Verify(prompt);
@@ -73,5 +82,10 @@ public class AgentPromptBuilderTests
 
         // Assert
         Assert.Equal(expected, isQuiet);
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }
