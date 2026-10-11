@@ -1,3 +1,4 @@
+/* Sanitized Markdown output. Colors come from the MudBlazor palette variables so both themes work. */
 .agent-markdown {
     overflow-wrap: anywhere;
 }
@@ -48,16 +49,18 @@
 .agent-markdown ::deep code {
     font-family: monospace;
     font-size: 0.9em;
-    background: rgba(128, 128, 128, 0.15);
+    background: var(--mud-palette-action-default-hover);
     padding: 0.1em 0.35em;
-    border-radius: 4px;
+    border-radius: var(--mud-default-borderradius);
 }
 
+/* Code blocks and tables scroll sideways instead of widening the page. */
 .agent-markdown ::deep pre {
-    background: rgba(128, 128, 128, 0.15);
+    background: var(--mud-palette-action-default-hover);
     padding: 0.75rem;
-    border-radius: 6px;
+    border-radius: var(--mud-default-borderradius);
     overflow-x: auto;
+    overflow-wrap: normal;
 }
 
 .agent-markdown ::deep pre code {
@@ -70,24 +73,26 @@
     display: block;
     max-width: 100%;
     overflow-x: auto;
+    overflow-wrap: normal;
 }
 
 .agent-markdown ::deep th,
 .agent-markdown ::deep td {
-    border: 1px solid rgba(128, 128, 128, 0.35);
+    border: 1px solid var(--mud-palette-table-lines);
     padding: 0.25rem 0.6rem;
     text-align: left;
+    white-space: nowrap;
 }
 
 .agent-markdown ::deep th {
-    background: rgba(128, 128, 128, 0.12);
+    background: var(--mud-palette-action-default-hover);
     font-weight: 500;
 }
 
 .agent-markdown ::deep blockquote {
-    border-left: 4px solid rgba(128, 128, 128, 0.4);
+    border-left: 4px solid var(--mud-palette-divider);
     padding-left: 0.75rem;
-    opacity: 0.85;
+    color: var(--mud-palette-text-secondary);
 }
 
 .agent-markdown ::deep a {

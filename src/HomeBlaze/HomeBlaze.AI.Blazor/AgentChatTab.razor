@@ -2,21 +2,24 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JavaScript
 
-@* column-reverse keeps the scroll position anchored at the newest entry without script. *@
-<div style="max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column-reverse;" data-testid="agent-timeline">
-    <div>
-        <AgentTimelineList Agent="Agent" TimeZoneVersion="TimeZoneVersion" />
+<div class="d-flex flex-column mud-height-full">
+    @* column-reverse keeps the scroll position anchored at the newest entry without script. *@
+    <div class="d-flex flex-column-reverse flex-grow-1 overflow-y-auto" data-testid="agent-timeline">
+        <div>
+            <AgentTimelineList Agent="Agent" TimeZoneVersion="TimeZoneVersion" />
+        </div>
     </div>
-</div>
 
-<MudStack Row="true" AlignItems="AlignItems.End" Class="mt-2">
-    <div style="flex-grow: 1;" data-testid="agent-chat-input" @ref="_inputContainer">
-        <MudTextField T="string" @bind-Value="_message" Immediate="true" Lines="2" Variant="Variant.Outlined"
-                      Placeholder="Ask the agent. Enter to send, Shift+Enter for a new line." FullWidth="true" />
-    </div>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendAsync"
-               Disabled="@(_isSending || string.IsNullOrWhiteSpace(_message))" data-testid="agent-chat-send">Send</MudButton>
-</MudStack>
+    <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2" Class="flex-shrink-0 pt-2">
+        <div class="flex-grow-1" data-testid="agent-chat-input" @ref="_inputContainer">
+            <MudTextField T="string" @bind-Value="_message" Immediate="true" Lines="1" Sizing="InputSizing.Auto" MaxLines="6"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Ask the agent"
+                          HelperText="Enter sends, Shift+Enter adds a line" FullWidth="true" />
+        </div>
+        <MudIconButton Icon="@Icons.Material.Filled.Send" Variant="Variant.Filled" Color="Color.Primary" aria-label="Send" Class="mt-1"
+                       OnClick="SendAsync" Disabled="@(_isSending || string.IsNullOrWhiteSpace(_message))" data-testid="agent-chat-send" />
+    </MudStack>
+</div>
 
 @code {
     private string _message = string.Empty;

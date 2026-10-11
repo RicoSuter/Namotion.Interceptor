@@ -1,8 +1,8 @@
 @implements IDisposable
 
-<MudPaper Class="pa-2 my-1" Elevation="1" Style="max-width: 80%;" data-testid="agent-streaming">
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-1" />
-    <MudText Style="white-space: pre-wrap;">@Agent.StreamingText</MudText>
+<MudPaper Class="pa-3 my-2" Elevation="0" Outlined="true" Style="max-width: min(100%, 56rem);" data-testid="agent-streaming">
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Rounded="true" Class="mb-2" />
+    <MudText Style="white-space: pre-wrap; overflow-wrap: anywhere;">@Agent.StreamingText</MudText>
 </MudPaper>
 
 @code {

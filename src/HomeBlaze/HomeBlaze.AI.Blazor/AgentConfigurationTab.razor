@@ -1,52 +1,77 @@
 @inject ITimeZoneDisplay TimeZone
 
-<MudGrid>
+<MudGrid Spacing="4">
     <MudItem xs="12" md="6">
-        <MudText Typo="Typo.h6">Settings</MudText>
-        <MudSimpleTable Dense="true">
+        <MudText Typo="Typo.h6" Class="mb-1">Settings</MudText>
+        <MudSimpleTable Dense="true" Elevation="0" Outlined="true">
             <tbody>
-                <tr><td>Model</td><td>@(Agent.Model ?? "default")</td></tr>
-                <tr><td>Effort</td><td>@(Agent.Effort?.ToString() ?? "default")</td></tr>
-                <tr><td>Background model</td><td>@(Agent.BackgroundModel ?? "same as model")</td></tr>
-                <tr><td>Background effort</td><td>@(Agent.BackgroundEffort?.ToString() ?? "same as effort")</td></tr>
-                <tr><td>Watch paths</td><td>@string.Join(", ", Agent.WatchPaths)</td></tr>
-                <tr><td>Poll interval</td><td>@(Agent.PollInterval?.ToString() ?? "none")</td></tr>
-                <tr><td>Minimum run interval</td><td>@Agent.MinRunInterval</td></tr>
-                <tr><td>Allowed tools</td><td>@(Agent.AllowedTools.Length > 0 ? string.Join(", ", Agent.AllowedTools) : "none (memory only)")</td></tr>
-                <tr><td>Turn timeout</td><td>@Agent.TurnTimeout</td></tr>
-                <tr><td>Tool calls per turn</td><td>@Agent.MaxToolCallsPerTurn</td></tr>
+                @SettingRow("Model", Agent.Model ?? "default")
+                @SettingRow("Effort", Agent.Effort?.ToString() ?? "default")
+                @SettingRow("Background model", Agent.BackgroundModel ?? "same as model")
+                @SettingRow("Background effort", Agent.BackgroundEffort?.ToString() ?? "same as effort")
+                @SettingRow("Watch paths", @<text>
+                    @if (Agent.WatchPaths.Length == 0)
+                    {
+                        <text>none</text>
+                    }
+                    @foreach (var path in Agent.WatchPaths)
+                    {
+                        <div>@path</div>
+                    }
+                </text>)
+                @SettingRow("Poll interval", Agent.PollInterval?.ToString() ?? "none")
+                @SettingRow("Minimum run interval", Agent.MinRunInterval.ToString())
+                @SettingRow("Allowed tools", @<text>
+                    @if (Agent.AllowedTools.Length > 0)
+                    {
+                        <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1" Class="py-1">
+                            @foreach (var tool in Agent.AllowedTools)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">@tool</MudChip>
+                            }
+                        </MudStack>
+                    }
+                    else
+                    {
+                        <text>none (memory only)</text>
+                    }
+                </text>)
+                @SettingRow("Turn timeout", Agent.TurnTimeout.ToString())
+                @SettingRow("Tool calls per turn", Agent.MaxToolCallsPerTurn.ToString())
                 @if (Agent is ClaudeCliAgent cliAgent)
                 {
-                    <tr><td>CLI path</td><td>@cliAgent.CliPath</td></tr>
-                    <tr><td>Fallback model</td><td>@(cliAgent.FallbackModel ?? "none")</td></tr>
+                    @SettingRow("CLI path", cliAgent.CliPath)
+                    @SettingRow("Fallback model", cliAgent.FallbackModel ?? "none")
                 }
             </tbody>
         </MudSimpleTable>
-        <MudText Typo="Typo.caption">Change settings with the subject's Edit action.</MudText>
-        <MudText Typo="Typo.subtitle2" Class="mt-3">Instructions</MudText>
-        <MudText Style="white-space: pre-wrap;">@Agent.Instructions</MudText>
+        <MudText Typo="Typo.caption" Class="d-block mt-1 mud-text-secondary">Change settings with the subject's Edit action.</MudText>
+        <MudText Typo="Typo.subtitle2" Class="mt-4">Instructions</MudText>
+        <MudText Typo="Typo.body2" Style="white-space: pre-wrap; overflow-wrap: anywhere;">@Agent.Instructions</MudText>
     </MudItem>
     <MudItem xs="12" md="6">
-        <MudText Typo="Typo.h6">Memory</MudText>
-        <MudText Typo="Typo.caption">
+        <MudText Typo="Typo.h6" Class="mb-1">Memory</MudText>
+        <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
             The agent's own notes, shown to it on every run. Last updated: @(Draft.LastUpdated is { } lastUpdated ? TimeZone.Format(lastUpdated) : "never")
         </MudText>
         <div data-testid="agent-memory">
-            <MudTextField T="string" @bind-Value="Draft.Text" Lines="16" Variant="Variant.Outlined" Immediate="true" Disabled="Draft.IsSaving" />
+            <MudTextField T="string" @bind-Value="Draft.Text" Lines="12" Variant="Variant.Outlined" Immediate="true" Disabled="Draft.IsSaving" />
         </div>
         @if (Draft.IsStale)
         {
-            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1">
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
                 The agent changed its memory while you were editing. Saving replaces its change.
                 <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="Draft.Reload">Reload</MudButton>
             </MudAlert>
         }
         @if (Draft.Error is not null)
         {
-            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-1">@Draft.Error</MudAlert>
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@Draft.Error</MudAlert>
         }
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-2" OnClick="Draft.SaveAsync"
-                   Disabled="@(Draft.IsSaving || !Draft.IsModified)" data-testid="agent-memory-save">Save memory</MudButton>
+        <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Draft.SaveAsync"
+                       Disabled="@(Draft.IsSaving || !Draft.IsModified)" data-testid="agent-memory-save">Save memory</MudButton>
+        </MudStack>
     </MudItem>
 </MudGrid>
 
@@ -59,4 +84,13 @@
 
     // The page re-renders when the agent writes its memory, so the draft follows or flags that write here.
     protected override void OnParametersSet() => Draft.Refresh();
+
+    private static RenderFragment SettingRow(string label, string value) => SettingRow(label, @<text>@value</text>);
+
+    // Values such as paths break anywhere so that narrow screens wrap them instead of widening the table.
+    private static RenderFragment SettingRow(string label, RenderFragment value) =>
+        @<tr>
+            <td class="mud-text-secondary">@label</td>
+            <td style="overflow-wrap: anywhere;">@value</td>
+        </tr>;
 }

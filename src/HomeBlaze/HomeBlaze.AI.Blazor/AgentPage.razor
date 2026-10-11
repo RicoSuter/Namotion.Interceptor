@@ -6,26 +6,47 @@
 
 @if (Agent is { } agent)
 {
-    <MudStack Spacing="2" Class="pa-4">
+    @* Fills the viewport below the app bar, so the chat input stays in view and the tab content scrolls on its own. *@
+    <div class="d-flex flex-column gap-2 pt-2 pt-sm-4 pb-2 px-sm-4" style="height: calc(100dvh - var(--mud-appbar-height));">
         @* The right padding keeps the buttons clear of the page's edit mode menu, which floats over the top right corner. *@
-        <MudStack Row="true" AlignItems="AlignItems.Center" Class="pr-12">
-            <MudIcon Icon="@Icons.Material.Filled.SmartToy" />
-            <MudText Typo="Typo.h5">@agent.Title</MudText>
-            <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(agent.Status)" data-testid="agent-status">
-                @(agent.StatusMessage is { Length: > 0 } statusMessage ? $"{agent.Status} · {statusMessage}" : agent.Status.ToString())
-            </MudChip>
-            <MudSpacer />
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow"
-                       OnClick="@agent.RunNow" Disabled="@agent.IsBusy" data-testid="agent-run-now">Run now</MudButton>
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt"
-                       OnClick="NewConversationAsync" Disabled="@agent.IsBusy" data-testid="agent-new-conversation">New conversation</MudButton>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="pr-12 flex-shrink-0">
+            <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="2" Class="flex-grow-1" Style="min-width: 0;">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudIcon Icon="@Icons.Material.Filled.SmartToy" />
+                    <MudText Typo="Typo.h5">@agent.Title</MudText>
+                </MudStack>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" data-testid="agent-status">
+                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(agent.Status)" Class="ma-0">@agent.Status</MudChip>
+                    @if (agent.StatusMessage is { Length: > 0 } statusMessage)
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">@statusMessage</MudText>
+                    }
+                </MudStack>
+            </MudStack>
+            <MudHidden Breakpoint="Breakpoint.Xs" Invert="true">
+                <MudTooltip Text="Run now">
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Variant="Variant.Outlined" aria-label="Run now"
+                                   OnClick="@agent.RunNow" Disabled="@agent.IsBusy" data-testid="agent-run-now" />
+                </MudTooltip>
+                <MudTooltip Text="New conversation">
+                    <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Variant="Variant.Outlined" aria-label="New conversation"
+                                   OnClick="NewConversationAsync" Disabled="@agent.IsBusy" data-testid="agent-new-conversation" />
+                </MudTooltip>
+            </MudHidden>
+            <MudHidden Breakpoint="Breakpoint.Xs">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow" Class="flex-shrink-0"
+                           OnClick="@agent.RunNow" Disabled="@agent.IsBusy" data-testid="agent-run-now">Run now</MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt" Class="flex-shrink-0"
+                           OnClick="NewConversationAsync" Disabled="@agent.IsBusy" data-testid="agent-new-conversation">New conversation</MudButton>
+            </MudHidden>
         </MudStack>
-        <MudTabs Outlined="true" Border="true" TabPanelsClass="pa-3">
-            <MudTabPanel Text="Chat"><AgentChatTab Agent="agent" TimeZoneVersion="_timeZoneVersion" /></MudTabPanel>
+        <MudTabs Elevation="0" Outlined="true" Rounded="true" ApplyEffectsToContainer="true" MinimumTabWidth="96px"
+                 Class="flex-grow-1 overflow-hidden" TabPanelsClass="pa-2 pa-sm-3 overflow-y-auto">
+            <MudTabPanel Text="Chat" PanelClass="mud-height-full"><AgentChatTab Agent="agent" TimeZoneVersion="_timeZoneVersion" /></MudTabPanel>
             <MudTabPanel Text="Activity"><AgentActivityTab Agent="agent" /></MudTabPanel>
             <MudTabPanel Text="Configuration"><AgentConfigurationTab Agent="agent" Draft="_memoryDraft!" /></MudTabPanel>
         </MudTabs>
-    </MudStack>
+    </div>
 }
 
 @code {

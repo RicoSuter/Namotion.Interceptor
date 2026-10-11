@@ -67,30 +67,35 @@
         <MudText Typo="Typo.body2" Class="mb-2">
             The tools the agent may use. update_memory is always available, so the agent can keep its notes.
         </MudText>
-        @foreach (var tool in _toolOptions)
-        {
-            <div class="mb-2" data-testid="@($"agent-edit-tool-{tool.Name}")">
-                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+        <MudGrid Spacing="2">
+            @foreach (var tool in _toolOptions)
+            {
+                <MudItem xs="12" md="6" data-testid="@($"agent-edit-tool-{tool.Name}")">
                     <MudSwitch T="bool" Value="@_allowedTools.Contains(tool.Name)" ValueChanged="@((bool isAllowed) => ToggleTool(tool.Name, isAllowed))"
-                               Label="@tool.Name" Color="Color.Primary" />
-                    @if (tool.CanChangeState)
-                    {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Warning">
-                            can change devices and send notifications
-                        </MudChip>
-                    }
-                </MudStack>
-                @if (!tool.IsOffered)
-                {
-                    <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block ml-14">@tool.Description</MudText>
-                }
-                else if (tool.Description is not null)
-                {
-                    <MudText Typo="Typo.caption" Class="ml-14 mud-text-secondary"
-                             Style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">@tool.Description</MudText>
-                }
-            </div>
-        }
+                               Color="Color.Primary">
+                        <MudStack Spacing="0" Class="py-1">
+                            <MudText Typo="Typo.body1">@tool.Name</MudText>
+                            @if (!tool.IsOffered)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Warning">@tool.Description</MudText>
+                            }
+                            else if (tool.Description is not null)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary"
+                                         Style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">@tool.Description</MudText>
+                            }
+                            @if (tool.CanChangeState)
+                            {
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                    <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small" />
+                                    <MudText Typo="Typo.caption" Color="Color.Warning">Can change devices and send notifications</MudText>
+                                </MudStack>
+                            }
+                        </MudStack>
+                    </MudSwitch>
+                </MudItem>
+            }
+        </MudGrid>
 
         @if (Agent is ClaudeCliAgent)
         {
