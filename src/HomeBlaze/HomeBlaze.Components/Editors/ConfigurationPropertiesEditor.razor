@@ -70,9 +70,7 @@ else
 
             foreach (var property in _configurationProperties)
             {
-                if (_editValues[property.Name] is null &&
-                    property.Type.IsValueType &&
-                    Nullable.GetUnderlyingType(property.Type) is null)
+                if (_editValues[property.Name] is null && EditedPropertyValues.IsRequired(property.Type))
                 {
                     return false;
                 }
@@ -107,7 +105,7 @@ else
     }
 
     /// <summary>
-    /// Gets whether the last <see cref="ApplyChanges"/> could not set every value.
+    /// Gets whether the last <see cref="ApplyChanges"/> failed and therefore applied nothing.
     /// </summary>
     public bool HasErrors => _errors.Any();
 
@@ -175,48 +173,20 @@ else
     }
 
     /// <summary>
-    /// Applies the edited values to the subject. A value that cannot be set is skipped and reported through
-    /// <see cref="HasErrors"/>, while the other values are still applied.
+    /// Applies the edited values to the subject, all or none: when one of them cannot be converted or set, the
+    /// subject keeps its values and <see cref="HasErrors"/> is true.
     /// </summary>
     public void ApplyChanges()
     {
         if (Subject == null) return;
 
-        _errors = [];
         _isSaving = true;
         try
         {
-            foreach (var property in _configurationProperties)
-            {
-                var newValue = _editValues[property.Name];
-
-                // Skip secret properties that were not modified by the user
-                if (property.GetConfigurationMetadata()?.IsSecret == true
-                    && !_modifiedSecrets.Contains(property.Name))
-                {
-                    continue;
-                }
-
-                var currentValue = property.GetValue();
-
-                if (!Equals(newValue, currentValue))
-                {
-                    try
-                    {
-                        var underlyingType = Nullable.GetUnderlyingType(property.Type) ?? property.Type;
-                        if (newValue != null && newValue.GetType() != underlyingType)
-                        {
-                            newValue = Convert.ChangeType(newValue, underlyingType);
-                        }
-
-                        property.SetValue(newValue);
-                    }
-                    catch (Exception ex)
-                    {
-                        _errors.Add($"Failed to set '{property.GetDisplayName()}': {ex.Message}");
-                    }
-                }
-            }
+            // A secret is shown empty, so only one that the user entered is an edit.
+            _errors = EditedPropertyValues.Apply(_configurationProperties
+                .Where(property => property.GetConfigurationMetadata()?.IsSecret != true || _modifiedSecrets.Contains(property.Name))
+                .Select(property => KeyValuePair.Create(property, _editValues[property.Name])));
         }
         finally
         {

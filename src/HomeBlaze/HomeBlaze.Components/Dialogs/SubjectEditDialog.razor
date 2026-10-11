@@ -31,9 +31,8 @@
 
     private async Task OnSaveClicked()
     {
-        if (_editPanel != null)
+        if (_editPanel != null && await _editPanel.SaveAsync(CancellationToken.None))
         {
-            await _editPanel.SaveAsync(CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
     }

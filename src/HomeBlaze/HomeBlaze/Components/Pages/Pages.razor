@@ -209,8 +209,11 @@
     {
         if (_editPanel != null)
         {
-            await _editPanel.SaveAsync(CancellationToken.None);
-            _componentKey++;
+            if (await _editPanel.SaveAsync(CancellationToken.None))
+            {
+                _componentKey++;
+            }
+
             StateHasChanged();
         }
     }

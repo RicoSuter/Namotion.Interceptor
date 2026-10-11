@@ -159,7 +159,16 @@
 
     private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
 
-    public async Task SaveAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Applies the buffered edits to the subject and persists them.
+    /// </summary>
+    /// <returns>
+    /// True when the edits were applied and <see cref="PersistAsync"/> ran, which reports a failure of its own to
+    /// the user. False when the edits were not applied, which is reported to the user, and nothing was persisted:
+    /// either <see cref="ApplyChangesAsync"/> returned false and the subject is unchanged, or the edit component
+    /// failed while saving.
+    /// </returns>
+    public async Task<bool> SaveAsync(CancellationToken cancellationToken)
     {
         bool isApplied;
         try
@@ -169,13 +178,17 @@
         catch (Exception ex)
         {
             Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
-            return;
+            return false;
         }
 
-        if (isApplied)
+        if (!isApplied)
         {
-            await PersistAsync(cancellationToken);
+            Snackbar.Add("The values could not be applied", Severity.Error);
+            return false;
         }
+
+        await PersistAsync(cancellationToken);
+        return true;
     }
 
     /// <summary>
@@ -183,8 +196,7 @@
     /// </summary>
     /// <returns>
     /// False when there is no subject, the editor is not ready yet, the edit component is invalid, or the generated
-    /// properties editor could not set every value. Only in the last case the subject has changed: the values that
-    /// could be set are applied.
+    /// properties editor could not convert or set one of its values. Nothing was applied to the subject then.
     /// </returns>
     public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
     {
