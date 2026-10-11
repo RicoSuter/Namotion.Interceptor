@@ -10,6 +10,15 @@ HomeBlaze has built-in AI agents: subjects that watch parts of the graph, run in
 
 ---
 
+## Quick start
+
+1. Install Claude Code for the user HomeBlaze runs as and run `claude` once as that user to log in, see [Setting up the Claude CLI](#setting-up-the-claude-cli).
+2. Create a `ClaudeCliAgent` in the subject browser. The defaults only allow reading tools and start no background runs.
+3. Open the agent's page and ask it something in the chat.
+4. Add `WatchPaths` or a `PollInterval` for background runs, and allow `invoke_operation` so the agent can send notifications.
+
+---
+
 ## Overview
 
 There are two agent types. Both offer the same features and differ only in how they reach the model:
@@ -38,18 +47,20 @@ An agent is a subject like any other: a JSON file in the `Files` storage (for ex
 | Credentials | The CLI keeps its own login; HomeBlaze never stores it | The API key is stored in the agent's JSON file |
 | Model | Optional, the CLI default otherwise; aliases such as `opus`, `sonnet` or `haiku` work | Required, a model id such as `claude-sonnet-5` |
 
+The `AnthropicAgent` sends its requests to the URL in the environment variable `ANTHROPIC_BASE_URL` when it is set, for example a proxy, and the API key goes there with them.
+
 ---
 
 ## Setting up the Claude CLI
 
 1. Install Claude Code for the user that runs HomeBlaze, for example the service account of a systemd unit.
 2. Run `claude` once as that user and log in with your Claude account. The login stays with the CLI.
-3. Make sure HomeBlaze finds the executable: `CliPath` defaults to `claude`, which is resolved through the `PATH` of the HomeBlaze process. Set `CliPath` to the full path when the service runs with a different `PATH`.
+3. Make sure HomeBlaze finds the executable: `CliPath` defaults to `claude`, which is resolved through the `PATH` of the HomeBlaze process. The native installer puts `claude` in `~/.local/bin`, which the `PATH` of a systemd service usually lacks; set `CliPath` to the full path in that case.
 4. Keep an HTTP binding for the HomeBlaze web server, for example through `ASPNETCORE_HTTP_PORTS` or an `http://` address in `ASPNETCORE_URLS`. The CLI calls back into HomeBlaze for the tools, see below.
 
 For each turn, HomeBlaze starts `claude -p` in the agent's own empty working directory and hands it a system prompt, the message and an MCP configuration that points to the agent route `/mcp/agents` of the local web server with a token that is valid for this turn only. The CLI runs without its built-in tools (no shell, files or web access), without the user's own MCP servers, settings, hooks or plugins, and reaches only the tools the agent is allowed to use. HomeBlaze picks the address from the bindings of the web server, preferring HTTP and a loopback or wildcard address, and rewrites a wildcard or `localhost` host to `127.0.0.1`. The route accepts only connections from the same host that carry the token of a running turn, and it is excluded from the HTTPS redirection.
 
-The CLI runs with the environment of the HomeBlaze process, so environment variables that Claude Code reads apply to it as well.
+HomeBlaze removes the variables that would make the CLI bill the API or another provider (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_PROFILE`) from the CLI's environment, so it always runs on the subscription login. Other variables of the HomeBlaze process apply to the CLI as well. For a service account without a browser, `claude setup-token` creates a subscription token that the service can pass in `CLAUDE_CODE_OAUTH_TOKEN`.
 
 ---
 
@@ -129,7 +140,7 @@ Runs never overlap, also not with chat turns. Requests that arrive while a run i
 
 When a run fails, automatic runs wait 1, 2, 4 and up to 30 minutes after consecutive failures; the next successful run or chat turn resets this. Two kinds of failure pause automatic runs instead, and the status shows the agent as unavailable with the reason:
 
-- **Configuration errors**, such as a CLI that is not logged in or a rejected API key, pause until the configuration changes, **Run now** succeeds or a chat turn succeeds.
+- **Configuration errors**, such as a CLI that is not logged in or a rejected API key, pause until the configuration is saved (also unchanged), **Run now** succeeds or a chat turn succeeds.
 - **Usage limits** pause until the reported reset time, or with the backoff above when none is reported.
 
 An invalid interval, such as a poll interval above 365 days, sets the status to an error and stops automatic runs until it is corrected.
@@ -145,7 +156,7 @@ Background runs and chat turns share the instructions, the memory and the timeli
 
 The `ClaudeCliAgent` keeps the chat as a CLI session that is resumed per message; if the CLI no longer has it, a new session starts and a "Session restarted" divider appears. The `AnthropicAgent` keeps the chat messages itself, together with a summary of older messages: when a chat request exceeds `HistoryTokenBudget` input tokens, it summarizes the older part with one extra model call and keeps the newer part, aiming at about half of the budget. When a request is too long for the model anyway, the error asks you to start a new conversation.
 
-Every turn uses the same system prompt, built in a fixed order: a preamble that explains the graph, the tools and the rules, a section for the background or chat mode, your `Instructions`, and the memory. The parts that rarely change come first, so the `AnthropicAgent` reads them from the prompt cache on later requests; it turns on automatic prompt caching for every request.
+Every turn's system prompt is built in the same fixed order: a preamble that explains the graph, the tools and the rules, a section for the background or chat mode, your `Instructions`, and the memory. See [AI Integration](../architecture/design/ai.md) for how this order serves prompt caching.
 
 ---
 
@@ -171,7 +182,7 @@ The page of an agent has a header with its status, **Run now** and **New convers
 
 **Chat** shows the timeline: your messages, the agent's replies with the tools they called, background findings, errors and dividers. Consecutive quiet background runs collapse into one line. Replies are rendered as Markdown while they stream in. The chat opens at the newest entry and follows new content while you are at the bottom; scrolling up stops following. It shows the newest 50 rows, and **Show earlier** adds 50 more at a time without moving what you are reading. With a mouse or trackpad, Enter sends and Shift+Enter adds a line; on touch devices Enter adds a line and the send button sends. While a background run holds the agent, the status shows "Waiting for the background run" and your message is answered after it. A message sent while the agent is stopped is recorded with an error and not answered.
 
-**Activity** shows the number of background runs and the time of the last one, the subscription usage of CLI agents, and a table of background runs, newest first and 25 per page, with trigger, duration, tokens, tool calls and result. Runs that failed or were cancelled are listed and counted as well; chat turns are not. The count survives restarts and new conversations.
+**Activity** shows the number of background runs and the time of the last one, the subscription usage of CLI agents, and a table of background runs, newest first and 25 per page, with trigger, duration, tokens, tool calls and result. Runs that failed or were cancelled are listed and counted as well; chat turns are not. The table lists the runs still in the timeline, which keeps the newest 500 entries; the count includes older runs and survives restarts and new conversations.
 
 **Configuration** summarizes the settings and the instructions and holds the memory editor. Change the settings with the subject's Edit action.
 
@@ -196,7 +207,7 @@ The agent reaches the graph through the HomeBlaze MCP tools. Each turn offers ex
 
 Only methods marked `[Query]` or `[Operation]` are visible to the tools, and `invoke_query` calls only queries while `invoke_operation` calls only operations. A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line.
 
-**Reading pages and documents.** Markdown pages and documents, such as these docs under `/Docs`, are the main source of context about an installation. The agent reads them with `invoke_query` and the query `ReadEvaluatedContent` of the page, which returns the text with every `{{ path }}` expression replaced by its current value. With `includeSourcePaths` set to true, each value is followed by the absolute path of its property, for example `21.5 °C (/Devices/Kitchen/Temperature)`, which the agent can read with `get_property`. `ReadRawContent` returns the source with the expressions unevaluated. The tool descriptions and the preamble point the agent to these pages, and the external MCP server sends the same hint to its clients as server instructions.
+**Reading pages and documents.** Markdown pages and documents, such as these docs under `/Docs`, are the main source of context about an installation. The agent reads them with `invoke_query` and the query `ReadEvaluatedContent` of the page, which returns the text with every `{{ path }}` expression replaced by its current value. With `includeSourcePaths` set to true, each value is followed by the absolute path of its property, for example `21.5 (/Devices/Kitchen/Temperature)`, which the agent can read with `get_property` when the property is state. `ReadRawContent` returns the source with the expressions unevaluated. The tool descriptions and the preamble point the agent to these pages, and the external MCP server sends the same hint to its clients as server instructions.
 
 **Changing things.** With `invoke_operation` or `set_property` allowed, the edit form marks the agent as able to change devices and send notifications. The preamble tells the agent to change something only when you asked for it in the chat or its instructions call for it, and to say in its reply what it changed. Some limits apply regardless:
 
@@ -204,11 +215,9 @@ Only methods marked `[Query]` or `[Operation]` are visible to the tools, and `in
 - Agents cannot run **operations of agents**, such as Run now or New conversation of another agent: "Agents cannot run operations of agents."
 - **Operations that require confirmation** cannot be called through MCP at all, neither by agents nor by external MCP clients; run them from the UI, which asks you to confirm. Among them are reboot and firmware update of a Wallbox, its Unlock, Set ICP Max Current and the charge port unlock and toggle operations, unlocking and toggling a door lock, adding and removing plugins, starting and stopping the OPC UA server and client, and New conversation of an agent. `list_methods` reports these with `requiresConfirmation`.
 
-Two gaps remain: **Pause Charging** of a Wallbox needs no confirmation but also releases the Type 2 connector latch while charging, so an agent allowed to call operations can release the latch even though the charge port unlock needs confirmation. And the configuration rule applies to agents only: an external MCP client with write access (`McpServer:ReadOnly` set to false) can still set `IsEnabled` of the OPC UA server and client.
+Two gaps remain: an agent allowed to call operations can still release a Wallbox's charge port through **Pause Charging**, see [Wallbox](../devices/Wallbox.md#operations). And the configuration rule applies to agents only: an external MCP client with write access (`McpServer:ReadOnly` set to false) can still set `IsEnabled` of the OPC UA server and client or the mode of a GPIO pin.
 
 **Notifications.** To notify you, an agent with `invoke_operation` finds the `INotificationPublisher` interface with `list_types`, the subjects that implement it with `search`, and calls their `SendNotification` operation. See [Notifications](../development/notifications.md). Without `invoke_operation` the agent can only report findings on its page.
-
-**Annotations.** The tools carry MCP tool annotations for external clients that decide which calls need approval: the reading tools are marked read-only, `set_property` and `invoke_operation` destructive, and `update_memory` neither. These are hints for clients, not enforcement.
 
 ---
 
@@ -229,7 +238,7 @@ Background runs usually dominate the usage, because they run without anyone aski
 - watch only the paths the agent needs, and raise `MinRunInterval` for values that change often,
 - prefer a longer `PollInterval`, or none when change triggers are enough.
 
-The Activity tab shows the tokens of each run. For CLI agents it also shows the subscription utilization of the last five hours and seven days as the CLI reports it; when a limit is reached, the agent pauses until the reported reset time. The `AnthropicAgent` caches the prompt prefix, so repeated tool rounds and chat turns read it from the cache at a lower price.
+The Activity tab shows the tokens of each run. For CLI agents it also shows the subscription utilization of the last five hours and seven days as the CLI reports it; when a limit is reached, the agent pauses until the reported reset time.
 
 ---
 
@@ -260,17 +269,10 @@ Renaming or moving the agent's file changes its path and so starts with new, emp
 | The turn did not finish within ... | Raise `TurnTimeout`, or narrow the instructions and watch paths |
 | The tool call budget of N calls for this turn is exhausted. | Shown on a tool call of the agent. Raise `MaxToolCallsPerTurn` if the agent regularly needs more |
 | Set the API key of the agent. / The Anthropic API rejected the API key. | Enter a valid key in the edit form |
+| Set the model of the agent. | The `AnthropicAgent` needs a model id such as `claude-sonnet-5` |
+| The Anthropic API rate limit is reached: ... | A usage limit of the API key; automatic runs pause with the backoff described in [Triggers](#triggers) |
 | The Anthropic API did not find the model | Use a model id the API knows, such as `claude-sonnet-5` |
 | The model reached the output token limit of N tokens before answering. | Raise `MaxTokens` or lower the effort |
 | The request is too long for the model | Start a new conversation, or lower `HistoryTokenBudget` |
-
-The `AnthropicAgent` sends its requests to the URL in the environment variable `ANTHROPIC_BASE_URL` when it is set, for example a proxy, and the API key goes there with them.
-
----
-
-## Integration tests
-
-The test projects cover both backends with fakes. Two opt-in tests run a real turn and are skipped otherwise, because they spend the subscription or API credits; both are in the `Integration` category:
-
-- the Claude CLI test runs when `HOMEBLAZE_RUN_CLAUDE_CLI_TESTS` is `1` and `claude` is on the `PATH`, logged in,
-- the Anthropic API test runs when `HOMEBLAZE_RUN_ANTHROPIC_API_TESTS` is `1` and `ANTHROPIC_API_KEY` holds a key.
+| The agent is not running. | A chat message reached a stopped agent. Check the status and the log for why it stopped |
+| Invalid configuration: ... | An interval is out of range, for example a poll interval above 365 days. Correct it in the edit form |

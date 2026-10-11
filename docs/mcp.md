@@ -205,7 +205,7 @@ Read a property value by path. Returns the value, JSON schema type, and optional
 
 Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. A value that cannot be converted returns an error and leaves the property unchanged.
 
-An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and a path and returns null to allow the write or the error message for the client, for example to keep a client from changing properties that hold settings. Decide on the property; the path only serves the message and is the client's text for `get_property` and `set_property` and the path of the subject node for `browse` and `search`. A refused property is not reported as writable by `get_property`, `browse` and `search`. The filter may be called concurrently.
+An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and a path and returns null to allow the write or the error message for the client, for example to keep a client from changing properties that hold settings. Decide on the property; the path only serves the message and is the client's text for `get_property` and `set_property` and, for `browse` and `search`, the property path built from the path the subject node shows. A refused property is not reported as writable by `get_property`, `browse` and `search`. The filter may be called concurrently.
 
 ### `list_types`
 
@@ -337,9 +337,10 @@ var response = await client.GetResponseAsync(messages, options, cancellationToke
 
 `ToAIFunction()` wraps a tool as an `AIFunction` with the tool's name, description and input schema; invoking it calls the tool's handler with the arguments as a JSON object.
 
-`McpToolDispatcher` serves any list of tools through the MCP list and call requests, which `WithSubjectRegistryTools` uses as well. It lets a custom route offer a different tool list, for example only the tools one client may use:
+`McpToolDispatcher` serves any list of tools through the MCP list and call requests, which `WithSubjectRegistryTools` uses as well. It lets a custom route offer a different tool list, for example only the tools one client may use, set in a stateless transport's `ConfigureSessionOptions` on `options.Handlers`:
 
 ```csharp
+var handlers = options.Handlers;
 handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
 handlers.CallToolHandler = (request, cancellationToken) =>
     McpToolDispatcher.CallToolAsync(tools, request.Params!, logger, cancellationToken);

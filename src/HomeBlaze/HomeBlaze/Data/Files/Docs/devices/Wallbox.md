@@ -26,7 +26,7 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 | `Resume Charging` | Resume a paused charging session |
 | `Lock` | Lock the charger |
 | `Unlock` | Unlock the charger (requires confirmation) |
-| `Set Max Charging Current` | Set maximum charging current (6-32A) |
+| `Set Maximum Charging Current` | Set maximum charging current (6-32A) |
 | `Set Energy Price` | Set energy price per kWh |
 | `Set ICP Max Current` | Set grid maximum current (requires confirmation) |
 | `Set Eco-Smart Mode` | Set solar charging mode (Disabled, Eco, Full Solar) |
@@ -34,7 +34,7 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 | `Update Firmware` | Trigger firmware update (requires confirmation) |
 | `Toggle/Lock/Unlock Charge Port` | Control the vehicle charge port lock; toggle and unlock require confirmation |
 
-Operations that require confirmation cannot be called through MCP, by [AI agents](../administration/ai-agents.md#tools-and-permissions) or external clients. The charger has no charge port lock API: the Type 2 connector latch releases whenever a session is paused, so `Pause Charging`, which needs no confirmation, also releases it while the car is charging.
+Operations that require confirmation cannot be called through MCP, neither by [AI agents](../administration/ai-agents.md#tools-and-permissions) nor by external clients. The charger has no charge port lock API: the Type 2 connector latch releases whenever a session is paused, so `Pause Charging`, which needs no confirmation, also releases it while the car is charging.
 
 ## State Properties
 

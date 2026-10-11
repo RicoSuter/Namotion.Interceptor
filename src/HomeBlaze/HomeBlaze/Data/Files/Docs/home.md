@@ -44,6 +44,7 @@ Guides for building custom subjects, plugins, and UI components.
 - [Configurable Subjects](development/configurable-subject.md): Subject serialization and persistence
 - [Notifications](development/notifications.md): Notification channel interface
 - [Aspire](development/aspire.md): Development environment with Seq
+- [Testing the AI Agents](development/testing-ai-agents.md): Fakes and the opt-in integration tests of the AI agents
 
 ### Devices
 

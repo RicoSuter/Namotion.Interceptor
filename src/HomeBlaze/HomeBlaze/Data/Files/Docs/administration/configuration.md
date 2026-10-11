@@ -56,7 +56,7 @@ HomeBlaze keeps everything it stores in one data folder: the folder that contain
 Data/
 ├── Root.json       root configuration
 ├── Files/          devices, dashboards, pages, Plugins.json, docs
-├── Agents/         timeline, memory and chat session of AI agents
+├── Agents/         timeline, memory, chat session, run count and CLI working directory of AI agents
 ├── History/Sqlite/ SQLite history
 └── OpcUa/          OPC UA certificates
 ```
