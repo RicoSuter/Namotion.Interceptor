@@ -7,6 +7,7 @@
 @inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
+@inject ISnackbar Snackbar
 
 <div class="canvas-layout-container"
      style="position: relative; width: 100%; min-height: @(Canvas?.MinHeight ?? 400)px;"
@@ -108,6 +109,9 @@
     private Diagram? _diagram;
     private bool _suppressNextClick;
 
+    // The canvas whose last drag was not saved, so that a row of such drags warns once instead of each time.
+    private CanvasLayout? _canvasWithUnsavedDrag;
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
@@ -140,7 +144,8 @@
 
     private void OnNodeModified(NodeBase modifiedNode)
     {
-        if (Canvas == null) return;
+        var canvas = Canvas;
+        if (canvas == null) return;
 
         _suppressNextClick = true;
 
@@ -148,8 +153,17 @@
         {
             try
             {
-                var configurationWriter = RootManager.GetConfigurationWriter(Canvas);
-                await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
+                var configurationWriter = RootManager.GetConfigurationWriter(canvas);
+                var isWritten = await configurationWriter.WriteConfigurationAsync(canvas, CancellationToken.None);
+                if (isWritten)
+                {
+                    _canvasWithUnsavedDrag = null;
+                }
+                else if (!ReferenceEquals(_canvasWithUnsavedDrag, canvas))
+                {
+                    _canvasWithUnsavedDrag = canvas;
+                    Snackbar.AddConfigurationNotSavedWarning();
+                }
             }
             catch (Exception exception)
             {
@@ -218,8 +232,7 @@
             Canvas.Nodes = Canvas.Nodes.Where(n => n != node).ToList();
 
             // Persist the change
-            var configurationWriter = RootManager.GetConfigurationWriter(Canvas);
-            await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
+            await RootManager.WriteConfigurationOrWarnAsync(Canvas, Snackbar, CancellationToken.None);
         }
     }
 }
