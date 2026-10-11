@@ -67,6 +67,11 @@ internal sealed class FileSubjectFactory
                 return subject;
             }
         }
+        catch (JsonException exception)
+        {
+            // Expected, for example for a file that is still being written.
+            _logger?.LogDebug(exception, "Not valid JSON, read as a plain file: {Path}", path);
+        }
         catch (Exception exception)
         {
             _logger?.LogError(exception, "Failed to deserialize JSON subject from: {Path}", path);

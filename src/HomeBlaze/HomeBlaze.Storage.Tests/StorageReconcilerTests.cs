@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using FluentStorage.Blobs;
 using HomeBlaze.Storage.Abstractions;
@@ -12,6 +13,9 @@ namespace HomeBlaze.Storage.Tests;
 
 public class StorageReconcilerTests : StorageTestBase
 {
+    // Work that waits for something that never happens never completes, so the wait for it ends the test instead.
+    private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
+
     [Fact]
     public async Task WhenNothingChanged_ThenPassLoadsNoFile()
     {
@@ -782,10 +786,278 @@ public class StorageReconcilerTests : StorageTestBase
         // Assert
         Assert.IsType<OperationCanceledException>(exception, exactMatch: false);
         Assert.True(previousWorkWasRunning);
-        Assert.Equal(StorageStatus.Error, statusAfterCancelledReconnect);
+        Assert.Equal(StorageStatus.Disconnected, statusAfterCancelledReconnect);
         Assert.True(laterReconnectWasWaiting);
         Assert.Equal(StorageStatus.Connected, storage.Status);
         Assert.Equal(["Notes.md", "Slow.gated"], storage.Children.Keys.Order());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenStorageConnectsAfterDispose_ThenConnectFailsAndNothingKeepsRunning(bool connectsByApplyingConfiguration)
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        WriteFile("Notes.md");
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+        storage.Dispose();
+        WriteFile("Added.md");
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => connectsByApplyingConfiguration
+            ? storage.ApplyConfigurationAsync(CancellationToken.None)
+            : storage.ConnectAsync(CancellationToken.None));
+
+        // Assert
+        Assert.IsType<ObjectDisposedException>(exception);
+        Assert.Equal(StorageStatus.Disconnected, storage.Status);
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+        Assert.Equal(0, timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsDisposedWhileReconnectStartsToFollowItsStorage_ThenNoTimerStaysArmed()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var hookedTimeProvider = new HookedTimeProvider(timeProvider);
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = hookedTimeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+
+        // The reconnect is held where it starts the trigger of the connection that it has just made the
+        // current one. A dispose can end that connection only together with its trigger, so it waits.
+        var dispose = new Thread(storage.Dispose);
+        hookedTimeProvider.BeforeNextTimerIsCreated(() =>
+        {
+            dispose.Start();
+            SpinWait.SpinUntil(() => dispose.ThreadState.HasFlag(ThreadState.WaitSleepJoin) || !dispose.IsAlive, DeadlockTimeout);
+        });
+
+        // Act
+        await Record.ExceptionAsync(() => storage.ConnectAsync(CancellationToken.None));
+        var hasDisposeEnded = dispose.Join(DeadlockTimeout);
+
+        // Assert
+        Assert.True(hasDisposeEnded);
+        Assert.Equal(0, timeProvider.ArmedTimerCount);
+        Assert.Equal(StorageStatus.Disconnected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenPassQueuedBehindFirstPassFails_ThenConnectDoesNotReplaceItsStatus()
+    {
+        // Arrange: what the connect does after its first pass is posted here and runs only when the test says so.
+        PausableBlobStorage? client = null;
+        FluentStorageContainer? storage = null;
+        WriteFile("Slow.gated");
+        var gate = GatedFile.PauseNextLoad();
+        var connectContext = new ManualSynchronizationContext();
+        var previousContext = SynchronizationContext.Current;
+        Task<FluentStorageContainer> connect;
+        SynchronizationContext.SetSynchronizationContext(connectContext);
+        try
+        {
+            connect = ConnectAsync(configure: container =>
+            {
+                storage = container;
+                container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+            });
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        // A second pass is queued behind the first one, as the trigger does for a change during startup.
+        await gate.WhenReachedAsync();
+        var listingOfSecondPassReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var secondPass = storage!.ReconcileAsync();
+
+        // Act
+        gate.Release();
+        await listingOfSecondPassReached;
+        client.FailHangingCall(new IOException("The share is gone."));
+        await secondPass;
+        var statusAfterFailedPass = storage.Status;
+        connectContext.RunAll();
+        await connect;
+
+        // Assert
+        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
+        Assert.Equal(StorageStatus.Error, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenUnchangedConfigurationIsAppliedWhileStorageConnects_ThenItWaitsAndNothingIsLoadedAgain()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        WriteFile("Slow.gated");
+        var gate = GatedFile.PauseNextLoad();
+        var storage = CreateStorage();
+        var connect = storage.ConnectAsync(CancellationToken.None);
+        await gate.WhenReachedAsync();
+
+        // Act
+        var apply = storage.ApplyConfigurationAsync(CancellationToken.None);
+        var applyWasWaiting = !apply.IsCompleted;
+        gate.Release();
+        await connect;
+        var motor = storage.Children["Motor"];
+        await apply.WaitAsync(DeadlockTimeout);
+
+        // Assert
+        Assert.True(applyWasWaiting);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Equal(1, GatedFile.LoadCount);
+    }
+
+    [Fact]
+    public async Task WhenOperationIsQueuedBehindPassThatReconnectCancels_ThenItFailsAsNotConnectedAndWritesNothing()
+    {
+        // Arrange
+        WriteFile("Data.gated", "first");
+        PausableBlobStorage? client = null;
+        var hookedTimeProvider = new HookedTimeProvider(new ManualTimeProvider());
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = hookedTimeProvider;
+            container.ReconcileIntervalSeconds = 60;
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        });
+        var listingReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var pass = storage.ReconcileAsync();
+        await listingReached;
+        var write = WriteBlobAsync(storage, "Data.gated", "second");
+
+        // Act: the reconnect is held after it has cancelled the connection and before it has closed the worker.
+        var triggerDisposeReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        hookedTimeProvider.BeforeNextTimerIsDisposed(() =>
+        {
+            triggerDisposeReached.SetResult();
+            release.Wait(DeadlockTimeout);
+        });
+        var reconnect = Task.Run(() => storage.ConnectAsync(CancellationToken.None));
+        await triggerDisposeReached.Task.WaitAsync(DeadlockTimeout);
+        var exception = await Record.ExceptionAsync(() => write.WaitAsync(DeadlockTimeout));
+        release.Set();
+        await reconnect.WaitAsync(DeadlockTimeout);
+        await pass.WaitAsync(DeadlockTimeout);
+
+        // Assert
+        Assert.Equal("Storage not connected", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal("first", File.ReadAllText(GetFullPath("Data.gated")));
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsAddedWhileReconnectStartsToFollowItsStorage_ThenItIsAddedAfterTheFirstPass()
+    {
+        // Arrange
+        WriteFile("Old.json", SerializeMotor("Old"));
+        var hookedTimeProvider = new HookedTimeProvider(new ManualTimeProvider());
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = hookedTimeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+        var assignments = new ChildrenAssignmentRecorder(storage);
+        Context!.AddService<IWriteInterceptor>(assignments);
+
+        // Act: the reconnect is held where it starts the trigger, when its connection is already the current one.
+        var triggerStartReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        hookedTimeProvider.BeforeNextTimerIsCreated(() =>
+        {
+            triggerStartReached.SetResult();
+            release.Wait(DeadlockTimeout);
+        });
+        var reconnect = Task.Run(() => storage.ConnectAsync(CancellationToken.None));
+        await triggerStartReached.Task.WaitAsync(DeadlockTimeout);
+        var add = storage.AddSubjectAsync("New.json", CreateMotor("New"), CancellationToken.None);
+        release.Set();
+        await reconnect.WaitAsync(DeadlockTimeout);
+        await add.WaitAsync(DeadlockTimeout);
+
+        // Assert: an add that ran before the first pass would have assigned a tree that holds nothing else.
+        Assert.Equal([["Old"], ["New", "Old"]], assignments.AssignedKeys);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsStoppedDuringItsFirstPass_ThenStatusIsDisconnected()
+    {
+        // Arrange
+        var storage = CreateStorage();
+        WriteFile("First.gated");
+        WriteFile("Second.gated");
+        var gate = GatedFile.PauseNextLoad();
+        await storage.StartAsync(CancellationToken.None);
+        await gate.WhenReachedAsync();
+
+        // Act
+        var stop = storage.StopAsync(CancellationToken.None);
+        gate.Release();
+        await stop;
+        var exception = await Record.ExceptionAsync(() => storage.ExecuteTask!);
+
+        // Assert
+        Assert.IsType<OperationCanceledException>(exception, exactMatch: false);
+        Assert.Equal(StorageStatus.Disconnected, storage.Status);
+        Assert.Empty(storage.Children);
+    }
+
+    [Fact]
+    public async Task WhenOperationsWaitBehindPassOfConnectionThatEnds_ThenTheyFailAsNotConnected()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectAsync();
+        var motor = storage.Children["Motor"];
+        WriteFile("Slow.gated");
+        var gate = GatedFile.PauseNextLoad();
+        var pass = storage.ReconcileAsync();
+        await gate.WhenReachedAsync();
+        using var content = new MemoryStream([1, 2, 3]);
+        Task[] queuedOperations =
+        [
+            storage.AddSubjectAsync("New.json", CreateMotor("New"), CancellationToken.None),
+            storage.WriteBlobAsync("Notes.txt", content, CancellationToken.None),
+            storage.DeleteBlobAsync("Motor.json", CancellationToken.None),
+            storage.DeleteSubjectAsync(motor, CancellationToken.None)
+        ];
+        var queuedSave = storage.WriteConfigurationAsync(motor, CancellationToken.None);
+
+        // Act: the worker reaches the operations once the pass that the reconnect has cancelled gives way.
+        var reconnect = storage.ConnectAsync(CancellationToken.None);
+        var laterException = await Record.ExceptionAsync(() => storage.DeleteBlobAsync("Motor.json", CancellationToken.None));
+        gate.Release();
+        await pass;
+        var exceptions = new List<Exception?>();
+        foreach (var operation in queuedOperations)
+        {
+            exceptions.Add(await Record.ExceptionAsync(() => operation.WaitAsync(DeadlockTimeout)));
+        }
+
+        var isSaved = await queuedSave.WaitAsync(DeadlockTimeout);
+        await reconnect;
+
+        // Assert
+        Assert.All(exceptions, exception =>
+            Assert.Equal("Storage not connected", Assert.IsType<InvalidOperationException>(exception).Message));
+        Assert.False(isSaved);
+        Assert.Equal("Storage not connected", Assert.IsType<InvalidOperationException>(laterException).Message);
+        Assert.Equal(["Motor", "Slow.gated"], storage.Children.Keys.Order());
+        Assert.False(File.Exists(GetFullPath("Notes.txt")));
     }
 
     [Fact]
@@ -1126,6 +1398,24 @@ public class StorageReconcilerTests : StorageTestBase
         await storage.WriteBlobAsync(path, stream, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Keeps what is posted to it until the test runs it, to hold the code after an await.
+    /// </summary>
+    private sealed class ManualSynchronizationContext : SynchronizationContext
+    {
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _posted = new();
+
+        public override void Post(SendOrPostCallback callback, object? state) => _posted.Enqueue((callback, state));
+
+        public void RunAll()
+        {
+            while (_posted.TryDequeue(out var posted))
+            {
+                posted.Callback(posted.State);
+            }
+        }
+    }
+
     private sealed class LifecycleFlowRecorder : ILifecycleHandler
     {
         private readonly List<(IInterceptorSubject Subject, bool IsContextAttach, bool IsFlowSuppressed)> _changes = [];
@@ -1150,6 +1440,38 @@ public class StorageReconcilerTests : StorageTestBase
                     _changes.Add((change.Subject, change.IsContextAttach, ExecutionContext.IsFlowSuppressed()));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Records the keys of every dictionary that is assigned to the children of one subject.
+    /// </summary>
+    private sealed class ChildrenAssignmentRecorder(IInterceptorSubject subject) : IWriteInterceptor
+    {
+        private readonly List<string[]> _assignedKeys = [];
+
+        public IReadOnlyList<string[]> AssignedKeys
+        {
+            get
+            {
+                lock (_assignedKeys)
+                {
+                    return _assignedKeys.ToList();
+                }
+            }
+        }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, subject) && context.NewValue is Dictionary<string, IInterceptorSubject> children)
+            {
+                lock (_assignedKeys)
+                {
+                    _assignedKeys.Add(children.Keys.Order().ToArray());
+                }
+            }
+
+            next(ref context);
         }
     }
 

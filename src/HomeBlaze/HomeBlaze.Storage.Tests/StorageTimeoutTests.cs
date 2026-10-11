@@ -494,6 +494,31 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenVersionCannotBeReadAfterSubjectWasWritten_ThenSubjectIsAddedAndKeptByNextPass()
+    {
+        // Arrange
+        var storage = await ConnectPausableAsync();
+        var motor = CreateMotor("Pump");
+        var versionReached = _client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+        var add = storage.AddSubjectAsync("Motor.json", motor, CancellationToken.None);
+        await versionReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        var exception = await Record.ExceptionAsync(() => add);
+        var childrenAfterAdd = storage.Children.ToDictionary();
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(File.Exists(GetFullPath("Motor.json")));
+        Assert.Same(motor, Assert.Single(childrenAfterAdd).Value);
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+    }
+
+    [Fact]
     public async Task WhenFileEventsArriveWhilePassStallsOnTheStorage_ThenLaterPassLoadsEverything()
     {
         // Arrange: without a periodic pass, so that only file events start one.

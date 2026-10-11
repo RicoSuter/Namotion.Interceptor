@@ -22,14 +22,17 @@ internal sealed class StorageWorker : IDisposable
     private readonly AsyncLocal<WorkItem?> _itemOfFlow = new();
     private readonly ILogger? _logger;
     private readonly Action? _whenStopped;
+    private readonly CancellationToken _endedToken;
     private readonly Task _loop;
 
     /// <param name="logger">Receives failures that no caller gets.</param>
     /// <param name="whenStopped">Runs on the worker once, after its last item.</param>
-    public StorageWorker(ILogger? logger = null, Action? whenStopped = null)
+    /// <param name="endedToken">Cancels the items that have not started, as <see cref="Dispose"/> does.</param>
+    public StorageWorker(ILogger? logger = null, Action? whenStopped = null, CancellationToken endedToken = default)
     {
         _logger = logger;
         _whenStopped = whenStopped;
+        _endedToken = endedToken;
 
         // Created within an item of another worker, the loop would otherwise carry the flow of that item into
         // everything it runs.
@@ -79,7 +82,9 @@ internal sealed class StorageWorker : IDisposable
             _itemOfFlow.Value = item;
             try
             {
-                await item.ExecuteAsync(_disposalSource.Token);
+                // Asked directly and not through a token that is linked to it: the item that this token
+                // cancels can end before a linked token is cancelled, and the next item would still start.
+                await item.ExecuteAsync(_endedToken.IsCancellationRequested ? _endedToken : _disposalSource.Token);
             }
             catch (Exception exception)
             {

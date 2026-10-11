@@ -66,8 +66,9 @@ public class ConfigurableSubjectSerializer
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
 
-        // Extract $type discriminator
-        if (!root.TryGetProperty(TypeDiscriminatorPropertyName, out var typeElement))
+        // Extract $type discriminator. Only an object can have one.
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty(TypeDiscriminatorPropertyName, out var typeElement))
         {
             return null;
         }

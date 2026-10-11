@@ -24,13 +24,11 @@ internal readonly record struct StorageConnectionSettings(
 internal sealed class StorageConnection : IDisposable
 {
     private readonly CancellationTokenSource _endedSource = new();
-    private readonly Lock _triggerLock = new();
     private readonly TimeLimitedBlobStorage _client;
     private readonly ILogger? _logger;
 
     private volatile ReconcileTrigger? _trigger;
     private volatile StorageFileWatcher? _fileWatcher;
-    private bool _isTriggerStopped;
 
     public StorageConnection(
         StorageConnectionSettings settings,
@@ -51,7 +49,7 @@ internal sealed class StorageConnection : IDisposable
         Reconciler = new StorageReconciler(_client, storage, subjectFactory, serializer, Index, timeProvider, logger, _endedSource.Token);
         // On the worker, which is the only one that reads the index, and after its last item: nothing places
         // the subjects of an ended connection any more.
-        Worker = new StorageWorker(logger, Reconciler.ReleaseUnplacedSubjects);
+        Worker = new StorageWorker(logger, Reconciler.ReleaseUnplacedSubjects, _endedSource.Token);
         _logger = logger;
     }
 
@@ -84,7 +82,8 @@ internal sealed class StorageConnection : IDisposable
 
     /// <summary>
     /// Starts requesting passes: after changes that the file watcher reports, periodically, and after a pass
-    /// that did not finish. Does nothing once <see cref="StopTrigger"/> was called or the connection has ended.
+    /// that did not finish. Called once, in the step that makes the connection the current one, and so never
+    /// after <see cref="StopTrigger"/>.
     /// </summary>
     /// <remarks>
     /// A file watcher that cannot start is logged and does not fail the call. The storage is then followed by
@@ -95,30 +94,21 @@ internal sealed class StorageConnection : IDisposable
     /// <param name="watchFiles">Whether <see cref="StorageDirectory"/> is watched.</param>
     public void StartTrigger(Func<IReadOnlySet<string>, bool, Task<bool>> runPass, TimeSpan periodicInterval, bool watchFiles)
     {
-        // Checked under the lock that stopping takes, so nothing starts after the trigger was stopped.
-        lock (_triggerLock)
+        var trigger = new ReconcileTrigger(runPass, periodicInterval, TimeProvider, _logger);
+        _trigger = trigger;
+
+        if (watchFiles)
         {
-            if (_isTriggerStopped)
+            var fileWatcher = new StorageFileWatcher(StorageDirectory!, trigger.NotifyChanged, trigger.NotifyEventsLost, _logger);
+            _fileWatcher = fileWatcher;
+
+            try
             {
-                return;
+                fileWatcher.Start();
             }
-
-            var trigger = new ReconcileTrigger(runPass, periodicInterval, TimeProvider, _logger);
-            _trigger = trigger;
-
-            if (watchFiles)
+            catch (Exception exception)
             {
-                var fileWatcher = new StorageFileWatcher(StorageDirectory!, trigger.NotifyChanged, trigger.NotifyEventsLost, _logger);
-                _fileWatcher = fileWatcher;
-
-                try
-                {
-                    fileWatcher.Start();
-                }
-                catch (Exception exception)
-                {
-                    _logger?.LogWarning(exception, "File watching could not start for: {Path}. It is tried again with every pass.", StorageDirectory);
-                }
+                _logger?.LogWarning(exception, "File watching could not start for: {Path}. It is tried again with every pass.", StorageDirectory);
             }
         }
     }
@@ -130,33 +120,25 @@ internal sealed class StorageConnection : IDisposable
     /// <returns>True when the watcher was started. Changes since it stopped have raised no event.</returns>
     public bool TryStartFileWatcher()
     {
-        if (_fileWatcher is not { IsRunning: false })
+        if (_fileWatcher is not { IsRunning: false } fileWatcher)
         {
             return false;
         }
 
-        lock (_triggerLock)
+        try
         {
-            if (_fileWatcher is not { IsRunning: false } fileWatcher)
-            {
-                return false;
-            }
-
-            try
-            {
-                fileWatcher.Start();
-                return fileWatcher.IsRunning;
-            }
-            catch (Exception exception)
-            {
-                _logger?.LogDebug(exception, "File watching still cannot start for: {Path}", StorageDirectory);
-                return false;
-            }
+            // Does nothing for a watcher that StopTrigger has disposed meanwhile.
+            fileWatcher.Start();
+            return fileWatcher.IsRunning;
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogDebug(exception, "File watching still cannot start for: {Path}", StorageDirectory);
+            return false;
         }
     }
 
     /// <inheritdoc cref="ReconcileTrigger.NotifyPassFailed"/>
-    /// <remarks>Does not wait for a file watcher that is being started: the worker calls this.</remarks>
     public void NotifyPassFailed()
         => _trigger?.NotifyPassFailed();
 
@@ -166,20 +148,14 @@ internal sealed class StorageConnection : IDisposable
     /// </summary>
     public void StopTrigger()
     {
-        lock (_triggerLock)
-        {
-            _isTriggerStopped = true;
-
-            _fileWatcher?.Dispose();
-            _fileWatcher = null;
-            _trigger?.Dispose();
-            _trigger = null;
-        }
+        Interlocked.Exchange(ref _fileWatcher, null)?.Dispose();
+        Interlocked.Exchange(ref _trigger, null)?.Dispose();
     }
 
     /// <summary>
     /// Ends the connection: cancels <see cref="Token"/>, stops the watcher and the trigger and lets the worker
-    /// take no more items. The item that is running ends at its next storage call or check.
+    /// take no more items. The item that is running ends at its next storage call or check, and the items
+    /// that wait behind it are cancelled.
     /// </summary>
     public void End()
     {

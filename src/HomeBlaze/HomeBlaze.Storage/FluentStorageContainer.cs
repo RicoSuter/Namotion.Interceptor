@@ -35,7 +35,7 @@ public partial class FluentStorageContainer :
     // Guards the status together with which connection is the current one, so that neither a pass of an ended
     // connection nor a connect that a Dispose overtook writes the status. Never held across an await.
     private readonly Lock _connectionLock = new();
-    private int _disposeCount;
+    private bool _isDisposed;
 
     // True from StopAsync until the next StartAsync. Read in the same step that publishes a connection, so a
     // stop either keeps that connection from following its storage or finds it and stops it.
@@ -183,12 +183,10 @@ public partial class FluentStorageContainer :
     /// </summary>
     /// <remarks>A container that was stopped does not follow its storage after this either, see <see cref="StopAsync"/>.</remarks>
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
-    {
-        // Called for every save of a subject whose first configurable parent is this container, such as a page.
-        return Status == StorageStatus.Connected && _connection is { IsEnded: false } connection && connection.Settings == Settings
-            ? Task.CompletedTask
-            : ConnectAsync(cancellationToken);
-    }
+        => IsConnectedWith(Settings) ? Task.CompletedTask : ConnectAsync(isOnlyForChangedSettings: true, cancellationToken);
+
+    private bool IsConnectedWith(StorageConnectionSettings settings)
+        => Status == StorageStatus.Connected && _connection is { IsEnded: false } connection && connection.Settings == settings;
 
     private StorageConnectionSettings Settings
         => new(StorageType, ConnectionString, ContainerName, EnableFileWatching, ReconcileIntervalSeconds);
@@ -209,25 +207,26 @@ public partial class FluentStorageContainer :
     /// exists is ended first, and its running work has finished before the new one starts.
     /// </summary>
     /// <remarks>A container that was stopped does not follow its storage after this either, see <see cref="StopAsync"/>.</remarks>
-    public async Task ConnectAsync(CancellationToken cancellationToken)
+    /// <exception cref="ObjectDisposedException">The container is disposed.</exception>
+    public Task ConnectAsync(CancellationToken cancellationToken)
+        => ConnectAsync(isOnlyForChangedSettings: false, cancellationToken);
+
+    private async Task ConnectAsync(bool isOnlyForChangedSettings, CancellationToken cancellationToken)
     {
         // Read once, so the connection is created with exactly the settings it is later compared by.
         var settings = Settings;
         if (!settings.IsInMemory && string.IsNullOrWhiteSpace(settings.ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
 
-        // Read before the wait at the gate, so a Dispose during that wait fails this connect as well.
-        int disposeCount;
-        lock (_connectionLock)
-        {
-            disposeCount = _disposeCount;
-        }
-
         // One connect at a time: two of them would each end the same connection and both start a new one.
         await _connectGate.WaitAsync(cancellationToken);
         try
         {
-            await ReplaceConnectionAsync(settings, disposeCount, cancellationToken);
+            // Decided here and not before the wait: the connect that this one waited for has done the work.
+            if (!isOnlyForChangedSettings || !IsConnectedWith(settings))
+            {
+                await ReplaceConnectionAsync(settings, cancellationToken);
+            }
         }
         finally
         {
@@ -235,15 +234,12 @@ public partial class FluentStorageContainer :
         }
     }
 
-    private async Task ReplaceConnectionAsync(
-        StorageConnectionSettings settings, int disposeCount, CancellationToken cancellationToken)
+    private async Task ReplaceConnectionAsync(StorageConnectionSettings settings, CancellationToken cancellationToken)
     {
         StorageConnection? previous;
         lock (_connectionLock)
         {
-            // After a Dispose during the wait at the gate, the connection that exists is not this connect's to
-            // end: a connect that started later can have published it.
-            ObjectDisposedException.ThrowIf(_disposeCount != disposeCount, this);
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
             previous = _connection;
         }
 
@@ -252,13 +248,12 @@ public partial class FluentStorageContainer :
 
         lock (_connectionLock)
         {
-            if (_disposeCount == disposeCount)
+            if (!_isDisposed)
             {
                 Status = StorageStatus.Initializing;
             }
         }
 
-        StorageConnection? published = null;
         try
         {
             // A reconnect starts from scratch. The item that the previous worker is running still assigns to
@@ -280,70 +275,112 @@ public partial class FluentStorageContainer :
 
             var connection = new StorageConnection(
                 settings, client, storageDirectory, this, _subjectFactory, _serializer, TimeProvider, _logger);
-            var followsStorage = Publish(connection, disposeCount);
-            published = connection;
+
+            // Queued before the connection can be found, so that it is the first item of the worker: an
+            // operation that ran before it would assign a tree that holds nothing of the storage yet. It
+            // lists only once the connection follows its storage, so a change during startup leads to
+            // another pass.
+            var isPublished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connection.Token);
+            var firstPass = RunFirstPassAsync(connection, isPublished.Task, passCancellation.Token);
+            try
+            {
+                Publish(connection);
+                isPublished.SetResult(true);
+            }
+            catch
+            {
+                isPublished.SetResult(false);
+                throw;
+            }
 
             _logger?.LogInformation("Connected to storage: {Type} at {Path}", settings.StorageType,
                 settings.IsInMemory ? "(in-memory)" : storageDirectory);
 
-            // Started before the first pass, so a change during startup leads to another pass.
-            if (followsStorage)
-            {
-                connection.StartTrigger(
-                    (namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed),
-                    TimeSpan.FromSeconds(settings.ReconcileIntervalSeconds),
-                    watchFiles: settings.EnableFileWatching && !settings.IsInMemory);
-            }
-
-            using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connection.Token);
-            await connection.Worker.RunAsync(async token =>
-            {
-                try
-                {
-                    await connection.Reconciler.ReconcileAsync(NoPaths, allNamed: false, token);
-                }
-                catch (Exception) when (!token.IsCancellationRequested)
-                {
-                    connection.NotifyPassFailed();
-                    throw;
-                }
-
-                _logger?.LogInformation("Storage loaded: {Count} entries.", connection.Index.Count);
-            }, passCancellation.Token);
-
-            SetStatus(connection, StorageStatus.Connected);
+            await firstPass;
         }
         catch (Exception exception)
         {
-            if (published != null)
+            var isCancelledByCaller = exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
+            lock (_connectionLock)
             {
-                SetStatus(published, StorageStatus.Error);
-            }
-            else
-            {
-                lock (_connectionLock)
+                // Only where the first pass has not written the status itself. Written here after it, the
+                // status could replace that of a pass that ran in between.
+                if (!_isDisposed && Status == StorageStatus.Initializing)
                 {
-                    if (_disposeCount == disposeCount)
-                    {
-                        Status = StorageStatus.Error;
-                    }
+                    Status = isCancelledByCaller ? StorageStatus.Disconnected : StorageStatus.Error;
                 }
             }
 
-            _logger?.LogError(exception, "Failed to connect to storage");
+            if (isCancelledByCaller)
+            {
+                _logger?.LogInformation("Connecting to the storage was cancelled");
+            }
+            else
+            {
+                _logger?.LogError(exception, "Failed to connect to storage");
+            }
+
             throw;
         }
     }
 
-    /// <returns>Whether the connection follows its storage: false while the container is stopped.</returns>
-    private bool Publish(StorageConnection connection, int disposeCount)
+    private Task RunFirstPassAsync(StorageConnection connection, Task<bool> isPublished, CancellationToken cancellationToken)
+        => connection.Worker.RunAsync(async token =>
+        {
+            if (!await isPublished)
+            {
+                return;
+            }
+
+            try
+            {
+                await connection.Reconciler.ReconcileAsync(NoPaths, allNamed: false, token);
+            }
+            catch (Exception)
+            {
+                // Cancelled by the caller of the connect, or with the connection, whose status nobody reads.
+                if (token.IsCancellationRequested)
+                {
+                    SetStatus(connection, StorageStatus.Disconnected);
+                }
+                else
+                {
+                    SetStatus(connection, StorageStatus.Error);
+                    connection.NotifyPassFailed();
+                }
+
+                throw;
+            }
+
+            SetStatus(connection, StorageStatus.Connected);
+            _logger?.LogInformation("Storage loaded: {Count} entries.", connection.Index.Count);
+        }, cancellationToken);
+
+    /// <summary>
+    /// Makes the connection the current one and lets it follow its storage, unless the container is stopped.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The container is disposed. The connection is then disposed as well.</exception>
+    private void Publish(StorageConnection connection)
     {
         lock (_connectionLock)
         {
-            if (_disposeCount == disposeCount)
+            if (!_isDisposed)
             {
                 _connection = connection;
-                return !_isStopped;
+
+                // In the step that publishes: a stop or a dispose either finds the connection with its
+                // trigger started, or keeps the trigger from starting.
+                if (!_isStopped)
+                {
+                    var settings = connection.Settings;
+                    connection.StartTrigger(
+                        (namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed),
+                        TimeSpan.FromSeconds(settings.ReconcileIntervalSeconds),
+                        watchFiles: settings.EnableFileWatching && !settings.IsInMemory);
+                }
+
+                return;
             }
         }
 
@@ -356,7 +393,7 @@ public partial class FluentStorageContainer :
     {
         lock (_connectionLock)
         {
-            if (ReferenceEquals(_connection, connection) && !connection.IsEnded && Status != status)
+            if (!_isDisposed && ReferenceEquals(_connection, connection) && !connection.IsEnded && Status != status)
             {
                 Status = status;
             }
@@ -445,7 +482,7 @@ public partial class FluentStorageContainer :
             throw new ArgumentException($"A subject at '{path}' would not be loaded again: the path is hidden or temporary.", nameof(path));
 
         var connection = Connection;
-        await connection.Worker.RunAsync(async token =>
+        await RunOperationAsync(connection, async token =>
         {
             if (connection.Index.TryGet(relativePath, out _))
                 throw new InvalidOperationException($"A file already exists at '{path}'.");
@@ -469,13 +506,42 @@ public partial class FluentStorageContainer :
     }
 
     // Recording version and hash is what keeps the event that this write raises from reloading the subject.
-    private static async Task WriteAndRecordAsync(
+    private async Task WriteAndRecordAsync(
         StorageConnection connection, StorageEntry entry, byte[] content, CancellationToken cancellationToken)
     {
         await WriteAsync(connection, entry.Path, content, cancellationToken);
 
         entry.Hash = StorageHash.Compute(content);
-        entry.Version = await connection.Reconciler.GetVersionAsync(entry.Path, cancellationToken);
+        try
+        {
+            entry.Version = await connection.Reconciler.GetVersionAsync(entry.Path, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // The file is written, so this is no failure of the write. Without a version the next pass
+            // compares the file by its hash and finds what was written.
+            entry.Version = default;
+            _logger?.LogDebug(exception, "Failed to read the version of the written file: {Path}", entry.Path);
+        }
+    }
+
+    /// <summary>
+    /// Runs an operation on the worker of the connection it was started for.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The connection ended before the operation was done, which is the same as no connection.
+    /// </exception>
+    private static async Task RunOperationAsync(
+        StorageConnection connection, Func<CancellationToken, Task> operation, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await connection.Worker.RunAsync(operation, cancellationToken);
+        }
+        catch (OperationCanceledException) when (connection.IsEnded && !cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException("Storage not connected");
+        }
     }
 
     private static async Task WriteAsync(
@@ -534,7 +600,7 @@ public partial class FluentStorageContainer :
         await content.CopyToAsync(buffer, cancellationToken);
         var bytes = buffer.ToArray();
 
-        await connection.Worker.RunAsync(async token =>
+        await RunOperationAsync(connection, async token =>
         {
             var entry = connection.Index.TryGet(relativePath, out var found) && !found.IsFolder ? found : null;
             if (entry != null)
@@ -570,8 +636,8 @@ public partial class FluentStorageContainer :
     public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
     {
         var connection = Connection;
-        await connection.Worker.RunAsync(
-            token => DeleteEntryAsync(connection, StoragePath.Normalize(path), token), cancellationToken);
+        await RunOperationAsync(
+            connection, token => DeleteEntryAsync(connection, StoragePath.Normalize(path), token), cancellationToken);
     }
 
     /// <summary>
@@ -588,7 +654,7 @@ public partial class FluentStorageContainer :
     public async Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = Connection;
-        await connection.Worker.RunAsync(token =>
+        await RunOperationAsync(connection, token =>
         {
             // A folder has an entry too, but no file that could be deleted.
             if (!connection.Index.TryGetPath(subject, out var path) ||
@@ -618,26 +684,21 @@ public partial class FluentStorageContainer :
         _logger?.LogDebug("Deleted blob from storage: {Path}", relativePath);
     }
 
+    /// <summary>
+    /// Ends the connection for good: a connect after this fails.
+    /// </summary>
     public override void Dispose()
     {
-        // The connection is ended outside the lock, because cancelling it runs code of the work it cancels.
-        // A connect can publish another one meanwhile, hence the loop.
-        while (true)
+        StorageConnection? connection;
+        lock (_connectionLock)
         {
-            var connection = _connection;
-            connection?.Dispose();
-
-            lock (_connectionLock)
-            {
-                if (ReferenceEquals(_connection, connection))
-                {
-                    _disposeCount++;
-                    Status = StorageStatus.Disconnected;
-                    break;
-                }
-            }
+            _isDisposed = true;
+            Status = StorageStatus.Disconnected;
+            connection = _connection;
         }
 
+        // Ended outside the lock, because cancelling it runs code of the work it cancels.
+        connection?.Dispose();
         base.Dispose();
     }
 }
