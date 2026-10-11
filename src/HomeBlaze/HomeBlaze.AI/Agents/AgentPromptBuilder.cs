@@ -22,7 +22,6 @@ public static class AgentPromptBuilder
 
         Tools:
         - browse and search explore the graph, get_property reads a value, list_types lists interfaces and concrete types, list_methods and invoke_method discover and call methods on a subject, get_property_history reads past values. Use only the tools you are given; some may not be available to you.
-        - read_file reads the text of a Markdown page or document by its path, such as /Docs/home.md; it cannot read other file types.
         - set_property changes a value, when it is available to you.
         - To notify the operator, find the INotificationPublisher interface with list_types, find the subjects implementing it with search (types parameter), check the exact method name and parameters with list_methods, then call SendNotification through invoke_method, if invoke_method is available to you.
         - update_memory replaces your memory document. Your memory is shown to you on every run, so keep there what you must remember across runs: notifications already sent, trends, open issues. Keep it short and current.

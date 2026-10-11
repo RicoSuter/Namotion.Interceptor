@@ -14,7 +14,7 @@ public sealed class AgentToolSet
 {
     /// <summary>The graph tools a new agent allows by default. An empty allowed list allows no graph tools.</summary>
     public static readonly IReadOnlyList<string> DefaultAllowedTools =
-        ["browse", "search", "get_property", "list_types", "list_methods", "get_property_history", "read_file"];
+        ["browse", "search", "get_property", "list_types", "list_methods", "get_property_history"];
 
     private const int PreviewLength = 2000;
 
