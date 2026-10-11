@@ -82,10 +82,25 @@ internal sealed class FileSubjectFactory
 
     /// <summary>
     /// Takes a subject that entered the context when it was created and that no property holds out of that
-    /// context, which detaches it as leaving the tree would have: a hosted service is stopped. Does nothing
-    /// for any other subject.
+    /// context, which detaches it as leaving the tree would have: a hosted service is stopped. The same for
+    /// the subjects that are embedded in a page which is not in the tree. Does nothing for any other subject.
     /// </summary>
     public void Release(IInterceptorSubject subject)
+    {
+        // A page enters the context only with the tree, but the subjects embedded in it when they are created.
+        // A page in the tree holds them in a property, so they are left alone here.
+        if (subject is MarkdownFile page)
+        {
+            foreach (var embedded in page.Children.Values)
+            {
+                ReleaseUnreferenced(embedded);
+            }
+        }
+
+        ReleaseUnreferenced(subject);
+    }
+
+    private void ReleaseUnreferenced(IInterceptorSubject subject)
     {
         // A subject that a property holds leaves the context with the assignment that removes it from there.
         if (subject.GetReferenceCount() == 0 &&

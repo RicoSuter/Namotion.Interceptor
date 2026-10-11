@@ -29,6 +29,7 @@ internal sealed class StorageConnection : IDisposable
 
     private volatile ReconcileTrigger? _trigger;
     private volatile StorageFileWatcher? _fileWatcher;
+    private bool _hasFileWatcherFailedToStart;
 
     public StorageConnection(
         StorageConnectionSettings settings,
@@ -81,14 +82,10 @@ internal sealed class StorageConnection : IDisposable
     public bool IsEnded => _endedSource.IsCancellationRequested;
 
     /// <summary>
-    /// Starts requesting passes: after changes that the file watcher reports, periodically, and after a pass
-    /// that did not finish. Called once, in the step that makes the connection the current one, and so never
-    /// after <see cref="StopTrigger"/>.
+    /// Starts requesting passes: periodically, after a pass that did not finish, and after changes that the
+    /// file watcher reports once <see cref="TryStartFileWatcher"/> has started it. Called once, in the step
+    /// that makes the connection the current one, and so never after <see cref="StopTrigger"/>.
     /// </summary>
-    /// <remarks>
-    /// A file watcher that cannot start is logged and does not fail the call. The storage is then followed by
-    /// the other passes, and <see cref="TryStartFileWatcher"/> tries again.
-    /// </remarks>
     /// <param name="runPass">Runs a pass of this connection, see <see cref="ReconcileTrigger"/>.</param>
     /// <param name="periodicInterval">How often a pass runs without any change. Zero or less switches it off.</param>
     /// <param name="watchFiles">Whether <see cref="StorageDirectory"/> is watched.</param>
@@ -99,24 +96,19 @@ internal sealed class StorageConnection : IDisposable
 
         if (watchFiles)
         {
-            var fileWatcher = new StorageFileWatcher(StorageDirectory!, trigger.NotifyChanged, trigger.NotifyEventsLost, _logger);
-            _fileWatcher = fileWatcher;
-
-            try
-            {
-                fileWatcher.Start();
-            }
-            catch (Exception exception)
-            {
-                _logger?.LogWarning(exception, "File watching could not start for: {Path}. It is tried again with every pass.", StorageDirectory);
-            }
+            _fileWatcher = new StorageFileWatcher(StorageDirectory!, trigger.NotifyChanged, trigger.NotifyEventsLost, _logger);
         }
     }
 
     /// <summary>
-    /// Starts the file watcher when the storage is watched and the watcher is not running: it could not
-    /// start, or it failed.
+    /// Starts the file watcher when the storage is watched and the watcher is not running: it was not started
+    /// yet, it could not start, or it failed. A watcher that cannot start is logged and tried again by the
+    /// next call. The storage is followed by the other passes until then.
     /// </summary>
+    /// <remarks>
+    /// Starting a watcher can stall on a storage that does not answer, so this is called neither on the worker
+    /// nor while a lock is held.
+    /// </remarks>
     /// <returns>True when the watcher was started. Changes since it stopped have raised no event.</returns>
     public bool TryStartFileWatcher()
     {
@@ -133,7 +125,9 @@ internal sealed class StorageConnection : IDisposable
         }
         catch (Exception exception)
         {
-            _logger?.LogDebug(exception, "File watching still cannot start for: {Path}", StorageDirectory);
+            // A warning for the first failure only: every pass tries again.
+            var level = Interlocked.Exchange(ref _hasFileWatcherFailedToStart, true) ? LogLevel.Debug : LogLevel.Warning;
+            _logger?.Log(level, exception, "File watching cannot start for: {Path}. It is tried again with every pass.", StorageDirectory);
             return false;
         }
     }

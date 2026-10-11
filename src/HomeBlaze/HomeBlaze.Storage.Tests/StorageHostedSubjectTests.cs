@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using FluentStorage.Blobs;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
@@ -259,6 +260,132 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             nested.Dispose();
         }
     }
+
+    [Fact]
+    public async Task WhenKeyOfPageIsTaken_ThenEveryDeviceEmbeddedInItIsDetachedAndStopped()
+    {
+        // Arrange: the subject of Page.md.json holds the key that Page.md asks for.
+        WriteFile("Page.md.json", SerializeMotor("Holds the key"));
+        var storage = await StartHostedStorageAsync();
+        await storage.ExecuteTask!;
+
+        // Act
+        WriteFile("Page.md", SerializePageWithDevice("first"));
+        await storage.ReconcileAsync();
+        WriteFile("Page.md", SerializePageWithDevice("second, with another size"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        var devices = RecordingDevice.Created;
+        await WaitUntilHostHasHandledEveryChangeAsync();
+        Assert.IsType<Samples.Motor>(storage.Children["Page.md"]);
+        Assert.Equal(2, devices.Count);
+        foreach (var device in devices)
+        {
+            Assert.Equal(1, _recorder.CountAttachesOf(device));
+            Assert.Equal(1, _recorder.CountDetachesOf(device));
+            Assert.False(IsAttached(device));
+            Assert.True(device.IsStopped);
+        }
+    }
+
+    [Fact]
+    public async Task WhenFirstPassTimesOutAfterLoadingPageAndStorageConnectsAgain_ThenDeviceEmbeddedInThatPageIsDetachedAndStopped()
+    {
+        // Arrange: the first pass loads the page with its device, loads B.gated and stalls on C.gated.
+        WriteFile("A.md", SerializePageWithDevice("A"));
+        WriteFile("B.gated");
+        WriteFile("C.gated");
+        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
+        var first = Assert.Single(RecordingDevice.Created);
+        await first.WhenStartedAsync();
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, RecordingDevice.Created.Count);
+        var second = RecordingDevice.Created[1];
+        Assert.Same(second, Assert.IsType<MarkdownFile>(storage.Children["A.md"]).Children["device"]);
+        await second.WhenStartedAsync();
+        Assert.False(second.IsStopped);
+
+        await first.WhenStoppedAsync();
+        Assert.Equal(1, _recorder.CountAttachesOf(first));
+        Assert.Equal(1, _recorder.CountDetachesOf(first));
+        Assert.False(IsAttached(first));
+    }
+
+    [Fact]
+    public async Task WhenFileOfUnplacedPageIsDeleted_ThenDeviceEmbeddedInItIsDetachedAndStopped()
+    {
+        // Arrange: the first pass loads the page with its device and ends before it places anything.
+        WriteFile("A.md", SerializePageWithDevice("A"));
+        WriteFile("B.gated");
+        WriteFile("C.gated");
+        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
+        var device = Assert.Single(RecordingDevice.Created);
+        await device.WhenStartedAsync();
+        _client!.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+
+        // Act
+        File.Delete(GetFullPath("A.md"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(["B.gated", "C.gated"], storage.Children.Keys.Order());
+        await device.WhenStoppedAsync();
+        Assert.Equal(1, _recorder.CountAttachesOf(device));
+        Assert.Equal(1, _recorder.CountDetachesOf(device));
+        Assert.False(IsAttached(device));
+    }
+
+    [Fact]
+    public async Task WhenFailedPassIsFollowedByPassOfSameConnection_ThenDeviceEmbeddedInItsPageIsNeverDetached()
+    {
+        // Arrange
+        WriteFile("A.md", SerializePageWithDevice("A"));
+        WriteFile("B.gated");
+        WriteFile("C.gated");
+        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
+
+        // Act
+        _client!.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+        await storage.ReconcileAsync();
+
+        // Assert
+        var device = Assert.Single(RecordingDevice.Created);
+        Assert.Same(device, Assert.IsType<MarkdownFile>(storage.Children["A.md"]).Children["device"]);
+        Assert.Equal(1, _recorder.CountAttachesOf(device));
+        Assert.Equal(0, _recorder.CountDetachesOf(device));
+        Assert.False(device.IsStopped);
+    }
+
+    [Fact]
+    public async Task WhenPlacedPageIsRemoved_ThenDeviceEmbeddedInItIsDetachedOnce()
+    {
+        // Arrange
+        WriteFile("A.md", SerializePageWithDevice("A"));
+        var storage = await StartHostedStorageAsync();
+        await storage.ExecuteTask!;
+        var device = Assert.Single(RecordingDevice.Created);
+        await device.WhenStartedAsync();
+
+        // Act
+        File.Delete(GetFullPath("A.md"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Empty(storage.Children);
+        await device.WhenStoppedAsync();
+        Assert.Equal(1, _recorder.CountAttachesOf(device));
+        Assert.Equal(1, _recorder.CountDetachesOf(device));
+    }
+
+    private static string SerializePageWithDevice(string deviceName)
+        => $"# Page\n\n```subject(device)\n{RecordingDevice.Serialize(deviceName)}\n```\n";
 
     private async Task<FluentStorageContainer> StartHostedStorageAsync()
     {

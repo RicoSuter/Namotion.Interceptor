@@ -286,6 +286,11 @@ public partial class FluentStorageContainer :
             try
             {
                 Publish(connection);
+
+                // Before the first listing, so that a change during startup raises an event. Not within
+                // Publish: a watcher on a storage that does not answer can stall while it starts, and would
+                // hold the lock that a stop, a dispose and every change of the status wait for.
+                connection.TryStartFileWatcher();
                 isPublished.SetResult(true);
             }
             catch
@@ -370,7 +375,7 @@ public partial class FluentStorageContainer :
                 _connection = connection;
 
                 // In the step that publishes: a stop or a dispose either finds the connection with its
-                // trigger started, or keeps the trigger from starting.
+                // trigger started, or keeps the trigger from starting. The file watcher starts after it.
                 if (!_isStopped)
                 {
                     var settings = connection.Settings;

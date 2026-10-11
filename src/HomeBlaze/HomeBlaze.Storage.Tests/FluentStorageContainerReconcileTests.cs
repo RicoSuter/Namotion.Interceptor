@@ -815,7 +815,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         // warning about it is logged. Without a periodic pass, so that only file events start a pass.
         var timeProvider = new ManualTimeProvider();
         var directory = Path.Combine(StorageDirectory.FullName, "Late");
-        var logger = new CallbackLogger(level =>
+        var logger = new CallbackLogger((level, _) =>
         {
             if (level == LogLevel.Warning && !Directory.Exists(directory))
             {
@@ -840,6 +840,130 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         await WaitWhileClockRunsAsync(timeProvider, () => storage.Children.ContainsKey("Added.md"));
         Assert.Equal(StorageStatus.Connected, statusAfterConnect);
         Assert.Equal(["Notes.md"], childrenAfterConnect);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenFileWatcherStallsWhileStorageConnects_ThenStorageCanStillBeStoppedOrDisposed(bool isDisposed)
+    {
+        // Arrange: the start of the file watcher is held where it logs that it watches, which is within the start.
+        var timeProvider = new ManualTimeProvider();
+        var watcherStartReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var logger = new CallbackLogger((_, message) =>
+        {
+            if (message.StartsWith(WatcherStartedMessage, StringComparison.Ordinal))
+            {
+                watcherStartReached.TrySetResult();
+                release.Wait(WatcherTimeout);
+            }
+        });
+        WriteFile("Notes.md");
+        var storage = CreateStorage(enableFileWatching: true, logger: logger, configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+        var connect = Task.Run(() => storage.ConnectAsync(CancellationToken.None));
+        await watcherStartReached.Task.WaitAsync(WatcherTimeout);
+
+        // Act
+        var stopOrDispose = Task.Run(() =>
+        {
+            if (isDisposed)
+            {
+                storage.Dispose();
+                return Task.CompletedTask;
+            }
+
+            return storage.StopAsync(CancellationToken.None);
+        });
+        Exception? exceptionWhileWatcherStarts;
+        try
+        {
+            exceptionWhileWatcherStarts = await Record.ExceptionAsync(() => stopOrDispose.WaitAsync(WatcherTimeout));
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        var connectException = await Record.ExceptionAsync(() => connect);
+
+        // Assert: neither the trigger nor a pass of the connection is left running.
+        Assert.Null(exceptionWhileWatcherStarts);
+        Assert.Equal(0, timeProvider.ArmedTimerCount);
+        if (isDisposed)
+        {
+            Assert.IsType<OperationCanceledException>(connectException, exactMatch: false);
+            Assert.Equal(StorageStatus.Disconnected, storage.Status);
+            Assert.Empty(storage.Children);
+        }
+        else
+        {
+            Assert.Null(connectException);
+            Assert.Equal(StorageStatus.Connected, storage.Status);
+            Assert.Equal(["Notes.md"], storage.Children.Keys);
+        }
+    }
+
+    [Fact]
+    public async Task WhenFileWatcherStallsWhileLaterPassStartsIt_ThenAnotherPassStillChangesTheStatus()
+    {
+        // Arrange: the file watcher cannot start at connect, because the directory appears only when the
+        // warning about that is logged. The start that a later pass tries is held where it logs that it watches.
+        var timeProvider = new ManualTimeProvider();
+        var directory = Path.Combine(StorageDirectory.FullName, "Late");
+        var watcherStartReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        PausableBlobStorage? client = null;
+        var logger = new CallbackLogger((level, message) =>
+        {
+            if (level == LogLevel.Warning && !Directory.Exists(directory))
+            {
+                WriteFile("Late/Notes.md");
+            }
+            else if (message.StartsWith(WatcherStartedMessage, StringComparison.Ordinal))
+            {
+                watcherStartReached.TrySetResult();
+                release.Wait(WatcherTimeout);
+            }
+        });
+        var storage = CreateStorage(enableFileWatching: true, logger: logger, configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+            container.ConnectionString = directory;
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        });
+        await storage.ConnectAsync(CancellationToken.None);
+        var statusAfterConnect = storage.Status;
+        var passThatStartsWatcher = Task.Run(() => storage.ReconcileAsync());
+        await watcherStartReached.Task.WaitAsync(WatcherTimeout);
+
+        // Act
+        StorageStatus statusWhileWatcherStarts;
+        try
+        {
+            var listingReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+            var otherPass = storage.ReconcileAsync();
+            await listingReached;
+            client.FailHangingCall(new IOException("The share did not answer."));
+            await otherPass.WaitAsync(WatcherTimeout);
+            statusWhileWatcherStarts = storage.Status;
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        await passThatStartsWatcher;
+
+        // Assert
+        Assert.Equal(StorageStatus.Connected, statusAfterConnect);
+        Assert.Equal(StorageStatus.Error, statusWhileWatcherStarts);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
     }
 
     [Fact]
@@ -1303,6 +1427,9 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
             WatcherTimeout);
     }
 
+    // What the file watcher logs within its start, once the file system watches. Nothing else shows that point.
+    private const string WatcherStartedMessage = "File watching enabled";
+
     /// <summary>
     /// Waits for something that passes started by the trigger bring about, with a clock that only the test moves.
     /// </summary>
@@ -1316,7 +1443,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
             },
             WatcherTimeout);
 
-    private sealed class CallbackLogger(Action<LogLevel> onLog) : ILogger<FluentStorageContainer>
+    private sealed class CallbackLogger(Action<LogLevel, string> onLog) : ILogger<FluentStorageContainer>
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -1324,6 +1451,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
 
         public void Log<TState>(
             LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            => onLog(logLevel);
+            => onLog(logLevel, formatter(state, exception));
     }
 }
