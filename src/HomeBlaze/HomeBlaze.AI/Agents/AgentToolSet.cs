@@ -75,11 +75,8 @@ public sealed class AgentToolSet
         return toolSet;
     }
 
-    private McpToolInfo Wrap(McpToolInfo tool, bool countsAgainstBudget) => new()
+    private McpToolInfo Wrap(McpToolInfo tool, bool countsAgainstBudget) => new(tool)
     {
-        Name = tool.Name,
-        Description = tool.Description,
-        InputSchema = tool.InputSchema,
         Handler = async (input, cancellationToken) =>
         {
             var arguments = input.GetRawText();

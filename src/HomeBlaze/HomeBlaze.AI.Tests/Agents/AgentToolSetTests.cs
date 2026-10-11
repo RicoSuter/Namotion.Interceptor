@@ -27,6 +27,19 @@ public class AgentToolSetTests
         Assert.Equal(["browse", "update_memory"], toolSet.Tools.Select(tool => tool.Name));
     }
 
+    [Fact]
+    public void WhenOnlyRemovedToolNamesAreAllowed_ThenOnlyUpdateMemoryIsAvailable()
+    {
+        // Arrange
+        var availableTools = new[] { Tool("browse"), Tool("invoke_query"), Tool("invoke_operation") };
+
+        // Act
+        var toolSet = AgentToolSet.Create(availableTools, ["invoke_method", "read_file"], MemoryTool, maxToolCalls: 5, progress: null);
+
+        // Assert
+        Assert.Equal(["update_memory"], toolSet.Tools.Select(tool => tool.Name));
+    }
+
     [Theory]
     [InlineData(new[] { "browse" }, true)]
     [InlineData(new[] { "browse", "invoke_operation" }, false)]

@@ -755,11 +755,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     // A backend may call tools on a flow that does not descend from RunTurnAsync, such as an HTTP request of
     // the MCP route, so each call marks its own flow as part of this agent's turn.
-    private McpToolInfo MarkAsTurnTool(McpToolInfo tool) => new()
+    private McpToolInfo MarkAsTurnTool(McpToolInfo tool) => new(tool)
     {
-        Name = tool.Name,
-        Description = tool.Description,
-        InputSchema = tool.InputSchema,
         Handler = async (input, cancellationToken) =>
         {
             CurrentTurnAgent.Value = this;

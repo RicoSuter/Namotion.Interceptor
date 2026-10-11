@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 
 namespace Namotion.Interceptor.Mcp;
@@ -7,6 +8,26 @@ namespace Namotion.Interceptor.Mcp;
 /// </summary>
 public class McpToolInfo
 {
+    /// <summary>
+    /// Initializes a new instance; all required members must be set.
+    /// </summary>
+    public McpToolInfo()
+    {
+    }
+
+    /// <summary>
+    /// Initializes a copy of <paramref name="source"/>. An object initializer can then replace single members,
+    /// for example <c>new McpToolInfo(tool) { Handler = wrappedHandler }</c>.
+    /// </summary>
+    [SetsRequiredMembers]
+    public McpToolInfo(McpToolInfo source)
+    {
+        Name = source.Name;
+        Description = source.Description;
+        InputSchema = source.InputSchema;
+        Handler = source.Handler;
+    }
+
     /// <summary>
     /// Gets the tool name.
     /// </summary>

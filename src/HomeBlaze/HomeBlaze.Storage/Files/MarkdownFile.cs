@@ -116,8 +116,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Returns the content with each {{ path }} expression replaced by its current value.
     /// </summary>
     /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute path of its
-    /// property in parentheses, for example "21.5 (/Devices/Kitchen/Temperature)". Null is treated as false.</param>
-    [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph. With includeSourcePaths set to true, each value is followed by the absolute path of its property in parentheses", Icon = "Preview")]
+    /// property in parentheses, for example "21.5 (/Devices/Kitchen/Temperature)"; get_property reads that path when the
+    /// property is exposed as state. Null is treated as false.</param>
+    [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph. With includeSourcePaths set to true, each value is followed by the absolute path of its property in parentheses, which get_property reads when the property is exposed as state", Icon = "Preview")]
     public string? ReadEvaluatedContent(bool? includeSourcePaths = null) =>
         _parser.RenderContent(Content, this, includeSourcePaths == true);
 

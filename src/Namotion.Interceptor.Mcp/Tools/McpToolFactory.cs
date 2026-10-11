@@ -43,13 +43,7 @@ public class McpToolFactory
                 var tool = tools[i];
                 if (descriptionAdditions.TryGetValue(tool.Name, out var addition))
                 {
-                    tools[i] = new McpToolInfo
-                    {
-                        Name = tool.Name,
-                        Description = tool.Description + " " + addition,
-                        InputSchema = tool.InputSchema,
-                        Handler = tool.Handler
-                    };
+                    tools[i] = new McpToolInfo(tool) { Description = tool.Description + " " + addition };
                 }
             }
         }
