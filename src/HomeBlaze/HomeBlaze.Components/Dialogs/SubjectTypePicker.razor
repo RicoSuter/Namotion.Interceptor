@@ -318,7 +318,7 @@
     private void SelectGroup(string? group)
     {
         _selectedGroup = group;
-        Refresh();
+        _isRenderPending = true;
     }
 
     private void ClearSearch()

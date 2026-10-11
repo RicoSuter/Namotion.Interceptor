@@ -9,11 +9,9 @@
 
 @implements IDisposable
 
-@* The first child would be the search field, which must not take the focus on a touch device. *@
 <MudDialog data-testid="create-subject-dialog"
            Class="subject-setup-dialog"
-           ContentClass="@(_selectedType is null ? "subject-setup-picker-content" : null)"
-           DefaultFocus="DefaultFocus.Element">
+           ContentClass="@(_selectedType is null ? "subject-setup-picker-content" : null)">
     <TitleContent>
         <MudText Typo="Typo.h6" data-testid="create-dialog-title">@GetTitle()</MudText>
     </TitleContent>
@@ -91,7 +89,7 @@
 <style>
     /* MudBlazor caps a dialog at the viewport height less the app bar, which leaves a phone in landscape too little. */
     .mud-dialog.subject-setup-dialog {
-        height: min(calc(100dvh - 16px), max(calc(100dvh - 200px), 480px));
+        height: max(calc(100dvh - 200px), 480px);
         max-height: calc(100dvh - 16px);
     }
 

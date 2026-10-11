@@ -77,6 +77,7 @@ public class SubjectFactoryTests
         using var serviceProvider = CreateServices();
         var factory = serviceProvider.GetRequiredService<SubjectFactory>();
         var registry = GetRegistry(serviceProvider);
+        var keptSubject = factory.CreateSubject(typeof(FactoryContextSubject));
         var subject = factory.CreateSubject(typeof(FactoryDependencySubject));
         var knownSubjects = registry.KnownSubjects.Keys.ToArray();
 
@@ -85,6 +86,21 @@ public class SubjectFactoryTests
 
         // Assert
         Assert.DoesNotContain(subject, knownSubjects);
+        Assert.Contains(keptSubject, knownSubjects);
         Assert.Equal(knownSubjects, registry.KnownSubjects.Keys.ToArray());
     }
+
+    [Fact]
+    public void WhenTypeIsNotASubject_ThenCreatingItThrows()
+    {
+        // Arrange
+        using var serviceProvider = CreateServices();
+        var factory = serviceProvider.GetRequiredService<SubjectFactory>();
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => factory.CreateSubject(typeof(NotASubject)));
+        Assert.Contains(nameof(NotASubject), exception.Message);
+    }
+
+    private sealed class NotASubject;
 }

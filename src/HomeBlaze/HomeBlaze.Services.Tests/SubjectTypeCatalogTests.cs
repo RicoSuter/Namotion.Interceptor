@@ -180,7 +180,7 @@ public class SubjectTypeCatalogTests
             ["Aardvark feeder", "Alpha relay", "Zebra sensor", "Catalog server subject"],
             descriptors.Select(descriptor => descriptor.DisplayName));
         Assert.Equal(
-            ["devices", "devices", "devices", "Servers"],
+            ["devices", "Devices", "Devices", "Servers"],
             descriptors.Select(descriptor => descriptor.Group));
         Assert.Equal([("devices", 3), ("Servers", 1)], CountMatches(groups));
         Assert.Equal(
@@ -236,7 +236,7 @@ public class SubjectTypeCatalogTests
         // Act
         var groups = SubjectTypeCatalog.GetGroups(descriptors, searchText);
 
-        // Assert - each term on its own matches a type, or the group of one.
+        // Assert - no type matches every term, although one of the terms matches a type or a group in each case.
         Assert.Empty(GetMatches(groups));
         Assert.Equal(["Devices", "Servers", "Other"], groups.Select(group => group.Name));
     }
@@ -287,7 +287,7 @@ public class SubjectTypeCatalogTests
     }
 
     [Fact]
-    public void WhenTypeDerivesFromAnAnnotatedType_ThenItDoesNotInheritTheDescription()
+    public void WhenTypeDerivesFromAnAnnotatedType_ThenItInheritsNoAttributes()
     {
         // Act
         var descriptor = SubjectTypeCatalog.Describe(typeof(CatalogDerivedAnnotatedSubject));

@@ -72,7 +72,7 @@
 
     // A null instance cannot stand for "not reported yet": a registered component that is not an
     // ISubjectComponent is reported as null and has nothing to apply.
-    private bool IsSubjectComponentPending => HostedComponentType is not null && !_isSubjectComponentRendered;
+    private bool IsSubjectComponentPending => !_isSubjectComponentRendered && HostedComponentType is not null;
 
     /// <summary>
     /// Gets whether the hosted editor is valid. Also true while a registered component has not rendered yet,

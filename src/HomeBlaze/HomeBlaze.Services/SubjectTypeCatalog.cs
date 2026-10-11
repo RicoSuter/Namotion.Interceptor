@@ -17,8 +17,6 @@ public partial class SubjectTypeCatalog
     /// </summary>
     public const string OtherGroup = "Other";
 
-    private const StringComparison GroupComparison = StringComparison.OrdinalIgnoreCase;
-
     private static readonly StringComparer GroupComparer = StringComparer.OrdinalIgnoreCase;
 
     private const string DefaultIconName = "Category";
@@ -46,40 +44,22 @@ public partial class SubjectTypeCatalog
     }
 
     /// <summary>
-    /// Gets the creatable types, ordered by group (alphabetically, <see cref="OtherGroup"/> last) and then by display name.
-    /// Groups are compared ignoring case, and every type of a group carries the spelling of the first one listed.
+    /// Gets the creatable types, ordered by group (alphabetically ignoring case, <see cref="OtherGroup"/> last) and then by display name.
     /// </summary>
     /// <param name="existingSubjects">The subjects of the current graph, used to hide single instance types that already exist.</param>
     public IReadOnlyList<SubjectTypeDescriptor> GetCreatableTypes(IEnumerable<IInterceptorSubject> existingSubjects)
     {
         var existingTypes = existingSubjects.Select(subject => subject.GetType()).ToHashSet();
 
-        var descriptors = _typeRegistry.RegisteredTypes
+        return _typeRegistry.RegisteredTypes
             .Where(type => typeof(IConfigurable).IsAssignableFrom(type) && !type.IsAbstract)
             .Where(type => !type.IsDefined(typeof(ExcludeFromCreationAttribute), false))
             .Where(type => !type.IsDefined(typeof(SingleInstanceAttribute), false) || !existingTypes.Contains(type))
             .Select(Describe)
-            .OrderBy(descriptor => string.Equals(descriptor.Group, OtherGroup, GroupComparison))
+            .OrderBy(descriptor => GroupComparer.Equals(descriptor.Group, OtherGroup))
             .ThenBy(descriptor => descriptor.Group, GroupComparer)
             .ThenBy(descriptor => descriptor.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
-
-        // One spelling per group, so that the sidebar entry and the section header of a group cannot differ.
-        var groupNames = new Dictionary<string, string>(GroupComparer);
-        for (var index = 0; index < descriptors.Count; index++)
-        {
-            var descriptor = descriptors[index];
-            if (!groupNames.TryGetValue(descriptor.Group, out var groupName))
-            {
-                groupNames.Add(descriptor.Group, descriptor.Group);
-            }
-            else if (groupName != descriptor.Group)
-            {
-                descriptors[index] = descriptor with { Group = groupName };
-            }
-        }
-
-        return descriptors;
     }
 
     /// <summary>
