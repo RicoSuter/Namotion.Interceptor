@@ -14,7 +14,7 @@
         <div class="flex-grow-1" data-testid="agent-chat-input" @ref="_inputContainer">
             <MudTextField T="string" @bind-Value="_message" Immediate="true" Lines="1" Sizing="InputSizing.Auto" MaxLines="6"
                           Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Ask the agent"
-                          HelperText="Enter sends, Shift+Enter adds a line" FullWidth="true" />
+                          HelperText="@(_sendsOnEnter ? "Enter sends, Shift+Enter adds a line" : null)" FullWidth="true" />
         </div>
         <MudIconButton Icon="@Icons.Material.Filled.Send" Variant="Variant.Filled" Color="Color.Primary" aria-label="Send" Class="mt-1"
                        OnClick="SendAsync" Disabled="@(_isSending || string.IsNullOrWhiteSpace(_message))" data-testid="agent-chat-send" />
@@ -28,6 +28,8 @@
     private DotNetObjectReference<AgentChatTab>? _dotNetReference;
     private IJSObjectReference? _module;
     private IJSObjectReference? _enterListener;
+    private bool _sendsOnEnter;
+    private bool _isDisposed;
 
     [Parameter, EditorRequired]
     public LlmAgentBase Agent { get; set; } = null!;
@@ -37,11 +39,41 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (!firstRender)
         {
+            return;
+        }
+
+        // DisposeAsync can run while an interop call is pending, so each result is checked against _isDisposed and
+        // released here when it arrives after disposal.
+        try
+        {
+            var module = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./_content/HomeBlaze.AI.Blazor/AgentChatTab.razor.js");
+            if (_isDisposed)
+            {
+                await module.DisposeAsync();
+                return;
+            }
+
+            _module = module;
             _dotNetReference = DotNetObjectReference.Create(this);
-            _module = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./_content/HomeBlaze.AI.Blazor/AgentChatTab.razor.js");
-            _enterListener = await _module.InvokeAsync<IJSObjectReference?>("attachEnterToSend", _inputContainer, _dotNetReference);
+            var listener = await module.InvokeAsync<IJSObjectReference?>("attachEnterToSend", _inputContainer, _dotNetReference);
+            if (_isDisposed)
+            {
+                await DisposeListenerAsync(listener);
+                return;
+            }
+
+            _enterListener = listener;
+            if (listener is not null && await listener.InvokeAsync<bool>("sendsOnEnter") && !_isDisposed)
+            {
+                _sendsOnEnter = true;
+                StateHasChanged();
+            }
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or OperationCanceledException)
+        {
+            // The circuit is gone or the script failed to load; the Send button still works.
         }
     }
 
@@ -84,24 +116,41 @@
 
     public async ValueTask DisposeAsync()
     {
+        _isDisposed = true;
+        var listener = _enterListener;
+        var module = _module;
+        _enterListener = null;
+        _module = null;
         try
         {
-            if (_enterListener is not null)
+            await DisposeListenerAsync(listener);
+            if (module is not null)
             {
-                await _enterListener.InvokeVoidAsync("dispose");
-                await _enterListener.DisposeAsync();
-            }
-
-            if (_module is not null)
-            {
-                await _module.DisposeAsync();
+                await module.DisposeAsync();
             }
         }
-        catch (JSDisconnectedException)
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or OperationCanceledException)
         {
             // The circuit is gone, and the browser dropped the listener with the page.
         }
 
         _dotNetReference?.Dispose();
+    }
+
+    private static async Task DisposeListenerAsync(IJSObjectReference? listener)
+    {
+        if (listener is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await listener.InvokeVoidAsync("dispose");
+        }
+        finally
+        {
+            await listener.DisposeAsync();
+        }
     }
 }
