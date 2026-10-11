@@ -86,8 +86,9 @@ public partial class DemoPagesTests
             "Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace.",
             "The type 'HomeBlaze.Storage.Files.MarkdownFile' cannot be used as a block because it does not implement IConfigurable.",
             "'Card' is not a type name. A slot block is only allowed directly inside a widget block.",
-            "Card has no configuration property 'titel'. Available: icon, title.",
-            "'fast' is not a valid value for 'targetSpeed'. Expected a value of type Int32.",
+            "Card has no configuration property 'Titel'. Available: Icon, Title.",
+            "Card has no configuration property 'title'. Did you mean 'Title'? Available: Icon, Title.",
+            "'fast' is not a valid value for 'TargetSpeed'. Expected a value of type Int32.",
             "Card has no slot 'Footr'. Available: Content, Footer.",
             "Motor has no default slot, so it cannot have content.",
             "The slot 'Footer' takes one block, but there are 2.",
@@ -176,7 +177,7 @@ public partial class DemoPagesTests
     /// <summary>Gets the 1-based line of the block of the page that has this title. A code fence shows no block.</summary>
     private static int FindBlockLine(string fileName, string title) =>
         MarkdownPageParser.Parse(ReadDemoPage(fileName)).AllBlocks
-            .Single(block => block.Head is not null && block.Head.Arguments.Any(argument => argument.Key == "title" && argument.Value == title))
+            .Single(block => block.Head is not null && block.Head.Arguments.Any(argument => argument.Key == "Title" && argument.Value == title))
             .Line;
 
     /// <summary>Gets the messages of all error boxes of the page, in the order of the page, without the line numbers.</summary>

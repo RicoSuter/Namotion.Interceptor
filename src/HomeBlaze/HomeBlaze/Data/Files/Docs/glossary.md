@@ -169,7 +169,7 @@ A path in double curly braces in the text of a markdown page, like `{{ mymotor/C
 
 ### Block
 
-A part of a markdown page between a head line that starts with two or more colons and a closing line of as many colons. A block inside another block has more colons than the block around it. A widget block has a full type name on its head line. It creates a subject of that type and shows its widget. A slot block has a name without a dot and fills the slot of that name on the widget around it. See [Markdown Pages: Blocks](administration/pages.md#blocks).
+A part of a markdown page between a head line that starts with two or more colons and a closing line of as many colons. A block inside another block has more colons than the block around it. A widget block has a full type name on its head line. It creates a subject of that type and shows its widget. Its arguments and the keys of its `json` fence are the property names of the type, like `TargetSpeed`. Configuration files keep camelCase, and a page uses the property names. A slot block has a name without a dot and fills the slot of that name on the widget around it. See [Markdown Pages: Blocks](administration/pages.md#blocks).
 
 ### Slot
 

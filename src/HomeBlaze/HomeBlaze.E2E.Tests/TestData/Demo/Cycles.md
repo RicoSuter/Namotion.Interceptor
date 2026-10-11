@@ -4,18 +4,18 @@ title: Cycles Demo
 
 # Cycles Demo
 
-:: HomeBlaze.Components.Card#selfcard title="Self Card"
-::: HomeBlaze.Components.Widget path=selfcard
+:: HomeBlaze.Components.Card#selfcard Title="Self Card"
+::: HomeBlaze.Components.Widget Path=selfcard
 :::
 ::
 
-:: HomeBlaze.Components.Card#firstcard title="First Card"
-::: HomeBlaze.Components.Widget path=secondcard
+:: HomeBlaze.Components.Card#firstcard Title="First Card"
+::: HomeBlaze.Components.Widget Path=secondcard
 :::
 ::
 
-:: HomeBlaze.Components.Card#secondcard title="Second Card"
-::: HomeBlaze.Components.Widget path=firstcard
+:: HomeBlaze.Components.Card#secondcard Title="Second Card"
+::: HomeBlaze.Components.Widget Path=firstcard
 :::
 ::
 

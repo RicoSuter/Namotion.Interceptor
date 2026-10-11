@@ -102,7 +102,7 @@ See [Paths](paths.md) for full path documentation including `./`, `../`, bracket
 A block puts a widget on the page. It starts with a head line of two colons and a type name, and ends with a closing line of two colons:
 
 ~~~~markdown
-:: HomeBlaze.Samples.Motor#mymotor name="My Motor" targetSpeed=2000 simulationInterval=00:00:01
+:: HomeBlaze.Samples.Motor#mymotor Name="My Motor" TargetSpeed=2000 SimulationInterval=00:00:01
 ::
 
 The motor runs at {{ mymotor/CurrentSpeed }} RPM.
@@ -121,21 +121,22 @@ The sample data of a development checkout has a page `Demo/Blocks.md` that shows
 - **Closing line**: A fence and nothing else, with exactly as many colons as the head line of the block. Every block needs its closing line, also an empty block. A line of colons with nothing after them is always a closing line.
 - **Type**: The full type name with its namespace. It is the name that the `$type` property has in the JSON file of a subject.
 - **Name**: An optional `#name` follows the type without a space. It starts with a letter or `_` and continues with letters, digits, `_` or `-`. A name is unique on the page, however deeply the blocks are nested.
-- **Arguments**: Any number of `key=value` pairs follow, separated by spaces. Each one sets a configuration property of the subject. The keys are the property names in camelCase, the same as in the JSON file of a subject.
-- **Case**: Type names, slot names and argument keys are case-sensitive.
+- **Arguments**: Any number of `key=value` pairs follow, separated by spaces. Each one sets a configuration property of the subject. The key is the name of the property, written exactly as in a path, for example `TargetSpeed`.
+- **Case**: Type names, slot names and argument keys are case-sensitive. A key in another case, like `targetSpeed`, is an error, and the message names the property.
+- **Not the names of a JSON file**: The JSON file of a subject names the same properties in camelCase, like `targetSpeed`. Configuration files keep camelCase, and a page uses the property names.
 
 ### Argument Values
 
 | Value | Written | Example |
 |-------|---------|---------|
-| Text without spaces | As it is | `name=CardMotor` |
-| Text with spaces, or empty text | In double quotes | `title="Motor Card"` |
-| Number | As it is | `targetSpeed=1200` |
-| Yes or no | `true` or `false` | `isSnapToGridEnabled=true` |
-| Duration | As it is | `simulationInterval=00:00:01` |
+| Text without spaces | As it is | `Name=CardMotor` |
+| Text with spaces, or empty text | In double quotes | `Title="Motor Card"` |
+| Number | As it is | `TargetSpeed=1200` |
+| Yes or no | `true` or `false` | `IsSnapToGridEnabled=true` |
+| Duration | As it is | `SimulationInterval=00:00:01` |
 
 - Inside double quotes, write `\"` for a double quote and `\\` for a backslash. A value without quotes cannot contain a double quote.
-- A value is converted to the type of its property. A value that does not fit, like `targetSpeed=fast`, is an error.
+- A value is converted to the type of its property. A value that does not fit, like `TargetSpeed=fast`, is an error.
 - A key that the type does not have is an error, and so is a key that is set twice.
 
 ### Configuration That Is Not a Single Value
@@ -143,24 +144,32 @@ The sample data of a development checkout has a page `Demo/Blocks.md` that shows
 A list or an object does not fit on the head line. Write such configuration as a JSON object in a `json` code fence that is the first thing inside the block:
 
 ~~~~markdown
-:: HomeBlaze.Components.GridLayout#grid rows=1 columns=4
+:: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
 ```json
-{ "cells": [] }
+{
+  "Cells": [
+    { "Row": 0, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" } }
+  ]
+}
 ```
 ::
 ~~~~
 
-The keys of the object are configuration properties like the arguments, and an unknown key is an error here too. When an argument and the fence set the same key, the argument wins. The fence is not shown on the page.
+- **Keys**: The keys of the object are property names like the keys of the arguments. This holds at every depth: here for `Cells` of the grid, for `Row`, `Column` and `Child` of a cell, and for `Path` of the widget in the cell.
+- **`$type`**: A subject inside the object names its type with `$type`, which is written the same as in a JSON file.
+- **Unknown keys**: A key at the top level of the object that the type does not have is an error, like an unknown argument. Below the top level, a key that names no property is ignored, and so is a key in camelCase. When a nested value is missing on the page, check the case of its key.
+- **Argument and fence**: When an argument and the fence set the same key, the argument wins.
+- **Not shown**: The fence is not shown on the page.
 
 ### Content and Slots
 
 A widget can take page content: text, expressions and other blocks. Its type declares the places for content as slots. There is at most one default slot and any number of named slots.
 
 ~~~~markdown
-:: HomeBlaze.Components.Card title="Motor Card" icon=Settings
+:: HomeBlaze.Components.Card Title="Motor Card" Icon=Settings
 Card body with a live value: speed is {{ cardmotor/CurrentSpeed }} RPM.
 
-::: HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1200 simulationInterval=00:00:01
+::: HomeBlaze.Samples.Motor#cardmotor Name=CardMotor TargetSpeed=1200 SimulationInterval=00:00:01
 :::
 
 ::: Footer
@@ -172,7 +181,7 @@ Card footer text
 - **Default slot**: Everything inside a widget block that is not a slot block goes to the default slot of the widget. Here that is the text, the expression and the motor.
 - **Slot block**: A block whose name has no dot is a slot block. It fills the slot of that name on the widget directly around it. Here `Footer` fills the footer of the card.
 - **One block, one value**: A slot for one value takes one block. A slot for a list takes one value per block, in the order of the page, like the `Item` blocks of a `FlowLayout` and the `Tab` blocks of a `TabLayout`.
-- **Slot blocks with arguments**: Some slot blocks create a subject and take arguments and a `#name`, like `Tab` with `title` and `icon`. All others hold content only and take no arguments, no name and no `json` fence, like `Footer` and `Item`.
+- **Slot blocks with arguments**: Some slot blocks create a subject and take arguments and a `#name`, like `Tab` with `Title` and `Icon`. All others hold content only and take no arguments, no name and no `json` fence, like `Footer` and `Item`.
 - **Widgets without a default slot**: A type that declares no default slot cannot have content. The motor above is such a type, so its block stays empty.
 
 ### Blocks Inside Blocks
@@ -190,8 +199,8 @@ A titled box around page content.
 
 | Part | Kind | Description |
 |------|------|-------------|
-| `title` | Argument | Title at the top of the card |
-| `icon` | Argument | Icon next to the title |
+| `Title` | Argument | Title at the top of the card |
+| `Icon` | Argument | Icon next to the title |
 | Content | Default slot | The body of the card |
 | `Footer` | Slot block | Content below a divider at the bottom of the card |
 
@@ -203,19 +212,19 @@ Lays its cells out from left to right and wraps them to as many rows as the widt
 
 | Part | Kind | Description |
 |------|------|-------------|
-| `minWidth` | Argument | The narrowest a cell may get, in pixels. The default is 320, and a value below 50 counts as 50 |
+| `MinWidth` | Argument | The narrowest a cell may get, in pixels. The default is 320, and a value below 50 counts as 50 |
 | `Item` | Slot block, any number | One cell. Holds any page content |
 
 ~~~~markdown
-:: HomeBlaze.Components.FlowLayout minWidth=320
+:: HomeBlaze.Components.FlowLayout MinWidth=320
 ::: Item
-:::: HomeBlaze.Components.Card title="Compressor" icon=Bolt
-::::: HomeBlaze.Components.Widget path=../Compressor
+:::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt
+::::: HomeBlaze.Components.Widget Path=../Compressor
 :::::
 ::::
 :::
 ::: Item
-:::: HomeBlaze.Components.Card title="Notes"
+:::: HomeBlaze.Components.Card Title="Notes"
 A cell can hold any page content, not only widgets.
 
 The compressor runs at {{ ../Compressor/CurrentSpeed }} RPM.
@@ -226,7 +235,7 @@ The compressor runs at {{ ../Compressor/CurrentSpeed }} RPM.
 
 The fences show the nesting rule: the flow has two colons, its items have three, the cards in the items have four and the widgets in the cards have five.
 
-Choose `minWidth` at least as large as the widest widget in the cells needs. A cell can get as narrow as `minWidth`, and a widget that needs more room then paints over the next cell. The sample motor widget needs 280 pixels, and 312 pixels inside a card.
+Choose `MinWidth` at least as large as the widest widget in the cells needs. A cell can get as narrow as `MinWidth`, and a widget that needs more room then paints over the next cell. The sample motor widget needs 280 pixels, and 312 pixels inside a card.
 
 ### TabLayout
 
@@ -234,20 +243,20 @@ Shows one of several tabs at a time.
 
 | Part | Kind | Description |
 |------|------|-------------|
-| `Tab` | Slot block, any number | One tab. Takes the arguments `title` and `icon`, an optional `#name`, and any page content |
+| `Tab` | Slot block, any number | One tab. Takes the arguments `Title` and `Icon`, an optional `#name`, and any page content |
 
 ~~~~markdown
 :: HomeBlaze.Components.TabLayout
-::: Tab#cooling title="Cooling Fan" icon=Home
+::: Tab#cooling Title="Cooling Fan" Icon=Home
 The cooling fan has a temperature of {{ ../CoolingFan/Temperature }} °C.
 
-:::: HomeBlaze.Components.Widget path=../CoolingFan
+:::: HomeBlaze.Components.Widget Path=../CoolingFan
 ::::
 :::
-::: Tab#exhaust title="Exhaust Fan"
+::: Tab#exhaust Title="Exhaust Fan"
 The exhaust fan runs at {{ ../ExhaustFan/CurrentSpeed }} RPM.
 
-:::: HomeBlaze.Components.Widget path=../ExhaustFan
+:::: HomeBlaze.Components.Widget Path=../ExhaustFan
 ::::
 :::
 ::
@@ -262,20 +271,20 @@ Shows the widget of a subject that exists somewhere else: in a file of its own, 
 
 | Part | Kind | Description |
 |------|------|-------------|
-| `path` | Argument | Path to the subject to show. The section "Paths on Markdown Pages" in [Paths](paths.md) explains where it starts |
+| `Path` | Argument | Path to the subject to show. The section "Paths on Markdown Pages" in [Paths](paths.md) explains where it starts |
 
 The example continues the card under "Content and Slots" above, which declares the motor `cardmotor`. On a page without that block, the first widget shows "Cannot resolve path".
 
 ~~~~markdown
-:: HomeBlaze.Components.Card title="Reference Card" icon=Link
+:: HomeBlaze.Components.Card Title="Reference Card" Icon=Link
 The motor of the first card, referenced by its name:
 
-::: HomeBlaze.Components.Widget path=cardmotor
+::: HomeBlaze.Components.Widget Path=cardmotor
 :::
 
 A motor next to this page, referenced by a relative path:
 
-::: HomeBlaze.Components.Widget path=../Conveyor
+::: HomeBlaze.Components.Widget Path=../Conveyor
 :::
 ::
 ~~~~
@@ -285,7 +294,7 @@ A motor next to this page, referenced by a relative path:
 
 ### Icons
 
-The `icon` of a card and of a tab is the name of a MudBlazor Material icon, for example `Settings`, `Bolt` or `WaterDrop`. An unknown name shows a default icon.
+The `Icon` of a card and of a tab is the name of a MudBlazor Material icon, for example `Settings`, `Bolt` or `WaterDrop`. An unknown name shows a default icon.
 
 ### Style Blocks
 
@@ -323,8 +332,9 @@ A block that cannot be shown is replaced by a red box with the line number of th
 | The type exists but is not made to be configured, so a page cannot create it | The type 'HomeBlaze.Storage.Files.MarkdownFile' cannot be used as a block because it does not implement IConfigurable. |
 | A type name without its namespace at the top level of the page, or a slot block there | 'Card' is not a type name. A slot block is only allowed directly inside a widget block. |
 | The widget has no slot of that name | Card has no slot 'Footr'. Available: Content, Footer. |
-| The type has no configuration property of that name | Card has no configuration property 'titel'. Available: icon, title. |
-| The value does not fit the property | 'wide' is not a valid value for 'minWidth'. Expected a value of type Int32. |
+| The type has no configuration property of that name | Card has no configuration property 'Titel'. Available: Icon, Title. |
+| The key differs from the name of a property only in upper and lower case | Card has no configuration property 'title'. Did you mean 'Title'? Available: Icon, Title. |
+| The value does not fit the property | 'wide' is not a valid value for 'MinWidth'. Expected a value of type Int32. |
 | Content in a widget without a default slot | Motor has no default slot, so it cannot have content. |
 | A second block for a slot that takes one | The slot 'Footer' takes one block, but there are 2. |
 | Two blocks with the same name | The name 'mymotor' is used twice on this page. |
@@ -358,7 +368,7 @@ The page editor marks the head line of every widget block and of every slot bloc
 - **Edit**: With the cursor on a marked head line, the toolbar shows a button that opens the edit dialog of the subject. Saving the dialog writes the configuration back into the block and saves the page. Only the head line and the `json` fence change, the content of the block stays as it is.
 - **Create**: The "Create" button adds a new block at the line of the cursor and saves the page. The block gets two colons directly on the page, and one colon more than the block around it when the cursor is inside the content of a block. The name you enter becomes the `#name` of the block. The wizard checks it while you type: it must start with a letter or `_`, contain only letters, digits, `_` and `-`, and not be used on the page yet.
 - **Save first**: "Edit" needs the saved page and the text in the editor to be the same from the start of the page to the end of the block's head line and `json` fence. When that part has unsaved changes, the editor asks you to save the page first. Unsaved text after the block is saved together with the edit.
-- **What is written**: Single values are written on the head line. Lists, objects and text with a line break are written into the `json` fence. Values that are not set are left out. The head line keeps its number of colons and gets one space after them.
+- **What is written**: Single values are written on the head line. Lists, objects and text with a line break are written into the `json` fence. Both are written with the property names. Values that are not set are left out. The head line keeps its number of colons and gets one space after them.
 
 Editing a subject elsewhere in the UI, for example through the edit button of its widget, writes its block in the same way.
 
@@ -382,11 +392,11 @@ Before:
 After:
 
 ~~~~markdown
-:: HomeBlaze.Samples.Motor#mymotor name="My Motor" targetSpeed=2000 simulationInterval=00:00:01
+:: HomeBlaze.Samples.Motor#mymotor Name="My Motor" TargetSpeed=2000 SimulationInterval=00:00:01
 ::
 ~~~~
 
-The name in parentheses becomes the `#name`, the value of `$type` becomes the type name, and every single value becomes an argument. Lists and objects go into a `json` fence inside the block.
+The name in parentheses becomes the `#name`, the value of `$type` becomes the type name, and every single value becomes an argument. Lists and objects go into a `json` fence inside the block. The old fence named its keys in camelCase like a JSON file. A block uses the property names, so `targetSpeed` becomes `TargetSpeed`, on the head line and in the `json` fence.
 
 ### Not Supported
 
@@ -431,10 +441,10 @@ position: 0
 
 # Factory Status
 
-:: HomeBlaze.Components.FlowLayout minWidth=320
+:: HomeBlaze.Components.FlowLayout MinWidth=320
 ::: Item
-:::: HomeBlaze.Components.Card title="Conveyor Belt" icon=Settings
-::::: HomeBlaze.Components.Widget path=/Demo/Conveyor
+:::: HomeBlaze.Components.Card Title="Conveyor Belt" Icon=Settings
+::::: HomeBlaze.Components.Widget Path=/Demo/Conveyor
 :::::
 
 ::::: Footer
@@ -443,8 +453,8 @@ Current speed: **{{ /Demo/Conveyor/CurrentSpeed }}** RPM
 ::::
 :::
 ::: Item
-:::: HomeBlaze.Components.Card title="Cooling Fan" icon=Bolt
-::::: HomeBlaze.Components.Widget path=/Demo/CoolingFan
+:::: HomeBlaze.Components.Card Title="Cooling Fan" Icon=Bolt
+::::: HomeBlaze.Components.Widget Path=/Demo/CoolingFan
 :::::
 
 ::::: Footer
@@ -456,7 +466,7 @@ Temperature: **{{ /Demo/CoolingFan/Temperature }}** °C
 
 ## Test Motor
 
-:: HomeBlaze.Samples.Motor#testmotor name="Test Motor" targetSpeed=1800 simulationInterval=00:00:01
+:: HomeBlaze.Samples.Motor#testmotor Name="Test Motor" TargetSpeed=1800 SimulationInterval=00:00:01
 ::
 
 The test motor runs at **{{ testmotor/CurrentSpeed }}** RPM.
@@ -473,7 +483,7 @@ For more details, see [Motor Setup Guide](../samples/MotorSetup.md).
 1. **Name the subjects that have state**: A subject with a `#name` survives edits elsewhere on the page. Names like `primaryMotor` are clearer than `m1`
 2. **Count the colons from the outside in**: Two for a block directly on the page, one more for each level inside it
 3. **Show shared subjects by path**: Keep a device in a file of its own and show it with a `Widget` block. Create a subject in a block only when it belongs to this page
-4. **Fit `minWidth` to the widgets**: A flow layout needs a `minWidth` that is at least as wide as its widest widget
+4. **Fit `MinWidth` to the widgets**: A flow layout needs a `MinWidth` that is at least as wide as its widest widget
 5. **Order your pages**: Use `position` in the frontmatter to control the place in the navigation
 6. **Keep pages focused**: One topic per page makes navigation cleaner
 

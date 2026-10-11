@@ -1058,6 +1058,7 @@ A declaration that breaks one of these rules cannot be used. Every block of that
 **Rules for a subject that is used on a page:**
 
 - A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `TabLayout`. For a type without it, the page shows an error that says the type cannot be used as a block.
+- A page names a `[Configuration]` property by its property name, for example `TargetSpeed=1200` on the head line and `"TargetSpeed"` in the `json` fence, also for the properties of nested objects and subjects. Configuration files keep camelCase, and a page uses the property names. An explicit JSON name on a property, such as `[JsonPropertyName]`, applies to configuration files only.
 - A page updates the subject of a block in place while the block stays. When an argument is removed from the block, the page creates a new instance.
 - The page does not call `ApplyConfigurationAsync` when it first creates the subject of a block. It calls it on every reload of the page for a subject that it keeps, also when the arguments of that block did not change. A reload happens with every change of the page text, so expect the method to run often.
 - The subject of a block that ends as an error is released again, so a hosted subject can get `StopAsync` without a preceding `StartAsync`.

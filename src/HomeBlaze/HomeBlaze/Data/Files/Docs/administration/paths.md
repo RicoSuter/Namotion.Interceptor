@@ -67,21 +67,21 @@ With `[InlinePaths]` dictionaries (like folder children), keys become direct seg
 
 ## Paths on Markdown Pages
 
-Every relative path on a markdown page starts at the page. This holds for the path of an expression and for the `path` of a `Widget` block, however deeply the block is nested. Moving a block into a card or into a tab does not change where its paths lead.
+Every relative path on a markdown page starts at the page. This holds for the path of an expression and for the `Path` of a `Widget` block, however deeply the block is nested. Moving a block into a card or into a tab does not change where its paths lead.
 
 A block gets a name with `#name` on its head line. The name is known anywhere on the page, also inside other blocks and above the block that declares it. See [Markdown Pages](pages.md) for the block syntax.
 
 ~~~~markdown
-:: HomeBlaze.Components.Card title="Motor Card" icon=Settings
-::: HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1200 simulationInterval=00:00:01
+:: HomeBlaze.Components.Card Title="Motor Card" Icon=Settings
+::: HomeBlaze.Samples.Motor#cardmotor Name=CardMotor TargetSpeed=1200 SimulationInterval=00:00:01
 :::
 ::
 
-:: HomeBlaze.Components.Card title="Reference Card" icon=Link
-::: HomeBlaze.Components.Widget path=cardmotor
+:: HomeBlaze.Components.Card Title="Reference Card" Icon=Link
+::: HomeBlaze.Components.Widget Path=cardmotor
 :::
 
-::: HomeBlaze.Components.Widget path=../Conveyor
+::: HomeBlaze.Components.Widget Path=../Conveyor
 :::
 
 The named motor has a temperature of {{ cardmotor/Temperature }} °C.

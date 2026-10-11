@@ -13,12 +13,12 @@ Each section of this page has a block that is broken on purpose, and says what i
 The type name is misspelled, `Crad` instead of `Card`. Write the full type name with its namespace, as it stands in the `$type` of a JSON file.
 
 ~~~~markdown
-:: HomeBlaze.Components.Crad title="Typing Mistake"
+:: HomeBlaze.Components.Crad Title="Typing Mistake"
 This card is never shown.
 ::
 ~~~~
 
-:: HomeBlaze.Components.Crad title="Typing Mistake"
+:: HomeBlaze.Components.Crad Title="Typing Mistake"
 This card is never shown.
 ::
 
@@ -39,24 +39,38 @@ The type exists, but it is not made to be configured, so a block cannot create i
 A name without a dot is the name of a slot, and a slot block is only allowed directly inside a widget block. Write the full name `HomeBlaze.Components.Card`.
 
 ~~~~markdown
-:: Card title="Short Name"
+:: Card Title="Short Name"
 ::
 ~~~~
 
-:: Card title="Short Name"
+:: Card Title="Short Name"
 ::
 
 ## An argument that the type does not have
 
-The key is misspelled, `titel` instead of `title`. The message lists the keys that the type has. Keys are case-sensitive.
+The key is misspelled, `Titel` instead of `Title`. The message lists the keys that the type has. A key is the name of a property.
 
 ~~~~markdown
-:: HomeBlaze.Components.Card titel="Motor Card"
+:: HomeBlaze.Components.Card Titel="Motor Card"
 The body of the card.
 ::
 ~~~~
 
-:: HomeBlaze.Components.Card titel="Motor Card"
+:: HomeBlaze.Components.Card Titel="Motor Card"
+The body of the card.
+::
+
+## An argument in another case
+
+Keys are case-sensitive, and the key here is `title` instead of `Title`. When a key differs from the name of a property only in upper and lower case, the message names that property. A JSON file of a subject writes the same property as `title`, a page writes it as `Title`.
+
+~~~~markdown
+:: HomeBlaze.Components.Card title="Lower Case"
+The body of the card.
+::
+~~~~
+
+:: HomeBlaze.Components.Card title="Lower Case"
 The body of the card.
 ::
 
@@ -65,11 +79,11 @@ The body of the card.
 The target speed of a motor is a number, and `fast` is not one. Write a value of the type that the message names.
 
 ~~~~markdown
-:: HomeBlaze.Samples.Motor#fastmotor name="Fast Motor" targetSpeed=fast
+:: HomeBlaze.Samples.Motor#fastmotor Name="Fast Motor" TargetSpeed=fast
 ::
 ~~~~
 
-:: HomeBlaze.Samples.Motor#fastmotor name="Fast Motor" targetSpeed=fast
+:: HomeBlaze.Samples.Motor#fastmotor Name="Fast Motor" TargetSpeed=fast
 ::
 
 ## A slot that the widget does not have
@@ -77,7 +91,7 @@ The target speed of a motor is a number, and `fast` is not one. Write a value of
 The slot name is misspelled, `Footr` instead of `Footer`. The message lists the slots that the widget has. The box replaces the whole card and names the line of the slot block.
 
 ~~~~markdown
-:: HomeBlaze.Components.Card title="Misspelled Footer"
+:: HomeBlaze.Components.Card Title="Misspelled Footer"
 The body of the card.
 
 ::: Footr
@@ -86,7 +100,7 @@ The footer of the card.
 ::
 ~~~~
 
-:: HomeBlaze.Components.Card title="Misspelled Footer"
+:: HomeBlaze.Components.Card Title="Misspelled Footer"
 The body of the card.
 
 ::: Footr
@@ -99,12 +113,12 @@ The footer of the card.
 A motor declares no slot, so its block must stay empty. Move the text out of the block, or put the text and the motor into a card.
 
 ~~~~markdown
-:: HomeBlaze.Samples.Motor#contentmotor name="Content Motor"
+:: HomeBlaze.Samples.Motor#contentmotor Name="Content Motor"
 A motor has no place for this text.
 ::
 ~~~~
 
-:: HomeBlaze.Samples.Motor#contentmotor name="Content Motor"
+:: HomeBlaze.Samples.Motor#contentmotor Name="Content Motor"
 A motor has no place for this text.
 ::
 
@@ -113,7 +127,7 @@ A motor has no place for this text.
 A card has one footer. The box names the line of the second `Footer` block. Remove one of the two, or put both texts into one block.
 
 ~~~~markdown
-:: HomeBlaze.Components.Card title="Two Footers"
+:: HomeBlaze.Components.Card Title="Two Footers"
 The body of the card.
 
 ::: Footer
@@ -126,7 +140,7 @@ The second footer.
 ::
 ~~~~
 
-:: HomeBlaze.Components.Card title="Two Footers"
+:: HomeBlaze.Components.Card Title="Two Footers"
 The body of the card.
 
 ::: Footer
@@ -143,17 +157,17 @@ The second footer.
 A name is unique on the page. The first block with the name keeps it and is shown, and every other block with that name is an error. Give the second motor a name of its own.
 
 ~~~~markdown
-:: HomeBlaze.Samples.Motor#twin name="First Twin" targetSpeed=500
+:: HomeBlaze.Samples.Motor#twin Name="First Twin" TargetSpeed=500
 ::
 
-:: HomeBlaze.Samples.Motor#twin name="Second Twin" targetSpeed=700
+:: HomeBlaze.Samples.Motor#twin Name="Second Twin" TargetSpeed=700
 ::
 ~~~~
 
-:: HomeBlaze.Samples.Motor#twin name="First Twin" targetSpeed=500
+:: HomeBlaze.Samples.Motor#twin Name="First Twin" TargetSpeed=500
 ::
 
-:: HomeBlaze.Samples.Motor#twin name="Second Twin" targetSpeed=700
+:: HomeBlaze.Samples.Motor#twin Name="Second Twin" TargetSpeed=700
 ::
 
 ## A closing line that closes nothing
@@ -161,14 +175,14 @@ A name is unique on the page. The first block with the name keeps it and is show
 A closing line has as many colons as the head line of its block. The card starts with two colons, and the line of three colons after the first paragraph matches no open block. The message names the blocks that are open at that line. The card itself is fine and still shows the text before and after the line. Remove the line, or give it two colons if it was meant to close the card.
 
 ~~~~markdown
-:: HomeBlaze.Components.Card title="Stray Closing Line"
+:: HomeBlaze.Components.Card Title="Stray Closing Line"
 The first paragraph of the card.
 :::
 The second paragraph of the card.
 ::
 ~~~~
 
-:: HomeBlaze.Components.Card title="Stray Closing Line"
+:: HomeBlaze.Components.Card Title="Stray Closing Line"
 The first paragraph of the card.
 :::
 The second paragraph of the card.
@@ -179,13 +193,13 @@ The second paragraph of the card.
 The motor inside the card has no closing line. The line of two colons closes the card and the motor with it, so the card is shown, and the box at the line of the motor names the line that is missing. Add a line of three colons after the head line of the motor.
 
 ~~~~markdown
-:: HomeBlaze.Components.Card title="Open Motor"
-::: HomeBlaze.Samples.Motor#openmotor name="Open Motor" targetSpeed=800
+:: HomeBlaze.Components.Card Title="Open Motor"
+::: HomeBlaze.Samples.Motor#openmotor Name="Open Motor" TargetSpeed=800
 ::
 ~~~~
 
-:: HomeBlaze.Components.Card title="Open Motor"
-::: HomeBlaze.Samples.Motor#openmotor name="Open Motor" targetSpeed=800
+:: HomeBlaze.Components.Card Title="Open Motor"
+::: HomeBlaze.Samples.Motor#openmotor Name="Open Motor" TargetSpeed=800
 ::
 
 A block that is still open at the end of the page gets the same box, and everything after its head line is then part of it and is not shown.
@@ -195,15 +209,15 @@ A block that is still open at the end of the page gets the same box, and everyth
 A block inside another block needs more colons than the block around it. The card and the motor inside it both have two. The box names both numbers and the line of the card. The motor still ends at its own closing line, so the card is shown with the text after it. Give the motor three colons on its head line and on its closing line.
 
 ~~~~markdown
-:: HomeBlaze.Components.Card title="Outer Card"
-:: HomeBlaze.Samples.Motor#fencemotor name="Fence Motor" targetSpeed=800
+:: HomeBlaze.Components.Card Title="Outer Card"
+:: HomeBlaze.Samples.Motor#fencemotor Name="Fence Motor" TargetSpeed=800
 ::
 The text after the motor.
 ::
 ~~~~
 
-:: HomeBlaze.Components.Card title="Outer Card"
-:: HomeBlaze.Samples.Motor#fencemotor name="Fence Motor" targetSpeed=800
+:: HomeBlaze.Components.Card Title="Outer Card"
+:: HomeBlaze.Samples.Motor#fencemotor Name="Fence Motor" TargetSpeed=800
 ::
 The text after the motor.
 ::
@@ -213,11 +227,11 @@ The text after the motor.
 A block is allowed directly on the page, directly inside another widget block and directly inside a slot block. Inside a quote, a list item or a style block it is an error. Move the block out of the quote.
 
 ~~~~markdown
-> :: HomeBlaze.Samples.Motor#quotedmotor name="Quoted Motor"
+> :: HomeBlaze.Samples.Motor#quotedmotor Name="Quoted Motor"
 > ::
 ~~~~
 
-> :: HomeBlaze.Samples.Motor#quotedmotor name="Quoted Motor"
+> :: HomeBlaze.Samples.Motor#quotedmotor Name="Quoted Motor"
 > ::
 
 ## A json fence with broken JSON
@@ -225,22 +239,22 @@ A block is allowed directly on the page, directly inside another widget block an
 The list of cells is opened and never closed. The message ends with what the reader of the JSON found and where. The fence must hold one valid JSON object.
 
 ~~~~markdown
-:: HomeBlaze.Components.GridLayout#brokengrid rows=1 columns=2
+:: HomeBlaze.Components.GridLayout#brokengrid Rows=1 Columns=2
 ```json
-{ "cells": [ }
+{ "Cells": [ }
 ```
 ::
 ~~~~
 
-:: HomeBlaze.Components.GridLayout#brokengrid rows=1 columns=2
+:: HomeBlaze.Components.GridLayout#brokengrid Rows=1 Columns=2
 ```json
-{ "cells": [ }
+{ "Cells": [ }
 ```
 ::
 
 ## The old subject fence
 
-Earlier versions embedded a subject with a code fence that held JSON. This fence is no longer supported. Write the subject as a block: the name in parentheses becomes the `#name`, the `$type` becomes the type name and every value becomes an argument.
+Earlier versions embedded a subject with a code fence that held JSON. This fence is no longer supported. Write the subject as a block: the name in parentheses becomes the `#name`, the `$type` becomes the type name and every value becomes an argument. The key of an argument is the name of the property, so `"targetSpeed": 2000` becomes `TargetSpeed=2000`.
 
 ~~~~markdown
 ```subject(oldmotor)
@@ -264,5 +278,5 @@ Earlier versions embedded a subject with a code fence that held JSON. This fence
 
 A block that cannot be shown does not take the page down. This text, the expression in it and the motor below come after all the errors above. The motor runs at {{ healthy/CurrentSpeed }} RPM.
 
-:: HomeBlaze.Samples.Motor#healthy name="Healthy Motor" targetSpeed=1000 simulationInterval=00:00:01
+:: HomeBlaze.Samples.Motor#healthy Name="Healthy Motor" TargetSpeed=1000 SimulationInterval=00:00:01
 ::

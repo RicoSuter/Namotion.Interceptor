@@ -10,46 +10,46 @@ This page shows how a block is configured: with values on its head line, with a 
 
 ## Values on the head line
 
-Each `key=value` pair on the head line sets one configuration property of the subject. The motor below gets a text with a space in double quotes, a number and a duration.
+Each `key=value` pair on the head line sets one configuration property of the subject. The key is the name of the property, written exactly as in a path: `TargetSpeed` on the head line and in `{{ valuemotor/TargetSpeed }}`. The motor below gets a text with a space in double quotes, a number and a duration.
 
 ~~~~markdown
-:: HomeBlaze.Samples.Motor#valuemotor name="Value Motor" targetSpeed=1500 simulationInterval=00:00:00.500
+:: HomeBlaze.Samples.Motor#valuemotor Name="Value Motor" TargetSpeed=1500 SimulationInterval=00:00:00.500
 ::
 ~~~~
 
-:: HomeBlaze.Samples.Motor#valuemotor name="Value Motor" targetSpeed=1500 simulationInterval=00:00:00.500
+:: HomeBlaze.Samples.Motor#valuemotor Name="Value Motor" TargetSpeed=1500 SimulationInterval=00:00:00.500
 ::
 
 The page reads two of the values back: the motor is called {{ valuemotor/Name }} and its target speed is {{ valuemotor/TargetSpeed }} RPM.
 
-A yes or no is written as `true` or `false`. The block below is a `CanvasLayout`, an area on which widgets are placed at any position, and it is empty here. Its `isSnapToGridEnabled` is such a value: with `true`, a widget that is placed or moved on the canvas snaps to a grid. `gridSize=20` gives that grid a step of 20 pixels, and `minHeight=120` makes the canvas 120 pixels high. The page reads the yes or no back as {{ canvas/IsSnapToGridEnabled }}.
+A yes or no is written as `true` or `false`. The block below is a `CanvasLayout`, an area on which widgets are placed at any position, and it is empty here. Its `IsSnapToGridEnabled` is such a value: with `true`, a widget that is placed or moved on the canvas snaps to a grid. `GridSize=20` gives that grid a step of 20 pixels, and `MinHeight=120` makes the canvas 120 pixels high. The page reads the yes or no back as {{ canvas/IsSnapToGridEnabled }}.
 
 ~~~~markdown
-:: HomeBlaze.Components.CanvasLayout#canvas minHeight=120 isSnapToGridEnabled=true gridSize=20
+:: HomeBlaze.Components.CanvasLayout#canvas MinHeight=120 IsSnapToGridEnabled=true GridSize=20
 ::
 ~~~~
 
-:: HomeBlaze.Components.CanvasLayout#canvas minHeight=120 isSnapToGridEnabled=true gridSize=20
+:: HomeBlaze.Components.CanvasLayout#canvas MinHeight=120 IsSnapToGridEnabled=true GridSize=20
 ::
 
 ## Configuration in a json fence
 
-A list or an object does not fit on the head line. The cells of a `GridLayout` are a list, so they are written as a JSON object in a `json` fence that is the first thing inside the block. Each cell here holds a `Widget` that refers to a motor next to this page. The fence itself is not shown on the page.
+A list or an object does not fit on the head line. The cells of a `GridLayout` are a list, so they are written as a JSON object in a `json` fence that is the first thing inside the block. Each cell here holds a `Widget` that refers to a motor next to this page. The keys in the fence are property names like the keys on the head line, also inside a cell and inside the widget of a cell. Only `$type` is written as it is in a JSON file. The fence itself is not shown on the page.
 
 ~~~~markdown
-:: HomeBlaze.Components.GridLayout#grid rows=1 columns=2
+:: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
 ```json
 {
-  "cells": [
+  "Cells": [
     {
-      "row": 0,
-      "column": 0,
-      "child": { "$type": "HomeBlaze.Components.Widget", "path": "../Compressor" }
+      "Row": 0,
+      "Column": 0,
+      "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" }
     },
     {
-      "row": 0,
-      "column": 1,
-      "child": { "$type": "HomeBlaze.Components.Widget", "path": "../WaterPump" }
+      "Row": 0,
+      "Column": 1,
+      "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../WaterPump" }
     }
   ]
 }
@@ -57,19 +57,19 @@ A list or an object does not fit on the head line. The cells of a `GridLayout` a
 ::
 ~~~~
 
-:: HomeBlaze.Components.GridLayout#grid rows=1 columns=2
+:: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
 ```json
 {
-  "cells": [
+  "Cells": [
     {
-      "row": 0,
-      "column": 0,
-      "child": { "$type": "HomeBlaze.Components.Widget", "path": "../Compressor" }
+      "Row": 0,
+      "Column": 0,
+      "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" }
     },
     {
-      "row": 0,
-      "column": 1,
-      "child": { "$type": "HomeBlaze.Components.Widget", "path": "../WaterPump" }
+      "Row": 0,
+      "Column": 1,
+      "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../WaterPump" }
     }
   ]
 }
@@ -102,7 +102,7 @@ This text is inside a `div` with the class `demo-note`. The value motor runs at 
 
 The page editor writes the configuration of a block for you. Try it on this motor:
 
-:: HomeBlaze.Samples.Motor#editmotor name="Edit Me" targetSpeed=900 simulationInterval=00:00:01
+:: HomeBlaze.Samples.Motor#editmotor Name="Edit Me" TargetSpeed=900 SimulationInterval=00:00:01
 ::
 
 1. Open the menu with the eye icon at the top right of the page and choose "Split". The text of the page opens in an editor next to the page.
@@ -134,12 +134,12 @@ In a fence:
 
 When the text of a page changes, the page is read again. A subject that is still on the page is updated and not created again, as long as the page can tell that it is the same one.
 
-:: HomeBlaze.Samples.Motor#keptmotor name="Named Motor" targetSpeed=2000 simulationInterval=00:00:01
+:: HomeBlaze.Samples.Motor#keptmotor Name="Named Motor" TargetSpeed=2000 SimulationInterval=00:00:01
 ::
 
 The motor above has the name `keptmotor`. It keeps running when the page is edited, as long as its block keeps its name and its type and stays directly on the page. Changing or adding an argument updates it, and removing an argument creates it again.
 
-:: HomeBlaze.Samples.Motor name="Unnamed Motor" targetSpeed=2000 simulationInterval=00:00:01
+:: HomeBlaze.Samples.Motor Name="Unnamed Motor" TargetSpeed=2000 SimulationInterval=00:00:01
 ::
 
 The motor above has no name, so the page knows it by its position. Add a block or an expression anywhere before it and save the page: the motor is created again and starts at a speed of zero, while the named motor keeps its speed.

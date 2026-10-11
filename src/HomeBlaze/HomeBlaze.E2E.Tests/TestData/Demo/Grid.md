@@ -4,8 +4,8 @@ title: Grid Demo
 
 # Grid Demo
 
-:: HomeBlaze.Components.GridLayout#grid rows=1 columns=4
+:: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=4
 ```json
-{ "cells": [] }
+{ "Cells": [] }
 ```
 ::

@@ -12,7 +12,7 @@ This page demonstrates embedded subjects and live expressions.
 
 Motor:
 
-:: HomeBlaze.Samples.Motor#mymotor name=MyMotor targetSpeed=3000 simulationInterval=00:00:01.500
+:: HomeBlaze.Samples.Motor#mymotor Name=MyMotor TargetSpeed=3000 SimulationInterval=00:00:01.500
 ::
 
 ## Live Expression
@@ -25,7 +25,7 @@ Speed: {{ mymotor/CurrentSpeed }}
 
 Reference an existing subject's widget by path instead of embedding it inline:
 
-:: HomeBlaze.Components.Widget#conveyorRef path=../Conveyor
+:: HomeBlaze.Components.Widget#conveyorRef Path=../Conveyor
 ::
 
 For more information on creating pages with embedded subjects, see [Pages Documentation](../Docs/administration/pages.md).
