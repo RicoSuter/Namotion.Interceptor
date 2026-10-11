@@ -195,20 +195,15 @@
     /// Applies the buffered edits to the subject without persisting them.
     /// </summary>
     /// <returns>
-    /// False when there is no subject, the editor is not ready yet, the edit component is invalid, or the generated
-    /// properties editor could not convert or set one of its values. Nothing was applied to the subject then.
+    /// False when there is no subject, the editor is not ready yet or not valid, or the generated properties
+    /// editor could not convert or set one of its values. Nothing was applied to the subject then.
     /// </returns>
     public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
     {
-        if (Subject == null || IsSubjectComponentPending) return false;
+        if (Subject == null || IsSubjectComponentPending || !IsValid) return false;
 
         if (_subjectComponent is ISubjectEditComponent editComponent)
         {
-            if (!editComponent.IsValid)
-            {
-                return false;
-            }
-
             await editComponent.SaveAsync(cancellationToken);
         }
         else if (_propertiesEditor is { } propertiesEditor)

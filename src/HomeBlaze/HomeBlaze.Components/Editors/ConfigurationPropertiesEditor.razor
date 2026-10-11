@@ -24,7 +24,8 @@ else
         </MudAlert>
     }
 
-    <MudForm ErrorsChanged="OnFormErrorsChanged">
+    @* Evaluated without the default delay, so that a click that follows an edit already meets its result. *@
+    <MudForm @ref="_form" ValidationDelay="0" ErrorsChanged="OnFormErrorsChanged">
         @foreach (var prop in _configurationProperties)
         {
             var isSecret = prop.GetConfigurationMetadata()?.IsSecret == true;
@@ -37,7 +38,7 @@ else
 }
 
 @code {
-    private bool _hasFormErrors;
+    private MudForm? _form;
     private bool? _reportedIsValid;
     private bool _isSaving;
     private bool _externalChangeDetected;
@@ -61,9 +62,9 @@ else
     {
         get
         {
-            // Not the validity of the MudForm: it stays invalid until every required field was touched,
-            // although all of them are prefilled from the subject.
-            if (_hasFormErrors)
+            // The MudForm only counts once it was evaluated, which the first edit causes. Until then it reports
+            // every form with a required field as invalid, although all of them are prefilled from the subject.
+            if (_form is { IsTouched: true, IsValid: false })
             {
                 return false;
             }
@@ -80,11 +81,9 @@ else
         }
     }
 
-    private Task OnFormErrorsChanged(string[] errors)
-    {
-        _hasFormErrors = errors.Length > 0;
-        return ReportIsValidAsync();
-    }
+    // Raised after every evaluation of the form, also when it changed its validity and not its errors, as
+    // for text that is no number.
+    private Task OnFormErrorsChanged(string[] errors) => ReportIsValidAsync();
 
     private async Task ReportIsValidAsync()
     {
