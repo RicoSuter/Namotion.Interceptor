@@ -184,6 +184,71 @@ public class MarkdownBlockMatcherTests
         Assert.Equal("Demo.Motor", blockAfterWriteBack?.Head?.Name);
     }
 
+    private const string ShortForm =
+        "# Page\n\n:: Demo.Flow\n::: Item\n:::: Demo.Card#card Title=A\n::::: Demo.Motor#inner Speed=1\n::: Item\n:::: Demo.Motor#last Speed=2\n";
+
+    [Theory]
+    [InlineData(2, "card")]
+    [InlineData(3, "inner")]
+    [InlineData(5, "last")]
+    public void WhenBlocksAreNestedWithoutClosingLinesAndTextsAreIdentical_ThenTheBlockIsFound(int blockIndex, string expectedId)
+    {
+        // Act
+        var block = MarkdownBlockMatcher.FindSavedBlock(ShortForm, ShortForm, blockIndex);
+
+        // Assert
+        Assert.Equal(expectedId, block?.Head?.Id);
+        Assert.Equal(blockIndex, block?.Index);
+    }
+
+    [Fact]
+    public void WhenWriteBackChangedTheHeadLineOfABlockWithoutClosingLine_ThenTheMatchAfterWriteBackFindsIt()
+    {
+        // Arrange
+        var savedText = ShortForm.Replace("Demo.Motor#inner Speed=1", "Demo.Motor#inner Speed=5");
+
+        // Act
+        var block = MarkdownBlockMatcher.FindSavedBlock(ShortForm, savedText, 3);
+        var blockAfterWriteBack = MarkdownBlockMatcher.FindSavedBlockAfterWriteBack(ShortForm, savedText, 3);
+
+        // Assert
+        Assert.Null(block);
+        Assert.Equal("inner", blockAfterWriteBack?.Head?.Id);
+        Assert.Equal("::::: Demo.Motor#inner Speed=1", ShortForm.Substring(blockAfterWriteBack!.HeadSpan.Start, blockAfterWriteBack.HeadSpan.Length));
+    }
+
+    [Theory]
+    // Text that is inside the block, because nothing ended the block before it.
+    [InlineData("::::: Demo.Motor#inner Speed=1\n", "::::: Demo.Motor#inner Speed=1\nTyped text\n")]
+    // A closing line for the block.
+    [InlineData("::::: Demo.Motor#inner Speed=1\n", "::::: Demo.Motor#inner Speed=1\n:::::\n")]
+    public void WhenUnsavedTextFollowsTheHeadLineOfABlockWithoutClosingLine_ThenTheBlockIsFound(string savedPart, string editorPart)
+    {
+        // Arrange
+        var editorText = ShortForm.Replace(savedPart, editorPart);
+
+        // Act
+        var block = MarkdownBlockMatcher.FindSavedBlock(editorText, ShortForm, 3);
+
+        // Assert
+        Assert.Equal("inner", block?.Head?.Id);
+    }
+
+    [Fact]
+    public void WhenAHeadLineIsTypedAboveABlockWithoutClosingLine_ThenTheBlockIsRefusedByBothMatches()
+    {
+        // Arrange
+        var editorText = ShortForm.Replace("::::: Demo.Motor#inner", ":::: Demo.Card#typed\n::::: Demo.Motor#inner");
+
+        // Act
+        var block = MarkdownBlockMatcher.FindSavedBlock(editorText, ShortForm, 4);
+        var blockAfterWriteBack = MarkdownBlockMatcher.FindSavedBlockAfterWriteBack(editorText, ShortForm, 4);
+
+        // Assert
+        Assert.Null(block);
+        Assert.Null(blockAfterWriteBack);
+    }
+
     [Theory]
     [InlineData(":: Demo.Motor Speed=\"1\ntext\n::\n")]
     [InlineData("::\ntext\n")]

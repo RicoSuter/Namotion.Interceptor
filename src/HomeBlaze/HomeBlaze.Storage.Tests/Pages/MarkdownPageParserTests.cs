@@ -1699,32 +1699,155 @@ public class MarkdownPageParserTests
             """));
 
         // Act
-        var fenceLength = page.GetFenceLengthForNewBlock(line);
+        var fenceLength = page.GetFenceLengthForNewBlock(line, FindTestType);
 
         // Assert
         Assert.Equal(expectedFenceLength, fenceLength);
     }
 
+    private const string TestNamespace = "HomeBlaze.Storage.Tests.Pages";
+
+    private static Type? FindTestType(string name) => typeof(TestPanel).Assembly.GetType(name);
+
     [Theory]
-    [InlineData(":: Demo.Card\ntext", 2, 3)]
-    [InlineData(":: Demo.Card\ntext", 3, 3)]
-    [InlineData(":: Demo.Card\ntext\n", 3, 3)]
+    [InlineData($":: {TestNamespace}.TestPanel\ntext", 2, 3)]
+    [InlineData($":: {TestNamespace}.TestPanel\ntext", 3, 3)]
+    [InlineData($":: {TestNamespace}.TestPanel\ntext\n", 3, 3)]
     [InlineData("::: {.band}\ntext\n:::", 2, 4)]
     [InlineData("::: {.band}\ntext\n:::", 3, 4)]
     [InlineData("text\n::\nmore", 2, 2)]
     [InlineData("text\n::\nmore", 3, 2)]
     [InlineData("", 1, 2)]
-    public void WhenNewBlockIsInsertedIntoAnUnclosedBlockOrAStyleBlock_ThenItsFenceIsOneLonger(
+    public void WhenNewBlockIsInsertedIntoABlockWithoutClosingLineThatTakesBlocksOrIntoAStyleBlock_ThenItsFenceIsOneLonger(
         string source, int line, int expectedFenceLength)
     {
         // Arrange
         var page = MarkdownPageParser.Parse(source);
 
         // Act
-        var fenceLength = page.GetFenceLengthForNewBlock(line);
+        var fenceLength = page.GetFenceLengthForNewBlock(line, FindTestType);
 
         // Assert
         Assert.Equal(expectedFenceLength, fenceLength);
+    }
+
+    [Theory]
+    [InlineData(1, 2)]
+    [InlineData(2, 3)]
+    [InlineData(3, 4)]
+    [InlineData(4, 5)]
+    // In the leaf, which takes no block, so the new block ends it and is in the panel around it.
+    [InlineData(5, 5)]
+    [InlineData(6, 5)]
+    [InlineData(7, 4)]
+    [InlineData(8, 4)]
+    [InlineData(9, 4)]
+    [InlineData(10, 4)]
+    [InlineData(11, 4)]
+    public void WhenNewBlockIsInsertedIntoALayoutInTheShortForm_ThenItIsInTheInnermostBlockThatTakesABlock(
+        int line, int expectedFenceLength)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(Normalize($"""
+            :: {TestNamespace}.TestPanel
+            ::: Item
+            :::: {TestNamespace}.TestPanel
+            ::::: {TestNamespace}.TestLeaf
+
+            ::: Row
+            :::: {TestNamespace}.TestLeaf
+            ::: Footer
+            footer text
+
+            """));
+
+        // Act
+        var fenceLength = page.GetFenceLengthForNewBlock(line, FindTestType);
+
+        // Assert
+        Assert.Equal(expectedFenceLength, fenceLength);
+    }
+
+    [Theory]
+    // A slot block whose value has no default slot, in a widget that has none either.
+    [InlineData($":: {TestNamespace}.TestFaultyHost\n::: Faulty Mode=ok\n", 3, 2)]
+    // A widget without slots, and a slot block that is none of its widget.
+    [InlineData($":: {TestNamespace}.TestLeaf\n", 2, 2)]
+    [InlineData($":: {TestNamespace}.TestLeaf\n::: Footer\ntext\n", 4, 2)]
+    // A slot block inside a slot block that only holds content: the outer one takes the new block.
+    [InlineData($":: {TestNamespace}.TestPanel\n::: Footer\n:::: Footer\n", 4, 4)]
+    // Blocks that are an error: a type that does not exist, a head line that cannot be read and a slot block on the page.
+    [InlineData(":: Demo.Unknown Speed=1\ntext\n", 3, 2)]
+    [InlineData($":: {TestNamespace}.TestPanel Title=\"open\ntext\n", 3, 2)]
+    [InlineData("::: Footer\ntext\n", 3, 2)]
+    // A style block, also inside a block that takes blocks.
+    [InlineData(":::: {.band}\ntext\n", 3, 2)]
+    [InlineData($":: {TestNamespace}.TestPanel\n:::: {{.band}}\ntext\n", 4, 3)]
+    public void WhenNewBlockIsInsertedIntoBlocksWithoutClosingLineThatTakeNoBlock_ThenItIsInTheNextBlockAroundThemThatTakesOne(
+        string source, int line, int expectedFenceLength)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var fenceLength = page.GetFenceLengthForNewBlock(line, FindTestType);
+
+        // Assert
+        Assert.Equal(expectedFenceLength, fenceLength);
+    }
+
+    [Theory]
+    // The leaf has its closing line, so the new block is inside it, as its author marked it.
+    [InlineData($":: {TestNamespace}.TestLeaf\n\n::\n", 2, 3)]
+    [InlineData($":: {TestNamespace}.TestLeaf\n\n::\n", 3, 3)]
+    [InlineData($":: {TestNamespace}.TestLeaf\n\n::\n", 4, 2)]
+    // The closing line of the block around it ended the leaf, and that block is not left.
+    [InlineData($":: {TestNamespace}.TestFaultyHost\n::: {TestNamespace}.TestLeaf\n\n::\n", 3, 3)]
+    [InlineData($":: {TestNamespace}.TestFaultyHost\n::: {TestNamespace}.TestLeaf\n\n::\n", 4, 3)]
+    [InlineData("::: Demo.Unknown\n:::: Demo.Unknown\n\n:::\n", 3, 4)]
+    public void WhenBlockAroundTheNewBlockHasItsClosingLine_ThenTheNewBlockIsInsideItWhateverItTakes(
+        string source, int line, int expectedFenceLength)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var fenceLength = page.GetFenceLengthForNewBlock(line, FindTestType);
+
+        // Assert
+        Assert.Equal(expectedFenceLength, fenceLength);
+    }
+
+    [Theory]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public void WhenNewBlockIsInsertedIntoALeafWithAJsonBlockAndWithoutClosingLine_ThenItGoesAfterTheJsonBlockAndEndsTheLeaf(int line)
+    {
+        // Arrange
+        var source = Normalize($$"""
+            :: {{TestNamespace}}.TestPanel
+            ::: {{TestNamespace}}.TestLeaf Name=A
+            ```json
+            { "Count": 1 }
+            ```
+
+            """);
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var insertLine = page.GetLineForNewBlock(line);
+        var fenceLength = page.GetFenceLengthForNewBlock(insertLine, FindTestType);
+
+        // Assert
+        Assert.Equal((6, 3), (insertLine, fenceLength));
+
+        var lines = source.Split('\n').ToList();
+        lines.InsertRange(insertLine - 1, MarkdownBlockWriter.CreateBlock("Demo.Motor", "m", "{}", fenceLength).Split('\n'));
+        var written = MarkdownPageParser.Parse(string.Join('\n', lines));
+        var panel = Assert.Single(written.Blocks);
+        Assert.Equal([$"{TestNamespace}.TestLeaf", "Demo.Motor"], panel.Children.Select(block => block.Head!.Name));
+        Assert.Equal("{ \"Count\": 1 }", panel.Children[0].ConfigurationJson);
     }
 
     [Theory]

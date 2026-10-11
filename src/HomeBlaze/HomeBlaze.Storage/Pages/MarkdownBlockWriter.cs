@@ -36,6 +36,7 @@ public static class MarkdownBlockWriter
             }
             else
             {
+                var start = configurationSpan.Start;
                 var end = configurationSpan.End;
                 if (end < result.Length && result[end] == '\r')
                 {
@@ -47,7 +48,21 @@ public static class MarkdownBlockWriter
                     end++;
                 }
 
-                result = result.Remove(configurationSpan.Start, end - configurationSpan.Start);
+                // A fence that ends the text has no line ending after it, so the one before it goes with it.
+                if (end == configurationSpan.End)
+                {
+                    if (start > block.HeadSpan.End && result[start - 1] == '\n')
+                    {
+                        start--;
+                    }
+
+                    if (start > block.HeadSpan.End && result[start - 1] == '\r')
+                    {
+                        start--;
+                    }
+                }
+
+                result = result.Remove(start, end - start);
             }
         }
         else if (remainder is not null)

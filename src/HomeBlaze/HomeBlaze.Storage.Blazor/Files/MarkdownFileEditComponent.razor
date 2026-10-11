@@ -20,6 +20,7 @@
 @inject ISnackbar Snackbar
 @inject ConfigurableSubjectSerializer Serializer
 @inject SubjectComponentRegistry ComponentRegistry
+@inject TypeProvider TypeProvider
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
 @implements ISubjectEditComponent
@@ -343,11 +344,13 @@ else
         var lines = _currentContent.Split(lineEnding);
         var newLines = new List<string>(lines);
 
-        // Inside the content of a block, the new block goes after the json block of that block and
-        // needs a longer fence than the block around it.
+        // Inside a block, the new block goes after the json block of that block and gets one colon more
+        // than the block that it is then inside of. It always gets a closing line, so that the lines
+        // after it are not inside it.
         var editorPage = MarkdownPageParser.Parse(_currentContent);
         var insertLine = Math.Min(editorPage.GetLineForNewBlock(position?.LineNumber ?? lines.Length), lines.Length + 1);
-        var fenceLength = editorPage.GetFenceLengthForNewBlock(insertLine);
+        var fenceLength = editorPage.GetFenceLengthForNewBlock(
+            insertLine, name => TypeProvider.Types.FirstOrDefault(type => type.FullName == name));
         var blockLines = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json, fenceLength, lineEnding).Split(lineEnding);
 
         // The parser accepts a block without blank lines around it. They keep the page text readable.

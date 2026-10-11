@@ -430,6 +430,53 @@ public class MarkdownBlockTests
     }
 
     [Fact]
+    public async Task WhenAWidgetInACardOfAPageWithoutClosingLinesIsEditedInTheEditor_ThenOnlyItsHeadLineChangesAndNoClosingLineIsAdded()
+    {
+        // Arrange: a layout in the short form, in which a head line ends the blocks before it.
+        const string source =
+            "---\ntitle: Scratch\n---\n\n# Scratch\n\n" +
+            ":: HomeBlaze.Components.FlowLayout MinWidth=320\n" +
+            "::: Item\n" +
+            ":::: HomeBlaze.Components.Card Title=\"Short Card\"\n" +
+            "The motor of the short card.\n" +
+            "::::: HomeBlaze.Samples.Motor#shortmotor Name=ShortMotor TargetSpeed=1200 SimulationInterval=00:00:01\n" +
+            "::: Item\n" +
+            ":::: HomeBlaze.Components.Card Title=\"Other Card\"\n" +
+            "The text of the other card.\n";
+        await WriteScratchPageAsync(source);
+
+        var page = await OpenPageAsync(ScratchPage);
+        var card = GetCard(page, "Short Card");
+        await Assertions.Expect(card).ToContainTextAsync("/ 1200 RPM", new() { Timeout = 30000 });
+        await Assertions.Expect(GetCard(page, "Other Card")).ToContainTextAsync("The text of the other card.");
+        await SelectEditModeAsync(page, "Split");
+
+        // The editor only knows its block regions once the decorations are applied.
+        await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Act
+        var headLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "HomeBlaze.Samples.Motor#shortmotor" });
+        await Assertions.Expect(headLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await headLine.ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit shortmotor" }).ClickAsync();
+
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await dialog.GetByLabel("Target Speed (RPM)").FillAsync("1500");
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+
+        // Assert: the editor has the new value, which it shows only after it wrote the page
+        var writtenHeadLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "TargetSpeed=1500" });
+        await Assertions.Expect(writtenHeadLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await SelectEditModeAsync(page, "View");
+        await Assertions.Expect(card).ToContainTextAsync("/ 1500 RPM", new() { Timeout = 30000 });
+        await Assertions.Expect(GetCard(page, "Other Card")).ToContainTextAsync("The text of the other card.");
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+
+        var written = (await File.ReadAllTextAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n");
+        Assert.Equal(source.Replace("TargetSpeed=1200", "TargetSpeed=1500"), written);
+    }
+
+    [Fact]
     public async Task WhenNameInTheCreateWizardIsNoValidBlockName_ThenTheWizardStaysOpenUntilTheNameIsCorrected()
     {
         // Arrange

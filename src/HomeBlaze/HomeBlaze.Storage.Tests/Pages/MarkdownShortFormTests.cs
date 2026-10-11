@@ -141,6 +141,53 @@ public class MarkdownShortFormTests
         Assert.Same(layout.Tabs[1], ((IPathScope)page).TryGetNamedSubject("belt"));
     }
 
+    [Fact]
+    public async Task WhenConfigurationOfABlockInTheShortFormIsWritten_ThenOnlyItsLinesChangeAndThePageKeepsTheShortForm()
+    {
+        // Arrange
+        const string testNamespace = "HomeBlaze.Storage.Tests.Pages";
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content =
+            $":: {testNamespace}.TestPanel#panel Title=Old\n" +
+            "::: Item\n" +
+            $":::: {testNamespace}.TestPanel\n" +
+            $"::::: {testNamespace}.TestLeaf#leaf Count=1\n" +
+            "::: Item\n" +
+            $":::: {testNamespace}.TestLeaf#other Count=2\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        IPathScope scope = page;
+        var leaf = Assert.IsType<TestLeaf>(scope.TryGetNamedSubject("leaf"));
+        var headLine = $"::::: {testNamespace}.TestLeaf#leaf";
+
+        // Act
+        leaf.Count = 9;
+        var isHeadLineWritten = await page.WriteConfigurationAsync(leaf, CancellationToken.None);
+        var afterHeadLine = await fixture.ReadAsync("page.md");
+
+        leaf.Tags = ["a"];
+        var isJsonBlockWritten = await page.WriteConfigurationAsync(leaf, CancellationToken.None);
+        var afterJsonBlock = await fixture.ReadAsync("page.md");
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(isHeadLineWritten);
+        Assert.Equal(
+            content.Replace($"{headLine} Count=1", $"{headLine} Count=9 Enabled=false Interval=00:00:00"),
+            afterHeadLine);
+
+        Assert.True(isJsonBlockWritten);
+        Assert.Equal(
+            content.Replace(
+                $"{headLine} Count=1",
+                $"{headLine} Count=9 Enabled=false Interval=00:00:00\n```json\n{{\n  \"Tags\": [\n    \"a\"\n  ]\n}}\n```"),
+            afterJsonBlock);
+
+        Assert.Empty(PageErrorBoxes.FindSortedByLine(page));
+        Assert.Same(leaf, scope.TryGetNamedSubject("leaf"));
+        Assert.Equal(2, Assert.IsType<TestLeaf>(scope.TryGetNamedSubject("other")).Count);
+        Assert.Equal(2, Assert.IsType<TestPanel>(scope.TryGetNamedSubject("panel")).Items.Length);
+    }
+
     /// <summary>
     /// Gets everything the subjects show, at every depth: the HTML as it is, the path of an expression,
     /// and for every other subject its type, its configuration and what is in each of its slots.

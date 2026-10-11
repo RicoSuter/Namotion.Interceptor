@@ -70,6 +70,99 @@ public class MarkdownBlockWriterTests
         Assert.Contains(":: Demo.Card#main Title=Old\n```json\n{\n  \"Tags\": [\n    \"a\"\n  ]\n}\n```\nBody **text**", result);
     }
 
+    private const string TagsOne = "```json\n{ \"Tags\": [1] }\n```";
+
+    private const string TagsTwo = "```json\n{\n  \"Tags\": [\n    2\n  ]\n}\n```";
+
+    private const string NewTitle = """{ "Title": "New" }""";
+
+    private const string NewTitleAndTags = """{ "Title": "New", "Tags": [2] }""";
+
+    // The source, the index of the block to write, the configuration and the page text after the write.
+    public static TheoryData<string, int, string, string> BlocksWithoutClosingLine() => new()
+    {
+        // An empty block that the head line of the next block ends.
+        { ":: Demo.Card Title=Old\n:: Demo.Motor Speed=1\n", 0, NewTitle, ":: Demo.Card Title=New\n:: Demo.Motor Speed=1\n" },
+        { ":: Demo.Card Title=Old\n:: Demo.Motor Speed=1\n", 0, NewTitleAndTags, $":: Demo.Card Title=New\n{TagsTwo}\n:: Demo.Motor Speed=1\n" },
+        { $":: Demo.Card Title=Old\n{TagsOne}\n:: Demo.Motor Speed=1\n", 0, NewTitleAndTags, $":: Demo.Card Title=New\n{TagsTwo}\n:: Demo.Motor Speed=1\n" },
+        { $":: Demo.Card Title=Old\n{TagsOne}\n:: Demo.Motor Speed=1\n", 0, NewTitle, ":: Demo.Card Title=New\n:: Demo.Motor Speed=1\n" },
+        { ":: Demo.Card Title=Old\n:: Demo.Motor Speed=1\n", 1, """{ "Speed": 2 }""", ":: Demo.Card Title=Old\n:: Demo.Motor Speed=2\n" },
+
+        // A block with content.
+        { "before\n\n:: Demo.Card Title=Old\nBody **text**\n\n:: Demo.Motor\n", 0, NewTitle, "before\n\n:: Demo.Card Title=New\nBody **text**\n\n:: Demo.Motor\n" },
+        { "before\n\n:: Demo.Card Title=Old\nBody **text**\n\n:: Demo.Motor\n", 0, NewTitleAndTags, $"before\n\n:: Demo.Card Title=New\n{TagsTwo}\nBody **text**\n\n:: Demo.Motor\n" },
+        { $"before\n\n:: Demo.Card Title=Old\n{TagsOne}\nBody **text**\n\n:: Demo.Motor\n", 0, NewTitleAndTags, $"before\n\n:: Demo.Card Title=New\n{TagsTwo}\nBody **text**\n\n:: Demo.Motor\n" },
+        { $"before\n\n:: Demo.Card Title=Old\n{TagsOne}\nBody **text**\n\n:: Demo.Motor\n", 0, NewTitle, "before\n\n:: Demo.Card Title=New\nBody **text**\n\n:: Demo.Motor\n" },
+
+        // A block that is the last thing on the page, with a final line break.
+        { "before\n\n:: Demo.Card Title=Old\n", 0, NewTitle, "before\n\n:: Demo.Card Title=New\n" },
+        { "before\n\n:: Demo.Card Title=Old\n", 0, NewTitleAndTags, $"before\n\n:: Demo.Card Title=New\n{TagsTwo}\n" },
+        { $"before\n\n:: Demo.Card Title=Old\n{TagsOne}\n", 0, NewTitleAndTags, $"before\n\n:: Demo.Card Title=New\n{TagsTwo}\n" },
+        { $"before\n\n:: Demo.Card Title=Old\n{TagsOne}\n", 0, NewTitle, "before\n\n:: Demo.Card Title=New\n" },
+
+        // A block that is the last thing on the page, without a final line break.
+        { "before\n\n:: Demo.Card Title=Old", 0, NewTitle, "before\n\n:: Demo.Card Title=New" },
+        { "before\n\n:: Demo.Card Title=Old", 0, NewTitleAndTags, $"before\n\n:: Demo.Card Title=New\n{TagsTwo}" },
+        { $"before\n\n:: Demo.Card Title=Old\n{TagsOne}", 0, NewTitleAndTags, $"before\n\n:: Demo.Card Title=New\n{TagsTwo}" },
+        { $"before\n\n:: Demo.Card Title=Old\n{TagsOne}", 0, NewTitle, "before\n\n:: Demo.Card Title=New" },
+
+        // A block whose first child is another block.
+        { ":: Demo.Card Title=Old\n::: Demo.Motor Speed=1\ntext\n", 0, NewTitle, ":: Demo.Card Title=New\n::: Demo.Motor Speed=1\ntext\n" },
+        { ":: Demo.Card Title=Old\n::: Demo.Motor Speed=1\ntext\n", 0, NewTitleAndTags, $":: Demo.Card Title=New\n{TagsTwo}\n::: Demo.Motor Speed=1\ntext\n" },
+        { $":: Demo.Card Title=Old\n{TagsOne}\n::: Demo.Motor Speed=1\ntext\n", 0, NewTitleAndTags, $":: Demo.Card Title=New\n{TagsTwo}\n::: Demo.Motor Speed=1\ntext\n" },
+        { $":: Demo.Card Title=Old\n{TagsOne}\n::: Demo.Motor Speed=1\ntext\n", 0, NewTitle, ":: Demo.Card Title=New\n::: Demo.Motor Speed=1\ntext\n" },
+        { ":: Demo.Card Title=Old\n::: Demo.Motor Speed=1\ntext\n", 1, """{ "Speed": 2, "Tags": [2] }""", $":: Demo.Card Title=Old\n::: Demo.Motor Speed=2\n{TagsTwo}\ntext\n" },
+
+        // The short form of a layout: every line but the one of the block stays as it is.
+        {
+            ":: Demo.Flow\n::: Item\n:::: Demo.Card Title=A\n::::: Demo.Motor Speed=1\n::: Item\n:::: Demo.Card Title=B\n",
+            3,
+            """{ "Speed": 2 }""",
+            ":: Demo.Flow\n::: Item\n:::: Demo.Card Title=A\n::::: Demo.Motor Speed=2\n::: Item\n:::: Demo.Card Title=B\n"
+        }
+    };
+
+    [Theory]
+    [MemberData(nameof(BlocksWithoutClosingLine))]
+    public void WhenBlockHasNoClosingLine_ThenOnlyItsHeadLineAndItsJsonFenceChangeAndNoClosingLineIsAdded(
+        string source, int blockIndex, string configurationJson, string expected)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var result = MarkdownBlockWriter.WriteConfiguration(source, page.AllBlocks[blockIndex], configurationJson);
+
+        // Assert
+        Assert.Equal(expected, result);
+
+        var written = MarkdownPageParser.Parse(result);
+        Assert.Equal(
+            page.AllBlocks.Select(block => (block.Kind, block.Head?.Name, block.FenceLength, block.HasClosingLine)),
+            written.AllBlocks.Select(block => (block.Kind, block.Head?.Name, block.FenceLength, block.HasClosingLine)));
+        Assert.All(written.AllBlocks, block => Assert.False(block.HasClosingLine));
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Card Title=Old\n```json\n{ \"Tags\": [1] }", NewTitleAndTags, ":: Demo.Card Title=New\n" + TagsTwo)]
+    [InlineData(":: Demo.Card Title=Old\n```json\n{ \"Tags\": [1] }\n", NewTitleAndTags, ":: Demo.Card Title=New\n" + TagsTwo + "\n")]
+    [InlineData(":: Demo.Card Title=Old\n```json\n{ \"Tags\": [1] }", NewTitle, ":: Demo.Card Title=New")]
+    [InlineData(":: Demo.Card Title=Old\n```json\n{ \"Tags\": [1] }\n", NewTitle, ":: Demo.Card Title=New\n")]
+    [InlineData(":: Demo.Card Title=Old\n```json", NewTitleAndTags, ":: Demo.Card Title=New\n" + TagsTwo)]
+    [InlineData(":: Demo.Card Title=Old\r\n```json\r\n{ \"Tags\": [1] }\r\n", NewTitle, ":: Demo.Card Title=New\r\n")]
+    public void WhenJsonFenceOfABlockWithoutClosingLineIsNotClosed_ThenItIsWrittenAsAFenceThatIsClosed(
+        string source, string configurationJson, string expected)
+    {
+        // Arrange
+        var card = Assert.Single(MarkdownPageParser.Parse(source).AllBlocks);
+
+        // Act
+        var result = MarkdownBlockWriter.WriteConfiguration(source, card, configurationJson);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
     [Fact]
     public void WhenBlockIsCreated_ThenItIsAClosedBlockWithAFenceOfTheGivenLength()
     {

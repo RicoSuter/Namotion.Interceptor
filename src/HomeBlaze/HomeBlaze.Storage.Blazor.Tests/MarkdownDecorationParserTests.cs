@@ -267,6 +267,47 @@ public class MarkdownDecorationParserTests
         Assert.Equal((1, 1, 1, 22), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
     }
 
+    [Fact]
+    public void WhenBlocksAreNestedWithoutClosingLines_ThenEachRegionCoversItsOwnHeadLineOnly()
+    {
+        // Arrange
+        const string content =
+            ":: Demo.Flow\n::: Item\n:::: Demo.Card Title=A\ntext of the card\n::::: Demo.Motor#m Speed=1\n\n::: Item\n:::: Demo.Card Title=B\n";
+
+        // Act
+        var regions = MarkdownDecorationParser.Parse(content, _ => null);
+
+        // Assert
+        Assert.Equal(
+            [("Flow", 1, 1, 1, 13), ("Card", 3, 1, 3, 23), ("m", 5, 1, 5, 27), ("Card", 8, 1, 8, 23)],
+            regions.Select(region => (region.Name, region.StartLine, region.StartColumn, region.EndLine, region.EndColumn)));
+        Assert.Equal([0, 2, 3, 5], regions.Select(region => region.BlockIndex));
+
+        // The cursor on a head line names its block, and the lines after it name none.
+        Assert.Equal("m", Assert.Single(regions, region => region.ContainsPosition(5, 8)).Name);
+        Assert.DoesNotContain(regions, region => region.ContainsPosition(4, 1));
+        Assert.DoesNotContain(regions, region => region.ContainsPosition(6, 1));
+        Assert.DoesNotContain(regions, region => region.ContainsPosition(7, 1));
+    }
+
+    [Theory]
+    // The head line of the next block ends the block.
+    [InlineData(":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }\n```\n:: Demo.Motor\n", 4, 4)]
+    // The page ends after the json block.
+    [InlineData(":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }\n```", 4, 4)]
+    // The json block is not closed either, so it runs to the end of the page.
+    [InlineData(":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }", 3, 16)]
+    [InlineData(":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }\n", 3, 16)]
+    public void WhenBlockWithoutClosingLineHasJsonFence_ThenRegionEndsAfterTheFence(string content, int endLine, int endColumn)
+    {
+        // Act
+        var region = MarkdownDecorationParser.Parse(content)[0];
+
+        // Assert
+        Assert.Equal("Grid", region.Name);
+        Assert.Equal((1, 1, endLine, endColumn), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+    }
+
     [Theory]
     [InlineData(":: Demo.Motor Speed=\"1\ntext\n::\n")]
     [InlineData("::\ntext\n")]

@@ -142,27 +142,68 @@ public sealed class MarkdownPage
     }
 
     /// <summary>
-    /// Gets the fence length for a new block whose head line is inserted before the 1-based
-    /// <paramref name="line"/>: one more than the fence of the innermost block that the new block is
-    /// then inside of, and two directly on the page.
+    /// Gets the fence length for a new widget block whose head line is inserted before the 1-based
+    /// <paramref name="line"/>: one more than the fence of the block that the new block is then inside
+    /// of, and two directly on the page.
     /// </summary>
-    public int GetFenceLengthForNewBlock(int line) =>
-        FindBlockAround(line) is { } outer ? outer.FenceLength + 1 : MarkdownBlockFence.MinimumLength;
+    /// <remarks>
+    /// The new block is inside the innermost block around the line that has a closing line of its own
+    /// or takes a widget block as content. A block further in has neither, so the head line of the new
+    /// block ends it: a widget whose type has no default slot, a style block or a block that is an error.
+    /// </remarks>
+    /// <param name="line">The line that <see cref="GetLineForNewBlock"/> returned.</param>
+    /// <param name="findType">Gets the type that a widget block names with its full name, or null when there is none.</param>
+    public int GetFenceLengthForNewBlock(int line, Func<string, Type?> findType)
+    {
+        MarkdownBlock? outer = null;
+        Type? typeAround = null;
+        var blocks = Blocks;
+        while (FindBlockAround(blocks, line) is { } block)
+        {
+            var type = block.Kind == MarkdownBlockKind.Widget ? findType(block.Head!.Name) : null;
+            var takesBlocks = false;
+            if (block.Kind == MarkdownBlockKind.Slot &&
+                typeAround is not null &&
+                SlotMap.For(typeAround).Named.TryGetValue(block.Head!.Name, out var slot))
+            {
+                // An open slot takes the content itself, any other slot creates a subject of its type.
+                takesBlocks = slot.IsOpen;
+                type = slot.IsOpen ? null : slot.ValueType;
+            }
+
+            if (block.HasClosingLine || takesBlocks || (type is not null && SlotMap.For(type).Default is not null))
+            {
+                outer = block;
+            }
+
+            typeAround = type;
+            blocks = block.Children;
+        }
+
+        return outer is null ? MarkdownBlockFence.MinimumLength : outer.FenceLength + 1;
+    }
 
     /// <summary>Gets the innermost block that a line inserted before <paramref name="line"/> is inside of.</summary>
     private MarkdownBlock? FindBlockAround(int line)
     {
         MarkdownBlock? innermost = null;
         var blocks = Blocks;
-        while (FindLastBlockBefore(blocks, line) is { } outer && (!outer.HasClosingLine || line <= outer.EndLine))
+        while (FindBlockAround(blocks, line) is { } outer)
         {
-            // A block without a closing line takes every line up to the next block beside it, because
-            // only the head line of that block, or what ends the block around both, can have ended it.
             innermost = outer;
             blocks = outer.Children;
         }
 
         return innermost;
+    }
+
+    /// <summary>Gets the one of the blocks beside each other that a line inserted before <paramref name="line"/> is inside of.</summary>
+    private static MarkdownBlock? FindBlockAround(IReadOnlyList<MarkdownBlock> blocks, int line)
+    {
+        // A block without a closing line takes every line up to the next block beside it, because
+        // only the head line of that block, or what ends the block around both, can have ended it.
+        var block = FindLastBlockBefore(blocks, line);
+        return block is not null && (!block.HasClosingLine || line <= block.EndLine) ? block : null;
     }
 
     private static MarkdownBlock? FindLastBlockBefore(IReadOnlyList<MarkdownBlock> blocks, int line)
@@ -236,14 +277,7 @@ public static class MarkdownPageParser
                 // Front matter and math blocks derive from the code block types, but they are not code:
                 // the code block renderer does not render them.
                 case CodeBlock block and not (YamlFrontMatterBlock or MathBlock):
-                    // The span of a fence that is never closed ends inside its opening line, so the ends
-                    // of that line and of the last code line count as well.
-                    end = Math.Max(end, FindLineEnd(source, start));
-                    if (block.Lines.Count > 0)
-                    {
-                        end = Math.Max(end, FindLineEnd(source, block.Lines.Lines[block.Lines.Count - 1].Position));
-                    }
-
+                    end = FindCodeBlockEnd(source, block);
                     break;
 
                 default:
@@ -261,10 +295,30 @@ public static class MarkdownPageParser
     private static bool IsDelimitedBy(string source, char delimiter, int start, int end) =>
         start >= 0 && end <= source.Length && end - start >= 2 && source[start] == delimiter && source[end - 1] == delimiter;
 
+    /// <summary>Gets the position after the last character of a code block.</summary>
+    private static int FindCodeBlockEnd(string source, CodeBlock block)
+    {
+        // The span of a fence that is never closed ends inside its opening line, so the ends
+        // of that line and of the last code line count as well.
+        var end = Math.Max(block.Span.End + 1, FindLineEnd(source, block.Span.Start));
+        if (block.Lines.Count > 0)
+        {
+            end = Math.Max(end, FindLineEnd(source, block.Lines.Lines[block.Lines.Count - 1].Position));
+        }
+
+        return end;
+    }
+
+    /// <summary>Gets the position after the last character of the line at <paramref name="position"/>, before its line ending.</summary>
     private static int FindLineEnd(string source, int position)
     {
         var lineEnd = source.IndexOf('\n', position);
-        return lineEnd < 0 ? source.Length : lineEnd;
+        if (lineEnd < 0)
+        {
+            return source.Length;
+        }
+
+        return lineEnd > position && source[lineEnd - 1] == '\r' ? lineEnd - 1 : lineEnd;
     }
 
     private static void Visit(
@@ -342,7 +396,8 @@ public static class MarkdownPageParser
         if (isOwner && container.Count > 0 && container[0] is FencedCodeBlock { Info: "json" } configuration)
         {
             configurationJson = configuration.Lines.ToString();
-            configurationSpan = new MarkdownSpan(configuration.Span.Start, configuration.Span.Length);
+            configurationSpan = new MarkdownSpan(
+                configuration.Span.Start, FindCodeBlockEnd(source, configuration) - configuration.Span.Start);
         }
 
         return new MarkdownBlock
