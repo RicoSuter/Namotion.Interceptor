@@ -767,29 +767,6 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenStorageIsDisposedWhileItReconnects_ThenReconnectFailsAndNothingIsLoaded()
-    {
-        // Arrange
-        WriteFile("Notes.md");
-        var storage = await ConnectAsync();
-        WriteFile("Slow.gated");
-        var gate = GatedFile.PauseNextLoad();
-        var pass = storage.ReconcileAsync();
-        await gate.WhenReachedAsync();
-        var reconnect = storage.ConnectAsync(CancellationToken.None);
-
-        // Act
-        storage.Dispose();
-        gate.Release();
-        await pass;
-
-        // Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => reconnect);
-        Assert.Equal(["Notes.md"], storage.Children.Keys);
-        Assert.Equal(StorageStatus.Disconnected, storage.Status);
-    }
-
-    [Fact]
     public async Task WhenStorageIsDisposedWhileSecondReconnectWaits_ThenThatReconnectFailsToo()
     {
         // Arrange

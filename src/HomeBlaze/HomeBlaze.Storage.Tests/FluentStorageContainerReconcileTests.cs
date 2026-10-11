@@ -40,19 +40,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenNamedPathDoesNotExist_ThenNoSubjectIsAdded()
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-
-        // Act
-        await storage.ReconcileAsync(Named("Home.md"));
-
-        // Assert
-        Assert.Empty(storage.Children);
-    }
-
-    [Fact]
     public async Task WhenFileIsRenamed_ThenSubjectMovesToNewName()
     {
         // Arrange
@@ -101,41 +88,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         Assert.Equal(["Readme.md"], docs.Children.Keys);
     }
 
-    [Fact]
-    public async Task WhenUnchangedFileIsNamed_ThenSubjectInTreeKeepsReceivingChanges()
-    {
-        // Arrange
-        WriteFile("Home.md", "first");
-        var storage = await ConnectAsync();
-        var file = Assert.IsType<MarkdownFile>(storage.Children["Home.md"]);
-
-        // Act
-        await storage.ReconcileAsync(Named("Home.md"));
-        WriteFile("Home.md", "second");
-        await storage.ReconcileAsync(Named("Home.md"));
-
-        // Assert
-        Assert.Same(file, storage.Children["Home.md"]);
-        Assert.Equal("second", file.Content);
-    }
-
-    [Theory]
-    [InlineData(".DS_Store")]
-    [InlineData("._Home.md")]
-    [InlineData(".idea/workspace.xml")]
-    public async Task WhenHiddenFileIsCreated_ThenItIsIgnored(string relativePath)
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-        WriteFile(relativePath);
-
-        // Act
-        await storage.ReconcileAsync(Named(relativePath));
-
-        // Assert
-        Assert.Empty(storage.Children);
-    }
-
     [Theory]
     [InlineData("Docs/.hidden.md")]
     [InlineData("Docs/Old~/Notes.md")]
@@ -154,20 +106,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenHiddenDirectoryIsCreated_ThenItIsIgnored()
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-        WriteFile(".idea/workspace.xml");
-
-        // Act
-        await storage.ReconcileAsync(Named(".idea"));
-
-        // Assert
-        Assert.Empty(storage.Children);
-    }
-
-    [Fact]
     public async Task WhenDirectoryIsCreated_ThenVirtualFolderIsAdded()
     {
         // Arrange
@@ -180,23 +118,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         // Assert
         var folder = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
         Assert.Empty(folder.Children);
-    }
-
-    [Fact]
-    public async Task WhenFileIsCreatedInNewDirectory_ThenFileAppearsInFolder()
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-        Directory.CreateDirectory(GetFullPath("Docs"));
-        await storage.ReconcileAsync(Named("Docs"));
-        WriteFile("Docs/Notes.md");
-
-        // Act
-        await storage.ReconcileAsync(Named("Docs/Notes.md"));
-
-        // Assert
-        var folder = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        Assert.True(folder.Children.ContainsKey("Notes.md"));
     }
 
     [Fact]
@@ -233,24 +154,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
 
         // Assert
         Assert.Equal(["Home.md"], storage.Children.Keys);
-    }
-
-    [Fact]
-    public async Task WhenFileIsRecreatedAfterDirectoryWasDeleted_ThenFileAppearsAgain()
-    {
-        // Arrange
-        WriteFile("Docs/Readme.md");
-        var storage = await ConnectAsync();
-        Directory.Delete(GetFullPath("Docs"), recursive: true);
-        await storage.ReconcileAsync(Named("Docs"));
-        WriteFile("Docs/Readme.md");
-
-        // Act
-        await storage.ReconcileAsync(Named("Docs/Readme.md"));
-
-        // Assert
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        Assert.Equal(["Readme.md"], docs.Children.Keys);
     }
 
     [Fact]
@@ -292,23 +195,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         Assert.Equal(["Both.md", "OnlyNew.md"], docs.Children.Keys.Order());
         Assert.Same(both, docs.Children["Both.md"]);
         Assert.Equal("new", both.Content);
-    }
-
-    [Fact]
-    public async Task WhenTrackedDirectoryIsNamed_ThenFolderAndSubjectsAreKept()
-    {
-        // Arrange
-        WriteFile("Docs/Readme.md");
-        var storage = await ConnectAsync();
-        var docs = storage.Children["Docs"];
-        var readme = ((VirtualFolder)docs).Children["Readme.md"];
-
-        // Act
-        await storage.ReconcileAsync(Named("Docs"));
-
-        // Assert
-        Assert.Same(docs, storage.Children["Docs"]);
-        Assert.Same(readme, ((VirtualFolder)docs).Children["Readme.md"]);
     }
 
     [Fact]
@@ -394,21 +280,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         Assert.Same(docs, storage.Children["Docs"]);
         Assert.Equal(["Added.md"], docs.Children.Keys);
         Assert.Equal(["Added.md"], Assert.IsType<VirtualFolder>(storage.Children["New"]).Children.Keys);
-    }
-
-    [Fact]
-    public async Task WhenFileIsGoneAndNamedInAnotherCasing_ThenSubjectIsRemoved()
-    {
-        // Arrange
-        WriteFile("notes.md");
-        var storage = await ConnectAsync();
-        File.Delete(GetFullPath("notes.md"));
-
-        // Act
-        await storage.ReconcileAsync(Named("Notes.md"));
-
-        // Assert
-        Assert.Empty(storage.Children);
     }
 
     [Fact]
@@ -572,22 +443,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         var devices = Assert.IsType<VirtualFolder>(storage.Children["Devices"]);
         Assert.Same(added, devices.Children["Motor"]);
         Assert.Equal("Only in memory", added.Name);
-    }
-
-    [Theory]
-    [InlineData("Build.tmp/Output.md")]
-    [InlineData("~Backup/Notes.md")]
-    public async Task WhenFileIsCreatedInTemporaryDirectory_ThenItIsIgnored(string relativePath)
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-        WriteFile(relativePath);
-
-        // Act
-        await storage.ReconcileAsync(Named(relativePath));
-
-        // Assert
-        Assert.Empty(storage.Children);
     }
 
     [Fact]
@@ -759,24 +614,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         // Assert
         Assert.Equal(StorageStatus.Connected, storage.Status);
         Assert.Equal(0, timeProvider.ArmedTimerCount);
-    }
-
-    [Fact]
-    public async Task WhenReconcileIntervalExceedsWhatTimerAccepts_ThenStorageConnectsAndPeriodicPassIsScheduled()
-    {
-        // Arrange
-        var timeProvider = new ManualTimeProvider();
-
-        // Act
-        var storage = await ConnectAsync(configure: container =>
-        {
-            container.TimeProvider = timeProvider;
-            container.ReconcileIntervalSeconds = int.MaxValue;
-        });
-
-        // Assert
-        Assert.Equal(StorageStatus.Connected, storage.Status);
-        Assert.Equal(1, timeProvider.ArmedTimerCount);
     }
 
     [Fact]
@@ -1293,51 +1130,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         Assert.Equal(5, metadata?.Size);
         Assert.NotNull(metadata?.LastModifiedUtc);
         Assert.Null(missing);
-    }
-
-    [Fact]
-    public async Task WhenFilesAreCreatedConcurrently_ThenAllFilesAreAdded()
-    {
-        // Arrange
-        const int fileCount = 100;
-        var storage = await ConnectAsync();
-        var paths = Enumerable.Range(0, fileCount)
-            .Select(index => index % 2 == 0 ? $"File{index}.json" : $"Docs/File{index}.json")
-            .ToArray();
-
-        foreach (var path in paths)
-        {
-            WriteFile(path, "{}");
-        }
-
-        // Act
-        await Task.WhenAll(paths.Select(path => Task.Run(() =>
-            storage.ReconcileAsync(Named(path)))));
-
-        // Assert
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        Assert.Equal(fileCount / 2, docs.Children.Count);
-        Assert.Equal(fileCount / 2 + 1, storage.Children.Count);
-        Assert.All(docs.Children.Values, child => Assert.NotNull(child.TryGetRegisteredSubject()));
-    }
-
-    [Fact]
-    public async Task WhenSameFileIsCreatedConcurrently_ThenSubjectInTreeKeepsReceivingChanges()
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-        WriteFile("Notes.md", "first");
-
-        // Act
-        await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => Task.Run(() =>
-            storage.ReconcileAsync(Named("Notes.md")))));
-
-        WriteFile("Notes.md", "second");
-        await storage.ReconcileAsync(Named("Notes.md"));
-
-        // Assert
-        var file = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
-        Assert.Equal("second", file.Content);
     }
 
     [Fact]

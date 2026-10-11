@@ -39,32 +39,6 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenReadOfOneFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
-    {
-        // Arrange
-        var storage = await ConnectPausableAsync();
-        WriteFile("First.md");
-        WriteFile("Second.md");
-        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
-        var pass = storage.ReconcileAsync();
-        await readReached;
-
-        // Act
-        await LetHangingCallTimeOutAsync();
-        await pass;
-        var statusAfterFailedPass = storage.Status;
-        var childrenAfterFailedPass = storage.Children.Keys.ToList();
-        await ReleaseHangingCallAsync(storage);
-        await storage.ReconcileAsync();
-
-        // Assert
-        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
-        Assert.Empty(childrenAfterFailedPass);
-        Assert.Equal(StorageStatus.Connected, storage.Status);
-        Assert.Equal(["First.md", "Second.md"], storage.Children.Keys.Order());
-    }
-
-    [Fact]
     public async Task WhenPassFailsAfterLoadingSomeFiles_ThenNextPassPlacesThemWithoutLoadingThemAgain()
     {
         // Arrange

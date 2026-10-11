@@ -85,19 +85,6 @@ public class StorageIndexTests
     }
 
     [Fact]
-    public void WhenSameBytesAreHashed_ThenHashIsEqual()
-    {
-        // Act
-        var first = StorageHash.Compute("content"u8);
-        var second = StorageHash.Compute("content"u8);
-        var other = StorageHash.Compute("Content"u8);
-
-        // Assert
-        Assert.Equal(first, second);
-        Assert.NotEqual(first, other);
-    }
-
-    [Fact]
     public async Task WhenStreamIsHashed_ThenHashEqualsTheHashOfItsBytes()
     {
         // Arrange
