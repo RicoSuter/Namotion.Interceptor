@@ -28,7 +28,8 @@
             var isFirst = i == 0;
             var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
 
-            <div @key="pane.Subject" data-testid="subject-pane" class="pb-4"
+            @* Keyed by path: a subject that is reachable from itself can be in the row twice. *@
+            <div @key="pane.Path" data-testid="subject-pane" class="pb-4"
                  style="@PaneStyle">
                 <MudPaper Style="height: 100%; overflow: hidden;">
                     <SubjectPropertyPanel @key="pane.Subject"
@@ -72,6 +73,7 @@
     private bool _scrollToLastPane;
     private int _placeholderCount;
     private int _scrollVersion;
+    private bool _disposed;
 
     private ElementReference _paneContainer;
     private IJSObjectReference? _jsModule;
@@ -96,30 +98,59 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        try
         {
-            var module = await JsRuntime.InvokeAsync<IJSObjectReference>(
-                "import", "./_content/HomeBlaze.Host/Components/Browser/SubjectBrowser.razor.js");
-            _paneFitting = await module.InvokeAsync<IJSObjectReference>("fitPanes", _paneContainer, MinimumPaneWidth, PaneGap);
-            _jsModule = module;
-        }
-
-        // The panes are fitted before the first scroll, which a render during the import above leaves to this one.
-        if (_scrollToLastPane && _jsModule != null)
-        {
-            _scrollToLastPane = false;
-            var scrollVersion = ++_scrollVersion;
-            await _jsModule.InvokeVoidAsync("scrollToPane", _paneContainer, _panes.Count - 1, !firstRender);
-
-            // The row has scrolled back to the remaining panes, unless the panes changed again in the meantime.
-            if (scrollVersion == _scrollVersion && _placeholderCount > 0)
+            if (firstRender)
             {
-                _placeholderCount = 0;
-                StateHasChanged();
+                var module = await JsRuntime.InvokeAsync<IJSObjectReference>(
+                    "import", "./_content/HomeBlaze.Host/Components/Browser/SubjectBrowser.razor.js");
+                var paneFitting = await module.InvokeAsync<IJSObjectReference>("fitPanes", _paneContainer, MinimumPaneWidth, PaneGap);
+
+                // The page can be left while the script loads, which is after DisposeAsync has run.
+                if (_disposed)
+                {
+                    await DisposeScriptAsync(module, paneFitting);
+                    return;
+                }
+
+                _paneFitting = paneFitting;
+                _jsModule = module;
             }
+
+            // The panes are fitted before the first scroll, which a render during the import above leaves to this one.
+            if (_scrollToLastPane && _jsModule != null && !_disposed)
+            {
+                _scrollToLastPane = false;
+                var scrollVersion = _scrollVersion;
+                try
+                {
+                    await _jsModule.InvokeVoidAsync("scrollToPane", _paneContainer, _panes.Count - 1, !firstRender);
+                }
+                finally
+                {
+                    // The row has scrolled back to the remaining panes, unless the panes changed again in the meantime.
+                    if (scrollVersion == _scrollVersion && _placeholderCount > 0 && !_disposed)
+                    {
+                        _placeholderCount = 0;
+                        StateHasChanged();
+                    }
+                }
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already disconnected, nothing to scroll
         }
 
         await base.OnAfterRenderAsync(firstRender);
+    }
+
+    // Asks for a scroll to the last pane once the changed panes are rendered. The version changes with the panes
+    // rather than with the scroll, so a scroll that ends after a later change leaves the placeholders to that change.
+    private void ScrollToLastPaneAfterRender()
+    {
+        _scrollToLastPane = true;
+        _scrollVersion++;
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
@@ -152,7 +183,7 @@
 
         // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom.
         _placeholderCount = Math.Max(0, previousPaneCount - _panes.Count);
-        _scrollToLastPane = true;
+        ScrollToLastPaneAfterRender();
     }
 
     private void BuildPanesFromPath()
@@ -303,7 +334,7 @@
 
         // The new pane takes the place of the first pane it replaced.
         _placeholderCount = Math.Max(0, _placeholderCount - 1);
-        _scrollToLastPane = true;
+        ScrollToLastPaneAfterRender();
         UpdateUrl();
         StateHasChanged();
     }
@@ -329,7 +360,7 @@
 
         _placeholderCount += _panes.Count - index;
         _panes.RemoveRange(index, _panes.Count - index);
-        _scrollToLastPane = true;
+        ScrollToLastPaneAfterRender();
     }
 
     private async Task OnPaneDelete(SubjectPane pane)
@@ -477,29 +508,35 @@
 
     public void Dispose()
     {
+        _disposed = true;
         NavigationManager.LocationChanged -= OnLocationChanged;
     }
 
     public async ValueTask DisposeAsync()
     {
+        Dispose();
+        await DisposeScriptAsync(_jsModule, _paneFitting);
+    }
+
+    private static async ValueTask DisposeScriptAsync(IJSObjectReference? module, IJSObjectReference? paneFitting)
+    {
         try
         {
-            if (_paneFitting != null)
+            if (paneFitting != null)
             {
-                await _paneFitting.InvokeVoidAsync("dispose");
-                await _paneFitting.DisposeAsync();
+                await paneFitting.InvokeVoidAsync("dispose");
+                await paneFitting.DisposeAsync();
             }
 
-            if (_jsModule != null)
+            if (module != null)
             {
-                await _jsModule.DisposeAsync();
+                await module.DisposeAsync();
             }
         }
         catch (JSDisconnectedException)
         {
             // Circuit already disconnected, nothing to clean up
         }
-        Dispose();
     }
 
     private class SubjectPane

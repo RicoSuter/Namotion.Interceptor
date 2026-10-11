@@ -20,6 +20,11 @@ function resumeSnapping(container) {
 // Sizes the panes so that a whole number of them fills the container, which keeps a pane from being cut off at an
 // edge, and keeps doing so as the container is resized. Returns a handle that stops it.
 export function fitPanes(container, minimumPaneWidth, gap) {
+    // The element is gone when the page was left while this module loaded.
+    if (!container) {
+        return { dispose: () => { } };
+    }
+
     const update = () => {
         const width = container.clientWidth;
         const count = Math.max(1, Math.floor((width + gap) / (minimumPaneWidth + gap)));
@@ -48,7 +53,7 @@ export function fitPanes(container, minimumPaneWidth, gap) {
 // Scrolls the pane at the index to the end of the view, with as many of the panes before it as fit. Resolves once
 // the scrolling has ended.
 export function scrollToPane(container, index, smooth) {
-    const panes = [...container.children].map(pane => pane.getBoundingClientRect());
+    const panes = container ? [...container.children].map(pane => pane.getBoundingClientRect()) : [];
     if (index < 0 || index >= panes.length) {
         return Promise.resolve();
     }
