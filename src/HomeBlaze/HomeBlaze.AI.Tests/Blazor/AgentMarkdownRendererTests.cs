@@ -215,4 +215,17 @@ public class AgentMarkdownRendererTests
         // Assert
         Assert.Equal("<h2>Status</h2>\n", html);
     }
+
+    [Fact]
+    public void WhenMarkdownUsesTheAllowedExtensions_ThenEachIsRendered()
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml("- [x] done\n- [ ] open\n\n~~old~~ value\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\na. first\nb. second");
+
+        // Assert
+        Assert.Contains("<input disabled=\"disabled\" type=\"checkbox\" checked=\"checked\" />", html);
+        Assert.Contains("<del>old</del>", html);
+        Assert.Contains("<table>", html);
+        Assert.Contains("<ol type=\"a\">", html);
+    }
 }

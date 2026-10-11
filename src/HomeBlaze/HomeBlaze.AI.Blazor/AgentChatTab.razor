@@ -77,6 +77,17 @@
         }
     }
 
+    /// <summary>Shows or hides the keyboard hint when the device's primary pointer changes.</summary>
+    [JSInvokable]
+    public void SetSendsOnEnter(bool sendsOnEnter)
+    {
+        if (!_isDisposed && _sendsOnEnter != sendsOnEnter)
+        {
+            _sendsOnEnter = sendsOnEnter;
+            StateHasChanged();
+        }
+    }
+
     /// <summary>Sends the message typed into the chat input when Enter is pressed.</summary>
     [JSInvokable]
     public async Task SendFromKeyboardAsync(string text)
@@ -123,10 +134,16 @@
         _module = null;
         try
         {
-            await DisposeListenerAsync(listener);
-            if (module is not null)
+            try
             {
-                await module.DisposeAsync();
+                await DisposeListenerAsync(listener);
+            }
+            finally
+            {
+                if (module is not null)
+                {
+                    await module.DisposeAsync();
+                }
             }
         }
         catch (Exception exception) when (exception is JSDisconnectedException or JSException or OperationCanceledException)

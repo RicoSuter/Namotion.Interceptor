@@ -18,9 +18,16 @@ export function attachEnterToSend(container, dotNetReference) {
         dotNetReference.invokeMethodAsync('SendFromKeyboardAsync', textarea.value);
     };
 
+    // A hybrid device switches pointers when a keyboard or mouse is attached, so the keyboard hint follows.
+    const onPointerChange = () => dotNetReference.invokeMethodAsync('SetSendsOnEnter', finePointer.matches);
+
     textarea.addEventListener('keydown', onKeyDown);
+    finePointer.addEventListener('change', onPointerChange);
     return {
         sendsOnEnter: () => finePointer.matches,
-        dispose: () => textarea.removeEventListener('keydown', onKeyDown)
+        dispose: () => {
+            textarea.removeEventListener('keydown', onKeyDown);
+            finePointer.removeEventListener('change', onPointerChange);
+        }
     };
 }
