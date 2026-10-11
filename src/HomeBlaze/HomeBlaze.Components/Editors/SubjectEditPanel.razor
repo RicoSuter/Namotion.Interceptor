@@ -37,6 +37,11 @@
 
     [Parameter] public bool IsCreating { get; set; }
 
+    /// <summary>
+    /// Invoked when the validity of an edit component changes, so the host can re-render its save button.
+    /// </summary>
+    [Parameter] public EventCallback<bool> IsValidChanged { get; set; }
+
     private ISubjectComponent? _subjectComponent;
     private ISubjectEditComponent? _editComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
@@ -77,7 +82,11 @@
         }
     }
 
-    private void OnIsValidChanged(bool isValid) => InvokeAsync(StateHasChanged);
+    private void OnIsValidChanged(bool isValid) => InvokeAsync(() =>
+    {
+        StateHasChanged();
+        return IsValidChanged.InvokeAsync(isValid);
+    });
 
     private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
 

@@ -5,7 +5,7 @@
 
 <MudDialog>
     <DialogContent>
-        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" />
+        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" IsValidChanged="StateHasChanged" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
