@@ -127,8 +127,8 @@
                                      HelperText="Per model request, including thinking." />
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudNumericField T="int" Label="History token budget" @bind-Value="_historyTokenBudget" @bind-Value:after="OnChanged" Min="1000"
-                                     HelperText="Above this many input tokens the older half of the chat is summarized." />
+                    <MudNumericField T="int" Label="History token budget" @bind-Value="_historyTokenBudget" @bind-Value:after="OnChanged" Min="0"
+                                     HelperText="When a chat request exceeds this many input tokens, older messages are summarized to about half of it. 0: never." />
                 </MudItem>
             </MudGrid>
         }
@@ -184,7 +184,7 @@
         _maxToolCalls > 0 &&
         (Agent is not ClaudeCliAgent || !string.IsNullOrWhiteSpace(_cliPath)) &&
         (Agent is not AnthropicAgent ||
-            ((_hasStoredApiKey || !string.IsNullOrWhiteSpace(_apiKey)) && !string.IsNullOrWhiteSpace(_model) && _maxTokens >= 256 && _historyTokenBudget >= 1000));
+            ((_hasStoredApiKey || !string.IsNullOrWhiteSpace(_apiKey)) && !string.IsNullOrWhiteSpace(_model) && _maxTokens >= 256 && _historyTokenBudget >= 0));
 
     private LlmAgentBase? Agent => Subject as LlmAgentBase;
 

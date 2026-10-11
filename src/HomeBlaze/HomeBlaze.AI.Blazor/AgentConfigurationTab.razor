@@ -45,8 +45,9 @@
                 }
                 @if (Agent is AnthropicAgent anthropicAgent)
                 {
+                    @SettingRow("API key", string.IsNullOrWhiteSpace(anthropicAgent.ApiKey) ? "not set" : "set")
                     @SettingRow("Max output tokens", anthropicAgent.MaxTokens.ToString())
-                    @SettingRow("History token budget", anthropicAgent.HistoryTokenBudget.ToString())
+                    @SettingRow("History token budget", anthropicAgent.HistoryTokenBudget > 0 ? anthropicAgent.HistoryTokenBudget.ToString() : "never summarize")
                 }
             </tbody>
         </MudSimpleTable>
