@@ -33,6 +33,12 @@ internal sealed class StorageFileWatcher : IDisposable
     }
 
     /// <summary>
+    /// False before the first start, after a start that failed, and after an error that starting over at once
+    /// does not help. <see cref="Start"/> then starts it again.
+    /// </summary>
+    public bool IsRunning => Volatile.Read(ref _watcher) != null;
+
+    /// <summary>
     /// Starts watching, or starts over when it already does. Does nothing once disposed.
     /// </summary>
     public void Start()
@@ -88,9 +94,11 @@ internal sealed class StorageFileWatcher : IDisposable
     internal void SimulateFileEvent(FileSystemEventArgs fileEvent) => OnWatcherEvent(this, fileEvent);
 
     /// <summary>
-    /// Handles a failure as if the watcher had raised it.
+    /// Handles a failure as if a watcher had raised it: the one that is running, or one that is not running
+    /// any more or not yet.
     /// </summary>
-    internal void SimulateError(Exception exception) => OnWatcherError(this, new ErrorEventArgs(exception));
+    internal void SimulateError(Exception exception, bool isRaisedByRunningWatcher = true)
+        => OnWatcherError(isRaisedByRunningWatcher ? Volatile.Read(ref _watcher) : null, new ErrorEventArgs(exception));
 
     private void OnWatcherEvent(object sender, FileSystemEventArgs fileEvent)
     {
@@ -107,18 +115,31 @@ internal sealed class StorageFileWatcher : IDisposable
     private string GetRelativePath(string fullPath)
         => Path.GetRelativePath(_basePath, fullPath).Replace('\\', '/');
 
-    private void OnWatcherError(object sender, ErrorEventArgs error)
+    private void OnWatcherError(object? sender, ErrorEventArgs error)
     {
-        _logger?.LogError(error.GetException(), "FileSystemWatcher error (buffer overflow?), events may be lost");
+        var failure = error.GetException();
+        _logger?.LogError(failure, "File watcher error, events may be lost for: {Path}", _basePath);
 
-        try
+        // Only for the watcher that is running. A watcher can raise an error from within its own start, and
+        // starting over from there would start again within that start, once more for every level.
+        if (sender is FileSystemWatcher watcher && ReferenceEquals(watcher, Volatile.Read(ref _watcher)))
         {
-            Start();
-        }
-        catch (Exception exception)
-        {
-            // Without a watcher only the periodic pass follows the storage, and nothing does when that is switched off.
-            _logger?.LogError(exception, "Failed to restart the file watcher for: {Path}", _basePath);
+            if (failure is InternalBufferOverflowException)
+            {
+                try
+                {
+                    Start();
+                }
+                catch (Exception exception)
+                {
+                    _logger?.LogError(exception, "Failed to restart the file watcher for: {Path}", _basePath);
+                }
+            }
+            else if (ReferenceEquals(Interlocked.CompareExchange(ref _watcher, null, watcher), watcher))
+            {
+                // Starting over at once would meet the same error. Not running, it is started again later.
+                watcher.Dispose();
+            }
         }
 
         _onEventsLost();

@@ -1,5 +1,8 @@
+using FluentStorage.Blobs;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 
@@ -777,22 +780,190 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenFileWatcherCannotStart_ThenConnectFailsAndNothingKeepsRunning()
+    public async Task WhenStorageDirectoryIsMissingAtConnect_ThenStorageLoadsAndIsWatchedOnceItExists()
+    {
+        // Arrange: without a periodic pass, so that only the retry of the failed pass and file events start one.
+        var timeProvider = new ManualTimeProvider();
+        FluentStorageContainer? storage = null;
+        var exception = await Record.ExceptionAsync(() => ConnectAsync(enableFileWatching: true, configure: container =>
+        {
+            storage = container;
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+            container.ConnectionString = Path.Combine(StorageDirectory.FullName, "Missing");
+        }));
+        var statusAfterConnect = storage!.Status;
+
+        // Act: the retry finds the directory and starts the file watcher, whose events lead to the passes after it.
+        WriteFile("Missing/Notes.md");
+        timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Connected, WatcherTimeout);
+        var childrenAfterRetry = storage.Children.Keys.ToList();
+        WriteFile("Missing/Added.md");
+
+        // Assert
+        await WaitWhileClockRunsAsync(timeProvider, () => storage.Children.ContainsKey("Added.md"));
+        Assert.IsType<IOException>(exception, exactMatch: false);
+        Assert.Equal(StorageStatus.Error, statusAfterConnect);
+        Assert.Equal(["Notes.md"], childrenAfterRetry);
+    }
+
+    [Fact]
+    public async Task WhenFileWatcherCannotStartWhileStorageCanBeRead_ThenStorageIsLoadedAndWatchedFromLaterPassOn()
+    {
+        // Arrange: the directory appears right after the file watcher failed to start, which is when the
+        // warning about it is logged. Without a periodic pass, so that only file events start a pass.
+        var timeProvider = new ManualTimeProvider();
+        var directory = Path.Combine(StorageDirectory.FullName, "Late");
+        var logger = new CallbackLogger(level =>
+        {
+            if (level == LogLevel.Warning && !Directory.Exists(directory))
+            {
+                WriteFile("Late/Notes.md");
+            }
+        });
+        var storage = CreateStorage(enableFileWatching: true, logger: logger, configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+            container.ConnectionString = directory;
+        });
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+        var statusAfterConnect = storage.Status;
+        var childrenAfterConnect = storage.Children.Keys.ToList();
+        await storage.ReconcileAsync();
+        WriteFile("Late/Added.md");
+
+        // Assert
+        await WaitWhileClockRunsAsync(timeProvider, () => storage.Children.ContainsKey("Added.md"));
+        Assert.Equal(StorageStatus.Connected, statusAfterConnect);
+        Assert.Equal(["Notes.md"], childrenAfterConnect);
+    }
+
+    [Fact]
+    public async Task WhenListingOfPeriodicPassFailsOnce_ThenPassIsRetriedWithoutAnyEvent()
     {
         // Arrange
         var timeProvider = new ManualTimeProvider();
-        var missingDirectory = Path.Combine(StorageDirectory.FullName, "Missing");
-
-        // Act
-        var exception = await Record.ExceptionAsync(() => ConnectAsync(enableFileWatching: true, configure: container =>
+        PausableBlobStorage? client = null;
+        WriteFile("Home.md");
+        var storage = await ConnectAsync(configure: container =>
         {
             container.TimeProvider = timeProvider;
-            container.ConnectionString = missingDirectory;
-        }));
+            container.ReconcileIntervalSeconds = 300;
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        });
+        WriteFile("Added.md");
+        var listingReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        timeProvider.Advance(TimeSpan.FromSeconds(300));
+        await listingReached;
+        client.FailHangingCall(new FileNotFoundException("A file vanished while the storage was listed."));
+
+        // The periodic timer and the timer of the retry.
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Error && timeProvider.ArmedTimerCount == 2);
+
+        // Act
+        timeProvider.Advance(ReconcileTrigger.MaximumDelay);
 
         // Assert
-        Assert.IsType<ArgumentException>(exception);
-        Assert.Equal(0, timeProvider.ArmedTimerCount);
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Connected);
+        Assert.Equal(["Added.md", "Home.md"], storage.Children.Keys.Order());
+    }
+
+    [Fact]
+    public async Task WhenFirstPassFails_ThenItIsRetriedWithoutAnyEvent()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        PausableBlobStorage? client = null;
+        Task? listingReached = null;
+        FluentStorageContainer? storage = null;
+        WriteFile("Home.md");
+        var connect = ConnectAsync(configure: container =>
+        {
+            storage = container;
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+            container.ClientDecorator = inner =>
+            {
+                client = new PausableBlobStorage(inner);
+                listingReached = client.PauseNext(nameof(IBlobStorage.ListAsync));
+                return client;
+            };
+        });
+        await listingReached!;
+        client!.FailHangingCall(new IOException("The share did not answer."));
+        var exception = await Record.ExceptionAsync(() => connect);
+        var statusAfterConnect = storage!.Status;
+
+        // Act
+        timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Connected);
+        Assert.IsType<IOException>(exception);
+        Assert.Equal(StorageStatus.Error, statusAfterConnect);
+        Assert.Equal(["Home.md"], storage.Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenStorageDirectoryIsGone_ThenPassFailsAndTreeIsKeptUntilItIsBack()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        WriteFile("Docs/Page.md");
+        var storage = await ConnectAsync();
+        var motor = storage.Children["Motor"];
+        var docs = storage.Children["Docs"];
+        var detaches = CountDetachesOf(motor);
+        var movedDirectory = StorageDirectory.FullName + "-moved";
+        Directory.Move(StorageDirectory.FullName, movedDirectory);
+
+        StorageStatus statusWhileGone;
+        List<string> childrenWhileGone;
+        try
+        {
+            // Act
+            await storage.ReconcileAsync();
+            statusWhileGone = storage.Status;
+            childrenWhileGone = storage.Children.Keys.Order().ToList();
+        }
+        finally
+        {
+            Directory.Move(movedDirectory, StorageDirectory.FullName);
+        }
+
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(StorageStatus.Error, statusWhileGone);
+        Assert.Equal(["Docs", "Motor"], childrenWhileGone);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Same(docs, storage.Children["Docs"]);
+        Assert.Equal(0, detaches.Count);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsInMemory_ThenPassNeedsNoDirectory()
+    {
+        // Arrange
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.StorageType = "inmemory";
+            container.ConnectionString = Path.Combine(StorageDirectory.FullName, "Missing");
+        });
+        using var content = new MemoryStream([1, 2, 3]);
+        await storage.WriteBlobAsync("Data.bin", content, CancellationToken.None);
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["Data.bin"], storage.Children.Keys);
     }
 
     [Fact]
@@ -1130,5 +1301,29 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         await AsyncTestHelpers.WaitUntilAsync(
             () => storage.Children.GetValueOrDefault("Docs") is VirtualFolder folder && folder.Children.ContainsKey("Notes.md"),
             WatcherTimeout);
+    }
+
+    /// <summary>
+    /// Waits for something that passes started by the trigger bring about, with a clock that only the test moves.
+    /// </summary>
+    private static Task WaitWhileClockRunsAsync(ManualTimeProvider timeProvider, Func<bool> condition)
+        => AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                // A quiet period per poll: a storage call is given up after thirty of them, which no call on a local disk takes.
+                timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+                return condition();
+            },
+            WatcherTimeout);
+
+    private sealed class CallbackLogger(Action<LogLevel> onLog) : ILogger<FluentStorageContainer>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => onLog(logLevel);
     }
 }

@@ -298,7 +298,16 @@ public partial class FluentStorageContainer :
             using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connection.Token);
             await connection.Worker.RunAsync(async token =>
             {
-                await connection.Reconciler.ReconcileAsync(NoPaths, allNamed: false, token);
+                try
+                {
+                    await connection.Reconciler.ReconcileAsync(NoPaths, allNamed: false, token);
+                }
+                catch (Exception) when (!token.IsCancellationRequested)
+                {
+                    connection.NotifyPassFailed();
+                    throw;
+                }
+
                 _logger?.LogInformation("Storage loaded: {Count} entries.", connection.Index.Count);
             }, passCancellation.Token);
 
@@ -362,27 +371,35 @@ public partial class FluentStorageContainer :
     internal Task ReconcileAsync(IReadOnlySet<string>? namedPaths = null, bool allNamed = false)
         => _connection is { } connection ? ReconcileAsync(connection, namedPaths ?? NoPaths, allNamed) : Task.CompletedTask;
 
-    private async Task ReconcileAsync(StorageConnection connection, IReadOnlySet<string> namedPaths, bool allNamed)
+    /// <returns>False when the pass failed and another one should follow. True also for a pass that ended with its connection.</returns>
+    private async Task<bool> ReconcileAsync(StorageConnection connection, IReadOnlySet<string> namedPaths, bool allNamed)
     {
+        // Not on the worker, which a watcher that stalls while it starts would hold. Changes since the watcher
+        // stopped have raised no event, so every file counts as named.
+        allNamed |= connection.TryStartFileWatcher();
+
         try
         {
-            await connection.Worker.RunAsync(async token =>
+            return await connection.Worker.RunAsync(async token =>
             {
                 try
                 {
                     await connection.Reconciler.ReconcileAsync(namedPaths, allNamed, token);
                     SetStatus(connection, StorageStatus.Connected);
+                    return true;
                 }
                 catch (Exception exception) when (!token.IsCancellationRequested)
                 {
                     SetStatus(connection, StorageStatus.Error);
-                    _logger?.LogError(exception, "Failed to reconcile the storage, the next pass tries again");
+                    _logger?.LogError(exception, "Failed to reconcile the storage, another pass tries again");
+                    return false;
                 }
             }, connection.Token);
         }
         catch (Exception exception) when (connection.IsEnded)
         {
             _logger?.LogDebug(exception, "A pass ended with its connection");
+            return true;
         }
     }
 

@@ -2,6 +2,7 @@ using System.Text.Json;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -41,6 +42,19 @@ public abstract class StorageTestBase : IDisposable
         bool enableFileWatching = false,
         Action<FluentStorageContainer>? configure = null)
     {
+        var storage = CreateStorage(enableFileWatching, configure);
+        await storage.ConnectAsync(CancellationToken.None);
+        return storage;
+    }
+
+    /// <summary>
+    /// The storage of <see cref="ConnectAsync"/> before it connects, for tests that start it another way.
+    /// </summary>
+    protected FluentStorageContainer CreateStorage(
+        bool enableFileWatching = false,
+        Action<FluentStorageContainer>? configure = null,
+        ILogger<FluentStorageContainer>? logger = null)
+    {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
@@ -65,7 +79,8 @@ public abstract class StorageTestBase : IDisposable
         var storage = new FluentStorageContainer(
             typeRegistry,
             serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(),
-            serviceProvider)
+            serviceProvider,
+            logger)
         {
             ConnectionString = StorageDirectory.FullName,
             EnableFileWatching = enableFileWatching
@@ -74,7 +89,6 @@ public abstract class StorageTestBase : IDisposable
         ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
         configure?.Invoke(storage);
         _storages.Add(storage);
-        await storage.ConnectAsync(CancellationToken.None);
         return storage;
     }
 

@@ -8,6 +8,7 @@ public class ReconcileTriggerTests
     private readonly List<(IReadOnlySet<string> NamedPaths, bool AllNamed)> _passes = [];
     private TaskCompletionSource? _runningPass;
     private Func<Task>? _failPass;
+    private bool _isPassFinished = true;
 
     [Fact]
     public void WhenPathChanges_ThenPassRunsAfterQuietPeriod()
@@ -269,6 +270,149 @@ public class ReconcileTriggerTests
     }
 
     [Fact]
+    public void WhenPassDoesNotFinish_ThenAnotherPassRunsAfterMaximumDelay()
+    {
+        // Arrange
+        using var trigger = CreateTrigger();
+        _isPassFinished = false;
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+        _isPassFinished = true;
+
+        // Act
+        _timeProvider.Advance(ReconcileTrigger.MaximumDelay - TimeSpan.FromMilliseconds(1));
+        var passesBeforeMaximumDelayEnds = _passes.Count;
+        _timeProvider.Advance(TimeSpan.FromMilliseconds(1));
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Assert: the pass that did not finish has kept what it was asked to look at, so the retry names nothing.
+        Assert.Equal(1, passesBeforeMaximumDelayEnds);
+        Assert.Equal(2, _passes.Count);
+        Assert.Empty(_passes[1].NamedPaths);
+        Assert.False(_passes[1].AllNamed);
+    }
+
+    [Fact]
+    public void WhenPassesKeepFailing_ThenRetriesStopAfterTheMaximumCount()
+    {
+        // Arrange
+        using var trigger = CreateTrigger();
+        _isPassFinished = false;
+
+        // Act
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Assert
+        Assert.Equal(1 + ReconcileTrigger.MaximumRetryCount, _passes.Count);
+        Assert.Equal(0, _timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public void WhenPassFinishesAfterRetriesWereUsedUp_ThenLaterFailureIsRetriedAgain()
+    {
+        // Arrange
+        using var trigger = CreateTrigger();
+        _isPassFinished = false;
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+        _isPassFinished = true;
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+        var passesBeforeLaterFailure = _passes.Count;
+
+        // Act
+        _isPassFinished = false;
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Assert
+        Assert.Equal(2 + ReconcileTrigger.MaximumRetryCount, passesBeforeLaterFailure);
+        Assert.Equal(passesBeforeLaterFailure + 1 + ReconcileTrigger.MaximumRetryCount, _passes.Count);
+    }
+
+    [Fact]
+    public void WhenChangeArrivesWhileFailedPassRuns_ThenPassForTheChangeIsTheRetry()
+    {
+        // Arrange
+        using var trigger = CreateTrigger();
+        _isPassFinished = false;
+        _runningPass = new TaskCompletionSource();
+        trigger.NotifyChanged("First.md");
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+        trigger.NotifyChanged("Second.md");
+
+        // Act
+        var failedPass = _runningPass;
+        _runningPass = null;
+        _isPassFinished = true;
+        failedPass.SetResult();
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+        var passesAfterQuietPeriod = _passes.Count;
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Assert
+        Assert.Equal(2, passesAfterQuietPeriod);
+        Assert.Equal(["Second.md"], _passes[1].NamedPaths);
+        Assert.Equal(2, _passes.Count);
+    }
+
+    [Fact]
+    public void WhenTriggerIsDisposedAfterPassDidNotFinish_ThenNoRetryRuns()
+    {
+        // Arrange
+        var trigger = CreateTrigger();
+        _isPassFinished = false;
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+
+        // Act
+        trigger.Dispose();
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Assert
+        Assert.Single(_passes);
+        Assert.Equal(0, _timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public void WhenTriggerIsDisposedWhilePassThatDoesNotFinishRuns_ThenNoRetryRuns()
+    {
+        // Arrange
+        var trigger = CreateTrigger();
+        _isPassFinished = false;
+        _runningPass = new TaskCompletionSource();
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+
+        // Act
+        trigger.Dispose();
+        _runningPass.SetResult();
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Assert
+        Assert.Single(_passes);
+        Assert.Equal(0, _timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public void WhenPassOfAnotherStarterFails_ThenItIsRetriedLikeOneOfTheTrigger()
+    {
+        // Arrange
+        using var trigger = CreateTrigger();
+
+        // Act
+        trigger.NotifyPassFailed();
+        _timeProvider.Advance(ReconcileTrigger.MaximumDelay - TimeSpan.FromMilliseconds(1));
+        var passesBeforeMaximumDelayEnds = _passes.Count;
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Assert
+        Assert.Equal(0, passesBeforeMaximumDelayEnds);
+        Assert.Single(_passes);
+    }
+
+    [Fact]
     public async Task WhenTriggerIsCreatedWithinFlow_ThenItsPassesDoNotCarryThatFlow()
     {
         // Arrange
@@ -280,7 +424,7 @@ public class ReconcileTriggerTests
             (_, _) =>
             {
                 flowOfPass.TrySetResult(flow.Value);
-                return Task.CompletedTask;
+                return Task.FromResult(true);
             },
             TimeSpan.Zero);
 
@@ -293,10 +437,12 @@ public class ReconcileTriggerTests
 
     private ReconcileTrigger CreateTrigger(TimeSpan? periodicInterval = null)
         => new(
-            (namedPaths, allNamed) =>
+            async (namedPaths, allNamed) =>
             {
                 _passes.Add((namedPaths, allNamed));
-                return _failPass?.Invoke() ?? _runningPass?.Task ?? Task.CompletedTask;
+                var isFinished = _isPassFinished;
+                await (_failPass?.Invoke() ?? _runningPass?.Task ?? Task.CompletedTask);
+                return isFinished;
             },
             periodicInterval ?? TimeSpan.Zero,
             _timeProvider);

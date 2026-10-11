@@ -83,7 +83,7 @@ public class StorageFileWatcherTests
     }
 
     [Fact]
-    public async Task WhenWatcherFails_ThenEventsLostIsReportedAndWatchingGoesOn()
+    public async Task WhenBufferOverflows_ThenEventsLostIsReportedAndWatcherStartsOver()
     {
         // Arrange
         var directory = Directory.CreateTempSubdirectory("homeblaze-watcher-");
@@ -107,12 +107,91 @@ public class StorageFileWatcherTests
             // Assert
             Assert.Equal(1, Volatile.Read(ref eventsLostCount));
             Assert.Equal(2, logger.StartCount);
+            Assert.True(watcher.IsRunning);
             await AsyncTestHelpers.WaitUntilAsync(() => changedPaths.Contains("Home.md"), WatcherTimeout);
         }
         finally
         {
             directory.Delete(recursive: true);
         }
+    }
+
+    [Fact]
+    public void WhenWatcherThatIsNotRunningRaisesError_ThenEventsLostIsReportedAndNoWatcherIsStarted()
+    {
+        // Arrange: on Linux a watcher raises an error from within its own start, before it counts as running.
+        var directory = Directory.CreateTempSubdirectory("homeblaze-watcher-");
+        try
+        {
+            var eventsLostCount = 0;
+            var logger = new StartCountingLogger();
+            using var watcher = new StorageFileWatcher(directory.FullName, (_, _) => { }, () => eventsLostCount++, logger);
+            watcher.Start();
+
+            // Act
+            watcher.SimulateError(new InternalBufferOverflowException(), isRaisedByRunningWatcher: false);
+
+            // Assert
+            Assert.Equal(1, eventsLostCount);
+            Assert.Equal(1, logger.StartCount);
+            Assert.True(watcher.IsRunning);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WhenWatcherFailsForAnotherReasonThanBufferOverflow_ThenEventsLostIsReportedAndItStaysStoppedUntilStartedAgain()
+    {
+        // Arrange
+        var directory = Directory.CreateTempSubdirectory("homeblaze-watcher-");
+        try
+        {
+            var changedPaths = new ConcurrentQueue<string>();
+            var eventsLostCount = 0;
+            var logger = new StartCountingLogger();
+            using var watcher = new StorageFileWatcher(
+                directory.FullName,
+                (path, _) => changedPaths.Enqueue(path),
+                () => Interlocked.Increment(ref eventsLostCount),
+                logger);
+
+            watcher.Start();
+
+            // Act
+            watcher.SimulateError(new IOException("The watch could not be added."));
+            var isRunningAfterError = watcher.IsRunning;
+            var startCountAfterError = logger.StartCount;
+            watcher.Start();
+            File.WriteAllText(Path.Combine(directory.FullName, "Home.md"), "content");
+
+            // Assert
+            Assert.Equal(1, Volatile.Read(ref eventsLostCount));
+            Assert.False(isRunningAfterError);
+            Assert.Equal(1, startCountAfterError);
+            Assert.True(watcher.IsRunning);
+            await AsyncTestHelpers.WaitUntilAsync(() => changedPaths.Contains("Home.md"), WatcherTimeout);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void WhenWatcherCannotStart_ThenItIsNotRunning()
+    {
+        // Arrange
+        using var watcher = new StorageFileWatcher(Path.Combine(BasePath, "Missing"), (_, _) => { }, () => { });
+
+        // Act
+        var exception = Record.Exception(watcher.Start);
+
+        // Assert
+        Assert.NotNull(exception);
+        Assert.False(watcher.IsRunning);
     }
 
     [Fact]

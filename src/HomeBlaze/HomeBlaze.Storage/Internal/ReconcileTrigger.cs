@@ -5,7 +5,9 @@ namespace HomeBlaze.Storage.Internal;
 /// <summary>
 /// Decides when a reconcile pass runs. Changes are collected until the storage has been quiet for
 /// <see cref="QuietPeriod"/>, but no longer than <see cref="MaximumDelay"/>. A periodic pass covers changes
-/// that no event reported. Only one pass runs at a time, and whatever arrives during it leads to one more.
+/// that no event reported. A pass that did not finish is followed by another one after
+/// <see cref="MaximumDelay"/>, at most <see cref="MaximumRetryCount"/> times in a row. Only one pass runs at a
+/// time, and whatever arrives during it leads to one more.
 /// </summary>
 internal sealed class ReconcileTrigger : IDisposable
 {
@@ -14,10 +16,12 @@ internal sealed class ReconcileTrigger : IDisposable
     // Without it a folder that is written to more often than once per quiet period would never get a pass.
     internal static readonly TimeSpan MaximumDelay = TimeSpan.FromSeconds(5);
 
+    internal const int MaximumRetryCount = 3;
+
     // The longest period a timer accepts.
     private static readonly TimeSpan MaximumPeriodicInterval = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
 
-    private readonly Func<IReadOnlySet<string>, bool, Task> _runPass;
+    private readonly Func<IReadOnlySet<string>, bool, Task<bool>> _runPass;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
     private readonly ITimer _timer;
@@ -31,9 +35,13 @@ internal sealed class ReconcileTrigger : IDisposable
     private bool _isRunning;
     private bool _isDisposed;
 
+    // The retries asked for since a pass last finished.
+    private int _retryCount;
+
     /// <param name="runPass">
-    /// Runs a pass with the named paths and whether every file counts as named. It is called on the thread of
-    /// a timer and must return its task without waiting for the pass. Must not throw.
+    /// Runs a pass with the named paths and whether every file counts as named, and returns whether the pass
+    /// finished. False asks for another pass. It is called on the thread of a timer and must return its task
+    /// without waiting for the pass. Must not throw.
     /// </param>
     /// <param name="periodicInterval">
     /// How often a pass runs without any change. Zero or less switches it off, and an interval longer than a
@@ -42,7 +50,7 @@ internal sealed class ReconcileTrigger : IDisposable
     /// <param name="timeProvider">The clock and timer source, the system one by default.</param>
     /// <param name="logger">Receives a pass that threw despite the contract.</param>
     public ReconcileTrigger(
-        Func<IReadOnlySet<string>, bool, Task> runPass,
+        Func<IReadOnlySet<string>, bool, Task<bool>> runPass,
         TimeSpan periodicInterval,
         TimeProvider? timeProvider = null,
         ILogger? logger = null)
@@ -84,6 +92,22 @@ internal sealed class ReconcileTrigger : IDisposable
     public void NotifyEventsLost()
         => Request(null, null, allNamed: true, atOnce: true);
 
+    /// <summary>
+    /// Reports that a pass which this trigger did not start has not finished, so that it is retried like one
+    /// of its own.
+    /// </summary>
+    public void NotifyPassFailed()
+    {
+        lock (_lock)
+        {
+            // A pass that runs or waits for the worker is the retry, and reports its own outcome.
+            if (!_isDisposed && !_isRunning)
+            {
+                ArmTimerAfterPass(isFinished: false);
+            }
+        }
+    }
+
     private void Request(string? path, string? otherPath, bool allNamed, bool atOnce)
     {
         lock (_lock)
@@ -112,19 +136,46 @@ internal sealed class ReconcileTrigger : IDisposable
             // The running pass arms the timer when it ends.
             if (!_isRunning)
             {
-                ArmTimer(atOnce);
+                ArmTimer(atOnce ? TimeSpan.Zero : QuietPeriod);
             }
         }
     }
 
-    private void ArmTimer(bool atOnce)
+    private void ArmTimer(TimeSpan delay)
     {
         var untilMaximum = MaximumDelay - _timeProvider.GetElapsedTime(_firstPendingTimestamp);
-        var delay = atOnce || untilMaximum <= TimeSpan.Zero
-            ? TimeSpan.Zero
-            : untilMaximum < QuietPeriod ? untilMaximum : QuietPeriod;
+        if (untilMaximum < delay)
+        {
+            delay = untilMaximum;
+        }
 
-        _timer.Change(delay, Timeout.InfiniteTimeSpan);
+        _timer.Change(delay > TimeSpan.Zero ? delay : TimeSpan.Zero, Timeout.InfiniteTimeSpan);
+    }
+
+    private void ArmTimerAfterPass(bool isFinished)
+    {
+        var delay = QuietPeriod;
+        if (isFinished)
+        {
+            _retryCount = 0;
+        }
+        else if (_retryCount < MaximumRetryCount)
+        {
+            _retryCount++;
+
+            // With a change pending, the pass for that change is the retry.
+            if (!_isPending)
+            {
+                _isPending = true;
+                _firstPendingTimestamp = _timeProvider.GetTimestamp();
+                delay = MaximumDelay;
+            }
+        }
+
+        if (_isPending)
+        {
+            ArmTimer(delay);
+        }
     }
 
     private void OnTimer()
@@ -151,9 +202,10 @@ internal sealed class ReconcileTrigger : IDisposable
 
     private async Task RunPassAsync(IReadOnlySet<string> namedPaths, bool allNamed)
     {
+        var isFinished = false;
         try
         {
-            await _runPass(namedPaths, allNamed);
+            isFinished = await _runPass(namedPaths, allNamed);
         }
         catch (Exception exception)
         {
@@ -164,9 +216,9 @@ internal sealed class ReconcileTrigger : IDisposable
             lock (_lock)
             {
                 _isRunning = false;
-                if (_isPending && !_isDisposed)
+                if (!_isDisposed)
                 {
-                    ArmTimer(atOnce: false);
+                    ArmTimerAfterPass(isFinished);
                 }
             }
         }

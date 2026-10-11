@@ -74,8 +74,9 @@ The subject tree follows the storage through reconcile passes. A pass lists the 
 **When a pass runs**
 
 - After a file system event, once the storage has been quiet for 1 second, and after 5 seconds at the latest. The event only names the path. What happened to it is decided by the listing. This needs a storage on disk and `enableFileWatching` switched on.
-- At once after the file watcher reported an error, such as a buffer overflow. The watcher restarts, and the pass compares the content of every file, because events may be missing.
+- At once after the file watcher reported an error. The pass compares the content of every file, because events may be missing. After a buffer overflow the watcher starts over at once. After any other error it is stopped and started again when the next pass begins.
 - Every `reconcileIntervalSeconds`, which covers changes that no event reported. It also runs when file watching is off.
+- 5 seconds after a pass that failed, at most three times in a row. After that the next event or the periodic pass tries again.
 - An event or a request that arrives while a pass runs leads to one more pass after it, never to a second pass next to it.
 
 | Setting | Default | Meaning |
@@ -113,11 +114,15 @@ Code that runs on the worker, such as the load of a subject or its `ApplyConfigu
 
 **An unresponsive storage**
 
-Every call on the storage client is started on the thread pool and limited to 30 seconds. When such a call hits the limit, a pass ends without changing the tree and sets the status of the storage to `Error`, and an operation fails with an exception. No file is marked as failed because of it: the next pass does the work again and compares what the failed pass was asked to compare. While a call that hit the limit has not returned, further calls fail at once instead of waiting again. This is about the storage's own client: a storage that is a file of another storage and does not answer fails only its own file in the pass of that other storage.
+Every call on the storage client is started on the thread pool and limited to 30 seconds. When such a call hits the limit, a pass ends without changing the tree and sets the status of the storage to `Error`, and an operation fails with an exception. A pass that fails for another reason, such as a listing that meets a file that has just been deleted, ends the same way. No file is marked as failed because of it: the next pass does the work again and compares what the failed pass was asked to compare. While a call that hit the limit has not returned, further calls fail at once instead of waiting again. This is about the storage's own client: a storage that is a file of another storage and does not answer fails only its own file in the pass of that other storage.
 
 Reading the content of a file to its end on the worker has the same limit, but there it is a failure of that one file: the pass goes on with the other files, the status stays `Connected`, and the file is loaded when it changes or an event names it. A new file is left out until then, and a file that is in the tree keeps the content it has.
 
 **Connecting and stopping**
+
+Connecting starts the timers and the file watcher and then runs the first pass. A file watcher that cannot start, for example because the system has no watches left, is logged as a warning and does not keep the storage from loading: the storage is followed by the other passes, and every pass tries to start the watcher again. The pass that starts it compares the content of every file.
+
+Before a storage on disk is listed, its directory is examined. A directory that is missing or cannot be reached fails the pass, so the tree stays as it is and the status shows `Error` until the directory is back. At connect that fails the connect, and the passes after it load the storage once the directory exists.
 
 A connection to the storage owns its worker, its index and its timers. Connecting again ends the old connection, lets its running work finish, and starts a new connection with every subject rebuilt. Applying the configuration of the storage therefore connects again only when a setting of the connection changed (storage type, connection string, container name, file watching, reconcile interval) or the storage is not connected. A connect that arrives while another one is running waits for it to finish.
 
@@ -134,11 +139,12 @@ A connection to the storage owns its worker, its index and its timers. Connectin
 - **Streams outside the worker.** The 30 second limit does not cover a stream that other code reads after `ReadBlobAsync`, for example a download in the UI.
 - **Writes that hit the limit.** Such a write keeps running in the background.
 - **Writes in memory.** `WriteBlobAsync` holds the content in memory while it writes.
-- **Missing directory.** When file watching is on and the directory is missing at startup, the storage stays in `Error` until it is reconfigured or restarted.
+- **Empty mount point.** A volume that is unmounted cleanly leaves an empty directory behind, which cannot be told from a storage whose files were all deleted. The pass then removes every subject.
 - **Folders on disk.** The disk client creates the folder of a path it is asked about. A folder that is deleted while one of its files is being loaded can come back empty.
 - **Reconnect.** A reconnect waits for a connect that is still running, including its first pass, and cannot end it early.
-- **No periodic pass, no retry.** With `reconcileIntervalSeconds` at zero, a failed pass is retried only when the next event arrives.
-- **File watcher that cannot restart.** A file watcher that fails and cannot restart leaves the storage on the periodic pass until it reconnects.
+- **No periodic pass.** With `reconcileIntervalSeconds` at zero, a pass that still fails after its three retries is tried again only when the next event arrives.
+- **File watcher that cannot start.** While the file watcher cannot start, only the periodic pass follows the storage, and nothing does when that is switched off.
+- **Unreadable folders.** One folder that the process cannot enter fails the listing and with it every pass, also when the folder is hidden or temporary.
 - **Cancelled calls.** A call that was given up because its caller was cancelled also makes the client refuse calls until it returns, so a pass in that moment fails and the status shows `Error` until the next pass.
 - **Cancelled operations.** A queued operation whose caller cancels is only dropped when the worker reaches it.
 

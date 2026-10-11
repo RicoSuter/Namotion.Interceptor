@@ -19,14 +19,23 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
     private readonly IBlobStorage _inner;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
+    private readonly Action? _verifyRoot;
 
     private int _abandonedCallCount;
 
-    public TimeLimitedBlobStorage(IBlobStorage inner, TimeProvider timeProvider, ILogger? logger)
+    /// <param name="inner">The storage whose calls are limited.</param>
+    /// <param name="timeProvider">The clock of the limit.</param>
+    /// <param name="logger">Receives what a call that was given up does later.</param>
+    /// <param name="verifyRoot">
+    /// Runs as the first part of every listing and throws when the root of the storage cannot be examined, for
+    /// a storage that lists such a root as empty.
+    /// </param>
+    public TimeLimitedBlobStorage(IBlobStorage inner, TimeProvider timeProvider, ILogger? logger, Action? verifyRoot = null)
     {
         _inner = inner;
         _timeProvider = timeProvider;
         _logger = logger;
+        _verifyRoot = verifyRoot;
     }
 
     /// <summary>
@@ -36,7 +45,16 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
 
     /// <inheritdoc cref="OpenReadAsync"/>
     public Task<IReadOnlyCollection<Blob>> ListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(ListAsync), options?.FolderPath ?? "/", () => _inner.ListAsync(options, cancellationToken), cancellationToken);
+        => RunAsync(
+            nameof(ListAsync),
+            options?.FolderPath ?? "/",
+            () =>
+            {
+                // Part of the call, so that a root that stalls when it is examined is limited like the listing.
+                _verifyRoot?.Invoke();
+                return _inner.ListAsync(options, cancellationToken);
+            },
+            cancellationToken);
 
     /// <inheritdoc cref="OpenReadAsync"/>
     public Task WriteAsync(string fullPath, Stream dataStream, bool append = false, CancellationToken cancellationToken = default)
