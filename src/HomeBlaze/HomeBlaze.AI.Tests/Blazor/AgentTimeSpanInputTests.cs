@@ -52,4 +52,34 @@ public class AgentTimeSpanInputTests
         Assert.Equal("1.02:03:04", text);
         Assert.Equal(original, parsed);
     }
+
+    [Theory]
+    [InlineData("00:00:00")]
+    [InlineData("00:03:00")]
+    [InlineData("24.00:00:00")]
+    [InlineData("24.20:31:23")]
+    public void WhenTurnTimeoutIsWithinTheEnforcedLimit_ThenItParses(string text)
+    {
+        // Act
+        var isValid = AgentTimeSpanInput.TryParseTurnTimeout(text, out var value);
+
+        // Assert
+        Assert.True(isValid);
+        Assert.True(value <= AgentTimeSpanInput.MaximumTurnTimeout);
+    }
+
+    [Theory]
+    [InlineData("24.20:31:24")]
+    [InlineData("25.00:00:00")]
+    [InlineData("365.00:00:00")]
+    [InlineData("5")]
+    public void WhenTurnTimeoutExceedsTheEnforcedLimit_ThenParsingFails(string text)
+    {
+        // Act
+        var isValid = AgentTimeSpanInput.TryParseTurnTimeout(text, out var value);
+
+        // Assert
+        Assert.False(isValid);
+        Assert.Equal(TimeSpan.Zero, value);
+    }
 }

@@ -56,7 +56,7 @@
             </MudItem>
             <MudItem xs="12" sm="6" md="3">
                 <MudTextField T="string" Label="Turn timeout" @bind-Value="_turnTimeout" @bind-Value:after="OnChanged" Immediate="true"
-                              HelperText="[d.]hh:mm:ss, 00:00:00 for none" Validation="@(new Func<string?, string?>(ValidateTimeSpan))" />
+                              HelperText="[d.]hh:mm:ss, 00:00:00 for none" Validation="@(new Func<string?, string?>(ValidateTurnTimeout))" />
             </MudItem>
             <MudItem xs="12" sm="6" md="3">
                 <MudNumericField T="int" Label="Tool calls per turn" @bind-Value="_maxToolCalls" @bind-Value:after="OnChanged" Min="1" Max="1000" />
@@ -117,6 +117,7 @@
 
 @code {
     private const string TimeSpanErrorText = "Use [d.]hh:mm:ss, at most 365 days";
+    private const string TurnTimeoutErrorText = "Use [d.]hh:mm:ss, at most 24 days; 00:00:00 for none";
 
     private static readonly AgentEffort?[] EffortValues = [null, .. Enum.GetValues<AgentEffort>().Cast<AgentEffort?>()];
 
@@ -155,7 +156,7 @@
     public bool IsValid =>
         ValidateOptionalTimeSpan(_pollInterval) is null &&
         AgentTimeSpanInput.TryParse(_minRunInterval, out _) &&
-        AgentTimeSpanInput.TryParse(_turnTimeout, out _) &&
+        AgentTimeSpanInput.TryParseTurnTimeout(_turnTimeout, out _) &&
         _maxToolCalls > 0 &&
         (Agent is not ClaudeCliAgent || !string.IsNullOrWhiteSpace(_cliPath));
 
@@ -178,10 +179,11 @@
         _backgroundEffort = agent.BackgroundEffort;
         _watchPaths = string.Join('\n', agent.WatchPaths);
         _pollInterval = agent.PollInterval is { } pollInterval ? AgentTimeSpanInput.Format(pollInterval) : null;
-        _minRunInterval = AgentTimeSpanInput.Format(agent.MinRunInterval);
+        // The trigger policy treats a negative minimum run interval as zero.
+        _minRunInterval = AgentTimeSpanInput.Format(agent.MinRunInterval > TimeSpan.Zero ? agent.MinRunInterval : TimeSpan.Zero);
         // The runtime treats zero, negative and over int.MaxValue milliseconds as no limit, which the form writes as 00:00:00.
         var turnTimeout = agent.TurnTimeout;
-        _turnTimeout = AgentTimeSpanInput.Format(turnTimeout > TimeSpan.Zero && turnTimeout.TotalMilliseconds <= int.MaxValue ? turnTimeout : TimeSpan.Zero);
+        _turnTimeout = AgentTimeSpanInput.Format(turnTimeout > TimeSpan.Zero && turnTimeout <= AgentTimeSpanInput.MaximumTurnTimeout ? turnTimeout : TimeSpan.Zero);
         _allowedTools = new HashSet<string>(agent.AllowedTools, StringComparer.Ordinal);
         _toolOptions = AgentToolOptions.Create(ToolSource, agent.AllowedTools);
         _maxToolCalls = agent.MaxToolCallsPerTurn;
@@ -211,7 +213,7 @@
         agent.PollInterval = AgentTimeSpanInput.TryParse(_pollInterval, out var pollInterval) && pollInterval > TimeSpan.Zero ? pollInterval : null;
         AgentTimeSpanInput.TryParse(_minRunInterval, out var minRunInterval);
         agent.MinRunInterval = minRunInterval;
-        AgentTimeSpanInput.TryParse(_turnTimeout, out var turnTimeout);
+        AgentTimeSpanInput.TryParseTurnTimeout(_turnTimeout, out var turnTimeout);
         agent.TurnTimeout = turnTimeout;
         agent.AllowedTools = _toolOptions.Select(tool => tool.Name).Where(_allowedTools.Contains).ToArray();
         agent.MaxToolCallsPerTurn = _maxToolCalls;
@@ -258,6 +260,8 @@
     }
 
     private static string? ValidateTimeSpan(string? text) => AgentTimeSpanInput.TryParse(text, out _) ? null : TimeSpanErrorText;
+
+    private static string? ValidateTurnTimeout(string? text) => AgentTimeSpanInput.TryParseTurnTimeout(text, out _) ? null : TurnTimeoutErrorText;
 
     private static string? ValidateOptionalTimeSpan(string? text) => string.IsNullOrWhiteSpace(text) ? null : ValidateTimeSpan(text);
 

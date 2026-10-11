@@ -20,7 +20,7 @@
                     }
                 </text>)
                 @SettingRow("Poll interval", Agent.PollInterval is { } pollInterval && pollInterval > TimeSpan.Zero ? AgentTimeSpanInput.Format(pollInterval) : "none")
-                @SettingRow("Minimum run interval", AgentTimeSpanInput.Format(Agent.MinRunInterval))
+                @SettingRow("Minimum run interval", AgentTimeSpanInput.Format(Agent.MinRunInterval > TimeSpan.Zero ? Agent.MinRunInterval : TimeSpan.Zero))
                 @SettingRow("Allowed tools", @<text>
                     @if (Agent.AllowedTools.Length > 0)
                     {
@@ -87,7 +87,7 @@
 
     // The runtime treats zero, negative and over int.MaxValue milliseconds as no limit.
     private static string FormatTurnTimeout(TimeSpan turnTimeout) =>
-        turnTimeout > TimeSpan.Zero && turnTimeout.TotalMilliseconds <= int.MaxValue ? AgentTimeSpanInput.Format(turnTimeout) : "none";
+        turnTimeout > TimeSpan.Zero && turnTimeout <= AgentTimeSpanInput.MaximumTurnTimeout ? AgentTimeSpanInput.Format(turnTimeout) : "none";
 
     private static RenderFragment SettingRow(string label, string value) => SettingRow(label, @<text>@value</text>);
 
