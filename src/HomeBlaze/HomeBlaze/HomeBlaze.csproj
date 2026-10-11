@@ -48,7 +48,7 @@
     <ItemGroup>
         <!-- Development data is read from the project folder, never from the output. -->
         <Content Update="Data\**\*" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
-        <None Remove="Data\History\**;Data\OpcUa\**" />
+        <None Remove="Data\History\**;Data\OpcUa\**;Data\Agents\**" />
         <!-- Starting set for new installations, copied into an empty data folder on first start. -->
         <Content Update="Seed\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
         <None Update="Seed\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

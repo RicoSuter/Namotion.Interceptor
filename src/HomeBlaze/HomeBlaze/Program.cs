@@ -1,4 +1,6 @@
 using HomeBlaze.AI;
+using HomeBlaze.AI.Agents;
+using HomeBlaze.AI.Agents.Cli;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Components;
 using HomeBlaze.History.InMemory.Blazor;
@@ -55,6 +57,7 @@ builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvid
     context.RootSubjectProvider,
     context.PathProvider,
     context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
+builder.Services.AddHomeBlazeAgents();
 
 // The MCP server is always registered because the built-in agents use it; McpServer:Enabled only decides
 // whether the external /mcp route is mapped (default: false, enabled in Development).
@@ -107,7 +110,8 @@ typeProvider
     .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject).Assembly)       // HomeBlaze.History.Sqlite
     .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly)                          // HomeBlaze.History.Sqlite.Blazor
     .AddAssembly(typeof(LuxtronikHeatPump).Assembly)                                        // Namotion.Devices.Luxtronik
-    .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly);                                 // Namotion.Devices.Luxtronik.HomeBlaze
+    .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly)                                  // Namotion.Devices.Luxtronik.HomeBlaze
+    .AddAssembly(typeof(ClaudeCliAgent).Assembly);                                          // HomeBlaze.AI
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
@@ -135,12 +139,18 @@ if (!app.Environment.IsDevelopment())
 
 if (!app.Environment.IsDevelopment())
 {
-    app.UseHttpsRedirection();
+    // The CLI agent calls back over loopback HTTP; a redirect would drop its bearer token.
+    app.UseWhen(
+        context => !context.Request.Path.StartsWithSegments(AgentMcpEndpoint.Route),
+        branch => branch.UseHttpsRedirection());
 }
 
 app.UseAntiforgery();
 
-// Map MCP server endpoint if enabled
+// The agent route is always mapped; it only accepts loopback requests carrying a running turn's token.
+app.MapHomeBlazeAgentMcp();
+
+// Map the external MCP server endpoint if enabled
 if (mcpEnabled)
 {
     app.MapMcp("/mcp");

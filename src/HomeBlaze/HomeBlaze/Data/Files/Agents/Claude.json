@@ -1,0 +1,7 @@
+{
+  "$type": "HomeBlaze.AI.Agents.Cli.ClaudeCliAgent",
+  "name": "Claude",
+  "instructions": "You are the assistant of this home automation installation. Answer questions about its devices and values by looking them up with your tools. Be concise.",
+  "model": "sonnet",
+  "backgroundModel": "sonnet"
+}
