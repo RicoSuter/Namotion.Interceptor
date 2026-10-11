@@ -5,6 +5,7 @@ using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Internal;
 
@@ -72,6 +73,23 @@ internal sealed class FileSubjectFactory
         }
 
         return new JsonFile(storage, path);
+    }
+
+    /// <summary>
+    /// Takes a subject that entered the context when it was created and that no property holds out of that
+    /// context, which detaches it as leaving the tree would have: a hosted service is stopped. Does nothing
+    /// for any other subject.
+    /// </summary>
+    public void Release(IInterceptorSubject subject)
+    {
+        // A subject that a property holds leaves the context with the assignment that removes it from there.
+        if (subject.GetReferenceCount() == 0 &&
+            _serviceProvider.GetService<IInterceptorSubjectContext>() is { } context &&
+            context.TryGetLifecycleInterceptor() is { } lifecycle &&
+            lifecycle.TryRunWhileAttached(subject, static () => { }))
+        {
+            subject.Context.RemoveFallbackContext(context);
+        }
     }
 
     /// <summary>

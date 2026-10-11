@@ -613,6 +613,7 @@ public partial class FluentStorageContainer :
         await connection.Client.DeleteAsync(relativePath, cancellationToken: cancellationToken);
         connection.Index.Remove(relativePath);
         connection.Reconciler.Apply();
+        connection.Reconciler.Release(entry.Subject);
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", relativePath);
     }

@@ -15,11 +15,15 @@ internal sealed class StorageWorker : IDisposable
     private readonly CancellationTokenSource _disposalSource = new();
     private readonly AsyncLocal<WorkItem?> _itemOfFlow = new();
     private readonly ILogger? _logger;
+    private readonly Action? _whenStopped;
     private readonly Task _loop;
 
-    public StorageWorker(ILogger? logger = null)
+    /// <param name="logger">Receives failures that no caller gets.</param>
+    /// <param name="whenStopped">Runs on the worker once, after its last item.</param>
+    public StorageWorker(ILogger? logger = null, Action? whenStopped = null)
     {
         _logger = logger;
+        _whenStopped = whenStopped;
 
         // Created within an item of another worker, the loop would otherwise carry the flow of that item into
         // everything it runs.
@@ -100,6 +104,15 @@ internal sealed class StorageWorker : IDisposable
             // belong to it, and the next item must not start next to them.
             await item.CloseWhenInlineCallsFinishedAsync();
         }
+
+        try
+        {
+            _whenStopped?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogError(exception, "Storage worker failed after its last item");
+        }
     }
 
     /// <summary>
@@ -113,7 +126,8 @@ internal sealed class StorageWorker : IDisposable
 
     /// <summary>
     /// Does what <see cref="Dispose"/> does and completes when the loop has ended: the running item and its
-    /// inline calls have finished. Called from within a running item of this worker, it completes at once.
+    /// inline calls have finished, and what the worker does when it has stopped is done. Called from within a
+    /// running item of this worker, it completes at once.
     /// </summary>
     public Task StopAsync()
     {

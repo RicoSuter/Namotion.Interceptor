@@ -6,6 +6,7 @@ using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Internal;
 
@@ -163,6 +164,7 @@ internal sealed class StorageReconciler
             .ThenBy(entry => entry.Path, StringComparer.Ordinal)
             .ToList();
 
+        List<StorageEntry>? newlyPlacedEntries = null;
         foreach (var entry in candidates)
         {
             // An entry never gets another subject, so the key it holds or asked for is still its key.
@@ -173,6 +175,8 @@ internal sealed class StorageReconciler
                 {
                     _logger?.LogWarning("Skipping '{Path}': key \"{Key}\" is taken or its folder is not placed", entry.Path, key);
                 }
+
+                Release(entry.Subject);
 
                 entry.State = StorageEntryState.KeyTaken;
                 entry.Key = key;
@@ -187,6 +191,11 @@ internal sealed class StorageReconciler
             }
 
             siblings.Add(key, entry.Subject!);
+            if (entry.State != StorageEntryState.Placed)
+            {
+                (newlyPlacedEntries ??= []).Add(entry);
+            }
+
             entry.State = StorageEntryState.Placed;
             entry.Key = key;
         }
@@ -222,6 +231,16 @@ internal sealed class StorageReconciler
             {
                 AssignChildren(folder, childrenByFolder[folder]);
             }
+
+            // A storage that has left the context, such as one whose file was deleted while this pass ran, no
+            // longer attaches what is assigned to it. Nothing would ever detach those subjects.
+            if (newlyPlacedEntries != null)
+            {
+                foreach (var entry in newlyPlacedEntries)
+                {
+                    _subjectFactory.Release(entry.Subject!);
+                }
+            }
         }
 
         // Only here: an assignment that throws leaves the rest of the tree to the next call.
@@ -235,6 +254,34 @@ internal sealed class StorageReconciler
     /// </summary>
     public bool IsKeyFree(string path, IInterceptorSubject subject)
         => IsKeyFree(StoragePath.GetParent(path), GetChildKey(path, subject));
+
+    /// <summary>
+    /// Takes a subject that is dropped before it was ever in the tree out of the context, where it has been
+    /// since it was created. Does nothing for a subject that the tree holds or held.
+    /// </summary>
+    public void Release(IInterceptorSubject? subject)
+    {
+        if (subject != null)
+        {
+            // Runs lifecycle handlers as an assignment in Apply does.
+            using (ExecutionContext.SuppressFlow())
+            {
+                _subjectFactory.Release(subject);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Releases every subject of the index that never reached the tree, for when the connection has ended and
+    /// no pass will place them.
+    /// </summary>
+    public void ReleaseUnplacedSubjects()
+    {
+        foreach (var entry in _index.Entries)
+        {
+            Release(entry.Subject);
+        }
+    }
 
     public async Task<StorageVersion> GetVersionAsync(string path, CancellationToken cancellationToken)
     {
@@ -342,8 +389,9 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Removes the entries that are gone or changed kind, and returns those of them that hold a configurable
-    /// subject by content hash: a new file with the same content can be the same subject under a new path.
+    /// Removes the entries that are gone or changed kind, and returns those of them whose configurable subject
+    /// is in the tree by content hash: a new file with the same content can be the same subject under a new
+    /// path. A subject of the others that never reached the tree is released.
     /// </summary>
     private Dictionary<string, List<StorageEntry>> RemoveMissingEntries(Dictionary<string, StorageListing> listing)
     {
@@ -367,7 +415,7 @@ internal sealed class StorageReconciler
         {
             _index.Remove(entry.Path);
 
-            if (entry is { IsFolder: false, Subject: IConfigurable, Hash: not null })
+            if (entry is { IsFolder: false, Subject: IConfigurable, Hash: not null } && entry.Subject.GetReferenceCount() > 0)
             {
                 if (!movableEntries.TryGetValue(entry.Hash, out var entries))
                 {
@@ -375,6 +423,10 @@ internal sealed class StorageReconciler
                 }
 
                 entries.Add(entry);
+            }
+            else
+            {
+                Release(entry.Subject);
             }
         }
 
@@ -570,6 +622,8 @@ internal sealed class StorageReconciler
         {
             return false;
         }
+
+        Release(entry.Subject);
 
         _index.Set(new StorageEntry { Path = entry.Path, IsFolder = false, Version = version, Hash = hash, Subject = subject });
         _logger?.LogInformation("Replaced the subject of: {Path}", entry.Path);
