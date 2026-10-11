@@ -14,7 +14,7 @@
         break;
     case AgentTimelineEntryKind.Assistant:
         <MudPaper Class="pa-3 my-2" Elevation="0" Outlined="true" Style="max-width: min(100%, 56rem);" data-testid="agent-reply">
-            <div class="agent-markdown mud-typography-body1">@_html</div>
+            <AgentMarkdown>@_html</AgentMarkdown>
             <AgentToolCalls Calls="Entry.ToolCalls" />
         </MudPaper>
         break;
@@ -34,7 +34,7 @@
                 <MudText Typo="Typo.subtitle2">Background run</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.Format(Entry.Timestamp) · @Entry.Trigger</MudText>
             </MudStack>
-            <div class="agent-markdown mud-typography-body1">@_html</div>
+            <AgentMarkdown>@_html</AgentMarkdown>
             <AgentToolCalls Calls="Entry.ToolCalls" />
         </MudPaper>
         break;

@@ -79,13 +79,13 @@ public class AgentPageTests
             return; // The fake CLI is a shell script.
         }
 
-        // Arrange - the script streams enough lines to overflow the timeline, then waits for a signal file before
+        // Arrange - the script streams enough paragraphs to overflow the timeline, then waits for a signal file before
         // streaming more, so the test controls when content grows. Deleting the directory ends the waits.
         static string Delta(string text) =>
             $$$"""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{{text}}}"}},"session_id":"e2e-session"}""";
 
-        var firstLines = string.Concat(Enumerable.Range(1, 40).Select(index => $"line {index}\\n"));
-        var moreLines = string.Concat(Enumerable.Range(1, 20).Select(index => $"more {index}\\n"));
+        var firstLines = string.Concat(Enumerable.Range(1, 40).Select(index => $"line {index}\\n\\n"));
+        var moreLines = string.Concat(Enumerable.Range(1, 20).Select(index => $"more {index}\\n\\n"));
         string CreateScript(string directory) =>
             "#!/bin/sh\ncat > /dev/null\n" +
             "cat <<'EOF'\n" +

@@ -1,13 +1,21 @@
 @implements IDisposable
 
-<MudPaper Class="pa-3 my-2" Elevation="0" Outlined="true" Style="max-width: min(100%, 56rem);" data-testid="agent-streaming">
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Rounded="true" Class="mb-2" />
-    <MudText Style="white-space: pre-wrap; overflow-wrap: anywhere;">@Agent.StreamingText</MudText>
+@{
+    UpdateHtml();
+}
+@* Laid out like the final reply, with the progress overlaid on the bottom padding, so the reply replaces it
+   without a jump. *@
+<MudPaper Class="pa-3 my-2 relative overflow-hidden" Elevation="0" Outlined="true" Style="max-width: min(100%, 56rem);" data-testid="agent-streaming">
+    <AgentMarkdown>@_stableHtml@_tailHtml</AgentMarkdown>
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="position: absolute; left: 0; right: 0; bottom: 0;" />
 </MudPaper>
 
 @code {
     private LlmAgentBase? _subscribed;
     private int _isRenderPending;
+    private string _stableText = string.Empty;
+    private MarkupString _stableHtml;
+    private MarkupString _tailHtml;
 
     [Parameter, EditorRequired]
     public LlmAgentBase Agent { get; set; } = null!;
@@ -37,6 +45,20 @@
                 StateHasChanged();
             });
         }
+    }
+
+    // The completed blocks are converted once per boundary move; only the block being written is converted per render.
+    private void UpdateHtml()
+    {
+        var text = Agent.StreamingText;
+        var stableLength = AgentStreamingMarkdown.FindStableLength(text);
+        if (!text.AsSpan(0, stableLength).SequenceEqual(_stableText))
+        {
+            _stableText = text[..stableLength];
+            _stableHtml = new MarkupString(AgentMarkdownRenderer.ToHtml(_stableText));
+        }
+
+        _tailHtml = stableLength < text.Length ? new MarkupString(AgentMarkdownRenderer.ToHtml(text[stableLength..])) : default;
     }
 
     public void Dispose()
