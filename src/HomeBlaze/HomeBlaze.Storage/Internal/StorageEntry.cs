@@ -12,7 +12,8 @@ namespace HomeBlaze.Storage.Internal;
 internal readonly record struct StorageVersion(long Size, DateTimeOffset? Modified);
 
 /// <summary>
-/// What was applied last for one path.
+/// What the index holds for one path: the subject of the file or folder, the version and hash of the file that
+/// the subject was last brought in line with, and the key under which the subject is in the tree.
 /// </summary>
 internal sealed class StorageEntry
 {

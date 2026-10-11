@@ -256,7 +256,8 @@ internal sealed class StorageReconciler
 
     /// <summary>
     /// Takes a subject that is dropped before it was ever in the tree out of the context, where it has been
-    /// since it was created. Does nothing for a subject that the tree holds or held.
+    /// since it was created, see <see cref="FileSubjectFactory.Release"/>. Does nothing for a subject that
+    /// the tree holds or held.
     /// </summary>
     public void Release(IInterceptorSubject? subject)
     {

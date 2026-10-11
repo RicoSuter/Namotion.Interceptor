@@ -19,6 +19,11 @@ namespace HomeBlaze.Storage;
 /// The root of a storage on a FluentStorage backend. Its subject tree follows the storage through reconcile
 /// passes, and every change of the storage or the tree runs on one worker per connection.
 /// </summary>
+/// <remarks>
+/// Every call on the storage is limited to 30 seconds. An operation whose call hits the limit fails with a
+/// <see cref="TimeoutException"/>, and so does every operation that is called before that call has returned.
+/// A write that failed this way can still reach the storage later.
+/// </remarks>
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
@@ -173,7 +178,8 @@ public partial class FluentStorageContainer :
 
     /// <summary>
     /// IConfigurable implementation - called after configuration properties are updated. Connects again when a
-    /// setting of the connection has changed or the storage is not connected, which rebuilds every subject.
+    /// setting of the connection has changed or <see cref="Status"/> is not <see cref="StorageStatus.Connected"/>,
+    /// which rebuilds every subject. The status is also not connected after a pass that failed.
     /// </summary>
     /// <remarks>A container that was stopped does not follow its storage after this either, see <see cref="StopAsync"/>.</remarks>
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
@@ -561,8 +567,8 @@ public partial class FluentStorageContainer :
         if (relativePath.Length == 0)
             return null;
 
-        // Through the client also for a storage on disk: subjects ask while they load on the worker, and only
-        // a call on the client is limited.
+        // Through the client also for a storage on disk: a file subject can ask from its load on the worker,
+        // and only a call on the client is limited.
         var blobs = await Connection.Client.GetBlobsAsync([relativePath], cancellationToken);
         return blobs.FirstOrDefault() is { } blob
             ? new BlobMetadata(blob.Size ?? 0, blob.LastModificationTime?.UtcDateTime)

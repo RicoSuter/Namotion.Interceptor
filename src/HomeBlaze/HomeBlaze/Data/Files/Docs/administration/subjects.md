@@ -48,6 +48,8 @@ Both approaches work on the same underlying files. The UI is a management layer 
 | `enableFileWatching` | `true` (default) to follow edits of files on disk through file system events, `false` to switch the events off |
 | `reconcileIntervalSeconds` | Seconds between the periodic checks of the folder, which catch changes that no event reported. Default 300, 0 switches the periodic check off |
 
+Changing one of these properties connects the storage again, which recreates every subject in it.
+
 For the design rationale (pluggable backends, recovery behavior), see [Storage Design](../architecture/design/storage.md).
 
 ---

@@ -40,7 +40,7 @@ All persistent files flow through `IStorageContainer` (`HomeBlaze.Storage.Abstra
 |-----------|-------------|
 | `ReadBlobAsync` | Stream-based blob reading |
 | `WriteBlobAsync` | Stream-based blob writing |
-| `DeleteBlobAsync` | Blob deletion |
+| `DeleteBlobAsync` | Deletes the file of a subject. A path without a subject is left alone |
 | `GetBlobMetadataAsync` | Query size and modification time |
 | `AddSubjectAsync` | Serialize and persist a subject |
 | `DeleteSubjectAsync` | Remove a subject |
@@ -69,14 +69,14 @@ Beyond the FluentStorage blob providers, two additional backend strategies are w
 
 ### Following Changes in the Storage
 
-The subject tree follows the storage through reconcile passes. A pass lists the storage once, compares the listing with what was applied in the last pass, and applies the difference. The startup scan is simply the first pass.
+The subject tree follows the storage through reconcile passes. A pass lists the storage once, compares the listing with the index of what earlier passes loaded, and applies the difference. The startup scan is simply the first pass.
 
 **When a pass runs**
 
 - After a file system event, once the storage has been quiet for 1 second, and after 5 seconds at the latest. The event only names the path. What happened to it is decided by the listing. This needs a storage on disk and `enableFileWatching` switched on.
-- At once after the file watcher reported an error. The pass compares the content of every file, because events may be missing. After a buffer overflow the watcher starts over at once. After any other error it is stopped and started again when the next pass begins.
+- After the file watcher reported an error: at once, or after the quiet period when a file system event arrives before that pass has started. The pass compares the content of every file, because events may be missing. After a buffer overflow the watcher starts over at once. After any other error it is stopped and started again when the next pass begins.
 - Every `reconcileIntervalSeconds`, which covers changes that no event reported. It also runs when file watching is off.
-- 5 seconds after a pass that failed, at most three times in a row. After that the next event or the periodic pass tries again.
+- 5 seconds after a pass that failed, the first pass included, or sooner when an event arrives. That happens at most three times in a row. After that the next event or the periodic pass tries again.
 - An event or a request that arrives while a pass runs leads to one more pass after it, never to a second pass next to it.
 
 | Setting | Default | Meaning |
@@ -86,22 +86,22 @@ The subject tree follows the storage through reconcile passes. A pass lists the 
 
 **What a pass does with a path**
 
-| In the storage | Applied before | Action |
+| In the storage | In the index | Action |
 |---|---|---|
 | present | no | The file is loaded and its subject added. A folder becomes a `VirtualFolder`. |
 | gone, or a file that became a folder or the reverse | yes | The subject or folder is removed. |
-| size or modification time differs, or an event named it | yes | The file is hashed and the subject reloaded only if the hash differs. The size and time that a file subject shows follow the listing either way. |
+| size or modification time differs, or an event named it | yes | The content is hashed and the subject reloaded only if the hash differs. The size and time that a file subject shows follow the listing either way. |
 | same size and time, not named | yes | Nothing. The file is not opened. |
 
 After a lost event every file counts as named, so the content of every file is compared once. A pass that failed or was cancelled hands the paths it was asked to compare to the pass after it.
 
 - **Exact names.** Paths are compared exactly as the storage reports them, on every platform. A rename is the old path gone and the new one present, which includes a rename that only changes the casing.
-- **Moved JSON subjects keep their instance.** A configurable JSON subject keeps its instance when its file moves to another folder or its folder is renamed: in the same pass, exactly one JSON subject with that content disappears and a new `.json` file with the same content appears in another folder. The subject is neither stopped nor recreated. A rename within the same folder creates a new instance.
+- **Moved JSON subjects keep their instance.** A configurable JSON subject that is in the tree keeps its instance when its file moves to another folder or its folder is renamed: in the same pass, exactly one JSON subject with that content disappears and a new `.json` file with the same content appears in another folder. The subject is neither stopped nor recreated. A rename within the same folder creates a new instance.
 - **Ignored paths.** A path with a segment that starts with a dot (`.DS_Store`, `.idea`, `._*`) or has a temp name (`~` prefix or suffix, `.tmp` suffix, `.tmp.` in the name) never becomes a subject. That includes everything below a folder with such a name. A visible folder that holds only ignored files shows as an empty `VirtualFolder`.
-- **JSON files.** What a `.json` file is follows its content. A file that was first read as plain or invalid JSON becomes its subject once its content describes one, a subject whose file names another type is replaced by a subject of that type, and a subject whose file loses its type becomes a plain JSON file. Content that is not valid JSON, such as a file that is still being written, leaves a subject as it is.
-- **Plain files.** A generic file and a plain JSON file hold only size and time, which come from the listing without a call per file.
-- **Subjects that are not placed.** A subject that the storage created and that does not reach the tree is taken out of the context again, which stops it when it is a hosted service: a subject whose key is taken, a subject whose file is gone or became something else before a pass placed it, and the subjects of a pass that ended early when its connection ends before a later pass placed them.
-- **Keys.** A subject that is in the tree keeps its key. A file whose key is taken (`Docs.json` next to a `Docs` folder) is left out with a warning and loaded again in the first pass in which the key is free. The same holds for a folder. Its files are loaded in the pass that places it or in the one after it.
+- **JSON files.** What a `.json` file is follows its content. A file that was first read as plain or invalid JSON becomes its subject once its content describes one, a subject whose file names another type is replaced by a subject of that type, and a subject whose file loses its type becomes a plain JSON file. A type that is not known counts as no type. Content that is not valid JSON, such as a file that is still being written, leaves a subject as it is.
+- **Plain files.** A generic file and a plain JSON file hold only size and time, which come from the listing without a call per file. A generic file is never opened.
+- **Subjects that are not placed.** A subject that the storage created and that does not reach the tree is taken out of the context again, which stops it when it is a hosted service: a subject whose key is taken, a subject whose file is gone or became something else before a pass placed it, and the subjects of a pass that ended early when its connection ends before a later pass placed them. The same holds for the subjects embedded in a markdown page that does not reach the tree.
+- **Keys.** A subject that is in the tree keeps its key. A file whose key is taken (the subject file `Docs.json` next to a `Docs` folder) is left out with a warning and loaded again in the first pass in which the key is free. The same holds for a folder. Its files are loaded in the pass that places it or in the one after it.
 - **Failed loads.** A file that cannot be loaded is retried when it changes or when an event names it. After an IO error, such as a file that its writer still holds, the next pass tries again. A subject that is in the tree and fails half way through a reload can hold part of the rejected content, and is loaded again when its file changes, which includes a file that is put back to what it was.
 - **Folders.** The children of a folder are assigned once per pass, and only when they changed. When a subject moved, they are assigned in two steps, first everything that is added and then everything that is removed, so the moved subject is not stopped and restarted.
 
@@ -111,21 +111,23 @@ Passes and the operations that change the storage (create, delete, write, save c
 
 After a write, the worker records the new size, time and hash, so the event that the write raises reloads nothing. When size and time cannot be read after the write, the write still succeeds, and the next pass finds the file unchanged by its hash. `WriteBlobAsync` first copies the content it is given, writes from that copy and then refreshes the subject of the file. If refreshing the subject after the write fails, the write still succeeds for the caller, the failure is logged, and the next pass reloads the file, with or without an event.
 
-Code that runs on the worker, such as the load of a file subject (`OnFileChangedAsync`) or the `ApplyConfigurationAsync` of a subject, must not call an operation of its own storage that goes through the worker (create, delete, write, save configuration). Such a call would wait for the work that waits for it, so it is refused with an `InvalidOperationException`. The file whose load made the call then fails like any other failed load, and the pass goes on with the other files. Reading a file or its metadata is allowed. The same holds for a task or a timer that such code starts and does not await, for as long as the pass or operation that started it runs: its calls are refused until then and queued afterwards. Work that has to call the storage is therefore started without the execution flow (`ExecutionContext.SuppressFlow()`), and its calls are queued like any other. The storage does that itself wherever it creates a subject or assigns to the tree, so work that a subject starts when it is created or attached is not part of the pass.
+Code that runs on the worker must not call an operation of its own storage that goes through the worker (create, delete, write, save configuration). Such code is the load of a file subject (`OnFileChangedAsync`) and the `ApplyConfigurationAsync` of a subject whose changed file a pass or a write applies. The call would wait for the work that waits for it, so it is refused with an `InvalidOperationException`. The file whose load made the call then fails like any other failed load, and the pass goes on with the other files. Reading a file or its metadata is allowed, and so is every operation of another storage.
+
+The same holds for a task or a timer that such code starts and does not await, for as long as the pass or operation that started it runs: its calls are refused until then and queued afterwards. A subject that has to change its storage from such code therefore starts that work without the execution flow (`ExecutionContext.SuppressFlow()`) and does not wait for it. The call is then queued like any other and runs once the pass or operation has finished. Waiting for it there would stall the worker for good, because the call can only run after the code that waits for it has returned. The storage suppresses the flow itself wherever it creates a subject or assigns to the tree, so work that a subject starts when it is created or attached is not part of the pass.
 
 **An unresponsive storage**
 
-Every call on the storage client is started on the thread pool and limited to 30 seconds. When such a call hits the limit, a pass ends without changing the tree and sets the status of the storage to `Error`, and an operation fails with an exception. A pass that fails for another reason, such as a listing that meets a file that has just been deleted, ends the same way. No file is marked as failed because of it: the next pass does the work again and compares what the failed pass was asked to compare. While a call that hit the limit has not returned, further calls fail at once instead of waiting again. This is about the storage's own client: a storage that is a file of another storage and does not answer fails only its own file in the pass of that other storage.
+Every call on the storage client is started on the thread pool and limited to 30 seconds. When such a call hits the limit, a pass ends without changing the tree and sets the status of the storage to `Error`, and an operation fails with a `TimeoutException`. A pass that fails for another reason, such as a listing that meets a file that has just been deleted, ends the same way. No file is marked as failed because of it: the next pass does the work again and compares what the failed pass was asked to compare. While a call that hit the limit has not returned, further calls fail at once instead of waiting again. This is about the storage's own client: a storage that is a file of another storage and does not answer fails only its own file in the pass of that other storage.
 
-Reading the content of a file to its end on the worker has the same limit, but there it is a failure of that one file: the pass goes on with the other files, the status stays `Connected`, and the file is loaded when it changes or an event names it. A new file is left out until then, and a file that is in the tree keeps the content it has.
+The storage limits its own reading of the content of a file in the same way: hashing a file, reading a JSON file, and the load of a markdown page. There the limit is a failure of that one file: the pass goes on with the other files, the status stays `Connected`, and the file is loaded when it changes or an event names it. A new file is left out until then, and a file that is in the tree keeps the content it has. A file type from outside this library that reads the stream of its file in `OnFileChangedAsync` has no such limit.
 
 **Connecting and stopping**
 
-Connecting starts the timers and the file watcher and then runs the first pass. A file watcher that cannot start, for example because the system has no watches left, is logged as a warning and does not keep the storage from loading: the storage is followed by the other passes, and every pass tries to start the watcher again. The pass that starts it compares the content of every file.
+Connecting creates the timers, starts the file watcher and then runs the first pass. A file watcher that cannot start, for example because the system has no watches left, is logged as a warning and does not keep the storage from loading: the storage is followed by the other passes, and every pass tries to start the watcher again. The pass that starts it compares the content of every file.
 
-Before a storage on disk is listed, its directory is examined. A directory that is missing or cannot be reached fails the pass, so the tree stays as it is and the status shows `Error` until the directory is back. At connect that fails the connect, and the passes after it load the storage once the directory exists.
+Before a storage on disk is listed, its directory is examined. A directory that is missing or cannot be reached fails the pass, so the tree stays as it is and the status shows `Error` until the directory is back. At connect that fails the connect, and the passes after it load the storage once the directory exists. A directory that exists and is empty passes this check, also when it is the mount point of a volume that is gone.
 
-A connection to the storage owns its worker, its index and its timers. Connecting again ends the old connection, lets its running work finish, and starts a new connection with every subject rebuilt. Applying the configuration of the storage therefore connects again only when a setting of the connection changed (storage type, connection string, container name, file watching, reconcile interval) or the storage is not connected. A connect that arrives while another one is running waits for it to finish, and applying unchanged configuration after such a wait does not connect again.
+A connection to the storage owns its worker, its index and its timers. Connecting again ends the old connection, waits until the work it is running has ended, and starts a new connection with every subject rebuilt. Until the new connection is there, reads and operations fail with "Storage not connected". Applying the configuration of the storage therefore connects again only when a setting of the connection changed (storage type, connection string, container name, file watching, reconcile interval) or the status is not `Connected`. That includes `Error` after a pass that failed, so applying the configuration of the storage in that state rebuilds every subject. A connect that arrives while another one is running waits for it to finish, and applying unchanged configuration after such a wait does not connect again.
 
 `StopAsync` stops the file watcher and the timers, so the tree no longer follows the storage, while writes still work. A pass that is running or already queued on the worker still completes. `StartAsync` connects again. A connect that its caller cancels, which a stop during the first pass does, leaves the status at `Disconnected` and not at `Error`. `Dispose` ends the connection for good: a connect afterwards fails.
 
@@ -133,27 +135,33 @@ An operation that still waits on the worker when its connection ends fails with 
 
 #### Known Limitations and Follow-ups
 
-- **Samba.** The tests run on Linux in CI. A data folder edited over an SMB share is the setup this was built for, and it has only been observed, not tested.
+- **Network shares.** Nothing has been tested on an SMB share or another network file system. The tests run on a local disk.
+- **File watcher errors on Linux.** How the storage handles an error of the file watcher is tested with simulated errors only. It has not been verified against the errors that a watcher raises on Linux.
 - **Coarse timestamps.** On a file system with timestamps of one or two seconds, an edit that keeps the size and falls into the same tick is only seen when its event arrives. The periodic pass alone misses it.
 - **A long pass delays the UI.** An operation waits for the running pass, which matters at startup, when the first pass loads every file.
-- **Subject code on the worker.** A subject whose `ApplyConfigurationAsync` hangs blocks the worker. The 30 second limit covers storage calls, not subject code.
+- **Subject code on the worker.** A subject whose `ApplyConfigurationAsync` hangs blocks the worker. The 30 second limit covers storage calls, not subject code. That includes a file type from outside this library that reads the stream of its file itself: a read that stalls there holds the worker.
 - **Renamed subjects are recreated.** A JSON subject that is renamed within its folder gets a new instance, and so does a renamed markdown or other file. Keeping the instance needs a fix in the core library for entries that are re-keyed inside one dictionary.
-- **Blocked keys.** A JSON subject whose key is taken is created and released again each time the blocked file changes or an event names it. A subject enters the context when it is created, so a device can be started and stopped once per such change without ever being in the tree.
+- **Blocked keys.** A JSON subject whose key is taken is created and released again each time the blocked file changes or an event names it. A subject enters the context when it is created, so a device can be started and stopped once per such change without ever being in the tree. The same holds for the subjects embedded in a markdown page whose key is taken.
+- **Embedded subjects of a page that fails to load.** When a block of a markdown page cannot be loaded, the subjects that the same load created from the blocks before it are not released. They stay in the context, and a hosted service among them stays started.
 - **Streams outside the worker.** The 30 second limit does not cover a stream that other code reads after `ReadBlobAsync`, for example a download in the UI.
-- **Writes that hit the limit.** Such a write keeps running in the background.
+- **Writes that hit the limit.** Such a write keeps running in the background. When it lands, the next pass sees a file that changed and applies it to the subject, also over what was changed in memory since.
+- **Writes are not atomic.** A write goes through the storage client directly to the file, not to a temporary file that is then renamed. A write that is interrupted can leave a truncated file.
 - **Writes in memory.** `WriteBlobAsync` holds the content in memory while it writes.
 - **Empty mount point.** A volume that is unmounted cleanly leaves an empty directory behind, which cannot be told from a storage whose files were all deleted. The pass then removes every subject.
 - **Folders on disk.** The disk client creates the folder of a path it is asked about. A folder that is deleted while one of its files is being loaded can come back empty.
+- **Backslashes in names.** A backslash in a path is treated as a path separator, also on a platform where a file name can contain one.
 - **Reconnect.** A reconnect waits for a connect that is still running, including its first pass, and cannot end it early.
 - **No periodic pass.** With `reconcileIntervalSeconds` at zero, a pass that still fails after its three retries is tried again only when the next event arrives.
 - **File watcher that cannot start.** While the file watcher cannot start, only the periodic pass follows the storage, and nothing does when that is switched off.
-- **Unreadable folders.** One folder that the process cannot enter fails the listing and with it every pass, also when the folder is hidden or temporary.
+- **File watcher that stalls while it starts.** A connect waits for the start of its file watcher. While that start stalls, the first pass and the operations behind it wait as well. A stop or a dispose does not wait.
+- **Unreadable folders.** The listing comes from the storage client as a whole. One folder that the process cannot enter fails it and with it every pass, also when the folder is hidden or temporary.
+- **Files that vanish during a listing.** A file that is deleted while the storage is listed can fail that pass, which is then retried.
 - **Cancelled calls.** A call that was given up because its caller was cancelled also makes the client refuse calls until it returns, so a pass in that moment fails and the status shows `Error` until the next pass.
 - **Cancelled operations.** A queued operation whose caller cancels is only dropped when the worker reaches it.
 
 ### File Hierarchy
 
-Files are organized into a `VirtualFolder` tree. Each folder delegates storage operations to its parent `IStorageContainer`. A subject is in the index under its path if and only if it is placed in the tree. `AddSubjectAsync` writes the file and places the subject as one step on the worker, and throws without writing when the path is ignored, a file already exists there, or the key is taken.
+Files are organized into a `VirtualFolder` tree. Each folder delegates storage operations to its parent `IStorageContainer`. After a pass that completed, a subject is in the index under its path if and only if it is placed in the tree. After a pass that ended early the two differ until the next pass completes: a subject whose file is gone is still shown, and deleting it fails with "Subject not found in storage registry". `AddSubjectAsync` writes the file and places the subject as one step on the worker, and throws without writing when the path is ignored, a file already exists there, or the key is taken.
 
 ### File Types
 
@@ -163,9 +171,9 @@ File subjects are created based on file extension via `FileExtensionAttribute`:
 |------|-----------|-------------|
 | `MarkdownFile` | `.md` | Markdown with YAML frontmatter, embedded subjects (```` ```subject(name) ````), and live expressions (`{{ path }}`) |
 | `JsonFile` | `.json` | Plain JSON files (non-configurable subjects) |
-| `GenericFile` | Other | Fallback for unknown extensions — metadata only |
+| `GenericFile` | Other | Fallback for unknown extensions, metadata only |
 
-Plugin authors can register additional file types via `[FileExtension]`.
+Plugin authors can register additional file types via `[FileExtension]`. The storage sets `FileSize` and `LastModified` of such a file subject from its listing and calls its `OnFileChangedAsync` when the file is new or its content hash differs. That call runs on the worker of the storage, see "One thing at a time" for what it must not do. A read of the stream of the file in that call is not limited by the storage.
 
 ### Subject Files vs Documents [Implemented]
 

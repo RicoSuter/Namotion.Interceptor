@@ -72,14 +72,15 @@ When a JSON file is loaded from storage:
 ```
 FluentStorageContainer reconcile pass
   -> Finds demo/motor.json
-  -> ConfigurableSubjectSerializer.DeserializeAsync()
+  -> ConfigurableSubjectSerializer.Deserialize()
      -> Reads $type discriminator
-     -> SubjectTypeRegistry resolves type name to CLR type
-     -> Creates instance via InterceptorSubjectContext
+     -> TypeProvider resolves type name to CLR type
+     -> Creates instance with services from dependency injection
      -> Deserializes [Configuration] properties from JSON
   -> Subject attached as child of folder
-  -> IConfigurable.ApplyConfigurationAsync() called
 ```
+
+`IConfigurable.ApplyConfigurationAsync()` is not called for a new subject. It is called after the configuration of an existing subject was changed, from its file or in the UI.
 
 ## Operation Invocation
 
