@@ -382,7 +382,7 @@ The second paragraph of the card.
 Line 3: This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 1 (2 characters).
 ~~~~
 
-**A closing line with too few colons.** It closes a block further out, and the block that it was meant for is shown as not closed. The line that was meant to close the outer block then finds no open block. Here line 4 should have three colons:
+**A closing line with too few colons.** It closes a block further out, and the block that it was meant for ends there as well. The line that was meant to close the outer block then finds no open block. Here line 4 should have three colons:
 
 <!-- sample: error -->
 ~~~~markdown
@@ -395,24 +395,10 @@ The body of the outer card.
 ~~~~
 
 ~~~~text
-Line 2: This block is not closed. The line ':::' that ends it is missing.
 Line 6: This line of 2 ':' characters closes no block. No block is open here.
 ~~~~
 
-**A closing line that is missing.** The block ends where the block around it ends, or at the end of the page. Its box replaces the block with everything in it. For a block that is still open at the end of the page, that is the whole rest of the page. Here the motor has no closing line, and the card is still shown:
-
-<!-- sample: error -->
-~~~~markdown
-:: HomeBlaze.Components.Card Title="Open Motor"
-::: HomeBlaze.Samples.Motor#openmotor Name="Open Motor" TargetSpeed=800
-::
-~~~~
-
-~~~~text
-Line 2: This block is not closed. The line ':::' that ends it is missing.
-~~~~
-
-**A head line with too few colons for its place.** The block is shown as an error and still ends at its own closing line, so the block around it is shown with the rest of its content. This holds for both forms of the mistake: the closing line of the block can have the same too few colons, or the number of colons that its place needs. Here the motor needs three colons on both of its lines:
+**A head line with too few colons for its place.** The head line ends the block that it was meant to be inside of, and its block stands after that block. The closing line that was written for the outer block then finds no open block. Here the motor needs three colons on both of its lines:
 
 <!-- sample: error -->
 ~~~~markdown
@@ -424,47 +410,32 @@ The text after the motor.
 ~~~~
 
 ~~~~text
-Line 2: A block inside another block needs more ':' characters than the block around it. This block has 2 and the block around it, at line 1, has 2. Write ':::' here and on its closing line.
+Line 5: This line of 2 ':' characters closes no block. No block is open here.
 ~~~~
 
-The other form: only the head line of the motor is one colon short, and its closing line has the three colons that its place needs. That line closes the motor, so the page shows the same single box and the card with the text after the motor:
-
-<!-- sample: error -->
-~~~~markdown
-:: HomeBlaze.Components.Card Title="Outer Card"
-:: HomeBlaze.Samples.Motor#rightclose Name="Short Motor" TargetSpeed=800
-:::
-The text after the motor.
-::
-~~~~
-
-~~~~text
-Line 2: A block inside another block needs more ':' characters than the block around it. This block has 2 and the block around it, at line 1, has 2. Write ':::' here and on its closing line.
-~~~~
-
-**A wrong colon line inside a widget that has no place for content.** In the cases above the card around the mistake is still shown, because the box stands in the content of the card where the block was. A `FlowLayout` and a `TabLayout` take no loose content, and neither does a card whose body stands in a `Content` block. Such a widget has no place for the box, so the box replaces the whole widget. It names the line and has the message of the block that is wrong, and with several such blocks there is one box for each. A head line that cannot be read, like `::: Tab Title = "Cooling Fan"` with spaces around the `=`, replaces its `TabLayout` in the same way. Here the first `Item` needs three colons on both of its lines:
+**A wrong colon line inside a widget that has no place for content.** In the cases above the card around the mistake is still shown, because the box stands in the content of the card where the block was. A `FlowLayout` and a `TabLayout` take no loose content, and neither does a card whose body stands in a `Content` block. Such a widget has no place for the box, so the box replaces the whole widget. It names the line and has the message of the block that is wrong, and with several such blocks there is one box for each. A head line that cannot be read, like `::: Tab Title = "Cooling Fan"` with spaces around the `=`, replaces its `TabLayout` in the same way. Here the head line of the second `Item` has spaces around the `=`:
 
 <!-- sample: error -->
 ~~~~markdown
 :: HomeBlaze.Components.FlowLayout MinWidth=320
-:: Item
-The first cell.
-::
 ::: Item
+The first cell.
+:::
+::: Item Width = 2
 The second cell.
 :::
 ::
 ~~~~
 
 ~~~~text
-Line 2: A block inside another block needs more ':' characters than the block around it. This block has 2 and the block around it, at line 1, has 2. Write ':::' here and on its closing line.
+Line 5: Expected key=value but found 'Width = 2'.
 ~~~~
 
 #### Colon Lines That Are Text
 
 - **Inside markdown code**: A colon line inside a fenced code block or an indented code block is text. It opens and closes nothing, also when the code block is inside a block. One case differs: a code block directly after an item of a definition list, without an empty line between them, is cut short by markdown at the first line that starts with a colon. A colon line there is then read as a colon line of the page: it can open a block, or close the block around the code without any error box. A code block directly after a definition list needs an empty line before it.
 - **Text after the colons that cannot be a name**: A colon line is a head line only when the text after the colons starts with a letter, `_` or `{`. A line like `:: 12:30 lunch` or `::)` is ordinary text.
-- **Text after the colons that starts with a letter**: A line like `:: note` is read as a head line and is shown as an error, because `note` is no type name. Inside a block such a line also takes the next closing line for itself, so the block around it is shown as not closed. The box names the line that took the closing line, see the second sample below.
+- **Text after the colons that starts with a letter**: A line like `:: note` is read as a head line and is shown as an error, because `note` is no type name. Inside a block such a line also ends the block around it and takes the next closing line for itself, see the second sample below.
 - **The backslash**: To start a line of text with colons in every case, write a backslash before the first colon: `\:: note`.
 - **One colon**: A line that starts with one colon is never a colon line of a block, and colons inside a line have no meaning.
 
@@ -476,7 +447,7 @@ Line 2: A block inside another block needs more ':' characters than the block ar
 ::
 ~~~~
 
-Without the backslash, line 2 of this card is read as a head line and takes the closing line of the card:
+Without the backslash, line 2 of this card is read as a head line. It ends the card and takes the closing line of the card:
 
 <!-- sample: error -->
 ~~~~markdown
@@ -487,7 +458,7 @@ The body of the card.
 ~~~~
 
 ~~~~text
-Line 1: This block is not closed. The line '::' that ends it is missing. The '::' at line 4 closed the block at line 2, which is inside this block and has 2 characters as well.
+Line 2: Expected key=value but found 'that this line is read as a head line'.
 ~~~~
 
 ### Content and Slots

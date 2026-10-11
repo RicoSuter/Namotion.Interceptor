@@ -10,11 +10,12 @@ namespace HomeBlaze.Storage.Pages;
 /// <summary>
 /// Parses the fence lines of blocks. A fence is a run of at least <see cref="MarkdownBlockFence.MinimumLength"/>
 /// fence characters at the start of a line. A fence followed by text that starts with a letter, an
-/// underscore or an opening brace opens a block, and a fence followed by other text is no fence line.
+/// underscore or an opening brace is a head line, and a fence followed by other text is no fence line.
+/// A head line ends every open block that was opened with as many characters or more, together with
+/// every block that is still open inside them, and opens its block in the container that remains.
 /// A fence alone closes the innermost open block that was opened with the same number of characters,
-/// together with every block that is still open inside it. It closes no block from inside a quote, a
-/// list item or another container that is not a block. A fence alone that fits no open block still
-/// closes the innermost one when only the head line of that block has too few characters for its place.
+/// together with every block that is still open inside it. A fence line ends no block from inside a
+/// quote, a list item or another container that is not a block. The end of the page ends every open block.
 /// </summary>
 internal sealed class MarkdownBlockContainerParser : BlockParser
 {
@@ -35,20 +36,32 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
             return CloseBlock(processor, fenceStart, fenceLength);
         }
 
-        // Other text after a fence, such as a time or a smiley, is no attempt at a head line.
-        var first = head.CurrentChar;
-        if (!char.IsLetter(first) && first != '_' && first != '{')
+        if (!IsHead(head))
         {
             return BlockState.None;
         }
 
-        TakeBackDefinitionMadeFromFence(processor, fenceStart);
+        // The blocks that the line is directly inside of have more characters the further in they are,
+        // because each of their head lines ended the blocks with as many characters or more.
+        MarkdownBlockContainer? outermostEnded = null;
+        var container = FindOpenContainer(TakeBackDefinitionMadeFromFence(processor, fenceStart));
+        while (container is MarkdownBlockContainer open && open.FenceLength >= fenceLength)
+        {
+            outermostEnded = open;
+            container = open.Parent;
+        }
+
+        if (outermostEnded is not null)
+        {
+            processor.Close(outermostEnded);
+        }
 
         var attributes = TryReadAttributes(head);
         var block = new MarkdownBlockContainer(this)
         {
             FenceLength = fenceLength,
             IsStyle = attributes is not null,
+            EndLine = processor.LineIndex,
             Column = processor.Column - (processor.Start - fenceStart),
             Span = new SourceSpan(fenceStart, processor.Line.End)
         };
@@ -65,15 +78,24 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
     public override BlockState TryContinue(BlockProcessor processor, Block block)
     {
         // A block never ends here. The blocks inside it are asked after it, so a code block keeps a fence
-        // line as text, and TryOpen sees a closing line only when nothing inside took it. An HTML block
-        // takes every line up to an empty one, so it is ended here to let the closing line through.
+        // line as text, and TryOpen sees a fence line only when nothing inside took it. An HTML block
+        // takes every line up to an empty one, so it is ended here to let the closing line through. A
+        // head line gets through only where an empty line would end the HTML block as well: a script,
+        // a style element, a comment and the like keep every line up to their own end.
+        var container = (MarkdownBlockContainer)block;
         if (processor.CurrentBlock is HtmlBlock htmlBlock &&
             TryReadFence(processor, out _, out var fenceLength, out var head) &&
-            head.IsEmpty &&
-            fenceLength == ((MarkdownBlockContainer)block).FenceLength &&
+            (head.IsEmpty ? fenceLength == container.FenceLength : EndsAtEmptyLine(htmlBlock) && IsHead(head)) &&
             IsInsideBlocksOnly(htmlBlock, block))
         {
             processor.Close(htmlBlock);
+        }
+
+        // Whether the line ends the block is known only once the blocks inside it were asked. Close
+        // takes the line off again when it does.
+        if (!processor.IsBlankLine)
+        {
+            container.AddLine(processor.LineIndex, processor.Line.End);
         }
 
         // Back before the indentation, which belongs to the content: it can make a line code.
@@ -83,7 +105,15 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
 
     public override bool Close(BlockProcessor processor, Block block)
     {
-        ((MarkdownBlockContainer)block).EndLine = processor.LineIndex;
+        // A block that ends on a line after its head line without a closing line of its own has
+        // continued on that line before, and took the line as content then. A block that ends on its
+        // first line took none, which is a closing line that closes no block.
+        var container = (MarkdownBlockContainer)block;
+        if (!container.HasClosingLine && container.EndLine == processor.LineIndex && container.Line != processor.LineIndex)
+        {
+            container.RemoveLastLine();
+        }
+
         return true;
     }
 
@@ -128,6 +158,35 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
 
         return false;
     }
+
+    /// <summary>
+    /// Gets the innermost container that is open for the current line, from <paramref name="container"/>
+    /// outwards. Every container around it is open for the line as well.
+    /// </summary>
+    private static ContainerBlock? FindOpenContainer(ContainerBlock? container)
+    {
+        // A container that this line did not continue is still open in the processor and is closed after
+        // the parser returns. It is open for this line only when a container inside it continued. A
+        // definition list is never asked to continue, so its flag says nothing and its item decides.
+        while (container is not null && (!container.IsOpen || container is DefinitionList))
+        {
+            container = container.Parent;
+        }
+
+        return container;
+    }
+
+    /// <summary>Gets whether the text after a fence makes the line a head line.</summary>
+    private static bool IsHead(StringSlice head)
+    {
+        // Other text after a fence, such as a time or a smiley, is no attempt at a head line.
+        var first = head.CurrentChar;
+        return char.IsLetter(first) || first == '_' || first == '{';
+    }
+
+    /// <summary>Gets whether the HTML block ends at the next empty line and not at an end of its own.</summary>
+    private static bool EndsAtEmptyLine(HtmlBlock htmlBlock) =>
+        htmlBlock.Type is HtmlBlockType.InterruptingBlock or HtmlBlockType.NonInterruptingBlock;
 
     /// <summary>Gets whether every container between <paramref name="inner"/> and <paramref name="outer"/> is a block.</summary>
     private static bool IsInsideBlocksOnly(Block inner, Block outer)
@@ -194,46 +253,20 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
     private BlockState CloseBlock(BlockProcessor processor, int fenceStart, int fenceLength)
     {
         List<MarkdownBlockContainer>? openBlocks = null;
-        var hasOpenBlockOutOfReach = false;
-
-        // A container that this line did not continue is still open in the processor and is closed after
-        // this call. It is open for this line only when a container inside it continued. A definition
-        // list is never asked to continue, so its flag says nothing and its item decides.
-        var isOpen = false;
-        for (var container = TakeBackDefinitionMadeFromFence(processor, fenceStart); container is not null; container = container.Parent)
+        var container = FindOpenContainer(TakeBackDefinitionMadeFromFence(processor, fenceStart));
+        for (; container is MarkdownBlockContainer block; container = block.Parent)
         {
-            isOpen |= container.IsOpen && container is not DefinitionList;
-            if (!isOpen)
-            {
-                continue;
-            }
-
-            // The line is inside a quote, a list item or the like. A head line there opens no valid
-            // block, so a closing line there closes none of the blocks around that container either.
-            if (container is not MarkdownBlockContainer block)
-            {
-                hasOpenBlockOutOfReach = HasBlockAround(container);
-                break;
-            }
-
             if (block.FenceLength == fenceLength)
             {
-                return CloseWithLine(processor, block);
+                block.HasClosingLine = true;
+                block.EndLine = processor.LineIndex;
+                block.UpdateSpanEnd(processor.Line.End);
+                processor.Close(block);
+                return BlockState.BreakDiscard;
             }
 
             openBlocks ??= [];
             openBlocks.Insert(0, block);
-        }
-
-        // The innermost block has too few characters for its place and is shown with that error. A line
-        // with enough characters for that place is its closing line, written as the head line should
-        // have been. Without this the line of the block around it would close the block instead.
-        if (openBlocks is [.., { Parent: MarkdownBlockContainer outer } innermost] &&
-            innermost.FenceLength <= outer.FenceLength &&
-            fenceLength > outer.FenceLength)
-        {
-            innermost.IsClosedByLongerLine = true;
-            return CloseWithLine(processor, innermost);
         }
 
         processor.NewBlocks.Push(new MarkdownBlockContainer(this)
@@ -241,19 +274,15 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
             FenceLength = fenceLength,
             IsClosingLine = true,
             OpenBlocks = openBlocks ?? [],
-            HasOpenBlockOutOfReach = hasOpenBlockOutOfReach,
+
+            // The line is inside a quote, a list item or the like. A head line there opens no valid
+            // block, so a closing line there closes none of the blocks around that container either.
+            HasOpenBlockOutOfReach = container is not null && HasBlockAround(container),
+            EndLine = processor.LineIndex,
             Column = processor.Column - (processor.Start - fenceStart),
             Span = new SourceSpan(fenceStart, processor.Line.End)
         });
 
-        return BlockState.BreakDiscard;
-    }
-
-    private static BlockState CloseWithLine(BlockProcessor processor, MarkdownBlockContainer block)
-    {
-        block.IsClosed = true;
-        block.UpdateSpanEnd(processor.Line.End);
-        processor.Close(block);
         return BlockState.BreakDiscard;
     }
 }

@@ -42,10 +42,17 @@ public sealed class MarkdownBlock
     public int Line { get; init; }
 
     /// <summary>
-    /// 1-based line of the closing line. A block without a closing line ends where the block around it
-    /// ends, or after the last line of the page.
+    /// 1-based last line of the block: its closing line, or without one the last line of its content
+    /// that is not empty, which is its head line when it has no content.
     /// </summary>
     internal int EndLine { get; init; }
+
+    /// <summary>
+    /// Whether the block ends with a closing line of its own. Without one, a head line with as many
+    /// fence characters or fewer, the closing line of a block around it or the end of the page ended it.
+    /// A closing line that closes no block is its own closing line.
+    /// </summary>
+    internal bool HasClosingLine { get; init; }
 
     public MarkdownSpan HeadSpan { get; init; }
 
@@ -147,13 +154,30 @@ public sealed class MarkdownPage
     {
         MarkdownBlock? innermost = null;
         var blocks = Blocks;
-        while (blocks.FirstOrDefault(block => block.Line < line && line <= block.EndLine) is { } outer)
+        while (FindLastBlockBefore(blocks, line) is { } outer && (!outer.HasClosingLine || line <= outer.EndLine))
         {
+            // A block without a closing line takes every line up to the next block beside it, because
+            // only the head line of that block, or what ends the block around both, can have ended it.
             innermost = outer;
             blocks = outer.Children;
         }
 
         return innermost;
+    }
+
+    private static MarkdownBlock? FindLastBlockBefore(IReadOnlyList<MarkdownBlock> blocks, int line)
+    {
+        // Not by position: a block in a footnote is listed where the footnote is rendered, after the blocks of later lines.
+        MarkdownBlock? last = null;
+        foreach (var block in blocks)
+        {
+            if (block.Line < line && (last is null || block.Line > last.Line))
+            {
+                last = block;
+            }
+        }
+
+        return last;
     }
 
     internal MarkdownBlock GetBlock(MarkdownBlockContainer container) => _containers[container];
@@ -291,51 +315,24 @@ public static class MarkdownPageParser
         {
             error = FormatClosesNothing(container);
         }
-        else
+        else if (container.IsStyle)
         {
-            if (container.IsStyle)
+            error = null;
+            kind = MarkdownBlockKind.Style;
+        }
+        else if (!allowsBlocks)
+        {
+            error = "A block is only allowed directly on the page or directly inside another block.";
+        }
+        else if (MarkdownBlockHead.TryParse(source.Substring(headSpan.Start, headSpan.Length), out head, out error))
+        {
+            if (head.IsWidget || hasOwner)
             {
-                error = FindNestingError(container);
-                if (error is null)
-                {
-                    kind = MarkdownBlockKind.Style;
-                }
+                kind = head.IsWidget ? MarkdownBlockKind.Widget : MarkdownBlockKind.Slot;
             }
-            else if (!allowsBlocks)
+            else
             {
-                error = "A block is only allowed directly on the page or directly inside another block.";
-            }
-            else if (MarkdownBlockHead.TryParse(source.Substring(headSpan.Start, headSpan.Length), out head, out error))
-            {
-                // After the head grammar, so that prose which starts with a fence is not told to add characters.
-                error = FindNestingError(container);
-                if (error is null)
-                {
-                    if (head.IsWidget || hasOwner)
-                    {
-                        kind = head.IsWidget ? MarkdownBlockKind.Widget : MarkdownBlockKind.Slot;
-                    }
-                    else
-                    {
-                        error = $"'{head.Name}' is not a type name. A slot block is only allowed directly inside a widget block.";
-                    }
-                }
-            }
-
-            // The box replaces the block with everything in it, so it also says why that is more than expected.
-            if (!container.IsClosed)
-            {
-                var fence = MarkdownBlockFence.Create(container.FenceLength);
-                var notClosed = $"This block is not closed. The line '{fence}' that ends it is missing.";
-                if (FindFirstBlockClosedByLineOfLength(container, container.FenceLength) is { } inner)
-                {
-                    notClosed =
-                        $"{notClosed} The '{fence}' at line {inner.EndLine + 1} closed the block at line {inner.Line + 1}, " +
-                        $"which is inside this block and has {container.FenceLength} characters as well.";
-                }
-
-                error = error is null ? notClosed : $"{error} {notClosed}";
-                kind = MarkdownBlockKind.Invalid;
+                error = $"'{head.Name}' is not a type name. A slot block is only allowed directly inside a widget block.";
             }
         }
 
@@ -356,57 +353,11 @@ public static class MarkdownPageParser
             FenceLength = container.FenceLength,
             Line = container.Line + 1,
             EndLine = container.EndLine + 1,
+            HasClosingLine = container.HasClosingLine || container.IsClosingLine,
             HeadSpan = headSpan,
             ConfigurationJson = configurationJson,
             ConfigurationSpan = configurationSpan
         };
-    }
-
-    /// <summary>
-    /// Gets the block inside <paramref name="container"/> that was the first to be closed by a line of
-    /// <paramref name="fenceLength"/> characters. Only blocks that such a line reaches from the container
-    /// count, so none inside a quote or a list item.
-    /// </summary>
-    private static MarkdownBlockContainer? FindFirstBlockClosedByLineOfLength(MarkdownBlockContainer container, int fenceLength)
-    {
-        // In document order with the blocks inside a block before that block, which is the order of the closing lines.
-        foreach (var child in container)
-        {
-            if (child is not MarkdownBlockContainer { IsClosingLine: false } inner)
-            {
-                continue;
-            }
-
-            if (FindFirstBlockClosedByLineOfLength(inner, fenceLength) is { } nested)
-            {
-                return nested;
-            }
-
-            if (inner is { IsClosed: true, IsClosedByLongerLine: false } && inner.FenceLength == fenceLength)
-            {
-                return inner;
-            }
-        }
-
-        return null;
-    }
-
-    private static string? FindNestingError(MarkdownBlockContainer container)
-    {
-        var outer = container.Parent;
-        while (outer is not null and not MarkdownBlockContainer)
-        {
-            outer = outer.Parent;
-        }
-
-        if (outer is not MarkdownBlockContainer outerBlock || container.FenceLength > outerBlock.FenceLength)
-        {
-            return null;
-        }
-
-        return $"A block inside another block needs more '{MarkdownBlockFence.Character}' characters than the block around it. " +
-               $"This block has {container.FenceLength} and the block around it, at line {outerBlock.Line + 1}, has {outerBlock.FenceLength}. " +
-               $"Write '{MarkdownBlockFence.Create(outerBlock.FenceLength + 1)}' here and on its closing line.";
     }
 
     private static string FormatClosesNothing(MarkdownBlockContainer closingLine)

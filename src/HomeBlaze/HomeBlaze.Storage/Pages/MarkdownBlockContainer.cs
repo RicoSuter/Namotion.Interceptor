@@ -4,11 +4,16 @@ using Markdig.Syntax;
 namespace HomeBlaze.Storage.Pages;
 
 /// <summary>
-/// The node of a block in the parsed document: everything between its head line and its closing line.
-/// A closing line that closes no block is a node of its own without content.
+/// The node of a block in the parsed document: its head line and everything up to its closing line, or
+/// up to its last line of content when it has no closing line. A closing line that closes no block is
+/// a node of its own without content.
 /// </summary>
 internal sealed class MarkdownBlockContainer(BlockParser parser) : ContainerBlock(parser)
 {
+    // The values of EndLine and Span.End before the last call of AddLine.
+    private int _endLineBeforeLastLine;
+    private int _spanEndBeforeLastLine;
+
     public required int FenceLength { get; init; }
 
     /// <summary>Whether the node is a closing line that closes no block.</summary>
@@ -29,18 +34,28 @@ internal sealed class MarkdownBlockContainer(BlockParser parser) : ContainerBloc
     /// <summary>Whether the head line has attributes in braces in place of a name.</summary>
     public bool IsStyle { get; init; }
 
-    /// <summary>Whether a closing line ended the block.</summary>
-    public bool IsClosed { get; set; }
+    /// <summary>Whether a closing line of its own ended the block.</summary>
+    public bool HasClosingLine { get; set; }
 
     /// <summary>
-    /// Whether the closing line that ended the block has more characters than its head line, which is
-    /// accepted for a block whose head line has too few characters for its place.
+    /// 0-based last line of the block: its closing line, or without one the last line of its content
+    /// that is not empty, which is its head line when it has no content.
     /// </summary>
-    public bool IsClosedByLongerLine { get; set; }
+    public required int EndLine { get; set; }
 
-    /// <summary>
-    /// 0-based line at which the block ended: its closing line, or the line that ended it in another way,
-    /// which is one after the last line when the page ended first.
-    /// </summary>
-    public int EndLine { get; set; }
+    /// <summary>Makes a line that is not empty the last line of the block. <paramref name="end"/> is the position of its last character.</summary>
+    public void AddLine(int line, int end)
+    {
+        _endLineBeforeLastLine = EndLine;
+        _spanEndBeforeLastLine = Span.End;
+        EndLine = line;
+        Span.End = end;
+    }
+
+    /// <summary>Takes the last line off the block again, when it turned out to be the line that ended the block.</summary>
+    public void RemoveLastLine()
+    {
+        EndLine = _endLineBeforeLastLine;
+        Span.End = _spanEndBeforeLastLine;
+    }
 }

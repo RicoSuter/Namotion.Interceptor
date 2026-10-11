@@ -188,40 +188,6 @@ The first paragraph of the card.
 The second paragraph of the card.
 ::
 
-## A block that is not closed
-
-The motor inside the card has no closing line. The line of two colons closes the card and the motor with it, so the card is shown, and the box at the line of the motor names the line that is missing. Add a line of three colons after the head line of the motor.
-
-~~~~markdown
-:: HomeBlaze.Components.Card Title="Open Motor"
-::: HomeBlaze.Samples.Motor#openmotor Name="Open Motor" TargetSpeed=800
-::
-~~~~
-
-:: HomeBlaze.Components.Card Title="Open Motor"
-::: HomeBlaze.Samples.Motor#openmotor Name="Open Motor" TargetSpeed=800
-::
-
-A block that is still open at the end of the page gets the same box, and everything after its head line is then part of it and is not shown.
-
-## A nested block with too few colons
-
-A block inside another block needs more colons than the block around it. The card and the motor inside it both have two. The box names both numbers and the line of the card. The motor still ends at its own closing line, so the card is shown with the text after it. Give the motor three colons on its head line and on its closing line.
-
-~~~~markdown
-:: HomeBlaze.Components.Card Title="Outer Card"
-:: HomeBlaze.Samples.Motor#shortmotor Name="Short Motor" TargetSpeed=800
-::
-The text after the motor.
-::
-~~~~
-
-:: HomeBlaze.Components.Card Title="Outer Card"
-:: HomeBlaze.Samples.Motor#shortmotor Name="Short Motor" TargetSpeed=800
-::
-The text after the motor.
-::
-
 ## A block in a quote
 
 A block is allowed directly on the page, directly inside another widget block and directly inside a slot block. Inside a quote, a list item or a style block it is an error. Move the block out of the quote.

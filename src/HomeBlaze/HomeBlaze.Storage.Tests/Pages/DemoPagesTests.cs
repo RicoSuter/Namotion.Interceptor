@@ -73,7 +73,6 @@ public class DemoPagesTests
 
         // Assert
         var strayCardLine = FindBlockLine("Errors.md", "Stray Closing Line");
-        var outerCardLine = FindBlockLine("Errors.md", "Outer Card");
         string[] expectedMessages =
         [
             "Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace.",
@@ -88,9 +87,6 @@ public class DemoPagesTests
             "The name 'twin' is used twice on this page.",
             "This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line of its block. " +
             $"Open here: line {strayCardLine} (2 characters).",
-            "This block is not closed. The line ':::' that ends it is missing.",
-            "A block inside another block needs more ':' characters than the block around it. " +
-            $"This block has 2 and the block around it, at line {outerCardLine}, has 2. Write ':::' here and on its closing line.",
             "A block is only allowed directly on the page or directly inside another block.",
             BrokenJsonError,
             "The subject(name) fence is no longer supported. Write the subject as a block: a line with :: Full.Type.Name#name key=value, then a closing :: line."
@@ -118,13 +114,6 @@ public class DemoPagesTests
         Assert.Contains("The first paragraph of the card.", strayCard);
         Assert.Contains("closes no block", strayCard);
         Assert.Contains("The second paragraph of the card.", strayCard);
-
-        var openCard = MarkdownPageFixture.Html(((MarkdownFragment)cards["Open Motor"].Content!).Children);
-        Assert.Contains("This block is not closed.", openCard);
-
-        var outerCard = MarkdownPageFixture.Html(((MarkdownFragment)cards["Outer Card"].Content!).Children);
-        Assert.Contains("needs more", outerCard);
-        Assert.Contains("The text after the motor.", outerCard);
     }
 
     [Fact]

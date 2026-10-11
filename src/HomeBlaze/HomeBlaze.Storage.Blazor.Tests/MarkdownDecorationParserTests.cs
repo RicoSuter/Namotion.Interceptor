@@ -253,8 +253,22 @@ public class MarkdownDecorationParserTests
     }
 
     [Theory]
-    [InlineData(":: Demo.Motor Speed=\"1\ntext\n::\n")]
     [InlineData(":: Demo.Motor Speed=1\ntext\n")]
+    [InlineData(":: Demo.Motor Speed=1\ntext")]
+    [InlineData(":: Demo.Motor Speed=1")]
+    public void WhenBlockHasNoClosingLine_ThenItsRegionCoversTheHeadLine(string content)
+    {
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal(DecorationRegionType.SubjectBlock, region.Type);
+        Assert.Equal("Motor", region.Name);
+        Assert.Equal((1, 1, 1, 22), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Motor Speed=\"1\ntext\n::\n")]
     [InlineData("::\ntext\n")]
     public void WhenBlockIsInvalid_ThenItGetsNoRegion(string content)
     {

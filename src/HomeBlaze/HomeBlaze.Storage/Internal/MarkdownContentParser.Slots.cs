@@ -102,9 +102,10 @@ public sealed partial class MarkdownContentParser
 
             if (!IsCommentOnly(defaultContent))
             {
-                error = new BlockError(owner.Block.Line, slots.Default is null
-                    ? $"{type.Name} has no default slot, so it cannot have content."
-                    : $"The slot '{slots.Default.Name}' is filled by a block and by loose content.");
+                error = slots.Default is null
+                    ? FindErrorOfBlocksBesideTheirSlotBlock(type, owner.Block) ??
+                      new BlockError(owner.Block.Line, FormatNoDefaultSlot(type, owner.Block))
+                    : new BlockError(owner.Block.Line, $"The slot '{slots.Default.Name}' is filled by a block and by loose content.");
                 return false;
             }
 
@@ -114,6 +115,53 @@ public sealed partial class MarkdownContentParser
         content = new BlockContent(slotGroups, hasDefaultContent ? defaultContent : []);
         error = null;
         return true;
+    }
+
+    private static string FormatNoDefaultSlot(Type type, MarkdownBlock owner)
+    {
+        var message = $"{type.Name} has no default slot, so it cannot have content.";
+
+        // Without a closing line the block takes everything up to the next head line that ends it, so
+        // the content is most likely meant for the block around this one.
+        return owner.HasClosingLine
+            ? message
+            : $"{message} The content is inside this block because the block is still open there. " +
+              $"A closing line '{MarkdownBlockFence.Create(owner.FenceLength)}' before the content ends the block.";
+    }
+
+    /// <summary>
+    /// Gets one box for every widget block directly inside <paramref name="owner"/> whose head line ended the
+    /// slot block before it, in document order. Such a block was most likely meant to be inside that slot block.
+    /// </summary>
+    private static BlockError? FindErrorOfBlocksBesideTheirSlotBlock(Type type, MarkdownBlock owner)
+    {
+        BlockError? error = null;
+        for (var index = owner.Children.Count - 1; index > 0; index--)
+        {
+            // Only the head line of the next block can end a slot block before the block around both ends.
+            var block = owner.Children[index];
+            if (block.Kind != MarkdownBlockKind.Widget ||
+                owner.Children[index - 1] is not { Kind: MarkdownBlockKind.Slot, HasClosingLine: false } slotBlock)
+            {
+                continue;
+            }
+
+            var slotName = slotBlock.Head!.Name;
+            var comparison = block.FenceLength == slotBlock.FenceLength ? "as many" : "fewer";
+            var comparedWith = block.FenceLength == slotBlock.FenceLength ? "as" : "than";
+            var place = block.HasClosingLine ? "here and on its closing line" : "here";
+            error = new BlockError(
+                block.Line,
+                $"This block has {comparison} '{MarkdownBlockFence.Character}' characters {comparedWith} the slot block " +
+                $"'{slotName}' at line {slotBlock.Line}, so it is not inside that block but directly inside {type.Name}, " +
+                $"which has no default slot. Write '{MarkdownBlockFence.Create(slotBlock.FenceLength + 1)}' {place} " +
+                $"to put it inside '{slotName}'.")
+            {
+                Next = error
+            };
+        }
+
+        return error;
     }
 
     /// <summary>Gets one box for every invalid block directly inside <paramref name="owner"/>, in document order.</summary>

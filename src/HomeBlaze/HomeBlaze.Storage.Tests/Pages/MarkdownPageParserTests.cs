@@ -222,7 +222,7 @@ public class MarkdownPageParserTests
     }
 
     [Fact]
-    public void WhenNestedBlockHasNoMoreCharactersThanTheBlockAroundIt_ThenItIsInvalidAndRunsToItsOwnClosingLine()
+    public void WhenHeadLineHasAsManyCharactersAsTheOpenBlock_ThenItEndsThatBlockAndItsBlockIsBesideIt()
     {
         // Arrange
         var source = Normalize("""
@@ -242,21 +242,17 @@ public class MarkdownPageParserTests
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var card = Assert.Single(page.Blocks);
-        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
-        Assert.Equal((3, 9), (card.Line, card.EndLine));
-        var widget = Assert.Single(card.Children);
-        Assert.Equal(MarkdownBlockKind.Invalid, widget.Kind);
-        Assert.Equal((5, 7), (widget.Line, widget.EndLine));
         Assert.Equal(
-            "A block inside another block needs more ':' characters than the block around it. " +
-            "This block has 2 and the block around it, at line 3, has 2. Write ':::' here and on its closing line.",
-            widget.Error);
-        Assert.Equal(2, page.AllBlocks.Count);
+            ExpectedTree("""
+                Widget :: Demo.Card [3-4]
+                Widget :: Demo.Widget Path=/x [5-7 closed]
+                Invalid This line of 2 ':' characters closes no block. No block is open here. [9-9 closed]
+                """),
+            DescribeTree(page.Blocks, withLines: true));
     }
 
     [Fact]
-    public void WhenNestedBlockHasFewerCharactersThanTheBlockAroundIt_ThenTheErrorNamesBothCounts()
+    public void WhenHeadLineHasFewerCharactersThanTheOpenBlock_ThenItEndsThatBlockAndItsBlockIsNotInsideIt()
     {
         // Arrange
         var source = Normalize("""
@@ -271,104 +267,137 @@ public class MarkdownPageParserTests
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var footer = Assert.Single(Assert.Single(page.Blocks).Children);
-        Assert.Equal(MarkdownBlockKind.Invalid, footer.Kind);
-        Assert.Contains("This block has 3 and the block around it, at line 1, has 4.", footer.Error);
-        Assert.Contains("Write ':::::' here", footer.Error);
-    }
-
-    [Fact]
-    public void WhenOnlyTheHeadLineOfANestedBlockHasTooFewCharacters_ThenItsClosingLineClosesItWithoutAnErrorOfItsOwn()
-    {
-        // Arrange
-        var source = Normalize("""
-            :: Demo.Card
-            :: Demo.Motor#m
-            :::
-            text
-            ::
-            more page text
-            """);
-
-        // Act
-        var page = MarkdownPageParser.Parse(source);
-
-        // Assert
-        var card = Assert.Single(page.Blocks);
-        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
-        Assert.Equal((1, 5), (card.Line, card.EndLine));
-        var motor = Assert.Single(card.Children);
-        Assert.Equal(MarkdownBlockKind.Invalid, motor.Kind);
-        Assert.Equal((2, 3), (motor.Line, motor.EndLine));
         Assert.Equal(
-            "A block inside another block needs more ':' characters than the block around it. " +
-            "This block has 2 and the block around it, at line 1, has 2. Write ':::' here and on its closing line.",
-            motor.Error);
-        Assert.Equal(2, page.AllBlocks.Count);
+            ExpectedTree("""
+                Widget :::: Demo.Card [1-1]
+                Invalid 'Footer' is not a type name. A slot block is only allowed directly inside a widget block. [2-4 closed]
+                Invalid This line of 4 ':' characters closes no block. No block is open here. [5-5 closed]
+                """),
+            DescribeTree(page.Blocks, withLines: true));
     }
 
+    public static TheoryData<string, string> PagesWhereAHeadLineEndsABlockAndAClosingLineFitsNoOpenBlock() => new()
+    {
+        {
+            // The closing line after the motor has more characters than its block.
+            ":: Demo.Card\n:: Demo.Motor#m\n:::\ntext\n::\nmore page text",
+            """
+            Widget :: Demo.Card [1-1]
+            Widget :: Demo.Motor#m [2-5 closed]
+              Invalid This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 2 (2 characters). [3-3 closed]
+            """
+        },
+        {
+            ":::: Demo.Card\n::: Demo.Motor\n:::::\ntext\n::::",
+            """
+            Widget :::: Demo.Card [1-1]
+            Widget ::: Demo.Motor [2-5]
+              Invalid This line of 5 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 2 (3 characters). [3-3 closed]
+              Invalid This line of 4 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 2 (3 characters). [5-5 closed]
+            """
+        },
+        {
+            ":: Demo.Card\n:: Demo.Motor\n:::::\ntext\n::",
+            """
+            Widget :: Demo.Card [1-1]
+            Widget :: Demo.Motor [2-5 closed]
+              Invalid This line of 5 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 2 (2 characters). [3-3 closed]
+            """
+        },
+        {
+            ":: Demo.Flow\n::: Item\n::: Demo.Card\ninside\n::::\ntext\n:::\n::",
+            """
+            Widget :: Demo.Flow [1-8 closed]
+              Slot ::: Item [2-2]
+              Widget ::: Demo.Card [3-7 closed]
+                Invalid This line of 4 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 1 (2 characters), line 3 (3 characters). [5-5 closed]
+            """
+        },
+        {
+            ":: Demo.Card\n:: {.band}\ninside\n:::\ntext\n::",
+            """
+            Widget :: Demo.Card [1-1]
+            Style [2-6 closed]
+              Invalid This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 2 (2 characters). [4-4 closed]
+            """
+        },
+        {
+            // The blocks inside a block that is an error are not read.
+            ":: Demo.Card\n:: Please note this\n:::\ntext\n::",
+            """
+            Widget :: Demo.Card [1-1]
+            Invalid Expected key=value but found 'note this'. [2-5 closed]
+            """
+        },
+        {
+            // The last line was written for the card, which the head line of the motor ended.
+            ":::: Demo.Card\n:: Demo.Motor\n:::\n::\n::::",
+            """
+            Widget :::: Demo.Card [1-1]
+            Widget :: Demo.Motor [2-4 closed]
+              Invalid This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 2 (2 characters). [3-3 closed]
+            Invalid This line of 4 ':' characters closes no block. No block is open here. [5-5 closed]
+            """
+        },
+        {
+            ":: Demo.Card\n:: Demo.Motor\n> :::\n::\n::",
+            """
+            Widget :: Demo.Card [1-1]
+            Widget :: Demo.Motor [2-4 closed]
+              Invalid This line of 3 ':' characters closes no block. A closing line inside a quote or a list item closes no block outside of it. [3-3 closed]
+            Invalid This line of 2 ':' characters closes no block. No block is open here. [5-5 closed]
+            """
+        },
+        {
+            ":: Demo.Card\n:: Demo.A\n:: Demo.B\n::\n::\n:: Demo.C\n::",
+            """
+            Widget :: Demo.Card [1-1]
+            Widget :: Demo.A [2-2]
+            Widget :: Demo.B [3-4 closed]
+            Invalid This line of 2 ':' characters closes no block. No block is open here. [5-5 closed]
+            Widget :: Demo.C [6-7 closed]
+            """
+        },
+        {
+            ":: Demo.Card\n::: Footer\n:: Demo.B\n::\n:::",
+            """
+            Widget :: Demo.Card [1-2]
+              Slot ::: Footer [2-2]
+            Widget :: Demo.B [3-4 closed]
+            Invalid This line of 3 ':' characters closes no block. No block is open here. [5-5 closed]
+            """
+        }
+    };
+
     [Theory]
-    [InlineData(":::: Demo.Card\n::: Demo.Motor\n:::::\ntext\n::::", 2, 3)]
-    [InlineData(":: Demo.Card\n:: Demo.Motor\n:::::\ntext\n::", 2, 3)]
-    [InlineData(":: Demo.Flow\n::: Item\n::: Demo.Card\ninside\n::::\ntext\n:::\n::", 3, 5)]
-    [InlineData(":: Demo.Card\n:: {.band}\ninside\n:::\ntext\n::", 2, 4)]
-    [InlineData(":: Demo.Card\n:: Please note this\n:::\ntext\n::", 2, 3)]
-    public void WhenClosingLineHasMoreCharactersThanTheBlockAroundABlockWithTooFew_ThenItClosesThatBlock(
-        string source, int expectedLine, int expectedEndLine)
+    [MemberData(nameof(PagesWhereAHeadLineEndsABlockAndAClosingLineFitsNoOpenBlock))]
+    public void WhenHeadLineEndedABlockAndAClosingLineFitsNoOpenBlock_ThenThatLineClosesNothing(string source, string expectedTree)
     {
         // Act
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var outer = Assert.Single(page.Blocks);
-        Assert.Equal(MarkdownBlockKind.Widget, outer.Kind);
-        Assert.Equal(source.Split('\n').Length, outer.EndLine);
-        var invalid = Assert.Single(page.AllBlocks, block => block.Kind == MarkdownBlockKind.Invalid);
-        Assert.Equal((expectedLine, expectedEndLine), (invalid.Line, invalid.EndLine));
-        Assert.DoesNotContain("closes no block", invalid.Error);
-        Assert.DoesNotContain("not closed", invalid.Error);
+        Assert.Equal(ExpectedTree(expectedTree), DescribeTree(page.Blocks, withLines: true));
     }
 
     [Theory]
-    // The innermost open block has enough characters for its place.
     [InlineData(":: Demo.Card\n::: Demo.Motor\n::::\n:::\n::", 3, "Open here: line 1 (2 characters), line 2 (3 characters).")]
-    // A block directly on the page has no block around it.
     [InlineData(":: Demo.Card\n:::\n::", 2, "Open here: line 1 (2 characters).")]
-    public void WhenClosingLineFitsNoBlockAndNoBlockWithTooFewCharactersIsItsTarget_ThenItStaysAnError(
+    public void WhenClosingLineHasMoreCharactersThanEveryOpenBlock_ThenItIsAnErrorThatNamesTheOpenBlocks(
         string source, int expectedLine, string expectedEnding)
     {
         // Act
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var closingLine = Assert.Single(page.AllBlocks, block => block.Error?.Contains("closes no block") == true);
+        var closingLine = Assert.Single(page.AllBlocks, block => block.Error is not null);
         Assert.Equal(expectedLine, closingLine.Line);
+        Assert.StartsWith("This line of ", closingLine.Error);
         Assert.EndsWith(expectedEnding, closingLine.Error);
-        Assert.DoesNotContain(page.AllBlocks, block => block.Error?.Contains("not closed") == true);
-    }
-
-    [Theory]
-    // The line has no more characters than the block around the block with too few.
-    [InlineData(":::: Demo.Card\n:: Demo.Motor\n:::\n::\n::::")]
-    // The line is inside a quote, which it does not reach out of.
-    [InlineData(":: Demo.Card\n:: Demo.Motor\n> :::\n::\n::")]
-    public void WhenClosingLineIsNoneThatCouldBeMeantForTheBlockWithTooFewCharacters_ThenThatBlockRunsToTheLineOfItsOwnLength(
-        string source)
-    {
-        // Act
-        var page = MarkdownPageParser.Parse(source);
-
-        // Assert
-        var card = Assert.Single(page.Blocks);
-        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
-        Assert.Equal((1, 5), (card.Line, card.EndLine));
-        var motor = Assert.Single(card.Children);
-        Assert.Equal(MarkdownBlockKind.Invalid, motor.Kind);
-        Assert.Equal((2, 4), (motor.Line, motor.EndLine));
     }
 
     [Fact]
-    public void WhenBlockIsNotClosedBecauseABlockInsideItWithAsManyCharactersTookTheClosingLine_ThenTheErrorNamesBothLines()
+    public void WhenTextInsideABlockStartsWithAFenceAndAWord_ThenItEndsTheBlockAndIsAnErrorThatTakesTheClosingLine()
     {
         // Arrange
         var source = Normalize("""
@@ -385,49 +414,58 @@ public class MarkdownPageParserTests
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var card = Assert.Single(page.AllBlocks);
-        Assert.Equal(MarkdownBlockKind.Invalid, card.Kind);
-        Assert.Equal(3, card.Line);
         Assert.Equal(
-            "This block is not closed. The line '::' that ends it is missing. " +
-            "The '::' at line 6 closed the block at line 4, which is inside this block and has 2 characters as well.",
-            card.Error);
+            ExpectedTree("""
+                Widget :: Demo.Card [3-3]
+                Invalid Expected key=value but found 'that this is text'. [4-6 closed]
+                """),
+            DescribeTree(page.Blocks, withLines: true));
     }
 
+    public static TheoryData<string, string> PagesThatEndInsideABlock() => new()
+    {
+        {
+            ":: note that this is text\nmore\nafter",
+            "Invalid Expected key=value but found 'that this is text'. [1-3]"
+        },
+        {
+            ":: Demo.Card\n::: Demo.Motor\n:::\ntext",
+            """
+            Widget :: Demo.Card [1-4]
+              Widget ::: Demo.Motor [2-3 closed]
+            """
+        },
+        {
+            ":: Demo.Card\n> :: Demo.Motor\n> ::\n\ntext",
+            """
+            Widget :: Demo.Card [1-5]
+              Invalid A block is only allowed directly on the page or directly inside another block. [2-3 closed]
+            """
+        },
+        {
+            // The second head line ended the card, and the closing line fits neither block.
+            "::: Demo.Card\n::: Demo.Motor\n::::\ntext",
+            """
+            Widget ::: Demo.Card [1-1]
+            Widget ::: Demo.Motor [2-4]
+              Invalid This line of 4 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 2 (3 characters). [3-3 closed]
+            """
+        }
+    };
+
     [Theory]
-    // The first closing line that a block inside took is the one that is named.
-    [InlineData(":: Demo.Card\n:: Demo.A\n:: Demo.B\n::\n::\n:: Demo.C\n::", "The '::' at line 4 closed the block at line 3,")]
-    // Also a block deeper inside takes a closing line of that length.
-    [InlineData(":: Demo.Card\n::: Footer\n:: Demo.B\n::\n:::", "The '::' at line 4 closed the block at line 3,")]
-    public void WhenSeveralBlocksInsideAnUnclosedBlockTookAClosingLine_ThenTheErrorNamesTheFirstOne(string source, string expectedPart)
+    [MemberData(nameof(PagesThatEndInsideABlock))]
+    public void WhenPageEndsInsideABlock_ThenTheBlockEndsThereWithoutAnErrorForIt(string source, string expectedTree)
     {
         // Act
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var card = Assert.Single(page.AllBlocks);
-        Assert.Contains(expectedPart, card.Error);
-    }
-
-    [Theory]
-    // No block inside it took a closing line.
-    [InlineData(":: note that this is text\nmore\nafter", "Expected key=value but found 'that this is text'. This block is not closed. The line '::' that ends it is missing.")]
-    [InlineData(":: Demo.Card\n::: Demo.Motor\n:::\ntext", "This block is not closed. The line '::' that ends it is missing.")]
-    // The block inside it was closed by a line with more characters, which could not have closed this block.
-    [InlineData("::: Demo.Card\n::: Demo.Motor\n::::\ntext", "This block is not closed. The line ':::' that ends it is missing.")]
-    // The closing line was inside a quote, which it does not reach out of.
-    [InlineData(":: Demo.Card\n> :: Demo.Motor\n> ::\n\ntext", "This block is not closed. The line '::' that ends it is missing.")]
-    public void WhenBlockIsNotClosedAndNoBlockInsideItTookItsClosingLine_ThenTheErrorIsAsBefore(string source, string expectedError)
-    {
-        // Act
-        var page = MarkdownPageParser.Parse(source);
-
-        // Assert
-        Assert.Equal(expectedError, page.Blocks[0].Error);
+        Assert.Equal(ExpectedTree(expectedTree), DescribeTree(page.Blocks, withLines: true));
     }
 
     [Fact]
-    public void WhenStyleBlockInsideABlockHasNoMoreCharacters_ThenItIsInvalid()
+    public void WhenHeadLineOfAStyleBlockHasAsManyCharactersAsTheOpenBlock_ThenItEndsThatBlockAndIsAStyleBlockBesideIt()
     {
         // Arrange
         var source = Normalize("""
@@ -442,11 +480,13 @@ public class MarkdownPageParserTests
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var card = Assert.Single(page.Blocks);
-        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
-        var style = Assert.Single(card.Children);
-        Assert.Equal(MarkdownBlockKind.Invalid, style.Kind);
-        Assert.Contains("needs more ':' characters", style.Error);
+        Assert.Equal(
+            ExpectedTree("""
+                Widget :: Demo.Card [1-1]
+                Style [2-4 closed]
+                Invalid This line of 2 ':' characters closes no block. No block is open here. [5-5 closed]
+                """),
+            DescribeTree(page.Blocks, withLines: true));
     }
 
     [Fact]
@@ -498,29 +538,7 @@ public class MarkdownPageParserTests
     }
 
     [Fact]
-    public void WhenBlockIsNotClosedAtTheEndOfThePage_ThenItIsInvalidAndNamesTheMissingLine()
-    {
-        // Arrange
-        var source = Normalize("""
-            before
-
-            ::: Demo.Card
-            text
-            """);
-
-        // Act
-        var page = MarkdownPageParser.Parse(source);
-
-        // Assert
-        var card = Assert.Single(page.AllBlocks);
-        Assert.Equal(MarkdownBlockKind.Invalid, card.Kind);
-        Assert.Equal(3, card.Line);
-        Assert.True(card.EndLine > 4);
-        Assert.Equal("This block is not closed. The line ':::' that ends it is missing.", card.Error);
-    }
-
-    [Fact]
-    public void WhenClosingLineClosesOuterBlockWhileInnerIsOpen_ThenInnerIsNotClosedAndOuterIsFine()
+    public void WhenClosingLineClosesOuterBlockWhileInnerIsOpen_ThenItEndsTheInnerBlockAsWell()
     {
         // Arrange
         var source = Normalize("""
@@ -536,17 +554,16 @@ public class MarkdownPageParserTests
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var card = Assert.Single(page.Blocks);
-        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
-        Assert.Equal((1, 5), (card.Line, card.EndLine));
-        var widget = Assert.Single(card.Children);
-        Assert.Equal(MarkdownBlockKind.Invalid, widget.Kind);
-        Assert.Equal((3, 5), (widget.Line, widget.EndLine));
-        Assert.Equal("This block is not closed. The line ':::' that ends it is missing.", widget.Error);
+        Assert.Equal(
+            ExpectedTree("""
+                Widget :: Demo.Card [1-5 closed]
+                  Widget ::: Demo.Widget Path=/x [3-4]
+                """),
+            DescribeTree(page.Blocks, withLines: true));
     }
 
     [Fact]
-    public void WhenBlockWithAnotherErrorIsNotClosed_ThenTheErrorSaysBoth()
+    public void WhenBlockWithAnErrorHasNoClosingLine_ThenTheErrorIsTheOneOfItsHeadLineOnly()
     {
         // Arrange
         const string source = "before\n\n:: Demo.Card Title=\"open\ntext";
@@ -556,8 +573,8 @@ public class MarkdownPageParserTests
 
         // Assert
         Assert.Equal(MarkdownBlockKind.Invalid, block.Kind);
-        Assert.Contains("closing quote", block.Error);
-        Assert.EndsWith("This block is not closed. The line '::' that ends it is missing.", block.Error);
+        Assert.Equal("The value of 'Title' has no closing quote.", block.Error);
+        Assert.Equal((3, 4, false), (block.Line, block.EndLine, block.HasClosingLine));
     }
 
     [Theory]
@@ -612,18 +629,21 @@ public class MarkdownPageParserTests
     }
 
     [Fact]
-    public void WhenCodeFenceInsideABlockIsNotClosed_ThenTheBlockIsNotClosedEither()
+    public void WhenCodeFenceInsideABlockIsNotClosed_ThenTheBlockRunsToTheEndOfThePageWithEveryLineAsCode()
     {
         // Arrange
-        const string source = "before\n\n:: Demo.Card\n```\ncode\n::\nrest";
+        const string source = "before\n\n:: Demo.Card\n```\ncode\n::\n:: Demo.Motor\nrest";
 
         // Act
-        var card = Assert.Single(MarkdownPageParser.Parse(source).AllBlocks);
+        var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        Assert.Equal(MarkdownBlockKind.Invalid, card.Kind);
-        Assert.Contains("is not closed", card.Error);
-        Assert.True(card.EndLine >= 7);
+        var card = Assert.Single(page.AllBlocks);
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Null(card.Error);
+        Assert.Equal((3, 8, false), (card.Line, card.EndLine, card.HasClosingLine));
+        Assert.True(page.IsInsideCode(source.IndexOf(":: Demo.Motor", StringComparison.Ordinal)));
+        Assert.True(page.IsInsideCode(source.Length - 1));
     }
 
     [Theory]
@@ -677,7 +697,23 @@ public class MarkdownPageParserTests
     }
 
     [Fact]
-    public void WhenFenceLinesFollowHtmlWithoutAnEmptyLineAndCloseNoOpenBlock_ThenTheyStayText()
+    public void WhenClosingLineFollowsHtmlWithoutAnEmptyLineAndFitsNoOpenBlock_ThenItStaysText()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\n<div>\n:::\n</div>\n::\nrest";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.AllBlocks);
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Equal((1, 5), (card.Line, card.EndLine));
+        Assert.Contains("<div>\n:::\n</div>", PageErrorBoxes.RenderSyntaxOnly(page));
+    }
+
+    [Fact]
+    public void WhenBlockIsWrittenInsideHtmlWithoutEmptyLinesInsideABlock_ThenItsHeadLineEndsTheHtmlAndItIsABlock()
     {
         // Arrange
         const string source = ":: Demo.Card\n<div>\n::: Demo.Widget Path=/x\n:::\n</div>\n::\nrest";
@@ -686,9 +722,17 @@ public class MarkdownPageParserTests
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var card = Assert.Single(page.AllBlocks);
-        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
-        Assert.Equal((1, 6), (card.Line, card.EndLine));
+        Assert.Equal(
+            ExpectedTree("""
+                Widget :: Demo.Card [1-6 closed]
+                  Widget ::: Demo.Widget Path=/x [3-4 closed]
+                """),
+            DescribeTree(page.Blocks, withLines: true));
+
+        var card = Assert.IsType<BlockMarkdownSegment>(MarkdownSegmentBuilder.Build(page)[0]);
+        Assert.Equal("<div>\n", Assert.IsType<HtmlMarkdownSegment>(card.Content[0]).Html);
+        Assert.IsType<BlockMarkdownSegment>(card.Content[1]);
+        Assert.Equal("</div>\n", Assert.IsType<HtmlMarkdownSegment>(card.Content[2]).Html);
     }
 
     [Fact]
@@ -720,8 +764,8 @@ public class MarkdownPageParserTests
         Assert.Equal((1, 5), (card.Line, card.EndLine));
         var widget = Assert.Single(card.Children);
         Assert.Equal(MarkdownBlockKind.Invalid, widget.Kind);
-        Assert.Contains("only allowed directly on the page", widget.Error);
-        Assert.Contains("is not closed", widget.Error);
+        Assert.Equal("A block is only allowed directly on the page or directly inside another block.", widget.Error);
+        Assert.Equal((3, 4, false), (widget.Line, widget.EndLine, widget.HasClosingLine));
     }
 
     [Fact]
@@ -843,6 +887,24 @@ public class MarkdownPageParserTests
         Assert.Equal(MarkdownBlockKind.Widget, block.Kind);
         Assert.Equal((2, expectedLine, expectedLine + 2), (block.FenceLength, block.Line, block.EndLine));
         Assert.Equal(":: A.B", source.Substring(block.HeadSpan.Start, block.HeadSpan.Length));
+    }
+
+    [Theory]
+    [InlineData(":: A.B\nTerm\n:   Definition\n:: C.D\ninside", "Widget :: A.B [1-3]\nWidget :: C.D [4-5]\n")]
+    [InlineData(":: A.B\nTerm\n:   Definition\n\n:: C.D\ninside", "Widget :: A.B [1-3]\nWidget :: C.D [5-6]\n")]
+    [InlineData(":: A.B\nTerm\n:   Definition\n   :: C.D\ninside", "Widget :: A.B [1-3]\nWidget :: C.D [4-5]\n")]
+    [InlineData(":: A.B\nTerm\n:   Definition\n\n   :: C.D\ninside", "Widget :: A.B [1-3]\nWidget :: C.D [5-6]\n")]
+    [InlineData(":: A.B\nTerm\n:   One\n:   Two\n::: C.D\ninside", "Widget :: A.B [1-6]\n  Widget ::: C.D [5-6]\n")]
+    [InlineData(":: A.B\n::: Tab\nTerm\n:   Definition\n   ::: Tab\ninside", "Widget :: A.B [1-6]\n  Slot ::: Tab [2-4]\n  Slot ::: Tab [5-6]\n")]
+    public void WhenHeadLineFollowsADefinitionListInsideABlock_ThenItEndsTheBlocksWithAsManyCharactersOrMore(
+        string source, string expectedTree)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal(expectedTree, DescribeTree(page.Blocks, withLines: true));
+        Assert.Contains("<dd>", PageErrorBoxes.RenderSyntaxOnly(page));
     }
 
     [Fact]
@@ -981,14 +1043,13 @@ public class MarkdownPageParserTests
         Assert.Equal((1, 7), (outer.Line, outer.EndLine));
         Assert.Equal(2, outer.Children.Count);
         Assert.Equal((2, 4), (outer.Children[0].Line, outer.Children[0].EndLine));
-        Assert.Contains("only allowed directly on the page", outer.Children[0].Error);
-        Assert.DoesNotContain("not closed", outer.Children[0].Error);
+        Assert.Equal("A block is only allowed directly on the page or directly inside another block.", outer.Children[0].Error);
         Assert.Equal(5, outer.Children[1].Line);
         Assert.Contains("closes no block. A closing line inside a quote or a list item closes no block outside of it.", outer.Children[1].Error);
     }
 
     [Fact]
-    public void WhenProseInsideABlockStartsWithAFenceAndAWord_ThenTheErrorIsTheOneOfTheHeadGrammar()
+    public void WhenProseInsideABlockStartsWithAFenceAndAWord_ThenTheErrorIsTheOneOfTheHeadGrammarAndTheClosingLineOfTheBlockClosesNothing()
     {
         // Arrange
         const string source = ":: Demo.Card\n:: Please note this\ntext\n::\nafter\n::";
@@ -997,12 +1058,13 @@ public class MarkdownPageParserTests
         var page = MarkdownPageParser.Parse(source);
 
         // Assert
-        var card = Assert.Single(page.Blocks);
-        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
-        Assert.Equal((1, 6), (card.Line, card.EndLine));
-        var prose = Assert.Single(card.Children);
-        Assert.Equal(MarkdownBlockKind.Invalid, prose.Kind);
-        Assert.Equal("Expected key=value but found 'note this'.", prose.Error);
+        Assert.Equal(
+            ExpectedTree("""
+                Widget :: Demo.Card [1-1]
+                Invalid Expected key=value but found 'note this'. [2-4 closed]
+                Invalid This line of 2 ':' characters closes no block. No block is open here. [6-6 closed]
+                """),
+            DescribeTree(page.Blocks, withLines: true));
     }
 
     [Theory]
@@ -1067,6 +1129,479 @@ public class MarkdownPageParserTests
         Assert.Equal(MarkdownBlockKind.Invalid, page.AllBlocks[1].Kind);
         Assert.Equal(5, page.AllBlocks[1].Line);
         Assert.Contains("closes no block. No block is open here.", page.AllBlocks[1].Error);
+    }
+
+    private const string LayoutWithEveryClosingLine = """
+        :: HomeBlaze.Components.TabLayout
+        ::: Tab#pumps Title="Pumps" Icon=WaterDrop
+        :::: HomeBlaze.Components.FlowLayout MinWidth=320
+        ::::: Item
+        :::::: HomeBlaze.Components.Card Title="Water Pump" Icon=WaterDrop
+        ::::::: HomeBlaze.Components.Widget Path=../WaterPump
+        :::::::
+        ::::::
+        :::::
+        ::::: Item
+        :::::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt
+        ::::::: HomeBlaze.Components.Widget Path=../Compressor
+        :::::::
+        ::::::
+        :::::
+        ::::
+        :::
+        ::: Tab#belt Title="Conveyor Belt" Icon=Settings
+        The conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
+        :::
+        ::
+        """;
+
+    private const string LayoutInTheShortForm = """
+        :: HomeBlaze.Components.TabLayout
+        ::: Tab#pumps Title="Pumps" Icon=WaterDrop
+        :::: HomeBlaze.Components.FlowLayout MinWidth=320
+        ::::: Item
+        :::::: HomeBlaze.Components.Card Title="Water Pump" Icon=WaterDrop
+        ::::::: HomeBlaze.Components.Widget Path=../WaterPump
+        ::::: Item
+        :::::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt
+        ::::::: HomeBlaze.Components.Widget Path=../Compressor
+        ::: Tab#belt Title="Conveyor Belt" Icon=Settings
+        The conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
+        """;
+
+    /// <summary>
+    /// Gets the tree of the blocks, one block per line: its kind and its head line or its error. With
+    /// <paramref name="withLines"/> also its first and its last line, and "closed" when the last one is its closing line.
+    /// </summary>
+    private static string DescribeTree(IEnumerable<MarkdownBlock> blocks, bool withLines = false, int depth = 0) =>
+        string.Concat(blocks.Select(block =>
+        {
+            var lines = withLines ? $"[{block.Line}-{block.EndLine}{(block.HasClosingLine ? " closed" : string.Empty)}]" : null;
+            string?[] parts = [block.Kind.ToString(), block.Head?.Format() ?? block.Error, lines];
+            return $"{new string(' ', depth * 2)}{string.Join(' ', parts.Where(part => part is not null))}\n" +
+                   DescribeTree(block.Children, withLines, depth + 1);
+        }));
+
+    /// <summary>Gets the lines of every block in document order: its head line, its last line and whether that is a closing line.</summary>
+    private static (int Line, int EndLine, bool HasClosingLine)[] DescribeLines(MarkdownPage page) =>
+        page.AllBlocks.Select(block => (block.Line, block.EndLine, block.HasClosingLine)).ToArray();
+
+    private static string ExpectedTree(string tree) => tree.ReplaceLineEndings("\n") + "\n";
+
+    [Fact]
+    public void WhenLayoutIsWrittenInTheShortForm_ThenItHasTheTreeOfTheSamePageWithEveryClosingLine()
+    {
+        // Arrange
+        var withEveryClosingLine = MarkdownPageParser.Parse(Normalize(LayoutWithEveryClosingLine));
+
+        // Act
+        var shortForm = MarkdownPageParser.Parse(Normalize(LayoutInTheShortForm));
+
+        // Assert
+        Assert.Equal(DescribeTree(withEveryClosingLine.Blocks), DescribeTree(shortForm.Blocks));
+        Assert.Equal(
+            """
+            Widget :: HomeBlaze.Components.TabLayout
+              Slot ::: Tab#pumps Title="Pumps" Icon=WaterDrop
+                Widget :::: HomeBlaze.Components.FlowLayout MinWidth=320
+                  Slot ::::: Item
+                    Widget :::::: HomeBlaze.Components.Card Title="Water Pump" Icon=WaterDrop
+                      Widget ::::::: HomeBlaze.Components.Widget Path=../WaterPump
+                  Slot ::::: Item
+                    Widget :::::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt
+                      Widget ::::::: HomeBlaze.Components.Widget Path=../Compressor
+              Slot ::: Tab#belt Title="Conveyor Belt" Icon=Settings
+
+            """.ReplaceLineEndings("\n"),
+            DescribeTree(shortForm.Blocks));
+
+        Assert.All(withEveryClosingLine.AllBlocks, block => Assert.True(block.HasClosingLine));
+        Assert.Equal(
+            [
+                (1, 11, false), (2, 9, false), (3, 9, false), (4, 6, false), (5, 6, false), (6, 6, false),
+                (7, 9, false), (8, 9, false), (9, 9, false), (10, 11, false)
+            ],
+            DescribeLines(shortForm));
+    }
+
+    [Fact]
+    public void WhenTwoEmptyBlocksFollowEachOtherWithoutClosingLines_ThenBothAreBlocksOfOneLine()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\n:: Demo.Motor";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal("Widget :: Demo.Card\nWidget :: Demo.Motor\n", DescribeTree(page.Blocks));
+        Assert.Equal([(1, 1, false), (2, 2, false)], DescribeLines(page));
+    }
+
+    [Theory]
+    [InlineData("before\n\n::: Demo.Card\ntext", 4)]
+    [InlineData("before\n\n::: Demo.Card\ntext\n", 4)]
+    [InlineData("before\n\n::: Demo.Card\ntext\n\n\n", 4)]
+    [InlineData("before\n\n::: Demo.Card\none\n\ntwo", 6)]
+    [InlineData("before\n\n::: Demo.Card", 3)]
+    [InlineData("before\n\n::: Demo.Card\n\n", 3)]
+    public void WhenBlockIsEndedByTheEndOfThePage_ThenItIsABlockThatEndsWithItsLastLineOfContent(string source, int expectedEndLine)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.AllBlocks);
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Null(card.Error);
+        Assert.Equal((3, expectedEndLine, false), (card.Line, card.EndLine, card.HasClosingLine));
+    }
+
+    [Fact]
+    public void WhenBlocksAtEveryDepthHaveNoClosingLine_ThenAHeadLineEndsTheBlocksWithAsManyCharactersOrMore()
+    {
+        // Arrange
+        var source = Normalize("""
+            :: Demo.Tabs
+            ::: Tab
+            one
+            ::: Tab
+            :::: Demo.Flow
+            ::::: Item
+            two
+            ::::: Item
+            three
+            :::: Demo.Flow
+            ::: Tab
+            :: Demo.Card
+            four
+            """);
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal(
+            """
+            Widget :: Demo.Tabs
+              Slot ::: Tab
+              Slot ::: Tab
+                Widget :::: Demo.Flow
+                  Slot ::::: Item
+                  Slot ::::: Item
+                Widget :::: Demo.Flow
+              Slot ::: Tab
+            Widget :: Demo.Card
+
+            """.ReplaceLineEndings("\n"),
+            DescribeTree(page.Blocks));
+        Assert.Equal(
+            [
+                (1, 11, false), (2, 3, false), (4, 10, false), (5, 9, false), (6, 7, false), (8, 9, false),
+                (10, 10, false), (11, 11, false), (12, 13, false)
+            ],
+            DescribeLines(page));
+    }
+
+    [Fact]
+    public void WhenHeadLineHasFewerCharactersThanThreeOpenBlocks_ThenItEndsAllOfThemAtOnce()
+    {
+        // Arrange
+        var source = Normalize("""
+            :: Demo.Tabs
+            ::: Tab
+            :::: Demo.Card
+            ::::: Demo.Widget Path=/x
+
+            ::: Tab
+            after
+            """);
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal(
+            """
+            Widget :: Demo.Tabs
+              Slot ::: Tab
+                Widget :::: Demo.Card
+                  Widget ::::: Demo.Widget Path=/x
+              Slot ::: Tab
+
+            """.ReplaceLineEndings("\n"),
+            DescribeTree(page.Blocks));
+        Assert.Equal([(1, 7, false), (2, 4, false), (3, 4, false), (4, 4, false), (6, 7, false)], DescribeLines(page));
+    }
+
+    [Fact]
+    public void WhenSomeBlocksHaveAClosingLineAndOthersHaveNone_ThenEachClosingLineEndsItsBlockAndEverythingOpenInsideIt()
+    {
+        // Arrange
+        var source = Normalize("""
+            :: Demo.Card
+            ::: Footer
+            :::: Demo.Widget Path=/x
+            :::
+            body
+            ::
+            page text
+            :: Demo.Flow
+            ::: Item
+            :::: Demo.Card
+            inside
+            ::::
+            ::: Item
+            last
+            """);
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal(
+            """
+            Widget :: Demo.Card
+              Slot ::: Footer
+                Widget :::: Demo.Widget Path=/x
+            Widget :: Demo.Flow
+              Slot ::: Item
+                Widget :::: Demo.Card
+              Slot ::: Item
+
+            """.ReplaceLineEndings("\n"),
+            DescribeTree(page.Blocks));
+        Assert.Equal(
+            [(1, 6, true), (2, 4, true), (3, 3, false), (8, 14, false), (9, 12, false), (10, 12, true), (13, 14, false)],
+            DescribeLines(page));
+    }
+
+    [Fact]
+    public void WhenTextFollowsABlockWithoutClosingLine_ThenItIsContentOfThatBlock()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\nbefore\n::: Demo.Widget Path=/x\nafter\n::\nrest";
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Build(MarkdownPageParser.Parse(source));
+
+        // Assert
+        var card = Assert.IsType<BlockMarkdownSegment>(segments[0]);
+        Assert.Equal((1, 5, true), (card.Block.Line, card.Block.EndLine, card.Block.HasClosingLine));
+        Assert.Equal("<p>before</p>\n", Assert.IsType<HtmlMarkdownSegment>(card.Content[0]).Html);
+        var widget = Assert.IsType<BlockMarkdownSegment>(card.Content[1]);
+        Assert.Equal(MarkdownBlockKind.Widget, widget.Block.Kind);
+        Assert.Equal((3, 4, false), (widget.Block.Line, widget.Block.EndLine, widget.Block.HasClosingLine));
+        Assert.Equal("<p>after</p>\n", Assert.IsType<HtmlMarkdownSegment>(Assert.Single(widget.Content)).Html);
+        Assert.Equal(2, card.Content.Count);
+        Assert.Equal("\n<p>rest</p>\n", Assert.IsType<HtmlMarkdownSegment>(segments[1]).Html);
+    }
+
+    [Fact]
+    public void WhenClosingLineFitsNoOpenBlockAfterAHeadLineEndedBlocks_ThenItIsStillTheErrorOfALineThatClosesNothing()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\n::: Demo.Widget Path=/x\n:: Demo.Card\ntext\n:::";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal(2, page.Blocks.Count);
+        Assert.Equal([(1, 2, false), (2, 2, false), (3, 5, false), (5, 5, true)], DescribeLines(page));
+        var closingLine = Assert.Single(page.Blocks[1].Children);
+        Assert.Equal(MarkdownBlockKind.Invalid, closingLine.Kind);
+        Assert.Equal(
+            "This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line " +
+            "of its block. Open here: line 3 (2 characters).",
+            closingLine.Error);
+        Assert.All(page.AllBlocks.Take(3), block => Assert.Equal(MarkdownBlockKind.Widget, block.Kind));
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Card\nbefore\n> :: Demo.Motor\n> inside\n\nafter\n::\nrest", 3, 4)]
+    [InlineData(":: Demo.Card\nbefore\n> ::: Demo.Motor\n> inside\n> :: Demo.Motor\n\nafter\n::\nrest", 5, 5)]
+    [InlineData(":: Demo.Card\n- item\n  :: Demo.Motor\n  inside\n\nafter\n::\nrest", 3, 4)]
+    [InlineData(":: Demo.Card\n1. item\n\n   :: Demo.Motor\n\nafter\n::\nrest", 4, 4)]
+    public void WhenHeadLineIsInsideAQuoteOrAListItemInsideABlock_ThenItEndsNoBlockOutsideAndStaysAnError(
+        string source, int expectedLine, int expectedEndLine)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.Blocks);
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Equal((1, source.Split('\n').Length - 1, true), (card.Line, card.EndLine, card.HasClosingLine));
+        var inner = card.Children[^1];
+        Assert.Equal(MarkdownBlockKind.Invalid, inner.Kind);
+        Assert.Equal("A block is only allowed directly on the page or directly inside another block.", inner.Error);
+        Assert.Equal((expectedLine, expectedEndLine, false), (inner.Line, inner.EndLine, inner.HasClosingLine));
+        Assert.Contains("<p>after</p>", PageErrorBoxes.RenderSyntaxOnly(page));
+    }
+
+    [Fact]
+    public void WhenHeadLineInsideAQuoteHasNoMoreCharactersThanABlockOfTheQuote_ThenItEndsThatBlockOnly()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\n> ::: {.band}\n> text\n> :: {.other}\n> more\n\nafter\n::";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.Blocks);
+        Assert.Equal((1, 8, true), (card.Line, card.EndLine, card.HasClosingLine));
+        Assert.Equal(2, card.Children.Count);
+        Assert.All(card.Children, style => Assert.Equal(MarkdownBlockKind.Style, style.Kind));
+        Assert.Equal((2, 3, false), (card.Children[0].Line, card.Children[0].EndLine, card.Children[0].HasClosingLine));
+        Assert.Equal((4, 5, false), (card.Children[1].Line, card.Children[1].EndLine, card.Children[1].HasClosingLine));
+    }
+
+    [Theory]
+    [InlineData("```")]
+    [InlineData("~~~~")]
+    public void WhenFenceLinesAreInsideFencedCodeInsideABlockWithoutClosingLine_ThenTheyStayTextAndTheBlockContinues(string codeFence)
+    {
+        // Arrange
+        var source = $":: Demo.Card\nbefore\n\n{codeFence}\n:: Demo.Motor\n::\n:::\n{codeFence}\n\nafter\n:: Demo.Motor";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal("Widget :: Demo.Card\nWidget :: Demo.Motor\n", DescribeTree(page.Blocks));
+        Assert.Equal([(1, 10, false), (11, 11, false)], DescribeLines(page));
+        Assert.True(page.IsInsideCode(source.IndexOf(":: Demo.Motor", StringComparison.Ordinal)));
+
+        var card = Assert.IsType<BlockMarkdownSegment>(MarkdownSegmentBuilder.Build(page)[0]);
+        var content = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(card.Content)).Html;
+        Assert.Contains(":: Demo.Motor\n::\n:::\n</code></pre>", content);
+        Assert.EndsWith("<p>after</p>\n", content);
+    }
+
+    [Fact]
+    public void WhenFenceLinesAreInsideIndentedCodeInsideABlockWithoutClosingLine_ThenTheyStayTextAndTheBlockContinues()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\nbefore\n\n    :: Demo.Motor\n    ::\n\nafter\n:: Demo.Motor";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal("Widget :: Demo.Card\nWidget :: Demo.Motor\n", DescribeTree(page.Blocks));
+        Assert.Equal([(1, 7, false), (8, 8, false)], DescribeLines(page));
+    }
+
+    [Theory]
+    [InlineData("<div class=\"row\">\n<span>a</span>")]
+    [InlineData("</div>")]
+    [InlineData("<custom-element>\ntext")]
+    public void WhenHeadLineFollowsHtmlThatEndsAtAnEmptyLineInsideABlock_ThenItEndsTheHtmlAndIsReadAsAHeadLine(string html)
+    {
+        // Arrange
+        var source = $":: Demo.Card\n{html}\n::: Demo.Widget Path=/x\n:: Demo.Motor\n{html}\n:: Demo.Motor";
+        var htmlLineCount = html.Split('\n').Length;
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal(
+            "Widget :: Demo.Card\n  Widget ::: Demo.Widget Path=/x\nWidget :: Demo.Motor\nWidget :: Demo.Motor\n",
+            DescribeTree(page.Blocks));
+        Assert.Equal(
+            [
+                (1, 2 + htmlLineCount, false),
+                (2 + htmlLineCount, 2 + htmlLineCount, false),
+                (3 + htmlLineCount, 3 + 2 * htmlLineCount, false),
+                (4 + 2 * htmlLineCount, 4 + 2 * htmlLineCount, false)
+            ],
+            DescribeLines(page));
+    }
+
+    [Theory]
+    [InlineData("<style>\n::selection { color: red }\n</style>", "::selection { color: red }")]
+    [InlineData("<script>\n:: Demo.Motor\n</script>", ":: Demo.Motor")]
+    [InlineData("<pre>\n:: Demo.Motor\n</pre>", ":: Demo.Motor")]
+    [InlineData("<!--\n:: Demo.Motor\n-->", ":: Demo.Motor")]
+    [InlineData("<?php\n:: Demo.Motor\n?>", ":: Demo.Motor")]
+    public void WhenHeadLineIsInsideHtmlThatEndsAtItsOwnEndInsideABlock_ThenItStaysPartOfTheHtml(string html, string line)
+    {
+        // Arrange
+        var source = $":: Demo.Card\n{html}\nafter\n::\nrest";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.AllBlocks);
+        Assert.Equal((MarkdownBlockKind.Widget, 1, 6, true), (card.Kind, card.Line, card.EndLine, card.HasClosingLine));
+        var segment = Assert.IsType<BlockMarkdownSegment>(MarkdownSegmentBuilder.Build(page)[0]);
+        Assert.Equal($"{html}\n<p>after</p>\n", Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segment.Content)).Html);
+        Assert.Contains(line, html);
+    }
+
+    [Theory]
+    [InlineData("<div>\n:: Demo.Card\n</div>")]
+    [InlineData("<custom-element>\n:: Demo.Card\ntext")]
+    public void WhenHeadLineFollowsHtmlOutsideOfAnyBlock_ThenItStaysPartOfTheHtml(string source)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Empty(page.Blocks);
+        Assert.Equal($"{source}\n", PageErrorBoxes.RenderSyntaxOnly(page));
+    }
+
+    [Fact]
+    public void WhenHeadLineFollowsHtmlInsideAQuoteInsideABlock_ThenItEndsTheBlockAroundTheQuote()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\n> <div>\n> text\n:: Demo.Motor";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal("Widget :: Demo.Card\nWidget :: Demo.Motor\n", DescribeTree(page.Blocks));
+        Assert.Equal([(1, 3, false), (4, 4, false)], DescribeLines(page));
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Card\ntext\n\n:: Demo.Motor", "text")]
+    [InlineData(":: Demo.Card\none\ntwo\n:: Demo.Motor", "two")]
+    [InlineData(":: Demo.Card\n::: Footer\ninside\n\n\n:: Demo.Motor", "inside")]
+    [InlineData(":: Demo.Card\n::: Demo.Widget Path=/x\n:: Demo.Motor", "Path=/x")]
+    [InlineData(":: Demo.Card\n- one\n- two\n", "- two")]
+    [InlineData(":: Demo.Card\n```\ncode\n", "code")]
+    [InlineData(":: Demo.Card\ntext\n> ::\n", "> ::")]
+    public void WhenBlockHasNoClosingLine_ThenItsSpanEndsWithItsLastLineOfContent(string source, string expectedEnd)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = page.Document.Descendants<MarkdownBlockContainer>().First();
+        Assert.Equal(0, card.Span.Start);
+        Assert.Equal(source.IndexOf(expectedEnd, StringComparison.Ordinal) + expectedEnd.Length - 1, card.Span.End);
+    }
+
+    [Fact]
+    public void WhenBlockHasAClosingLine_ThenItsSpanEndsWithThatLineAndTheSpanOfAnOpenBlockInsideItEndsBefore()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\n::: Demo.Widget Path=/x\ninside\n\n::\nrest";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var containers = page.Document.Descendants<MarkdownBlockContainer>().ToList();
+        Assert.Equal(source.IndexOf("\nrest", StringComparison.Ordinal) - 1, containers[0].Span.End);
+        Assert.Equal(source.IndexOf("inside", StringComparison.Ordinal) + "inside".Length - 1, containers[1].Span.End);
     }
 
     [Theory]

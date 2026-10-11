@@ -148,7 +148,7 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
-    public void WhenBlockIsNotClosedAtTheEndOfThePage_ThenAnErrorBoxReplacesItAndTheTextBeforeIsKept()
+    public void WhenBlockHasNoClosingLineAtTheEndOfThePage_ThenItIsABlockWithTheRestOfThePageAsContent()
     {
         // Act
         var segments = Build("""
@@ -159,15 +159,16 @@ public class MarkdownSegmentBuilderTests
             """);
 
         // Assert
-        Assert.Empty(segments.OfType<BlockMarkdownSegment>());
-        var html = WebUtility.HtmlDecode(AllHtml(segments));
-        Assert.Contains("Line 3: This block is not closed. The line '::' that ends it is missing.</div>", html);
-        Assert.Contains("<p>first</p>", html);
-        Assert.DoesNotContain("inside", html);
+        Assert.Equal(2, segments.Count);
+        Assert.Equal("<p>first</p>\n", Assert.IsType<HtmlMarkdownSegment>(segments[0]).Html);
+        var card = Assert.IsType<BlockMarkdownSegment>(segments[1]);
+        Assert.Equal("Demo.Card", card.Block.Head!.Name);
+        Assert.Equal("\n<p>inside</p>\n", AllHtml(card.Content));
+        Assert.DoesNotContain("markdown-block-error", AllHtml(segments));
     }
 
     [Fact]
-    public void WhenInnerBlockIsNotClosed_ThenAnErrorBoxReplacesItAndTheBlockAroundItAndTheTextAfterAreKept()
+    public void WhenInnerBlockHasNoClosingLine_ThenItsContentIsTheTextUpToTheClosingLineOfTheBlockAroundIt()
     {
         // Act
         var segments = Build("""
@@ -185,18 +186,19 @@ public class MarkdownSegmentBuilderTests
         // Assert
         var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
         Assert.Equal("Demo.Card", card.Block.Head!.Name);
-        Assert.Empty(card.Content.OfType<BlockMarkdownSegment>());
-        var content = WebUtility.HtmlDecode(AllHtml(card.Content));
-        Assert.Contains("<p>before</p>", content);
-        Assert.Contains("Line 5: This block is not closed. The line ':::' that ends it is missing.</div>", content);
-        Assert.DoesNotContain("inside", content);
+        Assert.Equal("\n<p>before</p>\n", Assert.IsType<HtmlMarkdownSegment>(card.Content[0]).Html);
+        var widget = Assert.IsType<BlockMarkdownSegment>(card.Content[1]);
+        Assert.Equal("Demo.Widget", widget.Block.Head!.Name);
+        Assert.Equal("\n<p>inside</p>\n", AllHtml(widget.Content));
+        Assert.Equal(2, card.Content.Count);
         var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
         Assert.Contains("<p>first</p>", outside);
         Assert.Contains("<p>last</p>", outside);
+        Assert.DoesNotContain("markdown-block-error", AllHtml(segments));
     }
 
     [Fact]
-    public void WhenNestedBlockHasNoMoreCharactersThanTheBlockAroundIt_ThenAnErrorBoxReplacesItAndItsContentDoesNotSpill()
+    public void WhenBlockHasAsManyCharactersAsTheOpenBlock_ThenBothAreBlocksBesideEachOtherAndTheClosingLineThatIsLeftOverIsABox()
     {
         // Act
         var segments = Build("""
@@ -205,7 +207,7 @@ public class MarkdownSegmentBuilderTests
             :: Demo.Card
             before
             :: Demo.Widget Path=/x
-            hidden
+            inside
             ::
             after
             ::
@@ -214,20 +216,16 @@ public class MarkdownSegmentBuilderTests
             """);
 
         // Assert
-        var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
-        Assert.Equal("Demo.Card", card.Block.Head!.Name);
-        var content = WebUtility.HtmlDecode(AllHtml(card.Content));
-        Assert.Contains("<p>before</p>", content);
-        Assert.Contains(
-            "Line 5: A block inside another block needs more ':' characters than the block around it. " +
-            "This block has 2 and the block around it, at line 3, has 2. Write ':::' here and on its closing line.</div>",
-            content);
-        Assert.DoesNotContain("hidden", content);
-        Assert.Contains("<p>after</p>", content);
-        var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
-        Assert.Contains("<p>first</p>", outside);
-        Assert.Contains("<p>last</p>", outside);
-        Assert.DoesNotContain("markdown-block-error", outside);
+        var blocks = segments.OfType<BlockMarkdownSegment>().ToList();
+        Assert.Equal(["Demo.Card", "Demo.Widget"], blocks.Select(block => block.Block.Head!.Name));
+        Assert.Equal("\n<p>before</p>\n", AllHtml(blocks[0].Content));
+        Assert.Equal("\n<p>inside</p>\n", AllHtml(blocks[1].Content));
+        var outside = WebUtility.HtmlDecode(AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment)));
+        Assert.Equal(
+            "<p>first</p>\n\n\n<p>after</p>\n" +
+            "<div class=\"markdown-block-error\" role=\"alert\">Line 9: This line of 2 ':' characters closes no block. No block is open here.</div>\n\n" +
+            "<p>last</p>\n",
+            outside);
     }
 
     [Theory]

@@ -171,8 +171,21 @@ public class MarkdownBlockMatcherTests
     }
 
     [Theory]
-    [InlineData(":: Demo.Motor Speed=\"1\ntext\n::\n")]
     [InlineData(":: Demo.Motor Speed=1\ntext\n")]
+    [InlineData(":: Demo.Motor Speed=1")]
+    public void WhenBlockHasNoClosingLineAndTextsAreIdentical_ThenItIsFoundByBothMatches(string text)
+    {
+        // Act
+        var block = MarkdownBlockMatcher.FindSavedBlock(text, text, 0);
+        var blockAfterWriteBack = MarkdownBlockMatcher.FindSavedBlockAfterWriteBack(text, text, 0);
+
+        // Assert
+        Assert.Equal("Demo.Motor", block?.Head?.Name);
+        Assert.Equal("Demo.Motor", blockAfterWriteBack?.Head?.Name);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Motor Speed=\"1\ntext\n::\n")]
     [InlineData("::\ntext\n")]
     public void WhenBlockIsInvalid_ThenItIsRefusedByBothMatches(string text)
     {
