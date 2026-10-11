@@ -359,7 +359,7 @@ AI Agent                  Knowledge Graph              Time-Series         Docum
      |                          |   write path)            |                    |
 ```
 
-Built-in agents access the same tools directly (in-process) and can additionally subscribe to property changes via reactive streams, triggering analysis only when declarative filter rules are met. External agents connect via MCP protocol and interact on-demand. See [AI Integration](design/ai.md) for details.
+Built-in agents use the same tools, limited to the ones each agent is allowed, either in-process or through a per-turn MCP route on the same host, and run in the background when their poll interval elapses or a property under their watch paths changes. External agents connect via MCP protocol and interact on-demand. See [AI Integration](design/ai.md) for details and [AI Agents](../administration/ai-agents.md) for the operator guide.
 
 ---
 

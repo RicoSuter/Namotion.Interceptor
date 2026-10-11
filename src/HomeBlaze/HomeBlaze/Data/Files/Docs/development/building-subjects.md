@@ -365,7 +365,7 @@ public partial class Motor
 | `Description` | Help text shown in the operation dialog and returned to agents by MCP `list_methods`, so write it to stand alone | `"Sets the motor target speed"` |
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
-| `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
+| `RequiresConfirmation` | Show confirmation dialog before executing; such operations cannot be called through MCP, by AI agents or external clients | `true` |
 
 **Key points:**
 - Operations appear in the subject's property panel under "Operations"
@@ -373,7 +373,7 @@ public partial class Motor
 - Async methods are supported and show a progress indicator
 - Methods returning values display the result in a dialog
 - Errors are caught and shown in an error dialog
-- Operations with `RequiresConfirmation = true` show a confirmation dialog first
+- Operations with `RequiresConfirmation = true` show a confirmation dialog first, and MCP clients, including the built-in [AI agents](../administration/ai-agents.md#tools-and-permissions), cannot call them. Use it for operations a person must decide on, such as unlocking, rebooting or installing code. An implementation of an interface operation that requires confirmation keeps the requirement, also when it declares its own `[Operation]`
 
 **Supported parameter types:**
 - `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`
