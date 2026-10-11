@@ -17,11 +17,18 @@ public static class EditedPropertyValues
     }
 
     /// <summary>
-    /// Sets every value that differs from the current value of its property, all or none: nothing is set when one
-    /// of them cannot be converted to the type of its property, and a setter that fails restores the values set
-    /// before it.
+    /// Sets every value that differs from the current value of its property. The conversions are all or nothing:
+    /// nothing is set when one of the values cannot be converted to the type of its property. When a setter
+    /// rejects its value, the values set before it are set back and the values after it are not set.
     /// </summary>
-    /// <returns>One error per value that could not be converted or set, which is empty when the values are applied.</returns>
+    /// <remarks>
+    /// Setting a value back goes through the same setter. A previous value that its setter rejects as well, such
+    /// as a default outside the valid range, is therefore not restored: the property keeps the edited value, which
+    /// is reported as an error of its own.
+    /// </remarks>
+    /// <returns>
+    /// One error per value that could not be converted, set or set back, which is empty when the values are applied.
+    /// </returns>
     public static List<string> Apply(IEnumerable<KeyValuePair<RegisteredSubjectProperty, object?>> editedValues)
     {
         var errors = new List<string>();

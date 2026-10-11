@@ -1,4 +1,6 @@
 @implements IDisposable
+@using System.Reactive.Concurrency
+@using System.Reactive.Linq
 @using HomeBlaze.Abstractions.Metadata
 
 @if (!_configurationProperties.Any())
@@ -40,7 +42,7 @@ else
 @code {
     private MudForm? _form;
     private bool? _reportedIsValid;
-    private bool _isSaving;
+    private volatile bool _isSaving;
     private bool _externalChangeDetected;
     private List<string> _errors = [];
 
@@ -104,7 +106,7 @@ else
     }
 
     /// <summary>
-    /// Gets whether the last <see cref="ApplyChanges"/> failed and therefore applied nothing.
+    /// Gets whether the last <see cref="ApplyChanges"/> failed.
     /// </summary>
     public bool HasErrors => _errors.Any();
 
@@ -139,14 +141,16 @@ else
 
         try
         {
-            var observable = Subject.Context.GetPropertyChangeObservable();
-            _changeSubscription = observable
+            // The filter runs inside the write, where it still meets _isSaving for what the editor sets and sets
+            // back itself. What passes is handled off the write, which every other writer of the context waits for.
+            _changeSubscription = Subject.Context
+                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+                .Where(change => change.Property.Subject == Subject && !_isSaving)
+                .ObserveOn(Scheduler.Default)
                 .Subscribe(
                     onNext: change =>
                     {
-                        if (change.Property.Subject == Subject &&
-                            !_isSaving &&
-                            change.Property.TryGetRegisteredProperty()?.IsConfigurationProperty() == true)
+                        if (change.Property.TryGetRegisteredProperty()?.IsConfigurationProperty() == true)
                         {
                             _externalChangeDetected = true;
                             InvokeAsync(StateHasChanged);
@@ -172,9 +176,13 @@ else
     }
 
     /// <summary>
-    /// Applies the edited values to the subject, all or none: when one of them cannot be converted or set, the
-    /// subject keeps its values and <see cref="HasErrors"/> is true.
+    /// Applies the edited values to the subject as <see cref="EditedPropertyValues.Apply"/> does: nothing is set
+    /// when one of them cannot be converted, and the values already set are set back when a setter rejects its
+    /// value. <see cref="HasErrors"/> is true in both cases.
     /// </summary>
+    /// <remarks>
+    /// A value that cannot be set back stays changed on the subject, which is shown as an error of its own.
+    /// </remarks>
     public void ApplyChanges()
     {
         if (Subject == null) return;

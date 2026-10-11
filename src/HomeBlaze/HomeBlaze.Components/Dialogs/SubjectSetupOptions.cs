@@ -10,6 +10,10 @@ public sealed record SubjectSetupOptions
     /// <summary>
     /// Optional callback that establishes the parent chain, invoked after the edits are applied and before they are persisted.
     /// </summary>
+    /// <remarks>
+    /// The callback must attach the subject to a parent. A subject that has no parent after the callback returned
+    /// is discarded when the dialog closes, although it is still returned in the result of the dialog.
+    /// </remarks>
     public Action<IInterceptorSubject>? BeforeSave { get; init; }
 
     /// <summary>

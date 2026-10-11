@@ -11,15 +11,18 @@ namespace HomeBlaze.Components.Tests;
 
 public class EditedPropertyValuesTests
 {
-    private static EditedSubject CreateSubject()
+    private static IInterceptorSubjectContext CreateContext()
     {
-        var context = InterceptorSubjectContext
+        return InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry()
             .WithDataAnnotationValidation();
+    }
 
-        return new EditedSubject(context)
+    private static EditedSubject CreateSubject()
+    {
+        return new EditedSubject(CreateContext())
         {
             Label = "Pump",
             Interval = 5,
@@ -141,6 +144,29 @@ public class EditedPropertyValuesTests
         Assert.Equal(5, subject.Interval);
         Assert.Equal(2, subject.Level);
         Assert.Equal(3, subject.Limit);
+    }
+
+    [Fact]
+    public void WhenAValueCannotBeSetBack_ThenItStaysChangedAndTheOtherValuesAreSetBack()
+    {
+        // Arrange - the level was never set, so it holds 0, which its own range does not allow.
+        var subject = new EditedSubject(CreateContext()) { Label = "Pump" };
+
+        // Act - the priority is rejected after the label and the level were set.
+        var errors = EditedPropertyValues.Apply(
+        [
+            Edit(subject, nameof(EditedSubject.Label), "Fan"),
+            Edit(subject, nameof(EditedSubject.Level), 5),
+            Edit(subject, nameof(EditedSubject.Priority), 99)
+        ]);
+
+        // Assert
+        Assert.Equal(2, errors.Count);
+        Assert.StartsWith("Failed to set 'Priority': ", errors[0]);
+        Assert.StartsWith("Failed to restore 'Level': ", errors[1]);
+        Assert.Equal(5, subject.Level);
+        Assert.Equal("Pump", subject.Label);
+        Assert.Equal(0, subject.Priority);
     }
 
     [Theory]

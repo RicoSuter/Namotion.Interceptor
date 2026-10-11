@@ -165,8 +165,7 @@
     /// <returns>
     /// True when the edits were applied and <see cref="PersistAsync"/> ran, which reports a failure of its own to
     /// the user. False when the edits were not applied, which is reported to the user, and nothing was persisted:
-    /// either <see cref="ApplyChangesAsync"/> returned false and the subject is unchanged, or the edit component
-    /// failed while saving.
+    /// either <see cref="ApplyChangesAsync"/> returned false, or the edit component failed while saving.
     /// </returns>
     public async Task<bool> SaveAsync(CancellationToken cancellationToken)
     {
@@ -196,7 +195,8 @@
     /// </summary>
     /// <returns>
     /// False when there is no subject, the editor is not ready yet or not valid, or the generated properties
-    /// editor could not convert or set one of its values. Nothing was applied to the subject then.
+    /// editor could not convert or set one of its values. The subject is unchanged then, except for a value that
+    /// could not be set back after a setter rejected a later one, see <see cref="EditedPropertyValues.Apply"/>.
     /// </returns>
     public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
     {

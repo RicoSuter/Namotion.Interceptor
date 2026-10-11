@@ -22,4 +22,8 @@ public partial class EditedSubject
     [Configuration]
     [Range(1, 10)]
     public partial int Level { get; set; }
+
+    [Configuration]
+    [Range(1, 10)]
+    public partial int Priority { get; set; }
 }
