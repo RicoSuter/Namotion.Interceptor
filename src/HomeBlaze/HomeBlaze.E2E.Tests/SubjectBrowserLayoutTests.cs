@@ -55,16 +55,19 @@ public class SubjectBrowserLayoutTests
     private const string BrowserIsInteractive =
         "() => (document.getElementById('scrollContainer')?.style.getPropertyValue('--pane-width') ?? '') !== ''";
 
-    // Records where the row is when placeholders appear and where its scrolling had got to when they are removed.
-    // The position at removal comes from the scroll events: once the placeholders are gone the row is shorter, and
-    // reading it then says nothing about where it was.
+    // Records where the row is when placeholders appear, the positions it scrolls through, and where its scrolling had
+    // got to when they are removed. The position at removal comes from the scroll events: once the placeholders are
+    // gone the row is shorter, and reading it then says nothing about where it was.
     private const string WatchPlaceholders = """
         () => {
             const container = document.getElementById('scrollContainer');
             const countPlaceholders = () => container.querySelectorAll("[data-testid='subject-pane-placeholder']").length;
-            const watch = { start: container.scrollLeft, appearedAt: null, removedAt: null, most: 0 };
+            const watch = { start: container.scrollLeft, appearedAt: null, removedAt: null, most: 0, positions: [] };
             let scrolledTo = container.scrollLeft;
-            container.addEventListener('scroll', () => scrolledTo = container.scrollLeft);
+            container.addEventListener('scroll', () => {
+                scrolledTo = container.scrollLeft;
+                watch.positions.push(scrolledTo);
+            });
             new MutationObserver(() => {
                 const count = countPlaceholders();
                 if (count > 0 && watch.appearedAt === null) {
@@ -88,14 +91,19 @@ public class SubjectBrowserLayoutTests
         _fixture = fixture;
     }
 
-    private sealed record PlaceholderWatch(double Start, double? AppearedAt, double? RemovedAt, int Most);
+    private sealed record PlaceholderWatch(double Start, double? AppearedAt, double? RemovedAt, int Most, double[] Positions);
 
     private static async Task<PlaceholderWatch> ReadPlaceholderWatchAsync(IPage page)
     {
         var values = await page.EvaluateAsync<double?[]>(
             "() => [window.placeholderWatch.start, window.placeholderWatch.appearedAt, window.placeholderWatch.removedAt, window.placeholderWatch.most]");
-        return new PlaceholderWatch(values[0] ?? double.NaN, values[1], values[2], (int)(values[3] ?? 0));
+        var positions = await page.EvaluateAsync<double[]>("() => window.placeholderWatch.positions");
+        return new PlaceholderWatch(values[0] ?? double.NaN, values[1], values[2], (int)(values[3] ?? 0), positions);
     }
+
+    // A row that jumps reports only its new position; one that scrolls reports positions on the way.
+    private static void AssertScrolledThrough(PlaceholderWatch watch, double end) =>
+        Assert.Contains(watch.Positions, position => position > end + 1 && position < watch.Start - 1);
 
     private async Task<IPage> OpenAsync(string path, int width, int height, int paneCount)
     {
@@ -173,6 +181,7 @@ public class SubjectBrowserLayoutTests
         Assert.Equal(1, watch.Most);
         Assert.Equal(watch.Start, watch.AppearedAt);
         Assert.True(end < watch.Start, "The row should have scrolled back.");
+        AssertScrolledThrough(watch, end);
         Assert.InRange(watch.RemovedAt ?? double.NaN, end - 1, end + 1);
         Assert.Equal(0, await page.EvaluateAsync<int>(CountPartlyVisiblePanes));
     }
@@ -192,6 +201,7 @@ public class SubjectBrowserLayoutTests
         var watch = await ReadPlaceholderWatchAsync(page);
         Assert.Equal(2, watch.Most);
         Assert.Equal(watch.Start, watch.AppearedAt);
+        AssertScrolledThrough(watch, end: 0);
         Assert.InRange(watch.RemovedAt ?? double.NaN, -1, 1);
     }
 
@@ -255,6 +265,11 @@ public class SubjectBrowserLayoutTests
                 }
                 """);
             Assert.True(isBounded, "The content of the root pane should be taller than the pane and end inside it.");
+
+            // The element developer mode adds is the one with the tooltip, and it has to be between pane and content.
+            var wrapperCount = await page.Locator(
+                "#scrollContainer [data-testid='subject-pane'] div[title]:has([data-testid='subject-pane-content'])").CountAsync();
+            Assert.Equal(isDeveloperMode ? 1 : 0, wrapperCount);
         }
         finally
         {
