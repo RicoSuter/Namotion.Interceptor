@@ -119,6 +119,7 @@ The sample data of a development checkout has a page `Demo/Blocks.md` that shows
 - **Fence**: The run of colons at the start of a line is the fence. A block directly on the page has two colons. A block inside another block has more colons than the block around it: write one more for each level. A fence may be indented by up to three spaces.
 - **Head line**: A fence and then the type name, or the slot name of a slot block. Write one space between them. The page also reads a head line without that space.
 - **Closing line**: A fence and nothing else, with exactly as many colons as the head line of the block. Every block needs its closing line, also an empty block. A line of colons with nothing after them is always a closing line.
+- **Text that starts with colons**: A fence followed by text is a head line only when the text starts with a letter, `_` or `{`. A line like `:: 12:30 lunch` or `::)` is ordinary text. A line like `:: note` is read as a head line and is shown as an error, because `note` is no type name. To start a line of text with colons in every case, write a backslash before the first colon: `\:: note`.
 - **Type**: The full type name with its namespace. It is the name that the `$type` property has in the JSON file of a subject.
 - **Name**: An optional `#name` follows the type without a space. It starts with a letter or `_` and continues with letters, digits, `_` or `-`. A name is unique on the page, however deeply the blocks are nested.
 - **Arguments**: Any number of `key=value` pairs follow, separated by spaces. Each one sets a configuration property of the subject. The key is the name of the property, written exactly as in a path, for example `TargetSpeed`.
@@ -312,10 +313,11 @@ A style block can hold text and expressions. A widget block inside a style block
 
 A widget block is allowed in three places: directly on the page, directly inside another widget block and directly inside a slot block. A slot block is allowed directly inside the widget block that declares the slot.
 
-- A block inside a list item, a quote or a style block is shown as an error.
+- A block inside a list item, a quote or a style block is shown as an error. A closing line inside a list item or a quote closes no block outside of it and is shown as an error as well.
 - A block inside a fenced code block or an indented code block is shown as text and creates nothing, which is how this page shows its examples.
 - Do not put a block between an opening HTML tag and its closing tag, for example between `<div>` and `</div>`. The page does not report this, but the widget ends up outside the element and the layout breaks. Without an empty line between the tag and the block, the lines of the block are shown as text. Use a `Card`, a `FlowLayout` or a `TabLayout` to arrange widgets.
-- HTML inside the content of a block does not need an empty line before the closing line of the block.
+- HTML inside the content of a block does not need an empty line before the closing line of the block. A line of colons with exactly as many colons as an open block around it closes that block also inside a multi-line HTML comment and inside a `<pre>`, a `<script>` or a `<style>` element.
+- A line of colons of another length directly after HTML, without an empty line, is part of the HTML. It is shown as text and gives no error.
 
 ### Errors
 
@@ -324,10 +326,10 @@ A block that cannot be shown is replaced by a red box with the line number of th
 | Situation | Message |
 |-----------|---------|
 | A closing line whose number of colons fits no open block | This line of 3 ':' characters closes no block. A closing line needs as many characters as the head line of its block. Open here: line 12 (2 characters). |
-| A closing line where no block is open | This line of 2 ':' characters closes no block. No block is open here. |
+| A closing line where no block is open, also inside a list item or a quote | This line of 2 ':' characters closes no block. No block is open here. |
 | A block without its closing line. It ends where the block around it ends, or at the end of the page | This block is not closed. The line ':::' that ends it is missing. |
 | A block inside another block that does not have more colons than the block around it | A block inside another block needs more ':' characters than the block around it. This block has 2 and the block around it, at line 12, has 2. Write ':::' here and on its closing line. |
-| A head line that is not a type name with arguments, for example text that happens to start with two colons | '1' is not a valid block name. |
+| A line of text that starts with colons and a letter. It is read as a head line | 'Note:' is not a valid block name. |
 | The type does not exist or is misspelled | Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace. |
 | The type exists but is not made to be configured, so a page cannot create it | The type 'HomeBlaze.Storage.Files.MarkdownFile' cannot be used as a block because it does not implement IConfigurable. |
 | A type name without its namespace at the top level of the page, or a slot block there | 'Card' is not a type name. A slot block is only allowed directly inside a widget block. |
@@ -366,7 +368,7 @@ A subject that is created again starts from its configuration, the same as after
 The page editor marks the head line of every widget block and of every slot block that creates a subject, together with its `json` fence.
 
 - **Edit**: With the cursor on a marked head line, the toolbar shows a button that opens the edit dialog of the subject. Saving the dialog writes the configuration back into the block and saves the page. Only the head line and the `json` fence change, the content of the block stays as it is.
-- **Create**: The "Create" button adds a new block at the line of the cursor and saves the page. The block gets two colons directly on the page, and one colon more than the block around it when the cursor is inside the content of a block. The name you enter becomes the `#name` of the block. The wizard checks it while you type: it must start with a letter or `_`, contain only letters, digits, `_` and `-`, and not be used on the page yet.
+- **Create**: The "Create" button adds a new block at the line of the cursor and saves the page. The block gets two colons directly on the page, and one colon more than the block around it when the cursor is inside the content of a block. A block keeps its `json` fence as the first thing inside it: with the cursor on or inside that fence, the new block goes after it. The name you enter becomes the `#name` of the block. The wizard checks it while you type: it must start with a letter or `_`, contain only letters, digits, `_` and `-`, and not be used on the page yet.
 - **Save first**: "Edit" needs the saved page and the text in the editor to be the same from the start of the page to the end of the block's head line and `json` fence. When that part has unsaved changes, the editor asks you to save the page first. Unsaved text after the block is saved together with the edit.
 - **What is written**: Single values are written on the head line. Lists, objects and text with a line break are written into the `json` fence. Both are written with the property names. Values that are not set are left out. The head line keeps its number of colons and gets one space after them.
 

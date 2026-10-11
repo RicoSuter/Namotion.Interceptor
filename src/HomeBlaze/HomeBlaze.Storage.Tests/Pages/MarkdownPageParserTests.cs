@@ -493,6 +493,38 @@ public class MarkdownPageParserTests
         Assert.Equal((1, lineCount - 1), (card.Line, card.EndLine));
     }
 
+    [Theory]
+    [InlineData("<!--\ncomment")]
+    [InlineData("<pre>\ntext")]
+    [InlineData("<script>\nvar x = 1;")]
+    [InlineData("<style>\np { color: red; }")]
+    public void WhenClosingLineIsInsideMultiLineHtml_ThenItClosesTheBlock(string html)
+    {
+        // Arrange
+        var source = $":: Demo.Card\n{html}\n::\nrest";
+
+        // Act
+        var card = Assert.Single(MarkdownPageParser.Parse(source).AllBlocks);
+
+        // Assert
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Equal((1, 4), (card.Line, card.EndLine));
+    }
+
+    [Fact]
+    public void WhenClosingLineIsInsideHtmlInsideAListItem_ThenItStaysTextAndTheBlockAroundTheListStaysOpen()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\n- <div>\n  ::\n  </div>\n::\nrest";
+
+        // Act
+        var card = Assert.Single(MarkdownPageParser.Parse(source).AllBlocks);
+
+        // Assert
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Equal((1, 5), (card.Line, card.EndLine));
+    }
+
     [Fact]
     public void WhenFenceLinesFollowHtmlWithoutAnEmptyLineAndCloseNoOpenBlock_ThenTheyStayText()
     {
@@ -607,19 +639,261 @@ public class MarkdownPageParserTests
     }
 
     [Theory]
-    [InlineData("::: {.band} trailing", "'{.band}' is not a valid block name.")]
-    [InlineData(":: 1 is the loopback address", "'1' is not a valid block name.")]
-    public void WhenFenceLineHasAHeadThatIsNoHead_ThenItIsAnInvalidBlockWithTheGrammarError(string headLine, string expectedError)
+    [InlineData(":: A.B\nTerm\n:   Definition\n::\nafter", 4)]
+    [InlineData(":: A.B\nTerm\n:   Definition\n\n::\nafter", 5)]
+    [InlineData(":: A.B\nTerm\n~   Definition\n::\nafter", 4)]
+    [InlineData(":: A.B\nTerm\n:   Definition\n\n# Heading\n::\nafter", 6)]
+    [InlineData(":: A.B\nTerm\n:   Definition\n# Heading\n::\nafter", 5)]
+    [InlineData(":: A.B\nTerm\n:   One\n:   Two\n::\nafter", 5)]
+    [InlineData(":: A.B\nTerm\n:   Definition\n   ::\nafter", 4)]
+    [InlineData(":: A.B\nTerm\n:   Definition\n::  \nafter", 4)]
+    public void WhenClosingLineFollowsADefinitionList_ThenItClosesTheBlock(string source, int expectedEndLine)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var block = Assert.Single(page.AllBlocks);
+        Assert.Equal(MarkdownBlockKind.Widget, block.Kind);
+        Assert.Equal((1, expectedEndLine), (block.Line, block.EndLine));
+    }
+
+    [Fact]
+    public void WhenClosingLineOfAnInnerBlockFollowsADefinitionList_ThenItIsReadWithAllItsCharacters()
     {
         // Arrange
-        var source = $"{headLine}\ntext\n{headLine[..headLine.IndexOf(' ')]}\nafter";
+        const string source = ":: A.B\n::: Tab\nTerm\n:   Definition\n:::\nmore\n::";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var outer = Assert.Single(page.Blocks);
+        Assert.Equal(MarkdownBlockKind.Widget, outer.Kind);
+        Assert.Equal((1, 7), (outer.Line, outer.EndLine));
+        var tab = Assert.Single(outer.Children);
+        Assert.Equal(MarkdownBlockKind.Slot, tab.Kind);
+        Assert.Equal((2, 5), (tab.Line, tab.EndLine));
+    }
+
+    [Theory]
+    [InlineData("Term\n:   Definition\n\n:: A.B\ninside\n::", 4)]
+    [InlineData("Term\n:   Definition\n:: A.B\ninside\n::", 3)]
+    [InlineData("Term\n:   Definition\n\n  :: A.B\ninside\n::", 4)]
+    [InlineData("Term\n:   Definition\n   :: A.B\ninside\n::", 3)]
+    [InlineData("Term\n:   One\n:   Two\n\n   :: A.B\ninside\n   ::", 5)]
+    public void WhenHeadLineFollowsADefinitionList_ThenItOpensABlockAndTheHeadSpanStartsAtTheFence(string source, int expectedLine)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var block = Assert.Single(page.AllBlocks);
+        Assert.Equal(MarkdownBlockKind.Widget, block.Kind);
+        Assert.Equal((2, expectedLine, expectedLine + 2), (block.FenceLength, block.Line, block.EndLine));
+        Assert.Equal(":: A.B", source.Substring(block.HeadSpan.Start, block.HeadSpan.Length));
+    }
+
+    [Fact]
+    public void WhenClosingLineThatClosesNothingFollowsADefinitionList_ThenTheErrorCountsAllItsCharacters()
+    {
+        // Arrange
+        const string source = "Term\n:   Definition\n:::";
+
+        // Act
+        var closingLine = Assert.Single(MarkdownPageParser.Parse(source).AllBlocks);
+
+        // Assert
+        Assert.Equal(MarkdownBlockKind.Invalid, closingLine.Kind);
+        Assert.Equal(3, closingLine.FenceLength);
+        Assert.Equal(":::", source.Substring(closingLine.HeadSpan.Start, closingLine.HeadSpan.Length));
+        Assert.Equal("This line of 3 ':' characters closes no block. No block is open here.", closingLine.Error);
+    }
+
+    [Theory]
+    [InlineData(":: A.B\ntext\n> ::\nafter\n::")]
+    [InlineData(":: A.B\ntext\n- ::\nafter\n::")]
+    [InlineData(":: A.B\n- item\n  ::\nafter\n::")]
+    [InlineData(":: A.B\n1. item\n   ::\nafter\n::")]
+    public void WhenClosingLineIsInsideAQuoteOrAListItem_ThenItClosesNothingAndTheBlockAroundItStaysOpen(string source)
+    {
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var outer = Assert.Single(page.Blocks);
+        Assert.Equal(MarkdownBlockKind.Widget, outer.Kind);
+        Assert.Equal((1, 5), (outer.Line, outer.EndLine));
+        var closingLine = Assert.Single(outer.Children);
+        Assert.Equal(MarkdownBlockKind.Invalid, closingLine.Kind);
+        Assert.Equal((3, 3), (closingLine.Line, closingLine.EndLine));
+        Assert.Equal("This line of 2 ':' characters closes no block. No block is open here.", closingLine.Error);
+    }
+
+    [Fact]
+    public void WhenClosingLineIsInsideAQuoteWithABlockOfItsOwn_ThenItClosesThatBlockOnly()
+    {
+        // Arrange
+        const string source = ":: A.B\n> ::: C.D\n> text\n> :::\n> ::\nafter\n::";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var outer = Assert.Single(page.Blocks);
+        Assert.Equal(MarkdownBlockKind.Widget, outer.Kind);
+        Assert.Equal((1, 7), (outer.Line, outer.EndLine));
+        Assert.Equal(2, outer.Children.Count);
+        Assert.Equal((2, 4), (outer.Children[0].Line, outer.Children[0].EndLine));
+        Assert.Contains("only allowed directly on the page", outer.Children[0].Error);
+        Assert.DoesNotContain("not closed", outer.Children[0].Error);
+        Assert.Equal(5, outer.Children[1].Line);
+        Assert.Contains("closes no block. No block is open here.", outer.Children[1].Error);
+    }
+
+    [Fact]
+    public void WhenProseInsideABlockStartsWithAFenceAndAWord_ThenTheErrorIsTheOneOfTheHeadGrammar()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\n:: Please note this\ntext\n::\nafter\n::";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.Blocks);
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Equal((1, 6), (card.Line, card.EndLine));
+        var prose = Assert.Single(card.Children);
+        Assert.Equal(MarkdownBlockKind.Invalid, prose.Kind);
+        Assert.Equal("Expected key=value but found 'note this'.", prose.Error);
+    }
+
+    [Theory]
+    [InlineData(":: 12:30 lunch")]
+    [InlineData("::)")]
+    [InlineData("::1")]
+    [InlineData(":: 1 is the loopback address")]
+    [InlineData("::: - a dash")]
+    [InlineData(":: #name")]
+    [InlineData(":: \"quoted\"")]
+    [InlineData("  :: 42")]
+    public void WhenTextAfterAFenceStartsWithNoLetterUnderscoreOrBrace_ThenTheLineIsNoBlock(string line)
+    {
+        // Arrange
+        var source = $"before\n\n{line}\n\n:: Demo.Card\n{line}\n::\n\nafter";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        var card = Assert.Single(page.AllBlocks);
+        Assert.Equal(MarkdownBlockKind.Widget, card.Kind);
+        Assert.Equal((5, 7), (card.Line, card.EndLine));
+        Assert.Empty(card.Children);
+    }
+
+    [Theory]
+    [InlineData("::note", "::", "'note' is not a type name. A slot block is only allowed directly inside a widget block.")]
+    [InlineData(":: warning", "::", "'warning' is not a type name. A slot block is only allowed directly inside a widget block.")]
+    [InlineData(":: Note: read this", "::", "'Note:' is not a valid block name.")]
+    [InlineData(":: _draft text", "::", "Expected key=value but found 'text'.")]
+    [InlineData(":: \u00dcbersicht", "::", "'\u00dcbersicht' is not a valid block name.")]
+    [InlineData("::: {.band} trailing", ":::", "'{.band}' is not a valid block name.")]
+    public void WhenTextAfterAFenceStartsWithALetterAnUnderscoreOrABrace_ThenTheLineIsAHeadLineWithTheGrammarError(
+        string headLine, string closingLine, string expectedError)
+    {
+        // Arrange
+        var source = $"before\n\n{headLine}\ntext\n{closingLine}\nafter";
 
         // Act
         var block = Assert.Single(MarkdownPageParser.Parse(source).AllBlocks);
 
         // Assert
         Assert.Equal(MarkdownBlockKind.Invalid, block.Kind);
+        Assert.Equal((3, 5), (block.Line, block.EndLine));
         Assert.Equal(expectedError, block.Error);
+    }
+
+    [Fact]
+    public void WhenFenceIsAloneOnItsLine_ThenItIsAClosingLineAlsoNextToTextThatIsNoHead()
+    {
+        // Arrange
+        const string source = ":: Demo.Card\n::1\n::\n::2\n::";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert
+        Assert.Equal(2, page.AllBlocks.Count);
+        Assert.Equal(MarkdownBlockKind.Widget, page.AllBlocks[0].Kind);
+        Assert.Equal((1, 3), (page.AllBlocks[0].Line, page.AllBlocks[0].EndLine));
+        Assert.Equal(MarkdownBlockKind.Invalid, page.AllBlocks[1].Kind);
+        Assert.Equal(5, page.AllBlocks[1].Line);
+        Assert.Contains("closes no block. No block is open here.", page.AllBlocks[1].Error);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(3, 6)]
+    [InlineData(4, 6)]
+    [InlineData(5, 6)]
+    [InlineData(6, 6)]
+    [InlineData(7, 7)]
+    [InlineData(8, 12)]
+    [InlineData(9, 12)]
+    [InlineData(10, 12)]
+    [InlineData(11, 12)]
+    [InlineData(12, 12)]
+    [InlineData(13, 13)]
+    [InlineData(14, 14)]
+    [InlineData(15, 15)]
+    [InlineData(16, 16)]
+    public void WhenNewBlockIsPlacedAtALineBeforeOrInsideAJsonBlock_ThenItGoesAfterTheJsonBlock(int line, int expectedLine)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(Normalize("""
+            intro
+            :: Demo.Grid Rows=1
+            ```json
+            { "Cells": [] }
+            ```
+            text
+            ::: Demo.Card
+
+            ```json
+            { "Title": "x" }
+            ```
+            inner
+            :::
+            ::
+            end
+            """));
+
+        // Act
+        var insertLine = page.GetLineForNewBlock(line);
+
+        // Assert
+        Assert.Equal(expectedLine, insertLine);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Card\ntext\n::", 2, 2)]
+    [InlineData(":: Demo.Card\n```\ncode\n```\n::", 3, 3)]
+    [InlineData(":: Demo.Card Title=\"open\n```json\n{}\n```\n::", 3, 3)]
+    [InlineData("```json\n{}\n```", 2, 2)]
+    [InlineData("", 1, 1)]
+    public void WhenNewBlockIsPlacedWhereNoJsonBlockOfABlockIs_ThenItStaysAtItsLine(string source, int line, int expectedLine)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var insertLine = page.GetLineForNewBlock(line);
+
+        // Assert
+        Assert.Equal(expectedLine, insertLine);
     }
 
     [Theory]

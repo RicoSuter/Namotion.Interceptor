@@ -483,20 +483,20 @@ public class MarkdownBlockTests
     }
 
     [Fact]
-    public async Task WhenABlockIsCreatedWithTheCursorInsideACard_ThenItGetsOneMoreFenceCharacterAndIsShownInTheCard()
+    public async Task WhenABlockIsCreatedWithTheCursorInTheJsonBlockOfACard_ThenItGoesAfterTheJsonBlockWithOneMoreFenceCharacter()
     {
-        // Arrange
-        await WriteScratchPageAsync(
-            "# Scratch\n\n:: HomeBlaze.Components.Card Title=\"Outer Card\"\nText inside the card\n::\n\nText after the card\n");
+        // Arrange: the title of the card is in its json block, so the card loses it if the json block is damaged.
+        const string cardStart = ":: HomeBlaze.Components.Card\n```json\n{ \"Title\": \"Outer Card\" }\n```\n";
+        await WriteScratchPageAsync($"# Scratch\n\n{cardStart}Text inside the card\n::\n\nText after the card\n");
 
         var page = await OpenPageAsync(ScratchPage);
         var card = GetCard(page, "Outer Card");
         await Assertions.Expect(card.GetByText("Text inside the card")).ToBeVisibleAsync(new() { Timeout = 30000 });
         await SelectEditModeAsync(page, "Split");
 
-        var textLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "Text inside the card" });
-        await Assertions.Expect(textLine).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await textLine.ClickAsync();
+        var jsonLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "\"Title\": \"Outer Card\"" });
+        await Assertions.Expect(jsonLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await jsonLine.ClickAsync();
 
         // Act
         await page.GetByTestId("create-subject-button").ClickAsync();
@@ -508,7 +508,8 @@ public class MarkdownBlockTests
         await wizard.GetByLabel("Name").FillAsync("Inner Motor");
         await wizard.GetByTestId("create-button").ClickAsync();
 
-        // Assert: the block is in the file with the fence of a block inside the card, and the card shows it
+        // Assert: the block is in the file after the json block with the fence of a block inside the card,
+        // and the card shows it and still has its title
         await Assertions.Expect(wizard).ToBeHiddenAsync(new() { Timeout = 30000 });
         await SelectEditModeAsync(page, "View");
         await Assertions.Expect(card).ToContainTextAsync("Inner Motor", new() { Timeout = 30000 });
@@ -520,7 +521,8 @@ public class MarkdownBlockTests
         var headLine = Array.FindIndex(lines, line => line.Contains("#innermotor", StringComparison.Ordinal));
         Assert.StartsWith("::: HomeBlaze.Samples.Motor#innermotor Name=\"Inner Motor\"", lines[headLine]);
         Assert.Equal(":::", lines[headLine + 1]);
-        Assert.True(headLine > Array.IndexOf(lines, ":: HomeBlaze.Components.Card Title=\"Outer Card\""));
+        Assert.Contains(cardStart, source);
+        Assert.True(headLine > Array.IndexOf(lines, "```"));
         Assert.True(headLine < Array.IndexOf(lines, "Text inside the card"));
         Assert.Contains("Text inside the card\n::\n\nText after the card", source);
     }

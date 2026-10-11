@@ -341,11 +341,13 @@ else
         // Insert at cursor line (or end if no cursor)
         var position = await _editor.GetPosition();
         var lines = _currentContent.Split(lineEnding);
-        var insertLine = position?.LineNumber ?? lines.Length;
         var newLines = new List<string>(lines);
 
-        // Inside the content of a block, the new block needs a longer fence than the block around it.
-        var fenceLength = MarkdownPageParser.Parse(_currentContent).GetFenceLengthForNewBlock(insertLine);
+        // Inside the content of a block, the new block goes after the json block of that block and
+        // needs a longer fence than the block around it.
+        var editorPage = MarkdownPageParser.Parse(_currentContent);
+        var insertLine = Math.Min(editorPage.GetLineForNewBlock(position?.LineNumber ?? lines.Length), lines.Length + 1);
+        var fenceLength = editorPage.GetFenceLengthForNewBlock(insertLine);
         var blockLines = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json, fenceLength, lineEnding).Split(lineEnding);
 
         // The parser accepts a block without blank lines around it. They keep the page text readable.

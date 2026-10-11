@@ -45,7 +45,7 @@ public sealed class MarkdownBlock
     /// 1-based line of the closing line. A block without a closing line ends where the block around it
     /// ends, or after the last line of the page.
     /// </summary>
-    public int EndLine { get; init; }
+    internal int EndLine { get; init; }
 
     public MarkdownSpan HeadSpan { get; init; }
 
@@ -118,21 +118,42 @@ public sealed class MarkdownPage
     }
 
     /// <summary>
+    /// Gets the 1-based line before which the head line of a new block is inserted when the cursor is on
+    /// <paramref name="line"/>: that line, or the line after the json block of the block around it when
+    /// the new block would otherwise stand before or inside that json block.
+    /// </summary>
+    /// <remarks>The json block must stay the first thing in its block, or it is no configuration any more.</remarks>
+    public int GetLineForNewBlock(int line)
+    {
+        if (FindBlockAround(line) is not { ConfigurationSpan: { } configurationSpan })
+        {
+            return line;
+        }
+
+        var lineAfterConfiguration = Source.AsSpan(0, configurationSpan.End).Count('\n') + 2;
+        return Math.Max(line, lineAfterConfiguration);
+    }
+
+    /// <summary>
     /// Gets the fence length for a new block whose head line is inserted before the 1-based
     /// <paramref name="line"/>: one more than the fence of the innermost block that the new block is
-    /// then inside of, and <see cref="MarkdownBlockFence.MinimumLength"/> directly on the page.
+    /// then inside of, and two directly on the page.
     /// </summary>
-    public int GetFenceLengthForNewBlock(int line)
+    public int GetFenceLengthForNewBlock(int line) =>
+        FindBlockAround(line) is { } outer ? outer.FenceLength + 1 : MarkdownBlockFence.MinimumLength;
+
+    /// <summary>Gets the innermost block that a line inserted before <paramref name="line"/> is inside of.</summary>
+    private MarkdownBlock? FindBlockAround(int line)
     {
-        var fenceLength = MarkdownBlockFence.MinimumLength;
+        MarkdownBlock? innermost = null;
         var blocks = Blocks;
         while (blocks.FirstOrDefault(block => block.Line < line && line <= block.EndLine) is { } outer)
         {
-            fenceLength = outer.FenceLength + 1;
+            innermost = outer;
             blocks = outer.Children;
         }
 
-        return fenceLength;
+        return innermost;
     }
 
     internal MarkdownBlock GetBlock(MarkdownBlockContainer container) => _containers[container];
@@ -284,19 +305,20 @@ public static class MarkdownPageParser
             {
                 error = "A block is only allowed directly on the page or directly inside another block.";
             }
-            else if (FindNestingError(container) is { } nestingError)
-            {
-                error = nestingError;
-            }
             else if (MarkdownBlockHead.TryParse(source.Substring(headSpan.Start, headSpan.Length), out head, out error))
             {
-                if (head.IsWidget || hasOwner)
+                // After the head grammar, so that prose which starts with a fence is not told to add characters.
+                error = FindNestingError(container);
+                if (error is null)
                 {
-                    kind = head.IsWidget ? MarkdownBlockKind.Widget : MarkdownBlockKind.Slot;
-                }
-                else
-                {
-                    error = $"'{head.Name}' is not a type name. A slot block is only allowed directly inside a widget block.";
+                    if (head.IsWidget || hasOwner)
+                    {
+                        kind = head.IsWidget ? MarkdownBlockKind.Widget : MarkdownBlockKind.Slot;
+                    }
+                    else
+                    {
+                        error = $"'{head.Name}' is not a type name. A slot block is only allowed directly inside a widget block.";
+                    }
                 }
             }
 

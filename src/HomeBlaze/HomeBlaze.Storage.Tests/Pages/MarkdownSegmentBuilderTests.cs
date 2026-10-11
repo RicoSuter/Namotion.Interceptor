@@ -272,6 +272,64 @@ public class MarkdownSegmentBuilderTests
         Assert.Contains("<p>last</p>", html);
     }
 
+    [Theory]
+    [InlineData(":: 12:30 lunch", "<p>:: 12:30 lunch</p>")]
+    [InlineData("::)", "<p>::)</p>")]
+    [InlineData("\\:: Demo.Card", "<p>:: Demo.Card</p>")]
+    [InlineData("\\::", "<p>::</p>")]
+    public void WhenLineStartsWithFenceCharactersButIsNoFenceLine_ThenItIsShownAsText(string line, string expectedHtml)
+    {
+        // Act
+        var segments = Build($"first\n\n{line}\n\nlast");
+
+        // Assert
+        Assert.Empty(segments.OfType<BlockMarkdownSegment>());
+        Assert.Equal($"<p>first</p>\n{expectedHtml}\n<p>last</p>\n", AllHtml(segments));
+    }
+
+    [Fact]
+    public void WhenClosingLineIsInsideAQuoteInsideABlock_ThenAnErrorBoxIsInTheQuoteAndTheBlockGoesOn()
+    {
+        // Act
+        var segments = Build("""
+            :: Demo.Card
+            before
+            > ::
+            after
+            ::
+
+            last
+            """);
+
+        // Assert
+        var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
+        var content = WebUtility.HtmlDecode(AllHtml(card.Content));
+        Assert.Contains("<p>before</p>", content);
+        Assert.Contains("<blockquote>\n<div class=\"markdown-block-error\" role=\"alert\">Line 3: This line of 2 ':' characters closes no block. No block is open here.</div>", content);
+        Assert.Contains("<p>after</p>", content);
+        Assert.Contains("<p>last</p>", AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment)));
+    }
+
+    [Fact]
+    public void WhenClosingLineFollowsADefinitionListInsideABlock_ThenTheBlockEndsThereAndTheTextAfterItIsOutside()
+    {
+        // Act
+        var segments = Build("""
+            :: Demo.Card
+            Term
+            :   Definition
+            ::
+            after
+            """);
+
+        // Assert
+        var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
+        Assert.Contains("<dd>Definition</dd>", AllHtml(card.Content));
+        Assert.DoesNotContain("after", AllHtml(card.Content));
+        Assert.Contains("<p>after</p>", AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment)));
+        Assert.DoesNotContain("markdown-block-error", AllHtml(segments));
+    }
+
     [Fact]
     public void WhenThreeFenceCharactersAreInTheText_ThenTheyHaveNoOtherMeaning()
     {
