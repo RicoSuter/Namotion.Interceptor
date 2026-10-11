@@ -41,6 +41,21 @@ public static class ClaudeCliProcess
 
     private static readonly TimeSpan KilledProcessExitTimeout = TimeSpan.FromSeconds(5);
 
+    // In -p mode the CLI always uses an API key or provider from the environment over the subscription login, so it
+    // would bill the API instead of the subscription. CLAUDE_CODE_OAUTH_TOKEN is a subscription token and is kept.
+    private static readonly string[] RemovedEnvironmentVariables =
+    [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "ANTHROPIC_PROFILE",
+        "ANTHROPIC_FEDERATION_RULE_ID",
+        "ANTHROPIC_ORGANIZATION_ID"
+    ];
+
     /// <summary>
     /// Runs the invocation to completion.
     /// </summary>
@@ -136,6 +151,11 @@ public static class ClaudeCliProcess
         foreach (var argument in invocation.Arguments)
         {
             startInfo.ArgumentList.Add(argument);
+        }
+
+        foreach (var name in RemovedEnvironmentVariables)
+        {
+            startInfo.Environment.Remove(name);
         }
 
         var process = new Process { StartInfo = startInfo };

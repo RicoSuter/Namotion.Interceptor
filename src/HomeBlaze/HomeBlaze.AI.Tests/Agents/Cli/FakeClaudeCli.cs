@@ -1,8 +1,8 @@
 namespace HomeBlaze.AI.Tests.Agents.Cli;
 
 /// <summary>
-/// Writes a shell script that stands in for the Claude CLI: it records each invocation's arguments, standard
-/// input and MCP configuration, then replays a fixture. Disposing deletes its temporary directory.
+/// Writes a shell script that stands in for the Claude CLI: it records each invocation's arguments, environment,
+/// standard input and MCP configuration, then replays a fixture. Disposing deletes its temporary directory.
 /// </summary>
 internal sealed class FakeClaudeCli : IDisposable
 {
@@ -37,6 +37,9 @@ internal sealed class FakeClaudeCli : IDisposable
     }
 
     public string LastStandardInput => File.ReadAllText(Path.Combine(Directory, "stdin.txt"));
+
+    /// <summary>The environment of the last invocation as <c>NAME=value</c> lines.</summary>
+    public IReadOnlyList<string> LastEnvironment => File.ReadAllLines(Path.Combine(Directory, "environment.txt"));
 
     public string LastMcpConfiguration => File.ReadAllText(Path.Combine(Directory, "mcp.json"));
 
@@ -95,6 +98,7 @@ internal sealed class FakeClaudeCli : IDisposable
             #!/bin/sh
             echo $$ > '{directory}/pid.tmp'
             mv '{directory}/pid.tmp' '{directory}/pid.txt'
+            env > '{directory}/environment.txt'
             for argument in "$@"; do printf '%s\n' "$argument"; done >> '{directory}/arguments.txt'
             printf '%s\n' '---END---' >> '{directory}/arguments.txt'
             previous=''
