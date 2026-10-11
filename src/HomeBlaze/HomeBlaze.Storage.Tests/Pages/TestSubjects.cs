@@ -229,6 +229,34 @@ public partial class DottedName
 }
 
 [InterceptorSubject]
+public partial class HyphenatedName
+{
+    [Slot("My-Item")]
+    public partial IInterceptorSubject? Content { get; set; }
+}
+
+[InterceptorSubject]
+public partial class NameWithLeadingDigit
+{
+    [Slot("1st")]
+    public partial IInterceptorSubject? Content { get; set; }
+}
+
+[InterceptorSubject]
+public partial class NameWithSpace
+{
+    [Slot("My Item")]
+    public partial IInterceptorSubject? Content { get; set; }
+}
+
+[InterceptorSubject]
+public partial class NameWithUnderscoreAndDigit
+{
+    [Slot("_Item_2")]
+    public partial IInterceptorSubject? Content { get; set; }
+}
+
+[InterceptorSubject]
 public partial class DuplicateNames
 {
     [Slot("Item")]

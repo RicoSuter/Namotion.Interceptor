@@ -25,25 +25,28 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Rewrites relative .md links to /pages/... route format with Children segments.
-    /// A fragment after the page stays on the link.
+    /// A fragment after the page stays on the link. A link that is only a fragment gets the route of the
+    /// page itself, whose file name is <paramref name="pageName"/>.
     /// </summary>
-    private static string RewriteLink(string url, string basePath)
+    private static string RewriteLink(string url, string basePath, string pageName)
     {
-        // Skip absolute URLs and anchors
+        // Skip absolute URLs
         if (string.IsNullOrEmpty(url) ||
             url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
             url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-            url.StartsWith("#") ||
             url.StartsWith("/"))
         {
             return url;
         }
 
+        // The browser resolves a link against the base address of the application and not against the
+        // address of the page, so a fragment alone would lead to the start page.
         var fragmentStart = url.IndexOf('#');
-        var pagePath = fragmentStart < 0 ? url : url[..fragmentStart];
+        var isFragmentOnly = fragmentStart == 0;
+        var pagePath = isFragmentOnly ? pageName : fragmentStart < 0 ? url : url[..fragmentStart];
 
         // Only process .md links
-        if (!pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+        if (!isFragmentOnly && !pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
         {
             return url;
         }
@@ -193,7 +196,8 @@ public sealed partial class MarkdownContentParser
 
         var page = MarkdownPageParser.Parse(content);
         var basePath = GetLinkBasePath(parent);
-        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath));
+        var pageName = Path.GetFileName(parent.FullPath);
+        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName));
 
         var state = new ParseState(parent, page.AllBlocks);
         try

@@ -54,11 +54,25 @@ public class SlotMapTests
         Assert.Same(slot, map.Default);
     }
 
+    [Fact]
+    public void WhenSlotNameHasLettersDigitsAndUnderscores_ThenItIsValid()
+    {
+        // Act
+        var map = SlotMap.For(typeof(NameWithUnderscoreAndDigit));
+
+        // Assert
+        Assert.Null(map.Error);
+        Assert.Equal(["_Item_2"], map.Named.Keys);
+    }
+
     [Theory]
     [InlineData(typeof(TwoDefaults), "more than one default slot")]
     [InlineData(typeof(TypedDefault), "default slot 'Content' must be of type IInterceptorSubject")]
     [InlineData(typeof(ArrayDefault), "default slot 'Content' must be of type IInterceptorSubject")]
     [InlineData(typeof(DottedName), "'A.B' must not contain a dot")]
+    [InlineData(typeof(HyphenatedName), "the slot name 'My-Item' cannot be written on a page. A slot name starts with a letter or '_' and has only letters, digits and '_'.")]
+    [InlineData(typeof(NameWithLeadingDigit), "the slot name '1st' cannot be written on a page.")]
+    [InlineData(typeof(NameWithSpace), "the slot name 'My Item' cannot be written on a page.")]
     [InlineData(typeof(DuplicateNames), "'Item' is declared twice")]
     [InlineData(typeof(EmptyName), "the slot of the property 'Content' needs a name")]
     [InlineData(typeof(WhitespaceName), "the slot of the property 'Content' needs a name")]

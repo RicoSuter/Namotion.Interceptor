@@ -558,4 +558,29 @@ public class MarkdownPageMistakeTests
         Assert.Empty(DocumentationSamplesTests.FindErrorBoxes(page));
         Assert.Equal(4, Assert.IsType<TestLeaf>(page.Children["leaf"]).Count);
     }
+
+    [Theory]
+    [InlineData(
+        ":: HomeBlaze.Components.TabLayout Title=x\n::",
+        "Line 1: TabLayout has no configuration properties, so 'Title' cannot be set.")]
+    [InlineData(
+        ":: HomeBlaze.Components.TabLayout\n```json\n{ \"title\": \"x\" }\n```\n::",
+        "Line 1: TabLayout has no configuration properties, so 'title' cannot be set.")]
+    [InlineData(
+        ":: HomeBlaze.Samples.Motor#m\n::: Footer\ntext\n:::\n::",
+        "Line 2: Motor has no slots, so 'Footer' cannot be used inside it.")]
+    [InlineData(
+        ":: HomeBlaze.Components.Card Titel=x\n::",
+        "Line 1: Card has no configuration property 'Titel'. Available: Icon, Title.")]
+    public async Task WhenNameIsUnknown_ThenTheMessageListsTheNamesOrSaysThatTheTypeHasNone(string source, string expectedBox)
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", source);
+
+        // Assert
+        Assert.Equal([expectedBox], DocumentationSamplesTests.FindErrorBoxes(page));
+    }
 }

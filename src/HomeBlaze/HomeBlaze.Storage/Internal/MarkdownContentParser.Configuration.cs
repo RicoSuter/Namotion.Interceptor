@@ -198,6 +198,11 @@ public sealed partial class MarkdownContentParser
 
     private static string FormatUnknownProperty(Type type, string key, IReadOnlyDictionary<string, Type> properties)
     {
+        if (properties.Count == 0)
+        {
+            return $"{type.Name} has no configuration properties, so '{key}' cannot be set.";
+        }
+
         var names = properties.Keys.Order(StringComparer.Ordinal).ToArray();
         var sameNameInOtherCase = Array.Find(names, name => string.Equals(name, key, StringComparison.OrdinalIgnoreCase));
         var hint = sameNameInOtherCase is null ? string.Empty : $" Did you mean '{sameNameInOtherCase}'?";

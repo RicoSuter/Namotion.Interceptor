@@ -71,6 +71,13 @@ internal sealed class SlotMap
                 return Invalid($"the slot name '{name}' must not contain a dot.");
             }
 
+            if (!MarkdownBlockHead.IsValidSlotName(name))
+            {
+                return Invalid(
+                    $"the slot name '{name}' cannot be written on a page. " +
+                    "A slot name starts with a letter or '_' and has only letters, digits and '_'.");
+            }
+
             var isList = property.PropertyType.IsArray;
             var valueType = isList ? property.PropertyType.GetElementType()! : property.PropertyType;
             var isOpen = valueType == typeof(IInterceptorSubject);

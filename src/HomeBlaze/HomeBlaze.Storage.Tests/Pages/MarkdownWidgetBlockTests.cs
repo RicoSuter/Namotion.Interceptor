@@ -503,7 +503,6 @@ public class MarkdownWidgetBlockTests
     [InlineData("[link](other.md#blocks)", "href=\"/pages/other.md#blocks\"")]
     [InlineData("[link](sub/other.md#a-b)", "href=\"/pages/sub/other.md#a-b\"")]
     [InlineData("[link](other.md)", "href=\"/pages/other.md\"")]
-    [InlineData("[link](#blocks)", "href=\"#blocks\"")]
     [InlineData("[link](https://example.com/other.md#blocks)", "href=\"https://example.com/other.md#blocks\"")]
     [InlineData("[link](other.html#blocks)", "href=\"other.html#blocks\"")]
     public async Task WhenLinkHasAFragment_ThenThePagePartIsRewrittenAndTheFragmentIsKept(string source, string expected)
@@ -516,5 +515,25 @@ public class MarkdownWidgetBlockTests
 
         // Assert
         Assert.Contains(expected, MarkdownPageFixture.Html(page.Children));
+    }
+
+    [Theory]
+    [InlineData("page.md", "#blocks", "/pages/page.md#blocks")]
+    [InlineData("Docs/development/building.md", "#some-heading", "/pages/Docs/development/building.md#some-heading")]
+    [InlineData("Docs/development/building.md", "#", "/pages/Docs/development/building.md#")]
+    public async Task WhenLinkIsOnlyAFragment_ThenItLeadsToThePageItselfLikeALinkWithThePageName(
+        string pagePath, string fragment, string expectedUrl)
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var pageName = pagePath[(pagePath.LastIndexOf('/') + 1)..];
+
+        // Act
+        var page = await fixture.AddPageAsync(pagePath, $"[fragment only]({fragment})\n\n[with page name]({pageName}{fragment})");
+
+        // Assert
+        var html = MarkdownPageFixture.Html(page.Children);
+        Assert.Contains($"<a href=\"{expectedUrl}\">fragment only</a>", html);
+        Assert.Contains($"<a href=\"{expectedUrl}\">with page name</a>", html);
     }
 }
