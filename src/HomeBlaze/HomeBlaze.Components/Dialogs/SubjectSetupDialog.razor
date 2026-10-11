@@ -6,6 +6,8 @@
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
 
+@implements IDisposable
+
 <MudDialog data-testid="create-subject-dialog"
            Style="height: calc(100vh - 200px);"
            DefaultFocus="DefaultFocus.FirstChild">
@@ -102,6 +104,7 @@
     private IReadOnlyList<SubjectTypeDescriptor> _types = [];
     private SubjectTypeDescriptor? _selectedType;
     private IInterceptorSubject? _createdSubject;
+    private bool _isCreatedSubjectHandedOver;
     private SubjectEditPanel? _editPanel;
     private bool _isEditPanelValid;
     private string _subjectName = "";
@@ -133,8 +136,8 @@
 
     private void SelectType(SubjectTypeDescriptor descriptor)
     {
-        // The subject only backs the form. It is attached to nothing until Create, so a subject that is
-        // replaced here or left behind by Cancel is simply dropped.
+        DiscardCreatedSubject();
+
         try
         {
             _createdSubject = SubjectFactory.CreateSubject(descriptor.Type);
@@ -159,8 +162,8 @@
 
     private void GoBack()
     {
+        DiscardCreatedSubject();
         _selectedType = null;
-        _createdSubject = null;
         _editPanel = null;
         _isEditPanelValid = false;
         RefreshDialog();
@@ -264,6 +267,9 @@
                 return;
             }
 
+            // From here on the subject may hang in the graph, even when BeforeSave fails halfway.
+            _isCreatedSubjectHandedOver = true;
+
             // Persisting finds its writer through the parents BeforeSave establishes.
             Options.BeforeSave?.Invoke(createdSubject);
 
@@ -280,6 +286,25 @@
             _isCreating = false;
             RefreshDialog();
         }
+    }
+
+    private void DiscardCreatedSubject()
+    {
+        // The factory attaches the subject that backs the form to the root context, where a hosted subject
+        // already runs. Discarding one that was handed over, or that a running create is about to hand over,
+        // would take it out of the graph again.
+        if (_createdSubject is { } createdSubject && !_isCreatedSubjectHandedOver && !_isCreating)
+        {
+            SubjectFactory.DiscardSubject(createdSubject);
+        }
+
+        _createdSubject = null;
+        _isCreatedSubjectHandedOver = false;
+    }
+
+    public void Dispose()
+    {
+        DiscardCreatedSubject();
     }
 
     /// <summary>

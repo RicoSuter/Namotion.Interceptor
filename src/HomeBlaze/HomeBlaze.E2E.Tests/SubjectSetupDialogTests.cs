@@ -1,9 +1,12 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
@@ -430,6 +433,58 @@ public class SubjectSetupDialogTests
         {
             File.Delete(filePath);
         }
+    }
+
+    [Fact]
+    public async Task WhenPickedTypesAreAbandoned_ThenTheirFormSubjectsLeaveTheGraphAndStop()
+    {
+        // Arrange - motors that exist already are told apart by instance, because the circuit of an earlier
+        // test can still be closing and take its own form subject out of the graph while this test runs.
+        var registry = _fixture.ServerServices.GetRequiredService<IInterceptorSubjectContext>().GetService<ISubjectRegistry>();
+        var existingMotors = registry.KnownSubjects.Keys.OfType<Motor>().ToHashSet();
+        Motor[] GetFormMotors() => registry.KnownSubjects.Keys.OfType<Motor>().Where(motor => !existingMotors.Contains(motor)).ToArray();
+
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+
+        // Act - the first pick is abandoned with "Back"
+        await PickTypeAsync(page, "motor");
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => GetFormMotors().Length == 1,
+            TimeSpan.FromSeconds(10),
+            message: "The motor that backs the form was not attached to the graph.");
+        var firstMotor = GetFormMotors().Single();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => firstMotor.Status == MotorStatus.Running,
+            TimeSpan.FromSeconds(10),
+            message: "The motor that backs the form did not start.");
+
+        await page.Locator("[data-testid='back-button']").ClickAsync();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => GetFormMotors().Length == 0,
+            TimeSpan.FromSeconds(10),
+            message: "The motor of the type that was left with Back is still in the graph.");
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => firstMotor.Status == MotorStatus.Stopped,
+            TimeSpan.FromSeconds(10),
+            message: "The motor of the type that was left with Back still runs.");
+
+        // Act - the second pick is abandoned with "Cancel"
+        await PickTypeAsync(page, "motor");
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => GetFormMotors().Length == 1,
+            TimeSpan.FromSeconds(10),
+            message: "The motor that backs the second form was not attached to the graph.");
+
+        await page.Locator("[data-testid='cancel-button']").ClickAsync();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => GetFormMotors().Length == 0,
+            TimeSpan.FromSeconds(10),
+            message: "The motor of the dialog that was cancelled is still in the graph.");
     }
 
     [Fact]
