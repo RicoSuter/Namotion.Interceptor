@@ -41,15 +41,22 @@ builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 
 // Seeding must run before AddHomeBlazePlugins, which reads the plugin configuration during registration.
-var seededFileCount = DataDirectorySeeder.SeedIfMissing(
-    HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
-    builder.Configuration[HomeBlazePaths.SeedDirectoryKey]);
+var rootConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(builder.Configuration);
+var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
+var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
 
 // Replaced on every start, unlike the seeded files, so the documentation always matches the running version.
-var replacedDocumentationFileCount = DataDirectorySeeder.ReplaceDirectory(
-    HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
-    builder.Configuration[HomeBlazePaths.SeedDirectoryKey],
-    DataDirectorySeeder.DocumentationDirectory);
+// A failure is only logged, once the logger exists: outdated documentation must not keep the application down.
+var replacedDocumentationFileCount = 0;
+Exception? documentationReplacementException = null;
+try
+{
+    replacedDocumentationFileCount = DataDirectorySeeder.ReplaceDocumentation(rootConfigurationPath, seedDirectory);
+}
+catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+{
+    documentationReplacementException = exception;
+}
 
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
@@ -86,7 +93,11 @@ if (seededFileCount > 0)
     app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
 }
 
-if (replacedDocumentationFileCount > 0)
+if (documentationReplacementException is not null)
+{
+    app.Logger.LogWarning(documentationReplacementException, "Could not replace the documentation from the seed directory. It may be outdated or incomplete until the next start.");
+}
+else if (replacedDocumentationFileCount > 0)
 {
     app.Logger.LogInformation("Replaced the documentation with {Count} files from the seed directory.", replacedDocumentationFileCount);
 }

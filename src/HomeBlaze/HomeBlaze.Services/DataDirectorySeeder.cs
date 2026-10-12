@@ -79,12 +79,12 @@ public static class DataDirectorySeeder
     }
 
     /// <summary>
-    /// Replaces <paramref name="relativeDirectory"/> in the folder of <paramref name="rootConfigurationPath"/> with the same
-    /// directory of <paramref name="seedDirectory"/>: the target is deleted with everything in it, then the seed's files are
-    /// copied. Nothing is deleted or copied when <paramref name="seedDirectory"/> is not set or does not contain that directory.
+    /// Replaces the <see cref="DocumentationDirectory"/> in the folder of <paramref name="rootConfigurationPath"/> with the one
+    /// of <paramref name="seedDirectory"/>: the target is deleted with everything in it, then the seed's files are copied.
+    /// Nothing is deleted or copied when <paramref name="seedDirectory"/> is not set or does not contain that directory.
     /// </summary>
-    /// <returns>The number of copied files; zero when nothing was replaced.</returns>
-    public static int ReplaceDirectory(string rootConfigurationPath, string? seedDirectory, string relativeDirectory)
+    /// <returns>The number of copied files; zero when nothing was copied.</returns>
+    public static int ReplaceDocumentation(string rootConfigurationPath, string? seedDirectory)
     {
         if (string.IsNullOrWhiteSpace(seedDirectory))
         {
@@ -92,14 +92,14 @@ public static class DataDirectorySeeder
         }
 
         // Checked before the delete: a seed without this directory must not wipe the existing one.
-        var sourceDirectory = Path.GetFullPath(Path.Combine(seedDirectory, relativeDirectory));
+        var sourceDirectory = Path.GetFullPath(Path.Combine(seedDirectory, DocumentationDirectory));
         if (!Directory.Exists(sourceDirectory))
         {
             return 0;
         }
 
         var dataDirectory = Path.GetDirectoryName(Path.GetFullPath(rootConfigurationPath))!;
-        var targetDirectory = Path.Combine(dataDirectory, relativeDirectory);
+        var targetDirectory = Path.Combine(dataDirectory, DocumentationDirectory);
 
         if (Directory.Exists(targetDirectory))
         {

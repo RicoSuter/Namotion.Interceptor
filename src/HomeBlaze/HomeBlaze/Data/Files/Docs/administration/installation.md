@@ -37,7 +37,16 @@ On the first start, when `Root.json` does not exist, HomeBlaze copies a starting
 
 Back up HomeBlaze by copying this folder. Stop HomeBlaze first (`docker compose stop`) so the SQLite history is copied in a consistent state. The container runs as root, so on Linux the files in `./data` belong to root and editing them on the host needs `sudo`.
 
-The documentation in `Files/Docs` belongs to the image. On every start, HomeBlaze deletes the folder and copies the documentation of the running image into it, so keep your own pages outside `Files/Docs`: anything added or changed there is lost on the next start. To keep `Files/Docs` as it is, set `HomeBlaze__SeedDirectory` to an empty string in the compose file after the first start. While the setting is empty, a new data folder is not filled with the starting set either.
+The documentation in `Files/Docs` belongs to the image. On every start, HomeBlaze deletes the folder and copies the documentation of the running image into it, so keep your own pages outside `Files/Docs`: anything added or changed there is lost on the next start. If that fails, for example because the disk is full, HomeBlaze logs a warning and starts anyway.
+
+To keep `Files/Docs` as it is, set the seed directory to an empty string in the compose file after the first start. The quotes are required, because an entry without a value keeps the image's seed directory:
+
+```yaml
+    environment:
+      HomeBlaze__SeedDirectory: ""
+```
+
+While the setting is empty, a new data folder is not filled with the starting set either.
 
 ### Optional services
 

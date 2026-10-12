@@ -121,8 +121,7 @@ public class DataDirectorySeederTests : IDisposable
         File.WriteAllText(Path.Combine(DataDocumentationDirectory, "removed-folder", "page.md"), "old-page");
 
         // Act
-        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
-            RootFile, _seedDirectory.FullName, DataDirectorySeeder.DocumentationDirectory);
+        var copiedFileCount = DataDirectorySeeder.ReplaceDocumentation(RootFile, _seedDirectory.FullName);
 
         // Assert
         Assert.Equal(2, copiedFileCount);
@@ -139,8 +138,7 @@ public class DataDirectorySeederTests : IDisposable
         WriteSeedDocumentation();
 
         // Act
-        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
-            RootFile, _seedDirectory.FullName, DataDirectorySeeder.DocumentationDirectory);
+        var copiedFileCount = DataDirectorySeeder.ReplaceDocumentation(RootFile, _seedDirectory.FullName);
 
         // Assert
         Assert.Equal(2, copiedFileCount);
@@ -149,7 +147,7 @@ public class DataDirectorySeederTests : IDisposable
     }
 
     [Fact]
-    public void WhenDirectoryIsReplaced_ThenFilesOutsideItAreKept()
+    public void WhenDocumentationIsReplaced_ThenFilesOutsideItAreKept()
     {
         // Arrange
         WriteSeedDocumentation();
@@ -158,8 +156,7 @@ public class DataDirectorySeederTests : IDisposable
         File.WriteAllText(Path.Combine(_dataDirectory.FullName, "Files", "Plugins.json"), "user-plugins");
 
         // Act
-        DataDirectorySeeder.ReplaceDirectory(
-            RootFile, _seedDirectory.FullName, DataDirectorySeeder.DocumentationDirectory);
+        DataDirectorySeeder.ReplaceDocumentation(RootFile, _seedDirectory.FullName);
 
         // Assert
         Assert.Equal("existing", File.ReadAllText(RootFile));
@@ -178,8 +175,7 @@ public class DataDirectorySeederTests : IDisposable
         File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
 
         // Act
-        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
-            RootFile, seedDirectory, DataDirectorySeeder.DocumentationDirectory);
+        var copiedFileCount = DataDirectorySeeder.ReplaceDocumentation(RootFile, seedDirectory);
 
         // Assert
         Assert.Equal(0, copiedFileCount);
@@ -194,8 +190,7 @@ public class DataDirectorySeederTests : IDisposable
         File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
 
         // Act
-        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
-            RootFile, Path.Combine(_seedDirectory.FullName, "missing"), DataDirectorySeeder.DocumentationDirectory);
+        var copiedFileCount = DataDirectorySeeder.ReplaceDocumentation(RootFile, Path.Combine(_seedDirectory.FullName, "missing"));
 
         // Assert
         Assert.Equal(0, copiedFileCount);
@@ -203,15 +198,14 @@ public class DataDirectorySeederTests : IDisposable
     }
 
     [Fact]
-    public void WhenSeedHasNoSuchDirectory_ThenTargetDirectoryIsKept()
+    public void WhenSeedHasNoDocumentationDirectory_ThenTargetDirectoryIsKept()
     {
         // Arrange
         Directory.CreateDirectory(DataDocumentationDirectory);
         File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
 
         // Act
-        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
-            RootFile, _seedDirectory.FullName, DataDirectorySeeder.DocumentationDirectory);
+        var copiedFileCount = DataDirectorySeeder.ReplaceDocumentation(RootFile, _seedDirectory.FullName);
 
         // Assert
         Assert.Equal(0, copiedFileCount);
