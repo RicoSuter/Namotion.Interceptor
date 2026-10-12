@@ -22,7 +22,7 @@ namespace HomeBlaze.Storage.Files;
 [InterceptorSubject]
 [FileExtension(".md")]
 [FileExtension(".markdown")]
-public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter, IPathScope
+public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter, IPathScope, ILinkScope
 {
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;
@@ -165,6 +165,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         return _namedSubjects.GetValueOrDefault(name);
     }
+
+    /// <inheritdoc />
+    public string ResolveLink(string link) => _parser.ResolveLink(link, this);
 
     [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions", Icon = "Description")]
     public string? ReadRawContent() => Content;

@@ -2,7 +2,6 @@ using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Services;
 
@@ -11,8 +10,6 @@ namespace HomeBlaze.Services;
 /// </summary>
 public static class SubjectPathResolverScopeExtensions
 {
-    private const int MaximumSingleParentDepth = 64;
-
     /// <summary>
     /// Resolves a subject from a path. A relative path resolves from the scope of
     /// <paramref name="from"/>, and its first segment can be a name the scope knows.
@@ -24,7 +21,7 @@ public static class SubjectPathResolverScopeExtensions
         PathStyle style,
         IInterceptorSubject from)
     {
-        var scope = FindScope(from);
+        var scope = SubjectScopeFinder.FindNearest<IPathScope>(from);
         if (scope is not IInterceptorSubject scopeSubject)
         {
             return resolver.ResolveSubject(path, style, from);
@@ -72,7 +69,7 @@ public static class SubjectPathResolverScopeExtensions
         var lastSlash = path.LastIndexOf('/');
         if (lastSlash < 0)
         {
-            var scopeSubject = FindScope(from) as IInterceptorSubject ?? from;
+            var scopeSubject = SubjectScopeFinder.FindNearest<IPathScope>(from) as IInterceptorSubject ?? from;
             return scopeSubject.TryGetRegisteredProperty(path);
         }
 
@@ -95,34 +92,4 @@ public static class SubjectPathResolverScopeExtensions
         PathStyle style,
         IInterceptorSubject from) =>
         resolver.ResolveScopedProperty(path, style, from)?.GetValue();
-
-    private static IPathScope? FindScope(IInterceptorSubject subject)
-    {
-        // The usual chain has one parent per subject and is walked without an allocation. The search that
-        // handles several parents and cycles allocates, so it only runs when the chain branches or is
-        // longer than any real nesting.
-        var current = subject;
-        for (var depth = 0; depth < MaximumSingleParentDepth; depth++)
-        {
-            if (current is IPathScope scope)
-            {
-                return scope;
-            }
-
-            var parents = current.GetParents();
-            if (parents.Length == 0)
-            {
-                return null;
-            }
-
-            if (parents.Length > 1)
-            {
-                break;
-            }
-
-            current = parents[0].Property.Subject;
-        }
-
-        return current as IPathScope ?? current.TryGetFirstParent<IPathScope>();
-    }
 }

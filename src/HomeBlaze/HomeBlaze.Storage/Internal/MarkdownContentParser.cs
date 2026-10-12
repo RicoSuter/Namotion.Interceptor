@@ -106,6 +106,12 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
+    /// Resolves a link of a block on the page the way a link in the text of the page is rewritten.
+    /// </summary>
+    public string ResolveLink(string link, MarkdownFile page) =>
+        RewriteLink(link, GetLinkBasePath(page), EscapeFileNameForLink(Path.GetFileName(page.FullPath)));
+
+    /// <summary>
     /// Resolves a relative path against a base path, handling .. navigation.
     /// </summary>
     private static string ResolvePath(string basePath, string relativePath)
