@@ -133,6 +133,34 @@ public class EmbeddedSubjectRedactionTests
     }
 
     [Fact]
+    public void WhenAPlainObjectHasKeysThatAreNoPropertiesOfIt_ThenTheyAreHidden()
+    {
+        // Arrange
+        var context = SubjectContextFactory.Create(new ServiceCollection());
+        var host = new PlainOptionsHost(context) { Options = new PlainOptions { Endpoint = "https://example.com" } };
+        var source = $$"""
+            :: {{typeof(PlainOptionsHost).FullName}}#host
+            ```json
+            {
+              "Options": { "Endpoint": "https://example.com", "ApiKey": "api-secret", "Nested": { "Token": "nested-secret" } },
+              "Missing": { "Value": "missing-secret" }
+            }
+            ```
+            ::
+            """;
+
+        // Act
+        var result = EmbeddedSubjectRedaction.Redact(
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = host });
+
+        // Assert
+        Assert.DoesNotContain("api-secret", result);
+        Assert.DoesNotContain("nested-secret", result);
+        Assert.DoesNotContain("missing-secret", result);
+        Assert.Contains("https://example.com", result);
+    }
+
+    [Fact]
     public void WhenABlockIsInsideAnInvalidBlock_ThenItsArgumentsAndItsJsonBlockAreRedacted()
     {
         // Arrange
@@ -226,4 +254,18 @@ public partial class NestedSecretDeviceGroup : IConfigurable
     public partial EmbeddedSecretDevice[] Backups { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class PlainOptionsHost : IConfigurable
+{
+    [Configuration]
+    public partial PlainOptions? Options { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+public sealed class PlainOptions
+{
+    public string? Endpoint { get; set; }
 }

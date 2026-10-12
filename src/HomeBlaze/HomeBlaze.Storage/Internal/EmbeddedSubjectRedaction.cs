@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Globalization;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -305,15 +306,49 @@ internal static class EmbeddedSubjectRedaction
             case IEnumerable items and not string when node is JsonArray array:
                 return RedactItems(array, items);
 
-            // A plain object that is no subject has no secret properties.
             case not null and not (IInterceptorSubject or IEnumerable) when
-                !value.GetType().IsPrimitive && !value.GetType().IsEnum && node is JsonObject:
-                return false;
+                !value.GetType().IsPrimitive && !value.GetType().IsEnum && node is JsonObject plainObject:
+                return RedactPlainObject(plainObject, value);
 
             default:
                 isReplaced = true;
                 return true;
         }
+    }
+
+    /// <summary>
+    /// Hides the values of a plain object, which is no subject and has no secret properties, whose key is no public
+    /// property of its runtime type, then the values below the other properties.
+    /// </summary>
+    private static bool RedactPlainObject(JsonObject jsonObject, object value)
+    {
+        var properties = value.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var isRedacted = false;
+        foreach (var (key, node) in jsonObject.ToList())
+        {
+            if (key == ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName || node is null)
+            {
+                continue;
+            }
+
+            var property = Array.Find(properties, candidate =>
+                candidate.GetIndexParameters().Length == 0 && candidate.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (property is null)
+            {
+                jsonObject[key] = RedactedValue;
+                isRedacted = true;
+            }
+            else if (RedactNested(node, property.GetValue(value), out var isReplaced))
+            {
+                isRedacted = true;
+                if (isReplaced)
+                {
+                    jsonObject[key] = RedactedValue;
+                }
+            }
+        }
+
+        return isRedacted;
     }
 
     private static bool RedactEntries(JsonObject entries, IDictionary dictionary)
