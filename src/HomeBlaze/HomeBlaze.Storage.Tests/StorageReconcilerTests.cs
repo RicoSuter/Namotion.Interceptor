@@ -1446,6 +1446,102 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenBlobIsWrittenToPathWithoutSubject_ThenItBecomesSubjectAfterQuietPeriodWithoutAnyEvent()
+    {
+        // Arrange: neither a file watcher nor a periodic pass.
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+        });
+
+        // Act
+        await WriteBlobAsync(storage, "Docs/Page.md", "# Page");
+        var childrenAfterWrite = storage.Children.Keys.ToList();
+        timeProvider.Advance(ReconcileTrigger.QuietPeriod - TimeSpan.FromMilliseconds(1));
+        var armedTimersBeforeQuietPeriodEnds = timeProvider.ArmedTimerCount;
+        timeProvider.Advance(TimeSpan.FromMilliseconds(1));
+
+        // Assert
+        Assert.Empty(childrenAfterWrite);
+        Assert.Equal(1, armedTimersBeforeQuietPeriodEnds);
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Children.ContainsKey("Docs"));
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal("# Page", Assert.IsType<MarkdownFile>(docs.Children["Page.md"]).Content);
+    }
+
+    [Fact]
+    public async Task WhenRefreshAfterBlobWriteFails_ThenSubjectIsLoadedAgainAfterQuietPeriodWithoutAnyEvent()
+    {
+        // Arrange: neither a file watcher nor a periodic pass.
+        var timeProvider = new ManualTimeProvider();
+        WriteFile("Data.gated", "first");
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+        });
+        var file = (GatedFile)storage.Children["Data.gated"];
+        GatedFile.FailNextLoad();
+
+        // Act
+        await WriteBlobAsync(storage, "Data.gated", "second version");
+        var contentAfterWrite = file.Content;
+        var armedTimersAfterWrite = timeProvider.ArmedTimerCount;
+        timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+
+        // Assert
+        Assert.Equal("first", contentAfterWrite);
+        Assert.Equal(1, armedTimersAfterWrite);
+        await AsyncTestHelpers.WaitUntilAsync(() => file.Content == "second version");
+        Assert.Same(file, storage.Children["Data.gated"]);
+    }
+
+    [Fact]
+    public async Task WhenBlobIsWrittenToIgnoredPath_ThenNoPassFollows()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+        });
+
+        // Act
+        await WriteBlobAsync(storage, ".cache/Data.bin", "data");
+
+        // Assert
+        Assert.True(File.Exists(GetFullPath(".cache/Data.bin")));
+        Assert.Equal(0, timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public async Task WhenBlobIsWrittenToPathWithoutSubjectAfterStorageWasStopped_ThenNoPassFollows()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+        });
+        await storage.StopAsync(CancellationToken.None);
+
+        // Act
+        await WriteBlobAsync(storage, "Page.md", "# Page");
+        var armedTimersAfterWrite = timeProvider.ArmedTimerCount;
+        timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+
+        // Assert: the save runs on the worker behind a pass, if one was started.
+        await storage.WriteConfigurationAsync(storage, CancellationToken.None);
+        Assert.Equal(0, armedTimersAfterWrite);
+        Assert.True(File.Exists(GetFullPath("Page.md")));
+        Assert.Empty(storage.Children);
+    }
+
+    [Fact]
     public async Task WhenPassAttachesSubjects_ThenLifecycleHandlersRunWithoutTheFlowOfThePass()
     {
         // Arrange

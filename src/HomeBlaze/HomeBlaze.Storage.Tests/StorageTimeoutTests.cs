@@ -516,6 +516,58 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenWriteOfAddedSubjectHitsTheLimitAndLandsLater_ThenItsFileIsLoadedWithoutAnyEvent()
+    {
+        // Arrange: neither a file watcher nor a periodic pass.
+        var storage = await ConnectPausableAsync(reconcileIntervalSeconds: 0);
+        var writeReached = _client!.PauseNext(nameof(IBlobStorage.WriteAsync));
+        var add = storage.AddSubjectAsync("Motor.json", CreateMotor("Pump"), CancellationToken.None);
+        await writeReached;
+        await LetHangingCallTimeOutAsync();
+        var exception = await Record.ExceptionAsync(() => add);
+        var childrenAfterTimeout = storage.Children.Keys.ToList();
+        var armedTimersAfterTimeout = _timeProvider.ArmedTimerCount;
+
+        // Act
+        await ReleaseHangingCallAsync(storage);
+        await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(GetFullPath("Motor.json")));
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+
+        // Assert
+        Assert.IsType<StorageUnresponsiveException>(exception);
+        Assert.Empty(childrenAfterTimeout);
+        Assert.Equal(1, armedTimersAfterTimeout);
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Children.ContainsKey("Motor"));
+        Assert.Equal("Pump", Assert.IsType<Samples.Motor>(storage.Children["Motor"]).Name);
+    }
+
+    [Fact]
+    public async Task WhenDeleteHitsTheLimitAndLandsLater_ThenSubjectIsRemovedWithoutAnyEvent()
+    {
+        // Arrange: neither a file watcher nor a periodic pass.
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectPausableAsync(reconcileIntervalSeconds: 0);
+        var deleteReached = _client!.PauseNext(nameof(IBlobStorage.DeleteAsync));
+        var delete = storage.DeleteBlobAsync("Motor.json", CancellationToken.None);
+        await deleteReached;
+        await LetHangingCallTimeOutAsync();
+        var exception = await Record.ExceptionAsync(() => delete);
+        var childrenAfterTimeout = storage.Children.Keys.ToList();
+        var armedTimersAfterTimeout = _timeProvider.ArmedTimerCount;
+
+        // Act
+        await ReleaseHangingCallAsync(storage);
+        await AsyncTestHelpers.WaitUntilAsync(() => !File.Exists(GetFullPath("Motor.json")));
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+
+        // Assert
+        Assert.IsType<StorageUnresponsiveException>(exception);
+        Assert.Equal(["Motor"], childrenAfterTimeout);
+        Assert.Equal(1, armedTimersAfterTimeout);
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Children.Count == 0);
+    }
+
+    [Fact]
     public async Task WhenVersionCannotBeReadAfterSubjectWasWritten_ThenSubjectIsAddedAndKeptByNextPass()
     {
         // Arrange

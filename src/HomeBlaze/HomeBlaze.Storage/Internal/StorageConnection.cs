@@ -180,6 +180,18 @@ internal sealed class StorageConnection : IDisposable
         => _trigger?.NotifyPassFailed();
 
     /// <summary>
+    /// Names a path that an operation of the application has left for a pass, as an event of the file watcher
+    /// does. Does nothing for a path that never becomes a subject, and nothing once the trigger is stopped.
+    /// </summary>
+    public void NotifyChanged(string path)
+    {
+        if (!StoragePathFilter.IsIgnored(path))
+        {
+            _trigger?.NotifyChanged(path);
+        }
+    }
+
+    /// <summary>
     /// Stops the watcher and the trigger for good, so that nothing requests a pass of this connection any
     /// more. Everything else of the connection stays as it is.
     /// </summary>

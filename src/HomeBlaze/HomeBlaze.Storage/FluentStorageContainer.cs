@@ -599,9 +599,23 @@ public partial class FluentStorageContainer :
     {
         // Not disposed when the write fails, see TimeLimitedBlobStorage.
         var stream = new MemoryStream(content);
-        await connection.Client.WriteAsync(path, stream, append: false, cancellationToken: cancellationToken);
+        try
+        {
+            await connection.Client.WriteAsync(path, stream, append: false, cancellationToken: cancellationToken);
+        }
+        catch (Exception exception) when (CanHaveReachedStorage(exception))
+        {
+            connection.NotifyChanged(path);
+            throw;
+        }
+
         await stream.DisposeAsync();
     }
+
+    // A call that failed can have changed the storage, and one that was given up can still do so. The pass
+    // that finds out is asked for by the operation, because not every storage has a file watcher that would.
+    private static bool CanHaveReachedStorage(Exception exception)
+        => exception is not (StorageRootUnavailableException or StorageUnresponsiveException { IsRefusal: true });
 
     /// <summary>
     /// IStorageContainer - Gets metadata about a blob.
@@ -662,18 +676,32 @@ public partial class FluentStorageContainer :
             await WriteAsync(connection, relativePath, bytes, token);
             _logger?.LogDebug("Wrote blob to storage: {Path}", relativePath);
 
-            // A file without a subject is picked up by the next pass.
+            // A file without a subject is picked up by the next pass, which is asked for here: not every
+            // storage has a file watcher that would.
             if (entry?.Subject == null)
+            {
+                connection.NotifyChanged(relativePath);
                 return;
+            }
 
+            var isRefreshed = false;
             try
             {
                 await connection.Reconciler.RefreshWrittenAsync(entry, bytes, token);
+                isRefreshed = true;
             }
             catch (Exception exception) when (!token.IsCancellationRequested)
             {
                 // The bytes are written, so the caller gets no failure.
                 _logger?.LogWarning(exception, "Failed to refresh the subject after writing: {Path}", relativePath);
+            }
+            finally
+            {
+                // The same for the pass that loads the file again.
+                if (!isRefreshed)
+                {
+                    connection.NotifyChanged(relativePath);
+                }
             }
         }, cancellationToken);
     }
@@ -725,7 +753,16 @@ public partial class FluentStorageContainer :
 
     private async Task DeleteEntryAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
     {
-        await connection.Client.DeleteAsync(entry.Path, cancellationToken: cancellationToken);
+        try
+        {
+            await connection.Client.DeleteAsync(entry.Path, cancellationToken: cancellationToken);
+        }
+        catch (Exception exception) when (CanHaveReachedStorage(exception))
+        {
+            connection.NotifyChanged(entry.Path);
+            throw;
+        }
+
         connection.Index.Remove(entry.Path);
         connection.Reconciler.Apply();
         connection.Reconciler.Release(entry.Subject);

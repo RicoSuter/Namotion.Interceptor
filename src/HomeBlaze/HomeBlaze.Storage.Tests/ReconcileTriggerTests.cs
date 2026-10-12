@@ -50,6 +50,23 @@ public class ReconcileTriggerTests
     }
 
     [Fact]
+    public void WhenSamePathIsNamedTwiceWithinQuietPeriod_ThenOnePassRuns()
+    {
+        // Arrange
+        using var trigger = CreateTrigger();
+
+        // Act: as a write of the application and the event that the file watcher raises for it.
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(TimeSpan.FromMilliseconds(100));
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Assert
+        var pass = Assert.Single(_passes);
+        Assert.Equal(["Home.md"], pass.NamedPaths);
+    }
+
+    [Fact]
     public void WhenPathsNeverStopChanging_ThenPassRunsAfterMaximumDelay()
     {
         // Arrange
