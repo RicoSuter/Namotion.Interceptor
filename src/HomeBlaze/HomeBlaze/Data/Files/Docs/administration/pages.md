@@ -85,6 +85,7 @@ See [Paths](paths.md) for full path documentation including `./`, `../`, bracket
 - **Live updates**: Values update automatically when the source property changes
 - **HTML-safe**: Values are automatically HTML-encoded
 - **Null handling**: Missing or null values render as empty strings
+- **Secrets**: Secret configuration values, such as passwords and API keys, are never rendered; their expressions render as empty strings like missing values
 
 ---
 

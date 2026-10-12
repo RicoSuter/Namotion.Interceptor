@@ -1,4 +1,5 @@
 using System.Text;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
@@ -6,6 +7,7 @@ using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests;
@@ -393,6 +395,39 @@ public class MarkdownFileTests
         Assert.Equal("Text", await method.InvokeAsync([null], serviceProvider: null, CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData(false, "Secret: , public: visible")]
+    [InlineData(true, "Secret: , public: visible (/Devices/motor/PublicConfig)")]
+    public async Task WhenAPageReadsASecretConfigurationProperty_ThenItIsNotRendered(bool includeSourcePaths, string expected)
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync(
+            "Secret: {{ /Devices/motor/SecretKey }}, public: {{ ../../Devices/motor/PublicConfig }}",
+            new PageSecretDevice { SecretKey = "s3cr3t", PublicConfig = "visible" });
+
+        // Act
+        var result = markdown.ReadEvaluatedContent(includeSourcePaths);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public async Task WhenThePageViewShowsASecretConfigurationProperty_ThenItsExpressionHasNoValue()
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync(
+            "Secret: {{ /Devices/motor/SecretKey }}, public: {{ /Devices/motor/PublicConfig }}",
+            new PageSecretDevice { SecretKey = "s3cr3t", PublicConfig = "visible" });
+
+        // Act
+        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Path);
+
+        // Assert
+        Assert.Null(expressions["/Devices/motor/SecretKey"].Value);
+        Assert.Equal("visible", expressions["/Devices/motor/PublicConfig"].Value);
+    }
+
     [Fact]
     public async Task WhenPageIsReloadedWithUnrelatedChange_ThenEmbeddedSubjectIsKept()
     {
@@ -513,7 +548,13 @@ public class MarkdownFileTests
     /// <summary>
     /// Creates the graph /Devices/motor (CurrentSpeed 750) and /Docs/page.md with the given page content.
     /// </summary>
-    private static async Task<MarkdownFile> CreatePageInGraphAsync(string content)
+    private static Task<MarkdownFile> CreatePageInGraphAsync(string content) =>
+        CreatePageInGraphAsync(content, new Motor { CurrentSpeed = 750 });
+
+    /// <summary>
+    /// Creates the graph /Devices/motor (the given device) and /Docs/page.md with the given page content.
+    /// </summary>
+    private static async Task<MarkdownFile> CreatePageInGraphAsync(string content, IInterceptorSubject device)
     {
         var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
@@ -530,7 +571,7 @@ public class MarkdownFileTests
         {
             ["Devices"] = new VirtualFolder(storage, "Devices/")
             {
-                Children = new Dictionary<string, IInterceptorSubject> { ["motor"] = new Motor { CurrentSpeed = 750 } }
+                Children = new Dictionary<string, IInterceptorSubject> { ["motor"] = device }
             },
             ["Docs"] = new VirtualFolder(storage, "Docs/")
             {
@@ -554,4 +595,14 @@ public class MarkdownFileTests
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
         await storage.WriteBlobAsync(path, stream, CancellationToken.None);
     }
+}
+
+[InterceptorSubject]
+public partial class PageSecretDevice
+{
+    [Configuration(IsSecret = true)]
+    public partial string? SecretKey { get; set; }
+
+    [Configuration]
+    public partial string? PublicConfig { get; set; }
 }

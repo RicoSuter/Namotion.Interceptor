@@ -192,7 +192,7 @@ public sealed partial class MarkdownContentParser
             var path = match.Groups[1].Value.Trim();
             try
             {
-                var property = _pathResolver.ResolveProperty(path, PathStyle.Canonical, relativeTo: parent);
+                var property = _pathResolver.ResolveDisplayableProperty(path, PathStyle.Canonical, relativeTo: parent);
                 var valueText = property?.GetValue()?.ToString() ?? string.Empty;
                 if (!includeSourcePaths || property is null || GetAbsolutePath(property) is not { } sourcePath)
                 {
