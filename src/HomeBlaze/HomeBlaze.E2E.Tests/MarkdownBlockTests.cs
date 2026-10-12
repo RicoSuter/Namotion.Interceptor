@@ -606,9 +606,12 @@ public class MarkdownBlockTests
 
         // Assert: the block is in the editor and in the file, with its head line and a closing line
         await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = 30000 });
-        var headLine = page.Locator(
-            ".monaco-editor .view-line", new() { HasTextString = ":: HomeBlaze.Components.ValueTile" });
-        await Assertions.Expect(headLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        // The text of the editor and not a line of its view: the editor wraps a long head line, also after a
+        // dot, and each part is then a line of the view. Where it wraps depends on the width and the font.
+        await page.WaitForFunctionAsync(
+            "needle => window.monaco.editor.getModels().some(model => model.getValue().includes(needle))",
+            ":: HomeBlaze.Components.ValueTile",
+            new() { Timeout = 30000 });
 
         var lines = (await File.ReadAllTextAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n").Split('\n');
         var headLineIndex = Array.FindIndex(lines, line => line.StartsWith(":: HomeBlaze.Components.ValueTile", StringComparison.Ordinal));
