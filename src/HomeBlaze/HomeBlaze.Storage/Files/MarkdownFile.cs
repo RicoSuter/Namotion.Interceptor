@@ -190,13 +190,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     /// <summary>
     /// Returns the Markdown source with unevaluated {{ path }} expressions. Secret configuration values in the blocks
-    /// are replaced by "***"; the page editor reads the file itself.
+    /// are replaced by "***"; the page editor reads the file itself. Null while a source that is not empty was not parsed yet.
     /// </summary>
     [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions. Secret configuration values in blocks are shown as ***", Icon = "Description")]
     public string? ReadRawContent()
     {
+        // Without a parsed page there are no subjects to tell the secret values, so only an empty source is shown.
         var snapshot = _parseResult;
-        return snapshot.Page is { } page ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects) : Content;
+        return snapshot.Page is { } page
+            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects)
+            : string.IsNullOrEmpty(Content) ? Content : null;
     }
 
     /// <summary>
@@ -352,7 +355,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            await Storage.WriteBlobAsync(FullPath, content, cancellationToken);
+            // Not cancelled once the lock is held, for the reason given at WriteUnlockedAsync.
+            await Storage.WriteBlobAsync(FullPath, content, CancellationToken.None);
         }
         finally
         {
