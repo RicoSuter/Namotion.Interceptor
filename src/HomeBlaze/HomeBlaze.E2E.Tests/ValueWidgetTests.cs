@@ -614,6 +614,26 @@ public class ValueWidgetTests
     }
 
     [Fact]
+    public async Task WhenSubtitleOfACardTakesSeveralLines_ThenTheIconAndTheIndicatorStandOnTheTitleLine()
+    {
+        // Arrange: the cell of the card is narrow enough for its subtitle to wrap.
+        var page = await OpenPageAsync(viewportWidth: 1280);
+        await Assertions.Expect(GetCard(page, "Wrapped Card").GetByTestId("card-subtitle")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var boxes = await GetBoxesAsync(page,
+            new("Wrapped Card", null, "[data-testid=card-title]"),
+            new("Wrapped Card", null, "[data-testid=card-subtitle]"),
+            new("Wrapped Card", null, "[data-testid=card-icon]"),
+            new("Wrapped Card", null, "[data-testid=card-header-right] [data-testid=indicator]"));
+
+        // Assert: a subtitle of one line is lower than the title, so one that is higher has wrapped.
+        Assert.True(boxes[1].Height > boxes[0].Height, $"The subtitle is {boxes[1].Height} pixels high, the title {boxes[0].Height}");
+        Assert.Equal(boxes[0].CenterY, boxes[2].CenterY, PositionTolerance);
+        Assert.Equal(boxes[0].CenterY, boxes[3].CenterY, PositionTolerance);
+    }
+
+    [Fact]
     public async Task WhenRowHasContent_ThenTheBarFillsTheRoomBeforeTheValueAndTextStandsRightBeforeIt()
     {
         // Arrange

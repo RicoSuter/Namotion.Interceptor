@@ -140,7 +140,9 @@ Alert text
 ::::::: HomeBlaze.Components.Progress Path=valuemotor/CurrentSpeed Minimum=0 Maximum=1600
 :::::: Value Path=valuemotor/Temperature Label="Heat"
 ::: Item
-Second narrow cell
+:::: HomeBlaze.Components.Card Title="Wrapped Card" Subtitle="A subtitle that is long enough to take several lines in a cell of this width" Icon=Bolt
+::::: HeaderRight
+:::::: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=status Kind=Icon
 ::: Item
 Third narrow cell
 ::: Item
