@@ -336,6 +336,31 @@ public class CanvasLayoutTests
     }
 
     [Fact]
+    public async Task WhenAPanOfTheCanvasEndedOutsideOfIt_ThenALaterClickOnTheEmptyCanvasOffersToAddANode()
+    {
+        // Arrange: the release is outside of the container, so no click reaches it and the pan is never followed by one.
+        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var boxBefore = await GetBoxInCanvasAsync(GetNodes(page).First);
+        var canvasBox = await GetBoxAsync(GetCanvas(page));
+        var x = canvasBox.Right - 40;
+        var y = canvasBox.Bottom - 40;
+        await page.Mouse.MoveAsync((float)x, (float)y);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync((float)(x - 150), (float)(y - 100), new() { Steps = 10 });
+        await page.Mouse.MoveAsync((float)(canvasBox.Right + 100), (float)(y - 100), new() { Steps = 5 });
+        await page.Mouse.UpAsync();
+        await WaitForNodeToMoveAsync(page, boxBefore);
+        await WaitForServerAsync(page, "Split");
+        await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
+
+        // Act
+        await page.Mouse.ClickAsync((float)x, (float)y);
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenCanvasIsEdited_ThenTheButtonsOfANodeStillWork()
     {
         // Arrange
