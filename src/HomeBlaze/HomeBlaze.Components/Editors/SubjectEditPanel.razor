@@ -256,13 +256,11 @@
             var configurationOwner = subject.TryGetConfigurationOwner();
             if (configurationOwner is IConfigurable configurable)
             {
-                var configurationWriter = RootManager.GetConfigurationWriter(configurationOwner);
-                var isWritten = await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
+                var isWritten = await RootManager.WriteConfigurationOrWarnAsync(configurationOwner, Snackbar, CancellationToken.None);
                 await configurable.ApplyConfigurationAsync(cancellationToken);
 
                 if (!isWritten)
                 {
-                    Snackbar.Add("Configuration applied but not saved. It will be lost on restart.", Severity.Warning);
                     return;
                 }
             }

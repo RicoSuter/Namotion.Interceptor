@@ -148,7 +148,7 @@ The `[State]` attribute marks runtime-only properties that are not persisted.
 
 `IConfigurationWriter` forms a chain resolved via the subject's parent hierarchy — the nearest parent that implements `IConfigurationWriter` handles persistence. This allows different storage containers to own different subtrees.
 
-A storage container stores one subject per JSON file, so a subject nested in that file's configuration through `[Configuration]` properties, such as a cell of a grid layout, is written by rewriting the whole file. A markdown page does the same for its embedded subjects. A writer returns `false` when it wrote nothing, because it stores no configuration that contains the subject or is not connected, and the editor then reports that the change was applied but not saved.
+A storage container stores one subject per JSON file, so a subject nested in that file's configuration through `[Configuration]` properties, such as a cell of a grid layout, is written by rewriting the whole file. A markdown page does the same for its embedded subjects. A writer returns `false` when it wrote nothing, because it stores no configuration that contains the subject or is not connected. A caller does not discard that result: the editor and the layout widgets then report that the change was applied but not saved, and a subject that saves its own configuration from a background loop logs a warning.
 
 ## Dynamic Metadata and Annotations [Planned]
 

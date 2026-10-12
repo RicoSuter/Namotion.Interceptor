@@ -7,6 +7,7 @@
 @inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
+@inject ISnackbar Snackbar
 
 <div class="grid-layout-container"
      style="display: grid;
@@ -225,8 +226,7 @@
             Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
 
             // Persist the change
-            var configurationWriter = RootManager.GetConfigurationWriter(Grid);
-            await configurationWriter.WriteConfigurationAsync(Grid, CancellationToken.None);
+            await RootManager.WriteConfigurationOrWarnAsync(Grid, Snackbar, CancellationToken.None);
         }
     }
 }
