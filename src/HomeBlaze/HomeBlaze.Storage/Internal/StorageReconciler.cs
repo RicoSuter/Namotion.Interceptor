@@ -117,14 +117,18 @@ internal sealed class StorageReconciler
 
             try
             {
-                var isNamed = isEveryFileNamed || namedPaths.Contains(listed.Path);
-                if (!_index.TryGet(listed.Path, out var entry) || NeedsLoad(entry, listed, isNamed))
+                var isChanged = !_index.TryGet(listed.Path, out var entry) || entry.Version != listed.Version ||
+                                isEveryFileNamed || namedPaths.Contains(listed.Path);
+                if (entry?.Subject != null)
+                {
+                    if (isChanged)
+                    {
+                        await RefreshAsync(entry, listed.Version, content: null, cancellationToken);
+                    }
+                }
+                else if (isChanged || (entry is { IsKeyTaken: true } && IsKeyFree(entry.Parent, entry.Key!)))
                 {
                     await AddAsync(listed, movableEntries, cancellationToken);
-                }
-                else if (entry.Subject != null && (entry.Version != listed.Version || isNamed))
-                {
-                    await RefreshAsync(entry, listed.Version, content: null, cancellationToken);
                 }
             }
             // By the token and not by the kind of exception: subject code that gives up throws a cancellation of
@@ -470,24 +474,6 @@ internal sealed class StorageReconciler
         }
 
         return movableEntries;
-    }
-
-    /// <summary>
-    /// Decides whether an entry without a subject is loaded again.
-    /// </summary>
-    private bool NeedsLoad(StorageEntry entry, StorageListing listed, bool isNamed)
-    {
-        if (entry.Subject != null)
-        {
-            return false;
-        }
-
-        if (entry.Version != listed.Version || isNamed)
-        {
-            return true;
-        }
-
-        return entry.IsKeyTaken && IsKeyFree(entry.Parent, entry.Key!);
     }
 
     private async Task AddAsync(
