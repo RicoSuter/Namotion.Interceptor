@@ -42,6 +42,27 @@ internal static class MarkdownWriteRules
         new("Only Markdown files in local storage (on disk or in memory) can be written; this storage is not local.");
 
     /// <summary>
+    /// Whether the path, relative to the storage, is in the documentation folder of the data directory, which is
+    /// replaced from the image on every start.
+    /// </summary>
+    public static bool IsInDocumentationFolder(IStorageContainer storage, string path) => storage switch
+    {
+        FluentStorageContainer container => container.IsPathInDocumentationFolder(path),
+        VirtualFolder folder => IsInDocumentationFolder(folder.Storage, path),
+        _ => false
+    };
+
+    /// <exception cref="ArgumentException">The path is in the documentation folder.</exception>
+    public static void EnsureNotInDocumentationFolder(IStorageContainer storage, string path)
+    {
+        // An argument error, so that its message reaches the caller of the operation, like the other rules of a write.
+        if (IsInDocumentationFolder(storage, path))
+        {
+            throw new ArgumentException(MarkdownFile.DocumentationFolderMessage);
+        }
+    }
+
+    /// <summary>
     /// Refuses a write that comes from work on the worker of the storage, such as the load of the page: the write would
     /// wait for the write lock of a write that waits for that work, and neither would ever end.
     /// </summary>

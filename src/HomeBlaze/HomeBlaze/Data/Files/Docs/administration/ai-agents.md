@@ -239,7 +239,7 @@ The operations accept at most 64 KB of source, measured as the agent writes it w
 
 One small gap remains: an agent can add a link reference definition with an http or https address, which changes where a `[text][label]` link inside a block leads.
 
-The `Docs` folder holds the documentation of the running version and is replaced on every start where a seed directory is configured, as in the container image, so a change an agent makes to a page there, or a page it creates there, is lost; let agents keep their pages in another folder. Pages are not versioned by HomeBlaze, so keep the data folder under version control or backed up if agents may change pages. See [Security](#security) before allowing page changes.
+The `Docs` folder of the data directory holds the documentation of the running version and is replaced on every start where a seed directory is configured, as in the container image. The operations therefore refuse to change a page there or to create one there, with the error "Pages under the documentation folder are replaced on start and cannot be changed by agents.", also through `invoke_operation`; let agents keep their pages in another folder. Pages are not versioned by HomeBlaze, so keep the data folder under version control or backed up if agents may change pages. See [Security](#security) before allowing page changes.
 
 ### Web tools
 

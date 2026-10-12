@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
@@ -21,7 +22,15 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
     private const string NotesPath = "/Storage/Notes.md";
     private const string DocsPath = "/Storage/Docs";
 
-    private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-markdown-tools-");
+    // The storage is the Files folder of a data directory, so its Docs folder is the documentation folder once the
+    // data directory is known to the storage.
+    private readonly DirectoryInfo _dataDirectory = Directory.CreateTempSubdirectory("homeblaze-markdown-tools-");
+    private readonly DirectoryInfo _directory;
+
+    public HomeBlazeMarkdownToolTests()
+    {
+        _directory = _dataDirectory.CreateSubdirectory("Files");
+    }
     private readonly List<FluentStorageContainer> _storages = [];
 
     [Fact]
@@ -175,6 +184,35 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAnAgentChangesOrCreatesAPageInTheDocumentationFolder_ThenTheToolsRefuseIt()
+    {
+        // Arrange
+        var (root, _, services) = await CreateGraphAsync(hasDocumentationFolder: true);
+        var tools = CreateTools(services, root);
+
+        // Act
+        var edit = await CallAsync(tools["edit_markdown"], new { path = "/Storage/Docs/Readme.md", old_text = "Readme", new_text = "Changed" });
+        var write = await CallAsync(tools["write_markdown"], new { path = "/Storage/Docs/Readme.md", content = "# Changed" });
+        var create = await CallAsync(tools["create_markdown"], new { folder_path = DocsPath, name = "New.md", content = "# New" });
+        var operation = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage/Docs/Readme.md",
+            method = "ReplaceText",
+            parameters = new { oldText = "Readme", newText = "Changed" }
+        });
+        var other = await CallAsync(tools["edit_markdown"], new { path = NotesPath, old_text = "cold", new_text = "warm" });
+
+        // Assert
+        Assert.Equal(MarkdownFile.DocumentationFolderMessage, edit.GetProperty("error").GetString());
+        Assert.Equal(MarkdownFile.DocumentationFolderMessage, write.GetProperty("error").GetString());
+        Assert.Equal(MarkdownFile.DocumentationFolderMessage, create.GetProperty("error").GetString());
+        Assert.Contains(MarkdownFile.DocumentationFolderMessage, operation.GetProperty("error").GetString());
+        Assert.True(other.GetProperty("success").GetBoolean());
+        Assert.Equal("# Readme", ReadFile("Docs/Readme.md"));
+        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Docs", "New.md")));
+    }
+
+    [Fact]
     public async Task WhenTheOperationRejectsAnArgument_ThenItsMessageIsReturned()
     {
         // Arrange
@@ -280,7 +318,8 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         Assert.Equal("invoke_operation", Assert.Single(toolSet.Calls).Name);
     }
 
-    private async Task<(AgentTestRoot Root, FluentStorageContainer Storage, IServiceProvider Services)> CreateGraphAsync()
+    private async Task<(AgentTestRoot Root, FluentStorageContainer Storage, IServiceProvider Services)> CreateGraphAsync(
+        bool hasDocumentationFolder = false)
     {
         WriteFile("Notes.md", "# Notes\n\nThe freezer is cold.");
         WriteFile("Docs/Readme.md", "# Readme");
@@ -291,6 +330,10 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
 
         var services = new ServiceCollection();
         var context = SubjectContextFactory.Create(services);
+        if (hasDocumentationFolder)
+        {
+            context.AddService<IDataDirectoryProvider>(new TestDataDirectory(_dataDirectory.FullName));
+        }
         services.AddSingleton(typeProvider);
         services.AddSingleton(typeRegistry);
         services.AddSingleton(context);
@@ -349,6 +392,6 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
             storage.Dispose();
         }
 
-        _directory.Delete(recursive: true);
+        _dataDirectory.Delete(recursive: true);
     }
 }

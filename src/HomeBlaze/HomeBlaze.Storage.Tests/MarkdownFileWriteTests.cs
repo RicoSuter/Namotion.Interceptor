@@ -734,6 +734,34 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAPageIsInTheDocumentationFolder_ThenTheWriteOperationsRefuseItAndOtherPagesStayWritable()
+    {
+        // Arrange
+        WriteFile("Docs/Guide.md", "# Guide");
+        WriteFile("Notes.md", "# Notes");
+        var storage = await ConnectWithDocumentationFolderAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        var guide = Assert.IsType<MarkdownFile>(docs.Children["Guide.md"]);
+        var notes = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+
+        // Act
+        var replaceText = await Record.ExceptionAsync(() => guide.ReplaceTextAsync("Guide", "Changed", CancellationToken.None));
+        var replaceContent = await Record.ExceptionAsync(() => guide.ReplaceContentAsync("# Changed", CancellationToken.None));
+        var create = await Record.ExceptionAsync(() => docs.CreateMarkdownFileAsync("New.md", "# New", CancellationToken.None));
+        await notes.ReplaceTextAsync("Notes", "Changed notes", CancellationToken.None);
+
+        // Assert
+        Assert.All([replaceText, replaceContent, create], exception =>
+            Assert.Equal(MarkdownFile.DocumentationFolderMessage, Assert.IsType<ArgumentException>(exception).Message));
+        Assert.True(guide.IsInDocumentationFolder);
+        Assert.True(docs.IsInDocumentationFolder);
+        Assert.False(notes.IsInDocumentationFolder);
+        Assert.Equal("# Guide", ReadFile("Docs/Guide.md"));
+        Assert.False(File.Exists(GetFullPath("Docs/New.md")));
+        Assert.Equal("# Changed notes", ReadFile("Notes.md"));
+    }
+
+    [Fact]
     public async Task WhenTheStorageIsAskedToSaveTheConfigurationOfAPage_ThenItDoesNotWriteThePage()
     {
         // Arrange
@@ -890,6 +918,13 @@ public class MarkdownFileWriteTests : IDisposable
 
         ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
         _storages.Add(storage);
+        return storage;
+    }
+
+    private async Task<FluentStorageContainer> ConnectWithDocumentationFolderAsync()
+    {
+        var storage = CreateStorage(dataDirectory: _dataDirectory.FullName);
+        await storage.ConnectAsync(CancellationToken.None);
         return storage;
     }
 

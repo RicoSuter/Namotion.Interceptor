@@ -124,6 +124,12 @@ public partial class FluentStorageContainer :
     /// </summary>
     public bool IsLocal => StorageType is "disk" or "filesystem" or "inmemory";
 
+    /// <summary>
+    /// Whether the storage is in the documentation folder, which is replaced on every start and in which the write
+    /// operations create no file.
+    /// </summary>
+    public bool IsInDocumentationFolder => IsPathInDocumentationFolder(string.Empty);
+
     public string Title => string.IsNullOrEmpty(ConnectionString)
         ? "Storage"
         : Path.GetFileName(ConnectionString.TrimEnd('/', '\\'));
@@ -738,9 +744,9 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Creates a Markdown file in the root folder of this storage and adds it as a page.
     /// </summary>
-    /// <exception cref="ArgumentException">The name is not a plain file name ending in .md, the file exists, or the
-    /// content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes or has blocks or other
-    /// <see cref="MarkdownFile.ActiveContent"/>.</exception>
+    /// <exception cref="ArgumentException">The name is not a plain file name ending in .md, the file exists, the folder
+    /// is the documentation folder, or the content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes or has
+    /// blocks or other <see cref="MarkdownFile.ActiveContent"/>.</exception>
     /// <exception cref="InvalidOperationException">The storage is not local or not connected.</exception>
     [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
     public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
@@ -759,6 +765,8 @@ public partial class FluentStorageContainer :
         var relativePath = StoragePath.Normalize(string.IsNullOrEmpty(folderPath) ? name : $"{folderPath.TrimEnd('/')}/{name}");
         if (StoragePathFilter.IsIgnored(relativePath))
             throw new ArgumentException($"A file in '{folderPath}' would not be loaded: the folder is hidden or temporary.", nameof(folderPath));
+
+        MarkdownWriteRules.EnsureNotInDocumentationFolder(this, relativePath);
 
         var connection = Connection;
         await RunOperationAsync(connection, async token =>
@@ -830,6 +838,28 @@ public partial class FluentStorageContainer :
         }
 
         return $"'{name}' cannot be created: another subject in this folder, or the folder itself, already has its name in the tree.";
+    }
+
+    /// <summary>
+    /// Whether the path, relative to this storage, is in the documentation folder of the data directory, which is
+    /// replaced from the image on every start.
+    /// </summary>
+    internal bool IsPathInDocumentationFolder(string relativePath)
+    {
+        if (StorageType is not ("disk" or "filesystem") || string.IsNullOrEmpty(ConnectionString) ||
+            ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory is not { } dataDirectory)
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var documentationDirectory = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(Path.Combine(dataDirectory, DataDirectorySeeder.DocumentationDirectory)));
+        var fullPath = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(Path.Combine(ResolveStorageDirectory(ConnectionString), StoragePath.Normalize(relativePath))));
+
+        return fullPath.Equals(documentationDirectory, comparison) ||
+               fullPath.StartsWith(documentationDirectory + Path.DirectorySeparatorChar, comparison);
     }
 
     /// <summary>

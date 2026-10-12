@@ -45,6 +45,12 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// </summary>
     public bool IsLocal => MarkdownWriteRules.IsLocal(Storage);
 
+    /// <summary>
+    /// Whether the folder is in the documentation folder, which is replaced on every start and in which the write
+    /// operations create no file.
+    /// </summary>
+    public bool IsInDocumentationFolder => MarkdownWriteRules.IsInDocumentationFolder(Storage, RelativePath);
+
     public VirtualFolder(IStorageContainer storage, string relativePath)
     {
         Storage = storage;
