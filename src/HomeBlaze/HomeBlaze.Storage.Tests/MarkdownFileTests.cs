@@ -556,6 +556,43 @@ public class MarkdownFileTests
         Assert.IsType<ArgumentException>(guessed);
     }
 
+    [Theory]
+    [InlineData("/Devices/motor/Password")]
+    [InlineData("/Devices/motor/PlainNote")]
+    [InlineData("/Docs/page.md/Content")]
+    public async Task WhenAFormattedExpressionOrAValueWidgetReadsAPropertyThatIsNotDisplayable_ThenItShowsNothing(string path)
+    {
+        // Arrange
+        var content =
+            $"Raw: {{{{ {path} | raw }}}}, display: {{{{ {path} | display }}}}, public: {{{{ /Devices/motor/Host | raw }}}}.\n\n" +
+            $":: HomeBlaze.Components.ValueTile#tile Path=\"../..{path}\"\n::\n\n" +
+            $":: HomeBlaze.Components.Indicator#indicator Path=\"../..{path}\"\n::\n";
+        var markdown = await CreatePageInGraphAsync(content, new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
+        var resolver = new SubjectPathResolver(() => null);
+        var scope = (IPathScope)markdown;
+
+        // Act
+        var evaluated = markdown.ReadEvaluatedContent();
+        var withSourcePaths = markdown.ReadEvaluatedContent(includeSourcePaths: true);
+        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToList();
+        var tile = Assert.IsType<HomeBlaze.Components.ValueTile>(scope.TryGetNamedSubject("tile"));
+        var indicator = Assert.IsType<HomeBlaze.Components.Indicator>(scope.TryGetNamedSubject("indicator"));
+        var hostReading = HomeBlaze.Components.ValueReader.Read(resolver, tile, "../../Devices/motor/Host", null, null);
+
+        // Assert
+        Assert.StartsWith("Raw: , display: , public: visible.", evaluated);
+        Assert.StartsWith("Raw: , display: , public: visible (/Devices/motor/Host).", withSourcePaths);
+        Assert.All(expressions.Where(expression => expression.Path == path), expression =>
+        {
+            Assert.Null(expression.Value);
+            Assert.Equal(string.Empty, expression.GetText(timeZone: null));
+        });
+        Assert.True(HomeBlaze.Components.ValueReader.Read(resolver, tile, tile.Path, null, null).IsMissing);
+        Assert.Null(HomeBlaze.Components.ValueReader.ReadValue(resolver, indicator, indicator.Path));
+        Assert.Equal("visible", hostReading.Value);
+        Assert.DoesNotContain("s3cr3t", evaluated);
+    }
+
     [Fact]
     public async Task WhenAnExpressionReadsTheRawSourceOfAPage_ThenItHasNoValue()
     {
@@ -816,6 +853,9 @@ public partial class EmbeddedSecretDevice : IConfigurable
 
     [Configuration(IsSecret = true)]
     public partial string? Password { get; set; }
+
+    /// <summary>A plain property, which a page shows nothing of.</summary>
+    public string PlainNote => "plain " + Password;
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
