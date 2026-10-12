@@ -10,6 +10,7 @@
 
 <div class="canvas-layout-container @(IsEditing ? "editing" : "")"
      style="position: relative; width: 100%; min-height: @(Canvas?.MinHeight ?? 400)px;"
+     @onmousedown="MouseDownCallback"
      @onclick="OnCanvasClick"
      @onclick:stopPropagation="true">
 
@@ -25,7 +26,7 @@
     }
 
     <Diagram @ref="_diagram" class="canvas-diagram" style="@($"width: 100%; height: {Canvas?.MinHeight ?? 400}px;")">
-        <NavigationSettings DisableZooming="@(!IsEditing)" DisablePanning="@(!IsEditing)" />
+        <NavigationSettings DisableZooming="@(!IsEditing)" DisablePanning="@(!IsEditing)" OriginChanged="@(_ => _isCanvasPanned = true)" />
         <Links />
         <Nodes OnModified="OnNodeModified">
             @if (Canvas?.Nodes != null)
@@ -131,6 +132,11 @@
     private Diagram? _diagram;
     private bool _suppressNextClick;
 
+    // Set when the origin of the diagram changes, which is while the canvas is panned, and cleared at the next mouse down.
+    // The release of a pan is a click on the empty canvas, so a click that follows a pan since the mouse went down is no
+    // click on it. The origin changes before the click: the diagram reports it with every move of the mouse.
+    private bool _isCanvasPanned;
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
@@ -181,11 +187,26 @@
         });
     }
 
+    // Only an edited canvas can be panned. A handler that is not there does not render the component on every mouse down.
+    private EventCallback<MouseEventArgs> MouseDownCallback
+        => IsEditing ? EventCallback.Factory.Create<MouseEventArgs>(this, OnCanvasMouseDown) : default;
+
+    private void OnCanvasMouseDown(MouseEventArgs e)
+    {
+        _isCanvasPanned = false;
+    }
+
     private async Task OnCanvasClick(MouseEventArgs e)
     {
         if (_suppressNextClick)
         {
             _suppressNextClick = false;
+            return;
+        }
+
+        if (_isCanvasPanned)
+        {
+            _isCanvasPanned = false;
             return;
         }
 

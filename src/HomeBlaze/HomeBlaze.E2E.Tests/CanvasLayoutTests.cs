@@ -202,6 +202,45 @@ public class CanvasLayoutTests
     }
 
     [Fact]
+    public async Task WhenCanvasIsPannedInEditMode_ThenNoDialogOpens()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var boxBefore = await GetBoxInCanvasAsync(GetNodes(page).First);
+        var canvasBox = await GetBoxAsync(GetCanvas(page));
+        var startX = canvasBox.Right - 40;
+        var startY = canvasBox.Bottom - 40;
+
+        // Act: the release of the drag counts as a click on the empty canvas.
+        await DragAsync(page, startX, startY, startX - 150, startY - 100);
+        await WaitForNodeToMoveAsync(page, boxBefore);
+        await WaitForServerAsync(page, "Split");
+
+        // Assert
+        await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenCanvasWasPannedInEditMode_ThenALaterClickOnTheEmptyCanvasOffersToAddANode()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var boxBefore = await GetBoxInCanvasAsync(GetNodes(page).First);
+        var canvasBox = await GetBoxAsync(GetCanvas(page));
+        var x = canvasBox.Right - 40;
+        var y = canvasBox.Bottom - 40;
+        await DragAsync(page, x, y, x - 150, y - 100);
+        await WaitForNodeToMoveAsync(page, boxBefore);
+        await WaitForServerAsync(page, "Split");
+
+        // Act
+        await page.Mouse.ClickAsync((float)x, (float)y);
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenCanvasIsEdited_ThenTheButtonsOfANodeStillWork()
     {
         // Arrange
@@ -230,19 +269,19 @@ public class CanvasLayoutTests
         Assert.True(await IsCanvasMarkedAsync(page), "The canvas was built again, so the test would not show that the diagram of the viewed page is changed");
 
         var node = GetNodes(page).First;
+        var boxBefore = await GetBoxInCanvasAsync(node);
         var widthBefore = (await GetBoxAsync(node)).Width;
         var canvasBox = await GetBoxAsync(GetCanvas(page));
         var x = canvasBox.Right - 40;
         var y = canvasBox.Bottom - 40;
 
-        // Act & Assert: the pan comes last, because the click that ends a drag on the empty canvas opens the dialog to add a node.
+        // Act & Assert
+        await DragAsync(page, x, y, x - 150, y - 100);
+        await WaitForNodeToMoveAsync(page, boxBefore);
+
         await page.Mouse.MoveAsync((float)x, (float)y);
         await page.Mouse.WheelAsync(0, -300);
         await WaitForNodeWidthToChangeAsync(page, widthBefore);
-
-        var boxZoomed = await GetBoxInCanvasAsync(node);
-        await DragAsync(page, x, y, x - 150, y - 100);
-        await WaitForNodeToMoveAsync(page, boxZoomed);
     }
 
     [Fact]
