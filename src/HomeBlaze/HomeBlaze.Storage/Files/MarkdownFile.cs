@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
@@ -23,11 +22,15 @@ namespace HomeBlaze.Storage.Files;
 [FileExtension(".markdown")]
 public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter
 {
-    [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n[\s\S]*?```")]
-    private static partial Regex SubjectBlockRegex();
-
     /// <summary>The largest Markdown source, in UTF-8 bytes, that the write operations accept.</summary>
     public const int MaxContentSize = 64 * 1024;
+
+    /// <summary>
+    /// The active content, besides embedded subject blocks, that the write operations cannot add to a file.
+    /// </summary>
+    public const string ActiveContent =
+        "HTML, images and media, custom containers, math and diagram blocks, element attributes and links other than " +
+        "http, https and mailto";
 
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;
@@ -132,16 +135,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Returns the content with each {{ path }} expression replaced by its current value.
     /// </summary>
     /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute path of its
-    /// property in parentheses, for example "21.5 (/Devices/Kitchen/Temperature)"; get_property reads that path when the
-    /// property is exposed as state. Null is treated as false.</param>
+    /// property in parentheses, for example "21.5 (/Devices/Kitchen/Temperature)". Null is treated as false.</param>
     [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph. With includeSourcePaths set to true, each value is followed by the absolute path of its property in parentheses, which get_property reads when the property is exposed as state", Icon = "Preview")]
     public string? ReadEvaluatedContent(bool? includeSourcePaths = null) =>
         _parser.RenderContent(Content, this, includeSourcePaths == true);
 
     /// <summary>
-    /// Replaces the whole Markdown source of the file. Embedded subject blocks must stay exactly as they are, and raw HTML,
-    /// images and media, custom containers, math and diagram blocks, element attributes and links other than http, https
-    /// and mailto only as far as the file already has them.
+    /// Replaces the whole Markdown source of the file. Embedded subject blocks must stay exactly as they are, and the
+    /// <see cref="ActiveContent"/> may only appear as far as the file already has it.
     /// </summary>
     /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes, or adds or
     /// changes such content.</exception>
@@ -274,22 +275,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return string.Empty;
         }
 
-        // Regex matches: ```subject(name)\n{json}```
-        return SubjectBlockRegex().Replace(
+        return MarkdownContentParser.SubjectBlockRegex().Replace(
             Content,
             match =>
             {
                 var name = match.Groups[1].Value;
-
-                // Find the child subject by name and serialize it
-                if (Children.TryGetValue(name, out var child))
-                {
-                    var json = _serializer.Serialize(child);
-                    return $"```subject({name})\n{json}\n```";
-                }
-
-                // Subject not found - keep original block unchanged
-                return match.Value;
+                return Children.TryGetValue(name, out var child)
+                    ? $"```subject({name})\n{_serializer.Serialize(child)}\n```"
+                    : match.Value;
             });
     }
 

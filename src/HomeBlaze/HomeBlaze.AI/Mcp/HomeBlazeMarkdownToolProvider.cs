@@ -31,31 +31,26 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     /// <summary>The names of the tools, all of which change pages and documents.</summary>
     public static IReadOnlyList<string> ToolNames { get; } = [EditMarkdownToolName, WriteMarkdownToolName, CreateMarkdownToolName];
 
-    // The active content that a write may not add; embedded subject blocks may not change either.
-    private const string AddedActiveContent =
-        "HTML, images and media, custom containers, math and diagram blocks, element attributes and links other than " +
-        "http, https and mailto";
-
     private static readonly string MaxContentSizeText = $"at most {MarkdownFile.MaxContentSize / 1024} KB";
 
     private static readonly string EditMarkdownDescription =
         "Replace one passage of a Markdown page or document (*.md): old_text must occur exactly once in the Markdown source, " +
         $"as returned by {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent (with {{{{ path }}}} expressions unevaluated), and is replaced by new_text. " +
         $"Prefer this over {WriteMarkdownToolName} for small changes. Only Markdown files in local storage can be changed. " +
-        $"Embedded subject blocks must stay exactly as they are, and {AddedActiveContent} cannot be added. " +
+        $"Embedded subject blocks must stay exactly as they are, and {MarkdownFile.ActiveContent} cannot be added. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private static readonly string WriteMarkdownDescription =
         $"Replace the whole Markdown source of a Markdown page or document (*.md) with content ({MaxContentSizeText}). Read the " +
         $"source first with {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent and keep what should stay; for small changes use {EditMarkdownToolName}. " +
         "Only Markdown files in local storage can be changed. " +
-        $"Embedded subject blocks must stay exactly as they are, and {AddedActiveContent} cannot be added. " +
+        $"Embedded subject blocks must stay exactly as they are, and {MarkdownFile.ActiveContent} cannot be added. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private static readonly string CreateMarkdownDescription =
         "Create a Markdown page or document: folder_path is the path of a local storage folder or storage, name a plain " +
         $"file name ending in .md that does not exist there yet, content the Markdown source ({MaxContentSizeText}) without " +
-        $"embedded subject blocks, {AddedActiveContent}. " +
+        $"embedded subject blocks, {MarkdownFile.ActiveContent}. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private static readonly MarkdownTool EditMarkdownTool = new(

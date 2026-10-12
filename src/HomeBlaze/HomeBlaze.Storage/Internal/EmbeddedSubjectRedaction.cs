@@ -12,15 +12,14 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 internal static class EmbeddedSubjectRedaction
 {
-    /// <summary>The text that replaces a secret value.</summary>
-    public const string RedactedValue = "***";
+    private const string RedactedValue = "***";
 
     private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
 
     /// <summary>
-    /// Returns the source with each secret value in an embedded subject block replaced by <see cref="RedactedValue"/>,
+    /// Returns the source with each secret value in an embedded subject block replaced by <c>***</c>,
     /// found through the configuration metadata of the subject the block created. A block without a subject keeps only
-    /// its type, a block whose JSON cannot be read as an object becomes <see cref="RedactedValue"/>, and a block
+    /// its type, a block whose JSON cannot be read as an object becomes <c>***</c>, and a block
     /// without secret values stays as it is.
     /// </summary>
     public static string? Redact(string? source, IDictionary<string, IInterceptorSubject> children)

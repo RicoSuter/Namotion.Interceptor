@@ -625,7 +625,8 @@ public partial class FluentStorageContainer :
     /// Creates a Markdown file in the root folder of this storage and adds it as a page.
     /// </summary>
     /// <exception cref="ArgumentException">The name is not a plain file name ending in .md, the file exists, or the
-    /// content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes or has embedded subjects, HTML, images or other active content.</exception>
+    /// content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes or has embedded subjects or other
+    /// <see cref="MarkdownFile.ActiveContent"/>.</exception>
     /// <exception cref="InvalidOperationException">The storage is not local.</exception>
     [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
     public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
@@ -640,7 +641,7 @@ public partial class FluentStorageContainer :
         MarkdownWriteRules.EnsureLocal(this);
 
         var bytes = MarkdownWriteRules.GetContentBytes(content, nameof(content));
-        MarkdownWriteRules.EnsureNoActiveContent(content, nameof(content));
+        MarkdownWriteRules.EnsureActiveContentUnchanged(string.Empty, content, nameof(content));
         var blob = new Blob(string.IsNullOrEmpty(folderPath) ? name : $"{folderPath.TrimEnd('/')}/{name}");
         var path = blob.FullPath;
 
@@ -652,10 +653,9 @@ public partial class FluentStorageContainer :
                 throw new ArgumentException($"'{name}' already exists in this folder.", nameof(name));
             }
 
-            _fileWatcher?.MarkAsOwnWrite(GetFileSystemPath(path));
             using (var stream = new MemoryStream(bytes, writable: false))
             {
-                await Client.WriteAsync(path, stream, append: false, cancellationToken: cancellationToken);
+                await WriteBlobAsync(path, stream, cancellationToken);
             }
 
             var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken)

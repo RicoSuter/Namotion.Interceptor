@@ -6,7 +6,8 @@ using HomeBlaze.Storage.Files;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// The rules shared by the operations that write Markdown files: local storage only, a size limit and plain file names.
+/// The rules shared by the operations that write Markdown files: local storage only, a size limit, plain file names and
+/// no added or changed active content.
 /// </summary>
 internal static class MarkdownWriteRules
 {
@@ -32,7 +33,7 @@ internal static class MarkdownWriteRules
     }
 
     public static InvalidOperationException CreateNotLocalException() =>
-        new("Only Markdown files in local storage (on disk) can be written; this storage is not local.");
+        new("Only Markdown files in local storage (on disk or in memory) can be written; this storage is not local.");
 
     /// <summary>
     /// Encodes the content as UTF-8.
@@ -52,15 +53,13 @@ internal static class MarkdownWriteRules
         return Encoding.UTF8.GetBytes(content);
     }
 
-    /// <summary>The message of the error for a write that adds or changes active content.</summary>
-    public const string ActiveContentMessage =
-        "Embedded subjects, HTML, images and media, custom containers, math and diagram blocks, element attributes and " +
-        "links other than http, https and mailto cannot be added or changed through these operations; use the page editor.";
+    private const string ActiveContentMessage =
+        $"Embedded subjects, {MarkdownFile.ActiveContent} cannot be added or changed through these operations; use the page editor.";
 
     /// <summary>
-    /// Ensures that the new source of a page keeps its embedded subject blocks exactly as they are, since adding,
-    /// changing or removing one creates, reconfigures or detaches a running subject, and adds none of the other active
-    /// content of <see cref="ActiveContentMessage"/> that the old source does not already contain.
+    /// Ensures that the new source of a page keeps its embedded subject blocks exactly as they are and adds none of the
+    /// <see cref="MarkdownFile.ActiveContent"/> that the old source does not already contain. A new page passes an empty
+    /// old source.
     /// </summary>
     /// <exception cref="ArgumentException">The new source adds or changes such content.</exception>
     public static void EnsureActiveContentUnchanged(string oldSource, string newSource, string parameterName)
@@ -68,21 +67,9 @@ internal static class MarkdownWriteRules
         var (oldBlocks, oldMarkup) = MarkdownContentParser.GetActiveContent(oldSource);
         var (newBlocks, newMarkup) = MarkdownContentParser.GetActiveContent(newSource);
 
+        // Adding, changing or removing a block would create, reconfigure or detach a running subject.
         var blocksUnchanged = oldBlocks.Order(StringComparer.Ordinal).SequenceEqual(newBlocks.Order(StringComparer.Ordinal), StringComparer.Ordinal);
         if (!blocksUnchanged || !IsContainedIn(newMarkup, oldMarkup))
-        {
-            throw new ArgumentException(ActiveContentMessage, parameterName);
-        }
-    }
-
-    /// <summary>
-    /// Ensures that the source of a new page has none of the active content of <see cref="ActiveContentMessage"/>.
-    /// </summary>
-    /// <exception cref="ArgumentException">The source has such content.</exception>
-    public static void EnsureNoActiveContent(string source, string parameterName)
-    {
-        var (blocks, markup) = MarkdownContentParser.GetActiveContent(source);
-        if (blocks.Count > 0 || markup.Count > 0)
         {
             throw new ArgumentException(ActiveContentMessage, parameterName);
         }
