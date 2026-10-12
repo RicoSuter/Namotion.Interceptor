@@ -111,8 +111,8 @@ internal sealed class ReconcileTrigger : IDisposable
         => Request(null, allNamed: true, atOnce: true);
 
     /// <summary>
-    /// Reports that the storage answers again after it refused calls, so that a pass runs at once. It names
-    /// nothing: a pass that was refused has kept what it was asked to look at.
+    /// Reports that the storage answers again after it refused a call of a pass, so that a pass runs at once.
+    /// It names nothing: a pass that was refused has kept what it was asked to look at.
     /// </summary>
     public void NotifyStorageAnswersAgain()
         => Request(null, allNamed: false, atOnce: true);

@@ -14,11 +14,12 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
-    private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<string, int> _callCounts = new();
     private TaskCompletionSource? _reached;
     private string? _pausedOperation;
     private string? _blockedOperation;
+    private Action? _afterNextListing;
     private int _pausedStreamNumber;
     private int _callCount;
     private int _openedStreamCount;
@@ -44,6 +45,21 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
         _pausedOperation = operation;
         return _reached.Task.WaitAsync(Timeout);
     }
+
+    /// <summary>
+    /// Does what <see cref="PauseNext"/> does after an earlier call was released: the call hangs until
+    /// <see cref="Release"/> is called once more.
+    /// </summary>
+    public Task PauseNextAfterRelease(string operation)
+    {
+        _released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        return PauseNext(operation);
+    }
+
+    /// <summary>
+    /// Runs the action once, when the next listing has been read from the storage and before its caller has it.
+    /// </summary>
+    public void RunAfterNextListing(Action action) => Volatile.Write(ref _afterNextListing, action);
 
     /// <summary>
     /// Makes the first read from one of the streams that <see cref="OpenReadAsync"/> returns from now on hang.
@@ -81,7 +97,9 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     public async Task<IReadOnlyCollection<Blob>> ListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
     {
         await ArriveAsync(nameof(ListAsync));
-        return await inner.ListAsync(options, cancellationToken);
+        var blobs = await inner.ListAsync(options, cancellationToken);
+        Interlocked.Exchange(ref _afterNextListing, null)?.Invoke();
+        return blobs;
     }
 
     public async Task WriteAsync(string fullPath, Stream dataStream, bool append = false, CancellationToken cancellationToken = default)

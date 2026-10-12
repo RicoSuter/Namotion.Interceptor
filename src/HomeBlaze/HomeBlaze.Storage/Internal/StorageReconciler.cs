@@ -69,6 +69,9 @@ internal sealed class StorageReconciler
     /// The storage did not answer in time. The pass ends without applying anything, and the next pass does the
     /// work again.
     /// </exception>
+    /// <exception cref="StorageRootUnavailableException">
+    /// The root of the storage could not be examined. The pass ends in the same way.
+    /// </exception>
     /// <remarks>
     /// A pass that ends early leaves what it was asked to look at to the next pass, which looks at that as well.
     /// More than <see cref="MaximumUnfinishedNamedPathCount"/> paths are left as every file.
@@ -125,9 +128,10 @@ internal sealed class StorageReconciler
                 }
             }
             // By the token and not by the kind of exception: subject code that gives up throws a cancellation of
-            // its own. An unresponsive storage ends the pass, because every file after this one would fail as well.
-            // Another storage that is unresponsive, such as one that is a file of this one, fails only its file.
-            catch (Exception exception) when (!IsOwnStorageUnresponsive(exception) && !cancellationToken.IsCancellationRequested)
+            // its own. A storage that is unresponsive or whose root cannot be examined ends the pass, because
+            // every file after this one would fail as well. Another storage in that state, such as one that is
+            // a file of this one, fails only its file.
+            catch (Exception exception) when (!IsFailureOfOwnStorage(exception) && !cancellationToken.IsCancellationRequested)
             {
                 _logger?.LogWarning(exception, "Failed to load: {Path}", listed.Path);
                 RecordFailure(listed, exception);
@@ -140,8 +144,13 @@ internal sealed class StorageReconciler
         _isEveryFileNamedByUnfinishedPass = false;
     }
 
-    private bool IsOwnStorageUnresponsive(Exception exception)
-        => exception is StorageUnresponsiveException unresponsive && ReferenceEquals(unresponsive.Storage, _client);
+    private bool IsFailureOfOwnStorage(Exception exception)
+        => exception switch
+        {
+            StorageUnresponsiveException unresponsive => ReferenceEquals(unresponsive.Storage, _client),
+            StorageRootUnavailableException unavailable => ReferenceEquals(unavailable.Storage, _client),
+            _ => false
+        };
 
     /// <summary>
     /// Builds the children of every folder from the index and assigns those that changed. Does nothing when no

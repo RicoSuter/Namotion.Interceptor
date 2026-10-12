@@ -34,6 +34,10 @@ internal sealed class StorageConnection : IDisposable
     private volatile StorageFileWatcher? _fileWatcher;
     private bool _hasFileWatcherFailedToStart;
 
+    // True from a pass that this storage refused until the pass that it is owed has been asked for. Only such
+    // a pass is asked for when the storage answers again: one that reached the storage keeps to its retries.
+    private bool _isPassOwed;
+
     public StorageConnection(
         StorageConnectionSettings settings,
         IBlobStorage client,
@@ -49,7 +53,7 @@ internal sealed class StorageConnection : IDisposable
             timeProvider,
             logger,
             storageDirectory is null ? null : () => VerifyDirectory(storageDirectory),
-            () => _trigger?.NotifyStorageAnswersAgain());
+            RequestOwedPass);
         Settings = settings;
         _storageDirectory = storageDirectory;
         _timeProvider = timeProvider;
@@ -137,12 +141,33 @@ internal sealed class StorageConnection : IDisposable
 
     /// <summary>
     /// Tells how a pass that failed with the exception is tried again: by the trigger, or, when this storage
-    /// refused a call of the pass, once the storage answers again.
+    /// refused a call of the pass, once the storage answers again. Such a pass is then asked for.
     /// </summary>
     public ReconcileOutcome GetOutcomeOfFailedPass(Exception exception)
-        => exception is StorageUnresponsiveException { IsRefusal: true } refusal && ReferenceEquals(refusal.Storage, _client)
-            ? ReconcileOutcome.Refused
-            : ReconcileOutcome.Failed;
+    {
+        if (exception is not StorageUnresponsiveException { IsRefusal: true } refusal || !ReferenceEquals(refusal.Storage, _client))
+        {
+            return ReconcileOutcome.Failed;
+        }
+
+        Volatile.Write(ref _isPassOwed, true);
+
+        // The storage can have answered since it refused the call, and does not tell a second time.
+        if (!_client.IsUnresponsive)
+        {
+            RequestOwedPass();
+        }
+
+        return ReconcileOutcome.Refused;
+    }
+
+    private void RequestOwedPass()
+    {
+        if (Interlocked.Exchange(ref _isPassOwed, false))
+        {
+            _trigger?.NotifyStorageAnswersAgain();
+        }
+    }
 
     /// <summary>
     /// Handles a failure as if the file watcher that is running had raised it.

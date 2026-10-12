@@ -1008,6 +1008,129 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         Assert.Equal(StorageStatus.Error, stalled.Storage.Status);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenEveryListingOutlastsTheLimitAndThenReturns_ThenOnlyThePassAndItsRetriesReachTheStorage(bool isRetryRefused)
+    {
+        // Arrange: a storage whose listing takes longer than the limit every time and then returns, before the
+        // retry is due in the first row, and after the retry was refused in the second.
+        var timeProvider = new ManualTimeProvider();
+        PausableBlobStorage? client = null;
+        var failedPassCount = 0;
+        var logger = new CallbackLogger((_, message) =>
+        {
+            if (message.StartsWith(FailedPassMessage, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref failedPassCount);
+            }
+        });
+        WriteFile("Home.md");
+        var storage = CreateStorage(logger: logger, configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 3600;
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        });
+        await storage.ConnectAsync(CancellationToken.None);
+        var listingsOfConnect = client!.GetCallCount(nameof(IBlobStorage.ListAsync));
+
+        // Act: one periodic pass, and then nothing but the storage answering late. No event arrives, and the
+        // clock stays far below the next periodic pass.
+        var expectedFailedPassCount = 0;
+        var listingReached = client.PauseNextAfterRelease(nameof(IBlobStorage.ListAsync));
+        timeProvider.Advance(TimeSpan.FromSeconds(3600));
+        for (var retryCount = 0; ; retryCount++)
+        {
+            // The periodic timer and the timer of the limit, and then the periodic timer and that of a retry
+            // that is left.
+            await listingReached;
+            await AsyncTestHelpers.WaitUntilAsync(() => timeProvider.ArmedTimerCount == 2);
+            timeProvider.Advance(StorageCallTimeout.Limit);
+            var isRetryLeft = retryCount < ReconcileTrigger.MaximumRetryCount;
+            var failedPassCountAfterLimit = ++expectedFailedPassCount;
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+                Volatile.Read(ref failedPassCount) == failedPassCountAfterLimit && timeProvider.ArmedTimerCount == (isRetryLeft ? 2 : 1));
+
+            if (isRetryLeft && isRetryRefused)
+            {
+                timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+                var failedPassCountAfterRefusal = ++expectedFailedPassCount;
+                await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref failedPassCount) == failedPassCountAfterRefusal);
+            }
+
+            client.Release();
+            await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+            if (!isRetryLeft)
+            {
+                break;
+            }
+
+            // The retry, or the pass that the refused retry is owed: at once, or after the quiet period when
+            // the storage answered before the trigger had the outcome of the refused pass.
+            listingReached = client.PauseNextAfterRelease(nameof(IBlobStorage.ListAsync));
+            await AsyncTestHelpers.WaitUntilAsync(() => timeProvider.ArmedTimerCount == 2);
+            timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+        }
+
+        // A pass of the test behind whatever the trigger started when the storage answered for the last time.
+        timeProvider.Advance(TimeSpan.FromSeconds(60));
+        await storage.ReconcileAsync();
+
+        // Assert
+        var listingsOfTrigger = client.GetCallCount(nameof(IBlobStorage.ListAsync)) - listingsOfConnect - 1;
+        Assert.Equal(1 + ReconcileTrigger.MaximumRetryCount, listingsOfTrigger);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenStorageAnswersAgainBeforeRefusedPassHasReported_ThenPassStillFollows()
+    {
+        // Arrange: a read whose caller gave up has not returned, so the storage refuses the pass. The pass
+        // logs its failure before it reports it, and by then the read has returned.
+        var timeProvider = new ManualTimeProvider();
+        PausableBlobStorage? client = null;
+        FluentStorageContainer? storage = null;
+        var hasAnsweredBeforeReport = false;
+        var logger = new CallbackLogger((_, message) =>
+        {
+            if (message.StartsWith(FailedPassMessage, StringComparison.Ordinal))
+            {
+                client!.Release();
+                hasAnsweredBeforeReport = SpinWait.SpinUntil(() => !storage!.IsStorageUnresponsive, WatcherTimeout);
+            }
+        });
+        WriteFile("Home.md");
+        storage = CreateStorage(logger: logger, configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        });
+        await storage.ConnectAsync(CancellationToken.None);
+        using var cancellation = new CancellationTokenSource();
+        var readReached = client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+        var read = storage.GetBlobMetadataAsync("Home.md", cancellation.Token);
+        await readReached;
+        await cancellation.CancelAsync();
+        await Record.ExceptionAsync(() => read);
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.IsStorageUnresponsive);
+        WriteFile("Added.md");
+
+        // Act
+        await storage.ReconcileAsync();
+        var statusAfterRefusedPass = storage.Status;
+        var armedTimersAfterRefusedPass = timeProvider.ArmedTimerCount;
+        timeProvider.Advance(TimeSpan.Zero);
+
+        // Assert
+        Assert.True(hasAnsweredBeforeReport);
+        Assert.Equal(StorageStatus.Error, statusAfterRefusedPass);
+        Assert.Equal(1, armedTimersAfterRefusedPass);
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Connected);
+        Assert.Equal(["Added.md", "Home.md"], storage.Children.Keys.Order());
+    }
+
     [Fact]
     public async Task WhenFirstPassIsRefused_ThenNoRetryIsArmedAndPassRunsOnceStorageAnswersAgain()
     {
@@ -1087,6 +1210,69 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         Assert.Same(motor, storage.Children["Motor"]);
         Assert.Same(docs, storage.Children["Docs"]);
         Assert.Equal(0, detaches.Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenStorageDirectoryCannotBeExaminedWhileFilesOfPassAreLoaded_ThenPassFailsAndLaterPassLoadsThoseFiles(bool isAccessDenied)
+    {
+        // The second row needs a directory whose mode keeps this process out.
+        if (isAccessDenied && (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess))
+        {
+            return;
+        }
+
+        // Arrange: a storage directory that the test can move away, in a directory that it can close.
+        var parent = CreateTemporaryDirectory();
+        var root = Path.Combine(parent.FullName, "root");
+        var movedRoot = root + "-moved";
+        var modeOfParent = OperatingSystem.IsWindows() ? default : File.GetUnixFileMode(parent.FullName);
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "Home.md"), "home");
+        PausableBlobStorage? client = null;
+        var storage = CreateStorage(configure: container =>
+        {
+            container.ConnectionString = root;
+            container.ReconcileIntervalSeconds = 0;
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        });
+        await storage.ConnectAsync(CancellationToken.None);
+        File.WriteAllText(Path.Combine(root, "Added.md"), "added");
+        File.WriteAllText(Path.Combine(root, "Home.md"), "home, changed and longer");
+
+        // Act: the directory cannot be examined after the listing of one pass, and can again before the next.
+        StorageStatus statusOfPassWithoutDirectory;
+        client!.RunAfterNextListing(() => SetCanBeExamined(false));
+        try
+        {
+            await storage.ReconcileAsync();
+            statusOfPassWithoutDirectory = storage.Status;
+        }
+        finally
+        {
+            SetCanBeExamined(true);
+        }
+
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(["Added.md", "Home.md"], storage.Children.Keys.Order());
+        Assert.Equal("home, changed and longer", Assert.IsType<MarkdownFile>(storage.Children["Home.md"]).Content);
+        Assert.Equal(StorageStatus.Error, statusOfPassWithoutDirectory);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+
+        void SetCanBeExamined(bool canBeExamined)
+        {
+            if (!isAccessDenied)
+            {
+                Directory.Move(canBeExamined ? movedRoot : root, canBeExamined ? root : movedRoot);
+            }
+            else if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(parent.FullName, canBeExamined ? modeOfParent : UnixFileMode.None);
+            }
+        }
     }
 
     [Fact]

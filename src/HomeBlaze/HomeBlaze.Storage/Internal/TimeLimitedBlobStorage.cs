@@ -29,8 +29,9 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
     /// <param name="logger">Receives what a call that was given up does later.</param>
     /// <param name="verifyRoot">
     /// Runs as the first part of every call that names a path and throws when the root of the storage cannot
-    /// be examined. For a storage that lists such a root as empty, and that creates the root again when it is
-    /// asked about a path in a folder or writes one.
+    /// be examined. The call then fails with a <see cref="StorageRootUnavailableException"/>. For a storage
+    /// that lists such a root as empty, and that creates the root again when it is asked about a path in a
+    /// folder or writes one.
     /// </param>
     /// <param name="whenAnswersAgain">
     /// Runs each time the last call that was given up has returned, so that calls are taken again. It runs on
@@ -80,7 +81,16 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
     // Within the call, so that a root that stalls when it is examined is limited like the call itself.
     private IBlobStorage VerifyRoot()
     {
-        _verifyRoot?.Invoke();
+        try
+        {
+            _verifyRoot?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            // One type for whatever the check throws: it is a failure of the storage, not of the path of the call.
+            throw new StorageRootUnavailableException(this, exception);
+        }
+
         return _inner;
     }
 
