@@ -523,6 +523,7 @@ A canvas with two nodes that show the sample motors by name. A canvas does not a
 ::
 
 - While the page is in edit mode, the nodes can be moved with the mouse, and the canvas has its own buttons to add, edit and remove nodes. They write the `json` block for you.
+- A canvas can be zoomed with the mouse wheel and moved by dragging its background only while the page is edited. While the page is viewed, the canvas takes no mouse input and the wheel scrolls the page. No line can be drawn between nodes in either mode.
 - The limits of the `GridLayout` hold here as well: a node holds a subject and no page content, the subjects are created again on every reload, and the names inside `Nodes` are not checked.
 
 ## Value Widgets

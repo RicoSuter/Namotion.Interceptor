@@ -24,7 +24,8 @@
                        OnClick="EditLayout" />
     }
 
-    <Diagram @ref="_diagram" style="@($"width: 100%; height: {Canvas?.MinHeight ?? 400}px;")">
+    <Diagram @ref="_diagram" class="canvas-diagram" style="@($"width: 100%; height: {Canvas?.MinHeight ?? 400}px;")">
+        <NavigationSettings DisableZooming="@(!IsEditing)" DisablePanning="@(!IsEditing)" />
         <Links />
         <Nodes OnModified="OnNodeModified">
             @if (Canvas?.Nodes != null)
@@ -65,6 +66,27 @@
 </div>
 
 <style>
+    /*
+     * Both modes: no link can be drawn, because a link of the canvas is never stored. A link starts from the
+     * strip along the border of a node, which the library draws as a rect in a group with an inline style that
+     * sets pointer-events. This depends on the markup of Excubo.Blazor.Diagrams (checked for 4.1.136), which has
+     * no setting for it. The border strip is not what moves a node: that is the rect in the first svg, which
+     * then also covers the strip.
+     */
+    .canvas-diagram svg g[style*="pointer-events"] {
+        pointer-events: none !important;
+    }
+
+    /*
+     * View mode: the diagram takes no mouse input at all. The library calls preventDefault for every wheel
+     * event that reaches it, whether zooming is enabled or not, so the wheel can only scroll the page when
+     * the event does not reach the diagram. The rects are the areas of the nodes, which would catch it.
+     */
+    .canvas-layout-container:not(.editing) .canvas-diagram,
+    .canvas-layout-container:not(.editing) .canvas-diagram svg rect {
+        pointer-events: none !important;
+    }
+
     /* The outline shows the area of the layout, so it is drawn in edit mode only. */
     .canvas-layout-container.editing {
         background: rgba(0,0,0,0.02);
