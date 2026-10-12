@@ -45,15 +45,17 @@ public class AgentMarkdownRendererTests
         Assert.DoesNotContain("/pages/", html);
     }
 
-    [Fact]
-    public void WhenAutolinkTargetIsNotAllowed_ThenItIsRenderedAsText()
+    [Theory]
+    [InlineData("<javascript:alert(1)>", "javascript:alert(1)")]
+    [InlineData("Get ftp://example.com/file now", "ftp://example.com/file")]
+    public void WhenAutolinkTargetIsNotAllowed_ThenItIsRenderedAsText(string markdown, string expectedText)
     {
         // Act
-        var html = AgentMarkdownRenderer.ToHtml("<javascript:alert(1)>");
+        var html = AgentMarkdownRenderer.ToHtml(markdown);
 
         // Assert
         Assert.DoesNotContain("<a", html);
-        Assert.Contains("javascript:alert(1)", html);
+        Assert.Contains(expectedText, html);
     }
 
     [Theory]
@@ -108,18 +110,6 @@ public class AgentMarkdownRendererTests
     }
 
     [Fact]
-    public void WhenMarkdownContainsPipeTable_ThenTableIsRendered()
-    {
-        // Act
-        var html = AgentMarkdownRenderer.ToHtml("| Device | Value |\n|---|---|\n| Motor | 42 |");
-
-        // Assert
-        Assert.Contains("<table>", html);
-        Assert.Contains("<th>Device</th>", html);
-        Assert.Contains("<td>42</td>", html);
-    }
-
-    [Fact]
     public void WhenMarkdownContainsListsAndCode_ThenTheyAreRendered()
     {
         // Act
@@ -155,17 +145,6 @@ public class AgentMarkdownRendererTests
         Assert.Contains("title=\"b' onclick='alert(1)\"", html);
         Assert.DoesNotContain("\" onmouseover=", html);
         Assert.DoesNotContain("\" onclick=", html);
-    }
-
-    [Fact]
-    public void WhenAutolinkUsesAnotherScheme_ThenItIsRenderedAsText()
-    {
-        // Act
-        var html = AgentMarkdownRenderer.ToHtml("Get ftp://example.com/file now");
-
-        // Assert
-        Assert.DoesNotContain("<a", html);
-        Assert.Contains("ftp://example.com/file", html);
     }
 
     [Theory]
@@ -213,7 +192,8 @@ public class AgentMarkdownRendererTests
         // Assert
         Assert.Contains("<input disabled=\"disabled\" type=\"checkbox\" checked=\"checked\" />", html);
         Assert.Contains("<del>old</del>", html);
-        Assert.Contains("<table>", html);
+        Assert.Contains("<th>A</th>", html);
+        Assert.Contains("<td>2</td>", html);
         Assert.Contains("<ol type=\"a\">", html);
     }
 

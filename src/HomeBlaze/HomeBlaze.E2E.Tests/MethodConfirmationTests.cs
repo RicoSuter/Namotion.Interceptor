@@ -10,7 +10,6 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class MethodConfirmationTests
 {
-    private const int PageLoadTimeout = 30000;
     private const int ElementVisibilityTimeout = 15000;
 
     private readonly PlaywrightFixture _fixture;
@@ -24,7 +23,7 @@ public class MethodConfirmationTests
     public async Task WhenAddingAPlugin_ThenTheParameterDialogAsksBeforeAnythingRuns()
     {
         // Arrange
-        var page = await OpenInBrowserAsync("Plugins");
+        var page = await SubjectBrowserPage.OpenAsync(_fixture, "Plugins");
 
         // Act
         await page.GetByRole(AriaRole.Button, new() { Name = "Add Plugin" }).ClickAsync();
@@ -41,7 +40,7 @@ public class MethodConfirmationTests
     public async Task WhenAnOperationWithoutParametersRequiresConfirmation_ThenTheConfirmationDialogAsksBeforeItRuns()
     {
         // Arrange
-        var page = await OpenInBrowserAsync("Agents/TestAgent");
+        var page = await SubjectBrowserPage.OpenAsync(_fixture, "Agents/TestAgent");
 
         // Act
         await page.GetByRole(AriaRole.Button, new() { Name = "New Conversation" }).ClickAsync();
@@ -51,13 +50,5 @@ public class MethodConfirmationTests
         await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
         await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = ElementVisibilityTimeout });
-    }
-
-    private async Task<IPage> OpenInBrowserAsync(string path)
-    {
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}browser/{path}");
-        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
-        return page;
     }
 }

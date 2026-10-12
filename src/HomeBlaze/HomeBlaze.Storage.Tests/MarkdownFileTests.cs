@@ -347,36 +347,21 @@ public class MarkdownFileTests
         Assert.Equal(string.Empty, result);
     }
 
-    [Fact]
-    public async Task WhenReadingEvaluatedContentWithSourcePaths_ThenEachResolvedValueIsFollowedByItsAbsolutePath()
+    [Theory]
+    [InlineData(true, "Relative: 750 (/Devices/motor/CurrentSpeed), absolute: 750 (/Devices/motor/CurrentSpeed), missing: ")]
+    [InlineData(false, "Relative: 750, absolute: 750, missing: ")]
+    [InlineData(null, "Relative: 750, absolute: 750, missing: ")]
+    public async Task WhenReadingEvaluatedContent_ThenSourcePathsFollowTheResolvedValuesOnlyWhenRequested(bool? includeSourcePaths, string expected)
     {
         // Arrange
         var markdown = await CreatePageInGraphAsync(
             "Relative: {{ ../../Devices/motor/CurrentSpeed }}, absolute: {{ /Devices/motor/CurrentSpeed }}, missing: {{ does/not/exist }}");
 
         // Act
-        var result = markdown.ReadEvaluatedContent(includeSourcePaths: true);
+        var result = includeSourcePaths is { } include ? markdown.ReadEvaluatedContent(include) : markdown.ReadEvaluatedContent();
 
         // Assert
-        Assert.Equal(
-            "Relative: 750 (/Devices/motor/CurrentSpeed), absolute: 750 (/Devices/motor/CurrentSpeed), missing: ",
-            result);
-    }
-
-    [Fact]
-    public async Task WhenReadingEvaluatedContentWithoutSourcePaths_ThenOnlyTheValuesAreRendered()
-    {
-        // Arrange
-        var markdown = await CreatePageInGraphAsync(
-            "Relative: {{ ../../Devices/motor/CurrentSpeed }}, absolute: {{ /Devices/motor/CurrentSpeed }}");
-
-        // Act
-        var defaultResult = markdown.ReadEvaluatedContent();
-        var explicitResult = markdown.ReadEvaluatedContent(includeSourcePaths: false);
-
-        // Assert
-        Assert.Equal("Relative: 750, absolute: 750", defaultResult);
-        Assert.Equal(defaultResult, explicitResult);
+        Assert.Equal(expected, result);
     }
 
     [Fact]

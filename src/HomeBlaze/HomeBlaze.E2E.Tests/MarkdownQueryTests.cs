@@ -11,7 +11,6 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class MarkdownQueryTests
 {
-    private const int PageLoadTimeout = 30000;
     private const int ElementVisibilityTimeout = 15000;
 
     private readonly PlaywrightFixture _fixture;
@@ -25,9 +24,7 @@ public class MarkdownQueryTests
     public async Task WhenReadingTheEvaluatedContentWithSourcePaths_ThenTheDialogOffersTheOptionAndShowsTheContent()
     {
         // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}browser/Dashboard.md");
-        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
+        var page = await SubjectBrowserPage.OpenAsync(_fixture, "Dashboard.md");
 
         var queryButton = page.GetByRole(AriaRole.Button, new() { Name = "Read Evaluated Content" });
         await Assertions.Expect(queryButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
@@ -49,9 +46,7 @@ public class MarkdownQueryTests
     public async Task WhenOpeningReplaceText_ThenTheDialogAsksForTheOldAndTheNewText()
     {
         // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}browser/Dashboard.md");
-        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
+        var page = await SubjectBrowserPage.OpenAsync(_fixture, "Dashboard.md");
 
         var operationButton = page.GetByRole(AriaRole.Button, new() { Name = "Replace Text" });
         await Assertions.Expect(operationButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });

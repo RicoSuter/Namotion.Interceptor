@@ -84,18 +84,6 @@ public class AgentToolOptionsTests
     }
 
     [Fact]
-    public void WhenAStateChangingToolIsNotOffered_ThenItIsStillMarkedAsChangingState()
-    {
-        // Act
-        var options = AgentToolOptions.Create([CreateTool("browse")], ["invoke_operation"]);
-
-        // Assert
-        var option = Assert.Single(options, option => option.Name == "invoke_operation");
-        Assert.False(option.IsOffered);
-        Assert.True(option.CanChangeState);
-    }
-
-    [Fact]
     public void WhenAKnownToolIsOffered_ThenItsShortSummaryIsTheDescription()
     {
         // Arrange
@@ -142,17 +130,19 @@ public class AgentToolOptionsTests
             options.Skip(1).Take(3).Select(option => option.Description));
     }
 
-    [Fact]
-    public void WhenAMarkdownToolIsAllowedButNotOffered_ThenItIsStillMarkedAsChangingPages()
+    [Theory]
+    [InlineData("invoke_operation", false)]
+    [InlineData("edit_markdown", true)]
+    public void WhenAStateChangingToolIsAllowedButNotOffered_ThenItIsStillMarkedAsChangingState(string name, bool expectedChangesPages)
     {
         // Act
-        var options = AgentToolOptions.Create([CreateTool("browse")], ["edit_markdown"]);
+        var options = AgentToolOptions.Create([CreateTool("browse")], [name]);
 
         // Assert
-        var option = Assert.Single(options, option => option.Name == "edit_markdown");
+        var option = Assert.Single(options, option => option.Name == name);
         Assert.False(option.IsOffered);
         Assert.True(option.CanChangeState);
-        Assert.True(option.ChangesPages);
+        Assert.Equal(expectedChangesPages, option.ChangesPages);
     }
 
     [Fact]

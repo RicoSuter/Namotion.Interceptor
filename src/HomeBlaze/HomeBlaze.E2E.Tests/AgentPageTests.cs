@@ -41,11 +41,9 @@ public class AgentPageTests
 
         // Arrange - the reply is unique per run, so a timeline left behind by an earlier run cannot satisfy the assertion.
         var reply = "Hello from the fake CLI " + Guid.NewGuid().ToString("N");
-        var output = $$$"""
-            {"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}
-            {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{{reply}}}"}},"session_id":"e2e-session"}
-            {"type":"result","subtype":"success","is_error":false,"result":"{{{reply}}}","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}
-            """;
+        var output = InitLine + "\n" +
+            $$$"""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{{reply}}}"}},"session_id":"e2e-session"}""" + "\n" +
+            ResultLine(reply);
 
         // Act & Assert
         await RunChatAsync(output, async page =>
@@ -70,7 +68,7 @@ public class AgentPageTests
 
         string CreateScript(string directory) =>
             "#!/bin/sh\ncat > /dev/null\ncat <<'EOF'\n" +
-            """{"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}""" + "\n" +
+            InitLine + "\n" +
             StreamEvent("""{"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[]}}""") + "\n" +
             StreamEvent("""{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""") + "\n" +
             StreamEvent($$$"""{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{{before}}}"}}""") + "\n" +
@@ -81,9 +79,7 @@ public class AgentPageTests
             StreamEvent($$$"""{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{{after}}}"}}""") + "\n" +
             "EOF\n" +
             $"while [ -d '{directory}' ] && [ ! -f '{directory}/finish' ]; do sleep 0.05; done\n" +
-            "cat <<'EOF'\n" +
-            $$$"""{"type":"result","subtype":"success","is_error":false,"result":"{{{after}}}","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""" +
-            "\nEOF\n";
+            "cat <<'EOF'\n" + ResultLine(after) + "\nEOF\n";
 
         // Act & Assert
         await RunChatAsync(CreateScript, async (page, directory) =>
@@ -109,12 +105,10 @@ public class AgentPageTests
         }
 
         // Arrange - the rate limit line adds the two usage tiles, so the tab shows all five.
-        const string output = """
-            {"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}
+        var output = InitLine + "\n" + """
             {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}},"session_id":"e2e-session"}
             {"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.18,"resetsAt":1791663000},"seven_day":{"utilization":0.73,"resetsAt":1791748800}}}}
-            {"type":"result","subtype":"success","is_error":false,"result":"Hello","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}
-            """;
+            """ + "\n" + ResultLine("Hello");
 
         // Act & Assert
         await RunChatAsync(output, async page =>
@@ -149,8 +143,7 @@ public class AgentPageTests
         }
 
         // Arrange
-        const string output = """
-            {"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}
+        const string output = InitLine + "\n" + """
             {"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Not logged in · Please run /login"}]},"error":"authentication_failed","session_id":"e2e-session"}
             {"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login","session_id":"e2e-session","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}
             """;
@@ -185,15 +178,13 @@ public class AgentPageTests
         string CreateScript(string directory) =>
             "#!/bin/sh\ncat > /dev/null\n" +
             "cat <<'EOF'\n" +
-            """{"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}""" + "\n" +
+            InitLine + "\n" +
             Delta(Paragraphs("line", 40)) + "\nEOF\n" +
             WaitFor(directory, "small") + "cat <<'EOF'\n" + Delta(Paragraphs("small", 10)) + "\nEOF\n" +
             WaitFor(directory, "far") + "cat <<'EOF'\n" + Delta(Paragraphs("far", 10)) + "\nEOF\n" +
             WaitFor(directory, "back") + "cat <<'EOF'\n" + Delta(Paragraphs("back", 10)) + "\nEOF\n" +
             WaitFor(directory, "finish") +
-            "cat <<'EOF'\n" + Delta("done") + "\n" +
-            $$$"""{"type":"result","subtype":"success","is_error":false,"result":"{{{Paragraphs("line", 40)}}}done","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""" +
-            "\nEOF\n";
+            "cat <<'EOF'\n" + Delta("done") + "\n" + ResultLine(Paragraphs("line", 40) + "done") + "\nEOF\n";
 
         // Act & Assert
         await RunChatAsync(CreateScript, async (page, directory) =>
@@ -241,15 +232,8 @@ public class AgentPageTests
     [Fact]
     public async Task WhenTheTimelineIsLong_ThenTheChatShowsTheNewestRowsAndTheActivityTabPages()
     {
-        // Arrange - a separate agent, so the seeded entries never reach the chat tests. Its storage is loaded once it
-        // runs; entries appended before that would be replaced by the stored timeline.
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/{TimelineAgentPath}");
-        await Assertions.Expect(page.GetByTestId("agent-status")).ToContainTextAsync(
-            new Regex("Idle|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
-
-        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
-        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + TimelineAgentPath, PathStyle.Canonical));
+        // Arrange - a separate agent, so the seeded entries never reach the chat tests.
+        var (page, resolver, agent) = await OpenSeededAgentPageAsync(TimelineAgentPath);
         var start = DateTimeOffset.UtcNow.AddDays(-1);
         try
         {
@@ -258,7 +242,7 @@ public class AgentPageTests
             {
                 await agent.Timeline.AppendAsync(index % 2 == 0
                     ? new AgentTimelineEntry { Kind = AgentTimelineEntryKind.User, Timestamp = start.AddMinutes(index), Text = $"Question {index}" }
-                    : new AgentTimelineEntry { Kind = AgentTimelineEntryKind.BackgroundRun, Timestamp = start.AddMinutes(index), Text = $"Run {index}", Trigger = "poll" },
+                    : new AgentTimelineEntry { Kind = AgentTimelineEntryKind.BackgroundRun, Timestamp = start.AddMinutes(index), Text = $"Run {index}", Trigger = AgentTriggers.Poll },
                     CancellationToken.None);
             }
 
@@ -308,15 +292,9 @@ public class AgentPageTests
     [Fact]
     public async Task WhenABackgroundRunHasTextBeforeItsResult_ThenTheCardAndTheActivityTabShowTheResult()
     {
-        // Arrange - a separate agent, so the seeded entry never reaches the chat tests. Its storage is loaded once it
-        // runs; an entry appended before that would be replaced by the stored timeline.
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/{ResultAgentPath}");
+        // Arrange - a separate agent, so the seeded entry never reaches the chat tests.
+        var (page, resolver, agent) = await OpenSeededAgentPageAsync(ResultAgentPath);
         var status = page.GetByTestId("agent-status");
-        await Assertions.Expect(status).ToContainTextAsync(new Regex("Idle|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
-
-        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
-        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + ResultAgentPath, PathStyle.Canonical));
         var result = "Conveyor at **700 RPM** " + Guid.NewGuid().ToString("N");
         var preamble = "Checking the conveyor " + Guid.NewGuid().ToString("N");
         try
@@ -327,7 +305,7 @@ public class AgentPageTests
                 Timestamp = DateTimeOffset.UtcNow,
                 Text = preamble + "\n\n" + result,
                 FinalText = result,
-                Trigger = "poll"
+                Trigger = AgentTriggers.Poll
             }, CancellationToken.None);
 
             // Act
@@ -359,21 +337,10 @@ public class AgentPageTests
     [Fact]
     public async Task WhenEditingACliAgent_ThenTheWebToolsAreOfferedWithTheWebWarning()
     {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}browser/{ResultAgentPath}");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
-        // The edit button is prerendered, and a click before the circuit is connected is lost.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-        var editButton = page.Locator("#scrollContainer [data-testid='edit-subject-button']").Last;
-        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-
         // Act
-        await editButton.ClickAsync();
+        var dialog = await OpenEditDialogAsync(ResultAgentPath);
 
         // Assert
-        var dialog = page.GetByRole(AriaRole.Dialog);
         var webSearch = dialog.GetByTestId("agent-edit-tool-web_search");
         await Assertions.Expect(webSearch).ToContainTextAsync("Searches the web.", new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(webSearch.GetByTestId("agent-edit-tool-web-warning")).ToHaveTextAsync("Loads untrusted web content");
@@ -384,21 +351,10 @@ public class AgentPageTests
     [Fact]
     public async Task WhenEditingAnAgent_ThenTheMarkdownToolsAreOfferedWithThePagesWarning()
     {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}browser/{ResultAgentPath}");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
-        // The edit button is prerendered, and a click before the circuit is connected is lost.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-        var editButton = page.Locator("#scrollContainer [data-testid='edit-subject-button']").Last;
-        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-
         // Act
-        await editButton.ClickAsync();
+        var dialog = await OpenEditDialogAsync(ResultAgentPath);
 
         // Assert
-        var dialog = page.GetByRole(AriaRole.Dialog);
         var editMarkdown = dialog.GetByTestId("agent-edit-tool-edit_markdown");
         await Assertions.Expect(editMarkdown).ToContainTextAsync("Replaces a passage of a Markdown page or document.", new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(editMarkdown.GetByTestId("agent-edit-tool-pages-warning")).ToHaveTextAsync("Changes pages and documents");
@@ -417,14 +373,8 @@ public class AgentPageTests
         }
 
         // Arrange - a separate agent with more rows than the chat renders, so each new row also drops the oldest one
-        // above the view. Its storage is loaded once it runs; entries appended before that would be replaced.
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/{ScrollAgentPath}");
-        await Assertions.Expect(page.GetByTestId("agent-status")).ToContainTextAsync(
-            new Regex("Idle|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
-
-        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
-        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + ScrollAgentPath, PathStyle.Canonical));
+        // above the view.
+        var (page, resolver, agent) = await OpenSeededAgentPageAsync(ScrollAgentPath);
         var reply = "Reply " + Guid.NewGuid().ToString("N");
         var message = "Message " + Guid.NewGuid().ToString("N");
         var scriptDirectory = Directory.CreateTempSubdirectory("e2e-fake-claude").FullName;
@@ -442,14 +392,8 @@ public class AgentPageTests
                 }, CancellationToken.None);
             }
 
-            var scriptPath = Path.Combine(scriptDirectory, "claude");
-            await File.WriteAllTextAsync(scriptPath,
-                "#!/bin/sh\ncat > /dev/null\ncat <<'EOF'\n" +
-                """{"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}""" + "\n" +
-                $$$"""{"type":"result","subtype":"success","is_error":false,"result":"{{{reply}}}","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""" +
-                "\nEOF\n");
-            File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            agent.CliPath = scriptPath;
+            agent.CliPath = await WriteFakeCliAsync(
+                scriptDirectory, "#!/bin/sh\ncat > /dev/null\ncat <<'EOF'\n" + InitLine + "\n" + ResultLine(reply) + "\nEOF\n");
 
             await page.ReloadAsync();
             var timelineLocator = page.GetByTestId("agent-timeline");
@@ -477,6 +421,80 @@ public class AgentPageTests
             DeleteAgentData(resolver, agent);
             Directory.Delete(scriptDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task WhenAddingAndDeletingAMemoryEntry_ThenTheMemoryTableShowsEachChange()
+    {
+        // Arrange - the key is unique per run, so an entry left behind by an earlier run cannot satisfy the assertion.
+        var key = "e2e/" + Guid.NewGuid().ToString("N");
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{AgentPath}");
+        await Assertions.Expect(page.GetByTestId("agent-chat-input")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
+        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + AgentPath, PathStyle.Canonical));
+        var table = page.GetByTestId("agent-memory");
+
+        try
+        {
+            // Act & Assert
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Configuration" }).ClickAsync();
+            await page.GetByTestId("agent-memory-add").ClickAsync();
+            await page.GetByTestId("agent-memory-key").Locator("input").FillAsync(key);
+            await page.GetByTestId("agent-memory-value").Locator("textarea").FillAsync("noted by the end-to-end test");
+            await page.GetByTestId("agent-memory-save").ClickAsync();
+            await Assertions.Expect(table).ToContainTextAsync(key, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(table).ToContainTextAsync("noted by the end-to-end test");
+            Assert.Equal("noted by the end-to-end test", agent.Memory.GetSnapshot().TryGetEntry(key)?.Value);
+
+            await page.GetByRole(AriaRole.Button, new() { Name = "Delete " + key }).ClickAsync();
+            await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+            await Assertions.Expect(table).Not.ToContainTextAsync(key, new() { Timeout = PageLoadTimeout });
+            Assert.Null(agent.Memory.GetSnapshot().TryGetEntry(key));
+        }
+        finally
+        {
+            DeleteAgentData(resolver, agent);
+        }
+    }
+
+    private const string InitLine = """{"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}""";
+
+    private static string ResultLine(string result) =>
+        $$$"""{"type":"result","subtype":"success","is_error":false,"result":"{{{result}}}","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""";
+
+    [UnsupportedOSPlatform("windows")]
+    private static async Task<string> WriteFakeCliAsync(string directory, string script)
+    {
+        var scriptPath = Path.Combine(directory, "claude");
+        await File.WriteAllTextAsync(scriptPath, script);
+        File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return scriptPath;
+    }
+
+    /// <summary>
+    /// Opens the page of an agent that a test seeds with timeline entries, once the agent has loaded its storage, which
+    /// would replace entries appended before.
+    /// </summary>
+    private async Task<(IPage Page, SubjectPathResolver Resolver, ClaudeCliAgent Agent)> OpenSeededAgentPageAsync(string agentPath)
+    {
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{agentPath}");
+        await Assertions.Expect(page.GetByTestId("agent-status")).ToContainTextAsync(
+            new Regex("Idle|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
+
+        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
+        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + agentPath, PathStyle.Canonical));
+        return (page, resolver, agent);
+    }
+
+    private async Task<ILocator> OpenEditDialogAsync(string path)
+    {
+        var page = await SubjectBrowserPage.OpenAsync(_fixture, path);
+        var editButton = page.Locator("#scrollContainer [data-testid='edit-subject-button']").Last;
+        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await editButton.ClickAsync();
+        return page.GetByRole(AriaRole.Dialog);
     }
 
     private static Task<bool> IsInViewAsync(ILocator row) =>
@@ -532,42 +550,6 @@ public class AgentPageTests
             "resolve(timeline.firstElementChild.getBoundingClientRect().top - timeline.getBoundingClientRect().top))))",
             timeline);
 
-    [Fact]
-    public async Task WhenAddingAndDeletingAMemoryEntry_ThenTheMemoryTableShowsEachChange()
-    {
-        // Arrange - the key is unique per run, so an entry left behind by an earlier run cannot satisfy the assertion.
-        var key = "e2e/" + Guid.NewGuid().ToString("N");
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/{AgentPath}");
-        await Assertions.Expect(page.GetByTestId("agent-chat-input")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
-        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + AgentPath, PathStyle.Canonical));
-        var table = page.GetByTestId("agent-memory");
-
-        try
-        {
-            // Act & Assert
-            await page.GetByRole(AriaRole.Tab, new() { Name = "Configuration" }).ClickAsync();
-            await page.GetByTestId("agent-memory-add").ClickAsync();
-            await page.GetByTestId("agent-memory-key").Locator("input").FillAsync(key);
-            await page.GetByTestId("agent-memory-value").Locator("textarea").FillAsync("noted by the end-to-end test");
-            await page.GetByTestId("agent-memory-save").ClickAsync();
-            await Assertions.Expect(table).ToContainTextAsync(key, new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(table).ToContainTextAsync("noted by the end-to-end test");
-            Assert.Equal("noted by the end-to-end test", agent.Memory.GetSnapshot().TryGetEntry(key)?.Value);
-
-            await page.GetByRole(AriaRole.Button, new() { Name = "Delete " + key }).ClickAsync();
-            await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
-            await Assertions.Expect(table).Not.ToContainTextAsync(key, new() { Timeout = PageLoadTimeout });
-            Assert.Null(agent.Memory.GetSnapshot().TryGetEntry(key));
-        }
-        finally
-        {
-            DeleteAgentData(resolver, agent);
-        }
-    }
-
-
     /// <summary>
     /// Points the test agent at a script that replays <paramref name="output"/>, sends a chat message from its
     /// page and runs <paramref name="assert"/> on the page, then restores the agent and deletes its data files.
@@ -589,9 +571,7 @@ public class AgentPageTests
         var scriptDirectory = Directory.CreateTempSubdirectory("e2e-fake-claude").FullName;
         try
         {
-            var scriptPath = Path.Combine(scriptDirectory, "claude");
-            await File.WriteAllTextAsync(scriptPath, createScript(scriptDirectory));
-            File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            var scriptPath = await WriteFakeCliAsync(scriptDirectory, createScript(scriptDirectory));
 
             // The page shows the chat only once the storage has loaded the agent, which can still be under way
             // right after the host started, so the agent is resolved after that.
