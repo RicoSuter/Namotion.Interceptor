@@ -41,6 +41,24 @@ public class SubjectPathResolverSecretTests
         Assert.Equal("visible", value);
     }
 
+    [Fact]
+    public void WhenResolvingAPropertyExcludedFromExpressionsForDisplay_ThenNothingIsResolved()
+    {
+        // Arrange
+        var (resolver, root) = CreateResolver();
+        root.RawSource = "Password=s3cr3t";
+
+        // Act
+        var property = resolver.ResolveDisplayableProperty("/RawSource", PathStyle.Canonical);
+        var scopedValue = resolver.ResolveScopedValue("RawSource", PathStyle.Canonical, root);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(scopedValue);
+        Assert.Null(resolver.ResolveValue("RawSource", PathStyle.Canonical));
+        Assert.NotNull(resolver.ResolveProperty("/RawSource", PathStyle.Canonical));
+    }
+
     private static (SubjectPathResolver Resolver, SecretConfigTestSubject Root) CreateResolver()
     {
         var context = InterceptorSubjectContext.Create()

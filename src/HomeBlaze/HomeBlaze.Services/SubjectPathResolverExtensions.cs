@@ -28,7 +28,7 @@ public static class SubjectPathResolverExtensions
 
     /// <summary>
     /// Resolves a property from a path for showing its value, for example in a page expression: the same as
-    /// <see cref="ResolveProperty"/>, except that a secret configuration property resolves to null, as if it did not exist.
+    /// <see cref="ResolveProperty"/>, except that a property that is not <see cref="SubjectRegistryExtensions.IsDisplayable"/>, such as a secret configuration property, resolves to null, as if it did not exist.
     /// </summary>
     /// <param name="resolver">The path resolver.</param>
     /// <param name="path">Path to resolve (e.g., "/Demo/Conveyor/Temperature" or "motor/Speed").</param>
@@ -42,7 +42,7 @@ public static class SubjectPathResolverExtensions
         IInterceptorSubject? relativeTo = null)
     {
         var property = resolver.ResolveProperty(path, style, relativeTo);
-        return property?.GetConfigurationMetadata()?.IsSecret == true ? null : property;
+        return property is not null && property.IsDisplayable() ? property : null;
     }
 
     /// <summary>

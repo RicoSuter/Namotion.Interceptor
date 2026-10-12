@@ -89,8 +89,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public partial MarkdownFrontmatter? Frontmatter { get; private set; }
 
     /// <summary>
-    /// Tracked content property - triggers UI refresh on change.
+    /// Tracked content property - triggers UI refresh on change. It holds the raw source with the secret values of its
+    /// blocks, so page expressions never show it.
     /// </summary>
+    [ExcludeFromExpressions]
     public partial string? Content { get; private set; }
 
     /// <summary>

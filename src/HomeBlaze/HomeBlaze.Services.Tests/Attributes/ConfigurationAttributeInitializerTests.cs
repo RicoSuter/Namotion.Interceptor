@@ -147,6 +147,9 @@ public partial class SecretConfigTestSubject
 
     [Configuration]
     public partial string? PublicConfig { get; set; }
+
+    [ExcludeFromExpressions]
+    public partial string? RawSource { get; set; }
 }
 
 [InterceptorSubject]

@@ -69,7 +69,7 @@ public static class SubjectPathResolverScopeExtensions
 
     /// <summary>
     /// Resolves a property for showing its value, for example in a page expression: the same as
-    /// <see cref="ResolveScopedProperty"/>, except that a secret configuration property resolves to null, as if it did not exist.
+    /// <see cref="ResolveScopedProperty"/>, except that a property that is not <see cref="SubjectRegistryExtensions.IsDisplayable"/>, such as a secret configuration property, resolves to null, as if it did not exist.
     /// </summary>
     public static RegisteredSubjectProperty? ResolveScopedDisplayableProperty(
         this SubjectPathResolver resolver,
@@ -78,7 +78,7 @@ public static class SubjectPathResolverScopeExtensions
         IInterceptorSubject from)
     {
         var property = resolver.ResolveScopedProperty(path, style, from);
-        return property?.GetConfigurationMetadata()?.IsSecret == true ? null : property;
+        return property is not null && property.IsDisplayable() ? property : null;
     }
 
     /// <summary>

@@ -528,6 +528,28 @@ public class MarkdownFileTests
     }
 
     [Fact]
+    public async Task WhenAnExpressionReadsTheRawSourceOfAPage_ThenItHasNoValue()
+    {
+        // Arrange: the source holds a secret value, which the content property has as written.
+        var content =
+            $":: {typeof(EmbeddedSecretDevice).FullName}#gateway Password=s3cr3t\n::\n\n" +
+            "Own: {{ Content }}, relative: {{ ../page.md/Content }}, absolute: {{ /Docs/page.md/Content }}, title: {{ Title }}.";
+        var markdown = await CreatePageInGraphAsync(content);
+
+        // Act
+        var evaluated = markdown.ReadEvaluatedContent();
+        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Path);
+
+        // Assert
+        Assert.EndsWith("Own: , relative: , absolute: , title: Page.", evaluated);
+        Assert.DoesNotContain("s3cr3t", evaluated);
+        Assert.Null(expressions["Content"].Value);
+        Assert.Null(expressions["../page.md/Content"].Value);
+        Assert.Null(expressions["/Docs/page.md/Content"].Value);
+        Assert.Equal("Page", expressions["Title"].Value);
+    }
+
+    [Fact]
     public async Task WhenABlockShowsASecretConfigurationPropertyInItsContent_ThenItsExpressionHasNoValue()
     {
         // Arrange

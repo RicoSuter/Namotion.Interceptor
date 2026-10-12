@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -62,6 +63,16 @@ public static class SubjectRegistryExtensions
     public static StateMetadata? GetStateMetadata(this RegisteredSubjectProperty property)
     {
         return property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
+    }
+
+    /// <summary>
+    /// Gets whether a page expression may show the value of the property: it is no secret configuration property and
+    /// not marked with <see cref="ExcludeFromExpressionsAttribute"/>.
+    /// </summary>
+    public static bool IsDisplayable(this RegisteredSubjectProperty property)
+    {
+        return property.GetConfigurationMetadata()?.IsSecret != true &&
+            !property.ReflectionAttributes.OfType<ExcludeFromExpressionsAttribute>().Any();
     }
 
     /// <summary>
