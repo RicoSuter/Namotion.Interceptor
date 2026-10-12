@@ -985,7 +985,7 @@ A type whose blocks only lay out a page, such as a card or a tab layout, is mark
 public partial class Widget : ITitleProvider, IConfigurable
 ```
 
-Mark only types whose configuration is plain values and that do nothing but show content.
+Name the properties that hold a link with `LinkProperties`, so only safe addresses are allowed, and those that load content from an address, such as a picture, with `MediaProperties`, so a block that sets one is no layout block. Mark only types whose configuration is plain values and that do nothing but show content.
 
 ### Excluding Properties from Page Expressions
 

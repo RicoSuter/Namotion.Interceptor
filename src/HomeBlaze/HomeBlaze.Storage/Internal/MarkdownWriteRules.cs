@@ -116,8 +116,9 @@ internal static partial class MarkdownWriteRules
 
     private const string LayoutMessage =
         "With the permission to edit page layout, only layout blocks can be added, changed, removed or moved: cards, tabs, " +
-        "tab and flow layouts, style blocks and Widget references to existing subjects, with single values of their " +
-        "configuration on the head line or in the json block. Every other block, and each old subject(name) code block, " +
+        "tab and flow layouts, expansion panels, alerts, style blocks, value widgets such as ValueTile, Indicator, Progress " +
+        "and ValueList, and Widget references to existing subjects, with single values of their configuration on the head " +
+        "line or in the json block, links only to http, https, mailto or relative addresses and no picture. Every other block, and each old subject(name) code block, " +
         "must stay exactly as ReadRawContent shows it, with *** where it hides a secret value, inside the same blocks and " +
         $"at the same position among the content around it, and {MarkdownFile.ActiveContent} cannot be added or changed.";
 
@@ -607,7 +608,7 @@ internal static partial class MarkdownWriteRules
     /// Whether a link target is relative or uses http, https or mailto. Browsers ignore whitespace and control
     /// characters in a scheme, so they are removed before it is compared.
     /// </summary>
-    private static bool IsSafeUrl(string url)
+    internal static bool IsSafeUrl(string url)
     {
         var colon = url.IndexOf(':');
         if (colon < 0 || url.AsSpan(0, colon).IndexOfAny('/', '?', '#') >= 0)

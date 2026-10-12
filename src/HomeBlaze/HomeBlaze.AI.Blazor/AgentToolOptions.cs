@@ -51,8 +51,8 @@ internal static class AgentToolOptions
     };
 
     private const string PageLayoutSummary =
-        "Lets the Markdown tools add, change, remove and move layout blocks of pages: cards, tabs, layouts, style blocks " +
-        "and widgets of existing subjects. Needs a Markdown tool.";
+        "Lets the Markdown tools add, change, remove and move layout blocks of pages: cards, tabs, layouts, style blocks, " +
+        "value widgets and widgets of existing subjects. Needs a Markdown tool.";
 
     private static readonly HashSet<string> PageTools = new(HomeBlazeMarkdownToolProvider.ToolNames, StringComparer.Ordinal);
 

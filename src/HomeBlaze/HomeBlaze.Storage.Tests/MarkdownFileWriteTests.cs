@@ -803,7 +803,14 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", ":: {.note}\nSome text.\n::")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Widget Path=motor\n::")]
     [InlineData("Card text.", "Card text.\n\n::: HomeBlaze.Components.Widget\n```json\n{ \"Path\": \"motor\" }\n```\n:::")]
-    [InlineData("# Plant", "# Plant at {{ motor/CurrentSpeed }}")]
+    [InlineData("# Plant", "# Plant at {{ motor/CurrentSpeed | raw }}")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.ValueTile Path=motor/CurrentSpeed Label=Speed\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Indicator Path=motor/IsAtTargetSpeed\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Progress Path=motor/CurrentSpeed Maximum=3000\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.ValueList\n::: Value Path=motor/CurrentSpeed Label=Speed\n:::\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.ExpansionPanels\n::: Panel Title=More\nDetails\n:::\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Alert\nCareful.\n::")]
+    [InlineData("Title=Info", "Title=Info Href=\"https://example.com/plant\"")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesLayoutBlocks_ThenThePageIsWritten(string oldText, string newText)
     {
         // Arrange
@@ -860,6 +867,8 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData(":: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n::\n", ":: HomeBlaze.Components.Card\n::: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n:::\n::\n", "With the permission to edit page layout")]
     [InlineData(":: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n::\n\n", "", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card Title=Info Password=x\n::", "With the permission to edit page layout")]
+    [InlineData("Title=Info", "Title=Info Image=\"https://tracker.example.com/pixel.png\"", "With the permission to edit page layout")]
+    [InlineData("Title=Info", "Title=Info Href=\"javascript:alert(1)\"", "With the permission to edit page layout")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesAnythingElse_ThenItIsRejected(string oldText, string newText, string expectedMessage)
     {
         // Arrange

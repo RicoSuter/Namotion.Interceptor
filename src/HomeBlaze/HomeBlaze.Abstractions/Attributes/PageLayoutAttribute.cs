@@ -14,4 +14,16 @@ public sealed class PageLayoutAttribute : Attribute
     /// the path of a widget reference, or null when the type refers to no subject.
     /// </summary>
     public string? ReferencePathProperty { get; init; }
+
+    /// <summary>
+    /// The names of configuration properties that hold the address of a link. Such a block stays a layout block only
+    /// while each of them is a relative address or uses http, https or mailto.
+    /// </summary>
+    public string[]? LinkProperties { get; init; }
+
+    /// <summary>
+    /// The names of configuration properties that load content from an address, such as a picture. A block that sets
+    /// one of them is no layout block, like an image in the text of a page.
+    /// </summary>
+    public string[]? MediaProperties { get; init; }
 }

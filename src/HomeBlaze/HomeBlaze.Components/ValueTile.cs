@@ -12,6 +12,7 @@ namespace HomeBlaze.Components;
 [Description("A tile with a small label and one large value")]
 [DisplayName("Value tile")]
 [SubjectIcon("Pin")]
+[PageLayout]
 [InterceptorSubject]
 public partial class ValueTile : IConfigurable, ITitleProvider
 {

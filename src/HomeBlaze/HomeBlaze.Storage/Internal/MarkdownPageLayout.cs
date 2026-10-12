@@ -32,7 +32,11 @@ internal static class MarkdownPageLayout
             .Select(property => property.Name)
             .ToHashSet(StringComparer.Ordinal);
 
-        return new LayoutType(properties, attribute.ReferencePathProperty);
+        return new LayoutType(
+            properties,
+            attribute.ReferencePathProperty,
+            (attribute.LinkProperties ?? []).ToHashSet(StringComparer.Ordinal),
+            (attribute.MediaProperties ?? []).ToHashSet(StringComparer.Ordinal));
     });
 
     /// <summary>
@@ -93,7 +97,7 @@ internal static class MarkdownPageLayout
 
         foreach (var argument in block.Head!.Arguments)
         {
-            if (!layoutType.ConfigurationProperties.Contains(argument.Key))
+            if (!IsLayoutValue(layoutType, argument.Key, argument.Value))
             {
                 return false;
             }
@@ -109,13 +113,21 @@ internal static class MarkdownPageLayout
         try
         {
             return JsonNode.Parse(json, documentOptions: MarkdownContentParser.StrictJsonOptions) is JsonObject configuration &&
-                   configuration.All(pair => layoutType.ConfigurationProperties.Contains(pair.Key) && pair.Value is null or JsonValue);
+                   configuration.All(pair => pair.Value is null or JsonValue &&
+                                             IsLayoutValue(layoutType, pair.Key, (pair.Value as JsonValue)?.ToString()));
         }
         catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
         {
             return false;
         }
     }
+
+    // A value of a non-secret configuration property, which neither loads content nor links to an address that runs
+    // something when it is opened.
+    private static bool IsLayoutValue(LayoutType layoutType, string key, string? value) =>
+        layoutType.ConfigurationProperties.Contains(key) &&
+        !layoutType.MediaProperties.Contains(key) &&
+        (!layoutType.LinkProperties.Contains(key) || value is null || MarkdownWriteRules.IsSafeUrl(value));
 
     /// <summary>
     /// Gets the reference path that a layout block configures, or null when its type refers to no subject or the block
@@ -147,6 +159,10 @@ internal static class MarkdownPageLayout
         }
     }
 
-    /// <summary>The non-secret configuration properties of a layout type and its reference path property.</summary>
-    internal sealed record LayoutType(IReadOnlySet<string> ConfigurationProperties, string? ReferencePathProperty);
+    /// <summary>The non-secret configuration properties of a layout type, its reference path property and its link and media properties.</summary>
+    internal sealed record LayoutType(
+        IReadOnlySet<string> ConfigurationProperties,
+        string? ReferencePathProperty,
+        IReadOnlySet<string> LinkProperties,
+        IReadOnlySet<string> MediaProperties);
 }

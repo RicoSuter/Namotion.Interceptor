@@ -13,7 +13,7 @@ namespace HomeBlaze.Components;
 [Description("A titled card that wraps page content")]
 [DisplayName("Card")]
 [SubjectIcon("WebAsset")]
-[PageLayout]
+[PageLayout(LinkProperties = [nameof(Href)], MediaProperties = [nameof(Image)])]
 [InterceptorSubject]
 public partial class Card : IConfigurable, ITitleProvider
 {
