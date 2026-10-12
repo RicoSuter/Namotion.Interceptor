@@ -160,11 +160,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     [Derived]
     public string? Title => Name ?? GetType().Name;
 
-    // A configuration file may hold an explicit null, which the rest of the agent never expects.
-    partial void OnWatchPathsChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
-
-    partial void OnAllowedToolsChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
-
     public string? IconName => "SmartToy";
 
     /// <summary>The timeline of background runs and chat.</summary>
@@ -202,6 +197,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     /// <summary>The services shared by agents.</summary>
     protected AgentServices Services => _services;
+
+    // A configuration file may hold an explicit null, which the rest of the agent never expects.
+    partial void OnWatchPathsChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
+
+    partial void OnAllowedToolsChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
 
     /// <summary>Starts a background run now, also while automatic runs are paused.</summary>
     [Operation(Title = "Run Now", Icon = "PlayArrow", Position = 1)]
