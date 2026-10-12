@@ -28,6 +28,9 @@ public sealed partial record MarkdownBlockHead(
 
     public static bool IsValidId(string id) => IdRegex().IsMatch(id);
 
+    /// <summary>Gets whether the name is a valid block name: a type name or a slot name.</summary>
+    internal static bool IsValidName(string name) => NameRegex().IsMatch(name);
+
     /// <summary>Gets whether a head line can have the name as the name of a slot block: a block name without a dot.</summary>
     internal static bool IsValidSlotName(string name) => !name.Contains('.') && NameRegex().IsMatch(name);
 

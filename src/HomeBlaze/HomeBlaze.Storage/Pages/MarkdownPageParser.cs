@@ -61,6 +61,12 @@ public sealed class MarkdownBlock
 
     public MarkdownSpan? ConfigurationSpan { get; init; }
 
+    /// <summary>
+    /// The span of a <c>json</c> code block that is the first thing inside the block, also for a block that it does not
+    /// configure, such as an invalid block. Equals <see cref="ConfigurationSpan"/> for a widget or slot block.
+    /// </summary>
+    internal MarkdownSpan? JsonFenceSpan { get; init; }
+
     public IReadOnlyList<MarkdownBlock> Children => ChildList;
 
     /// <summary>The list behind <see cref="Children"/>, which only the parser fills.</summary>
@@ -281,6 +287,9 @@ public static class MarkdownPageParser
         return builder.Build();
     }
 
+    /// <summary>Finds the end of the line at <paramref name="position"/>, before its line ending, for the redaction of a page.</summary>
+    internal static int GetLineEnd(string source, int position) => FindLineEnd(source, position);
+
     private static MarkdownSpan[] FindCodeSpans(string source, MarkdownDocument document)
     {
         var spans = new List<MarkdownSpan>();
@@ -412,12 +421,12 @@ public static class MarkdownPageParser
         }
 
         string? configurationJson = null;
-        MarkdownSpan? configurationSpan = null;
+        MarkdownSpan? jsonFenceSpan = null;
         var isOwner = kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot;
-        if (isOwner && container.Count > 0 && container[0] is FencedCodeBlock { Info: "json" } configuration)
+        if (container.Count > 0 && container[0] is FencedCodeBlock { Info: "json" } configuration)
         {
-            configurationJson = configuration.Lines.ToString();
-            configurationSpan = new MarkdownSpan(
+            configurationJson = isOwner ? configuration.Lines.ToString() : null;
+            jsonFenceSpan = new MarkdownSpan(
                 configuration.Span.Start, FindCodeBlockEnd(source, configuration) - configuration.Span.Start);
         }
 
@@ -432,7 +441,8 @@ public static class MarkdownPageParser
             HasClosingLine = container.HasClosingLine || container.IsClosingLine,
             HeadSpan = headSpan,
             ConfigurationJson = configurationJson,
-            ConfigurationSpan = configurationSpan
+            ConfigurationSpan = isOwner ? jsonFenceSpan : null,
+            JsonFenceSpan = jsonFenceSpan
         };
     }
 

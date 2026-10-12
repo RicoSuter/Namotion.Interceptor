@@ -1,8 +1,11 @@
 using System.Collections;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Pages;
+using Markdig.Syntax;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
@@ -21,51 +24,123 @@ internal static class EmbeddedSubjectRedaction
     /// <summary>
     /// Returns the source of the page with each secret value in the configuration of a block replaced by <c>***</c>,
     /// found through the configuration metadata of the subject the block configures. Every argument value and the json
-    /// block of a block without a subject become <c>***</c>, as does a json block that cannot be read as an object.
-    /// A block without secret values keeps its exact text.
+    /// block of a block without a subject become <c>***</c>, as does a json block that cannot be read as an object,
+    /// everything after the fence and the name of a head line that cannot be read, and the content of a fenced code block
+    /// of the old <c>subject(name)</c> form. A block without secret values keeps its exact text.
     /// </summary>
     /// <param name="page">The page as last parsed.</param>
     /// <param name="blockSubjects">The subjects of the blocks of <paramref name="page"/> by <see cref="MarkdownBlock.Index"/>.</param>
-    public static string Redact(MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects)
+    public static string Redact(MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects) =>
+        Redact(page, blockSubjects, out _);
+
+    /// <inheritdoc cref="Redact(MarkdownPage, IReadOnlyDictionary{int, IInterceptorSubject})"/>
+    /// <param name="page">The page as last parsed.</param>
+    /// <param name="blockSubjects">The subjects of the blocks of <paramref name="page"/> by <see cref="MarkdownBlock.Index"/>.</param>
+    /// <param name="redactedSpans">The spans of the replaced text in the returned source, in order.</param>
+    public static string Redact(
+        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, out List<MarkdownSpan> redactedSpans)
     {
         var source = page.Source;
-        List<(MarkdownSpan Span, string Text)>? replacements = null;
+        var replacements = new List<(MarkdownSpan Span, string Text)>();
         foreach (var block in page.AllBlocks)
         {
-            // A block at a place where blocks are not allowed has no parsed head, but its line can still hold arguments.
-            var head = block.Head;
-            if (head is null &&
-                !MarkdownBlockHead.TryParse(source.Substring(block.HeadSpan.Start, block.HeadSpan.Length), out head, out _))
-            {
-                continue;
-            }
+            AddBlockReplacements(source, block, blockSubjects.GetValueOrDefault(block.Index), replacements);
+        }
 
-            var subject = blockSubjects.GetValueOrDefault(block.Index);
-            if (RedactArguments(head, subject) is { } redactedHead)
+        foreach (var codeBlock in page.Document.Descendants<FencedCodeBlock>())
+        {
+            if (MarkdownSegmentBuilder.IsOldSubjectFence(codeBlock) && codeBlock.Lines.Count > 0)
             {
-                (replacements ??= []).Add((block.HeadSpan, redactedHead.Format()));
-            }
-
-            if (block is { ConfigurationSpan: { } configurationSpan, ConfigurationJson: { } json } &&
-                RedactConfiguration(json, subject, MarkdownBlockWriter.GetLineEnding(source, configurationSpan.Start)) is { } redactedFence)
-            {
-                (replacements ??= []).Add((configurationSpan, redactedFence));
+                var start = codeBlock.Lines.Lines[0].Position;
+                var end = MarkdownPageParser.GetLineEnd(source, codeBlock.Lines.Lines[codeBlock.Lines.Count - 1].Position);
+                replacements.Add((new MarkdownSpan(start, end - start), RedactedValue));
             }
         }
 
-        if (replacements is null)
+        redactedSpans = [];
+        if (replacements.Count == 0)
         {
             return source;
         }
 
-        // From the end, so the spans of the replacements still to come stay valid.
-        var result = source;
-        foreach (var (span, text) in replacements.OrderByDescending(replacement => replacement.Span.Start))
+        replacements.Sort(static (left, right) => left.Span.Start.CompareTo(right.Span.Start));
+        var result = new StringBuilder(source.Length);
+        var copied = 0;
+        foreach (var (span, text) in replacements)
         {
-            result = string.Concat(result.AsSpan(0, span.Start), text, result.AsSpan(span.End));
+            result.Append(source, copied, span.Start - copied);
+            redactedSpans.Add(new MarkdownSpan(result.Length, text.Length));
+            result.Append(text);
+            copied = span.End;
         }
 
-        return result;
+        return result.Append(source, copied, source.Length - copied).ToString();
+    }
+
+    private static void AddBlockReplacements(
+        string source, MarkdownBlock block, IInterceptorSubject? subject, List<(MarkdownSpan Span, string Text)> replacements)
+    {
+        // A block at a place where blocks are not allowed has no parsed head, but its line can still hold arguments.
+        var headText = source.Substring(block.HeadSpan.Start, block.HeadSpan.Length);
+        var head = block.Head;
+        if (head is not null || MarkdownBlockHead.TryParse(headText, out head, out _))
+        {
+            if (RedactArguments(head, subject) is { } redactedHead)
+            {
+                replacements.Add((block.HeadSpan, redactedHead.Format()));
+            }
+        }
+        else if (RedactUnreadableHead(headText) is { } redactedHeadText)
+        {
+            replacements.Add((block.HeadSpan, redactedHeadText));
+        }
+
+        if (block.JsonFenceSpan is { } jsonFenceSpan)
+        {
+            var lineEnding = MarkdownBlockWriter.GetLineEnding(source, jsonFenceSpan.Start);
+            var redactedFence = subject is not null && block.ConfigurationJson is { } json
+                ? RedactConfiguration(json, subject, lineEnding)
+                : FormatFence(RedactedValue, lineEnding);
+            if (redactedFence is not null)
+            {
+                replacements.Add((jsonFenceSpan, redactedFence));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Keeps the fence and a valid name with its valid #id of a head line that cannot be read, and replaces the rest by
+    /// <c>***</c>. Returns null when nothing follows them.
+    /// </summary>
+    private static string? RedactUnreadableHead(string headText)
+    {
+        var position = 0;
+        while (position < headText.Length && headText[position] == MarkdownBlockFence.Character)
+        {
+            position++;
+        }
+
+        var keptLength = position;
+        while (position < headText.Length && char.IsWhiteSpace(headText[position]))
+        {
+            position++;
+        }
+
+        var tokenStart = position;
+        while (position < headText.Length && !char.IsWhiteSpace(headText[position]))
+        {
+            position++;
+        }
+
+        var token = headText[tokenStart..position];
+        var idStart = token.IndexOf('#');
+        var name = idStart < 0 ? token : token[..idStart];
+        if (MarkdownBlockHead.IsValidName(name))
+        {
+            keptLength = tokenStart + (idStart >= 0 && MarkdownBlockHead.IsValidId(token[(idStart + 1)..]) ? token.Length : name.Length);
+        }
+
+        return string.IsNullOrWhiteSpace(headText[keptLength..]) ? null : $"{headText[..keptLength]} {RedactedValue}";
     }
 
     // Returns null when no argument value is hidden, so the head line keeps its exact text.
@@ -101,13 +176,8 @@ internal static class EmbeddedSubjectRedaction
     }
 
     // Returns null when the json block has no secret value, so it keeps its exact text.
-    private static string? RedactConfiguration(string json, IInterceptorSubject? subject, string lineEnding)
+    private static string? RedactConfiguration(string json, IInterceptorSubject subject, string lineEnding)
     {
-        if (subject is null)
-        {
-            return FormatFence(RedactedValue, lineEnding);
-        }
-
         JsonNode? node;
         try
         {
@@ -134,20 +204,23 @@ internal static class EmbeddedSubjectRedaction
         var isRedacted = false;
         foreach (var property in subject.GetConfigurationProperties())
         {
-            var key = jsonObject.Select(pair => pair.Key).FirstOrDefault(key => key.Equals(property.Name, StringComparison.OrdinalIgnoreCase));
-            if (key is null || jsonObject[key] is not { } value)
-            {
-                continue;
-            }
+            var keys = jsonObject
+                .Where(pair => pair.Value is not null && pair.Key.Equals(property.Name, StringComparison.OrdinalIgnoreCase))
+                .Select(pair => pair.Key)
+                .ToList();
 
-            if (property.GetConfigurationMetadata()?.IsSecret == true)
+            var isSecret = property.GetConfigurationMetadata()?.IsSecret == true;
+            foreach (var key in keys)
             {
-                jsonObject[key] = RedactedValue;
-                isRedacted = true;
-            }
-            else
-            {
-                isRedacted |= RedactNested(value, property.GetValue());
+                if (isSecret)
+                {
+                    jsonObject[key] = RedactedValue;
+                    isRedacted = true;
+                }
+                else
+                {
+                    isRedacted |= RedactNested(jsonObject[key]!, property.GetValue());
+                }
             }
         }
 
@@ -161,12 +234,14 @@ internal static class EmbeddedSubjectRedaction
             case IInterceptorSubject child when node is JsonObject childObject:
                 return RedactObject(childObject, child);
             case IDictionary dictionary when node is JsonObject entries:
+                // A key that is not a string, such as a number or an enum value, is written as its text.
                 var isRedacted = false;
-                foreach (var (key, entry) in entries)
+                foreach (DictionaryEntry dictionaryEntry in dictionary)
                 {
-                    if (entry is not null && dictionary.Contains(key))
+                    var key = Convert.ToString(dictionaryEntry.Key, CultureInfo.InvariantCulture);
+                    if (key is not null && entries[key] is { } entry)
                     {
-                        isRedacted |= RedactNested(entry, dictionary[key]);
+                        isRedacted |= RedactNested(entry, dictionaryEntry.Value);
                     }
                 }
 
