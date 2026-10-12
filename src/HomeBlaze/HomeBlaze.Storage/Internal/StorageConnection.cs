@@ -85,7 +85,7 @@ internal sealed class StorageConnection : IDisposable
     public bool IsEnded => _endedSource.IsCancellationRequested;
 
     /// <summary>
-    /// Starts requesting passes: periodically, after a pass that did not finish, and after changes that the
+    /// Starts requesting passes: periodically, after a pass that failed, and after changes that the
     /// file watcher reports once <see cref="TryStartFileWatcher"/> has started it. Called once, in the step
     /// that makes the connection the current one, and so never after <see cref="StopTrigger"/>.
     /// </summary>

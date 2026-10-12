@@ -163,10 +163,8 @@ public partial class FluentStorageContainer :
         return base.StartAsync(cancellationToken);
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        await ConnectAsync(stoppingToken);
-    }
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+        => ConnectAsync(stoppingToken);
 
     /// <summary>
     /// Stops following the storage: neither a file event nor the periodic timer starts a pass any more, so
@@ -231,7 +229,6 @@ public partial class FluentStorageContainer :
     private StorageConnectionSettings Settings
         => new(StorageType, ConnectionString, ContainerName, EnableFileWatching, ReconcileIntervalSeconds);
 
-    // A relative connection string is resolved against the data directory of the instance.
     private string ResolveStorageDirectory(string connectionString)
     {
         var baseDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory
@@ -421,8 +418,6 @@ public partial class FluentStorageContainer :
             {
                 _connection = connection;
 
-                // In the step that publishes: a stop or a dispose either finds the connection with its
-                // trigger started, or keeps the trigger from starting. The file watcher starts after it.
                 if (!_isStopped)
                 {
                     connection.StartTrigger((namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed));
