@@ -31,6 +31,9 @@ public class ValueWidgetTests
     private static ILocator GetCard(IPage page, string title) =>
         page.GetByTestId("card").Filter(new() { HasText = title });
 
+    private static ILocator GetRow(IPage page, string label) =>
+        page.GetByTestId("value-row").Filter(new() { Has = page.GetByTestId("value-label").GetByText(label, new() { Exact = true }) });
+
     [Fact]
     public async Task WhenCardHasHeaderOptions_ThenHeaderShowsThem()
     {
@@ -81,5 +84,83 @@ public class ValueWidgetTests
         // Assert
         await Assertions.Expect(GetCard(page, "Plain Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenRowHasPathAndLabel_ThenItShowsTheFormattedValue()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        await Assertions.Expect(GetRow(page, "Soll").GetByTestId("value-text")).ToHaveTextAsync("800", new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenRowHasNoLabel_ThenLabelIsThePropertyAndValueHasItsUnit()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var row = GetRow(page, "Temperature");
+        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveTextAsync(new Regex(@"^-?\d+(\.\d+)?°C$"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenValueChanges_ThenRowUpdatesLive()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        await Assertions.Expect(GetRow(page, "Ist").GetByTestId("value-text")).ToHaveTextAsync(new Regex(@"^[1-9]\d*$"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenRowHasMap_ThenItShowsTheTextOfTheCase()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        await Assertions.Expect(GetRow(page, "Zustand").GetByTestId("value-text")).ToHaveTextAsync(new Regex("^(steht|startet|läuft|stoppt)$"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenPathLeadsNowhere_ThenRowShowsADashAndNoError()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var row = GetRow(page, "Fehlt");
+        await Assertions.Expect(row.GetByTestId("value-missing")).ToHaveTextAsync("–", new() { Timeout = Timeout });
+        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenRowHasContentAndNoPath_ThenItShowsTheContentOnly()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var row = GetRow(page, "Zwei Werte");
+        await Assertions.Expect(row).ToContainTextAsync("800 von 800", new() { Timeout = Timeout });
+        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveCountAsync(0);
+        await Assertions.Expect(row.GetByTestId("value-missing")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenPageHasValueTile_ThenItShowsLabelAndValue()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var tile = page.GetByTestId("value-tile");
+        await Assertions.Expect(tile.GetByTestId("value-label")).ToHaveTextAsync("Tile Target", new() { Timeout = Timeout });
+        await Assertions.Expect(tile.GetByTestId("value-text")).ToHaveTextAsync("800");
     }
 }

@@ -1,0 +1,45 @@
+@using HomeBlaze.Components.Abstractions.TimeZones
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueList))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+<MudList T="string" Dense="true" ReadOnly="true" data-testid="value-list">
+    @foreach (var row in (Subject as ValueList)?.Values ?? [])
+    {
+        // Read once per render and never kept: the read is what the tracking scope records.
+        var reading = string.IsNullOrEmpty(row.Path) ? null : ValueReader.Read(PathResolver, row, row.Path, row.Map, TimeZone);
+        var icon = reading?.Icon ?? row.Icon;
+
+        <MudListItem T="string"
+                     @key="row"
+                     Class="value-list-item"
+                     Icon="@(string.IsNullOrEmpty(icon) ? null : MudBlazorIconResolver.Resolve(icon))"
+                     data-testid="value-row">
+            <div class="d-flex align-center gap-2">
+                <MudText Typo="Typo.body2" Class="flex-grow-1" data-testid="value-label">@ValueReader.GetLabel(reading, row.Label)</MudText>
+                @if (row.Content is not null)
+                {
+                    <SubjectComponent Subject="@row.Content" Type="SubjectComponentType.Widget" />
+                }
+
+                @if (reading is not null)
+                {
+                    <ValueText Reading="@reading" Path="@row.Path" Typo="Typo.subtitle2" />
+                }
+            </div>
+        </MudListItem>
+    }
+</MudList>
+
+<style>
+    /* A page gives every paragraph a distance above and below, and every text of a row is one (so is the one MudListItem wraps its content in), which makes a row three times as tall. */
+    .mud-list-item.value-list-item p {
+        margin: 0;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}
