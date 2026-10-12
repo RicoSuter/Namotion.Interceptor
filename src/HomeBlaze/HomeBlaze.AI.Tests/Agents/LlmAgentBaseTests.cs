@@ -75,6 +75,31 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
+    public async Task WhenABackgroundAnswerHasTextBeforeItsResult_ThenTheEntryKeepsBothAndTheResultIsTheLastAnalysis()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = (_, _, _) => Task.FromResult(
+            agent.Requests.Count == 1
+                ? new AgentTurnResult("Checking the freezer.\n\nFreezer is warm.", null, null) { FinalText = "Freezer is warm." }
+                : new AgentTurnResult("Oven is off.", null, null)));
+
+        // Act
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        var analysisAfterFirstRun = test.Agent.LastAnalysis;
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2 && !test.Agent.IsBusy);
+
+        // Assert
+        Assert.Equal("Freezer is warm.", analysisAfterFirstRun);
+        Assert.Equal("Checking the freezer.\n\nFreezer is warm.", test.Agent.Timeline.Entries[0].Text);
+        Assert.Equal("Freezer is warm.", test.Agent.Timeline.Entries[0].FinalText);
+        Assert.Null(test.Agent.Timeline.Entries[1].FinalText);
+        Assert.Contains("Freezer is warm.", test.Agent.Requests[1].UserMessage);
+        Assert.DoesNotContain("Checking the freezer.", test.Agent.Requests[1].UserMessage);
+    }
+
+    [Fact]
     public async Task WhenAWatchedPropertyChanges_ThenABackgroundRunIsTriggered()
     {
         // Arrange

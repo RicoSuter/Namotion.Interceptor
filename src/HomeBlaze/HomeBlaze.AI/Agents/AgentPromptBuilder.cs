@@ -131,7 +131,7 @@ public static class AgentPromptBuilder
 
         foreach (var result in recentResults)
         {
-            builder.Append("- ").Append(FormatTime(result.Timestamp)).Append(": ").AppendLine(result.Text.Trim());
+            builder.Append("- ").Append(FormatTime(result.Timestamp)).Append(": ").AppendLine(result.ResultText.Trim());
         }
 
         if (lastQuietRun is { } quiet)
@@ -178,7 +178,7 @@ public static class AgentPromptBuilder
         builder.AppendLine("Background findings since your last reply:");
         foreach (var finding in findings)
         {
-            builder.Append("- ").Append(FormatTime(finding.Timestamp)).Append(": ").AppendLine(finding.Text.Trim());
+            builder.Append("- ").Append(FormatTime(finding.Timestamp)).Append(": ").AppendLine(finding.ResultText.Trim());
         }
 
         builder.AppendLine();

@@ -36,6 +36,28 @@ public sealed class AgentTimelineTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAnEntryHasAFinalText_ThenItIsReloadedAndAnEntryWithoutOneOmitsIt()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.timeline.jsonl");
+        var timeline = new AgentTimeline(path);
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.BackgroundRun, 0, "Checking.\n\nFreezer is warm.") with { FinalText = "Freezer is warm." }, CancellationToken.None);
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.BackgroundRun, 1, "Oven is off."), CancellationToken.None);
+
+        // Act
+        var reloaded = new AgentTimeline(path);
+        await reloaded.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Freezer is warm.", "Oven is off."], reloaded.Entries.Select(entry => entry.ResultText));
+        Assert.Equal(["Freezer is warm.", null], reloaded.Entries.Select(entry => entry.FinalText));
+        var lines = await File.ReadAllLinesAsync(path);
+        Assert.Contains("\"finalText\"", lines[0]);
+        Assert.DoesNotContain("finalText", lines[1]);
+        Assert.DoesNotContain("resultText", lines[0]);
+    }
+
+    [Fact]
     public async Task WhenTheFileHasACorruptLine_ThenItIsSkipped()
     {
         // Arrange

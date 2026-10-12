@@ -590,7 +590,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         await memory.LoadAsync(cancellationToken);
         Memory = memory;
         await RestoreRunStatisticsAsync(cancellationToken);
-        LastAnalysis = Timeline.GetRecentBackgroundResults(1) is [var newestResult] ? newestResult.Text : null;
+        LastAnalysis = Timeline.GetRecentBackgroundResults(1) is [var newestResult] ? newestResult.ResultText : null;
         _isStorageLoaded = true;
         RaiseTimelineChanged();
     }
@@ -677,6 +677,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 Kind = AgentTimelineEntryKind.BackgroundRun,
                 Timestamp = started.Value,
                 Text = result.Text,
+                FinalText = result.FinalText == result.Text ? null : result.FinalText,
                 IsQuiet = isQuiet,
                 Trigger = reason,
                 ToolCalls = tools.Calls,

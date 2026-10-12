@@ -4,6 +4,7 @@
     _renderedEntry = Entry;
     _renderedQuietCount = QuietCount;
     _renderedTimeZoneVersion = TimeZoneVersion;
+    _renderedShowsFullAnswer = _showsFullAnswer;
 }
 @switch (Entry.Kind)
 {
@@ -23,7 +24,7 @@
             <MudIcon Icon="@Icons.Material.Outlined.CheckCircle" Size="Size.Small" />
             <MudText Typo="Typo.caption">
                 @(QuietCount <= 1 ? "Quiet background run" : $"{QuietCount} quiet background runs, newest")
-                @TimeZone.Format(Entry.Timestamp) · @Entry.Trigger · @Entry.Text
+                @TimeZone.Format(Entry.Timestamp) · @Entry.Trigger · @Entry.ResultText
             </MudText>
         </MudStack>
         break;
@@ -34,7 +35,12 @@
                 <MudText Typo="Typo.subtitle2">Background run</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.Format(Entry.Timestamp) · @Entry.Trigger</MudText>
             </MudStack>
-            <AgentMarkdown>@_html</AgentMarkdown>
+            <AgentMarkdown>@(_showsFullAnswer ? _fullAnswerHtml : _html)</AgentMarkdown>
+            @if (Entry.FinalText is not null)
+            {
+                <MudButton Variant="Variant.Text" Size="Size.Small" Class="mt-1" OnClick="ToggleFullAnswer"
+                           data-testid="agent-show-full-answer">@(_showsFullAnswer ? "Show result only" : "Show full answer")</MudButton>
+            }
             <AgentToolCalls Calls="Entry.ToolCalls" />
         </MudPaper>
         break;
@@ -53,6 +59,9 @@
     private AgentTimelineEntry? _renderedEntry;
     private AgentTimelineEntry? _htmlEntry;
     private MarkupString _html;
+    private MarkupString _fullAnswerHtml;
+    private bool _showsFullAnswer;
+    private bool _renderedShowsFullAnswer;
     private int _renderedQuietCount;
     private int _renderedTimeZoneVersion;
 
@@ -72,16 +81,33 @@
         if (!ReferenceEquals(_htmlEntry, Entry))
         {
             _htmlEntry = Entry;
-            _html = Entry.Kind == AgentTimelineEntryKind.Assistant || Entry is { Kind: AgentTimelineEntryKind.BackgroundRun, IsQuiet: false }
-                ? new MarkupString(AgentMarkdownRenderer.ToHtml(Entry.Text))
-                : default;
+            _showsFullAnswer = false;
+            _fullAnswerHtml = default;
+            _html = Entry.Kind switch
+            {
+                // A chat reply shows the whole answer; a background run shows its result and the rest on request.
+                AgentTimelineEntryKind.Assistant => new MarkupString(AgentMarkdownRenderer.ToHtml(Entry.Text)),
+                AgentTimelineEntryKind.BackgroundRun when !Entry.IsQuiet => new MarkupString(AgentMarkdownRenderer.ToHtml(Entry.ResultText)),
+                _ => default
+            };
         }
     }
 
-    // Entries are immutable, so an entry renders again only when it is replaced (a growing quiet group) or the
-    // display time zone changed. Compared by reference: records compare by value, which would cost a deep compare.
+    private void ToggleFullAnswer()
+    {
+        if (!_showsFullAnswer && _fullAnswerHtml.Value is null)
+        {
+            _fullAnswerHtml = new MarkupString(AgentMarkdownRenderer.ToHtml(Entry.Text));
+        }
+
+        _showsFullAnswer = !_showsFullAnswer;
+    }
+
+    // Entries are immutable, so an entry renders again only when it is replaced (a growing quiet group), the
+    // display time zone changed or the full answer was toggled. Compared by reference: records compare by value, which would cost a deep compare.
     protected override bool ShouldRender() =>
         !ReferenceEquals(_renderedEntry, Entry) ||
         _renderedQuietCount != QuietCount ||
-        _renderedTimeZoneVersion != TimeZoneVersion;
+        _renderedTimeZoneVersion != TimeZoneVersion ||
+        _renderedShowsFullAnswer != _showsFullAnswer;
 }

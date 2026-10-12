@@ -1,3 +1,4 @@
+using System.Text;
 using Markdig;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
@@ -35,6 +36,35 @@ public static class AgentMarkdownRenderer
         }
 
         return document.ToHtml(Pipeline);
+    }
+
+    /// <summary>
+    /// Converts Markdown to plain text on one line: the text of the rendered elements without markup, link targets
+    /// or images, with line breaks and runs of whitespace collapsed to single spaces.
+    /// </summary>
+    public static string ToPlainText(string markdown)
+    {
+        var text = Markdown.ToPlainText(markdown, Pipeline);
+        var builder = new StringBuilder(text.Length);
+        var isSpacePending = false;
+        foreach (var character in text)
+        {
+            if (char.IsWhiteSpace(character))
+            {
+                isSpacePending = builder.Length > 0;
+                continue;
+            }
+
+            if (isSpacePending)
+            {
+                builder.Append(' ');
+                isSpacePending = false;
+            }
+
+            builder.Append(character);
+        }
+
+        return builder.ToString();
     }
 
     // An allow list: extensions that copy text into class, id or style attributes (custom containers, generic

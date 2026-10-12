@@ -1,3 +1,4 @@
+@using System.Runtime.CompilerServices
 @inject ITimeZoneDisplay TimeZone
 
 @* Tiles at least 150 px wide fill each row, so the three to five tiles wrap evenly on any width. *@
@@ -31,9 +32,11 @@
         <MudTd DataLabel="Tokens (in/out)">@(context.Usage is { } usage ? $"{usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens}/{usage.OutputTokens}" : "")</MudTd>
         <MudTd DataLabel="Tools">@context.ToolCalls.Count</MudTd>
         <MudTd DataLabel="Result">
-            <MudText Typo="Typo.body2" title="@context.Text"
+            @{ var result = GetResultText(context); }
+            <MudText Typo="Typo.body2" title="@result"
                      Color="@(context.Kind == AgentTimelineEntryKind.Error ? Color.Error : Color.Inherit)"
-                     Style="max-width: 40ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;">@context.Text</MudText>
+                     Style="max-width: 40ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;"
+                     data-testid="agent-run-result">@result</MudText>
         </MudTd>
     </RowTemplate>
     <PagerContent>
@@ -49,6 +52,9 @@
 
 @code {
     private const int RunsPerPage = 25;
+
+    // Converted once per entry, which is immutable; entries that left the timeline release their text with them.
+    private static readonly ConditionalWeakTable<AgentTimelineEntry, string> ResultTexts = new();
 
     private IReadOnlyList<AgentTimelineEntry>? _runsSource;
     private List<AgentTimelineEntry> _runs = [];
@@ -78,6 +84,12 @@
 
         return _runs;
     }
+
+    // A run's result is Markdown; the clamped cell shows it as plain text. Errors are plain text already.
+    private static string GetResultText(AgentTimelineEntry entry) =>
+        entry.Kind == AgentTimelineEntryKind.BackgroundRun
+            ? ResultTexts.GetValue(entry, static run => AgentMarkdownRenderer.ToPlainText(run.ResultText))
+            : entry.Text;
 
     private static RenderFragment StatTile(string label, string value) =>
         @<MudPaper Outlined="true" Class="pa-3 mud-height-full">

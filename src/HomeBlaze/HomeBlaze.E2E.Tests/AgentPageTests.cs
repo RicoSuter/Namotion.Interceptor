@@ -20,6 +20,7 @@ public class AgentPageTests
     private const string AgentPath = "Agents/TestAgent";
     private const string TimelineAgentPath = "Agents/TimelineAgent";
     private const string ScrollAgentPath = "Agents/ScrollAgent";
+    private const string ResultAgentPath = "Agents/ResultAgent";
     private const int PageLoadTimeout = 30000;
     private const int ReplyTimeout = 30000;
 
@@ -297,6 +298,51 @@ public class AgentPageTests
             await nextPage.ClickAsync();
             await Assertions.Expect(runRows).ToHaveCountAsync(10);
             await Assertions.Expect(runRows.Last).ToContainTextAsync("Run 1");
+        }
+        finally
+        {
+            DeleteAgentData(resolver, agent);
+        }
+    }
+
+    [Fact]
+    public async Task WhenABackgroundRunHasTextBeforeItsResult_ThenTheCardAndTheActivityTabShowTheResult()
+    {
+        // Arrange - a separate agent, so the seeded entry never reaches the chat tests. Its storage is loaded once it
+        // runs; an entry appended before that would be replaced by the stored timeline.
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{ResultAgentPath}");
+        var status = page.GetByTestId("agent-status");
+        await Assertions.Expect(status).ToContainTextAsync(new Regex("Running|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
+
+        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
+        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + ResultAgentPath, PathStyle.Canonical));
+        var result = "Conveyor at **700 RPM** " + Guid.NewGuid().ToString("N");
+        var preamble = "Checking the conveyor " + Guid.NewGuid().ToString("N");
+        try
+        {
+            await agent.Timeline.AppendAsync(new AgentTimelineEntry
+            {
+                Kind = AgentTimelineEntryKind.BackgroundRun,
+                Timestamp = DateTimeOffset.UtcNow,
+                Text = preamble + "\n\n" + result,
+                FinalText = result,
+                Trigger = "poll"
+            }, CancellationToken.None);
+
+            // Act
+            await page.ReloadAsync();
+
+            // Assert - the card shows the result and the whole answer on request.
+            var card = page.GetByTestId("agent-background-run").Last;
+            var plainResult = result.Replace("**", string.Empty);
+            await Assertions.Expect(card).ToContainTextAsync(plainResult, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(card).Not.ToContainTextAsync(preamble);
+            await card.GetByTestId("agent-show-full-answer").ClickAsync();
+            await Assertions.Expect(card).ToContainTextAsync(preamble);
+
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Activity" }).ClickAsync();
+            await Assertions.Expect(page.GetByTestId("agent-run-result").First).ToHaveTextAsync(plainResult, new() { Timeout = PageLoadTimeout });
         }
         finally
         {

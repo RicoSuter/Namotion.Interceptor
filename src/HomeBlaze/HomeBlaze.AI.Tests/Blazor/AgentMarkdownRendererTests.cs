@@ -216,4 +216,17 @@ public class AgentMarkdownRendererTests
         Assert.Contains("<table>", html);
         Assert.Contains("<ol type=\"a\">", html);
     }
+
+    [Theory]
+    [InlineData("Conveyor at **700 RPM**.", "Conveyor at 700 RPM.")]
+    [InlineData("# Status\n\n- Freezer: *ok*\n- Oven: `off`", "Status Freezer: ok Oven: off")]
+    [InlineData("See [the docs](https://example.com/docs) & <b>more</b>", "See the docs & <b>more</b>")]
+    public void WhenConvertingToPlainText_ThenMarkupIsRemovedAndLinesAreJoined(string markdown, string expected)
+    {
+        // Act
+        var text = AgentMarkdownRenderer.ToPlainText(markdown);
+
+        // Assert
+        Assert.Equal(expected, text);
+    }
 }
