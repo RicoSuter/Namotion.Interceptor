@@ -1,0 +1,30 @@
+@* The value of a value widget: its text in the colour of its case, a dash when it is missing, or the error of its map. *@
+
+@if (Reading.MapError is not null)
+{
+    <MudAlert Severity="Severity.Error" Dense="true" data-testid="value-map-error">@Reading.MapError</MudAlert>
+}
+else if (Reading.IsMissing)
+{
+    <MudTooltip Text="@Path">
+        <MudText Typo="@Typo" Class="mud-text-secondary" data-testid="value-missing">@Reading.Text</MudText>
+    </MudTooltip>
+}
+else
+{
+    <MudText Typo="@Typo" Color="@Reading.Color" data-testid="value-text">@Reading.Text</MudText>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public ValueReading Reading { get; set; } = default!;
+
+    /// <summary>
+    /// The path of the value, shown as tooltip when the value is missing.
+    /// </summary>
+    [Parameter]
+    public string? Path { get; set; }
+
+    [Parameter]
+    public Typo Typo { get; set; } = Typo.body2;
+}
