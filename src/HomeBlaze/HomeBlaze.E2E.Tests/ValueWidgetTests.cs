@@ -13,6 +13,8 @@ public class ValueWidgetTests
 {
     private const int Timeout = 30000;
 
+    private static readonly Regex TemperaturePattern = new(@"^-?\d+(\.\d+)?°C$");
+
     private readonly PlaywrightFixture _fixture;
 
     public ValueWidgetTests(PlaywrightFixture fixture)
@@ -64,6 +66,20 @@ public class ValueWidgetTests
 
     private static ILocator GetExpressionParagraph(IPage page) =>
         page.Locator(".markdown-content p").Filter(new() { HasText = "Start" });
+
+    // The motor of the test page gives its temperature another value every second. A page also renders without a change of a value
+    // while it starts, when the circuit takes over from the prerendered page and when the time zone of the viewer arrives, so the
+    // first other text proves no live update. The second one comes after the circuit is interactive and after a first change.
+    private static async Task ExpectTextToKeepChangingAsync(IPage page, ILocator text)
+    {
+        await ExpectInteractiveAsync(page);
+
+        var first = await text.InnerTextAsync();
+        await Assertions.Expect(text).Not.ToHaveTextAsync(first, new() { Timeout = Timeout });
+
+        var second = await text.InnerTextAsync();
+        await Assertions.Expect(text).Not.ToHaveTextAsync(second, new() { Timeout = Timeout });
+    }
 
     private static ILocator GetCard(IPage page, string title) =>
         page.GetByTestId("card").Filter(new() { HasText = title });
@@ -248,17 +264,20 @@ public class ValueWidgetTests
 
         // Assert
         var row = GetRow(page, "Temperature");
-        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveTextAsync(new Regex(@"^-?\d+(\.\d+)?°C$"), new() { Timeout = Timeout });
+        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveTextAsync(TemperaturePattern, new() { Timeout = Timeout });
     }
 
     [Fact]
     public async Task WhenValueChanges_ThenRowUpdatesLive()
     {
-        // Arrange & Act
+        // Arrange & Act: the motor of the page changes its temperature by itself.
         var page = await OpenPageAsync();
+        var text = GetRow(page, "Temperature").GetByTestId("value-text");
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern, new() { Timeout = Timeout });
 
         // Assert
-        await Assertions.Expect(GetRow(page, "Ist").GetByTestId("value-text")).ToHaveTextAsync(new Regex(@"^[1-9]\d*$"), new() { Timeout = Timeout });
+        await ExpectTextToKeepChangingAsync(page, text);
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern);
     }
 
     [Fact]
@@ -787,7 +806,9 @@ public class ValueWidgetTests
 
         // Assert
         await Assertions.Expect(content).ToBeVisibleAsync();
-        await Assertions.Expect(content).ToContainTextAsync(new Regex(@"speed [1-9]\d* RPM"), new() { Timeout = Timeout });
+        var text = content.GetByText("Closed panel temperature");
+        await Assertions.Expect(text).ToHaveTextAsync(new Regex(@"^Closed panel temperature -?\d+(\.\d+)?°C$"), new() { Timeout = Timeout });
+        await ExpectTextToKeepChangingAsync(page, text);
     }
 
     [Fact]

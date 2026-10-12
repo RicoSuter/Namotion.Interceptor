@@ -93,7 +93,7 @@ Picture card footer
 ::: Panel Title="Open Panel" Icon=Bed Expanded=true
 Open panel target {{ valuemotor/TargetSpeed }}
 ::: Panel Title="Closed Panel"
-Closed panel speed {{ valuemotor/CurrentSpeed }} RPM
+Closed panel temperature {{ valuemotor/Temperature }}
 ::
 
 :: HomeBlaze.Components.ExpansionPanels Single=true
