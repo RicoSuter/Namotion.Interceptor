@@ -419,6 +419,20 @@ public class ConfigurableSubjectSerializerTests
         Assert.Null(result);
     }
 
+    [Theory]
+    [InlineData("[1, 2, 3]")]
+    [InlineData("42")]
+    [InlineData("\"text\"")]
+    [InlineData("null")]
+    public void WhenJsonIsNotAnObject_ThenDeserializeReturnsNull(string json)
+    {
+        // Act
+        var result = _serializer.Deserialize(json);
+
+        // Assert
+        Assert.Null(result);
+    }
+
     [Fact]
     public void WhenNestedSubjectHasConstructorDependency_ThenDeserializeCreatesItThroughTheServiceProvider()
     {

@@ -33,15 +33,20 @@ HomeBlaze is then available at http://localhost:8080 and opens on its welcome pa
 
 Everything HomeBlaze keeps lives in the folder mounted at `/data` (`./data` in the compose file). See [Configuration](configuration.md#data-folder) for the folder layout and the settings that control it.
 
-On the first start, when `Root.json` does not exist, HomeBlaze copies a starting set into the folder: a welcome page, a help page, this documentation, an empty plugin list and a SQLite history store that records to `History/Sqlite`. Existing files are never overwritten. The demo devices and sample plugins are only available when running from source.
+On the first start, when `Root.json` does not exist, HomeBlaze copies a starting set into the folder: a welcome page, a help page, this documentation, an empty plugin list and a SQLite history store that records to `History/Sqlite`. Existing files are never overwritten, except for the documentation described below. The demo devices and sample plugins are only available when running from source.
 
 Back up HomeBlaze by copying this folder. Stop HomeBlaze first (`docker compose stop`) so the SQLite history is copied in a consistent state. The container runs as root, so on Linux the files in `./data` belong to root and editing them on the host needs `sudo`.
 
-The documentation in `Files/Docs` is not updated by later image versions. To replace it with the documentation of the running image:
+The documentation in `Files/Docs` belongs to the image. On every start, HomeBlaze deletes the folder and copies the documentation of the running image into it, so keep your own pages outside `Files/Docs`: anything added or changed there is lost on the next start. If that fails, for example because the disk is full, HomeBlaze logs a warning and starts anyway.
 
-```bash
-docker compose exec homeblaze sh -c 'rm -rf /data/Files/Docs && cp -r /app/Seed/Files/Docs /data/Files/Docs'
+To keep `Files/Docs` as it is, set the seed directory to an empty string in the compose file after the first start. The quotes are required, because an entry without a value keeps the image's seed directory:
+
+```yaml
+    environment:
+      HomeBlaze__SeedDirectory: ""
 ```
+
+While the setting is empty, a new data folder is not filled with the starting set either.
 
 ### Optional services
 

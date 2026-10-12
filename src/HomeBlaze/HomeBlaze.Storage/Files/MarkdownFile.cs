@@ -9,9 +9,7 @@ using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Tracking.Parent;
 using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
 
 namespace HomeBlaze.Storage.Files;
@@ -33,8 +31,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private volatile MarkdownParseResult _parseResult;
 
     // A parse changes the subjects it reuses in place, so two reloads at once would leave the nested subjects
-    // from one parse and the snapshot from another. Only LoadFileAsync takes this. A write-back must not:
-    // the storage reloads the file from inside the write, on the same call chain, and would wait for itself.
+    // from one parse and the snapshot from another. Only OnFileChangedAsync takes this. A write-back must not:
+    // the storage reloads the file as part of the write, and that reload would wait for the write-back that
+    // waits for the write.
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
 
     // Each access reads the current snapshot. Code that needs two of these together must take
@@ -107,16 +106,20 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         _serializer = serializer;
     }
 
-    private async Task LoadFileAsync(CancellationToken cancellationToken)
+    public async Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
         await _reloadLock.WaitAsync(cancellationToken);
         try
         {
-            var metadata = await Storage.GetBlobMetadataAsync(FullPath, cancellationToken);
-
             await using var stream = await Storage.ReadBlobAsync(FullPath, cancellationToken);
             using var reader = new StreamReader(stream);
-            var content = await reader.ReadToEndAsync(cancellationToken);
+
+            // Limited like a call on the storage: the load runs on the storage worker, which a source that stalls
+            // in the middle of the file would otherwise hold.
+            var timeProvider = (Storage as FluentStorageContainer)?.TimeProvider ?? TimeProvider.System;
+            var reading = reader.ReadToEndAsync(cancellationToken);
+            await reading.WithStorageTimeoutAsync("reading", FullPath, timeProvider, cancellationToken);
+            var content = await reading;
             var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
             var result = await _parser.ParseAsync(content, this, Children, cancellationToken);
 
@@ -130,12 +133,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             _parseResult = result;
             Content = content;
             Frontmatter = frontmatter;
-            Children = result.Children;
 
-            if (metadata != null)
+            // The load runs on the worker of the storage. Without the flow of that work, as for every assignment
+            // to the tree: lifecycle handlers run here for a page that is in the tree.
+            using (ExecutionContext.SuppressFlow())
             {
-                FileSize = metadata.Size;
-                LastModified = metadata.LastModifiedUtc ?? DateTime.UtcNow;
+                Children = result.Children;
             }
         }
         finally
@@ -175,11 +178,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph", Icon = "Preview")]
     public string? ReadEvaluatedContent() => _parser.RenderContent(Content, this);
 
-    public Task OnFileChangedAsync(CancellationToken cancellationToken)
-    {
-        return LoadFileAsync(cancellationToken);
-    }
-
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
 
@@ -216,26 +214,27 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return true;
     }
 
-    private (int BlockIndex, IInterceptorSubject Subject)? FindBlock(
+    private static (int BlockIndex, IInterceptorSubject Subject)? FindBlock(
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
     {
         // The edited subject can be nested in the configuration of a block subject, for example a grid cell.
-        for (var current = subject; current is not null && !ReferenceEquals(current, this); current = GetSingleParent(current))
+        var blockIndex = -1;
+        var blockSubject = subject.TryGetConfigurationOwner(candidate =>
         {
-            foreach (var (blockIndex, blockSubject) in blockSubjects)
+            foreach (var (index, candidateBlockSubject) in blockSubjects)
             {
-                if (ReferenceEquals(blockSubject, current))
+                if (ReferenceEquals(candidateBlockSubject, candidate))
                 {
-                    return (blockIndex, current);
+                    blockIndex = index;
+                    return true;
                 }
             }
-        }
 
-        return null;
+            return false;
+        });
+
+        return blockSubject is null ? null : (blockIndex, blockSubject);
     }
-
-    private static IInterceptorSubject? GetSingleParent(IInterceptorSubject subject) =>
-        subject.TryGetRegisteredSubject()?.Parents is { Length: 1 } parents ? parents[0].Property.Subject : null;
 
     private static string FormatFilename(string name)
     {

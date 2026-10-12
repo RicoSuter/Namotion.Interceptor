@@ -18,9 +18,10 @@ public sealed class MarkdownPageFixture
     /// <summary>
     /// The xunit collection of every test class that writes to the in-memory blob storage.
     /// The storage hashes each write with one shared hash instance that is not thread-safe,
-    /// so these classes must not run in parallel.
+    /// so these classes must not run in parallel. It is the collection of <see cref="StorageTestBase"/>,
+    /// whose tests write to in-memory storages as well.
     /// </summary>
-    public const string StorageCollection = "In-memory blob storage";
+    public const string StorageCollection = nameof(StorageTestBase);
 
     private MarkdownPageFixture(FluentStorageContainer storage, IServiceProvider services)
     {
@@ -69,6 +70,7 @@ public sealed class MarkdownPageFixture
         };
         ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
         await storage.ConnectAsync(CancellationToken.None);
+        await StopFollowingAsync(storage);
 
         return new MarkdownPageFixture(storage, serviceProvider);
     }
@@ -106,7 +108,15 @@ public sealed class MarkdownPageFixture
         {
             await connect;
         }
+
+        await StopFollowingAsync(Storage);
     }
+
+    // The pages of a test are created and loaded by the fixture, and the storage only holds their files. A
+    // storage that follows its files would load a page of its own for every file that is written, in the pass
+    // that such a write asks for, and put that page into the tree in place of the page of the test. A stopped
+    // storage runs no pass, while its files can still be read and written.
+    private static Task StopFollowingAsync(FluentStorageContainer storage) => storage.StopAsync(CancellationToken.None);
 
     public async Task StopHostedServicesAsync()
     {
