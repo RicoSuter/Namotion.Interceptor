@@ -1,18 +1,31 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Attributes;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests;
 
 public class MarkdownFileWriteTests : IDisposable
 {
-    private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-markdown-");
+    // The storage is the Files folder of a data directory, so its Docs folder is the documentation folder once the
+    // data directory is known to the storage.
+    private readonly DirectoryInfo _dataDirectory = Directory.CreateTempSubdirectory("homeblaze-markdown-");
+    private readonly DirectoryInfo _directory;
+
+    public MarkdownFileWriteTests()
+    {
+        _directory = _dataDirectory.CreateSubdirectory("Files");
+    }
     private readonly List<FluentStorageContainer> _storages = [];
 
     [Fact]
@@ -671,6 +684,35 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAMarkdownFileIsCreatedInAFolderThatIsAFile_ThenTheMessageSaysSo()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes");
+        var storage = await ConnectAsync();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => storage.CreateMarkdownFileAsync("Notes.md", "New.md", "# New", CancellationToken.None));
+        Assert.StartsWith("'New.md' cannot be created: 'Notes.md' is a file and not a folder.", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenAFileOfANonConfigurableTypeIsAskedToBeSavedAsConfiguration_ThenItIsNotWritten()
+    {
+        // Arrange
+        WriteFile("Plan.testnote", "plain text");
+        var storage = await ConnectAsync();
+        var note = Assert.IsType<TestNoteFile>(storage.Children["Plan.testnote"]);
+
+        // Act
+        var isWritten = await storage.WriteConfigurationAsync(note, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal("plain text", ReadFile("Plan.testnote"));
+    }
+
+    [Fact]
     public async Task WhenTheStorageIsAskedToSaveTheConfigurationOfAPage_ThenItDoesNotWriteThePage()
     {
         // Arrange
@@ -811,9 +853,9 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.All(method.Parameters.Where(parameter => parameter.RequiresInput), parameter => Assert.Equal(typeof(string), parameter.Type));
     }
 
-    private FluentStorageContainer CreateStorage(string storageType = "disk")
+    private FluentStorageContainer CreateStorage(string storageType = "disk", string? dataDirectory = null)
     {
-        var services = CreateServices(out var context);
+        var services = CreateServices(out var context, dataDirectory);
         var serviceProvider = services.BuildServiceProvider();
         var storage = new FluentStorageContainer(
             serviceProvider.GetRequiredService<SubjectTypeRegistry>(),
@@ -837,12 +879,15 @@ public class MarkdownFileWriteTests : IDisposable
         return storage;
     }
 
-    private static ServiceCollection CreateServices(out IInterceptorSubjectContext context)
+    /// <param name="context">The context of the services.</param>
+    /// <param name="dataDirectory">The data directory that the root manager serves to the storage, or null for the default.</param>
+    private static ServiceCollection CreateServices(out IInterceptorSubjectContext context, string? dataDirectory = null)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
         typeProvider.AddAssembly(typeof(Components.Card).Assembly);
+        typeProvider.AddAssembly(typeof(MarkdownFileWriteTests).Assembly);
 
         var services = new ServiceCollection();
         context = SubjectContextFactory.Create(services);
@@ -852,6 +897,13 @@ public class MarkdownFileWriteTests : IDisposable
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
+        if (dataDirectory is not null)
+        {
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+                .AddInMemoryCollection([new(HomeBlazePaths.RootConfigurationFileKey, Path.Combine(dataDirectory, "root.json"))])
+                .Build());
+        }
+
         services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
         return services;
@@ -882,7 +934,7 @@ public class MarkdownFileWriteTests : IDisposable
             storage.Dispose();
         }
 
-        _directory.Delete(recursive: true);
+        _dataDirectory.Delete(recursive: true);
     }
 
     /// <summary>A stream whose reads wait until <see cref="Open"/> is called.</summary>
@@ -919,4 +971,20 @@ public class MarkdownFileWriteTests : IDisposable
             return base.Read(buffer);
         }
     }
+}
+
+/// <summary>A file type that is neither configurable nor a document.</summary>
+[InterceptorSubject]
+[FileExtension(".testnote")]
+public partial class TestNoteFile
+{
+    public TestNoteFile(IStorageContainer storage, string fullPath)
+    {
+        Storage = storage;
+        FullPath = fullPath;
+    }
+
+    public IStorageContainer Storage { get; }
+
+    public string FullPath { get; }
 }
