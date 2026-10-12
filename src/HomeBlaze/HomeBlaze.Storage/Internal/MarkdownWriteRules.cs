@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
@@ -17,7 +18,7 @@ namespace HomeBlaze.Storage.Internal;
 /// The rules shared by the operations that write Markdown files: local storage only, a size limit, plain file names,
 /// unchanged blocks and no added active content.
 /// </summary>
-internal static class MarkdownWriteRules
+internal static partial class MarkdownWriteRules
 {
     private static readonly char[] InvalidFileNameCharacters = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
@@ -152,6 +153,7 @@ internal static class MarkdownWriteRules
                 throw new ArgumentException(LayoutMessage, parameterName);
             }
 
+            EnsureLayoutBuilds(oldContent, newContent, newPage, layout, parameterName);
             EnsureReferencesResolve(newPage, layout, parameterName);
             return;
         }
@@ -172,6 +174,48 @@ internal static class MarkdownWriteRules
 
     private static IEnumerable<string> GetUnitKeys(List<UnitText> units) =>
         units.Select(unit => unit.Identity + "\n" + unit.Text).Order(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Ensures that every layout block of the new page would be built, so that none turns into an error box and detaches
+    /// the subjects inside it, and that no layout block takes a name that another block has or that has the shape of the
+    /// key of a block without a name.
+    /// </summary>
+    /// <exception cref="ArgumentException">A layout block would be shown as an error or takes such a name.</exception>
+    private static void EnsureLayoutBuilds(
+        ActiveContentOfPage oldContent, ActiveContentOfPage newContent, MarkdownPage newPage, PageLayoutRules layout, string parameterName)
+    {
+        var analysis = newContent.Layout!;
+        var oldLayoutNames = oldContent.Layout!.LayoutBlocks
+            .Select(block => block.Head?.Id)
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        var nameCounts = newPage.AllBlocks
+            .Select(block => block.Head?.Id)
+            .OfType<string>()
+            .CountBy(id => id, StringComparer.Ordinal)
+            .ToDictionary(StringComparer.Ordinal);
+
+        foreach (var block in analysis.LayoutBlocks)
+        {
+            if (block.Head?.Id is { } id &&
+                (nameCounts[id] > 1 || (!oldLayoutNames.Contains(id) && PositionalKeyShape().IsMatch(id))))
+            {
+                throw new ArgumentException(
+                    $"The name '#{id}' of the block at line {block.Line} is used by another block or has the shape of the key " +
+                    "of a block without a name, such as Card_3. Give the layout block another name.", parameterName);
+            }
+        }
+
+        if (layout.FindLayoutError(newPage, analysis.KeyedBlocks, analysis.LayoutBlocks) is { } error)
+        {
+            throw new ArgumentException(
+                $"The change would show a layout block as an error, which takes the subjects inside it off the page. {error}",
+                parameterName);
+        }
+    }
+
+    [GeneratedRegex(@"_[0-9]+$")]
+    private static partial Regex PositionalKeyShape();
 
     /// <exception cref="ArgumentException">A layout block refers to a path that leads to no subject.</exception>
     private static void EnsureReferencesResolve(MarkdownPage page, PageLayoutRules layout, string parameterName)
@@ -213,8 +257,10 @@ internal static class MarkdownWriteRules
         var message = layout is null ? ActiveContentMessage : LayoutMessage;
 
         // Every redaction is inside a unit, so a unit of the source maps to the view by the redactions before its end.
-        var units = GetUnits(MarkdownPageParser.Parse(source), layout);
-        var newUnits = GetUnits(MarkdownPageParser.Parse(newContent), layout);
+        var page = MarkdownPageParser.Parse(source);
+        var newPage = MarkdownPageParser.Parse(newContent);
+        var units = GetUnits(page, layout is null ? null : AnalyzeLayout(page, layout));
+        var newUnits = GetUnits(newPage, layout is null ? null : AnalyzeLayout(newPage, layout));
         if (units.Count != newUnits.Count)
         {
             throw new ArgumentException(message, parameterName);
@@ -361,7 +407,8 @@ internal static class MarkdownWriteRules
             activeMarkup.AddRange(abbreviations.Values.Select(abbreviation => "abbreviation:" + abbreviation.Label + "=" + abbreviation.Text));
         }
 
-        return new ActiveContentOfPage(GetUnits(page, layout), layout is null ? GetUnnamedBlockPositions(page) : [], activeMarkup);
+        var analysis = layout is null ? null : AnalyzeLayout(page, layout);
+        return new ActiveContentOfPage(GetUnits(page, analysis), layout is null ? GetUnnamedBlockPositions(page) : [], activeMarkup, analysis);
     }
 
     /// <summary>
@@ -405,7 +452,7 @@ internal static class MarkdownWriteRules
     /// each with its place among the blocks, which the keys of the subjects hold. The text is compared with line feeds as
     /// line endings.
     /// </summary>
-    private static List<UnitText> GetUnits(MarkdownPage page, PageLayoutRules? layout)
+    private static List<UnitText> GetUnits(MarkdownPage page, LayoutAnalysis? layout)
     {
         var source = page.Source;
         var lineEnds = GetLineEnds(source);
@@ -419,9 +466,7 @@ internal static class MarkdownWriteRules
         }
         else
         {
-            var layoutBlocks = MarkdownPageLayout.FindLayoutBlocks(page, layout.FindType);
-            var places = GetBlockPlaces(page);
-            AddUnitsBelowLayout(page.Blocks, layoutBlocks, places, source, lineEnds, units);
+            AddUnitsBelowLayout(page.Blocks, layout.LayoutBlocks, layout.Places, source, lineEnds, units);
         }
 
         var blockCount = units.Count;
@@ -470,49 +515,35 @@ internal static class MarkdownWriteRules
     }
 
     /// <summary>
-    /// Gets the place of each block among the blocks of the page: the path of its key and the keys of the blocks around
-    /// it, each key being the #name of a block or its name and its position among the content around it, with the names
-    /// of its configuration values. A subject is kept by a reload only while its place is the same.
+    /// Gets the layout blocks of the page and the place of the subject of each block as a parse finds it again
+    /// (<see cref="MarkdownSubjectKeys.Walk"/>). A subject is kept by a reload only while its place is the same.
     /// </summary>
-    private static Dictionary<MarkdownBlock, string> GetBlockPlaces(MarkdownPage page)
+    private static LayoutAnalysis AnalyzeLayout(MarkdownPage page, PageLayoutRules layout)
     {
+        var keyedBlocks = MarkdownSubjectKeys.Walk(MarkdownSegmentBuilder.Build(page), layout.FindType, GetConfigurationNames);
         var places = new Dictionary<MarkdownBlock, string>(ReferenceEqualityComparer.Instance);
-        AddBlockPlaces(MarkdownSegmentBuilder.Build(page), string.Empty, places);
-        return places;
-    }
-
-    private static void AddBlockPlaces(IReadOnlyList<MarkdownSegment> segments, string path, Dictionary<MarkdownBlock, string> places)
-    {
-        for (var index = 0; index < segments.Count; index++)
+        foreach (var keyed in keyedBlocks)
         {
-            if (segments[index] is BlockMarkdownSegment { Block: var block } blockSegment)
-            {
-                var key = block.Head?.Id is { } id
-                    ? "#" + id
-                    : (block.Head?.Name ?? block.Kind.ToString()) + "_" + index.ToString(CultureInfo.InvariantCulture);
-
-                // A removed configuration value creates the subject again, and with it the subjects inside it.
-                var configurationNames = string.Join(",", GetConfigurationNames(block).Order(StringComparer.Ordinal));
-                var place = path + "/" + key + "(" + configurationNames + ")";
-                places[block] = place;
-                AddBlockPlaces(blockSegment.Content, place, places);
-            }
+            places[keyed.Segment.Block] = keyed.Place;
         }
+
+        return new LayoutAnalysis(MarkdownPageLayout.FindLayoutBlocks(page, layout.FindType), keyedBlocks, places);
     }
 
-    private static IEnumerable<string> GetConfigurationNames(MarkdownBlock block)
+    private static List<string> GetConfigurationNames(MarkdownBlock block)
     {
-        var names = block.Head?.Arguments.Select(argument => argument.Key) ?? [];
+        var names = block.Head?.Arguments.Select(argument => argument.Key).ToList() ?? [];
         try
         {
-            if (block.ConfigurationJson is { } json && JsonNode.Parse(json) is JsonObject configuration)
+            if (block.ConfigurationJson is { } json &&
+                JsonNode.Parse(json, documentOptions: MarkdownContentParser.StrictJsonOptions) is JsonObject configuration)
             {
-                names = names.Concat(configuration.Select(pair => pair.Key));
+                names.AddRange(configuration.Select(pair => pair.Key));
             }
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
         {
-            names = names.Append("!");
+            names.Add("!");
         }
 
         return names;
@@ -608,7 +639,12 @@ internal static class MarkdownWriteRules
     /// <summary>The kind of a unit, its text for the comparison, its span in its source and its place among the blocks.</summary>
     private readonly record struct UnitText(string Kind, string Text, MarkdownSpan Span, string Identity);
 
-    private sealed record ActiveContentOfPage(List<UnitText> Units, List<string> UnnamedBlockPositions, List<string> ActiveMarkup);
+    private sealed record ActiveContentOfPage(
+        List<UnitText> Units, List<string> UnnamedBlockPositions, List<string> ActiveMarkup, LayoutAnalysis? Layout);
+
+    /// <summary>The layout blocks of a page, its blocks with their places, and the place of each block.</summary>
+    private sealed record LayoutAnalysis(
+        HashSet<MarkdownBlock> LayoutBlocks, List<KeyedBlock> KeyedBlocks, Dictionary<MarkdownBlock, string> Places);
 }
 
 /// <summary>
@@ -616,4 +652,9 @@ internal static class MarkdownWriteRules
 /// </summary>
 /// <param name="FindType">Gets the type that a widget block names with its full name, or null when there is none.</param>
 /// <param name="ResolvesToSubject">Gets whether a reference path of a layout block leads to an existing subject.</param>
-internal sealed record PageLayoutRules(Func<string, Type?> FindType, Func<string, bool> ResolvesToSubject);
+/// <param name="FindLayoutError">Runs the checks of a parse that need no instance on the layout blocks of a page, see
+/// <see cref="MarkdownContentParser.FindLayoutError"/>.</param>
+internal sealed record PageLayoutRules(
+    Func<string, Type?> FindType,
+    Func<string, bool> ResolvesToSubject,
+    Func<MarkdownPage, IReadOnlyList<KeyedBlock>, IReadOnlySet<MarkdownBlock>, string?> FindLayoutError);

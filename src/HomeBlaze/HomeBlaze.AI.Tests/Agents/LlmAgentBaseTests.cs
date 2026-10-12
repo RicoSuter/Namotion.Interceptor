@@ -49,8 +49,11 @@ public class LlmAgentBaseTests
                 };
             });
 
-        // Act
-        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        // Act: on a flow that has the opposite setting, which the tools must not take over.
+        using (MarkdownPageLayoutPermission.Enter(!canEditPageLayout))
+        {
+            await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        }
 
         // Assert
         Assert.False(granted["browse"]);

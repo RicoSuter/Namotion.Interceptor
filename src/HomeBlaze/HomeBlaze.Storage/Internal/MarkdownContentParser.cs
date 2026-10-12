@@ -345,7 +345,7 @@ public sealed partial class MarkdownContentParser
         }
 
         // An id can equal the positional key of another block, for example #Card_3.
-        var key = head.Id ?? $"{type.Name}_{index}";
+        var key = MarkdownSubjectKeys.GetContentKey(head.Id, type, index);
         if (children.ContainsKey(key))
         {
             return (null, null, new BlockError(block.Line, FormatUsedTwice(key)));
@@ -409,7 +409,7 @@ public sealed partial class MarkdownContentParser
                 return (null, new BlockError(block.Line, configurationError!));
             }
 
-            if (!TryArrangeContent(type, slots, segment, state, out var content, out var contentError))
+            if (!TryArrangeContent(type, slots, segment, state.OwnsName, out var content, out var contentError))
             {
                 return (null, contentError);
             }

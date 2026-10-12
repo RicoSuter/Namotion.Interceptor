@@ -535,7 +535,7 @@ public class MarkdownFileTests
         // Arrange
         var markdown = await CreatePageInGraphAsync(PageWithSecretBlock);
         var view = markdown.ReadRawContent()!;
-        using var permission = MarkdownPageLayoutPermission.Grant();
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
 
         // Act
         await markdown.ReplaceContentAsync(

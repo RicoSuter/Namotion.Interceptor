@@ -12,11 +12,14 @@ public static class MarkdownPageLayoutPermission
     /// <summary>Whether the permission is granted on the current flow.</summary>
     public static bool IsGranted => IsGrantedOnFlow.Value;
 
-    /// <summary>Grants the permission on the current flow until the returned scope is disposed.</summary>
-    public static IDisposable Grant()
+    /// <summary>
+    /// Sets whether the permission is granted on the current flow until the returned scope is disposed. A caller that
+    /// writes pages for someone sets it either way, so that a grant of the flow it runs on never carries over.
+    /// </summary>
+    public static IDisposable Enter(bool isGranted)
     {
         var wasGranted = IsGrantedOnFlow.Value;
-        IsGrantedOnFlow.Value = true;
+        IsGrantedOnFlow.Value = isGranted;
         return new Scope(wasGranted);
     }
 

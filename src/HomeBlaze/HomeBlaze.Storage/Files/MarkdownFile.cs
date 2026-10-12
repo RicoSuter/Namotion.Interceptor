@@ -356,7 +356,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // The rules of the permission to edit page layout when the caller has it, which a reference path resolves from this page.
     private PageLayoutRules? GetPageLayoutRules() => MarkdownPageLayoutPermission.IsGranted
-        ? new PageLayoutRules(_parser.FindType, path => _parser.ResolvesToSubject(path, this))
+        ? new PageLayoutRules(_parser.FindType, path => _parser.ResolvesToSubject(path, this), _parser.FindLayoutError)
         : null;
 
     // Reads from storage rather than Content, which lags behind an external edit until its file event arrives.

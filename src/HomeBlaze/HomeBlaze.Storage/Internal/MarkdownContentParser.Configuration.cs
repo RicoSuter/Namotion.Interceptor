@@ -26,7 +26,7 @@ public sealed partial class MarkdownContentParser
     private static readonly ConcurrentDictionary<Type, IReadOnlyDictionary<string, Type>> ConfigurationPropertyCache = new();
 
     // A JsonObject with a duplicate key parses and then throws on the first write, so the duplicate is rejected while parsing.
-    private static readonly JsonDocumentOptions StrictJsonOptions = new() { AllowDuplicateProperties = false };
+    internal static readonly JsonDocumentOptions StrictJsonOptions = new() { AllowDuplicateProperties = false };
 
     // The top-level keys of the configuration last applied to a subject. See CanUpdateInPlace.
     private readonly ConditionalWeakTable<IInterceptorSubject, string[]> _appliedConfigurationKeys = new();

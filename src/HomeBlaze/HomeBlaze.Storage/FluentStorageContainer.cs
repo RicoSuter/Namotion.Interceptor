@@ -838,7 +838,7 @@ public partial class FluentStorageContainer :
             return null;
 
         var parser = _serviceProvider.GetRequiredService<MarkdownContentParser>();
-        return new PageLayoutRules(parser.FindType, path => path.StartsWith('/') && parser.ResolvesToSubject(path, this));
+        return new PageLayoutRules(parser.FindType, path => path.StartsWith('/') && parser.ResolvesToSubject(path, this), parser.FindLayoutError);
     }
 
     private static string GetKeyTakenMessage(StorageConnection connection, string relativePath, string name)

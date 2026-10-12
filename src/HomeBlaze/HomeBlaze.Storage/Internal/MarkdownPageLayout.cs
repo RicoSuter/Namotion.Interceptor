@@ -104,13 +104,14 @@ internal static class MarkdownPageLayout
             return true;
         }
 
-        // Only single values: an object or a list could hold a subject definition.
+        // Only single values: an object or a list could hold a subject definition. Read with the rules of a parse, and
+        // anything that cannot be read makes the block no layout block, so that it is kept and hidden like any other.
         try
         {
-            return JsonNode.Parse(json) is JsonObject configuration &&
+            return JsonNode.Parse(json, documentOptions: MarkdownContentParser.StrictJsonOptions) is JsonObject configuration &&
                    configuration.All(pair => layoutType.ConfigurationProperties.Contains(pair.Key) && pair.Value is null or JsonValue);
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
         {
             return false;
         }
@@ -134,12 +135,13 @@ internal static class MarkdownPageLayout
 
         try
         {
-            return block.ConfigurationJson is { } json && JsonNode.Parse(json) is JsonObject configuration &&
+            return block.ConfigurationJson is { } json &&
+                   JsonNode.Parse(json, documentOptions: MarkdownContentParser.StrictJsonOptions) is JsonObject configuration &&
                    configuration[property] is JsonValue value && value.TryGetValue<string>(out var path)
                 ? path
                 : null;
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
         {
             return null;
         }

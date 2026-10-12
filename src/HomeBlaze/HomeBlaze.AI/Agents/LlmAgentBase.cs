@@ -1004,18 +1004,13 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     // A backend may call tools on a flow that does not descend from RunTurnAsync, such as an HTTP request of
     // the MCP route, so each call marks its own flow as part of this agent's turn. The permission to edit page layout
-    // is granted the same way, on the flow of the call only.
+    // is set the same way, granted or not, on the flow of the call only.
     private McpToolInfo MarkAsTurnTool(McpToolInfo tool, bool grantsPageLayout) => new(tool)
     {
         Handler = async (input, cancellationToken) =>
         {
             CurrentTurnAgent.Value = this;
-            if (!grantsPageLayout)
-            {
-                return await tool.Handler(input, cancellationToken);
-            }
-
-            using (MarkdownPageLayoutPermission.Grant())
+            using (MarkdownPageLayoutPermission.Enter(grantsPageLayout))
             {
                 return await tool.Handler(input, cancellationToken);
             }

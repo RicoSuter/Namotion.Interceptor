@@ -6,6 +6,7 @@ using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Attributes;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -809,7 +810,7 @@ public class MarkdownFileWriteTests : IDisposable
         WriteFile("Plant.md", PageWithLayout);
         var storage = await ConnectAsync();
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
-        using var permission = MarkdownPageLayoutPermission.Grant();
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
 
         // Act
         await markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None);
@@ -838,7 +839,7 @@ public class MarkdownFileWriteTests : IDisposable
 
             Some text.
             """;
-        using var permission = MarkdownPageLayoutPermission.Grant();
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
 
         // Act
         await markdown.ReplaceContentAsync(content, CancellationToken.None);
@@ -865,12 +866,132 @@ public class MarkdownFileWriteTests : IDisposable
         WriteFile("Plant.md", PageWithLayout);
         var storage = await ConnectAsync();
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
-        using var permission = MarkdownPageLayoutPermission.Grant();
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
         Assert.Contains(expectedMessage, exception.Message);
         Assert.Equal(PageWithLayout, ReadFile("Plant.md"));
+    }
+
+    private const string PageWithNestedDevices = """
+        # Plant
+
+        :: HomeBlaze.Samples.Motor#kitchen Name=Kitchen
+        ::
+
+        :: HomeBlaze.Components.FlowLayout#flow MinWidth=240
+        ::: Item
+        :::: HomeBlaze.Samples.Motor#flowmotor Name=FlowMotor
+        ::::
+        :::
+        ::
+
+        :: HomeBlaze.Components.Card#card Title=Card
+        Body.
+
+        ::: Footer
+        :::: HomeBlaze.Samples.Motor#footmotor Name=FootMotor
+        ::::
+        :::
+        ::
+
+        :: HomeBlaze.Components.TabLayout#tabs
+        ::: Tab Title=One
+        First
+        :::
+        ::: Tab Title=Two
+        :::: HomeBlaze.Samples.Motor#tabmotor Name=TabMotor
+        ::::
+        :::
+        ::
+
+        :: HomeBlaze.Components.Card#plain Title=Plain
+        ::: HomeBlaze.Samples.Motor Name=Unnamed
+        :::
+        ::
+
+        End.
+        """;
+
+    private static readonly string[] NestedDeviceNames = ["kitchen", "flowmotor", "footmotor", "tabmotor"];
+
+    [Theory]
+    // A name that another block has, or that has the shape of the key of a block without a name.
+    [InlineData("End.", "End.\n\n:: HomeBlaze.Components.Card#kitchen Title=Kitchen\n::", "is used by another block")]
+    [InlineData("# Plant\n", "# Plant\n\n:: HomeBlaze.Components.Card#kitchen Title=Kitchen\n::\n", "is used by another block")]
+    [InlineData("End.", "End.\n\n:: HomeBlaze.Components.Card#Motor_5 Title=Shape\n::", "has the shape of the key")]
+    // A layout block around a device that would be shown as an error.
+    [InlineData("MinWidth=240", "MinWidth=abc", "would show a layout block as an error")]
+    [InlineData("::::\n:::\n::\n\n:: HomeBlaze.Components.Card#card", "::::\n:::\nLoose text\n::\n\n:: HomeBlaze.Components.Card#card", "would show a layout block as an error")]
+    [InlineData("Body.\n", "Body.\n\n::: Footer\nSecond footer\n:::\n", "With the permission to edit page layout")]
+    [InlineData("::: Footer\n:::: HomeBlaze.Samples.Motor#footmotor", "::: Footer\nFirst footer\n:::\n::: Footer\n:::: HomeBlaze.Samples.Motor#footmotor", "With the permission to edit page layout")]
+    [InlineData("::: Tab Title=One\nFirst\n:::\n", "Loose text\n::: Tab Title=One\nFirst\n:::\n", "would show a layout block as an error")]
+    // A change of the layout that the parse would key differently.
+    [InlineData("::: Footer\n:::: HomeBlaze.Samples.Motor#footmotor", "::: HomeBlaze.Components.Card Title=Moved\n:::: HomeBlaze.Samples.Motor#footmotor", "With the permission to edit page layout")]
+    [InlineData("::: Tab Title=One", "::: Tab#one Title=One", "With the permission to edit page layout")]
+    public async Task WhenALayoutChangeWouldDetachOrRecreateADeviceInside_ThenItIsRejectedAndTheDevicesAreKept(
+        string oldText, string newText, string expectedMessage)
+    {
+        // Arrange
+        WriteFile("Plant.md", PageWithNestedDevices);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        var devices = GetNamedSubjects(markdown);
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
+
+        // Assert
+        Assert.Contains(expectedMessage, exception.Message);
+        Assert.Equal(PageWithNestedDevices, ReadFile("Plant.md"));
+        AssertSameSubjects(devices, GetNamedSubjects(markdown));
+    }
+
+    [Theory]
+    [InlineData("End.", "End.\n\n:: HomeBlaze.Components.Card#notes Title=Notes\nNotes.\n::")]
+    [InlineData("Title=Card", "Title=\"Renamed card\"")]
+    [InlineData("::::\n:::\n::\n\n:: HomeBlaze.Components.Card#card", "::::\n:::\n::: Item\nAnother item\n:::\n::\n\n:: HomeBlaze.Components.Card#card")]
+    [InlineData("::::\n:::\n::\n\n:: HomeBlaze.Components.Card#plain", "::::\n:::\n::: Tab#three Title=Three\nThird\n:::\n::\n\n:: HomeBlaze.Components.Card#plain")]
+    [InlineData(":::\n::\n\nEnd.", ":::\n\n::: Footer\nA footer after the device\n:::\n::\n\nEnd.")]
+    [InlineData("Title=Plain\n", "Title=Plain\nText before the device.\n\n")]
+    [InlineData("# Plant\n", "# Plant\n\n:: {.note}\nA styled note.\n::\n")]
+    public async Task WhenALayoutChangeKeepsTheKeysOfTheDevicesInside_ThenItIsWrittenAndTheDevicesAreKept(string oldText, string newText)
+    {
+        // Arrange
+        WriteFile("Plant.md", PageWithNestedDevices);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        var devices = GetNamedSubjects(markdown);
+        var unnamed = GetUnnamedMotor(markdown);
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
+
+        // Act
+        await markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(PageWithNestedDevices.Replace(oldText, newText), ReadFile("Plant.md"));
+        AssertSameSubjects(devices, GetNamedSubjects(markdown));
+        Assert.Same(unnamed, GetUnnamedMotor(markdown));
+    }
+
+    private static Dictionary<string, IInterceptorSubject?> GetNamedSubjects(MarkdownFile markdown) =>
+        NestedDeviceNames.ToDictionary(name => name, name => ((IPathScope)markdown).TryGetNamedSubject(name));
+
+    private static void AssertSameSubjects(Dictionary<string, IInterceptorSubject?> expected, Dictionary<string, IInterceptorSubject?> actual)
+    {
+        foreach (var (name, subject) in expected)
+        {
+            Assert.NotNull(subject);
+            Assert.Same(subject, actual[name]);
+        }
+    }
+
+    private static Samples.Motor GetUnnamedMotor(MarkdownFile markdown)
+    {
+        var card = Assert.IsType<Components.Card>(((IPathScope)markdown).TryGetNamedSubject("plain"));
+        return Assert.Single(Assert.IsType<MarkdownFragment>(card.Content).Children.Values.OfType<Samples.Motor>());
     }
 
     [Fact]
@@ -881,7 +1002,7 @@ public class MarkdownFileWriteTests : IDisposable
         WriteFile("Plant.md", content);
         var storage = await ConnectAsync();
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
-        using var permission = MarkdownPageLayoutPermission.Grant();
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceTextAsync(
@@ -912,7 +1033,7 @@ public class MarkdownFileWriteTests : IDisposable
     {
         // Arrange
         var storage = await ConnectAsync();
-        using var permission = MarkdownPageLayoutPermission.Grant();
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
 
         // Act
         var exception = await Record.ExceptionAsync(() => storage.CreateMarkdownFileAsync("New.md", content, CancellationToken.None));
