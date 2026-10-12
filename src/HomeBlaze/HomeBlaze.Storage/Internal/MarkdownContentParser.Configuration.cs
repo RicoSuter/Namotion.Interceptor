@@ -51,8 +51,12 @@ public sealed partial class MarkdownContentParser
         IInterceptorSubject? subject;
         if (CanUpdateInPlace(existing, type, configuration.Keys))
         {
-            _serializer.UpdateConfiguration(
-                existing, configuration.Json, RememberFirstSkipped, ConfigurationNaming.CSharpProperty);
+            // Without the execution flow, as for the creation below: it can attach nested subjects.
+            using (ExecutionContext.SuppressFlow())
+            {
+                _serializer.UpdateConfiguration(
+                    existing, configuration.Json, RememberFirstSkipped, ConfigurationNaming.CSharpProperty);
+            }
 
             if (skipped is null && existing is IConfigurable configurable)
             {
@@ -63,10 +67,16 @@ public sealed partial class MarkdownContentParser
         }
         else
         {
-            // Recorded before the configuration is set: when a setter throws, the instance is already attached
-            // and this parse is the only one that knows it.
-            subject = _serializer.Deserialize(
-                configuration.Json, state.AddCreated, RememberFirstSkipped, ConfigurationNaming.CSharpProperty) as IInterceptorSubject;
+            // The subject enters the context here, which runs lifecycle handlers. A page is parsed on the worker
+            // of its storage, and work that a handler starts with the flow of that work could not call the
+            // storage while it runs.
+            using (ExecutionContext.SuppressFlow())
+            {
+                // Recorded before the configuration is set: when a setter throws, the instance is already attached
+                // and this parse is the only one that knows it.
+                subject = _serializer.Deserialize(
+                    configuration.Json, state.AddCreated, RememberFirstSkipped, ConfigurationNaming.CSharpProperty) as IInterceptorSubject;
+            }
         }
 
         if (skipped is not null)

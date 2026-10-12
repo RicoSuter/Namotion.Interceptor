@@ -303,7 +303,15 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var fragment = existing as MarkdownFragment ?? new MarkdownFragment();
-        fragment.Children = await BuildChildrenAsync(content, fragment.Children, state, cancellationToken);
+        var children = await BuildChildrenAsync(content, fragment.Children, state, cancellationToken);
+
+        // A fragment that is reused is on the page, so this attaches and detaches the subjects in it. Without
+        // the execution flow, see CreateOrUpdateAsync.
+        using (ExecutionContext.SuppressFlow())
+        {
+            fragment.Children = children;
+        }
+
         return fragment;
     }
 
@@ -351,6 +359,7 @@ public sealed partial class MarkdownContentParser
 
     private static void SetSlotValues(IInterceptorSubject subject, SlotDefinition slot, IReadOnlyList<IInterceptorSubject> values)
     {
+        object? value;
         if (slot.IsList)
         {
             var array = Array.CreateInstanceFromArrayType(slot.PropertyType, values.Count);
@@ -359,11 +368,18 @@ public sealed partial class MarkdownContentParser
                 array.SetValue(values[index], index);
             }
 
-            slot.SetValue(subject, array);
+            value = array;
         }
         else
         {
-            slot.SetValue(subject, values.Count > 0 ? values[0] : null);
+            value = values.Count > 0 ? values[0] : null;
+        }
+
+        // The subject is in the context, so this attaches the new values with what they hold and detaches
+        // the values they replace. Without the execution flow, see CreateOrUpdateAsync.
+        using (ExecutionContext.SuppressFlow())
+        {
+            slot.SetValue(subject, value);
         }
     }
 
