@@ -141,7 +141,7 @@ Runs never overlap, also not with chat turns. Requests that arrive while a run i
 When a run fails, automatic runs wait 1, 2, 4 and up to 30 minutes after consecutive failures; the next successful run or chat turn resets this. Two kinds of failure pause automatic runs instead, and the status shows the agent as unavailable with the reason:
 
 - **Configuration errors**, such as a CLI that is not logged in or a rejected API key, pause until the configuration is saved (also unchanged), **Run now** succeeds or a chat turn succeeds.
-- **Usage limits** pause until the reported reset time, or with the backoff above when none is reported.
+- **Usage limits** pause until the reported reset time, or with the backoff above when none is reported; the agent then shows as idle again without waiting for a run.
 
 An invalid interval, such as a poll interval above 365 days, sets the status to an error and stops automatic runs until it is corrected.
 
@@ -178,13 +178,13 @@ The memory file of earlier versions, a Markdown document (`.memory.md`), is migr
 
 ## The agent page
 
-The page of an agent has a header with its status, **Run now** and **New conversation** (both disabled while a turn runs), and three tabs.
+The page of an agent has a header with one status chip, **Run now** and **New conversation** (both disabled while a turn runs), and three tabs. While the agent runs, the chip shows the state of its turn: Idle, Answering, Running background or Waiting; otherwise it shows Stopped, Starting, Error or Unavailable, followed by the reason.
 
-**Chat** shows the timeline: your messages, the agent's replies with the tools they called, background findings, errors and dividers. Consecutive quiet background runs collapse into one line. Replies are rendered as Markdown while they stream in. The chat opens at the newest entry and follows new content while you are at the bottom; scrolling up stops following. It shows the newest 50 rows, and **Show earlier** adds 50 more at a time without moving what you are reading. With a mouse or trackpad, Enter sends and Shift+Enter adds a line; on touch devices Enter adds a line and the send button sends. While a background run holds the agent, the status shows "Waiting for the background run" and your message is answered after it. A message sent while the agent is stopped is recorded with an error and not answered.
+**Chat** shows the timeline: your messages, the agent's replies with the tools they called, background findings, errors and dividers. A background finding shows the result of the run; when the agent wrote more before it, **Show full answer** shows the whole answer. Consecutive quiet background runs collapse into one line. Replies are rendered as Markdown while they stream in. The chat opens at the newest entry and follows new content while you are at the bottom; scrolling up stops following. It shows the newest 50 rows, and **Show earlier** adds 50 more at a time without moving what you are reading. With a mouse or trackpad, Enter sends and Shift+Enter adds a line; on touch devices Enter adds a line and the send button sends. While a background run holds the agent, the status shows Waiting and your message is answered after it. A message sent while the agent is stopped or still starting is rejected: it stays in the input with the error below it.
 
-**Activity** shows the number of background runs and the time of the last one, the subscription usage of CLI agents, and a table of background runs, newest first and 25 per page, with trigger, duration, tokens, tool calls and result. Runs that failed or were cancelled are listed and counted as well; chat turns are not. The table lists the runs still in the timeline, which keeps the newest 500 entries; the count includes older runs and survives restarts and new conversations.
+**Activity** shows the number of background runs and the time of the last one, the subscription usage of CLI agents, and a table of background runs, newest first and 25 per page, with trigger, duration, tokens, tool calls and the result as plain text. Runs that failed or were cancelled are listed and counted as well; chat turns are not. The table lists the runs still in the timeline, which keeps the newest 500 entries; the count includes older runs and survives restarts and new conversations.
 
-**Configuration** summarizes the settings and the instructions and holds the memory editor. Change the settings with the subject's Edit action.
+**Configuration** summarizes the settings and the instructions and holds the memory editor, which is available once the agent has started. Change the settings with the subject's Edit action.
 
 ---
 
@@ -274,5 +274,5 @@ Renaming or moving the agent's file changes its path and so starts with new, emp
 | The Anthropic API did not find the model | Use a model id the API knows, such as `claude-sonnet-5` |
 | The model reached the output token limit of N tokens before answering. | Raise `MaxTokens` or lower the effort |
 | The request is too long for the model | Start a new conversation, or lower `HistoryTokenBudget` |
-| The agent is not running. | A chat message reached a stopped agent. Check the status and the log for why it stopped |
+| The agent is not running. | A chat message was sent to an agent that is stopped or still starting. Check the status and the log for why it stopped |
 | Invalid configuration: ... | An interval is out of range, for example a poll interval above 365 days. Correct it in the edit form |
