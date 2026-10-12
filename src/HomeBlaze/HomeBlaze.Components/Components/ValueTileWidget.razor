@@ -12,13 +12,13 @@
 {
     // Read once per render and never kept: the read is what the tracking scope records.
     var reading = ValueReader.Read(PathResolver, tile, tile.Path, tile.Map, TimeZone);
-    var icon = reading.Icon ?? tile.Icon;
+    var icon = MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? tile.Icon);
 
     <MudPaper Class="pa-3" Elevation="1" data-testid="value-tile">
         <div class="d-flex align-center gap-1">
-            @if (!string.IsNullOrEmpty(icon))
+            @if (icon is not null)
             {
-                <MudIcon Icon="@MudBlazorIconResolver.Resolve(icon)" Size="Size.Small" />
+                <MudIcon Icon="@icon" Size="Size.Small" />
             }
 
             <MudText Typo="Typo.caption" data-testid="value-label">@ValueReader.GetLabel(reading, tile.Label)</MudText>

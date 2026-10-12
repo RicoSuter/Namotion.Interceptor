@@ -15,8 +15,8 @@
     {
         var row = rows[index];
         readings[index] = string.IsNullOrEmpty(row.Path) ? null : ValueReader.Read(PathResolver, row, row.Path, row.Map, TimeZone);
-        icons[index] = readings[index]?.Icon ?? row.Icon;
-        anyIcon |= !string.IsNullOrEmpty(icons[index]);
+        icons[index] = MudBlazorIconResolver.ResolveOrNull(readings[index]?.Icon ?? row.Icon);
+        anyIcon |= icons[index] is not null;
     }
 }
 
@@ -26,13 +26,12 @@
         var row = rows[index];
         var reading = readings[index];
         var icon = icons[index];
-        var hasIcon = !string.IsNullOrEmpty(icon);
 
         <MudListItem T="string"
                      @key="row"
                      Class="value-list-item"
-                     Icon="@(hasIcon ? MudBlazorIconResolver.Resolve(icon) : null)"
-                     Inset="@(anyIcon && !hasIcon)"
+                     Icon="@icon"
+                     Inset="@(anyIcon && icon is null)"
                      data-testid="value-row">
             <div class="d-flex align-center gap-2">
                 <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="value-label">@ValueReader.GetLabel(reading, row.Label)</MudText>

@@ -9,7 +9,7 @@
 {
     <MudAlert Severity="@alert.Severity"
               Variant="@alert.Variant"
-              Icon="@(string.IsNullOrEmpty(alert.Icon) ? null : MudBlazorIconResolver.Resolve(alert.Icon))"
+              Icon="@MudBlazorIconResolver.ResolveOrNull(alert.Icon)"
               Class="alert-widget my-3"
               data-testid="alert">
         <SubjectComponent Subject="@alert.Content" Type="SubjectComponentType.Widget" />

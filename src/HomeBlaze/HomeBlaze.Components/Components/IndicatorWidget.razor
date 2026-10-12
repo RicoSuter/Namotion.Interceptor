@@ -13,8 +13,7 @@
     // Read once per render and never kept: the read is what the tracking scope records.
     var reading = ValueReader.Read(PathResolver, indicator, indicator.Path, indicator.Map, TimeZone);
     var color = ValueReader.GetIndicatorColor(reading, indicator.Map);
-    var iconName = reading.Icon ?? indicator.Icon;
-    var icon = string.IsNullOrEmpty(iconName) ? null : MudBlazorIconResolver.Resolve(iconName);
+    var icon = MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? indicator.Icon);
 
     if (reading.MapError is not null)
     {
