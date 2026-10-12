@@ -1,5 +1,6 @@
 using FluentStorage.Blobs;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor.Testing;
 
@@ -353,6 +354,25 @@ public class StorageTimeoutTests : StorageTestBase
         var other = Assert.IsType<VirtualFolder>(storage.Children["Other"]);
         Assert.Same(motor, other.Children["Motor"]);
         Assert.Equal(0, detaches.Count);
+    }
+
+    [Fact]
+    public async Task WhenMarkdownFileIsLoadedAndReloaded_ThenLoadAsksStorageForNoMetadata()
+    {
+        // Arrange
+        PausableBlobStorage? client = null;
+        WriteFile("Page.md", "first");
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        var callCountOfFirstPass = client!.GetCallCount(nameof(IBlobStorage.GetBlobsAsync));
+
+        // Act
+        WriteFile("Page.md", "second, with another size");
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("second, with another size", Assert.IsType<MarkdownFile>(storage.Children["Page.md"]).Content);
+        Assert.Equal(0, callCountOfFirstPass);
+        Assert.Equal(0, client.GetCallCount(nameof(IBlobStorage.GetBlobsAsync)));
     }
 
     [Fact]
