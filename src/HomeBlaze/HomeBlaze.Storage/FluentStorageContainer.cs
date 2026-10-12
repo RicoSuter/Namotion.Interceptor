@@ -175,7 +175,8 @@ public partial class FluentStorageContainer :
     /// </summary>
     /// <remarks>
     /// A pass that is running or already queued on the worker still completes. What such a pass or an earlier
-    /// one created and did not place is released after it, because no pass places it any more.
+    /// one created and did not place is released after it, because no pass places it any more. An operation
+    /// after the stop does not place it either.
     /// </remarks>
     public override Task StopAsync(CancellationToken cancellationToken)
     {
