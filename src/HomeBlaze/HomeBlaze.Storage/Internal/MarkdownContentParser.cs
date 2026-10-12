@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Display;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.Logging;
@@ -155,7 +156,8 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
-    /// Renders markdown content by replacing {{ path }} expressions with their resolved values.
+    /// Renders markdown content by replacing {{ path }} expressions with their resolved values in the format
+    /// each one asks for. An expression with an unknown format stays as written.
     /// Everything else stays as written, including the lines of the blocks and the front matter. An expression inside markdown code is kept as written.
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
@@ -170,14 +172,28 @@ public sealed partial class MarkdownContentParser
         {
             rendered ??= new StringBuilder(content.Length);
             rendered.Append(content, copiedLength, expression.Span.Start - copiedLength);
-            try
-            {
-                var value = _pathResolver.ResolveScopedValue(expression.Path, PathStyle.Canonical, parent);
-                rendered.Append(value);
-            }
-            catch
+            if (expression.Error is not null)
             {
                 rendered.Append(content, expression.Span.Start, expression.Span.Length);
+            }
+            else
+            {
+                try
+                {
+                    var property = _pathResolver.ResolveScopedProperty(expression.Path, PathStyle.Canonical, parent);
+                    var value = property?.GetValue();
+                    if (property is not null && value is not null)
+                    {
+                        // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
+                        rendered.Append(expression.Format == ExpressionFormat.Raw
+                            ? RawValueFormatter.Format(value)
+                            : property.GetPropertyDisplayValue(value));
+                    }
+                }
+                catch
+                {
+                    rendered.Append(content, expression.Span.Start, expression.Span.Length);
+                }
             }
 
             copiedLength = expression.Span.End;
@@ -238,11 +254,13 @@ public sealed partial class MarkdownContentParser
                     break;
 
                 case ExpressionMarkdownSegment expression:
-                    var expressionKey = $"{ExpressionKeyPrefix}{index}_{ComputeHash(expression.Path)}";
+                    // The format and the error are part of the key, so that a changed format replaces the subject.
+                    var expressionKey =
+                        $"{ExpressionKeyPrefix}{index}_{ComputeHash($"{expression.Path}|{expression.Format}|{expression.Error}")}";
                     children[expressionKey] =
                         existingChildren.TryGetValue(expressionKey, out var existingExpression) && existingExpression is RenderExpression
                             ? existingExpression
-                            : new RenderExpression(expression.Path, state.Page, _pathResolver);
+                            : new RenderExpression(expression.Path, expression.Format, expression.Error, state.Page, _pathResolver);
                     break;
 
                 case BlockMarkdownSegment block:

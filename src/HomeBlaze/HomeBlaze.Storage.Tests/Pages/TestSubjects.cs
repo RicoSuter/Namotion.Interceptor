@@ -525,3 +525,22 @@ public partial class TestFailingDetach : IConfigurable, ILifecycleHandler
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
+
+/// <summary>A subject with a property that has a unit, for the formatted text of an expression.</summary>
+[InterceptorSubject]
+public partial class TestMeter : IConfigurable
+{
+    [Configuration]
+    [State(Unit = StateUnit.Watt)]
+    public partial decimal Power { get; set; }
+
+    [Configuration]
+    [State]
+    public partial bool IsOn { get; set; }
+
+    [Configuration]
+    [State(Unit = StateUnit.DegreeCelsius)]
+    public partial decimal? Temperature { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
