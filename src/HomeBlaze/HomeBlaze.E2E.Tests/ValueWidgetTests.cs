@@ -670,20 +670,40 @@ public class ValueWidgetTests
         Assert.NotEqual("rgba(0, 0, 0, 0)", colours[1]);
     }
 
-    [Fact]
-    public async Task WhenIndicatorIsAChip_ThenItAddsNoDistanceAroundItself()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task WhenIndicatorIsAChipOrAnIcon_ThenItKeepsADistanceOf4PixelsAroundItself(int position)
     {
-        // Arrange
+        // Arrange: the first indicator of the page is a chip and the second one is an icon.
         var page = await OpenPageAsync();
-        var chip = page.GetByTestId("indicator").First;
-        await Assertions.Expect(chip).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var indicator = page.GetByTestId("indicator").Nth(position);
+        await Assertions.Expect(indicator).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
-        var margins = await chip.EvaluateAsync<string[]>(
-            "chip => { const style = getComputedStyle(chip); return [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft]; }");
+        var margins = await indicator.EvaluateAsync<string[]>(
+            "indicator => { const style = getComputedStyle(indicator); return [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft]; }");
 
         // Assert
-        Assert.All(margins, margin => Assert.Equal("0px", margin));
+        Assert.All(margins, margin => Assert.Equal("4px", margin));
+    }
+
+    [Fact]
+    public async Task WhenTwoIndicatorChipsFollowEachOther_ThenTheyDoNotTouch()
+    {
+        // Arrange: the two chips are the fourth and fifth indicator outside of cards. A block stands on a line of its own, so the distance is the one between two lines.
+        var page = await OpenPageAsync();
+        var chips = page.Locator("[data-testid=indicator]:not([data-testid=card] *)");
+        await Assertions.Expect(chips).ToHaveCountAsync(5, new() { Timeout = Timeout });
+        await Assertions.Expect(chips.Nth(4)).ToBeVisibleAsync();
+
+        // Act
+        var rectangles = await page.EvaluateAsync<double[][]>(
+            "() => [...document.querySelectorAll('[data-testid=indicator]:not([data-testid=card] *)')].slice(3, 5).map(chip => { const box = chip.getBoundingClientRect(); return [box.top, box.bottom]; })");
+
+        // Assert
+        var distance = rectangles[1][0] - rectangles[0][1];
+        Assert.True(distance >= 8, $"The second chip starts {distance} pixels below the first");
     }
 
     [Fact]
@@ -735,7 +755,8 @@ public class ValueWidgetTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("value-map-error")).ToHaveTextAsync("Cannot resolve map: nomap", new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator("[data-testid=indicator]:not([data-testid=card] *)")).ToHaveCountAsync(3);
+        // Outside the cards are the three indicators of the first blocks and the two chips that follow them.
+        await Assertions.Expect(page.Locator("[data-testid=indicator]:not([data-testid=card] *)")).ToHaveCountAsync(5);
     }
 
     [Fact]

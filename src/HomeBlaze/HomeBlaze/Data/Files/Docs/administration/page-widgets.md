@@ -760,7 +760,7 @@ The pump runs at {{ pump/CurrentSpeed }} RPM.
 - **Without a map**: A boolean that is true has the colour `Primary`, and every other value has `Default`. With a map the colour comes from the case alone.
 - **No icon**: A chip without an icon shows its text only. An indicator of the kind `Icon` without an icon shows a plain circle.
 - **A missing value**: The chip shows a dash. The icon form shows its icon in the default colour. Both have the path as tooltip, see [Value Widgets](#value-widgets). A chip with a value has no tooltip.
-- **No distance to its surroundings**: An indicator adds no distance above, below or beside itself. Several indicators are spaced by a layout such as `FlowLayout` or by the text around them.
+- **A small distance to its surroundings**: An indicator keeps a distance of 4 pixels to what stands next to it, so that several of them in a row do not touch.
 
 ## Progress
 

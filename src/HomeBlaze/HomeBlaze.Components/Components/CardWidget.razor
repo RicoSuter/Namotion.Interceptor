@@ -17,14 +17,14 @@
     var hasPicture = !string.IsNullOrEmpty(card.Image);
     var isTight = hasHeader && card.Content is not null && !hasPicture;
 
-    // MudCardHeader gives its actions area a margin of -8 pixels at the top and at the end, because it is made for icon buttons with a padding of their own. me-2 and mt-3 cancel that, so that the content ends where the content of the card ends.
-    // The 4 pixels that mt-3 adds beyond the 8 centre one line of content, 24 pixels high, on the 32 pixel title line. A button in the slot has a padding of its own and needs no me-2 and no mt-3.
+    // MudCardHeader gives its actions area a margin of -8 pixels at the top and at the end, because it is made for icon buttons with a padding of their own. me-1 and mt-2 cancel 4 of them and the 4 pixels that an indicator has around itself the rest, so that its visible edge ends where the content of the card ends. mb-n1 takes back the bottom margin of the indicator, which would make the header 4 pixels taller than the title.
+    // The 4 pixels of top margin of the indicator are also what centres one line of content, 24 pixels high, on the 32 pixel title line. Text that stands here has no margin and ends 4 pixels further out than the content of the card. A button in the slot has a padding of its own and needs no me-1 and no mt-2.
     // A part of the header that is not set is passed as null, because the header keeps room for a part that is an empty fragment.
     RenderFragment? avatar = hasIcon
         ? @<MudIcon Icon="@MudBlazorIconResolver.Resolve(card.Icon!)" Color="@card.IconColor" data-testid="card-icon" />
         : null;
     RenderFragment? actions = headerRight is not null
-        ? @<div class="mt-3 me-2" data-testid="card-header-right"><SubjectComponent Subject="@headerRight" Type="SubjectComponentType.Widget" /></div>
+        ? @<div class="mt-2 me-1 mb-n1" data-testid="card-header-right"><SubjectComponent Subject="@headerRight" Type="SubjectComponentType.Widget" /></div>
         : null;
 
     <MudCard Class="card-widget" Elevation="@(card.Outlined ? 0 : card.Elevation)" Outlined="@card.Outlined" data-testid="card">

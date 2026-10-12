@@ -72,6 +72,12 @@ Body of the raised card.
 :: HomeBlaze.Components.Indicator Path=valuemotor/Missing Map=status
 ::
 
+:: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=status
+::
+
+:: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=status
+::
+
 :: HomeBlaze.Components.Progress Path=valuemotor/TargetSpeed Min=0 Max=1600
 ::
 

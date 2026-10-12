@@ -22,18 +22,18 @@
     else if (indicator.Kind == IndicatorKind.Icon)
     {
         <MudTooltip Text="@(reading.IsMissing ? indicator.Path : reading.Text)">
-            <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color" data-testid="indicator" />
+            <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color" Class="ma-1" data-testid="indicator" />
         </MudTooltip>
     }
     else if (reading.IsMissing)
     {
         <MudTooltip Text="@indicator.Path">
-            <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" Class="ma-0" data-testid="indicator">@reading.Text</MudChip>
+            <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" data-testid="indicator">@reading.Text</MudChip>
         </MudTooltip>
     }
     else
     {
-        <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" Class="ma-0" data-testid="indicator">@reading.Text</MudChip>
+        <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" data-testid="indicator">@reading.Text</MudChip>
     }
 }
 
