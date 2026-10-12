@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text;
 using FluentStorage;
 using FluentStorage.Blobs;
@@ -24,6 +25,10 @@ namespace HomeBlaze.Storage;
 /// <see cref="TimeoutException"/>, and so does every operation that is called before that call has returned.
 /// A write that failed this way can still reach the storage later.
 /// </remarks>
+[Category("System")]
+[Description("Mounts a storage location and loads the files in it as subjects")]
+[DisplayName("Storage")]
+[SubjectIcon("Storage")]
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
@@ -109,6 +114,9 @@ public partial class FluentStorageContainer :
     /// </summary>
     [State]
     public partial StorageStatus Status { get; set; }
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
 
     public string Title => string.IsNullOrEmpty(ConnectionString)
         ? "Storage"
@@ -682,7 +690,7 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Opens the create subject wizard to add a new subject to this storage.
+    /// Opens the create subject dialog to add a new subject to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)

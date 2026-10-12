@@ -8,6 +8,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// A positioned node on a canvas containing a child subject.
 /// </summary>
+[ExcludeFromCreation]
 [InterceptorSubject]
 public partial class CanvasNode : IConfigurable
 {

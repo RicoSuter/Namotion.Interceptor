@@ -23,6 +23,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(context);
 
         services.AddSingleton<SubjectFactory>();
+        services.AddSingleton<SubjectTypeCatalog>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
         // The root accessor is deferred so constructing the resolver does not pull in RootManager,

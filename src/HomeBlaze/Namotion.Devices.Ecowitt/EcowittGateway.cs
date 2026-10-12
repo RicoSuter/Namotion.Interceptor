@@ -14,8 +14,10 @@ using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Devices.Ecowitt;
 
-[Category("Devices")]
+[Category("Climate")]
 [Description("Ecowitt weather station gateway with dynamic sensor discovery")]
+[DisplayName("Ecowitt gateway")]
+[SubjectIcon("Cloud")]
 [InterceptorSubject]
 public partial class EcowittGateway : BackgroundService,
     IConfigurable,

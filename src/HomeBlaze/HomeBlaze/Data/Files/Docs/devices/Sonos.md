@@ -17,7 +17,7 @@ Controls a Sonos household over the speakers' local UPnP API on port 1400, witho
 
 ## Configuration
 
-Create a `SonosSystem` in the UI (category "Devices") or as a JSON file such as `Devices/Sonos.json`. The type alone is enough on a flat home network:
+Create a `SonosSystem` in the UI (group "Media") or as a JSON file such as `Devices/Sonos.json`. The type alone is enough on a flat home network:
 
 ```json
 {
