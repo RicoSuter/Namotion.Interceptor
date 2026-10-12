@@ -654,6 +654,22 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTheStorageIsAskedToSaveTheConfigurationOfAPage_ThenItDoesNotWriteThePage()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+
+        // Act
+        var isWritten = await storage.WriteConfigurationAsync(markdown, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal("# Notes", ReadFile("Notes.md"));
+    }
+
+    [Fact]
     public async Task WhenCreatingAMarkdownFileInAFolder_ThenItIsAddedToTheFolderAndCanBeEdited()
     {
         // Arrange

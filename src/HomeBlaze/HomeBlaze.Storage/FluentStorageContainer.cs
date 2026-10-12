@@ -509,7 +509,8 @@ public partial class FluentStorageContainer :
                 // Only the subject of a file has an entry. A subject nested in its configuration is written with it.
                 StorageEntry? entry = null;
                 var fileSubject = subject.TryGetConfigurationOwner(candidate => connection.Index.TryGetEntry(candidate, out entry));
-                if (fileSubject is null || entry is null)
+                // A document, such as a Markdown page, is no configuration: it writes itself, under its own rules.
+                if (fileSubject is null or IStorageFile || entry is null)
                     return;
 
                 await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);
