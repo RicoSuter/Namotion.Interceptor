@@ -15,7 +15,8 @@
         <div class="flex-grow-1" data-testid="agent-chat-input" @ref="_inputContainer">
             <MudTextField T="string" @bind-Value="_message" Immediate="true" Lines="1" Sizing="InputSizing.Auto" MaxLines="6"
                           Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Ask the agent"
-                          HelperText="@(_sendsOnEnter ? "Enter sends, Shift+Enter adds a line" : null)" FullWidth="true" />
+                          HelperText="@(_sendsOnEnter ? "Enter sends, Shift+Enter adds a line" : null)" FullWidth="true"
+                          Error="@(_sendError is not null)" ErrorText="@_sendError" />
         </div>
         <MudIconButton Icon="@Icons.Material.Filled.Send" Variant="Variant.Filled" Color="Color.Primary" aria-label="Send" Class="mt-1"
                        OnClick="SendAsync" Disabled="@(_isSending || string.IsNullOrWhiteSpace(_message))" data-testid="agent-chat-send" />
@@ -25,6 +26,7 @@
 @code {
     private string _message = string.Empty;
     private bool _isSending;
+    private string? _sendError;
     private ElementReference _inputContainer;
     private ElementReference _timeline;
     private DotNetObjectReference<AgentChatTab>? _dotNetReference;
@@ -132,13 +134,19 @@
         }
 
         _message = string.Empty;
+        _sendError = null;
         _isSending = true;
         StateHasChanged();
         _ = PinToBottomAsync();
         try
         {
-            // Failures and the not-running case are recorded in the timeline; only caller cancellation throws.
+            // Failures are recorded in the timeline; a message to an agent that is not running is rejected.
             await Agent.SendMessageAsync(text, CancellationToken.None);
+        }
+        catch (InvalidOperationException exception)
+        {
+            _message = text;
+            _sendError = exception.Message;
         }
         finally
         {

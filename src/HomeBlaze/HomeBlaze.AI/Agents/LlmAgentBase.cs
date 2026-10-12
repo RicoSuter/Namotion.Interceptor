@@ -24,6 +24,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <summary>The text of the error entry recorded for a chat message that was cancelled before a reply.</summary>
     public const string CancelledText = "Cancelled before a reply.";
 
+    /// <summary>The message of the exception thrown when a chat message is sent while the agent is not running.</summary>
+    public const string NotRunningText = "The agent is not running.";
+
     private const int RecentResultCount = 5;
     private const string WaitingStatusMessage = "Waiting for the background run";
     private static readonly TimeSpan ChangeBufferTime = TimeSpan.FromMilliseconds(100);
@@ -33,6 +36,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     private readonly AgentServices _services;
     private readonly ILogger _logger;
+    // Never disposed: its wait handle is never created, and a chat that unwinds after the agent was disposed still
+    // releases it.
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     private readonly Lock _streamingLock = new();
     private readonly StringBuilder _streamingText = new();
@@ -49,6 +54,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private volatile string? _configurationError;
     private string? _storageDirectory;
     private string? _storageName;
+    private volatile bool _isStorageLoaded;
 
     protected LlmAgentBase(AgentServices services, ILogger logger)
     {
@@ -143,6 +149,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     [Derived]
     public string? Title => Name ?? GetType().Name;
 
+    // A configuration file may hold an explicit null, which the rest of the agent never expects.
+    partial void OnWatchPathsChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
+
+    partial void OnAllowedToolsChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
+
     public string? IconName => "SmartToy";
 
     /// <summary>The timeline of background runs and chat.</summary>
@@ -150,6 +161,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     /// <summary>The agent's memory entries.</summary>
     public AgentMemory Memory { get; private set; }
+
+    /// <summary>
+    /// Whether the agent has loaded its timeline and memory, which happens when it starts for the first time. Before
+    /// that, <see cref="Timeline"/> and <see cref="Memory"/> are empty placeholders that are replaced on start.
+    /// </summary>
+    public bool IsStorageLoaded => _isStorageLoaded;
 
     /// <summary>The text streamed so far by the running turn, empty when idle.</summary>
     public string StreamingText
@@ -220,17 +237,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// the timeline instead of thrown. A message cancelled through <paramref name="cancellationToken"/> or by the
     /// agent stopping is recorded as an error entry with <see cref="CancelledText"/>, so background findings
     /// stay pending for the next message; only cancellation through <paramref name="cancellationToken"/> throws.
-    /// While the agent is not running the message is recorded with an error entry and not answered.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The agent is not running; the message is not recorded.</exception>
     public async Task SendMessageAsync(string text, CancellationToken cancellationToken)
     {
-        await AppendAsync(new AgentTimelineEntry
-        {
-            Kind = AgentTimelineEntryKind.User,
-            Timestamp = _services.TimeProvider.GetUtcNow(),
-            Text = text
-        });
-
         CancellationTokenSource? turnCancellation = null;
         lock (_stateLock)
         {
@@ -241,14 +251,22 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             }
         }
 
+        // Checked before the message is recorded: before the first start the timeline is a placeholder that the
+        // stored timeline replaces.
         if (turnCancellation is null)
         {
-            await AppendErrorAsync("The agent is not running.");
-            return;
+            throw new InvalidOperationException(NotRunningText);
         }
 
         using (turnCancellation)
         {
+            await AppendAsync(new AgentTimelineEntry
+            {
+                Kind = AgentTimelineEntryKind.User,
+                Timestamp = _services.TimeProvider.GetUtcNow(),
+                Text = text
+            });
+
             var turnToken = turnCancellation.Token;
             if (!await TryEnterGateForChatAsync(turnToken))
             {
@@ -257,6 +275,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 return;
             }
 
+            var isIdle = false;
             try
             {
                 var started = BeginTurn("Answering");
@@ -281,12 +300,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                     _scheduler?.ReportSuccess();
                 }
 
-                SetIdle();
+                isIdle = true;
             }
             catch (OperationCanceledException) when (turnToken.IsCancellationRequested)
             {
                 await AppendErrorAsync(CancelledText);
-                SetIdle();
+                isIdle = true;
                 cancellationToken.ThrowIfCancellationRequested();
             }
             catch (Exception exception)
@@ -295,7 +314,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             }
             finally
             {
-                EndTurn();
+                EndTurn(isIdle);
                 _turnGate.Release();
             }
         }
@@ -447,12 +466,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
     }
 
-    public override void Dispose()
-    {
-        _turnGate.Dispose();
-        base.Dispose();
-    }
-
     private async Task RunAsync(CancellationTokenSource lifetime, CancellationToken stoppingToken)
     {
         // Holding the gate keeps a chat turn from running against the timeline, memory and backend
@@ -577,6 +590,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         await memory.LoadAsync(cancellationToken);
         Memory = memory;
         await RestoreRunStatisticsAsync(cancellationToken);
+        LastAnalysis = Timeline.GetRecentBackgroundResults(1) is [var newestResult] ? newestResult.Text : null;
+        _isStorageLoaded = true;
         RaiseTimelineChanged();
     }
 
@@ -642,6 +657,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         await _turnGate.WaitAsync(cancellationToken);
         DateTimeOffset? started = null;
         var isCounted = false;
+        var isIdle = false;
         try
         {
             started = BeginTurn("Running");
@@ -680,7 +696,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 _scheduler?.ReportSuccess();
             }
 
-            SetIdle();
+            isIdle = true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -714,7 +730,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
         finally
         {
-            EndTurn();
+            EndTurn(isIdle);
             _turnGate.Release();
         }
     }
@@ -909,14 +925,21 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         return started;
     }
 
-    private void EndTurn()
+    /// <summary>Ends a turn; <paramref name="isIdle"/> reports the idle status once the agent is no longer busy.</summary>
+    private void EndTurn(bool isIdle)
     {
         lock (_streamingLock)
         {
             _streamingText.Clear();
         }
 
+        // Cleared before the idle status, so a configuration change that skipped SetIdle while busy is picked up.
         IsBusy = false;
+        if (isIdle)
+        {
+            SetIdle();
+        }
+
         RaiseTimelineChanged();
     }
 

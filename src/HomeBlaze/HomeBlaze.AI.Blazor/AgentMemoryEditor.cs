@@ -8,19 +8,28 @@ namespace HomeBlaze.AI.Blazor;
 /// </summary>
 public sealed class AgentMemoryEditor
 {
-    private readonly Func<AgentMemory> _getMemory;
+    /// <summary>The error of a save or delete while the memory is not loaded.</summary>
+    public const string NotLoadedText = "The memory can be edited once the agent has started.";
+
+    private readonly Func<AgentMemory?> _getMemory;
 
     // The entry as it was when editing started, to detect a concurrent write by the agent.
     private AgentMemoryEntry? _editedEntry;
 
-    /// <param name="getMemory">Returns the agent's current memory, which is replaced when the agent starts.</param>
-    public AgentMemoryEditor(Func<AgentMemory> getMemory)
+    /// <param name="getMemory">
+    /// Returns the agent's current memory, which is replaced when the agent starts, or null while the agent has not
+    /// loaded it yet.
+    /// </param>
+    public AgentMemoryEditor(Func<AgentMemory?> getMemory)
     {
         _getMemory = getMemory;
     }
 
-    /// <summary>The agent's current memory.</summary>
-    public AgentMemorySnapshot Snapshot => _getMemory().GetSnapshot();
+    /// <summary>The agent's current memory, empty while it is not loaded.</summary>
+    public AgentMemorySnapshot Snapshot => _getMemory()?.GetSnapshot() ?? AgentMemorySnapshot.Empty;
+
+    /// <summary>Whether the memory is loaded and can be edited.</summary>
+    public bool IsAvailable => _getMemory() is not null;
 
     /// <summary>Whether the add or edit form is open.</summary>
     public bool IsEditing { get; private set; }
@@ -135,10 +144,16 @@ public sealed class AgentMemoryEditor
 
     private async Task<bool> TryUpdateAsync(IReadOnlyList<AgentMemoryChange> changes)
     {
+        if (_getMemory() is not { } memory)
+        {
+            Error = NotLoadedText;
+            return false;
+        }
+
         IsSaving = true;
         try
         {
-            var result = await _getMemory().UpdateAsync(changes, CancellationToken.None);
+            var result = await memory.UpdateAsync(changes, CancellationToken.None);
             Error = result.Error;
             return result.Succeeded;
         }

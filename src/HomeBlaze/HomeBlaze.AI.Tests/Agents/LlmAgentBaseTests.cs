@@ -1,7 +1,12 @@
+using System.Collections.Concurrent;
+using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
 using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
@@ -414,7 +419,7 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
-    public async Task WhenTheAgentIsStopped_ThenAChatIsRecordedAsNotRunningAndRunNowDoesNothing()
+    public async Task WhenTheAgentIsStopped_ThenAChatIsRejectedAndRunNowDoesNothing()
     {
         // Arrange
         await using var test = await StartAsync();
@@ -423,14 +428,111 @@ public class LlmAgentBaseTests
         // Act
         test.Agent.RunNow();
         await test.Agent.ApplyConfigurationAsync(CancellationToken.None);
-        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => test.Agent.SendMessageAsync("Hello", CancellationToken.None));
 
         // Assert
+        Assert.Equal(LlmAgentBase.NotRunningText, exception.Message);
         Assert.Equal(ServiceStatus.Stopped, test.Agent.Status);
         Assert.Empty(test.Agent.Requests);
-        Assert.Equal(
-            [AgentTimelineEntryKind.User, AgentTimelineEntryKind.Error],
-            test.Agent.Timeline.Entries.Select(entry => entry.Kind));
+        Assert.Empty(test.Agent.Timeline.Entries);
+    }
+
+    [Fact]
+    public async Task WhenAMessageIsSentBeforeTheAgentStarted_ThenItIsRejectedAndNotRecorded()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        var agent = new FakeAgent(test.Services);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => agent.SendMessageAsync("Hello", CancellationToken.None));
+        Assert.Equal(LlmAgentBase.NotRunningText, exception.Message);
+        Assert.Empty(agent.Timeline.Entries);
+        Assert.False(agent.IsStorageLoaded);
+        Assert.True(test.Agent.IsStorageLoaded);
+    }
+
+    [Fact]
+    public async Task WhenATurnEnds_ThenTheAgentIsNoLongerBusyWhenItReportsIdle()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        var busyWhenIdle = new ConcurrentQueue<bool>();
+        using var subscription = ((IInterceptorSubject)test.Agent).Context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => ReferenceEquals(change.Property.Subject, test.Agent) &&
+                             change.Property.Name == nameof(LlmAgentBase.StatusMessage) &&
+                             change.GetNewValue<string?>() == "Idle")
+            .Subscribe(_ => busyWhenIdle.Enqueue(test.Agent.IsBusy));
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && busyWhenIdle.Count == 2);
+
+        // Assert
+        Assert.Equal([false, false], busyWhenIdle);
+    }
+
+    [Fact]
+    public async Task WhenTheAgentIsDisposedWhileAChatUnwinds_ThenTheChatEndsWithoutAnError()
+    {
+        // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var test = await StartAsync(agent => agent.Handler = async (_, _, _) =>
+        {
+            // Ignores cancellation, so the chat outlives the stop and the disposal.
+            await release.Task;
+            return new AgentTurnResult("late", null, null);
+        });
+        var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        test.Agent.Dispose();
+
+        // Act
+        release.SetResult();
+        await chat;
+
+        // Assert
+        Assert.False(test.Agent.IsBusy);
+    }
+
+    [Fact]
+    public async Task WhenTheAgentStarts_ThenTheLastAnalysisIsTheNewestNoteworthyBackgroundResult()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        Directory.CreateDirectory(Path.Combine(test.DataDirectory, "Agents"));
+        await File.WriteAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.timeline.jsonl"),
+            """{"kind":"BackgroundRun","timestamp":"2026-10-10T12:00:00+00:00","text":"Freezer is warm."}""" + "\n" +
+            """{"kind":"BackgroundRun","timestamp":"2026-10-10T12:05:00+00:00","text":"[quiet] all fine","isQuiet":true}""" + "\n");
+
+        // Act
+        await RestartAsync(test.Agent);
+
+        // Assert
+        Assert.Equal("Freezer is warm.", test.Agent.LastAnalysis);
+    }
+
+    [Fact]
+    public async Task WhenTheConfigurationHasNullLists_ThenTheyBecomeEmptyAndRunsStillWork()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+
+        // Act
+        test.Agent.WatchPaths = null!;
+        test.Agent.AllowedTools = null!;
+        await test.Agent.ApplyConfigurationAsync(CancellationToken.None);
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+
+        // Assert
+        Assert.Empty(test.Agent.WatchPaths);
+        Assert.Empty(test.Agent.AllowedTools);
+        Assert.Equal(["update_memory"], test.Agent.Requests[0].Tools.Tools.Select(tool => tool.Name));
+        Assert.Equal(AgentTimelineEntryKind.BackgroundRun, Assert.Single(test.Agent.Timeline.Entries).Kind);
     }
 
     [Fact]
@@ -611,17 +713,16 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
-    public async Task WhenAChatMessageIsNotAnswered_ThenTheLastActivityIsNotSet()
+    public async Task WhenAChatMessageIsRejected_ThenTheLastActivityIsNotSet()
     {
         // Arrange
         await using var test = await StartAsync();
         await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
 
         // Act
-        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => test.Agent.SendMessageAsync("Hello", CancellationToken.None));
 
         // Assert
-        Assert.Equal("The agent is not running.", test.Agent.Timeline.Entries[^1].Text);
         Assert.Null(test.Agent.LastActivityTime);
     }
 

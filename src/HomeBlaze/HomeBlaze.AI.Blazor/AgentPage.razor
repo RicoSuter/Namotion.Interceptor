@@ -89,7 +89,7 @@
             _memoryEditor = null;
             if (_subscribed is { } agent)
             {
-                _memoryEditor = new AgentMemoryEditor(() => agent.Memory);
+                _memoryEditor = new AgentMemoryEditor(() => agent.IsStorageLoaded ? agent.Memory : null);
                 CaptureRenderedState(agent);
                 agent.TimelineChanged += OnTimelineChanged;
             }

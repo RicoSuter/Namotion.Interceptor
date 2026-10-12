@@ -63,11 +63,15 @@
         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-1">
             <MudText Typo="Typo.h6">Memory</MudText>
             <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
-                       OnClick="MemoryEditor.StartAdd" Disabled="@(MemoryEditor.IsEditing || MemoryEditor.IsSaving)" data-testid="agent-memory-add">Add entry</MudButton>
+                       OnClick="MemoryEditor.StartAdd" Disabled="@(!MemoryEditor.IsAvailable || MemoryEditor.IsEditing || MemoryEditor.IsSaving)" data-testid="agent-memory-add">Add entry</MudButton>
         </MudStack>
         <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
             The agent's own notes, shown to it with their update time on every run. Keys are slash paths such as alerts/freezer.
         </MudText>
+        @if (!MemoryEditor.IsAvailable)
+        {
+            <MudText Typo="Typo.caption" Class="d-block mud-text-secondary" data-testid="agent-memory-not-loaded">@AgentMemoryEditor.NotLoadedText</MudText>
+        }
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="my-2" data-testid="agent-memory-size">
             <MudProgressLinear Value="@GetUsage(memory)" Color="@(GetUsage(memory) >= 90 ? Color.Warning : Color.Primary)"
                                Rounded="true" Size="Size.Small" Class="flex-grow-1" Style="max-width: 240px;" aria-label="Memory usage" />

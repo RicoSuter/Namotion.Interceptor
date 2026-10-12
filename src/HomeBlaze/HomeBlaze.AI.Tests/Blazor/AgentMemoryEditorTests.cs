@@ -28,6 +28,25 @@ public class AgentMemoryEditorTests
     }
 
     [Fact]
+    public async Task WhenTheMemoryIsNotLoaded_ThenTheEditorIsUnavailableAndSavingFailsWithAClearMessage()
+    {
+        // Arrange
+        var editor = new AgentMemoryEditor(() => null);
+        editor.StartAdd();
+        editor.Key = "preferences/quiet-hours";
+        editor.Value = "22:00 to 07:00";
+
+        // Act
+        await editor.SaveAsync();
+
+        // Assert
+        Assert.False(editor.IsAvailable);
+        Assert.Empty(editor.Snapshot.Entries);
+        Assert.True(editor.IsEditing);
+        Assert.Equal(AgentMemoryEditor.NotLoadedText, editor.Error);
+    }
+
+    [Fact]
     public async Task WhenRenamingAnEntry_ThenTheOldKeyIsRemovedInTheSameUpdate()
     {
         // Arrange
