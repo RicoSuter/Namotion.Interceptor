@@ -1,7 +1,10 @@
 using System.Globalization;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Recorder;
 using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -99,6 +102,25 @@ public class MarkdownExpressionFormatTests
 
         // Assert
         Assert.Equal(string.Empty, text);
+    }
+
+    [Theory]
+    [InlineData("{{ meter/Power }}")]
+    [InlineData("{{ meter/Power | raw }}")]
+    public async Task WhenTextIsReadWhileReadsAreRecorded_ThenThePropertyOfThePathIsRecorded(string text)
+    {
+        // Arrange
+        var page = await AddPageAsync(text);
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+        var expression = GetExpression(page);
+        var scope = ReadPropertyRecorder.Start();
+
+        // Act
+        expression.GetText(null);
+        var recorded = scope.GetPropertiesAndDispose();
+
+        // Assert: this record is what makes the page render again when the value changes
+        Assert.Contains(new PropertyReference(meter, nameof(TestMeter.Power)), recorded);
     }
 
     [Fact]

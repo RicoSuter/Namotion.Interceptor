@@ -67,21 +67,25 @@ public partial class RenderExpression : ITitleProvider
     /// Gets the value as the page shows it. A missing value gives an empty text.
     /// </summary>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for the time zone of the server.</param>
-    public string GetText(ITimeZoneDisplay? timeZone)
+    public string GetText(ITimeZoneDisplay? timeZone) =>
+        // The property is read here and not through Value, which would resolve the path a second time.
+        // The tracking scope of a render records this read like it records one of Value.
+        GetText(ResolveProperty(), Format, timeZone);
+
+    /// <summary>
+    /// Gets the value of a property as a page shows it in the format, with dates in the time zone or,
+    /// when it is null, in that of the server. A missing property or value gives an empty text.
+    /// </summary>
+    public static string GetText(RegisteredSubjectProperty? property, ExpressionFormat format, ITimeZoneDisplay? timeZone)
     {
-        // Read through the derived property, which is what the tracking scope of a render records.
-        var value = Value;
-        if (value is null)
+        var value = property?.GetValue();
+        if (property is null || value is null)
         {
             return string.Empty;
         }
 
-        if (Format == ExpressionFormat.Raw)
-        {
-            return RawValueFormatter.Format(value);
-        }
-
-        var property = ResolveProperty();
-        return property is null ? RawValueFormatter.Format(value) : property.GetPropertyDisplayValue(value, timeZone);
+        return format == ExpressionFormat.Raw
+            ? RawValueFormatter.Format(value)
+            : property.GetPropertyDisplayValue(value, timeZone);
     }
 }

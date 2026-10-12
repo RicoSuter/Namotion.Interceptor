@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Display;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.Logging;
@@ -186,15 +185,9 @@ public sealed partial class MarkdownContentParser
             {
                 try
                 {
+                    // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
                     var property = _pathResolver.ResolveScopedProperty(expression.Path, PathStyle.Canonical, parent);
-                    var value = property?.GetValue();
-                    if (property is not null && value is not null)
-                    {
-                        // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
-                        rendered.Append(expression.Format == ExpressionFormat.Raw
-                            ? RawValueFormatter.Format(value)
-                            : property.GetPropertyDisplayValue(value));
-                    }
+                    rendered.Append(RenderExpression.GetText(property, expression.Format, timeZone: null));
                 }
                 catch
                 {
