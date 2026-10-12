@@ -47,7 +47,7 @@ public partial class Card : IConfigurable, ITitleProvider
 
     /// <summary>
     /// Where the title leads to. Written like a link in the text of a page: relative to the page,
-    /// a route of the application, or a web address.
+    /// a route of the application, or a web address. It has no effect on a card without a title.
     /// </summary>
     [Configuration]
     public partial string? Href { get; set; }

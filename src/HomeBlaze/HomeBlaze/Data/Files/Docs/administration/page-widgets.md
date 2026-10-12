@@ -650,7 +650,7 @@ A row with content and without a path, and a row with a `Progress` as content. T
 ::
 
 - **Aligned labels**: When at least one row has an icon, the rows without one are indented, so that all labels line up. An icon that comes from a case of a map counts as well.
-- **Colour and icon of a case**: As described for a [ValueMap](#valuemap), the colour colours the value text.
+- **Colour and icon of a case**: A matching case gives the value text its colour and the row its icon, see [ValueMap](#valuemap).
 - **Content and value**: Content and a value can stand in the same row. The content comes first, and the value stays at the right.
 - **Rows only**: A `ValueList` has no default slot. Content outside of a `Value` block is an error.
 
@@ -688,7 +688,7 @@ Three tiles in a `FlowLayout`. The first has a label of its own and an icon, the
 :::: HomeBlaze.Components.ValueTile Path=pump/Status Map=motorstate
 ::
 
-- **Colour and icon of a case**: As described for a [ValueMap](#valuemap), the colour colours the value.
+- **Colour and icon of a case**: A matching case gives the value its colour and the tile its icon, see [ValueMap](#valuemap).
 - **No distance to its surroundings**: A tile adds no distance above, below or beside itself. It is meant to stand in a layout such as `FlowLayout`, which does the spacing.
 - **As wide as its place**: A tile is as wide as the place it stands in.
 
