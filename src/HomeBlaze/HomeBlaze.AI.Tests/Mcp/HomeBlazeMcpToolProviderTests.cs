@@ -21,11 +21,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenListMethods_ThenReturnsMethodMetadata()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
 
-        // Add a method property to the room
-        var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ => "done")
+        AddMethod(room, new MethodMetadata(_ => "done")
         {
             Kind = MethodKind.Operation,
             Title = "Turn On",
@@ -50,8 +48,8 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenListMethodsWithDescription_ThenReturnsDescription()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ => null)
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, new MethodMetadata(_ => null)
         {
             Kind = MethodKind.Operation,
             Title = "Turn On",
@@ -70,8 +68,8 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenListMethodsWithPercentParameter_ThenDescribesFraction()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetVolume", _ => new MethodMetadata(_ => null)
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, new MethodMetadata(_ => null)
         {
             Kind = MethodKind.Operation,
             PropertyName = "SetVolume",
@@ -96,8 +94,8 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenListMethodsWithOtherUnitParameter_ThenNamesTheUnit()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetTarget", _ => new MethodMetadata(_ => null)
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, new MethodMetadata(_ => null)
         {
             Kind = MethodKind.Operation,
             PropertyName = "SetTarget",
@@ -121,8 +119,8 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenListMethodsWithTimeSpanEnumAndNullableParameters_ThenDescribesFormatValuesAndNullability()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("Configure", _ => new MethodMetadata(_ => null)
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, new MethodMetadata(_ => null)
         {
             Kind = MethodKind.Operation,
             PropertyName = "Configure",
@@ -149,9 +147,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOperationWithTimeSpanArgument_ThenConvertsDocumentedFormat()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
         object? capturedPosition = null;
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("Seek", _ => new MethodMetadata(arguments =>
+        AddMethod(room, new MethodMetadata(arguments =>
         {
             capturedPosition = arguments?[0];
             return null;
@@ -177,9 +175,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOperationWithEnumName_ThenConvertsToEnumValue()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
         object? capturedMode = null;
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetMode", _ => new MethodMetadata(arguments =>
+        AddMethod(room, new MethodMetadata(arguments =>
         {
             capturedMode = arguments?[0];
             return null;
@@ -205,12 +203,13 @@ public class HomeBlazeMcpToolProviderTests
     [InlineData("""{"level": 0.3}""", "Unknown parameter 'level'.")]
     [InlineData("""{}""", "Missing parameter 'volume'.")]
     [InlineData(null, "Missing parameter 'volume'.")]
+    [InlineData("""[0.3]""", "'parameters' must be an object.")]
     public async Task WhenInvokeOperationArgumentIsMissingOrMisspelled_ThenReturnsErrorNamingTheParametersWithoutInvoking(string? parameters, string expectedError)
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
         var isInvoked = false;
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetVolume", _ => new MethodMetadata(_ =>
+        AddMethod(room, new MethodMetadata(_ =>
         {
             isInvoked = true;
             return null;
@@ -238,9 +237,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOperationWithoutNullableArgument_ThenItIsPassedAsNull()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
         object?[]? capturedArguments = null;
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("PlayStream", _ => new MethodMetadata(arguments =>
+        AddMethod(room, new MethodMetadata(arguments =>
         {
             capturedArguments = arguments;
             return null;
@@ -273,9 +272,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOperationEnumArgumentIsUndefined_ThenReturnsErrorListingTheValuesWithoutInvoking(string parameters)
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
         var isInvoked = false;
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetMode", _ => new MethodMetadata(_ =>
+        AddMethod(room, new MethodMetadata(_ =>
         {
             isInvoked = true;
             return null;
@@ -299,11 +298,11 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenMethodRejectsAnArgument_ThenTheArgumentErrorReachesTheCaller()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
         static object? PlayFavorite(string? title) =>
             throw new ArgumentException($"Unknown favorite '{title}'. Known favorites: Rock, Pop.", nameof(title));
 
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("PlayFavorite", _ => new MethodMetadata(arguments =>
+        AddMethod(room, new MethodMetadata(arguments =>
             PlayFavorite((string?)arguments![0]))
         {
             Kind = MethodKind.Operation,
@@ -322,8 +321,8 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeQueryCallsAQueryInReadOnlyMode_ThenItIsInvoked()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: true);
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("GetStatus", _ => new MethodMetadata(_ => "OK")
+        var (room, factory) = CreateTestSetup(isReadOnly: true);
+        AddMethod(room, new MethodMetadata(_ => "OK")
         {
             Kind = MethodKind.Query,
             Title = "Get Status",
@@ -348,9 +347,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeQueryCallsAnOperation_ThenErrorNamesInvokeOperationWithoutInvoking(bool isReadOnly, string expectedError)
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly);
+        var (room, factory) = CreateTestSetup(isReadOnly);
         var isInvoked = false;
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ =>
+        AddMethod(room, new MethodMetadata(_ =>
         {
             isInvoked = true;
             return null;
@@ -372,9 +371,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOperationCallsAQuery_ThenErrorNamesInvokeQueryWithoutInvoking()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
         var isInvoked = false;
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("GetStatus", _ => new MethodMetadata(_ =>
+        AddMethod(room, new MethodMetadata(_ =>
         {
             isInvoked = true;
             return "OK";
@@ -397,9 +396,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOperationCallsAnOperationThatRequiresConfirmation_ThenItIsRefusedWithoutInvoking()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
         var isInvoked = false;
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("Unlock", _ => new MethodMetadata(_ =>
+        AddMethod(room, new MethodMetadata(_ =>
         {
             isInvoked = true;
             return null;
@@ -423,10 +422,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenListMethods_ThenEachMethodReportsWhetherItRequiresConfirmation()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
-        var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("Unlock", _ => new MethodMetadata(_ => null) { Kind = MethodKind.Operation, PropertyName = "Unlock", RequiresConfirmation = true });
-        registered.AddProperty<MethodMetadata>("Lock", _ => new MethodMetadata(_ => null) { Kind = MethodKind.Operation, PropertyName = "Lock" });
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, new MethodMetadata(_ => null) { Kind = MethodKind.Operation, PropertyName = "Unlock", RequiresConfirmation = true });
+        AddMethod(room, new MethodMetadata(_ => null) { Kind = MethodKind.Operation, PropertyName = "Lock" });
 
         // Act
         var unlock = await ListMethodAsync(factory, "Unlock");
@@ -437,26 +435,13 @@ public class HomeBlazeMcpToolProviderTests
         Assert.False(lockMethod.GetProperty("requiresConfirmation").GetBoolean());
     }
 
-    [Fact]
-    public void WhenNotReadOnly_ThenTheOperationToolsDescribeTheConfirmationRuleAndCaution()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenListingTools_ThenInvokeQueryIsAlwaysOfferedAndInvokeOperationOnlyWhenNotReadOnly(bool isReadOnly)
     {
         // Arrange
-        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
-
-        // Act
-        var tools = factory.CreateTools().ToDictionary(tool => tool.Name, tool => tool.Description);
-
-        // Assert
-        Assert.Contains("requiresConfirmation", tools["list_methods"]);
-        Assert.Contains("require confirmation", tools["invoke_operation"]);
-        Assert.Contains(HomeBlazeMcpInstructions.ChangeCaution, tools["invoke_operation"]);
-    }
-
-    [Fact]
-    public void WhenReadOnly_ThenInvokeQueryIsOfferedAndInvokeOperationIsNot()
-    {
-        // Arrange
-        var (_, _, factory) = CreateTestSetup(isReadOnly: true);
+        var (_, factory) = CreateTestSetup(isReadOnly);
 
         // Act
         var toolNames = factory.CreateTools().Select(tool => tool.Name).ToArray();
@@ -464,23 +449,7 @@ public class HomeBlazeMcpToolProviderTests
         // Assert
         Assert.Contains("list_methods", toolNames);
         Assert.Contains("invoke_query", toolNames);
-        Assert.DoesNotContain("invoke_operation", toolNames);
-        Assert.DoesNotContain("invoke_method", toolNames);
-    }
-
-    [Fact]
-    public void WhenNotReadOnly_ThenInvokeQueryAndInvokeOperationAreOffered()
-    {
-        // Arrange
-        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
-
-        // Act
-        var toolNames = factory.CreateTools().Select(tool => tool.Name).ToArray();
-
-        // Assert
-        Assert.Contains("invoke_query", toolNames);
-        Assert.Contains("invoke_operation", toolNames);
-        Assert.DoesNotContain("invoke_method", toolNames);
+        Assert.Equal(!isReadOnly, toolNames.Contains("invoke_operation"));
     }
 
     [Theory]
@@ -489,10 +458,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenListMethods_ThenEachMethodReportsItsKind(bool isReadOnly)
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly);
-        var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ => null) { Kind = MethodKind.Operation, PropertyName = "TurnOn" });
-        registered.AddProperty<MethodMetadata>("GetStatus", _ => new MethodMetadata(_ => "OK") { Kind = MethodKind.Query, PropertyName = "GetStatus" });
+        var (room, factory) = CreateTestSetup(isReadOnly);
+        AddMethod(room, new MethodMetadata(_ => null) { Kind = MethodKind.Operation, PropertyName = "TurnOn" });
+        AddMethod(room, new MethodMetadata(_ => "OK") { Kind = MethodKind.Query, PropertyName = "GetStatus" });
 
         // Act
         var operation = await ListMethodAsync(factory, "TurnOn");
@@ -504,10 +472,10 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
-    public void WhenNotReadOnly_ThenTheMethodToolDescriptionsNameEachOther()
+    public void WhenNotReadOnly_ThenTheMethodToolDescriptionsNameEachOtherAndTheConfirmationRule()
     {
         // Arrange
-        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (_, factory) = CreateTestSetup(isReadOnly: false);
 
         // Act
         var tools = factory.CreateTools().ToDictionary(tool => tool.Name, tool => tool.Description);
@@ -516,15 +484,18 @@ public class HomeBlazeMcpToolProviderTests
         Assert.Contains("invoke_query", tools["list_methods"]);
         Assert.Contains("invoke_operation", tools["list_methods"]);
         Assert.Contains("kind", tools["list_methods"]);
+        Assert.Contains("requiresConfirmation", tools["list_methods"]);
         Assert.Contains("Find methods and their kind with list_methods", tools["invoke_query"]);
         Assert.Contains("Find methods and their kind with list_methods", tools["invoke_operation"]);
+        Assert.Contains("require confirmation", tools["invoke_operation"]);
+        Assert.Contains(HomeBlazeMcpInstructions.ChangeCaution, tools["invoke_operation"]);
     }
 
     [Fact]
     public void WhenListingTools_ThenInvokeQueryDescribesReadingMarkdownPages()
     {
         // Arrange
-        var (_, _, factory) = CreateTestSetup(isReadOnly: true);
+        var (_, factory) = CreateTestSetup(isReadOnly: true);
 
         // Act
         var description = factory.CreateTools().First(tool => tool.Name == "invoke_query").Description;
@@ -538,7 +509,7 @@ public class HomeBlazeMcpToolProviderTests
     public void WhenReadOnly_ThenListMethodsDescriptionSaysOperationsCannotBeCalled()
     {
         // Arrange
-        var (_, _, factory) = CreateTestSetup(isReadOnly: true);
+        var (_, factory) = CreateTestSetup(isReadOnly: true);
 
         // Act
         var description = factory.CreateTools().First(tool => tool.Name == "list_methods").Description;
@@ -555,9 +526,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenAMethodReturnsALongString_ThenTheResultIsCutWithAMarker(string toolName, MethodKind kind)
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
         var text = new string('a', MethodResultLimit.MaxStringLength + 10);
-        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("Read", _ => new MethodMetadata(_ => text)
+        AddMethod(room, new MethodMetadata(_ => text)
         {
             Kind = kind,
             PropertyName = "Read",
@@ -580,7 +551,7 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeNonExistentMethod_ThenReturnsError()
     {
         // Arrange
-        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (_, factory) = CreateTestSetup(isReadOnly: false);
         var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
@@ -597,7 +568,7 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOnInvalidPath_ThenReturnsError()
     {
         // Arrange
-        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (_, factory) = CreateTestSetup(isReadOnly: false);
         var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
@@ -613,11 +584,10 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenInvokeOperationWithParameters_ThenParametersArePassedCorrectly()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
 
         string? capturedInput = null;
-        var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("SetName", _ => new MethodMetadata(args =>
+        AddMethod(room, new MethodMetadata(args =>
         {
             capturedInput = args?[0] as string;
             return null;
@@ -653,10 +623,9 @@ public class HomeBlazeMcpToolProviderTests
     public async Task WhenMethodThrows_ThenReturnsGenericError()
     {
         // Arrange
-        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
 
-        var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("FailMethod", _ => new MethodMetadata(_ =>
+        AddMethod(room, new MethodMetadata(_ =>
             throw new InvalidOperationException("Internal failure"))
         {
             Kind = MethodKind.Operation,
@@ -677,7 +646,7 @@ public class HomeBlazeMcpToolProviderTests
         Assert.Contains("failed", error.GetString());
     }
 
-    internal static (TestThing room, McpServerConfiguration config, McpToolFactory factory) CreateTestSetup(bool isReadOnly)
+    internal static (TestThing Room, McpToolFactory Factory) CreateTestSetup(bool isReadOnly)
     {
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
@@ -696,15 +665,17 @@ public class HomeBlazeMcpToolProviderTests
             NullLogger<HomeBlazeMcpToolProvider>.Instance,
             isReadOnly);
 
-        var config = new McpServerConfiguration
+        var configuration = new McpServerConfiguration
         {
             PathProvider = pathProvider,
             IsReadOnly = isReadOnly,
             ToolProviders = { toolProvider }
         };
-        var factory = new McpToolFactory(room, config);
-        return (room, config, factory);
+        return (room, new McpToolFactory(room, configuration));
     }
+
+    private static void AddMethod(TestThing room, MethodMetadata method) =>
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>(method.PropertyName, _ => method);
 
     private static async Task<string> InvokeForErrorAsync(McpToolFactory factory, string methodName, string? parameters, string toolName = "invoke_operation")
     {

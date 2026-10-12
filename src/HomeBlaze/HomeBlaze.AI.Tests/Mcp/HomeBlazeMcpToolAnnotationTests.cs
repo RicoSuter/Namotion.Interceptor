@@ -1,11 +1,9 @@
 using HomeBlaze.AI.Mcp;
-using HomeBlaze.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 using Namotion.Interceptor.Mcp.Extensions;
@@ -19,12 +17,9 @@ public class HomeBlazeMcpToolAnnotationTests
     public async Task WhenAClientListsTheToolsOverHttp_ThenReadToolsAreReadOnlyAndWriteToolsDestructive()
     {
         // Arrange
-        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
-        var services = new ServiceCollection()
-            .AddSingleton(new SubjectTypeRegistry(new TypeProvider()))
-            .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
-            .BuildServiceProvider();
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false);
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(
+            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => room, isReadOnly: false);
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");

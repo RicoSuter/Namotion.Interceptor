@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
+using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Xunit;
@@ -19,12 +20,8 @@ public class HomeBlazeMcpConfigurationFactoryTests
     public void WhenCreatingAConfiguration_ThenRegisteredProvidersAndTheReadOnlyFlagApply()
     {
         // Arrange
-        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: true);
-        var services = new ServiceCollection()
-            .AddSingleton(new SubjectTypeRegistry(new TypeProvider()))
-            .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
-            .AddHomeBlazeMcpToolProvider(_ => new StubToolProvider())
-            .BuildServiceProvider();
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: true);
+        var services = CreateServices(services => services.AddHomeBlazeMcpToolProvider(_ => new StubToolProvider()));
 
         // Act
         var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false);
@@ -43,11 +40,8 @@ public class HomeBlazeMcpConfigurationFactoryTests
     public void WhenCreatingAConfiguration_ThenBrowseAndSearchPointToTheMarkdownPages(bool isReadOnly)
     {
         // Arrange
-        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: true);
-        var services = new ServiceCollection()
-            .AddSingleton(new SubjectTypeRegistry(new TypeProvider()))
-            .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
-            .BuildServiceProvider();
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: true);
+        var services = CreateServices();
 
         // Act
         var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly);
@@ -66,7 +60,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
     public void WhenCreatingAConfiguration_ThenSetPropertyCarriesTheChangeCaution()
     {
         // Arrange
-        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
 
         // Act
         var tools = CreateTools(room, forAgents: false);
@@ -111,7 +105,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
     public async Task WhenAnAgentSetsAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged()
     {
         // Arrange
-        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
         room.TargetTemperature = 20m;
         var setProperty = CreateTools(room, forAgents: true)["set_property"];
 
@@ -128,7 +122,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
     public async Task WhenAnAgentSetsAStateProperty_ThenItIsWritten()
     {
         // Arrange
-        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
         var setProperty = CreateTools(room, forAgents: true)["set_property"];
 
         // Act
@@ -144,7 +138,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
     public async Task WhenTheServerConfigurationIsWritable_ThenConfigurationPropertiesCanStillBeSet()
     {
         // Arrange
-        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
         room.TargetTemperature = 20m;
         var setProperty = CreateTools(room, forAgents: false)["set_property"];
 
@@ -157,12 +151,19 @@ public class HomeBlazeMcpConfigurationFactoryTests
         Assert.Equal(30m, room.TargetTemperature);
     }
 
-    private static Dictionary<string, Namotion.Interceptor.Mcp.McpToolInfo> CreateTools(TestThing room, bool forAgents)
+    /// <summary>Creates the services the configuration factory needs, after <paramref name="configure"/> added others.</summary>
+    internal static ServiceProvider CreateServices(Action<IServiceCollection>? configure = null)
     {
         var services = new ServiceCollection()
             .AddSingleton(new SubjectTypeRegistry(new TypeProvider()))
-            .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
-            .BuildServiceProvider();
+            .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
+        configure?.Invoke(services);
+        return services.BuildServiceProvider();
+    }
+
+    private static Dictionary<string, McpToolInfo> CreateTools(TestThing room, bool forAgents)
+    {
+        var services = CreateServices();
         var configuration = forAgents
             ? HomeBlazeMcpConfigurationFactory.CreateForAgents(services, () => room, isReadOnly: false)
             : HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false);
@@ -171,13 +172,13 @@ public class HomeBlazeMcpConfigurationFactoryTests
 
     private sealed class StubToolProvider : IMcpToolProvider
     {
-        public IEnumerable<Namotion.Interceptor.Mcp.McpToolInfo> GetTools()
+        public IEnumerable<McpToolInfo> GetTools()
         {
-            yield return new Namotion.Interceptor.Mcp.McpToolInfo
+            yield return new McpToolInfo
             {
                 Name = "stub_tool",
                 Description = "Stub",
-                InputSchema = System.Text.Json.JsonSerializer.SerializeToElement(new { type = "object" }),
+                InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
                 Handler = (_, _) => Task.FromResult<object?>(null)
             };
         }

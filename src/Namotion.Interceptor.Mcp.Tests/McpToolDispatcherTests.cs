@@ -5,12 +5,15 @@ namespace Namotion.Interceptor.Mcp.Tests;
 
 public class McpToolDispatcherTests
 {
-    private static McpToolInfo CreateTool(string name, Func<JsonElement, object?> handler) => new()
+    private static McpToolInfo CreateTool(string name, Func<JsonElement, object?> handler) =>
+        CreateTool(name, (input, _) => Task.FromResult(handler(input)));
+
+    private static McpToolInfo CreateTool(string name, Func<JsonElement, CancellationToken, Task<object?>> handler) => new()
     {
         Name = name,
         Description = name + " description",
         InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
-        Handler = (input, _) => Task.FromResult(handler(input))
+        Handler = handler
     };
 
     [Fact]
@@ -120,17 +123,11 @@ public class McpToolDispatcherTests
         cancellationTokenSource.Cancel();
         var tools = new[]
         {
-            new McpToolInfo
+            CreateTool("wait", async (_, token) =>
             {
-                Name = "wait",
-                Description = "wait description",
-                InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
-                Handler = async (_, token) =>
-                {
-                    await Task.Delay(Timeout.Infinite, token);
-                    return null;
-                }
-            }
+                await Task.Delay(Timeout.Infinite, token);
+                return null;
+            })
         };
 
         // Act & Assert
@@ -143,16 +140,7 @@ public class McpToolDispatcherTests
     public async Task WhenAToolThrowsCancellationWithoutTheCallBeingCancelled_ThenResultIsAnError()
     {
         // Arrange
-        var tools = new[]
-        {
-            new McpToolInfo
-            {
-                Name = "fail-cancel",
-                Description = "fail-cancel description",
-                InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
-                Handler = (_, _) => throw new OperationCanceledException()
-            }
-        };
+        var tools = new[] { CreateTool("fail-cancel", (_, _) => throw new OperationCanceledException()) };
 
         // Act
         var result = await McpToolDispatcher.CallToolAsync(
