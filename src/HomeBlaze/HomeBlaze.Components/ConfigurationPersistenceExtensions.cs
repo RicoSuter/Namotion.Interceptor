@@ -10,9 +10,9 @@ namespace HomeBlaze.Components;
 internal static class ConfigurationPersistenceExtensions
 {
     /// <summary>
-    /// Writes the configuration that contains the subject through the nearest configuration writer among its
-    /// parents, else the root manager, and warns when the writer wrote nothing, in which case the change is
-    /// applied but not saved.
+    /// Writes the configuration that contains the subject through its configuration writer, see
+    /// <see cref="RootManagerExtensions.GetConfigurationWriter"/>, and warns when the writer wrote nothing, in
+    /// which case the change is applied but not saved.
     /// </summary>
     /// <returns>true if the configuration was written.</returns>
     public static async Task<bool> WriteConfigurationOrWarnAsync(

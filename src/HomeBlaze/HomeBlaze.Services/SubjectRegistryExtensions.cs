@@ -125,6 +125,8 @@ public static class SubjectRegistryExtensions
     /// Finds the nearest subject that matches the predicate and whose configuration contains this subject: the
     /// subject itself when it matches, else a parent that holds it through [Configuration] properties only.
     /// </summary>
+    /// <param name="subject">The subject to start from.</param>
+    /// <param name="isOwner">Decides whether a subject is the owner that is looked for.</param>
     /// <returns>Null when there is none.</returns>
     public static IInterceptorSubject? TryGetConfigurationOwner(
         this IInterceptorSubject subject,

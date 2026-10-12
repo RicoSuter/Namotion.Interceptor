@@ -13,8 +13,6 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class LayoutWidgetSaveTests
 {
-    private const string NotSavedWarning = LayoutPageExtensions.NotSavedWarning;
-
     private readonly PlaywrightFixture _fixture;
 
     public LayoutWidgetSaveTests(PlaywrightFixture fixture)
@@ -34,7 +32,7 @@ public class LayoutWidgetSaveTests
             await ConfirmDeleteAsync(page);
 
             // Assert
-            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToBeVisibleAsync(new() { Timeout = 30000 });
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToBeVisibleAsync(new() { Timeout = 30000 });
             Assert.Empty(layout.Cells);
         });
     }
@@ -51,7 +49,7 @@ public class LayoutWidgetSaveTests
             await ConfirmDeleteAsync(page);
 
             // Assert
-            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToBeVisibleAsync(new() { Timeout = 30000 });
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToBeVisibleAsync(new() { Timeout = 30000 });
             Assert.Empty(layout.Nodes);
         });
     }
@@ -68,7 +66,7 @@ public class LayoutWidgetSaveTests
             await DragNodeAsync(page, 80, 40);
 
             // Assert
-            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToBeVisibleAsync(new() { Timeout = 30000 });
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToBeVisibleAsync(new() { Timeout = 30000 });
             Assert.NotEqual((100, 100), (node.X, node.Y));
         });
     }

@@ -452,17 +452,18 @@ public partial class FluentStorageContainer :
         if (_client == null)
             return false;
 
-        // Only the subject of a file is registered. A subject nested in its configuration is written with it.
+        // Several subjects map to one file, so their writes can overlap. The file is looked up and serialized
+        // inside the lock, so that the write that runs last holds the edits of the ones before it and does not
+        // wait with the path of a file that is removed meanwhile.
         string? path = null;
-        var fileSubject = subject.TryGetConfigurationOwner(candidate => _pathRegistry.TryGetPath(candidate, out path));
-        if (fileSubject == null || path == null)
-            return false;
-
-        // Several subjects map to one file, so their writes can overlap. The file is serialized inside the lock,
-        // so that the write that runs last holds the edits of the ones before it.
         await _configurationWriteLock.WaitAsync(cancellationToken);
         try
         {
+            // Only the subject of a file is registered. A subject nested in its configuration is written with it.
+            var fileSubject = subject.TryGetConfigurationOwner(candidate => _pathRegistry.TryGetPath(candidate, out path));
+            if (fileSubject == null || path == null)
+                return false;
+
             var fullPath = GetFileSystemPath(path);
             _fileWatcher?.MarkAsOwnWrite(fullPath);
 

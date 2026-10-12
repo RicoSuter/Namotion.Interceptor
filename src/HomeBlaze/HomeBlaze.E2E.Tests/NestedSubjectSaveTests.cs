@@ -66,7 +66,7 @@ public class NestedSubjectSaveTests
             await SaveCellWithColumnSpanThreeAsync(page);
 
             // Assert
-            await Assertions.Expect(page.GetByText(LayoutPageExtensions.NotSavedWarning))
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved"))
                 .ToBeVisibleAsync(new() { Timeout = 30000 });
             await Assertions.Expect(page.GetByText("Configuration saved.")).ToHaveCountAsync(0);
             Assert.Equal(3, cell.ColumnSpan);

@@ -1051,6 +1051,42 @@ public class SubjectSetupDialogTests
     }
 
     [Fact]
+    public async Task WhenApplyingTheConfigurationOfACreatedSubjectFails_ThenTheFailureIsReportedAndTheSubjectIsStored()
+    {
+        // A storage without a connection string cannot connect, which is what applying its configuration does.
+        var name = $"CreatedStorage{Guid.NewGuid():N}";
+        var filePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{name}.json");
+        var root = Assert.IsType<FluentStorageContainer>(_fixture.ServerServices.GetRequiredService<RootManager>().Root);
+        try
+        {
+            // Arrange
+            var page = await _fixture.CreatePageAsync();
+            await OpenDialogAsync(page);
+            await PickTypeAsync(page, "fluentstoragecontainer");
+            await NameInput(page).FillAsync(name);
+            await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // Act
+            await CreateButton(page).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(page.GetByText("Error applying configuration"))
+                .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath), TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            if (root.Children.TryGetValue(name, out var created))
+            {
+                await root.DeleteSubjectAsync(created, CancellationToken.None);
+            }
+
+            File.Delete(filePath);
+        }
+    }
+
+    [Fact]
     public async Task WhenPickedTypesAreAbandoned_ThenTheirFormSubjectsLeaveTheGraphAndStop()
     {
         // Arrange - motors that exist already are told apart by instance, because the circuit of an earlier

@@ -87,40 +87,36 @@ public class FluentStorageContainerConfigurationWriterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenSubjectsNestedInOneFileAreEditedAndWrittenConcurrently_ThenFileHoldsEveryEdit()
+    public async Task WhenSubjectIsEditedAndWrittenWhileItsFileIsSerialized_ThenTheFileHoldsTheEdit()
     {
         // Arrange
         var first = new ConfigurationWriterTestSubject(_context);
         var second = new ConfigurationWriterTestSubject(_context);
         var file = new ConfigurationWriterTestSubject(_context) { Items = [first, second] };
         await _storage.AddSubjectAsync(FilePath, file, CancellationToken.None);
-        var roundsWithLostEdit = new List<int>();
+
+        // The items are serialized in order, so the write that reaches the second item has read the first one.
+        // The later write is started from there, which is in the middle of the first write.
+        var isLaterWriteStarted = false;
+        Task<bool>? laterWrite = null;
+        second.Serializing = () =>
+        {
+            if (!isLaterWriteStarted)
+            {
+                isLaterWriteStarted = true;
+                first.Name = "edited";
+                laterWrite = _storage.WriteConfigurationAsync(first, CancellationToken.None);
+            }
+        };
 
         // Act
-        for (var round = 0; round < 200; round++)
-        {
-            var firstName = $"first{round}";
-            var secondName = $"second{round}";
-
-            await Task.WhenAll(
-                Task.Run(() => EditAndWriteAsync(first, firstName)),
-                Task.Run(() => EditAndWriteAsync(second, secondName)));
-
-            var content = await ReadFileAsync();
-            if (!content.Contains($"\"{firstName}\"") || !content.Contains($"\"{secondName}\""))
-            {
-                roundsWithLostEdit.Add(round);
-            }
-        }
+        var isWritten = await _storage.WriteConfigurationAsync(second, CancellationToken.None);
+        var isLaterWritten = await laterWrite!;
 
         // Assert
-        Assert.Empty(roundsWithLostEdit);
-    }
-
-    private async Task EditAndWriteAsync(ConfigurationWriterTestSubject subject, string name)
-    {
-        subject.Name = name;
-        Assert.True(await _storage.WriteConfigurationAsync(subject, CancellationToken.None));
+        Assert.True(isWritten);
+        Assert.True(isLaterWritten);
+        Assert.Contains("\"name\": \"edited\"", await ReadFileAsync());
     }
 
     private Task<string> ReadFileAsync()
@@ -145,6 +141,22 @@ public partial class ConfigurationWriterTestSubject : IConfigurable
 
     [State]
     public partial ConfigurationWriterTestSubject? StateItem { get; set; }
+
+    /// <summary>
+    /// Called each time the subject is serialized, through the property below that the serializer reads.
+    /// </summary>
+    public Action? Serializing { get; set; }
+
+    [Configuration]
+    public string? SerializationProbe
+    {
+        get
+        {
+            Serializing?.Invoke();
+            return null;
+        }
+        set => _ = value;
+    }
 
     public ConfigurationWriterTestSubject()
     {

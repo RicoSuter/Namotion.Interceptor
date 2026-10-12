@@ -9,9 +9,7 @@ using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Tracking.Parent;
 using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
 
 namespace HomeBlaze.Storage.Files;
@@ -217,14 +215,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
     {
         // The edited subject can be nested in the configuration of a block subject, for example a grid cell.
-        (int, IInterceptorSubject)? block = null;
-        subject.TryGetConfigurationOwner(candidate =>
+        var blockIndex = -1;
+        var blockSubject = subject.TryGetConfigurationOwner(candidate =>
         {
-            foreach (var (blockIndex, blockSubject) in blockSubjects)
+            foreach (var (index, candidateBlockSubject) in blockSubjects)
             {
-                if (ReferenceEquals(blockSubject, candidate))
+                if (ReferenceEquals(candidateBlockSubject, candidate))
                 {
-                    block = (blockIndex, candidate);
+                    blockIndex = index;
                     return true;
                 }
             }
@@ -232,7 +230,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return false;
         });
 
-        return block;
+        return blockSubject is null ? null : (blockIndex, blockSubject);
     }
 
     private static string FormatFilename(string name)

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -14,8 +15,6 @@ internal static class LayoutPageExtensions
 {
     private const string PagePath = "Demo/LayoutPage.md";
 
-    public const string NotSavedWarning = "Configuration applied but not saved";
-
     /// <summary>
     /// Opens the layout page in inline edit mode.
     /// </summary>
@@ -24,6 +23,10 @@ internal static class LayoutPageExtensions
         var page = await fixture.CreatePageAsync();
         await page.GotoAsync($"{fixture.ServerAddress}pages/{PagePath}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // The edit menu is prerendered, and a click before the circuit is connected is lost.
+        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
+            .ToBeVisibleAsync(new() { Timeout = 30000 });
 
         var editMenu = page.Locator("[data-testid='edit-mode-menu']");
         await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });

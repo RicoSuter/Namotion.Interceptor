@@ -303,7 +303,15 @@
                 // runs and has to pick up the edits.
                 if (createdSubject is IConfigurable configurable)
                 {
-                    await configurable.ApplyConfigurationAsync(CancellationToken.None);
+                    try
+                    {
+                        await configurable.ApplyConfigurationAsync(CancellationToken.None);
+                    }
+                    catch (Exception exception)
+                    {
+                        // As when persisting, the subject is created all the same.
+                        Snackbar.Add($"Error applying configuration: {exception.Message}", Severity.Error);
+                    }
                 }
 
                 // The caller attaches and stores the subject, which it takes from the result.

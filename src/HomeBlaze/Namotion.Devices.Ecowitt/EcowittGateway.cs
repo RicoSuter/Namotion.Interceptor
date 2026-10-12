@@ -337,11 +337,11 @@ public partial class EcowittGateway : BackgroundService,
 
     internal async Task SaveConfigurationAsync(CancellationToken cancellationToken)
     {
-        var configWriter = this.TryGetFirstParent<IConfigurationWriter>();
-        if (configWriter == null)
+        var configurationWriter = this.TryGetFirstParent<IConfigurationWriter>();
+        if (configurationWriter == null)
             return;
 
-        var isWritten = await configWriter.WriteConfigurationAsync(this, cancellationToken);
+        var isWritten = await configurationWriter.WriteConfigurationAsync(this, cancellationToken);
         if (!isWritten && !_isConfigurationUnsaved)
         {
             _logger.LogWarning(
