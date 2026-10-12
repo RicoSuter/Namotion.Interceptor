@@ -45,7 +45,7 @@ public static class ParentsHandlerExtensions
 
             if (parents.Length > 1)
             {
-                return FindFirstParentBreadthFirst<TRoot>(subject, current);
+                return FindFirstParentBreadthFirst<TRoot>(subject, current, parents);
             }
 
             var parent = parents[0];
@@ -76,15 +76,16 @@ public static class ParentsHandlerExtensions
     }
 
     /// <summary>
-    /// Searches breadth first from <paramref name="start"/>, which was reached from
-    /// <paramref name="subject"/> over subjects with one parent each that are no match.
+    /// Searches breadth first above <paramref name="start"/>, whose parents are <paramref name="parentsOfStart"/>.
+    /// <paramref name="start"/> is no match: it is <paramref name="subject"/> itself or was checked on the way from it.
     /// </summary>
-    private static TRoot? FindFirstParentBreadthFirst<TRoot>(IInterceptorSubject subject, IInterceptorSubject start)
+    private static TRoot? FindFirstParentBreadthFirst<TRoot>(
+        IInterceptorSubject subject, IInterceptorSubject start, ImmutableArray<SubjectParent> parentsOfStart)
         where TRoot : class
     {
-        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { start };
         var queue = new Queue<IInterceptorSubject>();
-        queue.Enqueue(start);
+        EnqueueParents(queue, parentsOfStart);
 
         while (queue.Count > 0)
         {
@@ -100,16 +101,21 @@ public static class ParentsHandlerExtensions
                 return root;
             }
 
-            foreach (var parent in current.GetParents())
-            {
-                if (!parent.Equals(default))
-                {
-                    queue.Enqueue(parent.Property.Subject);
-                }
-            }
+            EnqueueParents(queue, current.GetParents());
         }
 
         return null;
+    }
+
+    private static void EnqueueParents(Queue<IInterceptorSubject> queue, ImmutableArray<SubjectParent> parents)
+    {
+        foreach (var parent in parents)
+        {
+            if (!parent.Equals(default))
+            {
+                queue.Enqueue(parent.Property.Subject);
+            }
+        }
     }
 
     /// <summary>
