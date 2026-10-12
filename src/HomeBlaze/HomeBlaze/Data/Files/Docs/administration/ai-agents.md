@@ -170,7 +170,7 @@ The memory is the agent's own notebook: key-value entries that the agent keeps a
 
 The agent changes its memory with the `update_memory` tool, which is always available and does not count against the tool-call budget. One call takes a list of changes, each either setting a key to a value or removing a key; removing a key that ends in `/` removes the whole subtree. The changes apply in order, all or nothing. The memory reaches the model as JSON Lines with `key`, `value` and `updated`, sorted by key, and the prompt tells the model that these notes are data and never override the instructions.
 
-On the **Configuration** tab you can read, add, edit and delete entries; a bar shows the size against the limits. When the agent changes an entry while you edit it, the form warns that saving replaces the agent's change. The agent and the editor can write at the same time; the last write of a key wins.
+On the **Memory** tab you can read, add, edit and delete entries; a bar shows the size against the limits. When the agent changes an entry while you edit it, the form warns that saving replaces the agent's change. The agent and the editor can write at the same time; the last write of a key wins.
 
 The memory file of earlier versions, a Markdown document (`.memory.md`), is migrated once into the entry `notes/legacy` and renamed to `.memory.md.migrated`. A memory file that cannot be read completely is copied to `.memory.json.damaged`; the readable entries are kept, or the memory starts empty.
 
@@ -178,13 +178,15 @@ The memory file of earlier versions, a Markdown document (`.memory.md`), is migr
 
 ## The agent page
 
-The page of an agent has a header with one status chip, **Run now** and **New conversation** (both disabled while a turn runs), and three tabs. While the agent runs, the chip shows the state of its turn: Idle, Answering, Running background or Waiting; otherwise it shows Stopped, Starting, Error or Unavailable, followed by the reason.
+The page of an agent has a header with one status chip, **Run now** and **New conversation** (both disabled while a turn runs), and four tabs: Chat, Activity, Memory and Settings. While the agent runs, the chip shows the state of its turn: Idle, Answering, Running background or Waiting; otherwise it shows Stopped, Starting, Error or Unavailable, followed by the reason.
 
 **Chat** shows the timeline: your messages, the agent's replies with the tools they called, background findings, errors and dividers. A background finding shows the result of the run; when the agent wrote more before it, **Show full answer** shows the whole answer. Consecutive quiet background runs collapse into one line. Replies are rendered as Markdown while they stream in. The chat opens at the newest entry and follows new content while you are at the bottom; scrolling up stops following. It shows the newest 50 rows, and **Show earlier** adds 50 more at a time without moving what you are reading. With a mouse or trackpad, Enter sends and Shift+Enter adds a line; on touch devices Enter adds a line and the send button sends. While a background run holds the agent, the status shows Waiting and your message is answered after it. A message sent while the agent is stopped or still starting is rejected: it stays in the input with the error below it.
 
 **Activity** shows the number of background runs and the time of the last one, the subscription usage of CLI agents, and a table of background runs, newest first and 25 per page, with trigger, duration, tokens, tool calls and the result as plain text. Runs that failed or were cancelled are listed and counted as well; chat turns are not. The table lists the runs still in the timeline, which keeps the newest 500 entries; the count includes older runs and survives restarts and new conversations.
 
-**Configuration** summarizes the settings and the instructions and holds the memory editor, which is available once the agent has started. Change the settings with the subject's Edit action.
+**Memory** lists the agent's memory entries with their update time and a bar for the size against the limits, and lets you add, edit and delete entries once the agent has started.
+
+**Settings** summarizes the agent in sections: Instructions; Model (model, effort, background model and effort, and the fallback model of CLI agents); Triggers (watch paths, poll interval, minimum run interval); Tools (the allowed tools and permissions); Limits (turn timeout, tool calls per turn); and Connection (the CLI path of CLI agents, or whether an API key is set, the output token limit and the history budget of API agents). Change the settings with the subject's Edit action.
 
 ---
 

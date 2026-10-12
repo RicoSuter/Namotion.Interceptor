@@ -438,7 +438,7 @@ public class AgentPageTests
         try
         {
             // Act & Assert
-            await page.GetByRole(AriaRole.Tab, new() { Name = "Configuration" }).ClickAsync();
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Memory" }).ClickAsync();
             await page.GetByTestId("agent-memory-add").ClickAsync();
             await page.GetByTestId("agent-memory-key").Locator("input").FillAsync(key);
             await page.GetByTestId("agent-memory-value").Locator("textarea").FillAsync("noted by the end-to-end test");

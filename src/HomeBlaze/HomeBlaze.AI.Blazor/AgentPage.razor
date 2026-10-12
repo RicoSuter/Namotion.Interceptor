@@ -52,11 +52,13 @@
             </div>
         </MudStack>
         @* A plain underlined tab bar on the page background, with the content aligned to the title. *@
-        <MudTabs Elevation="0" Border="true" MinimumTabWidth="96px" TabHeaderClass="mud-background"
+        @* The narrow tab padding on phones keeps all four tabs in view without a scrolling tab bar. *@
+        <MudTabs Elevation="0" Border="true" MinimumTabWidth="0px" TabHeaderClass="mud-background" TabButtonsClass="px-2 px-sm-4"
                  Class="flex-grow-1 overflow-hidden" TabPanelsClass="flex-grow-1 pt-3 overflow-y-auto">
             <MudTabPanel Text="Chat" PanelClass="mud-height-full"><AgentChatTab Agent="agent" TimeZoneVersion="_timeZoneVersion" /></MudTabPanel>
             <MudTabPanel Text="Activity"><AgentActivityTab Agent="agent" /></MudTabPanel>
-            <MudTabPanel Text="Configuration"><AgentConfigurationTab Agent="agent" MemoryEditor="_memoryEditor!" /></MudTabPanel>
+            <MudTabPanel Text="Memory"><AgentMemoryTab MemoryEditor="_memoryEditor!" /></MudTabPanel>
+            <MudTabPanel Text="Settings"><AgentSettingsTab Agent="agent" /></MudTabPanel>
         </MudTabs>
     </div>
 }
