@@ -975,6 +975,15 @@ This hides the subject from:
 
 Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
 
+### Excluding Properties from Page Expressions
+
+A `{{ path }}` expression on a page shows the value of any property it reaches, except a secret configuration property. A property whose value can hold secrets in another form, such as the raw source of a file, is marked with `[ExcludeFromExpressions]`, and an expression that reaches it shows nothing:
+
+```csharp
+[ExcludeFromExpressions]
+public partial string? Content { get; private set; }
+```
+
 ---
 
 ## Building Subject Components

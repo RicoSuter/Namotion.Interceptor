@@ -34,9 +34,10 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     private const string BlocksRule =
         "Blocks, which start with a line of two or more colons (::) and create widgets, layouts, slots, subjects and " +
         "styled sections, must stay exactly as they are and in the same order, including their content up to their " +
-        "closing line; text directly after a block without a closing line belongs to that block. Keep a block with a " +
-        "hidden secret value (***) exactly as ReadRawContent shows it; the page keeps the real value. Expressions and the " +
-        "first text cannot be added or removed before a block without a #name.";
+        "closing line; text directly after a block without a closing line belongs to that block. Keep blocks and old " +
+        "subject(name) code blocks with a hidden secret value (***) exactly as ReadRawContent shows them; the page keeps " +
+        "the real value. Expressions, the first text and text between two blocks cannot be added or removed before a " +
+        "block without a #name.";
 
     private static readonly string MaxContentSizeText = $"at most {MarkdownFile.MaxContentSize / 1024} KB";
 

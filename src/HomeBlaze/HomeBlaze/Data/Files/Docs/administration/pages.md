@@ -116,7 +116,7 @@ The reader sees the sentence with the two numbers in place of the expressions, a
 - **Live**: The value updates when the property changes.
 - **HTML-safe**: The value is HTML-encoded, so a value can never add markup to the page.
 - **Empty**: A value that is not set shows nothing.
-- **Secrets**: A secret configuration value, such as a password or an API key, is never shown. Its expression shows nothing, like a value that is not set.
+- **Secrets**: A secret configuration value, such as a password or an API key, is never shown. Its expression shows nothing, like a value that is not set. The same holds for the raw source of a page, the `Content` property of a markdown file, which holds the configuration of its blocks.
 
 ### Expression Paths
 
