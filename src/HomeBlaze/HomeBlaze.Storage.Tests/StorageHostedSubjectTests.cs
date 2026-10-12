@@ -218,6 +218,37 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenSubjectIsAddedAfterStopReleasedWhatPassCreated_ThenThatIsOnlyLoadedWhenStorageIsStartedAgain()
+    {
+        // Arrange: the first pass creates the device, loads B.gated and ends before it places anything, and
+        // the stop releases the device.
+        WriteFile("A.json", RecordingDevice.Serialize("A"));
+        WriteFile("B.gated");
+        WriteFile("C.gated");
+        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
+        var device = Assert.Single(RecordingDevice.Created);
+        await device.WhenStartedAsync();
+        _client!.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+        await storage.StopAsync(CancellationToken.None);
+        await device.WhenStoppedAsync();
+
+        // Act: an operation assigns the tree from the index.
+        await storage.AddSubjectAsync("New.json", CreateMotor("New"), CancellationToken.None);
+        var childrenAfterAdd = storage.Children.Keys.ToList();
+        await storage.StartAsync(CancellationToken.None);
+        await storage.ExecuteTask!;
+
+        // Assert
+        Assert.Equal(["New"], childrenAfterAdd);
+        Assert.Equal(1, _recorder.CountAttachesOf(device));
+        Assert.False(IsAttached(device));
+        Assert.Equal(["A", "B.gated", "C.gated", "New"], storage.Children.Keys.Order());
+        Assert.Equal(2, RecordingDevice.Created.Count);
+        Assert.Same(RecordingDevice.Created[1], storage.Children["A"]);
+    }
+
+    [Fact]
     public async Task WhenStorageIsStoppedDuringItsFirstPass_ThenDeviceThatPassCreatedIsDetachedAndStopped()
     {
         // Arrange

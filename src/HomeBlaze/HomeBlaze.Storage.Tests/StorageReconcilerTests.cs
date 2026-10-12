@@ -220,6 +220,32 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenJsonSubjectMovesIntoFolderThatTakesOverKeyOfAnotherMovedSubject_ThenNeitherIsDetached()
+    {
+        // Arrange
+        WriteFile("Docs.json", SerializeMotor("first"));
+        WriteFile("Z/M.json", SerializeMotor("second"));
+        WriteFile("Other/Page.md");
+        var storage = await ConnectAsync();
+        var first = storage.Children["Docs"];
+        var second = Assert.IsType<VirtualFolder>(storage.Children["Z"]).Children["M"];
+        var detachesOfFirst = CountDetachesOf(first);
+        var detachesOfSecond = CountDetachesOf(second);
+
+        // Act: "Docs.json" moves away, a folder "Docs" takes over its key, and "Z/M.json" moves into that folder.
+        File.Move(GetFullPath("Docs.json"), GetFullPath("Other/Docs.json"));
+        Directory.CreateDirectory(GetFullPath("Docs"));
+        File.Move(GetFullPath("Z/M.json"), GetFullPath("Docs/M.json"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Same(first, Assert.IsType<VirtualFolder>(storage.Children["Other"]).Children["Docs"]);
+        Assert.Same(second, Assert.IsType<VirtualFolder>(storage.Children["Docs"]).Children["M"]);
+        Assert.Equal(0, detachesOfFirst.Count);
+        Assert.Equal(0, detachesOfSecond.Count);
+    }
+
+    [Fact]
     public async Task WhenTwoJsonSubjectsWithSameContentAreRenamed_ThenNewInstancesAreCreated()
     {
         // Arrange
@@ -1128,6 +1154,41 @@ public class StorageReconcilerTests : StorageTestBase
         Assert.Equal(StorageStatus.Disconnected, statusAfterConnect);
         Assert.Empty(childrenAfterConnect);
         Assert.Equal(["First.gated", "Second.gated"], storage.Children.Keys.Order());
+    }
+
+    [Fact]
+    public async Task WhenConnectIsCancelledByItsCallerBeforeFirstPassStarts_ThenLaterPassLoadsTheStorageAndSetsTheStatus()
+    {
+        // Arrange: without a periodic pass, so that only the retry of the cancelled pass can run one. The
+        // caller cancels after the last check of the connect and before the worker takes the first pass.
+        var timeProvider = new ManualTimeProvider();
+        using var cancellation = new CancellationTokenSource();
+        var storage = CreateStorage(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+            container.ClientDecorator = client =>
+            {
+                cancellation.Cancel();
+                return client;
+            };
+        });
+        WriteFile("Home.md");
+        var exception = await Record.ExceptionAsync(() => storage.ConnectAsync(cancellation.Token));
+        var statusAfterConnect = storage.Status;
+        var childrenAfterConnect = storage.Children.Keys.ToList();
+        var armedTimersAfterConnect = timeProvider.ArmedTimerCount;
+
+        // Act
+        timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+
+        // Assert
+        Assert.IsType<OperationCanceledException>(exception, exactMatch: false);
+        Assert.Equal(StorageStatus.Disconnected, statusAfterConnect);
+        Assert.Empty(childrenAfterConnect);
+        Assert.Equal(1, armedTimersAfterConnect);
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Connected);
+        Assert.Equal(["Home.md"], storage.Children.Keys);
     }
 
     [Fact]

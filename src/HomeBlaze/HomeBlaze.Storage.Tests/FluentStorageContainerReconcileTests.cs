@@ -1140,6 +1140,8 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         var hookedTimeProvider = new HookedTimeProvider(timeProvider);
         PausableBlobStorage? client = null;
         Task? read = null;
+        var hasReadReachedStorage = false;
+        var isReadGivenUp = false;
         using var cancellation = new CancellationTokenSource();
         WriteFile("Home.md");
         var storage = CreateStorage(configure: container =>
@@ -1152,15 +1154,17 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         {
             var readReached = client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
             read = storage.GetBlobMetadataAsync("Home.md", cancellation.Token);
-            readReached.Wait(WatcherTimeout);
+            hasReadReachedStorage = readReached.Wait(WatcherTimeout);
             cancellation.Cancel();
-            SpinWait.SpinUntil(() => storage.IsStorageUnresponsive, WatcherTimeout);
+            isReadGivenUp = SpinWait.SpinUntil(() => storage.IsStorageUnresponsive, WatcherTimeout);
         });
 
         // Act
         var exception = await Record.ExceptionAsync(() => storage.ConnectAsync(CancellationToken.None));
         var statusAfterConnect = storage.Status;
         var armedTimersAfterConnect = timeProvider.ArmedTimerCount;
+        Assert.True(hasReadReachedStorage, "The read did not reach the storage before the first pass.");
+        Assert.True(isReadGivenUp, "The read was not given up before the first pass.");
         await Record.ExceptionAsync(() => read!);
         client!.Release();
         await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive && timeProvider.ArmedTimerCount == 1);

@@ -224,27 +224,32 @@ internal sealed class StorageReconciler
         // part of the item, and its calls into the storage would be refused for as long as the item runs.
         using (ExecutionContext.SuppressFlow())
         {
-            // In two steps when a subject moved, first everything that is added and then everything that is
-            // removed: one assignment detaches before it attaches, which would stop and restart the subject.
+            // When a subject moved, everything is added before anything is removed: one assignment detaches
+            // before it attaches, which would stop and restart the subject.
             if (_hasUnappliedMove)
             {
                 var placedSubjects = new HashSet<IInterceptorSubject>(
                     childrenByFolder.Values.SelectMany(children => children.Values), ReferenceEqualityComparer.Instance);
 
-                foreach (var folder in folders)
+                // Added in two steps. In the first a subject that moves away keeps its key: its new holder
+                // would detach it there, before the folder it moves to is assigned. The second gives the key
+                // to that holder, so a folder that takes over a key is attached with what moved into it
+                // before that is removed from where it was.
+                foreach (var isKeyKeptByMovedSubject in (ReadOnlySpan<bool>)[true, false])
                 {
-                    var union = new Dictionary<string, IInterceptorSubject>(GetChildren(folder));
-                    foreach (var (key, subject) in childrenByFolder[folder])
+                    foreach (var folder in folders)
                     {
-                        // A subject that moves away keeps its key in this step: its new holder would detach
-                        // it here, before the folder it moves to is assigned.
-                        if (!union.TryGetValue(key, out var current) || !placedSubjects.Contains(current))
+                        var union = new Dictionary<string, IInterceptorSubject>(GetChildren(folder));
+                        foreach (var (key, subject) in childrenByFolder[folder])
                         {
-                            union[key] = subject;
+                            if (!isKeyKeptByMovedSubject || !union.TryGetValue(key, out var current) || !placedSubjects.Contains(current))
+                            {
+                                union[key] = subject;
+                            }
                         }
-                    }
 
-                    AssignChildren(folder, union);
+                        AssignChildren(folder, union);
+                    }
                 }
             }
 
@@ -295,13 +300,23 @@ internal sealed class StorageReconciler
 
     /// <summary>
     /// Releases every subject of the index that never reached the tree, for when the connection has ended or
-    /// the storage was stopped, and no pass will place them.
+    /// the storage was stopped, and no pass will place them. Their entries are left as those of files that
+    /// were not loaded.
     /// </summary>
     public void ReleaseUnplacedSubjects()
     {
         foreach (var entry in _index.Entries)
         {
             Release(entry.Subject);
+
+            // Kept, an operation after a stop would place the subject and attach again what was released
+            // here. Not for a subject that moved: the tree still holds it, and it was not released.
+            if (entry is { IsPlaced: false, Subject: not null } && entry.Subject.GetReferenceCount() == 0)
+            {
+                entry.Subject = null;
+                entry.Version = default;
+                entry.Hash = null;
+            }
         }
     }
 

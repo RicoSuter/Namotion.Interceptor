@@ -323,6 +323,39 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenStorageIsStoppedAfterPassFailedAfterMovingSubject_ThenLaterOperationKeepsTheInstanceAttached()
+    {
+        // Arrange: the pass moves the subject to another entry and ends before it assigns the tree.
+        WriteFile("Old/Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectPausableAsync();
+        var motor = (Samples.Motor)((VirtualFolder)storage.Children["Old"]).Children["Motor"];
+        var detaches = CountDetachesOf(motor);
+        Directory.CreateDirectory(GetFullPath("Other"));
+        File.Move(GetFullPath("Old/Motor.json"), GetFullPath("Other/Motor.json"));
+        WriteFile("Zeta.gated");
+        WriteFile("Zulu.md");
+        var gate = GatedFile.PauseNextLoad();
+        var pass = storage.ReconcileAsync();
+        await gate.WhenReachedAsync();
+        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        gate.Release();
+        await readReached;
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        await ReleaseHangingCallAsync(storage);
+
+        // Act: the stop releases what the pass created and did not place, and the operation assigns the tree.
+        await storage.StopAsync(CancellationToken.None);
+        await storage.AddSubjectAsync("New.json", CreateMotor("New"), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["New", "Old", "Other"], storage.Children.Keys.Order());
+        var other = Assert.IsType<VirtualFolder>(storage.Children["Other"]);
+        Assert.Same(motor, other.Children["Motor"]);
+        Assert.Equal(0, detaches.Count);
+    }
+
+    [Fact]
     public async Task WhenReadingMarkdownFileHangs_ThenOnlyThatFileIsLeftOutUntilAnEventNamesIt()
     {
         // Arrange

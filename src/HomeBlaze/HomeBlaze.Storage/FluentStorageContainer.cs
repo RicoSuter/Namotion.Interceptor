@@ -291,6 +291,7 @@ public partial class FluentStorageContainer :
             }
         }
 
+        StorageConnection? connection = null;
         try
         {
             // A reconnect starts from scratch. The item that the previous worker is running still assigns to
@@ -310,7 +311,7 @@ public partial class FluentStorageContainer :
 
             client = ClientDecorator?.Invoke(client) ?? client;
 
-            var connection = new StorageConnection(
+            connection = new StorageConnection(
                 settings, client, storageDirectory, this, _subjectFactory, _serializer, TimeProvider, _logger);
 
             // Queued before the connection can be found, so that it is the first item of the worker: an
@@ -344,6 +345,7 @@ public partial class FluentStorageContainer :
         catch (Exception exception)
         {
             var isCancelledByCaller = exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
+            var wasStillInitializing = false;
             lock (_connectionLock)
             {
                 // Only where the first pass has not written the status itself. Written here after it, the
@@ -351,7 +353,15 @@ public partial class FluentStorageContainer :
                 if (!_isDisposed && Status == StorageStatus.Initializing)
                 {
                     Status = isCancelledByCaller ? StorageStatus.Disconnected : StorageStatus.Error;
+                    wasStillInitializing = true;
                 }
+            }
+
+            // The worker does not run an item whose caller has cancelled, so a first pass that was cancelled
+            // before it started has not asked for its retry, as one that is cancelled while it runs does.
+            if (isCancelledByCaller && wasStillInitializing)
+            {
+                connection?.NotifyPassFailed();
             }
 
             if (isCancelledByCaller)
