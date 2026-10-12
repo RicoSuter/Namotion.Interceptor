@@ -41,7 +41,11 @@
                           XChanged="@(x => OnNodePositionChanged(node, x, node.Y))"
                           YChanged="@(y => OnNodePositionChanged(node, node.X, y))"
                           ContentStyle="@($"width: {node.Width}px; height: {node.Height}px;")">
-                        <div class="canvas-node @(IsEditing ? "editing" : "")">
+                        <div class="canvas-node @(IsEditing ? "editing" : "")"
+                             @onwheel:stopPropagation="@(!IsEditing)"
+                             @onmousedown:stopPropagation="@(!IsEditing)"
+                             @onmouseup:stopPropagation="@(!IsEditing)"
+                             @onmousemove:stopPropagation="@(!IsEditing)">
                             <div class="canvas-node-content">
                                 <SubjectComponent Subject="@node.Child"
                                                   Type="SubjectComponentType.Widget">
@@ -79,13 +83,21 @@
     }
 
     /*
-     * View mode: the diagram takes no mouse input at all. The library calls preventDefault for every wheel
-     * event that reaches it, whether zooming is enabled or not, so the wheel can only scroll the page when
-     * the event does not reach the diagram. The rects are the areas of the nodes, which would catch it.
+     * View mode: the diagram itself takes no mouse input, only the content of the nodes does. The library calls
+     * preventDefault for every wheel event that reaches its handler, whether zooming is enabled or not, so the wheel
+     * can only scroll the page when the event does not reach the diagram. The rects are the areas of the nodes,
+     * which would catch it. The content of a node takes the pointer again, and the node stops the events that
+     * Blazor would pass on to the handlers of the diagram (see the markup), so that the wheel over a widget
+     * scrolls what the widget scrolls and then the page. In edit mode the pointer events of the content are
+     * off, so that a node can be moved.
      */
     .canvas-layout-container:not(.editing) .canvas-diagram,
     .canvas-layout-container:not(.editing) .canvas-diagram svg rect {
         pointer-events: none !important;
+    }
+
+    .canvas-layout-container:not(.editing) .canvas-node {
+        pointer-events: auto;
     }
 
     /* The outline shows the area of the layout, so it is drawn in edit mode only. */

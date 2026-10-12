@@ -109,6 +109,101 @@ public class CanvasLayoutTests
     }
 
     [Fact]
+    public async Task WhenCanvasIsViewed_ThenAWidgetInANodeCanBeOperated()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync(withOperableWidgets: true);
+        var title = GetNodes(page).First.GetByTestId("card-title");
+
+        // Act
+        await title.ClickAsync();
+
+        // Assert
+        await page.WaitForURLAsync(new Regex("/pages/Demo/Blocks\\.md$"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenCanvasIsViewed_ThenHoveringAWidgetInANodeShowsItsTooltip()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync(withOperableWidgets: true);
+        var indicator = GetNodes(page).Last.GetByTestId("indicator");
+
+        // Act
+        await indicator.HoverAsync();
+
+        // Assert
+        await Assertions.Expect(page.Locator(".mud-tooltip.mud-popover-open")).ToHaveTextAsync("../Motor/Missing", new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenCanvasIsViewed_ThenAWidgetInANodeThatScrollsScrollsBeforeThePage()
+    {
+        // Arrange: a box with a scroll bar of its own in the first node, which a widget with a long list would have.
+        var page = await OpenCanvasPageAsync(withTextBelow: true, withOperableWidgets: true);
+        var node = GetNodes(page).First;
+        await node.EvaluateAsync(
+            """
+            node => {
+                const box = document.createElement('div');
+                box.dataset.testid = 'scroll-box';
+                box.style.cssText = 'position: absolute; left: 0; top: 0; width: 100%; height: 100px; overflow: auto; background: white';
+                box.innerHTML = '<div style="height: 1000px">Long content</div>';
+                node.appendChild(box);
+            }
+            """);
+        var scrollBox = node.GetByTestId("scroll-box");
+        var box = await GetBoxAsync(scrollBox);
+        var scrollBefore = await GetScrollPositionAsync(page);
+        await page.Mouse.MoveAsync((float)(box.Left + 50), (float)(box.Top + 50));
+
+        // Act
+        await page.Mouse.WheelAsync(0, 100);
+
+        // Assert
+        await page.WaitForFunctionAsync(
+            "element => element.scrollTop > 0",
+            await scrollBox.ElementHandleAsync(),
+            new() { Timeout = Timeout });
+        Assert.Equal(scrollBefore, await GetScrollPositionAsync(page));
+    }
+
+    [Fact]
+    public async Task WhenCanvasIsViewed_ThenDraggingFromTheContentOfANodeMovesNothing()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync(withOperableWidgets: true);
+        var nodes = GetNodes(page);
+        var positionsBefore = await GetNodePositionsAsync(page);
+        var box = await GetBoxAsync(nodes.Last);
+
+        // Act: the drag starts on the indicator and ends on the empty canvas.
+        await DragAsync(page, box.Left + 100, box.Top + 100, box.Left + 100 - 60, box.Bottom + 60);
+        await WaitForServerAsync(page);
+
+        // Assert
+        Assert.Equal(positionsBefore, await GetNodePositionsAsync(page));
+        await Assertions.Expect(GetCanvas(page).Locator("line")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenCanvasIsEdited_ThenAWidgetInANodeCannotBeOperated()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync(editMode: "Split", withOperableWidgets: true);
+        var titleBox = await GetBoxAsync(GetNodes(page).First.GetByTestId("card-title"));
+        var urlBefore = page.Url;
+
+        // Act: a click on the title, which would follow its link while the page is viewed.
+        await page.Mouse.ClickAsync((float)(titleBox.Left + 5), (float)(titleBox.Top + titleBox.Height / 2));
+
+        // Assert: the click is the click on a node, which offers to add a node at that place. Closing the dialog is the round trip
+        // after which the page would have navigated.
+        await page.GetByTestId("cancel-button").ClickAsync();
+        Assert.Equal(urlBefore, page.Url);
+    }
+
+    [Fact]
     public async Task WhenCanvasIsEdited_ThenDraggingFromANodeBorderDrawsNoLink()
     {
         // Arrange
@@ -341,9 +436,9 @@ public class CanvasLayoutTests
         Assert.Equal(widthBefore, (await GetBoxAsync(GetNodes(page).First)).Width);
     }
 
-    private async Task<IPage> OpenCanvasPageAsync(bool withTextBelow = false, string? editMode = null)
+    private async Task<IPage> OpenCanvasPageAsync(bool withTextBelow = false, string? editMode = null, bool withOperableWidgets = false)
     {
-        await _fixture.WriteDemoPageAsync(ScratchPage, CreateCanvasPage(withTextBelow));
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateCanvasPage(withTextBelow, withOperableWidgets));
 
         var page = await _fixture.CreatePageAsync(new BrowserNewContextOptions
         {
@@ -537,15 +632,25 @@ public class CanvasLayoutTests
         return page.EvaluateAsync<double>($"() => ({ScrollPositionScript})('.canvas-layout-container')");
     }
 
-    private static string CreateCanvasPage(bool withTextBelow)
+    private static string CreateCanvasPage(bool withTextBelow, bool withOperableWidgets)
     {
         var builder = new StringBuilder();
         builder.Append("---\ntitle: Scratch\n---\n\n# Scratch\n\n");
         builder.Append($":: HomeBlaze.Components.CanvasLayout#canvas MinHeight={CanvasHeight}\n");
         builder.Append("```json\n");
         builder.Append("{\n  \"Nodes\": [\n");
-        builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } },\n");
-        builder.Append("    { \"X\": 420, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } }\n");
+        if (withOperableWidgets)
+        {
+            // A card whose title is a link, and an icon indicator whose path does not exist, so that its tooltip is the path.
+            builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Card\", \"Title\": \"Linked Card\", \"Href\": \"/pages/Demo/Blocks.md\" } },\n");
+            builder.Append("    { \"X\": 420, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Indicator\", \"Path\": \"../Motor/Missing\", \"Kind\": \"Icon\" } }\n");
+        }
+        else
+        {
+            builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } },\n");
+            builder.Append("    { \"X\": 420, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } }\n");
+        }
+
         builder.Append("  ]\n}\n");
         builder.Append("```\n::\n\n");
 
