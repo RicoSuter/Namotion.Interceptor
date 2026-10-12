@@ -163,4 +163,60 @@ public class ValueWidgetTests
         await Assertions.Expect(tile.GetByTestId("value-label")).ToHaveTextAsync("Tile Target", new() { Timeout = Timeout });
         await Assertions.Expect(tile.GetByTestId("value-text")).ToHaveTextAsync("800");
     }
+
+    [Fact]
+    public async Task WhenCaseHasColor_ThenValueTextHasThatColor()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        await Assertions.Expect(GetRow(page, "Zustand").GetByTestId("value-text")).ToHaveClassAsync(new Regex(@"\bmud-(error|warning|success)-text\b"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenCaseHasIcon_ThenItReplacesTheIconOfTheRow()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        await Assertions.Expect(GetRow(page, "Lampe").GetByTestId("value-text")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert
+        var rowIcon = await GetIconShapeAsync(GetRow(page, "Lampe"));
+        var lightbulb = await GetIconShapeAsync(GetRow(page, "Lampe fest"));
+        var speed = await GetIconShapeAsync(GetRow(page, "Soll"));
+        Assert.Equal(lightbulb, rowIcon);
+        Assert.NotEqual(speed, rowIcon);
+    }
+
+    [Fact]
+    public async Task WhenOnlyOtherRowsHaveAnIcon_ThenTheLabelsStillLineUp()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        await Assertions.Expect(GetRow(page, "Ohne Symbol").GetByTestId("value-text")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert
+        var withIcon = await GetRow(page, "Lampe").GetByTestId("value-label").BoundingBoxAsync();
+        var withoutIcon = await GetRow(page, "Ohne Symbol").GetByTestId("value-label").BoundingBoxAsync();
+        Assert.Equal(withIcon!.X, withoutIcon!.X);
+    }
+
+    [Fact]
+    public async Task WhenNoRowHasAnIcon_ThenLabelsStartAtTheEdge()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var list = page.GetByTestId("value-list").Filter(new() { Has = page.GetByTestId("value-label").GetByText("Nur Text", new() { Exact = true }) });
+        await Assertions.Expect(list.GetByTestId("value-text").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert
+        var listBox = await list.BoundingBoxAsync();
+        var label = await list.GetByTestId("value-label").First.BoundingBoxAsync();
+        Assert.True(label!.X - listBox!.X < 40);
+    }
+
+    // The path of an icon is what tells two icons of MudBlazor apart.
+    private static Task<string?> GetIconShapeAsync(ILocator row) =>
+        row.Locator(".mud-list-item-icon svg path").Last.GetAttributeAsync("d");
 }

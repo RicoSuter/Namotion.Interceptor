@@ -34,5 +34,24 @@ Body of the plain card.
 {{ valuemotor/TargetSpeed }} von {{ valuemotor/TargetSpeed | raw }}
 ::
 
+:: HomeBlaze.Components.ValueMap#lamp
+::: Case Value=Stopped Icon=Lightbulb
+::: Case Value=Starting Icon=Lightbulb
+::: Case Value=Running Icon=Lightbulb
+::: Case Value=Stopping Icon=Lightbulb
+::: Case Value=Error Icon=Lightbulb
+::
+
+:: HomeBlaze.Components.ValueList
+::: Value Path=valuemotor/Status Label="Lampe" Icon=Speed Map=lamp
+::: Value Label="Lampe fest" Icon=Lightbulb
+::: Value Path=valuemotor/Status Label="Ohne Symbol"
+::
+
+:: HomeBlaze.Components.ValueList
+::: Value Path=valuemotor/Status Label="Nur Text"
+::: Value Path=valuemotor/TargetSpeed Label="Auch Text"
+::
+
 :: HomeBlaze.Components.ValueTile Path=valuemotor/TargetSpeed Label="Tile Target" Icon=Speed
 ::

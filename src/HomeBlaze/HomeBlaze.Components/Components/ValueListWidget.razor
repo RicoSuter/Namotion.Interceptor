@@ -4,20 +4,38 @@
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
 
-<MudList T="string" Dense="true" ReadOnly="true" data-testid="value-list">
-    @foreach (var row in (Subject as ValueList)?.Values ?? [])
+@{
+    // Read once per render and never kept in a field: the read is what the tracking scope records.
+    // The readings come first because a row without an icon needs to know whether another row has one.
+    var rows = (Subject as ValueList)?.Values ?? [];
+    var readings = new ValueReading?[rows.Length];
+    var icons = new string?[rows.Length];
+    var anyIcon = false;
+    for (var index = 0; index < rows.Length; index++)
     {
-        // Read once per render and never kept: the read is what the tracking scope records.
-        var reading = string.IsNullOrEmpty(row.Path) ? null : ValueReader.Read(PathResolver, row, row.Path, row.Map, TimeZone);
-        var icon = reading?.Icon ?? row.Icon;
+        var row = rows[index];
+        readings[index] = string.IsNullOrEmpty(row.Path) ? null : ValueReader.Read(PathResolver, row, row.Path, row.Map, TimeZone);
+        icons[index] = readings[index]?.Icon ?? row.Icon;
+        anyIcon |= !string.IsNullOrEmpty(icons[index]);
+    }
+}
+
+<MudList T="string" Dense="true" ReadOnly="true" data-testid="value-list">
+    @for (var index = 0; index < rows.Length; index++)
+    {
+        var row = rows[index];
+        var reading = readings[index];
+        var icon = icons[index];
+        var hasIcon = !string.IsNullOrEmpty(icon);
 
         <MudListItem T="string"
                      @key="row"
                      Class="value-list-item"
-                     Icon="@(string.IsNullOrEmpty(icon) ? null : MudBlazorIconResolver.Resolve(icon))"
+                     Icon="@(hasIcon ? MudBlazorIconResolver.Resolve(icon) : null)"
+                     Inset="@(anyIcon && !hasIcon)"
                      data-testid="value-row">
             <div class="d-flex align-center gap-2">
-                <MudText Typo="Typo.body2" Class="flex-grow-1" data-testid="value-label">@ValueReader.GetLabel(reading, row.Label)</MudText>
+                <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="value-label">@ValueReader.GetLabel(reading, row.Label)</MudText>
                 @if (row.Content is not null)
                 {
                     <SubjectComponent Subject="@row.Content" Type="SubjectComponentType.Widget" />
@@ -33,7 +51,7 @@
 </MudList>
 
 <style>
-    /* A page gives every paragraph a distance above and below, and every text of a row is one (so is the one MudListItem wraps its content in), which makes a row three times as tall. */
+    /* A page gives every paragraph a distance above and below. A utility class cannot reach the paragraph that MudListItem wraps its content in or the paragraphs of the content of a row, and this rule removes the distance of both. Content with several paragraphs loses the distance between them. */
     .mud-list-item.value-list-item p {
         margin: 0;
     }

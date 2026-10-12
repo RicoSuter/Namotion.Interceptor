@@ -123,7 +123,8 @@ public static class ValueReader
         return null;
     }
 
-    // A path is written by the author of a page, and a malformed one must not take the page down.
+    // The path of a property and that of a map are written by the author of a page, and a malformed one
+    // must not take the page down. This holds for both resolving methods below.
     private static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
     {
         try

@@ -7,12 +7,12 @@
 else if (Reading.IsMissing)
 {
     <MudTooltip Text="@Path">
-        <MudText Typo="@Typo" Class="mud-text-secondary" data-testid="value-missing">@Reading.Text</MudText>
+        <MudText Typo="@Typo" Class="mud-text-secondary ma-0" data-testid="value-missing">@Reading.Text</MudText>
     </MudTooltip>
 }
 else
 {
-    <MudText Typo="@Typo" Color="@Reading.Color" data-testid="value-text">@Reading.Text</MudText>
+    <MudText Typo="@Typo" Color="@Reading.Color" Class="ma-0" data-testid="value-text">@Reading.Text</MudText>
 }
 
 @code {
