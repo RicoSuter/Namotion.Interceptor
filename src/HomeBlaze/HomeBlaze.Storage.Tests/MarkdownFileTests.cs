@@ -383,13 +383,13 @@ public class MarkdownFileTests
 
     [Theory]
     [InlineData(false, "Secret: , public: visible")]
-    [InlineData(true, "Secret: , public: visible (/Devices/motor/PublicConfig)")]
+    [InlineData(true, "Secret: , public: visible (/Devices/motor/Host)")]
     public async Task WhenAPageReadsASecretConfigurationProperty_ThenItIsNotRendered(bool includeSourcePaths, string expected)
     {
         // Arrange
         var markdown = await CreatePageInGraphAsync(
-            "Secret: {{ /Devices/motor/SecretKey }}, public: {{ ../../Devices/motor/PublicConfig }}",
-            new PageSecretDevice { SecretKey = "s3cr3t", PublicConfig = "visible" });
+            "Secret: {{ /Devices/motor/Password }}, public: {{ ../../Devices/motor/Host }}",
+            new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
 
         // Act
         var result = markdown.ReadEvaluatedContent(includeSourcePaths);
@@ -403,15 +403,15 @@ public class MarkdownFileTests
     {
         // Arrange
         var markdown = await CreatePageInGraphAsync(
-            "Secret: {{ /Devices/motor/SecretKey }}, public: {{ /Devices/motor/PublicConfig }}",
-            new PageSecretDevice { SecretKey = "s3cr3t", PublicConfig = "visible" });
+            "Secret: {{ /Devices/motor/Password }}, public: {{ /Devices/motor/Host }}",
+            new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
 
         // Act
         var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Path);
 
         // Assert
-        Assert.Null(expressions["/Devices/motor/SecretKey"].Value);
-        Assert.Equal("visible", expressions["/Devices/motor/PublicConfig"].Value);
+        Assert.Null(expressions["/Devices/motor/Password"].Value);
+        Assert.Equal("visible", expressions["/Devices/motor/Host"].Value);
     }
 
     [Fact]
@@ -444,7 +444,7 @@ public class MarkdownFileTests
             }
             ```
             """;
-        var markdown = await CreatePageInGraphAsync(content, new Motor { CurrentSpeed = 750 });
+        var markdown = await CreatePageInGraphAsync(content);
 
         // Act
         var result = markdown.ReadRawContent();
@@ -587,16 +587,12 @@ public class MarkdownFileTests
     }
 
     /// <summary>
-    /// Creates the graph /Devices/motor (CurrentSpeed 750) and /Docs/page.md with the given page content.
+    /// Creates the graph /Devices/motor (the given device, by default a motor with CurrentSpeed 750) and /Docs/page.md
+    /// with the given page content.
     /// </summary>
-    private static Task<MarkdownFile> CreatePageInGraphAsync(string content) =>
-        CreatePageInGraphAsync(content, new Motor { CurrentSpeed = 750 });
-
-    /// <summary>
-    /// Creates the graph /Devices/motor (the given device) and /Docs/page.md with the given page content.
-    /// </summary>
-    private static async Task<MarkdownFile> CreatePageInGraphAsync(string content, IInterceptorSubject device)
+    private static async Task<MarkdownFile> CreatePageInGraphAsync(string content, IInterceptorSubject? device = null)
     {
+        device ??= new Motor { CurrentSpeed = 750 };
         var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
         await WriteFileAsync(storage, "Docs/page.md", content);
@@ -636,16 +632,6 @@ public class MarkdownFileTests
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
         await storage.WriteBlobAsync(path, stream, CancellationToken.None);
     }
-}
-
-[InterceptorSubject]
-public partial class PageSecretDevice
-{
-    [Configuration(IsSecret = true)]
-    public partial string? SecretKey { get; set; }
-
-    [Configuration]
-    public partial string? PublicConfig { get; set; }
 }
 
 [InterceptorSubject]
