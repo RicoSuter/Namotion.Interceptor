@@ -107,11 +107,19 @@ public class ValueWidgetTests
     // is for rounding. A line that is off by a gutter or a margin is 4 pixels or more away.
     private const double PositionTolerance = 1.0;
 
+    // The header of a card that has an indicator at its right is 1 pixel higher than one that has not.
+    private const double HeaderHeightTolerance = 2.0;
+
+    // For a distance that is at least a value: rounding of fractions of a pixel, and less than the 4 pixels of a margin.
+    private const double DistanceTolerance = 0.5;
+
     private sealed record ElementBox(double Left, double Top, double Right, double Bottom)
     {
         public double Width => Right - Left;
 
         public double CenterY => (Top + Bottom) / 2;
+
+        public double Height => Bottom - Top;
     }
 
     // One part of the page to measure: an element inside a card, inside a row of the card, or the text range of the element.
@@ -584,6 +592,28 @@ public class ValueWidgetTests
     }
 
     [Fact]
+    public async Task WhenCardHasAnIconIndicatorInItsHeaderAndNoSubtitle_ThenTheHeaderIsAsHighAsThatOfACardWithoutIndicator()
+    {
+        // Arrange: the narrow card has an icon and a title and nothing at the right of the header.
+        var page = await OpenPageWhenCardHasValuesAsync("Icon Indicator Card");
+
+        // Act
+        var boxes = await GetBoxesAsync(page,
+            new("Icon Indicator Card", null, ".mud-card-header"),
+            new("Icon Indicator Card", null, "[data-testid=card-icon]"),
+            new("Icon Indicator Card", null, "[data-testid=card-title]"),
+            new("Narrow Card", null, ".mud-card-header"),
+            new("Narrow Card", null, "[data-testid=card-icon]"),
+            new("Narrow Card", null, "[data-testid=card-title]"));
+
+        // Assert: without mb-n1 on the wrapper of the indicator the header is 4 pixels higher than that of the other card. The
+        // 1 pixel that it is higher with it is the measured one, so the tolerance of 2 pixels holds it from the 4 pixels. The title
+        // does not move against the icon either way, so the offset between them is the same in both cards.
+        Assert.Equal(boxes[3].Height, boxes[0].Height, HeaderHeightTolerance);
+        Assert.Equal(boxes[4].CenterY - boxes[5].CenterY, boxes[1].CenterY - boxes[2].CenterY, PositionTolerance);
+    }
+
+    [Fact]
     public async Task WhenRowHasContent_ThenTheBarFillsTheRoomBeforeTheValueAndTextStandsRightBeforeIt()
     {
         // Arrange
@@ -701,9 +731,10 @@ public class ValueWidgetTests
         var rectangles = await page.EvaluateAsync<double[][]>(
             "() => [...document.querySelectorAll('[data-testid=indicator]:not([data-testid=card] *)')].slice(3, 5).map(chip => { const box = chip.getBoundingClientRect(); return [box.top, box.bottom]; })");
 
-        // Assert
+        // Assert: the distance of two lines is 8 pixels, measured as 8.0 on a layout whose sizes are fractions of a pixel, so a
+        // result that is a hair below 8 is rounding. A chip that lost its margin on one side is 4 pixels closer.
         var distance = rectangles[1][0] - rectangles[0][1];
-        Assert.True(distance >= 8, $"The second chip starts {distance} pixels below the first");
+        Assert.True(distance >= 8 - DistanceTolerance, $"The second chip starts {distance} pixels below the first");
     }
 
     [Fact]
@@ -727,6 +758,21 @@ public class ValueWidgetTests
         var icon = page.GetByTestId("indicator").Nth(1);
         await Assertions.Expect(icon).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(icon).ToHaveTextAsync(string.Empty);
+    }
+
+    [Fact]
+    public async Task WhenIndicatorIsAnIcon_ThenItShowsTheTextOfTheCaseAsTooltip()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var icon = page.GetByTestId("indicator").Nth(1);
+        await Assertions.Expect(icon).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await icon.HoverAsync();
+
+        // Assert
+        await Assertions.Expect(page.Locator(".mud-tooltip.mud-popover-open")).ToHaveTextAsync(new Regex("^(steht|startet|läuft|stoppt)$"), new() { Timeout = Timeout });
     }
 
     [Fact]
