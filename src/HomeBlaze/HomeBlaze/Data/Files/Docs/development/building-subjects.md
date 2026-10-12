@@ -446,7 +446,7 @@ public partial class Motor
 | `Description` | Help text shown in the operation dialog and returned to agents by MCP `list_methods`, so write it to stand alone | `"Sets the motor target speed"` |
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
-| `RequiresConfirmation` | Show confirmation dialog before executing; such operations cannot be called through MCP, neither by AI agents nor by external clients | `true` |
+| `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
 
 **Key points:**
 - Operations appear in the subject's property panel under "Operations"
