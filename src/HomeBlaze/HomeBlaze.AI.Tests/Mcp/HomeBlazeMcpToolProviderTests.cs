@@ -432,18 +432,19 @@ public class HomeBlazeMcpToolProviderTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void WhenListingTools_ThenInvokeQueryIsAlwaysOfferedAndInvokeOperationOnlyWhenNotReadOnly(bool isReadOnly)
+    public void WhenListingTools_ThenExactlyTheToolsOfTheModeAreOfferedWithInvokeOperationOnlyWhenNotReadOnly(bool isReadOnly)
     {
         // Arrange
         var (_, factory) = CreateTestSetup(isReadOnly);
 
         // Act
-        var toolNames = factory.CreateTools().Select(tool => tool.Name).ToArray();
+        var toolNames = factory.CreateTools().Select(tool => tool.Name).Order(StringComparer.Ordinal).ToArray();
 
         // Assert
-        Assert.Contains("list_methods", toolNames);
-        Assert.Contains("invoke_query", toolNames);
-        Assert.Equal(!isReadOnly, toolNames.Contains("invoke_operation"));
+        string[] expected = isReadOnly
+            ? ["browse", "get_property", "invoke_query", "list_methods", "list_types", "search", "set_property"]
+            : ["browse", "get_property", "invoke_operation", "invoke_query", "list_methods", "list_types", "search", "set_property"];
+        Assert.Equal(expected, toolNames);
     }
 
     [Theory]
