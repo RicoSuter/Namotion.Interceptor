@@ -216,7 +216,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         // Without a parsed page there are no subjects to tell the secret values, so only an empty source is shown.
         var snapshot = _parseResult;
         return snapshot.Page is { } page
-            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects)
+            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, FindLayoutBlocks(page))
             : string.IsNullOrEmpty(Content) ? Content : null;
     }
 
@@ -251,7 +251,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             var source = await ReadSourceUnlockedAsync(cancellationToken);
             var redactedSource = RedactSource(source, out var redactions);
-            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, content, nameof(content)));
+            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, content, nameof(content), GetPageLayoutRules()));
         }
         finally
         {
@@ -291,7 +291,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
             var updated = string.Concat(redactedSource.AsSpan(0, index), newText, redactedSource.AsSpan(index + oldText.Length));
             MarkdownWriteRules.GetContentBytes(updated, nameof(newText));
-            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, updated, nameof(newText)));
+            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, updated, nameof(newText), GetPageLayoutRules()));
         }
         finally
         {
@@ -345,9 +345,19 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     {
         var snapshot = _parseResult;
         return snapshot.Page is { } page && page.Source == source
-            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, out redactions)
-            : EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>(), out redactions);
+            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, out redactions, FindLayoutBlocks(page))
+            : RedactWithoutSubjects(MarkdownPageParser.Parse(source), out redactions);
     }
+
+    private string RedactWithoutSubjects(MarkdownPage page, out List<EmbeddedSubjectRedaction.Redaction> redactions) =>
+        EmbeddedSubjectRedaction.Redact(page, new Dictionary<int, IInterceptorSubject>(), out redactions, FindLayoutBlocks(page));
+
+    private HashSet<MarkdownBlock> FindLayoutBlocks(MarkdownPage page) => MarkdownPageLayout.FindLayoutBlocks(page, _parser.FindType);
+
+    // The rules of the permission to edit page layout when the caller has it, which a reference path resolves from this page.
+    private PageLayoutRules? GetPageLayoutRules() => MarkdownPageLayoutPermission.IsGranted
+        ? new PageLayoutRules(_parser.FindType, path => _parser.ResolvesToSubject(path, this))
+        : null;
 
     // Reads from storage rather than Content, which lags behind an external edit until its file event arrives.
     private async Task<string> ReadSourceUnlockedAsync(CancellationToken cancellationToken)

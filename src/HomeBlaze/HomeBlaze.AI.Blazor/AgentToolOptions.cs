@@ -13,8 +13,16 @@ namespace HomeBlaze.AI.Blazor;
 /// <param name="CanChangeState">Whether the tool can change state: devices, notifications or pages.</param>
 /// <param name="LoadsWebContent">Whether the tool is a backend tool that brings untrusted web content into the turn.</param>
 /// <param name="ChangesPages">Whether the tool changes Markdown pages and documents rather than devices.</param>
+/// <param name="ChangesPageLayout">Whether the entry is the permission to edit page layout, which is no tool and needs a
+/// Markdown tool.</param>
 internal sealed record AgentToolOption(
-    string Name, string? Description, bool IsOffered, bool CanChangeState, bool LoadsWebContent = false, bool ChangesPages = false);
+    string Name,
+    string? Description,
+    bool IsOffered,
+    bool CanChangeState,
+    bool LoadsWebContent = false,
+    bool ChangesPages = false,
+    bool ChangesPageLayout = false);
 
 /// <summary>
 /// Builds the allowed-tools toggles of the agent edit form.
@@ -42,6 +50,10 @@ internal static class AgentToolOptions
         [HomeBlazeMarkdownToolProvider.CreateMarkdownToolName] = "Creates a Markdown page or document in a folder."
     };
 
+    private const string PageLayoutSummary =
+        "Lets the Markdown tools add, change, remove and move layout blocks of pages: cards, tabs, layouts, style blocks " +
+        "and widgets of existing subjects. Needs a Markdown tool.";
+
     private static readonly HashSet<string> PageTools = new(HomeBlazeMarkdownToolProvider.ToolNames, StringComparer.Ordinal);
 
     /// <summary>
@@ -65,7 +77,8 @@ internal static class AgentToolOptions
     }
 
     /// <summary>
-    /// Creates a toggle per offered tool, read-only tools first, then a toggle per backend tool of the agent type,
+    /// Creates a toggle per offered tool, read-only tools first, with the permission to edit page layout right after the
+    /// Markdown tools when one is offered, then a toggle per backend tool of the agent type,
     /// followed by a toggle per allowed name that is not offered, so it can be turned off. update_memory is excluded
     /// because it is always available. Known tools are described by a short summary instead of their tool description.
     /// </summary>
@@ -90,6 +103,7 @@ internal static class AgentToolOptions
         }
 
         var sorted = options.OrderBy(option => option.CanChangeState).ToList();
+        InsertPageLayoutOption(sorted, names);
         foreach (var backendTool in backendTools ?? [])
         {
             if (names.Add(backendTool.Name))
@@ -102,12 +116,30 @@ internal static class AgentToolOptions
         {
             if (names.Add(name))
             {
-                sorted.Add(new AgentToolOption(
-                    name, "Not offered by this installation.", IsOffered: false, CanChangeState(name), ChangesPages: PageTools.Contains(name)));
+                sorted.Add(CreateNotOfferedOption(name));
             }
         }
 
         return sorted;
+    }
+
+    // Right after the Markdown tools, whose page writes it widens, when one of them is offered.
+    private static void InsertPageLayoutOption(List<AgentToolOption> sorted, HashSet<string> names)
+    {
+        var lastPageToolIndex = sorted.FindLastIndex(option => option.ChangesPages);
+        if (lastPageToolIndex >= 0 && names.Add(AgentToolSet.EditPageLayoutPermission))
+        {
+            sorted.Insert(lastPageToolIndex + 1, new AgentToolOption(
+                AgentToolSet.EditPageLayoutPermission, PageLayoutSummary, IsOffered: true, CanChangeState: true, ChangesPageLayout: true));
+        }
+    }
+
+    private static AgentToolOption CreateNotOfferedOption(string name)
+    {
+        var isPageLayout = name == AgentToolSet.EditPageLayoutPermission;
+        return new AgentToolOption(
+            name, "Not offered by this installation.", IsOffered: false, isPageLayout || CanChangeState(name),
+            ChangesPages: PageTools.Contains(name), ChangesPageLayout: isPageLayout);
     }
 
     private static bool CanChangeState(string name) => !AgentToolSet.IsReadOnly([name]);

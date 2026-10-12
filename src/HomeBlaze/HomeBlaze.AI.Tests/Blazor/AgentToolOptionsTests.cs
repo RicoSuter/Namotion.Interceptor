@@ -122,12 +122,30 @@ public class AgentToolOptionsTests
         var options = AgentToolOptions.Create(offeredTools, []);
 
         // Assert
-        Assert.Equal(["browse", "create_markdown", "edit_markdown", "write_markdown", "invoke_operation"], options.Select(option => option.Name));
-        Assert.Equal([false, true, true, true, true], options.Select(option => option.CanChangeState));
-        Assert.Equal([false, true, true, true, false], options.Select(option => option.ChangesPages));
+        Assert.Equal(["browse", "create_markdown", "edit_markdown", "write_markdown", "edit_page_layout", "invoke_operation"], options.Select(option => option.Name));
+        Assert.Equal([false, true, true, true, true, true], options.Select(option => option.CanChangeState));
+        Assert.Equal([false, true, true, true, false, false], options.Select(option => option.ChangesPages));
+        Assert.Equal([false, false, false, false, true, false], options.Select(option => option.ChangesPageLayout));
         Assert.Equal(
             ["Creates a Markdown page or document in a folder.", "Replaces a passage of a Markdown page or document.", "Replaces the whole text of a Markdown page or document."],
             options.Skip(1).Take(3).Select(option => option.Description));
+    }
+
+    [Fact]
+    public void WhenNoMarkdownToolIsOffered_ThenThePermissionToEditPageLayoutIsNotListedUnlessItIsAllowed()
+    {
+        // Arrange
+        var offeredTools = new[] { CreateTool("browse"), CreateTool("invoke_operation") };
+
+        // Act
+        var withoutPermission = AgentToolOptions.Create(offeredTools, []);
+        var withPermission = AgentToolOptions.Create(offeredTools, [AgentToolSet.EditPageLayoutPermission]);
+
+        // Assert
+        Assert.DoesNotContain(withoutPermission, option => option.ChangesPageLayout);
+        var option = Assert.Single(withPermission, option => option.ChangesPageLayout);
+        Assert.False(option.IsOffered);
+        Assert.True(option.CanChangeState);
     }
 
     [Theory]
@@ -155,7 +173,8 @@ public class AgentToolOptionsTests
         var options = AgentToolOptions.Create(toolSource, AgentToolSet.DefaultAllowedTools);
 
         // Assert
-        Assert.Equal(AgentToolOptions.FallbackToolNames.Order(), options.Select(option => option.Name).Order());
+        Assert.Equal(
+            AgentToolOptions.FallbackToolNames.Append(AgentToolSet.EditPageLayoutPermission).Order(), options.Select(option => option.Name).Order());
         Assert.Contains("invoke_query", AgentToolOptions.FallbackToolNames);
         Assert.Contains("invoke_operation", AgentToolOptions.FallbackToolNames);
         Assert.DoesNotContain("invoke_method", AgentToolOptions.FallbackToolNames);

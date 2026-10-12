@@ -71,7 +71,7 @@
             {
                 <MudItem xs="12" md="6" data-testid="@($"agent-edit-tool-{tool.Name}")">
                     <MudSwitch T="bool" Value="@_allowedTools.Contains(tool.Name)" ValueChanged="@((bool isAllowed) => ToggleTool(tool.Name, isAllowed))"
-                               Color="Color.Primary">
+                               Disabled="@(tool.ChangesPageLayout && !HasPageTool)" Color="Color.Primary">
                         <MudStack Spacing="0" Class="py-1">
                             <MudText Typo="Typo.body1">@tool.Name</MudText>
                             @if (!tool.IsOffered)
@@ -83,7 +83,12 @@
                                 <MudText Typo="Typo.caption" Class="mud-text-secondary"
                                          Style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">@tool.Description</MudText>
                             }
-                            @if (tool.ChangesPages)
+                            @if (tool.ChangesPageLayout)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Dashboard"
+                                         Class="ml-0" data-testid="agent-edit-tool-page-layout-warning">Changes page layout</MudChip>
+                            }
+                            else if (tool.ChangesPages)
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.EditNote"
                                          Class="ml-0" data-testid="agent-edit-tool-pages-warning">Changes pages and documents</MudChip>
@@ -259,7 +264,11 @@
         agent.MinRunInterval = minRunInterval;
         AgentTimeSpanInput.TryParseTurnTimeout(_turnTimeout, out var turnTimeout);
         agent.TurnTimeout = turnTimeout;
-        agent.AllowedTools = _toolOptions.Select(tool => tool.Name).Where(_allowedTools.Contains).ToArray();
+        // The permission to edit page layout has no effect without a Markdown tool, so it is not kept without one.
+        agent.AllowedTools = _toolOptions
+            .Where(tool => _allowedTools.Contains(tool.Name) && (!tool.ChangesPageLayout || HasPageTool))
+            .Select(tool => tool.Name)
+            .ToArray();
         agent.MaxToolCallsPerTurn = _maxToolCalls;
         if (agent is ClaudeCliAgent cliAgent)
         {
@@ -284,6 +293,8 @@
         IsDirtyChanged?.Invoke(false);
         return Task.CompletedTask;
     }
+
+    private bool HasPageTool => AgentToolSet.HasMarkdownTool(_allowedTools);
 
     private void ToggleTool(string name, bool isAllowed)
     {

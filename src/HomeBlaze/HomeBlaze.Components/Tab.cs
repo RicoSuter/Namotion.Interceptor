@@ -9,6 +9,7 @@ namespace HomeBlaze.Components;
 /// One tab of a <see cref="TabLayout"/>.
 /// </summary>
 [ExcludeFromCreation]
+[PageLayout]
 [InterceptorSubject]
 public partial class Tab : IConfigurable
 {

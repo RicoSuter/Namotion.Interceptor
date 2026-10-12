@@ -323,7 +323,7 @@ public sealed partial class MarkdownContentParser
                 $"'{head.Name}' is not a slot at this position. A slot block must be directly inside the widget that declares it."));
         }
 
-        var type = _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == head.Name);
+        var type = FindType(head.Name);
         if (type is null)
         {
             return (null, null, new BlockError(
@@ -356,6 +356,22 @@ public sealed partial class MarkdownContentParser
             type, $"The type '{head.Name}'", segment, existing, state, cancellationToken);
 
         return (subject is null ? null : key, subject, error);
+    }
+
+    /// <summary>Gets the type that a widget block names with its full name, or null when there is none.</summary>
+    internal Type? FindType(string fullName) => _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == fullName);
+
+    /// <summary>Gets whether the path resolves to a subject from <paramref name="from"/> the way a page resolves it.</summary>
+    internal bool ResolvesToSubject(string path, IInterceptorSubject from)
+    {
+        try
+        {
+            return _pathResolver.ResolveScopedSubject(path, PathStyle.Canonical, from) is not null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return false;
+        }
     }
 
     private static string FormatUsedTwice(string name) => $"The name '{name}' is used twice on this page.";

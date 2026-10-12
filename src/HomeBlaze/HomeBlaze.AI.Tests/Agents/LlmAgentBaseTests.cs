@@ -5,8 +5,10 @@ using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.Services;
+using HomeBlaze.Storage;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Testing;
 using Xunit;
@@ -17,6 +19,46 @@ public class LlmAgentBaseTests
 {
     private static Task<AgentTestContext<FakeAgent>> StartAsync(Action<FakeAgent>? configure = null) =>
         AgentTestContext<FakeAgent>.StartAsync(services => new FakeAgent(services), configure);
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenAnAgentMayEditPageLayout_ThenOnlyItsPageWritingToolsRunWithThePermission(bool canEditPageLayout)
+    {
+        // Arrange
+        var granted = new ConcurrentDictionary<string, bool>();
+        string[] allowedTools = canEditPageLayout
+            ? ["browse", "edit_markdown", "invoke_operation", AgentToolSet.EditPageLayoutPermission]
+            : ["browse", "edit_markdown", "invoke_operation"];
+        string? systemPrompt = null;
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(new AgentServices(
+                new PermissionRecordingToolSource(), services.TokenRegistry, services.EndpointAddress, services.TimeProvider)),
+            agent =>
+            {
+                agent.AllowedTools = allowedTools;
+                agent.Handler = async (request, _, cancellationToken) =>
+                {
+                    systemPrompt = request.SystemPrompt;
+                    foreach (var tool in request.Tools.Tools.Where(tool => tool.Name != "update_memory"))
+                    {
+                        granted[tool.Name] = (bool)(await tool.Handler(JsonSerializer.SerializeToElement(new { }), cancellationToken))!;
+                    }
+
+                    return new AgentTurnResult("Done.", null, null);
+                };
+            });
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.False(granted["browse"]);
+        Assert.Equal(canEditPageLayout, granted["edit_markdown"]);
+        Assert.Equal(canEditPageLayout, granted["invoke_operation"]);
+        Assert.False(MarkdownPageLayoutPermission.IsGranted);
+        Assert.Equal(canEditPageLayout, systemPrompt!.Contains("You may edit the layout of Markdown pages", StringComparison.Ordinal));
+    }
 
     [Fact]
     public async Task WhenAPageExpressionReadsTheTextAnAgentStreams_ThenItHasNoValue()
@@ -915,4 +957,17 @@ public class LlmAgentBaseTests
             .Where(entry => entry.Message.Contains("requests a background run"))
             .Select(entry => entry.Message)
             .ToList();
+}
+
+/// <summary>Offers tools whose result is whether the permission to edit page layout is granted where they run.</summary>
+internal sealed class PermissionRecordingToolSource : IAgentToolSource
+{
+    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly) =>
+        new[] { "browse", "edit_markdown", "invoke_operation" }.Select(name => new McpToolInfo
+        {
+            Name = name,
+            Description = name,
+            InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
+            Handler = (_, _) => Task.FromResult<object?>(MarkdownPageLayoutPermission.IsGranted)
+        }).ToList();
 }

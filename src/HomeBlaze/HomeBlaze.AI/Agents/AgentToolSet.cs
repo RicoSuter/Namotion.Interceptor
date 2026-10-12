@@ -25,6 +25,16 @@ public sealed class AgentToolSet
         .. HomeBlazeMarkdownToolProvider.ToolNames
     ];
 
+    /// <summary>
+    /// The permission in <see cref="LlmAgentBase.AllowedTools"/> that lets the Markdown tools and the operations the agent
+    /// calls add, change, remove and move layout blocks of pages. It is no tool and needs a Markdown tool to be allowed.
+    /// </summary>
+    public const string EditPageLayoutPermission = "edit_page_layout";
+
+    /// <summary>The tools whose page writes the permission to edit page layout widens.</summary>
+    private static readonly IReadOnlyList<string> PageWritingTools =
+        [.. HomeBlazeMarkdownToolProvider.ToolNames, HomeBlazeMcpToolProvider.InvokeOperationToolName];
+
     private const int PreviewLength = 2000;
 
     // Display only: previews are for the timeline and audit, never sent back to the model, so relaxed escaping
@@ -55,6 +65,20 @@ public sealed class AgentToolSet
 
     /// <summary>The calls left in the turn's budget, never negative.</summary>
     public int RemainingCalls => Math.Max(_maxToolCalls - Volatile.Read(ref _callCount), 0);
+
+    /// <summary>
+    /// Whether the allowed names grant the permission to edit page layout: <see cref="EditPageLayoutPermission"/> together
+    /// with at least one Markdown tool.
+    /// </summary>
+    public static bool CanEditPageLayout(IReadOnlyCollection<string> allowedTools) =>
+        allowedTools.Contains(EditPageLayoutPermission) && HasMarkdownTool(allowedTools);
+
+    /// <summary>Whether at least one Markdown tool is allowed, which the permission to edit page layout needs.</summary>
+    public static bool HasMarkdownTool(IReadOnlyCollection<string> allowedTools) =>
+        HomeBlazeMarkdownToolProvider.ToolNames.Any(allowedTools.Contains);
+
+    /// <summary>Whether a tool writes pages through the Markdown write operations, whose rules the permission widens.</summary>
+    public static bool WritesPages(string toolName) => PageWritingTools.Contains(toolName);
 
     /// <summary>
     /// Whether tools built for these allowed names must run in read-only mode, i.e. none of the <see cref="StateChangingTools"/> is allowed.

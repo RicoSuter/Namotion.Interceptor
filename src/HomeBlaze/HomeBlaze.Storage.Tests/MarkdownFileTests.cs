@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
+using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
@@ -526,6 +527,33 @@ public class MarkdownFileTests
         Assert.Equal(
             PageWithSecretBlock.Replace("The gateway", "The main gateway") + "\n\nAdded and changed text.",
             await ReadStoredPageAsync(markdown));
+    }
+
+    [Fact]
+    public async Task WhenAnAgentMayEditPageLayout_ThenLayoutAroundABlockWithASecretKeepsTheSecretAndTheBlock()
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync(PageWithSecretBlock);
+        var view = markdown.ReadRawContent()!;
+        using var permission = MarkdownPageLayoutPermission.Grant();
+
+        // Act
+        await markdown.ReplaceContentAsync(
+            "# Gateway\n\n:: HomeBlaze.Components.Card Title=Note\nA layout card.\n::\n\n" + view, CancellationToken.None);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+        var wrapped = await Record.ExceptionAsync(() => markdown.ReplaceContentAsync(
+            ":: HomeBlaze.Components.Card Title=Around\n" + view.Replace("::\n", "::::\n").Replace(":: ", ":::: ") + "\n::",
+            CancellationToken.None));
+        var guessed = await Record.ExceptionAsync(() => markdown.ReplaceContentAsync(
+            "# Gateway\n\n" + PageWithSecretBlock, CancellationToken.None));
+
+        // Assert
+        Assert.Contains("Password=***", view);
+        Assert.Equal(
+            "# Gateway\n\n:: HomeBlaze.Components.Card Title=Note\nA layout card.\n::\n\n" + PageWithSecretBlock,
+            await ReadStoredPageAsync(markdown));
+        Assert.IsType<ArgumentException>(wrapped);
+        Assert.IsType<ArgumentException>(guessed);
     }
 
     [Fact]

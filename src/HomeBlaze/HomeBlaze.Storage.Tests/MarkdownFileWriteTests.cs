@@ -780,6 +780,148 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal("# Changed notes", ReadFile("Notes.md"));
     }
 
+    private const string PageWithLayout = """
+        # Plant
+
+        :: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000
+        ::
+
+        Some text.
+
+        :: HomeBlaze.Components.Card#info Title=Info
+        Card text.
+        ::
+        """;
+
+    [Theory]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card Title=New\nNew card.\n::")]
+    [InlineData("Title=Info", "Title=Details Icon=Info")]
+    [InlineData(":: HomeBlaze.Components.Card#info Title=Info\nCard text.\n::", "")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.TabLayout\n::: Tab Title=One\nFirst\n:::\n::: Tab Title=Two\nSecond\n:::\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.FlowLayout MinWidth=200\n::: Item\nCell\n:::\n::")]
+    [InlineData("Some text.", ":: {.note}\nSome text.\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Widget Path=motor\n::")]
+    [InlineData("Card text.", "Card text.\n\n::: HomeBlaze.Components.Widget\n```json\n{ \"Path\": \"motor\" }\n```\n:::")]
+    [InlineData("# Plant", "# Plant at {{ motor/CurrentSpeed }}")]
+    public async Task WhenAnAgentMayEditPageLayoutAndChangesLayoutBlocks_ThenThePageIsWritten(string oldText, string newText)
+    {
+        // Arrange
+        WriteFile("Plant.md", PageWithLayout);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        using var permission = MarkdownPageLayoutPermission.Grant();
+
+        // Act
+        await markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(PageWithLayout.Replace(oldText, newText), ReadFile("Plant.md"));
+    }
+
+    [Fact]
+    public async Task WhenAnAgentMayEditPageLayoutAndMovesANamedCardAboveADevice_ThenThePageIsWritten()
+    {
+        // Arrange
+        WriteFile("Plant.md", PageWithLayout);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        var motor = markdown.Children["motor"];
+        const string content = """
+            # Plant
+
+            :: HomeBlaze.Components.Card#info Title=Info
+            Card text.
+            ::
+
+            :: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000
+            ::
+
+            Some text.
+            """;
+        using var permission = MarkdownPageLayoutPermission.Grant();
+
+        // Act
+        await markdown.ReplaceContentAsync(content, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(content, ReadFile("Plant.md"));
+        Assert.Same(motor, markdown.Children["motor"]);
+    }
+
+    [Theory]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Widget Path=missing\n::", "leads to no existing subject")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Samples.Motor#other Name=Other\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Storage.FluentStorageContainer#store StorageType=inmemory\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card\n```json\n{ \"Title\": { \"$type\": \"HomeBlaze.Samples.Motor\" } }\n```\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Widget\n```json\n{ \"Path\": { \"$type\": \"HomeBlaze.Samples.Motor\" } }\n```\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some <b onclick=\"alert(1)\">text</b>.", "With the permission to edit page layout")]
+    [InlineData("TargetSpeed=1000", "TargetSpeed=2000", "With the permission to edit page layout")]
+    [InlineData(":: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n::\n", ":: HomeBlaze.Components.Card\n::: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n:::\n::\n", "With the permission to edit page layout")]
+    [InlineData(":: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n::\n\n", "", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card Title=Info Password=x\n::", "With the permission to edit page layout")]
+    public async Task WhenAnAgentMayEditPageLayoutAndChangesAnythingElse_ThenItIsRejected(string oldText, string newText, string expectedMessage)
+    {
+        // Arrange
+        WriteFile("Plant.md", PageWithLayout);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        using var permission = MarkdownPageLayoutPermission.Grant();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
+        Assert.Contains(expectedMessage, exception.Message);
+        Assert.Equal(PageWithLayout, ReadFile("Plant.md"));
+    }
+
+    [Fact]
+    public async Task WhenAnAgentMayEditPageLayoutAndAddsTextBeforeAnUnnamedDevice_ThenItIsRejected()
+    {
+        // Arrange
+        const string content = "# Plant\n\n:: HomeBlaze.Samples.Motor Name=Unnamed\n::\n";
+        WriteFile("Plant.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        using var permission = MarkdownPageLayoutPermission.Grant();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceTextAsync(
+            "# Plant", "# Plant\n\n:: HomeBlaze.Components.Card Title=New\n::", CancellationToken.None));
+        Assert.Equal(content, ReadFile("Plant.md"));
+    }
+
+    [Fact]
+    public async Task WhenNoAgentPermissionIsGranted_ThenALayoutBlockIsRefusedAsBefore()
+    {
+        // Arrange
+        WriteFile("Plant.md", PageWithLayout);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceTextAsync(
+            "Some text.", "Some text.\n\n:: HomeBlaze.Components.Card Title=New\n::", CancellationToken.None));
+        Assert.StartsWith("Blocks cannot be added, changed or removed", exception.Message);
+        Assert.Equal(PageWithLayout, ReadFile("Plant.md"));
+    }
+
+    [Theory]
+    [InlineData("# New\n\n:: HomeBlaze.Components.Card Title=New\nText.\n::", true)]
+    [InlineData("# New\n\n:: HomeBlaze.Components.Widget Path=motor\n::", false)]
+    [InlineData("# New\n\n:: HomeBlaze.Samples.Motor\n::", false)]
+    public async Task WhenAnAgentMayEditPageLayoutAndCreatesAPage_ThenOnlyLayoutBlocksWithAbsoluteReferencesAreAllowed(string content, bool isAllowed)
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        using var permission = MarkdownPageLayoutPermission.Grant();
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => storage.CreateMarkdownFileAsync("New.md", content, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(isAllowed, exception is null);
+        Assert.Equal(isAllowed, File.Exists(GetFullPath("New.md")));
+    }
+
     [Fact]
     public async Task WhenTheStorageIsAskedToSaveTheConfigurationOfAPage_ThenItDoesNotWriteThePage()
     {

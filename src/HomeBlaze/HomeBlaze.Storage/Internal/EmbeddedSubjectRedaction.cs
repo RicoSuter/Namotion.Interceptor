@@ -29,20 +29,28 @@ internal static class EmbeddedSubjectRedaction
     /// found through the configuration metadata of the subject the block configures. Every argument value and the json
     /// block of a block without a subject become <c>***</c>, also of a block inside an invalid block, as does every
     /// value in a json block that does not match the subject, the rest of a head line after a valid name when the line
-    /// cannot be read, and the content of a fenced code block of the old <c>subject(name)</c> form. The view keeps
-    /// the lines and the block structure of the page, and a block without secret values keeps its exact text.
+    /// cannot be read, and the content of a fenced code block of the old <c>subject(name)</c> form. A layout block is kept
+    /// as it is, because it holds nothing secret. The view keeps the lines and the block structure of the page, and a
+    /// block without secret values keeps its exact text.
     /// </summary>
     /// <param name="page">The page as last parsed.</param>
     /// <param name="blockSubjects">The subjects of the blocks of <paramref name="page"/> by <see cref="MarkdownBlock.Index"/>.</param>
-    public static string Redact(MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects) =>
-        Redact(page, blockSubjects, out _);
+    /// <param name="layoutBlocks">The layout blocks of the page (<see cref="MarkdownPageLayout"/>), which hold nothing
+    /// secret and are kept as they are, also without a subject.</param>
+    public static string Redact(
+        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IReadOnlySet<MarkdownBlock>? layoutBlocks = null) =>
+        Redact(page, blockSubjects, out _, layoutBlocks);
 
-    /// <inheritdoc cref="Redact(MarkdownPage, IReadOnlyDictionary{int, IInterceptorSubject})"/>
+    /// <inheritdoc cref="Redact(MarkdownPage, IReadOnlyDictionary{int, IInterceptorSubject}, IReadOnlySet{MarkdownBlock})"/>
     /// <param name="page">The page as last parsed.</param>
     /// <param name="blockSubjects">The subjects of the blocks of <paramref name="page"/> by <see cref="MarkdownBlock.Index"/>.</param>
     /// <param name="redactions">Each replaced span of the source with the span of its replacement in the returned view, in order.</param>
+    /// <param name="layoutBlocks">The layout blocks of the page, which are kept as they are.</param>
     public static string Redact(
-        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, out List<Redaction> redactions)
+        MarkdownPage page,
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
+        out List<Redaction> redactions,
+        IReadOnlySet<MarkdownBlock>? layoutBlocks = null)
     {
         var source = page.Source;
         var replacements = new List<(MarkdownSpan Span, string Text)>();
@@ -51,7 +59,7 @@ internal static class EmbeddedSubjectRedaction
         foreach (var container in page.Document.Descendants<MarkdownBlockContainer>())
         {
             var block = page.DescribeBlock(container);
-            if (block.Kind == MarkdownBlockKind.Style)
+            if (block.Kind == MarkdownBlockKind.Style || layoutBlocks?.Contains(block) == true)
             {
                 continue;
             }

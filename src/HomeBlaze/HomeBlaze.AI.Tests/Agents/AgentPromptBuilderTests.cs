@@ -48,6 +48,20 @@ public class AgentPromptBuilderTests
     }
 
     [Fact]
+    public void WhenTheAgentMayEditPageLayout_ThenThePreambleSaysWhichBlocksItMayChange()
+    {
+        // Act
+        var prompt = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty, canEditPageLayout: true);
+        var withoutPermission = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty);
+
+        // Assert
+        var preamble = prompt[..prompt.IndexOf("# Mode", StringComparison.Ordinal)];
+        Assert.Contains("You may edit the layout of Markdown pages", preamble);
+        Assert.Contains("Every other block, such as one that creates a device or a service, must stay exactly as ReadRawContent shows it", preamble);
+        Assert.DoesNotContain("layout of Markdown pages", withoutPermission);
+    }
+
+    [Fact]
     public void WhenWebToolsAreAvailable_ThenThePreambleWarnsThatWebContentIsData()
     {
         // Act

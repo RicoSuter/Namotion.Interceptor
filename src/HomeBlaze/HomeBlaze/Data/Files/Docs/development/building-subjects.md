@@ -975,6 +975,18 @@ This hides the subject from:
 
 Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
 
+### Page Layout Types
+
+A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks create no subject that acts on anything and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). A type that refers to an existing subject names the property of that path, so the path is checked:
+
+```csharp
+[PageLayout(ReferencePathProperty = nameof(Path))]
+[InterceptorSubject]
+public partial class Widget : ITitleProvider, IConfigurable
+```
+
+Mark only types whose configuration is plain values and that do nothing but show content.
+
 ### Excluding Properties from Page Expressions
 
 A `{{ path }}` expression on a page shows the value of a property it reaches when the property is a partial (intercepted) property or a `[Derived]` property. It shows nothing for:

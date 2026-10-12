@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Storage;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -888,7 +889,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         var backendTools = SupportedBackendTools.Where(tool => allowedTools.Contains(tool.Name)).ToList();
         var request = new AgentTurnRequest(
             kind,
-            AgentPromptBuilder.BuildSystemPrompt(kind, Instructions, Memory.GetSnapshot(), backendTools.Exists(tool => tool.LoadsWebContent)),
+            AgentPromptBuilder.BuildSystemPrompt(
+                kind, Instructions, Memory.GetSnapshot(), backendTools.Exists(tool => tool.LoadsWebContent), AgentToolSet.CanEditPageLayout(allowedTools)),
             message,
             isBackground ? BackgroundModel ?? Model : Model,
             isBackground ? BackgroundEffort ?? Effort : Effort,
@@ -992,21 +994,31 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private AgentToolSet CreateToolSet(IProgress<AgentTurnUpdate> progress)
     {
         var allowedTools = AllowedTools;
+        var canEditPageLayout = AgentToolSet.CanEditPageLayout(allowedTools);
         var available = _services.ToolSource.CreateTools(AgentToolSet.IsReadOnly(allowedTools))
             .Where(tool => allowedTools.Contains(tool.Name))
-            .Select(MarkAsTurnTool)
+            .Select(tool => MarkAsTurnTool(tool, grantsPageLayout: canEditPageLayout && AgentToolSet.WritesPages(tool.Name)))
             .ToList();
         return AgentToolSet.Create(available, allowedTools, Memory.CreateUpdateTool(), MaxToolCallsPerTurn, progress);
     }
 
     // A backend may call tools on a flow that does not descend from RunTurnAsync, such as an HTTP request of
-    // the MCP route, so each call marks its own flow as part of this agent's turn.
-    private McpToolInfo MarkAsTurnTool(McpToolInfo tool) => new(tool)
+    // the MCP route, so each call marks its own flow as part of this agent's turn. The permission to edit page layout
+    // is granted the same way, on the flow of the call only.
+    private McpToolInfo MarkAsTurnTool(McpToolInfo tool, bool grantsPageLayout) => new(tool)
     {
         Handler = async (input, cancellationToken) =>
         {
             CurrentTurnAgent.Value = this;
-            return await tool.Handler(input, cancellationToken);
+            if (!grantsPageLayout)
+            {
+                return await tool.Handler(input, cancellationToken);
+            }
+
+            using (MarkdownPageLayoutPermission.Grant())
+            {
+                return await tool.Handler(input, cancellationToken);
+            }
         }
     };
 

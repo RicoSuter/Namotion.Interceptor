@@ -8,6 +8,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -38,6 +39,7 @@ public partial class FluentStorageContainer :
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
     private readonly FileSubjectFactory _subjectFactory;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly ILogger<FluentStorageContainer>? _logger;
 
@@ -151,6 +153,7 @@ public partial class FluentStorageContainer :
         ILogger<FluentStorageContainer>? logger = null)
     {
         _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, serviceProvider, logger);
+        _serviceProvider = serviceProvider;
         _serializer = serializer;
         _logger = logger;
 
@@ -761,7 +764,7 @@ public partial class FluentStorageContainer :
         MarkdownWriteRules.EnsureLocal(this);
 
         var bytes = MarkdownWriteRules.GetContentBytes(content, nameof(content));
-        MarkdownWriteRules.EnsureActiveContentUnchanged(string.Empty, content, nameof(content));
+        MarkdownWriteRules.EnsureActiveContentUnchanged(string.Empty, content, nameof(content), GetPageLayoutRules());
         var relativePath = StoragePath.Normalize(string.IsNullOrEmpty(folderPath) ? name : $"{folderPath.TrimEnd('/')}/{name}");
         if (StoragePathFilter.IsIgnored(relativePath))
             throw new ArgumentException($"A file in '{folderPath}' would not be loaded: the folder is hidden or temporary.", nameof(folderPath));
@@ -825,6 +828,17 @@ public partial class FluentStorageContainer :
 
             _logger?.LogInformation("Created Markdown file: {Path}", relativePath);
         }, cancellationToken);
+    }
+
+    // The rules of the permission to edit page layout when the caller has it. A new page has no names and no place
+    // yet, so a reference path must be absolute.
+    private PageLayoutRules? GetPageLayoutRules()
+    {
+        if (!MarkdownPageLayoutPermission.IsGranted)
+            return null;
+
+        var parser = _serviceProvider.GetRequiredService<MarkdownContentParser>();
+        return new PageLayoutRules(parser.FindType, path => path.StartsWith('/') && parser.ResolvesToSubject(path, this));
     }
 
     private static string GetKeyTakenMessage(StorageConnection connection, string relativePath, string name)
