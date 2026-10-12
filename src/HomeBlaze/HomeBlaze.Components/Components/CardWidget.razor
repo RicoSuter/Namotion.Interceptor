@@ -11,6 +11,11 @@
     var hasSubtitle = !string.IsNullOrEmpty(card.Subtitle);
     var hasIcon = !string.IsNullOrEmpty(card.Icon);
     var headerRight = card.HeaderRight;
+    var hasHeader = hasTitle || hasSubtitle || hasIcon || headerRight is not null;
+
+    // The title and the body sit close together, as the lines of a paragraph. A picture between them, or a missing body or header, leaves the full padding.
+    var hasPicture = !string.IsNullOrEmpty(card.Image);
+    var isTight = hasHeader && card.Content is not null && !hasPicture;
 
     // A part of the header that is not set is passed as null, because the header keeps room for a part that is an empty fragment.
     RenderFragment? avatar = hasIcon
@@ -21,9 +26,9 @@
         : null;
 
     <MudCard Class="card-widget" Elevation="@(card.Outlined ? 0 : card.Elevation)" Outlined="@card.Outlined" data-testid="card">
-        @if (hasTitle || hasSubtitle || hasIcon || headerRight is not null)
+        @if (hasHeader)
         {
-            <MudCardHeader CardHeaderAvatar="@avatar" CardHeaderActions="@actions">
+            <MudCardHeader Class="@(isTight ? "pb-2" : null)" CardHeaderAvatar="@avatar" CardHeaderActions="@actions">
                 <CardHeaderContent>
                     @if (hasTitle && !string.IsNullOrEmpty(card.Href))
                     {
@@ -42,14 +47,14 @@
             </MudCardHeader>
         }
 
-        @if (!string.IsNullOrEmpty(card.Image))
+        @if (hasPicture)
         {
             <MudCardMedia Image="@card.ResolveScopedLink(card.Image)" Height="200" />
         }
 
         @if (card.Content is not null)
         {
-            <MudCardContent>
+            <MudCardContent Class="@(isTight ? "pt-0" : null)">
                 <SubjectComponent Subject="@card.Content" Type="SubjectComponentType.Widget" />
             </MudCardContent>
         }
