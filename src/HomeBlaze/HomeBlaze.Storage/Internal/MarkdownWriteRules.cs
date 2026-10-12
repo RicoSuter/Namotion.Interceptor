@@ -231,7 +231,7 @@ internal static class MarkdownWriteRules
 
     /// <summary>
     /// Gets the position of each block without a #name among the content around it, with the positions of the blocks
-    /// around it, which is what its key holds.
+    /// around it up to the nearest one with a #name, which is what its key holds.
     /// </summary>
     private static List<string> GetUnnamedBlockPositions(MarkdownPage page)
     {
@@ -246,12 +246,16 @@ internal static class MarkdownWriteRules
         {
             if (segments[index] is BlockMarkdownSegment blockSegment)
             {
-                var blockPath = path + "/" + index.ToString(CultureInfo.InvariantCulture);
-                if (blockSegment.Block.Head is { Id: null })
+                // A block with a #name keeps its subject wherever it is, and the keys of the blocks inside it count
+                // from its content, so their positions are taken relative to it.
+                if (blockSegment.Block.Head?.Id is { } id)
                 {
-                    positions.Add(blockPath);
+                    AddUnnamedBlockPositions(blockSegment.Content, "#" + id, positions);
+                    continue;
                 }
 
+                var blockPath = path + "/" + index.ToString(CultureInfo.InvariantCulture);
+                positions.Add(blockPath);
                 AddUnnamedBlockPositions(blockSegment.Content, blockPath, positions);
             }
         }

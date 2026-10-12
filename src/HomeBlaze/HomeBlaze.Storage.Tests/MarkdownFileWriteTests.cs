@@ -363,6 +363,34 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal(PageWithUnnamedBlock, ReadFile("Motors.md"));
     }
 
+    [Theory]
+    [InlineData("#main", true)]
+    [InlineData("", false)]
+    public async Task WhenAnExpressionIsAddedBeforeACardWithAnUnnamedWidget_ThenOnlyAnUnnamedCardRefusesIt(string cardName, bool isAllowed)
+    {
+        // Arrange: the widget inside the card has no name, and its key counts from the content of the card.
+        var content = $"# Cards\n\n:: HomeBlaze.Components.Card{cardName} Title=Main\n::: HomeBlaze.Components.Widget Path=/Devices\n:::\n::\n";
+        WriteFile("Cards.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+
+        // Act
+        var exception = await Record.ExceptionAsync(
+            () => markdown.ReplaceTextAsync("# Cards", "# Cards at {{ /Devices/Speed }}", CancellationToken.None));
+
+        // Assert
+        if (isAllowed)
+        {
+            Assert.Null(exception);
+            Assert.Equal(content.Replace("# Cards", "# Cards at {{ /Devices/Speed }}"), ReadFile("Cards.md"));
+        }
+        else
+        {
+            Assert.StartsWith("The change adds or removes an expression", Assert.IsType<ArgumentException>(exception).Message);
+            Assert.Equal(content, ReadFile("Cards.md"));
+        }
+    }
+
     [Fact]
     public async Task WhenTheFirstTextIsAddedBeforeABlockWithoutAName_ThenItIsRejectedBecauseTheSubjectWouldStartAgain()
     {
