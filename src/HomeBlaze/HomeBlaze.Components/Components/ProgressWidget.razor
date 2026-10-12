@@ -1,0 +1,38 @@
+@using System.Globalization
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Progress))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+
+@{
+    var progress = Subject as Progress;
+}
+
+@if (progress is not null)
+{
+    // Read once per render and never kept: the read is what the tracking scope records.
+    var value = ValueReader.ReadValue(PathResolver, progress, progress.Path);
+    var percent = ValueReader.GetProgressPercent(value, progress.Minimum, progress.Maximum);
+
+    if (percent is null)
+    {
+        // A value that is no number has no bar, and neither has an empty range.
+        <ValueText Reading="@ValueReading.Missing" Path="@progress.Path" />
+    }
+    else
+    {
+        @* In a row the bar fills the room between the label and the value. The minimum width keeps it visible when that room is small. *@
+        <MudProgressLinear Value="@percent.Value"
+                           Min="0"
+                           Max="100"
+                           Color="@progress.Color"
+                           Rounded="true"
+                           Style="min-width: 48px;"
+                           data-testid="progress"
+                           data-percent="@percent.Value.ToString("0.##", CultureInfo.InvariantCulture)" />
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

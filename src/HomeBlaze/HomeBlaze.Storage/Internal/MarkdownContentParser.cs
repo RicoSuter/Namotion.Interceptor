@@ -28,28 +28,43 @@ public sealed partial class MarkdownContentParser
     /// A fragment after the page stays on the link. A link that is only a fragment gets the route of the
     /// page itself, which a link names with <paramref name="pageName"/>.
     /// </summary>
-    private static string RewriteLink(string url, string basePath, string pageName)
+    private static string RewriteLink(string url, string basePath, string pageName) =>
+        IsRelativePageLink(url, out var fragmentStart) ? RewritePageLink(url, fragmentStart, basePath, pageName) : url;
+
+    /// <summary>
+    /// Whether a link is rewritten: a relative link to a markdown page or a fragment of the page itself.
+    /// Every other link stays as written. For a link that is rewritten, <paramref name="fragmentStart"/> is
+    /// where its fragment starts, or -1 without one.
+    /// </summary>
+    private static bool IsRelativePageLink(string url, out int fragmentStart)
     {
+        fragmentStart = -1;
+
         // Skip absolute URLs
         if (string.IsNullOrEmpty(url) ||
             url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
             url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
             url.StartsWith("/"))
         {
-            return url;
+            return false;
         }
 
-        // The browser resolves a link against the base address of the application and not against the
-        // address of the page, so a fragment alone would lead to the start page.
-        var fragmentStart = url.IndexOf('#');
-        var isFragmentOnly = fragmentStart == 0;
-        var pagePath = isFragmentOnly ? pageName : fragmentStart < 0 ? url : url[..fragmentStart];
+        fragmentStart = url.IndexOf('#');
+        if (fragmentStart == 0)
+        {
+            return true;
+        }
 
         // Only process .md links
-        if (!isFragmentOnly && !pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
-        {
-            return url;
-        }
+        var pagePath = fragmentStart < 0 ? url.AsSpan() : url.AsSpan(0, fragmentStart);
+        return pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string RewritePageLink(string url, int fragmentStart, string basePath, string pageName)
+    {
+        // The browser resolves a link against the base address of the application and not against the
+        // address of the page, so a fragment alone would lead to the start page.
+        var pagePath = fragmentStart == 0 ? pageName : fragmentStart < 0 ? url : url[..fragmentStart];
 
         // Resolve relative path against base path
         var resolvedPath = ResolvePath(basePath, pagePath);
@@ -105,6 +120,15 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
+    /// Resolves a link of a block on the page the way a link in the text of the page is rewritten.
+    /// </summary>
+    public string ResolveLink(string link, MarkdownFile page) =>
+        // Asked first, because a widget resolves its link on every render and most links stay as written.
+        IsRelativePageLink(link, out var fragmentStart)
+            ? RewritePageLink(link, fragmentStart, GetLinkBasePath(page), EscapeFileNameForLink(Path.GetFileName(page.FullPath)))
+            : link;
+
+    /// <summary>
     /// Resolves a relative path against a base path, handling .. navigation.
     /// </summary>
     private static string ResolvePath(string basePath, string relativePath)
@@ -155,7 +179,8 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
-    /// Renders markdown content by replacing {{ path }} expressions with their resolved values.
+    /// Renders markdown content by replacing {{ path }} expressions with their resolved values in the format
+    /// each one asks for. An expression with an unknown format stays as written.
     /// Everything else stays as written, including the lines of the blocks and the front matter. An expression inside markdown code is kept as written.
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
@@ -170,14 +195,22 @@ public sealed partial class MarkdownContentParser
         {
             rendered ??= new StringBuilder(content.Length);
             rendered.Append(content, copiedLength, expression.Span.Start - copiedLength);
-            try
-            {
-                var value = _pathResolver.ResolveScopedValue(expression.Path, PathStyle.Canonical, parent);
-                rendered.Append(value);
-            }
-            catch
+            if (expression.Error is not null)
             {
                 rendered.Append(content, expression.Span.Start, expression.Span.Length);
+            }
+            else
+            {
+                try
+                {
+                    // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
+                    var property = _pathResolver.ResolveScopedProperty(expression.Path, PathStyle.Canonical, parent);
+                    rendered.Append(RenderExpression.GetText(property, expression.Format, timeZone: null));
+                }
+                catch
+                {
+                    rendered.Append(content, expression.Span.Start, expression.Span.Length);
+                }
             }
 
             copiedLength = expression.Span.End;
@@ -238,11 +271,13 @@ public sealed partial class MarkdownContentParser
                     break;
 
                 case ExpressionMarkdownSegment expression:
-                    var expressionKey = $"{ExpressionKeyPrefix}{index}_{ComputeHash(expression.Path)}";
+                    // The format and the error are part of the key, so that a changed format replaces the subject.
+                    var expressionKey =
+                        $"{ExpressionKeyPrefix}{index}_{ComputeHash($"{expression.Path}|{expression.Format}|{expression.Error}")}";
                     children[expressionKey] =
                         existingChildren.TryGetValue(expressionKey, out var existingExpression) && existingExpression is RenderExpression
                             ? existingExpression
-                            : new RenderExpression(expression.Path, state.Page, _pathResolver);
+                            : new RenderExpression(expression.Path, expression.Format, expression.Error, state.Page, _pathResolver);
                     break;
 
                 case BlockMarkdownSegment block:

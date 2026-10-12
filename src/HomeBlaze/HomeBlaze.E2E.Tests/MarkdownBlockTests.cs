@@ -1,10 +1,5 @@
-using System.Text;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
-using HomeBlaze.Services;
-using HomeBlaze.Storage;
-using HomeBlaze.Storage.Files;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
@@ -16,7 +11,7 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class MarkdownBlockTests
 {
-    private static readonly Regex TemperaturePattern = new(@"temperature of -?\d+([.,]\d+)? °C");
+    private static readonly Regex TemperaturePattern = new(@"temperature of -?\d+([.,]\d+)?°C");
 
     private const int NarrowViewportWidth = 390;
 
@@ -579,6 +574,54 @@ public class MarkdownBlockTests
         Assert.Contains("Text inside the card\n::\n\nText after the card", source);
     }
 
+    [Fact]
+    public async Task WhenValueTileIsCreatedInTheEditor_ThenItsBlockIsWrittenToThePage()
+    {
+        // Arrange
+        await WriteScratchPageAsync("# Scratch\n\nText before the block\n");
+
+        var page = await OpenPageAsync(ScratchPage);
+        await Assertions.Expect(page.GetByText("Text before the block")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await SelectEditModeAsync(page, "Split");
+
+        var textLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "Text before the block" });
+        await Assertions.Expect(textLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await textLine.ClickAsync();
+
+        await page.GetByTestId("create-subject-button").ClickAsync();
+        await Assertions.Expect(SubjectSetupDialogTests.TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Act: the tile is found in the group "Dashboard" under its display name
+        await page.GetByTestId("type-group-dashboard").ClickAsync();
+        var tileRow = SubjectSetupDialogTests.TypeRows(page).Filter(new() { HasText = "Value tile" });
+        await Assertions.Expect(tileRow).ToHaveCountAsync(1);
+        await tileRow.ClickAsync();
+
+        var dialog = SubjectSetupDialogTests.Dialog(page);
+        var createButton = SubjectSetupDialogTests.CreateButton(page);
+        await Assertions.Expect(createButton).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await dialog.GetByLabel("Path", new() { Exact = true }).FillAsync("scratchmotor/CurrentSpeed");
+        await Assertions.Expect(createButton).ToBeEnabledAsync(new() { Timeout = 30000 });
+        await createButton.ClickAsync();
+
+        // Assert: the block is in the editor and in the file, with its head line and a closing line
+        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = 30000 });
+        // The text of the editor and not a line of its view: the editor wraps a long head line, also after a
+        // dot, and each part is then a line of the view. Where it wraps depends on the width and the font.
+        await page.WaitForFunctionAsync(
+            "needle => window.monaco.editor.getModels().some(model => model.getValue().includes(needle))",
+            ":: HomeBlaze.Components.ValueTile",
+            new() { Timeout = 30000 });
+
+        var lines = (await File.ReadAllTextAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n").Split('\n');
+        var headLineIndex = Array.FindIndex(lines, line => line.StartsWith(":: HomeBlaze.Components.ValueTile", StringComparison.Ordinal));
+        Assert.True(headLineIndex >= 0, "The page has no head line of a ValueTile.");
+        Assert.Contains("Path=scratchmotor/CurrentSpeed", lines[headLineIndex]);
+        Assert.Equal("::", lines[headLineIndex + 1]);
+        Assert.Contains("Text before the block", lines);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+    }
+
     private static ILocator GetTab(ILocator tabLayout, string title)
     {
         return tabLayout.GetByRole(AriaRole.Tab, new() { Name = title, Exact = true });
@@ -612,16 +655,7 @@ public class MarkdownBlockTests
             ":: HomeBlaze.Components.TabLayout#tabs\n" + string.Concat(tabs) + "::\n";
     }
 
-    // Writes through the page like an editor does, which also loads the page again.
-    private async Task WriteScratchPageAsync(string content)
-    {
-        var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
-        var folder = (VirtualFolder)root.Children["Demo"];
-        var file = (MarkdownFile)folder.Children[ScratchPage];
-
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
-        await file.WriteAsync(stream, CancellationToken.None);
-    }
+    private Task WriteScratchPageAsync(string content) => _fixture.WriteDemoPageAsync(ScratchPage, content);
 
     private async Task<IPage> OpenScratchPageWithSecondOfThreeTabsSelectedAsync()
     {

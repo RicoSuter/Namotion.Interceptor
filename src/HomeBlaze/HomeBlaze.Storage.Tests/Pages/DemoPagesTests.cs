@@ -1,7 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Samples;
-using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
@@ -28,7 +27,7 @@ public class DemoPagesTests
     public async Task WhenDemoPageIsLoaded_ThenNoBlockIsShownAsError(string fileName)
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, fileName);
@@ -56,7 +55,7 @@ public class DemoPagesTests
     public async Task WhenDemoPageIsLoaded_ThenTheBlockWithANameCreatesItsSubject(string fileName, string name, Type expectedType)
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         IPathScope page = await AddDemoPageAsync(fixture, fileName);
@@ -66,26 +65,26 @@ public class DemoPagesTests
     }
 
     [Fact]
-    public async Task WhenDashboardPageIsLoaded_ThenItsFourTabsHoldTheLayoutsOfTheDashboard()
+    public async Task WhenDashboardPageIsLoaded_ThenItsTabsHoldTheLayoutsOfTheDashboard()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Dashboard.md");
 
         // Assert
         var dashboard = Assert.Single(page.Children.Values.OfType<TabLayout>());
-        Assert.Equal(["Dashboard", "Devices", "Grid and Canvas", "On This Page"], dashboard.Tabs.Select(tab => tab.Title));
+        Assert.Equal(["Devices", "Grid and Canvas", "On This Page"], dashboard.Tabs.Select(tab => tab.Title));
         Assert.Equal(4, PageErrorBoxes.Flatten(page.Children.Values).OfType<TabLayout>().Count());
 
         // Tabs three levels deep: the tab of the devices holds a tab layout, and its tab of the fans holds another one.
-        var devices = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[1]));
+        var devices = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[0]));
         Assert.Equal(["Pumps", "Fans", "Conveyor", "Sample Devices"], devices.Tabs.Select(tab => tab.Title));
         var fans = Assert.Single(FindInTab<TabLayout>(devices.Tabs[1]));
         Assert.Equal(["Cooling Fan", "Exhaust Fan"], fans.Tabs.Select(tab => tab.Title));
 
-        var gridAndCanvas = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[2]));
+        var gridAndCanvas = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[1]));
         Assert.Equal(["Grid", "Canvas"], gridAndCanvas.Tabs.Select(tab => tab.Title));
         var grid = Assert.Single(FindInTab<GridLayout>(gridAndCanvas.Tabs[0]));
         Assert.Equal((2, 3, 5), (grid.Rows, grid.Columns, grid.Cells.Count));
@@ -93,17 +92,53 @@ public class DemoPagesTests
         Assert.Equal(3, canvas.Nodes.Count);
 
         // The motor that the page creates is shown once more by its name, in the same tab.
-        var ownTab = PageErrorBoxes.Flatten([dashboard.Tabs[3]]).ToList();
+        var ownTab = PageErrorBoxes.Flatten([dashboard.Tabs[2]]).ToList();
         var motor = Assert.Single(ownTab.OfType<Motor>());
         Assert.Equal("Dashboard Motor", motor.Name);
         Assert.Same(motor, Assert.Single(ownTab.OfType<Widget>()).ResolvedSubject);
     }
 
     [Fact]
+    public async Task WhenDashboardPageIsLoaded_ThenItUsesEveryValueWidgetAndEachMapOfAWidgetIsTheMapOfThePage()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Dashboard.md");
+
+        // Assert
+        var subjects = PageErrorBoxes.Flatten(page.Children.Values).ToList();
+        var map = Assert.IsType<ValueMap>(((IPathScope)page).TryGetNamedSubject("motorstate"));
+        Assert.Equal(Enum.GetNames<MotorStatus>(), map.Cases.Select(valueCase => valueCase.Value));
+
+        var tiles = subjects.OfType<ValueTile>().ToList();
+        Assert.Equal(5, tiles.Count);
+        Assert.All(tiles, tile => Assert.StartsWith("/Demo/", tile.Path));
+
+        var cards = subjects.OfType<Card>().Where(card => card.Subtitle is not null).ToList();
+        Assert.Equal(5, cards.Count);
+        Assert.All(cards, card => Assert.Single(Assert.IsType<MarkdownFragment>(card.HeaderRight).Children.Values.OfType<Indicator>()));
+
+        var panels = Assert.Single(subjects.OfType<ExpansionPanels>());
+        Assert.Equal(["Drives", "Fans", "All Motors"], panels.Panels.Select(panel => panel.Title));
+        Assert.Equal([true, false, false], panels.Panels.Select(panel => panel.Expanded));
+
+        Assert.NotEmpty(subjects.OfType<ValueList>());
+        Assert.NotEmpty(subjects.OfType<Progress>());
+        Assert.NotEmpty(subjects.OfType<Alert>());
+
+        var maps = subjects.OfType<ValueRow>().Select(row => row.Map)
+            .Concat(subjects.OfType<Indicator>().Select(indicator => indicator.Map))
+            .Where(name => name is not null);
+        Assert.All(maps, name => Assert.Equal("motorstate", name));
+    }
+
+    [Fact]
     public async Task WhenErrorsPageIsLoaded_ThenEverySectionShowsItsOwnError()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Errors.md");
@@ -116,10 +151,10 @@ public class DemoPagesTests
             "Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace.",
             "The type 'HomeBlaze.Storage.Files.MarkdownFile' cannot be used as a block because it does not implement IConfigurable.",
             "'Card' is not a type name. A slot block is only allowed directly inside a widget block.",
-            "Card has no configuration property 'Titel'. Available: Icon, Title.",
-            "Card has no configuration property 'title'. Did you mean 'Title'? Available: Icon, Title.",
+            "Card has no configuration property 'Titel'. Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.",
+            "Card has no configuration property 'title'. Did you mean 'Title'? Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.",
             "'fast' is not a valid value for 'TargetSpeed'. Expected a value of type Int32.",
-            "Card has no slot 'Footr'. Available: Content, Footer.",
+            "Card has no slot 'Footr'. Available: Content, Footer, HeaderRight.",
             "Motor has no default slot, so it cannot have content.",
             "The slot 'Footer' takes one block, but there are 2.",
             "The name 'twin' is used twice on this page.",
@@ -146,7 +181,7 @@ public class DemoPagesTests
     public async Task WhenErrorsPageIsLoaded_ThenTheBlocksAroundAFenceErrorAreStillShown()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Errors.md");
@@ -166,7 +201,7 @@ public class DemoPagesTests
     public async Task WhenErrorsPageIsLoaded_ThenTheMistakesWithoutABoxShowTheirBlocksAtTheWrongPlace()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Errors.md");
@@ -196,7 +231,7 @@ public class DemoPagesTests
     public async Task WhenErrorsPageIsLoaded_ThenTheBlocksWithoutAnErrorAreCreated()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Errors.md");
@@ -213,19 +248,6 @@ public class DemoPagesTests
         // The first of two blocks with the same name keeps the name.
         Assert.Equal("First Twin", Assert.IsType<Motor>(page.Children["twin"]).Name);
     }
-
-    private static Task<MarkdownPageFixture> CreateFixtureAsync() =>
-        MarkdownPageFixture.CreateAsync(services =>
-        {
-            // The type registry reads the provider on first use, so the assemblies are added before anything is created.
-            var typeProvider = (TypeProvider)services
-                .Single(service => service.ServiceType == typeof(TypeProvider))
-                .ImplementationInstance!;
-
-            typeProvider
-                .AddAssembly(typeof(Card).Assembly)
-                .AddAssembly(typeof(Motor).Assembly);
-        });
 
     private static Task<MarkdownFile> AddDemoPageAsync(MarkdownPageFixture fixture, string fileName) =>
         fixture.AddPageAsync(fileName, ReadDemoPage(fileName));

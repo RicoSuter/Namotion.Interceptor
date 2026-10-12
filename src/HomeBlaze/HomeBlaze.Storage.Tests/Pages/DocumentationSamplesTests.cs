@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
-using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
@@ -99,7 +98,7 @@ public partial class DocumentationSamplesTests
     {
         // Arrange
         var sample = FindSample(relativePath, line);
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("Sample.md", sample.Source);
@@ -118,7 +117,7 @@ public partial class DocumentationSamplesTests
     {
         // Arrange
         var sample = FindSample(relativePath, line);
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
         var serializer = fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>();
 
         // Act
@@ -146,7 +145,7 @@ public partial class DocumentationSamplesTests
     {
         // Arrange
         var sample = FindSample(relativePath, line);
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("Sample.md", sample.Source);
@@ -267,7 +266,7 @@ public partial class DocumentationSamplesTests
     {
         // Arrange
         var sample = FindSample(relativePath, line);
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
         var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
 
         // Act
@@ -370,20 +369,6 @@ public partial class DocumentationSamplesTests
             ? $"{relativePath} line {endIndex + 1}: expected an empty line after the live block, but found '{pageLines[endIndex]}'."
             : null;
     }
-
-    /// <summary>Creates a fixture that knows the widget types that ship and the sample subjects.</summary>
-    internal static Task<MarkdownPageFixture> CreateFixtureAsync() =>
-        MarkdownPageFixture.CreateAsync(services =>
-        {
-            // The type registry reads the provider on first use, so the assemblies are added before anything is created.
-            var typeProvider = (TypeProvider)services
-                .Single(service => service.ServiceType == typeof(TypeProvider))
-                .ImplementationInstance!;
-
-            typeProvider
-                .AddAssembly(typeof(Card).Assembly)
-                .AddAssembly(typeof(Motor).Assembly);
-        });
 
     // The page is asked for its boxes by line, so the order in which the documentation lists them does not matter.
     private static List<string> SortByLine(IEnumerable<string> boxes) =>

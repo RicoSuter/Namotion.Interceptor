@@ -299,6 +299,48 @@ public class MarkdownPageScopeTests
     }
 
     [Fact]
+    public async Task WhenPathStartsWithBlockName_ThenScopedPropertyIsThePropertyOfThatBlock()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $$$"""
+            :: {{{Namespace}}}.TestLeaf#leaf Count=7
+            ::
+            """);
+        var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+
+        // Act
+        var property = resolver.ResolveScopedProperty("leaf/Count", PathStyle.Canonical, page);
+
+        // Assert
+        Assert.NotNull(property);
+        Assert.Equal("Count", property.Name);
+        Assert.Equal(7, property.GetValue());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("leaf/")]
+    [InlineData("leaf/Missing")]
+    [InlineData("nothing/Count")]
+    public async Task WhenPathLeadsToNoProperty_ThenScopedPropertyIsNull(string path)
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $$$"""
+            :: {{{Namespace}}}.TestLeaf#leaf Count=7
+            ::
+            """);
+        var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+
+        // Act
+        var property = resolver.ResolveScopedProperty(path, PathStyle.Canonical, page);
+
+        // Assert
+        Assert.Null(property);
+    }
+
+    [Fact]
     public async Task WhenSubjectIsNotOnAPage_ThenItsScopedPathResolvesFromTheSubjectItself()
     {
         // Arrange
@@ -482,5 +524,23 @@ public class MarkdownPageScopeTests
         Assert.Same(later, FindReference(page, "byPath").Resolved);
         Assert.Same(leaf, FindReference(page, "byName").Resolved);
         Assert.Equal(5, FindExpression(page.Children.Values, "leaf/Count").Value);
+    }
+
+    [Fact]
+    public async Task WhenTargetOfAnAbsolutePathAppearsAfterThePageWasParsed_ThenTheValueOfTheExpressionIsPublished()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", "Title: {{ /later.md/Title }}");
+        var expression = FindExpression(page.Children.Values, "/later.md/Title");
+        var expressionChanges = RecordChangedProperties(expression);
+        Assert.Null(expression.Value);
+
+        // Act
+        await fixture.AddPageAsync("later.md", "---\ntitle: Later\n---\n\ntext");
+
+        // Assert
+        Assert.Contains(nameof(RenderExpression.Value), expressionChanges);
+        Assert.Equal("Later", expression.Value);
     }
 }

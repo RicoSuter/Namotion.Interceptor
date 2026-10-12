@@ -70,12 +70,12 @@ An expression takes the same paths as a `Widget`, followed by the name of a prop
 ~~~~markdown
 Relative: the conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
 
-Absolute: the conveyor has a temperature of {{ /Demo/Conveyor/Temperature }} °C.
+Absolute: the conveyor has a temperature of {{ /Demo/Conveyor/Temperature }}.
 ~~~~
 
 Relative: the conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
 
-Absolute: the conveyor has a temperature of {{ /Demo/Conveyor/Temperature }} °C.
+Absolute: the conveyor has a temperature of {{ /Demo/Conveyor/Temperature }}.
 
 ## References that contain themselves
 

@@ -30,7 +30,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         Assert.Equal(new HtmlMarkdownSegment("<p>Value "), segments[0]);
-        Assert.Equal(new ExpressionMarkdownSegment("a/b"), segments[1]);
+        Assert.Equal(new ExpressionMarkdownSegment("a/b", ExpressionFormat.Display, null), segments[1]);
         Assert.DoesNotContain("title", AllHtml(segments));
     }
 
@@ -578,7 +578,7 @@ public class MarkdownSegmentBuilderTests
         Assert.Equal("Demo.Card", block.Block.Head!.Name);
         Assert.Contains("Use {{ to start an expression.", AllHtml(block.Content));
         Assert.Contains("After the card", AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment)));
-        Assert.Equal(new ExpressionMarkdownSegment("motor/Speed"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+        Assert.Equal(new ExpressionMarkdownSegment("motor/Speed", ExpressionFormat.Display, null), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
     }
 
     [Fact]
@@ -599,7 +599,7 @@ public class MarkdownSegmentBuilderTests
         var block = Assert.Single(segments.OfType<BlockMarkdownSegment>());
         Assert.Equal("Demo.Card", block.Block.Head!.Name);
         Assert.Equal(
-            new ExpressionMarkdownSegment("motor/Speed"), Assert.Single(block.Content.OfType<ExpressionMarkdownSegment>()));
+            new ExpressionMarkdownSegment("motor/Speed", ExpressionFormat.Display, null), Assert.Single(block.Content.OfType<ExpressionMarkdownSegment>()));
         Assert.Empty(segments.OfType<ExpressionMarkdownSegment>());
         var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
         Assert.Contains("Use {{ to start an expression.", outside);
@@ -613,7 +613,7 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("Use {{ to start one, like {{ a/B }} here");
 
         // Assert
-        Assert.Equal(new ExpressionMarkdownSegment("a/B"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+        Assert.Equal(new ExpressionMarkdownSegment("a/B", ExpressionFormat.Display, null), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
         Assert.Contains("Use {{ to start one, like ", AllHtml(segments));
     }
 
@@ -646,7 +646,7 @@ public class MarkdownSegmentBuilderTests
         var segments = Build(source);
 
         // Assert
-        Assert.Equal(new ExpressionMarkdownSegment(expectedPath), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+        Assert.Equal(new ExpressionMarkdownSegment(expectedPath, ExpressionFormat.Display, null), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
     }
 
     [Fact]
@@ -656,7 +656,7 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("Value {{ a < b }} now and {{ c/D }}");
 
         // Assert
-        Assert.Equal(new ExpressionMarkdownSegment("c/D"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+        Assert.Equal(new ExpressionMarkdownSegment("c/D", ExpressionFormat.Display, null), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
         Assert.Contains("Value {{ a < b }} now and ", VisibleText(segments));
     }
 
@@ -691,6 +691,29 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         Assert.Equal(found, rendered);
+    }
+
+    [Fact]
+    public void WhenExpressionHasTheRawFormat_ThenItIsFoundWithThePathWithoutTheFormat()
+    {
+        // Act
+        var expression = Assert.Single(MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse("Value {{ a | raw }} now")));
+
+        // Assert
+        Assert.Equal("a", expression.Path);
+        Assert.Equal(ExpressionFormat.Raw, expression.Format);
+        Assert.Null(expression.Error);
+    }
+
+    [Fact]
+    public void WhenExpressionHasAnUnknownFormat_ThenItIsFoundWithAnError()
+    {
+        // Act
+        var expression = Assert.Single(MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse("Value {{ a | x }} now")));
+
+        // Assert
+        Assert.Equal("a", expression.Path);
+        Assert.Equal("Unknown format 'x'", expression.Error);
     }
 
     [Fact]

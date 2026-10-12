@@ -28,4 +28,11 @@ public static class MudBlazorIconResolver
             return field?.GetValue(null) as string ?? Icons.Material.Filled.Article;
         });
     }
+
+    /// <summary>
+    /// Resolves an icon name like <see cref="Resolve"/>, but to null when the name is null or empty,
+    /// for an option that shows no icon when it is not set.
+    /// </summary>
+    public static string? ResolveOrNull(string? iconName) =>
+        string.IsNullOrEmpty(iconName) ? null : Resolve(iconName);
 }
