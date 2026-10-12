@@ -154,6 +154,27 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAnAgentChangesOrAddsABlock_ThenTheToolsReturnTheBlockRuleAndTheFilesAreUnchanged()
+    {
+        // Arrange
+        var (root, _, services) = await CreateGraphAsync();
+        var tools = CreateTools(services, root);
+        WriteFile("Notes.md", "# Notes\n\n:: HomeBlaze.Samples.Motor#motor TargetSpeed=1000\n::\n\nThe freezer is cold.");
+
+        // Act
+        var edit = await CallAsync(tools["edit_markdown"], new { path = NotesPath, old_text = "TargetSpeed=1000", new_text = "TargetSpeed=5000" });
+        var write = await CallAsync(tools["write_markdown"], new { path = NotesPath, content = "# Notes\n\nNo motor any more." });
+        var create = await CallAsync(tools["create_markdown"], new { folder_path = "/Storage", name = "New.md", content = ":: HomeBlaze.Components.Widget Path=/Storage\n::" });
+
+        // Assert
+        Assert.StartsWith("Blocks cannot be added, changed or removed", edit.GetProperty("error").GetString());
+        Assert.StartsWith("Blocks cannot be added, changed or removed", write.GetProperty("error").GetString());
+        Assert.StartsWith("Blocks cannot be added, changed or removed", create.GetProperty("error").GetString());
+        Assert.Equal("# Notes\n\n:: HomeBlaze.Samples.Motor#motor TargetSpeed=1000\n::\n\nThe freezer is cold.", ReadFile("Notes.md"));
+        Assert.False(File.Exists(Path.Combine(_directory.FullName, "New.md")));
+    }
+
+    [Fact]
     public async Task WhenTheOperationRejectsAnArgument_ThenItsMessageIsReturned()
     {
         // Arrange

@@ -6,6 +6,7 @@ using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
 using HomeBlaze.Storage.Tests.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
@@ -392,57 +393,102 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public async Task WhenReadingTheRawContent_ThenSecretValuesOfEmbeddedSubjectsAreHidden()
+    public async Task WhenReadingTheRawContent_ThenSecretValuesInTheBlocksAreHidden()
     {
-        // Arrange
-        var content = $$"""
+        // Arrange: secrets as arguments and in json blocks, of a widget block, of a widget inside a card and of a
+        // typed slot block, next to blocks without secrets and blocks whose type is unknown.
+        var device = typeof(EmbeddedSecretDevice).FullName;
+        var content = $$$"""
             # Gateway
 
-            ```subject(gateway)
-            {
-              "$type": "{{typeof(EmbeddedSecretDevice).FullName}}",
-              "host": "192.168.1.10",
-              "password": "s3cr3t"
-            }
-            ```
+            :: {{{device}}}#gateway Host=192.168.1.10 Password=s3cr3t
+            ::
 
-            ```subject(plain)
+            :: {{{device}}}#jsongateway
+            ```json
             {
-              "$type": "{{typeof(Motor).FullName}}",
-              "name": "Plain",
-              "targetSpeed": 1000
+              "Host": "10.0.0.2",
+              "Password": "json-secret"
             }
             ```
+            ::
 
-            ```subject(unknown)
-            {
-              "$type": "Unknown.Device",
-              "token": "also secret"
-            }
+            :: {{{typeof(Motor).FullName}}}#plain Name=Plain TargetSpeed=1000
+            ::
+
+            :: HomeBlaze.Components.Card#card Title="Card Title"
+            ::: {{{device}}}#cardgateway Host=card-host Password="card secret"
+            :::
+            ::
+
+            :: {{{typeof(SecretSlotHost).FullName}}}#host
+            ::: Gateway Host=slot-host Password=slot-secret
+            :::
+            ::
+
+            :: Unknown.Device#unknown Token="also secret"
+            ```json
+            { "Key": "json also secret" }
             ```
+            ::
+
+            Gateway at {{ gateway/Host }}, password {{ gateway/Password }}.
             """;
         var markdown = await CreatePageInGraphAsync(content);
 
         // Act
-        var result = markdown.ReadRawContent();
+        var raw = markdown.ReadRawContent();
+        var evaluated = markdown.ReadEvaluatedContent();
 
         // Assert
         Assert.IsType<EmbeddedSecretDevice>(markdown.Children["gateway"]);
-        Assert.DoesNotContain("s3cr3t", result);
-        Assert.DoesNotContain("also secret", result);
-        Assert.Contains("\"password\": \"***\"", result);
-        Assert.Contains("\"host\": \"192.168.1.10\"", result);
-        Assert.Contains($$"""
-            ```subject(plain)
-            {
-              "$type": "{{typeof(Motor).FullName}}",
-              "name": "Plain",
-              "targetSpeed": 1000
-            }
-            ```
-            """, result);
-        Assert.Contains("\"$type\": \"Unknown.Device\"", result);
+        Assert.IsType<EmbeddedSecretDevice>(markdown.Children["jsongateway"]);
+        var cardContent = Assert.IsType<MarkdownFragment>(Assert.IsType<HomeBlaze.Components.Card>(markdown.Children["card"]).Content);
+        Assert.Single(cardContent.Children.Values.OfType<EmbeddedSecretDevice>());
+        Assert.Single(Assert.IsType<SecretSlotHost>(markdown.Children["host"]).Gateways);
+        foreach (var result in new[] { raw, evaluated })
+        {
+            Assert.NotNull(result);
+            Assert.DoesNotContain("s3cr3t", result);
+            Assert.DoesNotContain("json-secret", result);
+            Assert.DoesNotContain("card secret", result);
+            Assert.DoesNotContain("slot-secret", result);
+            Assert.DoesNotContain("also secret", result);
+            Assert.Contains($":: {device}#gateway Host=192.168.1.10 Password=***\n", result);
+            Assert.Contains("\"Host\": \"10.0.0.2\",\n  \"Password\": \"***\"", result);
+            Assert.Contains($"::: {device}#cardgateway Host=card-host Password=***\n", result);
+            Assert.Contains("::: Gateway Host=slot-host Password=***\n", result);
+            Assert.Contains(":: Unknown.Device#unknown Token=***\n```json\n***\n```\n", result);
+            Assert.Contains($":: {typeof(Motor).FullName}#plain Name=Plain TargetSpeed=1000\n", result);
+            Assert.Contains(":: HomeBlaze.Components.Card#card Title=\"Card Title\"\n", result);
+        }
+
+        Assert.EndsWith("Gateway at {{ gateway/Host }}, password {{ gateway/Password }}.", raw);
+        Assert.EndsWith("Gateway at 192.168.1.10, password .", evaluated);
         Assert.Equal(content, markdown.Content);
+    }
+
+    [Fact]
+    public async Task WhenABlockShowsASecretConfigurationPropertyInItsContent_ThenItsExpressionHasNoValue()
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync(
+            """
+            :: HomeBlaze.Components.Card#card Title=Device
+            Secret: {{ /Devices/motor/Password }}, public: {{ /Devices/motor/Host }}
+            ::
+            """,
+            new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
+        var card = Assert.IsType<HomeBlaze.Components.Card>(markdown.Children["card"]);
+
+        // Act
+        var expressions = Assert.IsType<MarkdownFragment>(card.Content).Children.Values
+            .OfType<RenderExpression>()
+            .ToDictionary(expression => expression.Path);
+
+        // Assert
+        Assert.Null(expressions["/Devices/motor/Password"].Value);
+        Assert.Equal("visible", expressions["/Devices/motor/Host"].Value);
     }
 
     [Fact]
@@ -536,6 +582,7 @@ public class MarkdownFileTests
         typeProvider.AddAssembly(typeof(Motor).Assembly);
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         typeProvider.AddAssembly(typeof(EmbeddedSecretDevice).Assembly);
+        typeProvider.AddAssembly(typeof(HomeBlaze.Components.Card).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         // The context of the application: an embedded subject is updated through the configuration
@@ -618,6 +665,20 @@ public partial class EmbeddedSecretDevice : IConfigurable
 
     [Configuration(IsSecret = true)]
     public partial string? Password { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class SecretSlotHost : IConfigurable
+{
+    public SecretSlotHost()
+    {
+        Gateways = [];
+    }
+
+    [Slot("Gateway")]
+    public partial EmbeddedSecretDevice[] Gateways { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

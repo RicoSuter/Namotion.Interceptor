@@ -177,6 +177,31 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal("# Heading\n\nchanged by an agent", markdown.Content);
     }
 
+    [Fact]
+    public async Task WhenAConfigurationWriteBackRunsDuringAnotherWrite_ThenItWaitsAndWritesIntoTheWrittenSource()
+    {
+        // Arrange - an editor save whose content is still being written.
+        WriteFile("Motors.md", "# Heading\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor\n::\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+        var motor = Assert.IsType<Samples.Motor>(markdown.Children["motor"]);
+        using var savedContent = new GatedStream("# Saved by the editor\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor\n::\n"u8.ToArray());
+        var save = markdown.WriteAsync(savedContent, CancellationToken.None);
+        await savedContent.Started;
+
+        // Act
+        motor.TargetSpeed = 1500;
+        var writeBack = markdown.WriteConfigurationAsync(motor, CancellationToken.None);
+        savedContent.Open();
+        await Task.WhenAll(save, writeBack);
+
+        // Assert
+        var content = ReadFile("Motors.md");
+        Assert.StartsWith("# Saved by the editor\n\n:: HomeBlaze.Samples.Motor#motor ", content);
+        Assert.Contains("TargetSpeed=1500", content);
+        Assert.Equal(content, markdown.Content);
+    }
+
     private const string PageWithActiveContent = """
         # Motors
 
@@ -184,20 +209,70 @@ public class MarkdownFileWriteTests : IDisposable
 
         ![Wiring](https://example.com/wiring.png)
 
-        ```subject(motor)
-        {
-          "$type": "HomeBlaze.Samples.Motor",
-          "name": "Motor",
-          "targetSpeed": 1000
-        }
-        ```
+        :: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000
+        ::
 
         The motor runs at {{ motor/CurrentSpeed }} rpm.
+
+        :: HomeBlaze.Components.Card#card Title="Motor Card"
+        Card body.
+
+        ::: Footer
+        Card footer
+        :::
+        ::
+
+        :: HomeBlaze.Components.TabLayout#tabs
+        ::: Tab Title="First Tab"
+        First tab text
+        :::
+        ::
+
+        :: HomeBlaze.Components.FlowLayout#flow MinWidth=240
+        ::: Item
+        :::: HomeBlaze.Components.Widget Path=motor
+        ::::
+        :::
+        ::
+
+        :: HomeBlaze.Samples.Motor#jsonmotor Name=JsonMotor
+        ```json
+        { "TargetSpeed": 500 }
+        ```
+        ::
+
+        :: {.highlight}
+        Styled text
+        ::
+
+        End of the page.
         """;
 
     [Theory]
-    [InlineData("The motor runs at", "The motor runs at\n\n```subject(other)\n{ \"$type\": \"HomeBlaze.Samples.Motor\" }\n```\n\nIt runs at")]
-    [InlineData("\"targetSpeed\": 1000", "\"targetSpeed\": 2000")]
+    // Widget blocks: added with or without a closing line, an argument, the name or the json block changed, removed.
+    [InlineData("End of the page.", "End of the page.\n\n:: HomeBlaze.Samples.Motor#other\n::")]
+    [InlineData("End of the page.", "End of the page.\n\n:: HomeBlaze.Samples.Motor")]
+    [InlineData("TargetSpeed=1000", "TargetSpeed=2000")]
+    [InlineData("Motor#motor", "Motor#othermotor")]
+    [InlineData(":: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n::\n\n", "")]
+    [InlineData("\"TargetSpeed\": 500", "\"TargetSpeed\": 900")]
+    [InlineData("Name=Motor TargetSpeed=1000\n", "Name=Motor TargetSpeed=1000\n```json\n{ \"SimulationInterval\": \"00:00:01\" }\n```\n")]
+    // A layout or card: its content, a slot block added, changed or removed, a typed slot such as a tab.
+    [InlineData("Card body.", "Changed body.")]
+    [InlineData("Card footer", "Changed footer")]
+    [InlineData("::: Footer\nCard footer\n:::\n", "")]
+    [InlineData("Card body.\n", "Card body.\n\n::: HomeBlaze.Samples.Motor#cardmotor\n:::\n")]
+    [InlineData("Title=\"First Tab\"", "Title=\"Renamed Tab\"")]
+    [InlineData("First tab text\n:::\n", "First tab text\n:::\n::: Tab Title=\"Second Tab\"\nMore\n:::\n")]
+    [InlineData("Path=motor", "Path=/Devices/Other")]
+    [InlineData("MinWidth=240", "MinWidth=480")]
+    [InlineData("::::\n:::\n::\n", "::::\n:::\n::: Item\nAnother item\n:::\n::\n")]
+    // Style blocks, a closing line that closes nothing and a stray head line.
+    [InlineData("Styled text", "Other styled text")]
+    [InlineData("End of the page.", "End of the page.\n\n:: {.highlight}\nMore styled text\n::")]
+    [InlineData("End of the page.", "End of the page.\n\n::")]
+    [InlineData("The motor runs at", ":: Note\nThe motor runs at")]
+    // Active markup.
     [InlineData("rpm.", "rpm. <img src=x onerror=alert(1)>")]
     [InlineData("rpm.", "rpm.\n\n<script>alert(1)</script>")]
     [InlineData("Handle with care", "Handle <b onclick=\"alert(1)\">with</b> care")]
@@ -210,11 +285,10 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("rpm.", "rpm.\n\n![](https://h/x.mp4)")]
     [InlineData("rpm.", "rpm. ![Pixel](https://tracker.example.com/pixel.png)")]
     [InlineData("rpm.", "rpm. ![Pixel][pixel]\n\n[pixel]: https://tracker.example.com/pixel.png")]
-    [InlineData("rpm.", "rpm.\n\n:::warning\nCareful\n:::")]
     [InlineData("rpm.", "rpm.\n\n$$\nx^2\n$$")]
     [InlineData("rpm.", "rpm.\n\n```mermaid\ngraph TD; A-->B\n```")]
     [InlineData("(https://example.com/wiring.png)", "(https://example.com/other.png)")]
-    public async Task WhenReplacingTextAddsOrChangesActiveContent_ThenItIsRejectedAndTheFileIsUnchanged(string oldText, string newText)
+    public async Task WhenReplacingTextAddsChangesOrRemovesActiveContent_ThenItIsRejectedAndTheFileIsUnchanged(string oldText, string newText)
     {
         // Arrange
         WriteFile("Motors.md", PageWithActiveContent);
@@ -224,18 +298,21 @@ public class MarkdownFileWriteTests : IDisposable
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(
             () => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
-        Assert.StartsWith("Embedded subjects, HTML, images and media", exception.Message);
+        Assert.StartsWith("Blocks cannot be added, changed or removed, and HTML, images and media", exception.Message);
         Assert.Equal(PageWithActiveContent, ReadFile("Motors.md"));
     }
 
     [Theory]
     [InlineData("The motor runs at", "The conveyor motor runs at")]
+    [InlineData("End of the page.", "End of the page, with a note.\n\nAnother paragraph.")]
+    [InlineData("# Motors", "# All motors")]
     [InlineData("rpm.", "rpm. See [the manual](https://example.com/manual) or [the notes](Notes.md).")]
     [InlineData("rpm.", "rpm.\n\n| Speed | State |\n|:-----:|------:|\n| 1000 | ok |\n\n- [x] checked[^1]\n\n[^1]: A footnote.")]
     [InlineData("<div class=\"note\">Handle with care</div>\n\n", "")]
     [InlineData("![Wiring](https://example.com/wiring.png)\n\n", "")]
     [InlineData("rpm.", "rpm.\n\n```csharp\nvar speed = 1000;\n```")]
-    public async Task WhenReplacingTextKeepsTheActiveContent_ThenTheTextIsChanged(string oldText, string newText)
+    [InlineData("rpm.", "rpm.\n\n```text\n:: HomeBlaze.Samples.Motor\n::\n```")]
+    public async Task WhenReplacingTextKeepsTheBlocksAndTheActiveContent_ThenTheTextIsChanged(string oldText, string newText)
     {
         // Arrange
         WriteFile("Motors.md", PageWithActiveContent);
@@ -250,7 +327,23 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenReplacingTheContentRemovesAnEmbeddedSubject_ThenItIsRejected()
+    public async Task WhenTextIsAddedAfterABlockWithoutAClosingLine_ThenItIsRejectedBecauseItBelongsToTheBlock()
+    {
+        // Arrange
+        const string content = "# Motors\n\n:: HomeBlaze.Components.Card Title=Notes\nCard text";
+        WriteFile("Motors.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceTextAsync("Card text", "Card text\n\nAppended by an agent.", CancellationToken.None));
+        await markdown.ReplaceTextAsync("# Motors", "# Motors\n\nAdded before the block.", CancellationToken.None);
+        Assert.Equal("# Motors\n\nAdded before the block.\n\n:: HomeBlaze.Components.Card Title=Notes\nCard text", ReadFile("Motors.md"));
+    }
+
+    [Fact]
+    public async Task WhenReplacingTheContentRemovesABlock_ThenItIsRejected()
     {
         // Arrange
         WriteFile("Motors.md", PageWithActiveContent);
@@ -261,6 +354,21 @@ public class MarkdownFileWriteTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(
             () => markdown.ReplaceContentAsync("# Motors\n\nNo motor any more.", CancellationToken.None));
         Assert.Equal(PageWithActiveContent, ReadFile("Motors.md"));
+    }
+
+    [Fact]
+    public async Task WhenReplacingTheContentSwapsTwoBlocks_ThenItIsRejected()
+    {
+        // Arrange
+        const string content = "# Motors\n\n:: HomeBlaze.Samples.Motor#first\n::\n\n:: HomeBlaze.Samples.Motor#second\n::\n";
+        WriteFile("Motors.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceContentAsync(
+            "# Motors\n\n:: HomeBlaze.Samples.Motor#second\n::\n\n:: HomeBlaze.Samples.Motor#first\n::\n", CancellationToken.None));
+        Assert.Equal(content, ReadFile("Motors.md"));
     }
 
     [Fact]
@@ -280,14 +388,21 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Theory]
-    [InlineData("# Notes\n\n```subject(motor)\n{ \"$type\": \"HomeBlaze.Samples.Motor\" }\n```")]
+    [InlineData("# Notes\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor\n::")]
+    [InlineData("# Notes\n\n:: HomeBlaze.Samples.Motor")]
+    [InlineData("# Notes\n\n:: HomeBlaze.Samples.Motor\n```json\n{ \"TargetSpeed\": 500 }\n```\n::")]
+    [InlineData("# Notes\n\n:: HomeBlaze.Components.Card Title=Notes\nText\n\n::: Footer\nFooter\n:::\n::")]
+    [InlineData("# Notes\n\n:: HomeBlaze.Components.TabLayout\n::: Tab Title=First\nText\n:::\n::")]
+    [InlineData("# Notes\n\n:: HomeBlaze.Components.FlowLayout\n::: Item\nText\n:::\n::")]
+    [InlineData("# Notes\n\n:: HomeBlaze.Components.Widget Path=/Devices/Motor\n::")]
+    [InlineData("# Notes\n\n:: {.highlight}\nText\n::")]
+    [InlineData("# Notes\n\n::")]
     [InlineData("# Notes\n\n<img src=x onerror=alert(1)>")]
     [InlineData("# Notes <span>inline</span>")]
     [InlineData("# Notes {style=\"color:red\"}")]
     [InlineData("[Run](javascript:alert(1))")]
     [InlineData("![](https://www.youtube.com/watch?v=x)")]
-    [InlineData(":::note\nText\n:::")]
-    public async Task WhenANewFileHasActiveContent_ThenCreatingItIsRejected(string content)
+    public async Task WhenANewFileHasBlocksOrActiveContent_ThenCreatingItIsRejected(string content)
     {
         // Arrange
         var storage = await ConnectAsync();
@@ -540,6 +655,7 @@ public class MarkdownFileWriteTests : IDisposable
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
+        typeProvider.AddAssembly(typeof(Components.Card).Assembly);
 
         var services = new ServiceCollection();
         context = SubjectContextFactory.Create(services);
