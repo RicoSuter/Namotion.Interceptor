@@ -70,6 +70,10 @@ public sealed class AgentMemory
         }
         """).RootElement.Clone();
 
+    // Changes only the agent's own memory, so it is neither read-only nor destructive to the environment.
+    private static readonly McpToolAnnotations UpdateToolAnnotations =
+        new() { ReadOnlyHint = false, DestructiveHint = false, OpenWorldHint = false };
+
     private static readonly JsonWriterOptions FileWriterOptions = new()
     {
         Indented = true,
@@ -288,10 +292,6 @@ public sealed class AgentMemory
 
         return null;
     }
-
-    // Changes only the agent's own memory, so it is neither read-only nor destructive to the environment.
-    private static readonly McpToolAnnotations UpdateToolAnnotations =
-        new() { ReadOnlyHint = false, DestructiveHint = false, OpenWorldHint = false };
 
     /// <summary>
     /// Creates the agent-local <c>update_memory</c> tool.
