@@ -677,24 +677,13 @@ public partial class FluentStorageContainer :
             await WriteAsync(connection, relativePath, bytes, token);
             _logger?.LogDebug("Wrote blob to storage: {Path}", relativePath);
 
-            // A file without a subject is picked up by the next pass, which is asked for here: not every
-            // storage has a file watcher that would.
-            if (entry?.Subject == null)
-            {
-                connection.NotifyChanged(relativePath);
-                return;
-            }
-
-            var isRefreshed = false;
+            // The pass that does the rest is asked for here, because not every storage has a file watcher that
+            // would: it loads a file that has no subject or whose subject could not be refreshed, and after a
+            // subject was replaced it places an entry that waited for the key this freed.
+            var leavesWorkForPass = true;
             try
             {
-                if (await connection.Reconciler.RefreshWrittenAsync(entry, bytes, token))
-                {
-                    // The subject was replaced, which can free a key that another entry waits for.
-                    connection.NotifyChanged(relativePath);
-                }
-
-                isRefreshed = true;
+                leavesWorkForPass = entry?.Subject == null || await connection.Reconciler.RefreshWrittenAsync(entry, bytes, token);
             }
             catch (Exception exception) when (!token.IsCancellationRequested)
             {
@@ -703,8 +692,7 @@ public partial class FluentStorageContainer :
             }
             finally
             {
-                // The same for the pass that loads the file again.
-                if (!isRefreshed)
+                if (leavesWorkForPass)
                 {
                     connection.NotifyChanged(relativePath);
                 }
