@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Anthropic.Core;
@@ -69,14 +70,35 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
     {
         private readonly Dictionary<string, PendingCall> _pendingCalls = new(StringComparer.Ordinal);
 
+        // The streamed input of each content block of the current response, by block index.
+        private readonly Dictionary<long, StringBuilder> _streamedInputs = [];
+
         public void Observe(ChatResponseUpdate update)
         {
+            long? stoppedBlockIndex = null;
+            if (update.RawRepresentation is RawMessageStreamEvent streamEvent)
+            {
+                if (streamEvent.TryPickStart(out _))
+                {
+                    _streamedInputs.Clear();
+                }
+                else if (streamEvent.TryPickContentBlockDelta(out var delta) && delta.Delta.TryPickInputJson(out var inputJson))
+                {
+                    ref var input = ref CollectionsMarshal.GetValueRefOrAddDefault(_streamedInputs, delta.Index, out _);
+                    (input ??= new StringBuilder()).Append(inputJson.PartialJson);
+                }
+                else if (streamEvent.TryPickContentBlockStop(out var stop))
+                {
+                    stoppedBlockIndex = stop.Index;
+                }
+            }
+
             foreach (var content in update.Contents)
             {
                 switch (content)
                 {
                     case WebSearchToolCallContent call when call.RawRepresentation is JsonModel block:
-                        _pendingCalls[call.CallId] = new PendingCall(call, block.RawData);
+                        _pendingCalls[call.CallId] = new PendingCall(call, block.RawData, GetStreamedInput(stoppedBlockIndex));
                         break;
                     case WebSearchToolResultContent result when result.RawRepresentation is JsonModel block:
                         result.RawRepresentation = new ContentBlockParam(ToElement(block.RawData));
@@ -87,6 +109,24 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
 
                         break;
                 }
+            }
+        }
+
+        private JsonElement? GetStreamedInput(long? blockIndex)
+        {
+            if (blockIndex is not { } index || !_streamedInputs.TryGetValue(index, out var json))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(json.ToString());
+                return document.RootElement.ValueKind == JsonValueKind.Object ? document.RootElement.Clone() : null;
+            }
+            catch (JsonException)
+            {
+                return null;
             }
         }
 
@@ -102,23 +142,33 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
 
         private void Complete(PendingCall pendingCall, IReadOnlyDictionary<string, JsonElement>? result)
         {
-            var (call, block) = pendingCall;
+            var (call, block, streamedInput) = pendingCall;
             var name = block.TryGetValue("name", out var nameElement) && nameElement.ValueKind == JsonValueKind.String
                 ? nameElement.GetString()!
                 : "web_search";
-            var input = GetInput(call, block, result);
+            var input = GetInput(call, block, streamedInput, result);
             call.RawRepresentation = new ContentBlockParam(ToElement(block, replacedInput: input));
 
             var (preview, isError) = result is null ? ("No result.", true) : DescribeResult(result);
             tools.RecordBackendCall(name, input.GetRawText(), preview, isError);
         }
 
-        // The streamed call block holds an empty input; the query survives in the content, the URL of a fetch only in its result.
-        private static JsonElement GetInput(WebSearchToolCallContent call, IReadOnlyDictionary<string, JsonElement> block, IReadOnlyDictionary<string, JsonElement>? result)
+        // The streamed call block holds an empty input, so the input comes from the streamed input deltas; without
+        // them the query survives in the content, and the URL of a fetch in a successful result.
+        private static JsonElement GetInput(
+            WebSearchToolCallContent call,
+            IReadOnlyDictionary<string, JsonElement> block,
+            JsonElement? streamedInput,
+            IReadOnlyDictionary<string, JsonElement>? result)
         {
             if (block.TryGetValue("input", out var input) && input.ValueKind == JsonValueKind.Object && input.EnumerateObject().Any())
             {
                 return input;
+            }
+
+            if (streamedInput is { } streamed && streamed.EnumerateObject().Any())
+            {
+                return streamed;
             }
 
             if (call.Queries is [var query, ..])
@@ -194,6 +244,6 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
             return document.RootElement.Clone();
         }
 
-        private sealed record PendingCall(WebSearchToolCallContent Call, IReadOnlyDictionary<string, JsonElement> Block);
+        private sealed record PendingCall(WebSearchToolCallContent Call, IReadOnlyDictionary<string, JsonElement> Block, JsonElement? StreamedInput);
     }
 }

@@ -619,6 +619,54 @@ public class AnthropicAgentTests
     }
 
     [Fact]
+    public async Task WhenAWebFetchFailsBeforeAGraphTool_ThenTheFetchIsSentBackWithItsUrl()
+    {
+        // Arrange - the failed fetch result carries no URL; only the streamed input of the call does.
+        var handler = new SequenceHandler(
+            Stream(
+                MessageStart("msg_1"),
+                BlockStart(0, """{"type":"server_tool_use","id":"srvtoolu_1","name":"web_fetch","input":{}}"""),
+                InputDelta(0, """{"url":"""),
+                InputDelta(0, """ "https://example.com/missing"}"""),
+                BlockStop(0),
+                BlockStart(1, """{"type":"web_fetch_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"web_fetch_tool_result_error","error_code":"url_not_accessible"}}"""),
+                BlockStop(1),
+                BlockStart(2, """{"type":"tool_use","id":"toolu_1","name":"get_property","input":{}}"""),
+                InputDelta(2, """{"path":"/Temperature"}"""),
+                BlockStop(2),
+                MessageDelta("tool_use"),
+                """{"type":"message_stop"}"""),
+            Stream(
+                MessageStart("msg_2"),
+                BlockStart(0, """{"type":"text","text":""}"""),
+                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"The page is unavailable."}}""",
+                BlockStop(0),
+                MessageDelta("end_turn"),
+                """{"type":"message_stop"}"""));
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HttpHandler = handler;
+            agent.AllowedTools = ["get_property", "web_fetch"];
+        });
+
+        // Act
+        await test.Agent.SendMessageAsync("Fetch it", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, handler.Bodies.Count);
+        var assistant = JsonDocument.Parse(handler.Bodies[1]).RootElement.GetProperty("messages").EnumerateArray().ToList()[^2];
+        var blocks = assistant.GetProperty("content").EnumerateArray().ToList();
+        Assert.Equal(["server_tool_use", "web_fetch_tool_result", "tool_use"], blocks.Select(block => block.GetProperty("type").GetString()));
+        Assert.Equal("https://example.com/missing", blocks[0].GetProperty("input").GetProperty("url").GetString());
+
+        var reply = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(["web_fetch", "get_property"], reply.ToolCalls.Select(call => call.Name));
+        Assert.Equal("https://example.com/missing", JsonDocument.Parse(reply.ToolCalls[0].Arguments).RootElement.GetProperty("url").GetString());
+        Assert.True(reply.ToolCalls[0].IsError);
+        Assert.Contains("url_not_accessible", reply.ToolCalls[0].ResultPreview);
+    }
+
+    [Fact]
     public async Task WhenNoWebToolIsAllowed_ThenTheRequestHasNoServerToolAndNoWebLine()
     {
         // Arrange
