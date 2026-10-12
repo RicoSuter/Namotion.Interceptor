@@ -182,7 +182,7 @@ internal static class McpToolHelper
     private static bool IsWritable(
         RegisteredSubjectProperty property, string? subjectPath, string segment, PathProviderBase pathProvider, McpServerConfiguration configuration)
     {
-        if (configuration.IsReadOnly || !property.HasSetter || !HasPublicSetter(property))
+        if (!CanWrite(property, configuration))
         {
             return false;
         }
@@ -198,6 +198,13 @@ internal static class McpToolHelper
             : $"{subjectPath}{pathProvider.PathSeparator}{segment}";
         return filter(property, path) is null;
     }
+
+    /// <summary>
+    /// Whether the configuration lets MCP write the property before its <see cref="McpServerConfiguration.PropertyWriteFilter"/>
+    /// is asked: it is not read-only and the property has a public setter.
+    /// </summary>
+    internal static bool CanWrite(RegisteredSubjectProperty property, McpServerConfiguration configuration) =>
+        !configuration.IsReadOnly && property.HasSetter && HasPublicSetter(property);
 
     // TODO: Clean up when HasSetter in registry respects access modifiers (see #102)
     internal static bool HasPublicSetter(RegisteredSubjectProperty property) =>

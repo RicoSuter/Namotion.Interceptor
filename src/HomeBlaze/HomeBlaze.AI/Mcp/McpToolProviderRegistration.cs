@@ -7,7 +7,7 @@ namespace HomeBlaze.AI.Mcp;
 /// A tool provider contributed by a satellite package, for example history. Every HomeBlaze tool
 /// configuration (the MCP server and each agent) creates one instance from it.
 /// </summary>
-public sealed record McpToolProviderRegistration(Func<McpToolProviderContext, IMcpToolProvider> Create);
+internal sealed record McpToolProviderRegistration(Func<McpToolProviderContext, IMcpToolProvider> Create);
 
 /// <summary>
 /// Registers satellite MCP tool providers.

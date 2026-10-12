@@ -3,7 +3,7 @@ namespace HomeBlaze.AI.Mcp;
 /// <summary>
 /// Caps the size of the results the method tools return, so one large result cannot fill a model's context.
 /// </summary>
-public static class MethodResultLimit
+internal static class MethodResultLimit
 {
     /// <summary>The maximum length of a string result, in characters.</summary>
     public const int MaxStringLength = 64 * 1024;

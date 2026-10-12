@@ -33,21 +33,16 @@ public static class AgentToolOptions
         ["get_property"] = "Reads a single property value.",
         ["list_types"] = "Lists the known types and interfaces, so subjects can be found by capability.",
         ["list_methods"] = "Lists the operations and queries a subject offers.",
-        ["invoke_query"] = "Calls read-only query methods, for example to read Markdown pages.",
+        [HomeBlazeMcpToolProvider.InvokeQueryToolName] = "Calls read-only query methods, for example to read Markdown pages.",
         ["get_property_history"] = "Reads the recorded history of property values.",
-        ["invoke_operation"] = "Runs operations on subjects, such as switching a device or sending a notification.",
+        [HomeBlazeMcpToolProvider.InvokeOperationToolName] = "Runs operations on subjects, such as switching a device or sending a notification.",
         ["set_property"] = "Writes property values of subjects.",
         [HomeBlazeMarkdownToolProvider.EditMarkdownToolName] = "Replaces a passage of a Markdown page or document.",
         [HomeBlazeMarkdownToolProvider.WriteMarkdownToolName] = "Replaces the whole text of a Markdown page or document.",
         [HomeBlazeMarkdownToolProvider.CreateMarkdownToolName] = "Creates a Markdown page or document in a folder."
     };
 
-    private static readonly HashSet<string> PageTools = new(StringComparer.Ordinal)
-    {
-        HomeBlazeMarkdownToolProvider.EditMarkdownToolName,
-        HomeBlazeMarkdownToolProvider.WriteMarkdownToolName,
-        HomeBlazeMarkdownToolProvider.CreateMarkdownToolName
-    };
+    private static readonly HashSet<string> PageTools = new(HomeBlazeMarkdownToolProvider.ToolNames, StringComparer.Ordinal);
 
     /// <summary>
     /// Lists the tools of <paramref name="toolSource"/>, or <see cref="FallbackToolNames"/> when listing fails, followed

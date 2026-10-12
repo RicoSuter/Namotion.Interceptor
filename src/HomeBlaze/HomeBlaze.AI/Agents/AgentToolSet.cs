@@ -15,16 +15,14 @@ public sealed class AgentToolSet
 {
     /// <summary>The graph tools a new agent allows by default. An empty allowed list allows no graph tools.</summary>
     public static readonly IReadOnlyList<string> DefaultAllowedTools =
-        ["browse", "search", "get_property", "list_types", "list_methods", "invoke_query", "get_property_history"];
+        ["browse", "search", "get_property", "list_types", "list_methods", HomeBlazeMcpToolProvider.InvokeQueryToolName, "get_property_history"];
 
     /// <summary>The graph tools that can change state: devices, notifications or pages.</summary>
     public static readonly IReadOnlyList<string> StateChangingTools =
     [
         HomeBlazeMcpToolProvider.InvokeOperationToolName,
         "set_property",
-        HomeBlazeMarkdownToolProvider.EditMarkdownToolName,
-        HomeBlazeMarkdownToolProvider.WriteMarkdownToolName,
-        HomeBlazeMarkdownToolProvider.CreateMarkdownToolName
+        .. HomeBlazeMarkdownToolProvider.ToolNames
     ];
 
     private const int PreviewLength = 2000;

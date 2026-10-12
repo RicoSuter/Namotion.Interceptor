@@ -1,33 +1,59 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp.Tools;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// Calls a query or operation method of a subject for an MCP tool: checks the method kind, the operation filter and
-/// whether confirmation is required, converts the arguments, invokes the method and turns the outcome into the
-/// tool result. invoke_query, invoke_operation and the Markdown tools share it.
+/// Resolves the subject of an MCP tool and calls a query or operation method of it: checks the method kind, the
+/// operation filter and whether confirmation is required, converts the arguments, invokes the method and turns the
+/// outcome into the tool result. invoke_query, invoke_operation and the Markdown tools share it.
 /// </summary>
 internal sealed class McpMethodInvoker
 {
+    private readonly Func<IInterceptorSubject> _rootSubjectProvider;
+    private readonly PathProviderBase _pathProvider;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger _logger;
     private readonly bool _isReadOnly;
     private readonly Func<RegisteredSubject, MethodMetadata, string?>? _operationFilter;
 
     public McpMethodInvoker(
+        Func<IInterceptorSubject> rootSubjectProvider,
+        PathProviderBase pathProvider,
         IServiceProvider serviceProvider,
         ILogger logger,
         bool isReadOnly,
         Func<RegisteredSubject, MethodMetadata, string?>? operationFilter)
     {
+        _rootSubjectProvider = rootSubjectProvider;
+        _pathProvider = pathProvider;
         _serviceProvider = serviceProvider;
         _logger = logger;
         _isReadOnly = isReadOnly;
         _operationFilter = operationFilter;
+    }
+
+    /// <summary>
+    /// Returns the subject at <paramref name="path"/>, the root for an empty path or "/", or null when the path
+    /// does not resolve or the root is not registered.
+    /// </summary>
+    public RegisteredSubject? TryResolveSubject(string path)
+    {
+        var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject();
+        if (rootRegistered is null)
+        {
+            return null;
+        }
+
+        return string.IsNullOrEmpty(path) || path == "/"
+            ? rootRegistered
+            : _pathProvider.TryGetSubjectFromPath(rootRegistered, path);
     }
 
     /// <summary>
@@ -108,17 +134,19 @@ internal sealed class McpMethodInvoker
 
     private static (object?[]? Arguments, string? Error) ReadArguments(JsonElement argumentsElement, MethodParameter[] inputParameters)
     {
-        var objectError = TryGetArgumentsObject(argumentsElement, inputParameters, out var argumentsObject);
-        if (objectError is not null)
+        var argumentsError = GetArgumentsError(argumentsElement, inputParameters);
+        if (argumentsError is not null)
         {
-            return (null, objectError);
+            return (null, argumentsError);
         }
+
+        var hasArguments = argumentsElement.ValueKind == JsonValueKind.Object;
 
         var arguments = new object?[inputParameters.Length];
         for (var i = 0; i < inputParameters.Length; i++)
         {
             var parameter = inputParameters[i];
-            if (argumentsObject is not { } providedArguments || !providedArguments.TryGetProperty(parameter.Name, out var argumentValue))
+            if (!hasArguments || !argumentsElement.TryGetProperty(parameter.Name, out var argumentValue))
             {
                 // A missing non-nullable argument would otherwise reach the method as default, for example a volume of 0.
                 if (!parameter.IsNullable)
@@ -142,9 +170,9 @@ internal sealed class McpMethodInvoker
         return (arguments, null);
     }
 
-    private static string? TryGetArgumentsObject(JsonElement argumentsElement, MethodParameter[] inputParameters, out JsonElement? argumentsObject)
+    // No arguments, given as undefined or null, are valid; an object may only name input parameters.
+    private static string? GetArgumentsError(JsonElement argumentsElement, MethodParameter[] inputParameters)
     {
-        argumentsObject = null;
         if (argumentsElement.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
         {
             return null;
@@ -163,7 +191,6 @@ internal sealed class McpMethodInvoker
             }
         }
 
-        argumentsObject = argumentsElement;
         return null;
     }
 

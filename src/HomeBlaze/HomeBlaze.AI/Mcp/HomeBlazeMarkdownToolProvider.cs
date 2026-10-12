@@ -28,29 +28,34 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     /// <summary>The name of the tool that creates a Markdown file in a folder.</summary>
     public const string CreateMarkdownToolName = "create_markdown";
 
-    private const string ActiveContentRule =
-        "Embedded subject blocks must stay exactly as they are, and HTML, images and media, custom containers, math and " +
-        "diagram blocks, element attributes and links other than http, https and mailto cannot be added. ";
+    /// <summary>The names of the tools, all of which change pages and documents.</summary>
+    public static IReadOnlyList<string> ToolNames { get; } = [EditMarkdownToolName, WriteMarkdownToolName, CreateMarkdownToolName];
 
-    private const string EditMarkdownDescription =
+    // The active content that a write may not add; embedded subject blocks may not change either.
+    private const string AddedActiveContent =
+        "HTML, images and media, custom containers, math and diagram blocks, element attributes and links other than " +
+        "http, https and mailto";
+
+    private static readonly string MaxContentSizeText = $"at most {MarkdownFile.MaxContentSize / 1024} KB";
+
+    private static readonly string EditMarkdownDescription =
         "Replace one passage of a Markdown page or document (*.md): old_text must occur exactly once in the Markdown source, " +
-        "as returned by invoke_query method ReadRawContent (with {{ path }} expressions unevaluated), and is replaced by new_text. " +
-        "Prefer this over write_markdown for small changes. Only Markdown files in local storage can be changed. " +
-        ActiveContentRule +
+        $"as returned by {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent (with {{{{ path }}}} expressions unevaluated), and is replaced by new_text. " +
+        $"Prefer this over {WriteMarkdownToolName} for small changes. Only Markdown files in local storage can be changed. " +
+        $"Embedded subject blocks must stay exactly as they are, and {AddedActiveContent} cannot be added. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
-    private const string WriteMarkdownDescription =
-        "Replace the whole Markdown source of a Markdown page or document (*.md) with content (at most 64 KB). Read the " +
-        "source first with invoke_query method ReadRawContent and keep what should stay; for small changes use edit_markdown. " +
+    private static readonly string WriteMarkdownDescription =
+        $"Replace the whole Markdown source of a Markdown page or document (*.md) with content ({MaxContentSizeText}). Read the " +
+        $"source first with {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent and keep what should stay; for small changes use {EditMarkdownToolName}. " +
         "Only Markdown files in local storage can be changed. " +
-        ActiveContentRule +
+        $"Embedded subject blocks must stay exactly as they are, and {AddedActiveContent} cannot be added. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
-    private const string CreateMarkdownDescription =
+    private static readonly string CreateMarkdownDescription =
         "Create a Markdown page or document: folder_path is the path of a local storage folder or storage, name a plain " +
-        "file name ending in .md that does not exist there yet, content the Markdown source (at most 64 KB) without " +
-        "embedded subject blocks, HTML, images and media, custom containers, math and diagram blocks, element attributes " +
-        "or links other than http, https and mailto. " +
+        $"file name ending in .md that does not exist there yet, content the Markdown source ({MaxContentSizeText}) without " +
+        $"embedded subject blocks, {AddedActiveContent}. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private static readonly MarkdownTool EditMarkdownTool = new(
@@ -88,8 +93,8 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
         [("name", "name"), ("content", "content")],
         GetFolderError);
 
-    private readonly Func<IInterceptorSubject> _rootSubjectProvider;
-    private readonly PathProviderBase _pathProvider;
+    private static readonly MarkdownTool[] Tools = [EditMarkdownTool, WriteMarkdownTool, CreateMarkdownTool];
+
     private readonly bool _isReadOnly;
     private readonly McpMethodInvoker _invoker;
 
@@ -108,10 +113,8 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
         bool isReadOnly,
         Func<RegisteredSubject, MethodMetadata, string?>? operationFilter = null)
     {
-        _rootSubjectProvider = rootSubjectProvider;
-        _pathProvider = pathProvider;
         _isReadOnly = isReadOnly;
-        _invoker = new McpMethodInvoker(serviceProvider, logger, isReadOnly, operationFilter);
+        _invoker = new McpMethodInvoker(rootSubjectProvider, pathProvider, serviceProvider, logger, isReadOnly, operationFilter);
     }
 
     public IEnumerable<McpToolInfo> GetTools()
@@ -121,7 +124,7 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
             yield break;
         }
 
-        foreach (var tool in new[] { EditMarkdownTool, WriteMarkdownTool, CreateMarkdownTool })
+        foreach (var tool in Tools)
         {
             yield return new McpToolInfo
             {
@@ -142,7 +145,7 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
         }
 
         var path = pathElement.GetString()!;
-        var subject = McpSubjectPathResolver.TryResolveSubject(_rootSubjectProvider, _pathProvider, path);
+        var subject = _invoker.TryResolveSubject(path);
         if (subject is null)
         {
             return Task.FromResult<object?>(new { error = "Subject not found." });
@@ -187,13 +190,9 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
             required = properties.Select(property => property.Name).ToArray()
         });
 
-    /// <param name="Name">The tool name.</param>
-    /// <param name="Description">The tool description.</param>
-    /// <param name="Schema">The input schema; every argument is a required string.</param>
-    /// <param name="PathArgument">The argument with the path of the target subject.</param>
-    /// <param name="MethodName">The operation the tool calls.</param>
-    /// <param name="Arguments">The other arguments, each mapped to the operation parameter it is passed as.</param>
-    /// <param name="GetTargetError">Returns the error for a target the tool does not apply to, or null.</param>
+    // Every argument in Schema is a required string. PathArgument holds the path of the target subject, Arguments maps
+    // the other arguments to the operation parameters they are passed as, and GetTargetError returns the error for a
+    // target the tool does not apply to, or null.
     private sealed record MarkdownTool(
         string Name,
         string Description,

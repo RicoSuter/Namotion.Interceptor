@@ -70,8 +70,8 @@ public class MethodMetadata
     public int Position { get; init; }
 
     /// <summary>
-    /// Whether the UI should show a confirmation dialog before invoking this method.
-    /// Such operations cannot be invoked through MCP, by agents or external clients.
+    /// Whether the UI should show a confirmation dialog before invoking this method; see
+    /// <see cref="Attributes.OperationAttribute.RequiresConfirmation"/>.
     /// </summary>
     public bool RequiresConfirmation { get; init; }
 

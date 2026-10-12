@@ -52,11 +52,7 @@ public static class McpToolDispatcher
             var tool = tools.FirstOrDefault(t => t.Name == parameters.Name);
             if (tool is null)
             {
-                return new CallToolResult
-                {
-                    IsError = true,
-                    Content = [new TextContentBlock { Text = $"Unknown tool: {parameters.Name}" }]
-                };
+                return CreateErrorResult($"Unknown tool: {parameters.Name}");
             }
 
             var input = parameters.Arguments is not null
@@ -72,13 +68,15 @@ public static class McpToolDispatcher
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             logger?.LogWarning(exception, "MCP tool '{ToolName}' failed.", parameters.Name);
-            return new CallToolResult
-            {
-                IsError = true,
-                Content = [new TextContentBlock { Text = exception.Message }]
-            };
+            return CreateErrorResult(exception.Message);
         }
     }
+
+    internal static CallToolResult CreateErrorResult(string message) => new()
+    {
+        IsError = true,
+        Content = [new TextContentBlock { Text = message }]
+    };
 
     private static JsonSerializerOptions CreateSerializerOptions()
     {

@@ -26,25 +26,27 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
     /// <summary>The name of the tool that calls operation methods.</summary>
     public const string InvokeOperationToolName = "invoke_operation";
 
+    private const string ListMethodsToolName = "list_methods";
+
     private const string ListMethodsDescription =
         "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
-        "(reads, no side effects; call it with invoke_query) or an operation (changes devices or sends something; " +
-        "call it with invoke_operation). The kind field of each method says which. Operations with requiresConfirmation " +
+        $"(reads, no side effects; call it with {InvokeQueryToolName}) or an operation (changes devices or sends something; " +
+        $"call it with {InvokeOperationToolName}). The kind field of each method says which. Operations with requiresConfirmation " +
         "set need a person's confirmation and cannot be called through MCP.";
 
     private const string ReadOnlyListMethodsDescription =
         "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
-        "(reads, no side effects; call it with invoke_query) or an operation (changes devices or sends something). " +
+        $"(reads, no side effects; call it with {InvokeQueryToolName}) or an operation (changes devices or sends something). " +
         "The kind field of each method says which; operations are listed for information but cannot be called on this server.";
 
     private const string InvokeQueryDescription =
         "Call a query method of a subject: it reads and has no side effects, for example ReadEvaluatedContent on a " +
         "Markdown page or document (*.md) to read it, with includeSourcePaths=true to see where each value comes from. " +
-        "Find methods and their kind with list_methods.";
+        $"Find methods and their kind with {ListMethodsToolName}.";
 
     private const string InvokeOperationDescription =
         "Call an operation method of a subject: it can change devices or send something, for example SendNotification. " +
-        "Operations that require confirmation by a person cannot be called. Find methods and their kind with list_methods. " +
+        $"Operations that require confirmation by a person cannot be called. Find methods and their kind with {ListMethodsToolName}. " +
         HomeBlazeMcpInstructions.ChangeCaution;
 
     private static readonly JsonElement ListMethodsSchema = JsonSerializer.SerializeToElement(new
@@ -61,13 +63,11 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         {
             path = new { type = "string", description = "Subject path" },
             method = new { type = "string", description = "Method name" },
-            parameters = new { type = "object", description = "Arguments by parameter name, in the type, format and unit list_methods gives (optional)" }
+            parameters = new { type = "object", description = $"Arguments by parameter name, in the type, format and unit {ListMethodsToolName} gives (optional)" }
         },
         required = new[] { "path", "method" }
     });
 
-    private readonly Func<IInterceptorSubject> _rootSubjectProvider;
-    private readonly PathProviderBase _pathProvider;
     private readonly bool _isReadOnly;
     private readonly McpMethodInvoker _invoker;
 
@@ -86,17 +86,15 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         bool isReadOnly,
         Func<RegisteredSubject, MethodMetadata, string?>? operationFilter = null)
     {
-        _rootSubjectProvider = rootSubjectProvider;
-        _pathProvider = pathProvider;
         _isReadOnly = isReadOnly;
-        _invoker = new McpMethodInvoker(serviceProvider, logger, isReadOnly, operationFilter);
+        _invoker = new McpMethodInvoker(rootSubjectProvider, pathProvider, serviceProvider, logger, isReadOnly, operationFilter);
     }
 
     public IEnumerable<McpToolInfo> GetTools()
     {
         yield return new McpToolInfo
         {
-            Name = "list_methods",
+            Name = ListMethodsToolName,
             Description = _isReadOnly ? ReadOnlyListMethodsDescription : ListMethodsDescription,
             InputSchema = ListMethodsSchema,
             Handler = HandleListMethodsAsync,
@@ -127,7 +125,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private Task<object?> HandleListMethodsAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var subject = ResolveSubject(input.GetProperty("path").GetString()!);
+        var subject = _invoker.TryResolveSubject(input.GetProperty("path").GetString()!);
         if (subject is null)
         {
             return Task.FromResult<object?>(new { error = "Subject not found." });
@@ -153,7 +151,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private Task<object?> HandleInvokeAsync(JsonElement input, MethodKind allowedKind, CancellationToken cancellationToken)
     {
-        var subject = ResolveSubject(input.GetProperty("path").GetString()!);
+        var subject = _invoker.TryResolveSubject(input.GetProperty("path").GetString()!);
         if (subject is null)
         {
             return Task.FromResult<object?>(new { error = "Subject not found." });
@@ -169,7 +167,4 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         StateUnit.Percent => "fraction where 1 = 100% (0.2 = 20%)",
         _ => $"unit: {unit}"
     };
-
-    private RegisteredSubject? ResolveSubject(string path) =>
-        McpSubjectPathResolver.TryResolveSubject(_rootSubjectProvider, _pathProvider, path);
 }

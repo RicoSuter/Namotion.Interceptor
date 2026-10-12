@@ -5,8 +5,7 @@ using Namotion.Interceptor.Mcp.Tools;
 namespace HomeBlaze.AI.Agents;
 
 /// <summary>
-/// Creates the HomeBlaze MCP tools for agents, with the configuration of the MCP server except that configuration
-/// properties cannot be written.
+/// Creates the HomeBlaze MCP tools for agents with <see cref="HomeBlazeMcpConfigurationFactory.CreateForAgents"/>.
 /// </summary>
 public sealed class HomeBlazeAgentToolSource : IAgentToolSource
 {

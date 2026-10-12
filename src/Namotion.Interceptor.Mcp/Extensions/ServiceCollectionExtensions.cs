@@ -39,14 +39,14 @@ public static class ServiceCollectionExtensions
             }
             catch (Exception exception)
             {
-                var logger = request.Services?.GetService<ILogger<McpToolFactory>>();
-                logger?.LogWarning(exception, "MCP ListTools failed.");
+                request.Services?.GetService<ILogger<McpToolFactory>>()?.LogWarning(exception, "MCP ListTools failed.");
                 throw;
             }
         });
 
         builder.WithCallToolHandler((request, cancellationToken) =>
         {
+            var logger = request.Services?.GetService<ILogger<McpToolFactory>>();
             IReadOnlyList<McpToolInfo> tools;
             try
             {
@@ -54,17 +54,11 @@ public static class ServiceCollectionExtensions
             }
             catch (Exception exception)
             {
-                var logger = request.Services?.GetService<ILogger<McpToolFactory>>();
                 logger?.LogWarning(exception, "MCP tool '{ToolName}' failed.", request.Params!.Name);
-                return new ValueTask<CallToolResult>(new CallToolResult
-                {
-                    IsError = true,
-                    Content = [new TextContentBlock { Text = exception.Message }]
-                });
+                return new ValueTask<CallToolResult>(McpToolDispatcher.CreateErrorResult(exception.Message));
             }
 
-            return McpToolDispatcher.CallToolAsync(
-                tools, request.Params!, request.Services?.GetService<ILogger<McpToolFactory>>(), cancellationToken);
+            return McpToolDispatcher.CallToolAsync(tools, request.Params!, logger, cancellationToken);
         });
 
         return builder;
