@@ -688,7 +688,12 @@ public partial class FluentStorageContainer :
             var isRefreshed = false;
             try
             {
-                await connection.Reconciler.RefreshWrittenAsync(entry, bytes, token);
+                if (await connection.Reconciler.RefreshWrittenAsync(entry, bytes, token))
+                {
+                    // The subject was replaced, which can free a key that another entry waits for.
+                    connection.NotifyChanged(relativePath);
+                }
+
                 isRefreshed = true;
             }
             catch (Exception exception) when (!token.IsCancellationRequested)
@@ -767,6 +772,9 @@ public partial class FluentStorageContainer :
         connection.Index.Remove(entry.Path);
         connection.Reconciler.Apply();
         connection.Reconciler.Release(entry.Subject);
+
+        // The key is free now, and an entry that waited for it is only loaded by a pass.
+        connection.NotifyChanged(entry.Path);
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", entry.Path);
     }

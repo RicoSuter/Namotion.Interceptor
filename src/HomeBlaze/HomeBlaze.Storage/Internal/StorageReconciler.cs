@@ -331,14 +331,18 @@ internal sealed class StorageReconciler
     /// Brings the subject of a file in line with content that was just written to the file, and records the
     /// version and the hash of the file. A subject that the content replaces is placed in the tree.
     /// </summary>
-    public async Task RefreshWrittenAsync(StorageEntry entry, byte[] content, CancellationToken cancellationToken)
+    /// <returns>True when the content replaced the subject.</returns>
+    public async Task<bool> RefreshWrittenAsync(StorageEntry entry, byte[] content, CancellationToken cancellationToken)
     {
         // Taken before the subject reads the file: taken after, it could be of a later content than the subject has.
         var version = await GetVersionAsync(entry.Path, cancellationToken);
-        if (await RefreshAsync(entry, version, content, cancellationToken))
+        if (!await RefreshAsync(entry, version, content, cancellationToken))
         {
-            Apply();
+            return false;
         }
+
+        Apply();
+        return true;
     }
 
     private static string GetChildKey(string path, IInterceptorSubject subject)

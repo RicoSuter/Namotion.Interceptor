@@ -1778,6 +1778,59 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         return new StalledStorage(storage, client, timeProvider, callCountBeforeRetry, () => Volatile.Read(ref failedPassCount));
     }
 
+    [Theory]
+    [InlineData("Docs/Page.md")]
+    [InlineData("Docs")]
+    public async Task WhenSubjectIsDeletedWhoseKeyAnotherEntryWaitsFor_ThenPassPlacesThatEntryWithoutFileWatcher(string waitingPath)
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        WriteFile("Docs.json", SerializeMotor("Motor"));
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+        });
+        var motor = storage.Children["Docs"];
+        WriteFile(waitingPath);
+        await storage.ReconcileAsync();
+
+        // Act
+        await storage.DeleteSubjectAsync(motor, CancellationToken.None);
+
+        // Assert
+        await WaitWhileClockRunsAsync(timeProvider, () =>
+            storage.Children.TryGetValue("Docs", out var placed) &&
+            placed is not VirtualFolder { Children.Count: 0 } &&
+            !ReferenceEquals(placed, motor));
+    }
+
+    [Fact]
+    public async Task WhenWriteReplacesSubjectWhoseKeyFolderWaitsFor_ThenPassLoadsFilesOfThatFolderWithoutFileWatcher()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        WriteFile("Docs.json", SerializeMotor("Motor"));
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+        });
+        WriteFile("Docs/Page.md");
+        await storage.ReconcileAsync();
+
+        // Act
+        using var content = new MemoryStream("{ \"plain\": true }"u8.ToArray());
+        await storage.WriteBlobAsync("Docs.json", content, CancellationToken.None);
+
+        // Assert
+        await WaitWhileClockRunsAsync(timeProvider, () =>
+            storage.Children.TryGetValue("Docs", out var placed) &&
+            placed is VirtualFolder folder &&
+            folder.Children.ContainsKey("Page.md"));
+        Assert.IsType<JsonFile>(storage.Children["Docs.json"]);
+    }
+
     private sealed record StalledStorage(
         FluentStorageContainer Storage,
         PausableBlobStorage Client,
