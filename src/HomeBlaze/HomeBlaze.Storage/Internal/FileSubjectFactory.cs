@@ -87,8 +87,16 @@ internal sealed class FileSubjectFactory
     /// context, which detaches it as leaving the tree would have: a hosted service is stopped. The same for
     /// the subjects that are embedded in a page which is not in the tree. Does nothing for any other subject.
     /// </summary>
-    public void Release(IInterceptorSubject subject)
+    public void Release(IInterceptorSubject? subject)
     {
+        if (subject is null)
+        {
+            return;
+        }
+
+        // Without the flow of the caller, as for a subject from JSON: detaching runs lifecycle handlers too.
+        using var suppressedFlow = ExecutionContext.SuppressFlow();
+
         // A page enters the context only with the tree, but the subjects embedded in it when they are created.
         // A page in the tree holds them in a property, so they are left alone here.
         if (subject is MarkdownFile page)

@@ -759,7 +759,7 @@ public partial class FluentStorageContainer :
 
         connection.Index.Remove(entry.Path);
         connection.Reconciler.Apply();
-        connection.Reconciler.Release(entry.Subject);
+        _subjectFactory.Release(entry.Subject);
 
         // The key is free now, and an entry that waited for it is only loaded by a pass.
         connection.NotifyChanged(entry.Path);

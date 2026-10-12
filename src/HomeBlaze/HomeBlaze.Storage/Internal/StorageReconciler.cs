@@ -194,7 +194,7 @@ internal sealed class StorageReconciler
                     _logger?.LogWarning("Skipping '{Path}': key \"{Key}\" is taken or its folder is not placed", entry.Path, key);
                 }
 
-                Release(entry.Subject);
+                _subjectFactory.Release(entry.Subject);
 
                 entry.Key = key;
                 entry.Subject = null;
@@ -268,7 +268,7 @@ internal sealed class StorageReconciler
             {
                 foreach (var entry in newlyPlacedEntries)
                 {
-                    _subjectFactory.Release(entry.Subject!);
+                    _subjectFactory.Release(entry.Subject);
                 }
             }
         }
@@ -286,23 +286,6 @@ internal sealed class StorageReconciler
         => IsKeyFree(StoragePath.GetParent(path), GetChildKey(path, subject));
 
     /// <summary>
-    /// Takes a subject that is dropped before it was ever in the tree out of the context, where it has been
-    /// since it was created, see <see cref="FileSubjectFactory.Release"/>. Does nothing for a subject that
-    /// the tree holds or held.
-    /// </summary>
-    public void Release(IInterceptorSubject? subject)
-    {
-        if (subject != null)
-        {
-            // Runs lifecycle handlers as an assignment in Apply does.
-            using (ExecutionContext.SuppressFlow())
-            {
-                _subjectFactory.Release(subject);
-            }
-        }
-    }
-
-    /// <summary>
     /// Releases every subject of the index that never reached the tree, for when the connection has ended or
     /// the storage was stopped, and no pass will place them. Their entries are left as those of files that
     /// were not loaded.
@@ -311,7 +294,7 @@ internal sealed class StorageReconciler
     {
         foreach (var entry in _index.Entries)
         {
-            Release(entry.Subject);
+            _subjectFactory.Release(entry.Subject);
 
             // Kept, an operation after a stop would place the subject and attach again what was released
             // here. Not for a subject that moved: the tree still holds it, and it was not released.
@@ -469,7 +452,7 @@ internal sealed class StorageReconciler
             }
             else
             {
-                Release(entry.Subject);
+                _subjectFactory.Release(entry.Subject);
             }
         }
 
@@ -634,7 +617,7 @@ internal sealed class StorageReconciler
             return false;
         }
 
-        Release(entry.Subject);
+        _subjectFactory.Release(entry.Subject);
 
         _index.Set(new StorageEntry { Path = entry.Path, IsFolder = false, Version = version, Hash = hash, Subject = subject });
         _logger?.LogInformation("Replaced the subject of: {Path}", entry.Path);
