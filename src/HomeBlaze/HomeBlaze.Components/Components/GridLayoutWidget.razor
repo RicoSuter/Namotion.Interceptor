@@ -225,7 +225,6 @@
             // Replace list to trigger property setter and parent tracking
             Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
 
-            // Persist the change
             await RootManager.WriteConfigurationOrWarnAsync(Grid, Snackbar, CancellationToken.None);
         }
     }

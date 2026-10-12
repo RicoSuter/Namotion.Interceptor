@@ -1,10 +1,8 @@
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
-using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
-using Namotion.Interceptor;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -15,7 +13,6 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class NestedSubjectSaveTests
 {
-    private const string PagePath = "Demo/LayoutPage.md";
     private const string LayoutPath = "Demo/Layout.json";
     private const string SavedColumnSpan = "\"columnSpan\": 3";
 
@@ -33,7 +30,7 @@ public class NestedSubjectSaveTests
         var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
         var layoutFilePath = Path.Combine(rootManager.DataDirectory, "TestData", LayoutPath);
         var originalContent = await File.ReadAllTextAsync(layoutFilePath);
-        var cell = ((GridLayout)GetDemoFolder(rootManager).Children["Layout"]).Cells.Single();
+        var cell = ((GridLayout)_fixture.GetDemoFolder().Children["Layout"]).Cells.Single();
         var originalColumnSpan = cell.ColumnSpan;
 
         // The output copy outlives a run, so one that was stopped before its cleanup would leave the value behind.
@@ -41,10 +38,10 @@ public class NestedSubjectSaveTests
 
         try
         {
-            var (page, dialog) = await OpenCellDialogWithColumnSpanThreeAsync();
+            var page = await _fixture.OpenLayoutPageInInlineModeAsync();
 
             // Act
-            await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+            await SaveCellWithColumnSpanThreeAsync(page);
 
             // Assert: the notification is the last step of the save, so everything it writes is written by now.
             await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -60,51 +57,24 @@ public class NestedSubjectSaveTests
     [Fact]
     public async Task WhenCellOfUnstoredLayoutIsSaved_ThenWarningIsShown()
     {
-        // Arrange: the layout takes the place of the stored one in the tree, but the storage knows no file for it.
-        var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
-        var subjectFactory = _fixture.ServerServices.GetRequiredService<SubjectFactory>();
-        var folder = GetDemoFolder(rootManager);
-        var originalChildren = folder.Children;
+        // Arrange
+        var (layout, cell) = _fixture.CreateGridWithCell();
 
-        var cell = subjectFactory.CreateSubject<GridCell>();
-        cell.Row = 0;
-        cell.Column = 0;
-        cell.Child = subjectFactory.CreateSubject<GridLayout>();
-
-        var layout = subjectFactory.CreateSubject<GridLayout>();
-        layout.Cells = [cell];
-
-        try
+        await _fixture.WithUnstoredLayoutAsync(layout, async page =>
         {
-            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren) { ["Layout"] = layout };
-            var (page, dialog) = await OpenCellDialogWithColumnSpanThreeAsync();
-
             // Act
-            await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+            await SaveCellWithColumnSpanThreeAsync(page);
 
             // Assert
-            await Assertions.Expect(page.GetByText("Configuration applied but not saved"))
+            await Assertions.Expect(page.GetByText(LayoutPageExtensions.NotSavedWarning))
                 .ToBeVisibleAsync(new() { Timeout = 30000 });
             await Assertions.Expect(page.GetByText("Configuration saved.")).ToHaveCountAsync(0);
             Assert.Equal(3, cell.ColumnSpan);
-        }
-        finally
-        {
-            folder.Children = originalChildren;
-        }
+        });
     }
 
-    private async Task<(IPage Page, ILocator Dialog)> OpenCellDialogWithColumnSpanThreeAsync()
+    private static async Task SaveCellWithColumnSpanThreeAsync(IPage page)
     {
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Inline").ClickAsync();
-
         var editCellButton = page.GetByTitle("Edit Cell");
         await Assertions.Expect(editCellButton).ToBeVisibleAsync(new() { Timeout = 30000 });
         await editCellButton.ClickAsync();
@@ -114,12 +84,6 @@ public class NestedSubjectSaveTests
         await Assertions.Expect(columnSpanField).ToBeVisibleAsync(new() { Timeout = 30000 });
         await columnSpanField.FillAsync("3");
 
-        return (page, dialog);
-    }
-
-    private static VirtualFolder GetDemoFolder(RootManager rootManager)
-    {
-        var root = (FluentStorageContainer)rootManager.Root!;
-        return (VirtualFolder)root.Children["Demo"];
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
     }
 }

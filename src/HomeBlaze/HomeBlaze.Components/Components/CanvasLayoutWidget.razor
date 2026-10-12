@@ -109,9 +109,6 @@
     private Diagram? _diagram;
     private bool _suppressNextClick;
 
-    // The canvas whose last drag was not saved, so that a row of such drags warns once instead of each time.
-    private CanvasLayout? _canvasWithUnsavedDrag;
-
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
@@ -153,17 +150,7 @@
         {
             try
             {
-                var configurationWriter = RootManager.GetConfigurationWriter(canvas);
-                var isWritten = await configurationWriter.WriteConfigurationAsync(canvas, CancellationToken.None);
-                if (isWritten)
-                {
-                    _canvasWithUnsavedDrag = null;
-                }
-                else if (!ReferenceEquals(_canvasWithUnsavedDrag, canvas))
-                {
-                    _canvasWithUnsavedDrag = canvas;
-                    Snackbar.AddConfigurationNotSavedWarning();
-                }
+                await RootManager.WriteConfigurationOrWarnAsync(canvas, Snackbar, CancellationToken.None);
             }
             catch (Exception exception)
             {
@@ -234,7 +221,6 @@
             // Replace list to trigger property setter and parent tracking
             Canvas.Nodes = Canvas.Nodes.Where(n => n != node).ToList();
 
-            // Persist the change
             await RootManager.WriteConfigurationOrWarnAsync(Canvas, Snackbar, CancellationToken.None);
         }
     }

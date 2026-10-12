@@ -213,26 +213,27 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return true;
     }
 
-    private (int BlockIndex, IInterceptorSubject Subject)? FindBlock(
+    private static (int BlockIndex, IInterceptorSubject Subject)? FindBlock(
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
     {
         // The edited subject can be nested in the configuration of a block subject, for example a grid cell.
-        for (var current = subject; current is not null && !ReferenceEquals(current, this); current = GetSingleParent(current))
+        (int, IInterceptorSubject)? block = null;
+        subject.TryGetConfigurationOwner(candidate =>
         {
             foreach (var (blockIndex, blockSubject) in blockSubjects)
             {
-                if (ReferenceEquals(blockSubject, current))
+                if (ReferenceEquals(blockSubject, candidate))
                 {
-                    return (blockIndex, current);
+                    block = (blockIndex, candidate);
+                    return true;
                 }
             }
-        }
 
-        return null;
+            return false;
+        });
+
+        return block;
     }
-
-    private static IInterceptorSubject? GetSingleParent(IInterceptorSubject subject) =>
-        subject.TryGetRegisteredSubject()?.Parents is { Length: 1 } parents ? parents[0].Property.Subject : null;
 
     private static string FormatFilename(string name)
     {

@@ -453,8 +453,9 @@ public partial class FluentStorageContainer :
             return false;
 
         // Only the subject of a file is registered. A subject nested in its configuration is written with it.
-        var fileSubject = subject.TryGetConfigurationOwner(candidate => _pathRegistry.TryGetPath(candidate, out _));
-        if (fileSubject == null || !_pathRegistry.TryGetPath(fileSubject, out var path))
+        string? path = null;
+        var fileSubject = subject.TryGetConfigurationOwner(candidate => _pathRegistry.TryGetPath(candidate, out path));
+        if (fileSubject == null || path == null)
             return false;
 
         // Several subjects map to one file, so their writes can overlap. The file is serialized inside the lock,

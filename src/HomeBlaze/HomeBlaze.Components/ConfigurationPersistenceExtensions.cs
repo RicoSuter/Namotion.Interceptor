@@ -7,7 +7,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Extension methods for components that persist a configuration change and report one that was not saved.
 /// </summary>
-public static class ConfigurationPersistenceExtensions
+internal static class ConfigurationPersistenceExtensions
 {
     /// <summary>
     /// Writes the configuration that contains the subject through the nearest configuration writer among its
