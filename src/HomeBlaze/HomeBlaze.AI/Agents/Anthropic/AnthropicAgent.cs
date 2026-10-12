@@ -87,17 +87,7 @@ public partial class AnthropicAgent : LlmAgentBase
     protected override async Task OnStartingAsync(CancellationToken cancellationToken)
     {
         ResetCompactionState();
-        var json = await ReadSessionAsync(cancellationToken);
-        try
-        {
-            _history = json is null ? new AnthropicHistory() : AnthropicHistory.Deserialize(json);
-        }
-        catch (JsonException exception)
-        {
-            // A damaged session file only loses the chat context; it must not keep the agent from starting.
-            _logger.LogWarning(exception, "The session file of agent {Agent} could not be read; a new session starts.", Title);
-            _history = new AnthropicHistory();
-        }
+        _history = await ReadSessionAsync(AnthropicHistory.Deserialize, cancellationToken) ?? new AnthropicHistory();
     }
 
     protected override async Task ResetSessionAsync(CancellationToken cancellationToken)

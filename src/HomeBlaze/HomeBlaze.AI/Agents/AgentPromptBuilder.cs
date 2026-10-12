@@ -30,10 +30,7 @@ public enum AgentWatchedStateKind
 /// <param name="Value">The state; see <see cref="AgentWatchedStateKind"/>.</param>
 public sealed record AgentWatchedState(string Path, AgentWatchedStateKind Kind, JsonElement Value);
 
-/// <summary>
-/// Builds the prompts of agent turns. The order is fixed: preamble, mode section, instructions and memory
-/// in the system prompt, then the messages.
-/// </summary>
+/// <summary>Builds the prompts of agent turns.</summary>
 public static class AgentPromptBuilder
 {
     /// <summary>The marker a background reply starts with when nothing is noteworthy.</summary>
@@ -76,12 +73,9 @@ public static class AgentPromptBuilder
 
     /// <summary>
     /// Builds the system prompt: preamble with the mode section, the configured instructions, then the memory
-    /// entries sorted by key as JSON Lines in a fenced block.
+    /// entries sorted by key as JSON Lines in a fenced block. <paramref name="hasWebTools"/> tells whether a tool that
+    /// loads web content is available, which adds a warning about it.
     /// </summary>
-    /// <param name="kind">Background or chat.</param>
-    /// <param name="instructions">The configured instructions.</param>
-    /// <param name="memory">The memory entries.</param>
-    /// <param name="hasWebTools">Whether a tool that loads web content is available, which adds a warning about it.</param>
     public static string BuildSystemPrompt(AgentTurnKind kind, string? instructions, AgentMemorySnapshot memory, bool hasWebTools = false)
     {
         var builder = new StringBuilder();
@@ -144,7 +138,7 @@ public static class AgentPromptBuilder
 
         foreach (var result in recentResults)
         {
-            builder.Append("- ").Append(FormatTime(result.Timestamp)).Append(": ").AppendLine(result.ResultText.Trim());
+            AppendResultLine(builder, result);
         }
 
         if (lastQuietRun is { } quiet)
@@ -191,7 +185,7 @@ public static class AgentPromptBuilder
         builder.AppendLine("Background findings since your last reply:");
         foreach (var finding in findings)
         {
-            builder.Append("- ").Append(FormatTime(finding.Timestamp)).Append(": ").AppendLine(finding.ResultText.Trim());
+            AppendResultLine(builder, finding);
         }
 
         builder.AppendLine();
@@ -235,6 +229,9 @@ public static class AgentPromptBuilder
 
         builder.Append("```");
     }
+
+    private static void AppendResultLine(StringBuilder builder, AgentTimelineEntry run) =>
+        builder.Append("- ").Append(FormatTime(run.Timestamp)).Append(": ").AppendLine(run.ResultText.Trim());
 
     private static string FormatTime(DateTimeOffset time) => time.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
 }

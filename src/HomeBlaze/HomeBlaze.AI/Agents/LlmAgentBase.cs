@@ -24,8 +24,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <summary>The text of the error entry recorded for a chat message that was cancelled before a reply.</summary>
     public const string CancelledText = "Cancelled before a reply.";
 
-    /// <summary>The status message of a running agent without a turn.</summary>
-    public const string IdleStatusMessage = "Idle";
+    private const string IdleStatusMessage = "Idle";
 
     /// <summary>The status message while a chat turn runs.</summary>
     public const string AnsweringStatusMessage = "Answering";
@@ -38,6 +37,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     /// <summary>The message of the exception thrown when a chat message is sent while the agent is not running.</summary>
     public const string NotRunningText = "The agent is not running.";
+
+    /// <summary>The longest <see cref="TurnTimeout"/> that applies; a longer one means no limit.</summary>
+    public static readonly TimeSpan MaximumTurnTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
 
     private const int RecentResultCount = 5;
     private static readonly TimeSpan ChangeBufferTime = TimeSpan.FromMilliseconds(100);
@@ -67,9 +69,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private string? _storageName;
     private volatile bool _isStorageLoaded;
 
-    /// <param name="services">The services shared by agents.</param>
-    /// <param name="logger">The logger.</param>
-    /// <param name="supportedBackendTools">The backend tools this agent type can run; none when null.</param>
+    /// <summary>
+    /// Initializes the agent; <paramref name="supportedBackendTools"/> are the backend tools its type can run, none
+    /// when null.
+    /// </summary>
     protected LlmAgentBase(AgentServices services, ILogger logger, IReadOnlyList<AgentBackendTool>? supportedBackendTools = null)
     {
         _services = services;
@@ -104,8 +107,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     public partial string[] AllowedTools { get; set; }
 
     /// <summary>
-    /// The time a turn may take. Zero or less, or more than <see cref="int.MaxValue"/> milliseconds (about 24.8 days),
-    /// means no limit.
+    /// The time a turn may take. Zero or less, or more than <see cref="MaximumTurnTimeout"/> (about 24.8 days), means no
+    /// limit; see <see cref="GetEffectiveTurnTimeout"/>.
     /// </summary>
     [Configuration]
     public partial TimeSpan TurnTimeout { get; set; }
@@ -207,6 +210,20 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <summary>The services shared by agents.</summary>
     protected AgentServices Services => _services;
 
+    /// <summary>The turn timeout that applies, or null for no limit.</summary>
+    public TimeSpan? GetEffectiveTurnTimeout()
+    {
+        var turnTimeout = TurnTimeout;
+        return turnTimeout > TimeSpan.Zero && turnTimeout <= MaximumTurnTimeout ? turnTimeout : null;
+    }
+
+    /// <summary>The minimum run interval that applies: <see cref="MinRunInterval"/>, or zero when it is negative.</summary>
+    public TimeSpan GetEffectiveMinRunInterval()
+    {
+        var minRunInterval = MinRunInterval;
+        return minRunInterval > TimeSpan.Zero ? minRunInterval : TimeSpan.Zero;
+    }
+
     // A configuration file may hold an explicit null, which the rest of the agent never expects.
     partial void OnWatchPathsChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
 
@@ -239,12 +256,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         try
         {
             await ResetSessionAsync(cancellationToken);
-            await AppendAsync(new AgentTimelineEntry
-            {
-                Kind = AgentTimelineEntryKind.Divider,
-                Timestamp = _services.TimeProvider.GetUtcNow(),
-                Text = "New conversation"
-            });
+            await AppendDividerAsync("New conversation");
         }
         finally
         {
@@ -381,25 +393,19 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     protected virtual Task OnStartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
-    /// Reads the backend's session file, or null when there is none or it cannot be read; read failures are logged.
+    /// Reads the backend's session file and parses it with <paramref name="parse"/>, which may throw
+    /// <see cref="JsonException"/>; returns null when there is no file or it cannot be read or parsed. Failures are
+    /// logged, so a damaged file only loses the chat context.
     /// </summary>
-    protected async Task<string?> ReadSessionAsync(CancellationToken cancellationToken)
+    protected async Task<T?> ReadSessionAsync<T>(Func<string, T?> parse, CancellationToken cancellationToken)
+        where T : class
     {
-        var path = GetStoragePath(AgentStorage.SessionSuffix);
-        if (path is null)
-        {
-            return null;
-        }
-
+        var content = await TryReadDataFileAsync(AgentStorage.SessionSuffix, cancellationToken);
         try
         {
-            return await File.ReadAllTextAsync(path, cancellationToken);
+            return content is null ? null : parse(content);
         }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
-        {
-            return null;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (JsonException exception)
         {
             _logger.LogWarning(exception, "The session file of agent {Agent} could not be read; a new session starts.", Title);
             return null;
@@ -410,29 +416,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// Writes the backend's session file atomically; null deletes it. Write failures are logged, not thrown, so the
     /// file may keep its previous content.
     /// </summary>
-    protected async Task WriteSessionAsync(string? content, CancellationToken cancellationToken)
-    {
-        var path = GetStoragePath(AgentStorage.SessionSuffix);
-        if (path is null)
-        {
-            return;
-        }
-
-        try
-        {
-            if (content is null)
-            {
-                File.Delete(path);
-                return;
-            }
-
-            await AtomicFile.WriteAllTextAsync(path, content, cancellationToken);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning(exception, "The session file of agent {Agent} could not be written.", Title);
-        }
-    }
+    protected Task WriteSessionAsync(string? content, CancellationToken cancellationToken) =>
+        TryWriteDataFileAsync(AgentStorage.SessionSuffix, content, cancellationToken);
 
     /// <summary>Appends a divider, for example when a backend session had to be restarted.</summary>
     protected Task AppendDividerAsync(string text) => AppendAsync(new AgentTimelineEntry
@@ -568,7 +553,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     {
         try
         {
-            scheduler.Reconfigure(PollInterval, MinRunInterval);
+            scheduler.Reconfigure(PollInterval, GetEffectiveMinRunInterval());
             _configurationError = null;
             return true;
         }
@@ -619,6 +604,61 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     private string? GetStoragePath(string suffix) =>
         _storageDirectory is null ? null : Path.Combine(_storageDirectory, _storageName + suffix);
+
+    /// <summary>
+    /// Reads a data file of this agent, or null when the agent has no storage, the file does not exist or it cannot be
+    /// read; read failures are logged.
+    /// </summary>
+    private async Task<string?> TryReadDataFileAsync(string suffix, CancellationToken cancellationToken)
+    {
+        var path = GetStoragePath(suffix);
+        if (path is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await File.ReadAllTextAsync(path, cancellationToken);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be read.", path, Title);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Writes a data file of this agent atomically, or deletes it for null content; does nothing when the agent has no
+    /// storage. Write failures are logged, not thrown.
+    /// </summary>
+    private async Task TryWriteDataFileAsync(string suffix, string? content, CancellationToken cancellationToken)
+    {
+        var path = GetStoragePath(suffix);
+        if (path is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (content is null)
+            {
+                File.Delete(path);
+                return;
+            }
+
+            await AtomicFile.WriteAllTextAsync(path, content, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be written.", path, Title);
+        }
+    }
 
     private bool IsWatchCandidate(PropertyReference property)
     {
@@ -795,26 +835,13 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         return WriteRunStatisticsAsync();
     }
 
-    /// <summary>Persists the run count and the last activity; the caller holds the turn gate.</summary>
-    private async Task WriteRunStatisticsAsync()
-    {
-        var path = GetStoragePath(AgentStorage.StatsSuffix);
-        if (path is null)
-        {
-            return;
-        }
-
-        try
-        {
-            // Not cancellable: the count of a finished run is written even while the host stops.
-            var content = JsonSerializer.Serialize(new AgentStats(RunCount, LastActivityTime), JsonSerializerOptions.Web);
-            await AtomicFile.WriteAllTextAsync(path, content, CancellationToken.None);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning(exception, "The run statistics of agent {Agent} could not be written.", Title);
-        }
-    }
+    /// <summary>
+    /// Persists the run count and the last activity, also while the host stops; the caller holds the turn gate.
+    /// </summary>
+    private Task WriteRunStatisticsAsync() => TryWriteDataFileAsync(
+        AgentStorage.StatsSuffix,
+        JsonSerializer.Serialize(new AgentStats(RunCount, LastActivityTime), AgentJsonContext.Default.AgentStats),
+        CancellationToken.None);
 
     /// <summary>
     /// Restores the run count and the last activity from the stats file, or from the timeline when the file or the
@@ -830,30 +857,17 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     private async Task<AgentStats?> ReadRunStatisticsAsync(CancellationToken cancellationToken)
     {
-        var path = GetStoragePath(AgentStorage.StatsSuffix);
-        if (path is null)
-        {
-            return null;
-        }
-
+        var content = await TryReadDataFileAsync(AgentStorage.StatsSuffix, cancellationToken);
         try
         {
-            var content = await File.ReadAllTextAsync(path, cancellationToken);
-            return JsonSerializer.Deserialize<AgentStats>(content, JsonSerializerOptions.Web);
+            return content is null ? null : JsonSerializer.Deserialize(content, AgentJsonContext.Default.AgentStats);
         }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
-        {
-            return null;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        catch (JsonException exception)
         {
             _logger.LogWarning(exception, "The stats file of agent {Agent} could not be read; the run statistics are taken from the timeline.", Title);
             return null;
         }
     }
-
-    // LastActivityTime is missing in files written before it existed and then reads as null.
-    private sealed record AgentStats(int BackgroundRunCount, DateTimeOffset? LastActivityTime = null);
 
     private async Task<AgentTurnResult> RunTurnAsync(
         AgentTurnKind kind, string message, AgentToolSet tools, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
@@ -872,11 +886,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             BackendTools = backendTools.ConvertAll(tool => tool.Name)
         };
 
-        var turnTimeout = TurnTimeout;
+        var turnTimeout = GetEffectiveTurnTimeout();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (turnTimeout > TimeSpan.Zero && turnTimeout.TotalMilliseconds <= int.MaxValue)
+        if (turnTimeout is { } limit)
         {
-            timeout.CancelAfter(turnTimeout);
+            timeout.CancelAfter(limit);
         }
 
         try
@@ -914,11 +928,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         {
             try
             {
-                states.Add(await FetchWatchedStateAsync(path, browse, getProperty, cancellationToken));
+                states.Add(await FetchPathStateAsync(path, browse, getProperty, cancellationToken));
             }
             catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
-                states.Add(new AgentWatchedState(path, AgentWatchedStateKind.Error, JsonSerializer.SerializeToElement("Error: " + exception.Message)));
+                states.Add(new AgentWatchedState(path, AgentWatchedStateKind.Error, ToJsonString("Error: " + exception.Message)));
             }
         }
 
@@ -929,34 +943,37 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// Browses the subject at a watch path, or reads the property there when no subject is, since browse only
     /// resolves subjects.
     /// </summary>
-    private static async Task<AgentWatchedState> FetchWatchedStateAsync(
+    private static async Task<AgentWatchedState> FetchPathStateAsync(
         string path, McpToolInfo? browse, McpToolInfo? getProperty, CancellationToken cancellationToken)
     {
         string? error = null;
         if (browse is not null)
         {
-            var input = JsonSerializer.SerializeToElement(new { path, depth = 2, includeProperties = true, format = "text" });
+            var input = JsonSerializer.SerializeToElement(new AgentBrowseInput(path, Depth: 2, IncludeProperties: true, Format: "text"), AgentJsonContext.Default.AgentBrowseInput);
             var result = await browse.Handler(input, cancellationToken);
             if (result is string text)
             {
-                return new AgentWatchedState(path, AgentWatchedStateKind.Subject, JsonSerializer.SerializeToElement(text));
+                return new AgentWatchedState(path, AgentWatchedStateKind.Subject, ToJsonString(text));
             }
 
+            // Tool results are open-ended objects, so only they are serialized without generated metadata.
             error = TryGetError(JsonSerializer.SerializeToElement(result));
         }
 
         if (getProperty is not null)
         {
-            var result = JsonSerializer.SerializeToElement(await getProperty.Handler(JsonSerializer.SerializeToElement(new { path }), cancellationToken));
+            var input = JsonSerializer.SerializeToElement(new AgentPathInput(path), AgentJsonContext.Default.AgentPathInput);
+            var result = JsonSerializer.SerializeToElement(await getProperty.Handler(input, cancellationToken));
             if (TryGetError(result) is null && result.ValueKind == JsonValueKind.Object)
             {
                 return new AgentWatchedState(path, AgentWatchedStateKind.Property, result);
             }
         }
 
-        return new AgentWatchedState(path, AgentWatchedStateKind.Error,
-            JsonSerializer.SerializeToElement(error ?? $"No subject or property found at {path}."));
+        return new AgentWatchedState(path, AgentWatchedStateKind.Error, ToJsonString(error ?? $"No subject or property found at {path}."));
     }
+
+    private static JsonElement ToJsonString(string text) => JsonSerializer.SerializeToElement(text, AgentJsonContext.Default.String);
 
     private static string? TryGetError(JsonElement result) =>
         result.ValueKind == JsonValueKind.Object && result.TryGetProperty("error", out var error) ? error.ToString() : null;
@@ -1180,3 +1197,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
     }
 }
+
+// LastActivityTime is missing in files written before it existed and then reads as null.
+internal sealed record AgentStats(int BackgroundRunCount, DateTimeOffset? LastActivityTime = null);
+
+/// <summary>The input of the browse tool for the state of a watch path.</summary>
+internal sealed record AgentBrowseInput(string Path, int Depth, bool IncludeProperties, string Format);
+
+/// <summary>The input of the get_property tool for the state of a watch path.</summary>
+internal sealed record AgentPathInput(string Path);

@@ -18,24 +18,6 @@ public static class AgentWatchPaths
     }
 
     /// <summary>
-    /// Whether a canonical property path lies in one of the normalized watch paths.
-    /// </summary>
-    public static bool Matches(string propertyPath, IReadOnlyList<string> normalizedWatchPaths)
-    {
-        foreach (var watchPath in normalizedWatchPaths)
-        {
-            if (watchPath == "/" ||
-                (propertyPath.StartsWith(watchPath, StringComparison.Ordinal) &&
-                 (propertyPath.Length == watchPath.Length || IsSegmentBoundary(propertyPath[watchPath.Length]))))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Whether the property <paramref name="propertyName"/> of the subject at the canonical
     /// <paramref name="subjectPath"/> lies in one of the normalized watch paths, without joining the two.
     /// </summary>

@@ -38,17 +38,8 @@ public partial class ClaudeCliAgent : LlmAgentBase
 
     protected override async Task OnStartingAsync(CancellationToken cancellationToken)
     {
-        var json = await ReadSessionAsync(cancellationToken);
-        try
-        {
-            _sessionId = json is null ? null : JsonSerializer.Deserialize(json, AgentJsonContext.Default.ClaudeCliSessionFile)?.SessionId;
-        }
-        catch (JsonException exception)
-        {
-            // A damaged session file only loses the chat context; it must not keep the agent from starting.
-            _logger.LogWarning(exception, "The session file of agent {Agent} could not be read; a new session starts.", Title);
-            _sessionId = null;
-        }
+        _sessionId = await ReadSessionAsync(
+            json => JsonSerializer.Deserialize(json, AgentJsonContext.Default.ClaudeCliSessionFile)?.SessionId, cancellationToken);
     }
 
     protected override async Task ResetSessionAsync(CancellationToken cancellationToken)

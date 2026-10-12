@@ -26,11 +26,14 @@ public sealed class AgentMemory
     /// <summary>The maximum length of a value in characters.</summary>
     public const int MaxValueLength = 1000;
 
+    /// <summary>The name of the tool through which the model changes its memory.</summary>
+    public const string ToolName = "update_memory";
+
     /// <summary>The key a memory document of the earlier Markdown format is migrated into.</summary>
     public const string LegacyKey = "notes/legacy";
 
     /// <summary>The version written to the memory file.</summary>
-    internal const int FileVersion = 1;
+    private const int FileVersion = 1;
 
     private const int MaxEchoedKeyLength = 140;
 
@@ -293,12 +296,10 @@ public sealed class AgentMemory
         return null;
     }
 
-    /// <summary>
-    /// Creates the agent-local <c>update_memory</c> tool.
-    /// </summary>
+    /// <summary>Creates the agent-local <see cref="ToolName"/> tool.</summary>
     public McpToolInfo CreateUpdateTool() => new()
     {
-        Name = "update_memory",
+        Name = ToolName,
         Description =
             "Change your memory: key-value entries whose keys are slash paths forming a tree, such as alerts/freezer-temperature, " +
             "issues/garage-door or preferences/quiet-hours. Every entry is shown to you with its last update time at the start of " +
@@ -344,7 +345,7 @@ public sealed class AgentMemory
             changes.Add(change!);
         }
 
-        return changes.Count == 0 ? (null, "Pass at least one change.") : (changes, null);
+        return (changes, null);
     }
 
     private static string? ParseChange(JsonElement element, out AgentMemoryChange? change)

@@ -220,11 +220,9 @@
         _backgroundEffort = agent.BackgroundEffort;
         _watchPaths = string.Join('\n', agent.WatchPaths);
         _pollInterval = agent.PollInterval is { } pollInterval ? AgentTimeSpanInput.Format(pollInterval) : null;
-        // The trigger policy treats a negative minimum run interval as zero.
-        _minRunInterval = AgentTimeSpanInput.Format(agent.MinRunInterval > TimeSpan.Zero ? agent.MinRunInterval : TimeSpan.Zero);
-        // The runtime treats zero, negative and over int.MaxValue milliseconds as no limit, which the form writes as 00:00:00.
-        var turnTimeout = agent.TurnTimeout;
-        _turnTimeout = AgentTimeSpanInput.Format(turnTimeout > TimeSpan.Zero && turnTimeout <= AgentTimeSpanInput.MaximumTurnTimeout ? turnTimeout : TimeSpan.Zero);
+        _minRunInterval = AgentTimeSpanInput.Format(agent.GetEffectiveMinRunInterval());
+        // The form writes no limit as 00:00:00.
+        _turnTimeout = AgentTimeSpanInput.Format(agent.GetEffectiveTurnTimeout() ?? TimeSpan.Zero);
         _allowedTools = new HashSet<string>(agent.AllowedTools, StringComparer.Ordinal);
         _toolOptions = AgentToolOptions.Create(ToolSource, agent.AllowedTools, agent.SupportedBackendTools);
         _maxToolCalls = agent.MaxToolCallsPerTurn;

@@ -21,7 +21,7 @@
                     }
                 </text>)
                 @SettingRow("Poll interval", Agent.PollInterval is { } pollInterval && pollInterval > TimeSpan.Zero ? AgentTimeSpanInput.Format(pollInterval) : "none")
-                @SettingRow("Minimum run interval", AgentTimeSpanInput.Format(Agent.MinRunInterval > TimeSpan.Zero ? Agent.MinRunInterval : TimeSpan.Zero))
+                @SettingRow("Minimum run interval", AgentTimeSpanInput.Format(Agent.GetEffectiveMinRunInterval()))
                 @SettingRow("Allowed tools", @<text>
                     @if (Agent.AllowedTools.Length > 0)
                     {
@@ -37,7 +37,7 @@
                         <text>none (memory only)</text>
                     }
                 </text>)
-                @SettingRow("Turn timeout", FormatTurnTimeout(Agent.TurnTimeout))
+                @SettingRow("Turn timeout", Agent.GetEffectiveTurnTimeout() is { } turnTimeout ? AgentTimeSpanInput.Format(turnTimeout) : "none")
                 @SettingRow("Tool calls per turn", Agent.MaxToolCallsPerTurn.ToString())
                 @if (Agent is ClaudeCliAgent cliAgent)
                 {
@@ -178,10 +178,6 @@
             await MemoryEditor.DeleteAsync(entry);
         }
     }
-
-    // The runtime treats zero, negative and over int.MaxValue milliseconds as no limit.
-    private static string FormatTurnTimeout(TimeSpan turnTimeout) =>
-        turnTimeout > TimeSpan.Zero && turnTimeout <= AgentTimeSpanInput.MaximumTurnTimeout ? AgentTimeSpanInput.Format(turnTimeout) : "none";
 
     private static RenderFragment SettingRow(string label, string value) => SettingRow(label, @<text>@value</text>);
 

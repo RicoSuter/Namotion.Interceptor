@@ -14,10 +14,7 @@ public sealed class AgentTimeline
     private readonly Lock _entriesLock = new();
     private ImmutableList<AgentTimelineEntry> _entries = ImmutableList<AgentTimelineEntry>.Empty;
 
-    /// <summary>
-    /// How many lines the file currently holds. Only read and written while holding <see cref="_fileLock"/>,
-    /// so it never needs its own synchronization.
-    /// </summary>
+    // Guarded by _fileLock.
     private int _fileLineCount;
 
     /// <param name="filePath">The JSONL file, or null to keep the timeline in-process only.</param>
@@ -35,8 +32,6 @@ public sealed class AgentTimeline
 
     /// <summary>
     /// Loads the file, skipping corrupt lines, keeps the newest entries up to the capacity and rewrites the file with them.
-    /// Serialized with <see cref="AppendAsync"/> through <see cref="_fileLock"/> so a concurrent append cannot be lost
-    /// or placed out of order relative to the entries this load keeps.
     /// </summary>
     public async Task LoadAsync(CancellationToken cancellationToken)
     {
@@ -45,6 +40,7 @@ public sealed class AgentTimeline
             return;
         }
 
+        // Shared with AppendAsync, so a concurrent append is neither lost nor placed before the entries kept here.
         await _fileLock.WaitAsync(cancellationToken);
         try
         {
@@ -57,7 +53,7 @@ public sealed class AgentTimeline
                 }
             }
 
-            var kept = entries.Skip(Math.Max(0, entries.Count - _capacity)).ToImmutableList();
+            var kept = entries.TakeLast(_capacity).ToImmutableList();
             await WriteFileLockedAsync(kept, cancellationToken);
 
             lock (_entriesLock)
@@ -158,15 +154,12 @@ public sealed class AgentTimeline
     /// <summary>The newest non-quiet background runs, oldest first.</summary>
     public IReadOnlyList<AgentTimelineEntry> GetRecentBackgroundResults(int count)
     {
-        var results = Entries.Where(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun && !entry.IsQuiet).ToList();
-        return results.Skip(Math.Max(0, results.Count - count)).ToList();
+        return Entries.Where(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun && !entry.IsQuiet).TakeLast(count).ToList();
     }
 
     /// <summary>The time of the newest quiet background run.</summary>
-    public DateTimeOffset? GetLastQuietRunTime()
-    {
-        return Entries.LastOrDefault(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun && entry.IsQuiet)?.Timestamp;
-    }
+    public DateTimeOffset? GetLastQuietRunTime() =>
+        Entries.LastOrDefault(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun && entry.IsQuiet)?.Timestamp;
 
     /// <summary>Non-quiet background runs after the newest assistant reply or divider, oldest first.</summary>
     public IReadOnlyList<AgentTimelineEntry> GetFindingsSinceLastReply()

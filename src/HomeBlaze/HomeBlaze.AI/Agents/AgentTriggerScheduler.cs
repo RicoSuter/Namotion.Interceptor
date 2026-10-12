@@ -119,7 +119,7 @@ public sealed class AgentTriggerScheduler
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            string? reason = null;
+            string? reason;
             DateTimeOffset? wakeAt;
             Task wakeSignal;
             bool isPauseLifted;
@@ -127,10 +127,7 @@ public sealed class AgentTriggerScheduler
             {
                 var now = _timeProvider.GetUtcNow();
                 var wasPaused = _policy.PauseReason is not null;
-                if (_policy.TryTakeDueRun(now, out var dueReason))
-                {
-                    reason = dueReason;
-                }
+                reason = _policy.TryTakeDueRun(now, out var dueReason) ? dueReason : null;
 
                 wakeAt = _policy.GetNextWakeTime(now);
                 isPauseLifted = wasPaused && _policy.PauseReason is null;

@@ -1,4 +1,5 @@
 using System.Globalization;
+using HomeBlaze.AI.Agents;
 
 namespace HomeBlaze.AI.Blazor;
 
@@ -11,7 +12,7 @@ public static class AgentTimeSpanInput
     public static readonly TimeSpan Maximum = TimeSpan.FromDays(365);
 
     /// <summary>The largest turn timeout the runtime enforces; a longer one applies no limit.</summary>
-    public static readonly TimeSpan MaximumTurnTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
+    public static readonly TimeSpan MaximumTurnTimeout = LlmAgentBase.MaximumTurnTimeout;
 
     /// <summary>Formats a time span as [d.]hh:mm:ss.</summary>
     public static string Format(TimeSpan value) => value.ToString("c", CultureInfo.InvariantCulture);
