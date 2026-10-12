@@ -11,7 +11,7 @@ namespace HomeBlaze.Storage.Tests;
 [InterceptorSubject]
 public partial class CallbackSubject : IConfigurable
 {
-    private static Func<CallbackSubject, CancellationToken, Task>? _nextApply;
+    private static Func<CancellationToken, Task>? _nextApply;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -24,7 +24,7 @@ public partial class CallbackSubject : IConfigurable
     /// <summary>
     /// Makes the next configuration that is applied to any instance run the callback.
     /// </summary>
-    public static void RunOnNextApply(Func<CallbackSubject, CancellationToken, Task> callback)
+    public static void RunOnNextApply(Func<CancellationToken, Task> callback)
         => Volatile.Write(ref _nextApply, callback);
 
     public static void Reset()
@@ -44,6 +44,6 @@ public partial class CallbackSubject : IConfigurable
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
         => Interlocked.Exchange(ref _nextApply, null) is { } callback
-            ? callback(this, cancellationToken)
+            ? callback(cancellationToken)
             : Task.CompletedTask;
 }

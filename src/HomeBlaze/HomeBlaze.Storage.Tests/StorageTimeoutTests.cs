@@ -8,9 +8,6 @@ namespace HomeBlaze.Storage.Tests;
 
 public class StorageTimeoutTests : StorageTestBase
 {
-    // A pass that waits for a call that never returns never completes, so the wait for it ends the test instead.
-    private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
-
     private readonly ManualTimeProvider _timeProvider = new();
     private PausableBlobStorage? _client;
     private int _idleTimerCount;
@@ -637,17 +634,6 @@ public class StorageTimeoutTests : StorageTestBase
 
         _idleTimerCount = _timeProvider.ArmedTimerCount;
         return storage;
-    }
-
-    /// <summary>
-    /// Replaces the content of a file with content of the same length and keeps its modification time, so that
-    /// a listing shows no change.
-    /// </summary>
-    private void ChangeContentOnly(string relativePath, string content)
-    {
-        var modified = File.GetLastWriteTimeUtc(GetFullPath(relativePath));
-        WriteFile(relativePath, content);
-        File.SetLastWriteTimeUtc(GetFullPath(relativePath), modified);
     }
 
     private async Task LetHangingCallTimeOutAsync()

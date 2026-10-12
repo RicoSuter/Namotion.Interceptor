@@ -1,5 +1,7 @@
+using System.Text;
 using System.Text.Json;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -22,6 +24,9 @@ namespace HomeBlaze.Storage.Tests;
 public abstract class StorageTestBase : IDisposable
 {
     protected static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);
+
+    // Work that waits for something that never happens never completes, so the wait for it ends the test instead.
+    protected static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
 
     private readonly List<FluentStorageContainer> _storages = [];
     private readonly List<DirectoryInfo> _temporaryDirectories = [];
@@ -114,11 +119,11 @@ public abstract class StorageTestBase : IDisposable
     }
 
     /// <summary>The JSON file of a storage that is nested in another one and follows nothing by itself.</summary>
-    protected static string SerializeStorage(string directory, string? containerName = null, string storageType = "disk")
+    protected static string SerializeStorage(string directory, string? containerName = null)
         => $$"""
             {
               "$type": "{{typeof(FluentStorageContainer).FullName}}",
-              "storageType": "{{storageType}}",
+              "storageType": "disk",
               "connectionString": {{JsonSerializer.Serialize(directory)}},
               "containerName": {{JsonSerializer.Serialize(containerName)}},
               "enableFileWatching": false,
@@ -134,6 +139,24 @@ public abstract class StorageTestBase : IDisposable
         var fullPath = GetFullPath(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         File.WriteAllText(fullPath, content);
+    }
+
+    /// <summary>
+    /// Replaces the content of a file with content of the same length and keeps its modification time, so that
+    /// a listing shows no change.
+    /// </summary>
+    protected void ChangeContentOnly(string relativePath, string content)
+    {
+        var modified = File.GetLastWriteTimeUtc(GetFullPath(relativePath));
+        WriteFile(relativePath, content);
+        File.SetLastWriteTimeUtc(GetFullPath(relativePath), modified);
+    }
+
+    protected static async Task WriteBlobAsync(
+        IStorageContainer storage, string path, string content, CancellationToken cancellationToken = default)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+        await storage.WriteBlobAsync(path, stream, cancellationToken);
     }
 
     /// <summary>A directory next to <see cref="StorageDirectory"/>, deleted with the test.</summary>

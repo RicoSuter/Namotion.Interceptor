@@ -16,9 +16,6 @@ namespace HomeBlaze.Storage.Tests;
 
 public class StorageReconcilerTests : StorageTestBase
 {
-    // Work that waits for something that never happens never completes, so the wait for it ends the test instead.
-    private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
-
     [Fact]
     public async Task WhenFilesAreLoaded_ThenTheirFullPathStartsWithSlash()
     {
@@ -99,9 +96,7 @@ public class StorageReconcilerTests : StorageTestBase
         WriteFile("Data.gated", "first");
         var storage = await ConnectAsync();
         var file = (GatedFile)storage.Children["Data.gated"];
-        var originalTime = File.GetLastWriteTimeUtc(GetFullPath("Data.gated"));
-        WriteFile("Data.gated", "other");
-        File.SetLastWriteTimeUtc(GetFullPath("Data.gated"), originalTime);
+        ChangeContentOnly("Data.gated", "other");
 
         // Act
         await storage.ReconcileAsync();
@@ -120,9 +115,7 @@ public class StorageReconcilerTests : StorageTestBase
         WriteFile("Data.gated", "first");
         var storage = await ConnectAsync();
         var file = (GatedFile)storage.Children["Data.gated"];
-        var originalTime = File.GetLastWriteTimeUtc(GetFullPath("Data.gated"));
-        WriteFile("Data.gated", "other");
-        File.SetLastWriteTimeUtc(GetFullPath("Data.gated"), originalTime);
+        ChangeContentOnly("Data.gated", "other");
 
         // Act
         await storage.ReconcileAsync(allNamed: true);
@@ -470,7 +463,7 @@ public class StorageReconcilerTests : StorageTestBase
         WriteFile("Valve.json", "{");
         await storage.ReconcileAsync();
         var applyCount = 0;
-        CallbackSubject.RunOnNextApply((_, _) =>
+        CallbackSubject.RunOnNextApply(_ =>
         {
             applyCount++;
             return Task.CompletedTask;
@@ -493,7 +486,7 @@ public class StorageReconcilerTests : StorageTestBase
         WriteFile("Valve.json", CallbackSubject.Serialize("first"));
         var storage = await ConnectAsync();
         var valve = Assert.IsType<CallbackSubject>(storage.Children["Valve"]);
-        CallbackSubject.RunOnNextApply((_, _) => throw new InvalidOperationException("The endpoint is unreachable."));
+        CallbackSubject.RunOnNextApply(_ => throw new InvalidOperationException("The endpoint is unreachable."));
         WriteFile("Valve.json", CallbackSubject.Serialize("second, rejected"));
         await storage.ReconcileAsync(Named("Valve.json"));
         var nameAfterFailedApply = valve.Name;
@@ -1634,7 +1627,7 @@ public class StorageReconcilerTests : StorageTestBase
         var nested = Assert.IsType<CallbackSubject>(Assert.IsType<MarkdownFragment>(Assert.Single(panel.Rows).Content).Children["inRow"]);
         var childrenBeforeSave = page.Children;
         Task? callFromReload = null;
-        CallbackSubject.RunOnNextApply((_, cancellationToken) =>
+        CallbackSubject.RunOnNextApply(cancellationToken =>
         {
             // Not awaited: a block whose subject fails is shown as an error and leaves the page.
             callFromReload = storage.WriteBlobAsync("Other.md", new MemoryStream("text"u8.ToArray()), cancellationToken);
@@ -1935,12 +1928,6 @@ public class StorageReconcilerTests : StorageTestBase
         Assert.Equal(modified, file.LastModified);
         Assert.Equal(DateTimeKind.Utc, file.LastModified.Kind);
         Assert.Equal(loadCountAfterStartup, GatedFile.LoadCount);
-    }
-
-    private static async Task WriteBlobAsync(FluentStorageContainer storage, string path, string content)
-    {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
-        await storage.WriteBlobAsync(path, stream, CancellationToken.None);
     }
 
     /// <summary>

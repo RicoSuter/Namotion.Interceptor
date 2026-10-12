@@ -1339,8 +1339,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
             container.StorageType = "inmemory";
             container.ConnectionString = Path.Combine(StorageDirectory.FullName, "Missing");
         });
-        using var content = new MemoryStream([1, 2, 3]);
-        await storage.WriteBlobAsync("Data.bin", content, CancellationToken.None);
+        await WriteBlobAsync(storage, "Data.bin", "content");
 
         // Act
         await storage.ReconcileAsync();
@@ -1368,8 +1367,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         timeProvider.Advance(TimeSpan.FromSeconds(60));
 
         // A pass that the clock started would be queued by now, and the worker runs it before this write.
-        using var content = new MemoryStream([1, 2, 3]);
-        await storage.WriteBlobAsync("Other.bin", content, CancellationToken.None);
+        await WriteBlobAsync(storage, "Other.bin", "content");
 
         // Assert
         Assert.Equal(0, armedTimerCount);
@@ -1440,8 +1438,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         // Act
         motor.Name = "Changed after stop";
         var isConfigurationWritten = await storage.WriteConfigurationAsync(motor, CancellationToken.None);
-        using var content = new MemoryStream("second"u8.ToArray());
-        await storage.WriteBlobAsync("Notes.md", content, CancellationToken.None);
+        await WriteBlobAsync(storage, "Notes.md", "second");
 
         // Assert
         Assert.True(isConfigurationWritten);
@@ -1522,8 +1519,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     {
         // Arrange
         var storage = await ConnectAsync(configure: container => container.StorageType = "inmemory");
-        using var content = new MemoryStream([1, 2, 3, 4, 5]);
-        await storage.WriteBlobAsync("Docs/Notes.md", content, CancellationToken.None);
+        await WriteBlobAsync(storage, "Docs/Notes.md", "12345");
 
         // Act
         var metadata = await storage.GetBlobMetadataAsync("Docs/Notes.md", CancellationToken.None);
@@ -1708,8 +1704,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         await storage.ReconcileAsync();
 
         // Act
-        using var content = new MemoryStream("{ \"plain\": true }"u8.ToArray());
-        await storage.WriteBlobAsync("Docs.json", content, CancellationToken.None);
+        await WriteBlobAsync(storage, "Docs.json", "{ \"plain\": true }");
 
         // Assert
         await WaitWhileClockRunsAsync(timeProvider, () =>

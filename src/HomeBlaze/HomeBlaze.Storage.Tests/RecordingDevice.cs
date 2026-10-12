@@ -33,8 +33,6 @@ public partial class RecordingDevice : BackgroundService, IConfigurable
 
     public static void Reset() => Instances.Clear();
 
-    public bool IsStarted => _started.Task.IsCompleted;
-
     public bool IsStopped => _stopped.Task.IsCompleted;
 
     public Task WhenStartedAsync() => _started.Task.WaitAsync(Timeout);

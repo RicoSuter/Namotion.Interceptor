@@ -1,4 +1,3 @@
-using System.Text;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
@@ -12,9 +11,6 @@ namespace HomeBlaze.Storage.Tests;
 /// </summary>
 public class StorageReentrancyTests : StorageTestBase
 {
-    // A call that waits for itself never completes, so the wait for it ends the test instead.
-    private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
-
     [Theory]
     [InlineData(nameof(IStorageContainer.WriteBlobAsync))]
     [InlineData(nameof(IStorageContainer.AddSubjectAsync))]
@@ -97,7 +93,7 @@ public class StorageReentrancyTests : StorageTestBase
         var storage = await ConnectAsync();
         var valve = Assert.IsType<CallbackSubject>(storage.Children["Valve"]);
         Task? refusedCall = null;
-        CallbackSubject.RunOnNextApply((_, cancellationToken) =>
+        CallbackSubject.RunOnNextApply(cancellationToken =>
             refusedCall = storage.AddSubjectAsync("Devices/Motor.json", CreateMotor("Added by the configuration"), cancellationToken));
         WriteFile("Valve.json", CallbackSubject.Serialize("Valve, changed"));
         WriteFile("Zulu.md");
@@ -270,11 +266,4 @@ public class StorageReentrancyTests : StorageTestBase
             nameof(IConfigurationWriter.WriteConfigurationAsync) => storage.WriteConfigurationAsync(subjectInStorage, cancellationToken),
             _ => throw new ArgumentOutOfRangeException(nameof(operation))
         };
-
-    private static async Task WriteBlobAsync(
-        IStorageContainer storage, string path, string content, CancellationToken cancellationToken)
-    {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
-        await storage.WriteBlobAsync(path, stream, cancellationToken);
-    }
 }
