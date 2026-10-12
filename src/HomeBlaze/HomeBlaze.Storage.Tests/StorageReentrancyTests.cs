@@ -151,6 +151,34 @@ public class StorageReentrancyTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenLoadCallsItsStorageDirectlyWithinSuppressedFlow_ThenCallIsStillRefusedThroughItsTask()
+    {
+        // Arrange: suppressing the flow only keeps work that is started there from carrying it.
+        WriteFile("Notes.md", "first");
+        var storage = await ConnectAsync();
+        Task? call = null;
+        WriteFile("Data.gated");
+        GatedFile.RunOnNextLoad((file, _) =>
+        {
+            using (ExecutionContext.SuppressFlow())
+            {
+                call = file.Storage.WriteBlobAsync("Notes.md", new MemoryStream("second"u8.ToArray()), CancellationToken.None);
+            }
+
+            return Task.CompletedTask;
+        });
+
+        // Act
+        await storage.ReconcileAsync();
+        var exception = await Record.ExceptionAsync(() => call!.WaitAsync(DeadlockTimeout));
+
+        // Assert: the load that did not await the call has not failed, and nothing was written.
+        Assert.Equal(StorageWorker.CallFromWithinItemMessage, Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal(["Data.gated", "Notes.md"], storage.Children.Keys.Order());
+        Assert.Equal("first", File.ReadAllText(GetFullPath("Notes.md")));
+    }
+
+    [Fact]
     public async Task WhenLoadStartsTaskWithoutExecutionFlow_ThenCallOfThatTaskRunsAfterThePass()
     {
         // Arrange

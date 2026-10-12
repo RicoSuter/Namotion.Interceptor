@@ -12,8 +12,9 @@ internal sealed class StorageWorker : IDisposable
     internal const string CallFromWithinItemMessage =
         "An operation of a storage was called from work that runs on the worker of that storage, such as the load " +
         "of a file or the ApplyConfigurationAsync of a subject. The operation would wait for the work that waits " +
-        "for it. Start it once that work has returned, from a task that is started without the execution flow " +
-        "(ExecutionContext.SuppressFlow).";
+        "for it. Call it from a task that is started inside using (ExecutionContext.SuppressFlow()), for example " +
+        "with Task.Run, and do not wait for that task: the call then runs once the work has returned. A call that " +
+        "is made directly inside that scope is refused like this one.";
 
     private readonly Channel<WorkItem> _queue =
         Channel.CreateUnbounded<WorkItem>(new UnboundedChannelOptions { SingleReader = true });
@@ -46,7 +47,7 @@ internal sealed class StorageWorker : IDisposable
     /// Runs the work after everything handed in before it. After disposal the returned task is cancelled.
     /// </summary>
     /// <remarks>
-    /// A call from within a running item of this worker is refused: the work is not run, and the returned task fails with an <see cref="InvalidOperationException"/>. Every flow that the item started counts as within it while the work of the item has not returned, also a flow the item does not await, such as a task or a timer it started. Code that runs on the worker therefore starts such work without the execution flow (<see cref="ExecutionContext.SuppressFlow"/>). Once the item has finished, a call from a flow it started is queued like any other.
+    /// A call from within a running item of this worker is refused: the work is not run, and the returned task fails with an <see cref="InvalidOperationException"/>. Every flow that the item started counts as within it while the work of the item has not returned, also a flow the item does not await, such as a task or a timer it started. Code that runs on the worker therefore starts such work inside <see cref="ExecutionContext.SuppressFlow"/>: a task or a timer that is started there does not carry the item. A call that is made directly inside that scope still does, and is refused. Once the item has finished, a call from a flow it started is queued like any other.
     /// </remarks>
     public Task RunAsync(Func<CancellationToken, Task> work, CancellationToken cancellationToken)
     {
