@@ -42,6 +42,26 @@ internal static class MarkdownWriteRules
         new("Only Markdown files in local storage (on disk or in memory) can be written; this storage is not local.");
 
     /// <summary>
+    /// Refuses a write that comes from work on the worker of the storage, such as the load of the page: the write would
+    /// wait for the write lock of a write that waits for that work, and neither would ever end.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage.</exception>
+    public static void EnsureNotWithinStorageWork(IStorageContainer storage)
+    {
+        var container = storage switch
+        {
+            FluentStorageContainer fluentContainer => fluentContainer,
+            VirtualFolder { Storage: FluentStorageContainer fluentContainer } => fluentContainer,
+            _ => null
+        };
+
+        if (container is { IsWithinRunningOperation: true })
+        {
+            throw new InvalidOperationException(StorageWorker.CallFromWithinItemMessage);
+        }
+    }
+
+    /// <summary>
     /// Encodes the content as UTF-8.
     /// </summary>
     /// <exception cref="ArgumentException">The content is null or larger than <see cref="MarkdownFile.MaxContentSize"/> bytes.</exception>

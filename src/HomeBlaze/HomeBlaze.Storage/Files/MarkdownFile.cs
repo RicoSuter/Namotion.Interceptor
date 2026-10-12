@@ -230,6 +230,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
     {
         MarkdownWriteRules.EnsureLocal(Storage);
+        MarkdownWriteRules.EnsureNotWithinStorageWork(Storage);
         MarkdownWriteRules.GetContentBytes(content, nameof(content));
 
         await _writeLock.WaitAsync(cancellationToken);
@@ -257,6 +258,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)
     {
         MarkdownWriteRules.EnsureLocal(Storage);
+        MarkdownWriteRules.EnsureNotWithinStorageWork(Storage);
         if (string.IsNullOrEmpty(oldText))
         {
             throw new ArgumentException("The text to replace must not be empty.", nameof(oldText));
@@ -353,6 +355,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     public async Task WriteAsync(Stream content, CancellationToken cancellationToken)
     {
+        MarkdownWriteRules.EnsureNotWithinStorageWork(Storage);
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
@@ -369,6 +372,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
+        MarkdownWriteRules.EnsureNotWithinStorageWork(Storage);
         await _writeLock.WaitAsync(cancellationToken);
         try
         {

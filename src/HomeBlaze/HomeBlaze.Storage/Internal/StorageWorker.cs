@@ -44,6 +44,12 @@ internal sealed class StorageWorker : IDisposable
     }
 
     /// <summary>
+    /// Whether the current flow is within an item of this worker that has not finished, where <see cref="RunAsync"/>
+    /// refuses work.
+    /// </summary>
+    public bool IsWithinRunningItem => _itemOfFlow.Value is { IsFinished: false };
+
+    /// <summary>
     /// Runs the work after everything handed in before it. After disposal the returned task is cancelled.
     /// </summary>
     /// <remarks>
@@ -54,7 +60,7 @@ internal sealed class StorageWorker : IDisposable
         // Queued, the call would wait for the item that waits for it, and nothing would ever run again. That
         // the flow carries an item is not enough: a task that an item started keeps the flow of that item
         // after it has finished.
-        if (_itemOfFlow.Value is { IsFinished: false })
+        if (IsWithinRunningItem)
         {
             return Task.FromException(new InvalidOperationException(CallFromWithinItemMessage));
         }

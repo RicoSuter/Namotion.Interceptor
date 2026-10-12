@@ -713,6 +713,27 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenASubjectWritesItsPageWhileThePageIsReloadedAfterAWrite_ThenItsWriteFailsInsteadOfWaitingForever()
+    {
+        // Arrange
+        WriteFile("Notes.md", ":: HomeBlaze.Storage.Tests.PageWritingSubject#writer Level=1\n::\n\nText.");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var writer = Assert.IsType<PageWritingSubject>(markdown.Children["writer"]);
+        Exception? innerException = null;
+        writer.WhenApplied = async () =>
+            innerException = await Record.ExceptionAsync(() => markdown.ReplaceTextAsync("Text.", "Inner.", CancellationToken.None));
+
+        // Act
+        await markdown.ReplaceTextAsync("Text.", "Changed.", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        var exception = Assert.IsType<InvalidOperationException>(innerException);
+        Assert.StartsWith("An operation of a storage was called from work that runs on the worker", exception.Message);
+        Assert.EndsWith("Changed.", ReadFile("Notes.md"));
+    }
+
+    [Fact]
     public async Task WhenTheStorageIsAskedToSaveTheConfigurationOfAPage_ThenItDoesNotWriteThePage()
     {
         // Arrange
@@ -971,6 +992,18 @@ public class MarkdownFileWriteTests : IDisposable
             return base.Read(buffer);
         }
     }
+}
+
+/// <summary>A subject on a page that runs <see cref="WhenApplied"/> when the page applies its configuration.</summary>
+[InterceptorSubject]
+public partial class PageWritingSubject : IConfigurable
+{
+    [Configuration]
+    public partial int Level { get; set; }
+
+    public Func<Task>? WhenApplied { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => WhenApplied?.Invoke() ?? Task.CompletedTask;
 }
 
 /// <summary>A file type that is neither configurable nor a document.</summary>

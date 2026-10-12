@@ -833,6 +833,12 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
+    /// Whether the call comes from work that runs on the worker of this storage, such as the load of a file, where an
+    /// operation of the storage is refused.
+    /// </summary>
+    internal bool IsWithinRunningOperation => _connection is { } connection && connection.Worker.IsWithinRunningItem;
+
+    /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the index.
     /// </summary>
     /// <exception cref="InvalidOperationException">The subject is not the subject of a file in this storage.</exception>
