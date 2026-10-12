@@ -237,6 +237,8 @@ The operations change text only. They keep every [block](pages.md#blocks) exactl
 
 The operations accept at most 64 KB of source, measured as the agent writes it with the hidden values as `***`, so the limit tells nothing about them either; the file can be larger by the hidden values. They write through the same path as the page editor, so an open page updates as after a save. JSON and other files cannot be changed this way.
 
+One small gap remains: an agent can add a link reference definition with an http or https address, which changes where a `[text][label]` link inside a block leads.
+
 Pages are not versioned by HomeBlaze, so keep the data folder under version control or backed up if agents may change pages. See [Security](#security) before allowing page changes.
 
 ### Web tools
