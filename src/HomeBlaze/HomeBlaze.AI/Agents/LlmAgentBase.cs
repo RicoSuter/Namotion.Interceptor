@@ -25,7 +25,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     public const string CancelledText = "Cancelled before a reply.";
 
     private const int RecentResultCount = 5;
-    private const string StatsSuffix = ".stats.json";
     private const string WaitingStatusMessage = "Waiting for the background run";
     private static readonly TimeSpan ChangeBufferTime = TimeSpan.FromMilliseconds(100);
 
@@ -347,7 +346,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// </summary>
     protected async Task<string?> ReadSessionAsync(CancellationToken cancellationToken)
     {
-        var path = GetStoragePath(".session.json");
+        var path = GetStoragePath(AgentStorage.SessionSuffix);
         if (path is null)
         {
             return null;
@@ -374,7 +373,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// </summary>
     protected async Task WriteSessionAsync(string? content, CancellationToken cancellationToken)
     {
-        var path = GetStoragePath(".session.json");
+        var path = GetStoragePath(AgentStorage.SessionSuffix);
         if (path is null)
         {
             return;
@@ -557,23 +556,24 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         if (dataDirectory is not null && path is not null)
         {
             _storageDirectory = Path.Combine(dataDirectory, "Agents");
-            _storageName = AgentWatchPaths.GetStorageName(path);
-            WorkingDirectory = Path.Combine(_storageDirectory, _storageName + ".workdir");
+            _storageName = AgentStorage.GetName(path);
+            AgentStorage.MigrateLegacyName(_storageDirectory, path, _logger);
+            WorkingDirectory = Path.Combine(_storageDirectory, _storageName + AgentStorage.WorkingDirectorySuffix);
         }
         else
         {
             _logger.LogWarning("The agent {Agent} has no data directory or path; its timeline and memory are not persisted.", Title);
         }
 
-        Timeline = new AgentTimeline(GetStoragePath(".timeline.jsonl"));
+        Timeline = new AgentTimeline(GetStoragePath(AgentStorage.TimelineSuffix));
         await Timeline.LoadAsync(cancellationToken);
 
         // Loaded before it is published, so the memory editor never writes to a memory that has not read its file.
         // A restart keeps the instance of an unchanged path, so two instances never write the same file.
-        var memoryPath = GetStoragePath(".memory.json");
+        var memoryPath = GetStoragePath(AgentStorage.MemorySuffix);
         var memory = memoryPath is not null && Memory.FilePath == memoryPath
             ? Memory
-            : new AgentMemory(memoryPath, _services.TimeProvider, _logger, legacyFilePath: GetStoragePath(".memory.md"));
+            : new AgentMemory(memoryPath, _services.TimeProvider, _logger, legacyFilePath: GetStoragePath(AgentStorage.LegacyMemorySuffix));
         await memory.LoadAsync(cancellationToken);
         Memory = memory;
         await RestoreRunStatisticsAsync(cancellationToken);
@@ -739,7 +739,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <summary>Persists the run count and the last activity; the caller holds the turn gate.</summary>
     private async Task WriteRunStatisticsAsync()
     {
-        var path = GetStoragePath(StatsSuffix);
+        var path = GetStoragePath(AgentStorage.StatsSuffix);
         if (path is null)
         {
             return;
@@ -771,7 +771,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     private async Task<AgentStats?> ReadRunStatisticsAsync(CancellationToken cancellationToken)
     {
-        var path = GetStoragePath(StatsSuffix);
+        var path = GetStoragePath(AgentStorage.StatsSuffix);
         if (path is null)
         {
             return null;

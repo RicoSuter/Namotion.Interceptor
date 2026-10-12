@@ -538,7 +538,7 @@ public class AgentPageTests
             return;
         }
 
-        var storageName = AgentWatchPaths.GetStorageName(path);
+        var storageName = AgentStorage.GetName(path);
         foreach (var file in Directory.GetFiles(agentDirectory, storageName + ".*"))
         {
             File.Delete(file);

@@ -103,7 +103,7 @@ internal sealed class TestDataDirectory : IDataDirectoryProvider
 }
 
 /// <summary>
-/// A graph with a root, an agent attached under /Agent, path resolution and a data directory.
+/// A graph with a root, an agent attached under /Agent (or another name), path resolution and a data directory.
 /// </summary>
 internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
     where TAgent : LlmAgentBase
@@ -129,7 +129,8 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
         Action<TAgent>? configure = null,
         Uri? endpoint = null,
         AgentTurnTokenRegistry? tokenRegistry = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        string agentName = "Agent")
     {
         var dataDirectory = Directory.CreateTempSubdirectory("agent-test").FullName;
         var context = InterceptorSubjectContext.Create()
@@ -152,7 +153,7 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
         var agent = createAgent(services);
         agent.MinRunInterval = TimeSpan.Zero;
         configure?.Invoke(agent);
-        root.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
+        root.Children = new Dictionary<string, IInterceptorSubject> { [agentName] = agent };
 
         await ((IHostedService)agent).StartAsync(CancellationToken.None);
         await Namotion.Interceptor.Testing.AsyncTestHelpers.WaitUntilAsync(

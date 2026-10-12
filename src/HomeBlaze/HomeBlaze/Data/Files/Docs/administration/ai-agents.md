@@ -244,7 +244,7 @@ The Activity tab shows the tokens of each run. For CLI agents it also shows the 
 
 ## Files
 
-Besides its configuration file, each agent keeps its data in the `Agents` folder of the [data folder](configuration.md#data-folder), named after the agent's path with slashes replaced by underscores (`/Agents/EnergyAdvisor` becomes `Agents_EnergyAdvisor`):
+Besides its configuration file, each agent keeps its data in the `Agents` folder of the [data folder](configuration.md#data-folder), named after the agent's path with slashes replaced by underscores (`/Agents/EnergyAdvisor` becomes `Agents_EnergyAdvisor`). When the path itself contains an underscore or a character that file names cannot hold, the name ends with `__` and a short hash of the path, so no two agents share files (`/Agents/Energy_Advisor` becomes `Agents_Energy_Advisor__` followed by eight hex digits); files of such an agent under the earlier name without the hash are renamed once on start. Paths that differ only in letter case get names that differ only in letter case, which share files on a file system that ignores case, such as the Windows default; give such agents names that differ in more than case:
 
 | File | Content |
 |---|---|

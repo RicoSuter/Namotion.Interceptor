@@ -49,17 +49,4 @@ public class AgentWatchPathsTests
         // Assert
         Assert.Equal(["/Energy", "/Kitchen/Freezer"], normalized);
     }
-
-    [Theory]
-    [InlineData("/Agents/EnergyAdvisor.json", "Agents_EnergyAdvisor.json")]
-    [InlineData("/", "root")]
-    [InlineData("/Agents/A:B", "Agents_A_B")]
-    public void WhenDerivingAStorageName_ThenItIsAFlatFileName(string path, string expected)
-    {
-        // Act
-        var name = AgentWatchPaths.GetStorageName(path);
-
-        // Assert
-        Assert.Equal(expected, name);
-    }
 }

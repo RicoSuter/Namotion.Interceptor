@@ -1,13 +1,10 @@
 namespace HomeBlaze.AI.Agents;
 
 /// <summary>
-/// Path helpers of agents: watch path matching and the file name of an agent's data.
+/// Watch path matching of agents.
 /// </summary>
 public static class AgentWatchPaths
 {
-    // The Windows set, so data directories move between platforms without renames.
-    private static readonly char[] InvalidFileNameCharacters = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
-
     /// <summary>
     /// Trims entries, drops blank ones, adds a leading slash and removes a trailing one.
     /// </summary>
@@ -55,29 +52,6 @@ public static class AgentWatchPaths
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// A flat file name for an agent's data files, derived from its canonical path.
-    /// </summary>
-    public static string GetStorageName(string subjectPath)
-    {
-        var trimmed = subjectPath.Trim('/');
-        if (trimmed.Length == 0)
-        {
-            return "root";
-        }
-
-        var characters = trimmed.ToCharArray();
-        for (var index = 0; index < characters.Length; index++)
-        {
-            if (InvalidFileNameCharacters.Contains(characters[index]) || char.IsControl(characters[index]))
-            {
-                characters[index] = '_';
-            }
-        }
-
-        return new string(characters);
     }
 
     private static bool MatchesWatchPath(ReadOnlySpan<char> subjectPart, string propertyName, ReadOnlySpan<char> watch)
