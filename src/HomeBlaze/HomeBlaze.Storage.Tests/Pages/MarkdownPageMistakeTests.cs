@@ -104,7 +104,7 @@ public class MarkdownPageMistakeTests
         string widget, string[] expectedBoxes)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $"Text before.\n\n{widget}\n\nText after.");
@@ -122,7 +122,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenItemHasAsManyCharactersAsItsLayout_ThenItEndsTheLayoutAndEveryItemIsAnErrorBesideIt()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -156,7 +156,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenItemHasNoClosingLine_ThenTheClosingLineOfTheLayoutEndsItAndThereIsNoBox()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -181,7 +181,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenTabIsClosedWithTheLineOfTheLayout_ThenTheLayoutEndsThereAndTheNextTabIsAnErrorBesideIt()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -219,7 +219,7 @@ public class MarkdownPageMistakeTests
         string lineThatEndsTheWidget)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
         var source =
             ":: HomeBlaze.Components.Card#card Title=\"Pump\"\n" +
             "::: HomeBlaze.Components.Widget Path=../WaterPump\n" +
@@ -243,7 +243,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenBlockIsInsideAWidgetWithoutDefaultSlotThatHasNoClosingLine_ThenTheBoxSaysWhichLineEndsTheWidget()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -266,7 +266,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenContentIsInsideASlotValueWithoutDefaultSlotThatHasNoClosingLine_ThenTheBoxSaysWhichLineEndsTheSlotBlock()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $"""
@@ -296,7 +296,7 @@ public class MarkdownPageMistakeTests
         string source, string expectedBox)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", source);
@@ -309,7 +309,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenLayoutWithoutClosingLineIsFollowedByPageText_ThenTheBoxSaysWhichLineEndsTheLayout()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -402,7 +402,7 @@ public class MarkdownPageMistakeTests
         string source)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
         var typeName = source.Contains("FlowLayout", StringComparison.Ordinal) ? "FlowLayout" : "TabLayout";
 
         // Act
@@ -418,7 +418,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenOnlyAnHtmlCommentFollowsTheContentOfAWidgetWithoutClosingLine_ThenTheBoxStillNamesTheClosingLine()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync(
@@ -439,7 +439,7 @@ public class MarkdownPageMistakeTests
         string widget, string[] expectedBoxes)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $"Text before.\n\n{widget}");
@@ -458,7 +458,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenWidgetBlockInAWidgetWithoutDefaultSlotEndedNoSlotBlock_ThenTheBoxIsTheOneOfTheWidgetAroundIt(string source)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", source);
@@ -473,7 +473,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenWidgetBlockEndedASlotBlockInAWidgetWithDefaultSlot_ThenItIsContentOfThatWidgetAndThereIsNoBox()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -493,7 +493,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenAnHtmlCommentStandsBetweenTheSlotBlocksOfAWidgetWithoutDefaultSlot_ThenItIsNoContent()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -531,7 +531,7 @@ public class MarkdownPageMistakeTests
         string looseContent)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $"""
@@ -562,7 +562,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenBlockInsideAWidgetWithDefaultSlotIsInvalid_ThenTheWidgetIsShownWithTheBoxWhereTheBlockWas()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -593,7 +593,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenDefaultSlotIsFilledByABlockAndAnotherBlockIsInvalid_ThenTheBoxNamesTheLineAndTheMessageOfThatBlock()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -617,7 +617,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenDefaultSlotIsFilledByABlockAndAnHtmlCommentStandsNextToIt_ThenTheCommentIsNoContent()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -643,7 +643,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenBlockInACardHasAsManyCharactersAsTheCard_ThenItIsABlockAfterTheCardAndTheClosingLineOfTheCardClosesNothing()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -671,7 +671,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenBlockInACardHasAsManyCharactersAsTheCardAndALongerClosingLine_ThenThatLineClosesNothingAndIsTheBoxOfTheBlock()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -700,7 +700,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenTextInsideABlockIsReadAsAHeadLine_ThenItEndsTheBlockAndItsBoxReplacesTheTextUpToTheClosingLine()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -730,7 +730,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenBlockDirectlyOnThePageHasNoClosingLine_ThenItTakesTheRestOfThePageAndThereIsNoBox()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -756,7 +756,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenSingleValueInTheJsonBlockDoesNotFitItsProperty_ThenTheBoxNamesThePropertyAndTheExpectedType()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -786,7 +786,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenValueInTheJsonBlockIsNoText_ThenTheBoxShowsItAsItIsWritten(string value, string expectedMessage)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync(
@@ -800,7 +800,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenTypeOfASubjectInsideAValueOfTheJsonBlockIsMisspelled_ThenTheBoxNamesThePropertyAndThePlace()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", """
@@ -836,7 +836,7 @@ public class MarkdownPageMistakeTests
         string cells, string expectedStart)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync(
@@ -862,7 +862,7 @@ public class MarkdownPageMistakeTests
         string json, string expectedPlace)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync(
@@ -880,7 +880,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenValueOfTheJsonBlockIsItselfASubjectWithoutType_ThenTheBoxNamesThePropertyAndTheMissingType()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync(
@@ -1004,7 +1004,7 @@ public class MarkdownPageMistakeTests
     public async Task WhenNameIsUnknown_ThenTheMessageListsTheNamesOrSaysThatTheTypeHasNone(string source, string expectedBox)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("page.md", source);

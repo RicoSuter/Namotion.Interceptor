@@ -1,6 +1,5 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
-using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,22 +24,9 @@ public class ValueReaderTests
         ::
         """;
 
-    private static Task<MarkdownPageFixture> CreateFixtureAsync() =>
-        MarkdownPageFixture.CreateAsync(services =>
-        {
-            // The type registry reads the provider on first use, so the assemblies are added before anything is created.
-            var typeProvider = (TypeProvider)services
-                .Single(service => service.ServiceType == typeof(TypeProvider))
-                .ImplementationInstance!;
-
-            typeProvider
-                .AddAssembly(typeof(Card).Assembly)
-                .AddAssembly(typeof(Motor).Assembly);
-        });
-
     private static async Task<(SubjectPathResolver Resolver, MarkdownFile Page)> AddPageAsync()
     {
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
         var page = await fixture.AddPageAsync("page.md", Page);
         return (fixture.Services.GetRequiredService<SubjectPathResolver>(), page);
     }

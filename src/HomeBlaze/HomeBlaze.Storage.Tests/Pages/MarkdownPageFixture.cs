@@ -1,4 +1,6 @@
 using System.Text;
+using HomeBlaze.Components;
+using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -70,6 +72,20 @@ public sealed class MarkdownPageFixture
 
         return new MarkdownPageFixture(storage, serviceProvider);
     }
+
+    /// <summary>Creates a fixture that knows the widget types that ship and the sample subjects.</summary>
+    public static Task<MarkdownPageFixture> CreateWithWidgetsAndSamplesAsync() =>
+        CreateAsync(services =>
+        {
+            // The type registry reads the provider on first use, so the assemblies are added before anything is created.
+            var typeProvider = (TypeProvider)services
+                .Single(service => service.ServiceType == typeof(TypeProvider))
+                .ImplementationInstance!;
+
+            typeProvider
+                .AddAssembly(typeof(Card).Assembly)
+                .AddAssembly(typeof(Motor).Assembly);
+        });
 
     /// <summary>
     /// Starts the hosted services of the context, so that the hosted subjects on a page are started and stopped.

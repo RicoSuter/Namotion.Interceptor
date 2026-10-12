@@ -1,7 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Samples;
-using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
@@ -28,7 +27,7 @@ public class DemoPagesTests
     public async Task WhenDemoPageIsLoaded_ThenNoBlockIsShownAsError(string fileName)
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, fileName);
@@ -56,7 +55,7 @@ public class DemoPagesTests
     public async Task WhenDemoPageIsLoaded_ThenTheBlockWithANameCreatesItsSubject(string fileName, string name, Type expectedType)
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         IPathScope page = await AddDemoPageAsync(fixture, fileName);
@@ -69,7 +68,7 @@ public class DemoPagesTests
     public async Task WhenDashboardPageIsLoaded_ThenItsTabsHoldTheLayoutsOfTheDashboard()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Dashboard.md");
@@ -103,7 +102,7 @@ public class DemoPagesTests
     public async Task WhenDashboardPageIsLoaded_ThenItUsesEveryValueWidgetAndEachMapOfAWidgetIsTheMapOfThePage()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Dashboard.md");
@@ -139,7 +138,7 @@ public class DemoPagesTests
     public async Task WhenErrorsPageIsLoaded_ThenEverySectionShowsItsOwnError()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Errors.md");
@@ -182,7 +181,7 @@ public class DemoPagesTests
     public async Task WhenErrorsPageIsLoaded_ThenTheBlocksAroundAFenceErrorAreStillShown()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Errors.md");
@@ -202,7 +201,7 @@ public class DemoPagesTests
     public async Task WhenErrorsPageIsLoaded_ThenTheMistakesWithoutABoxShowTheirBlocksAtTheWrongPlace()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Errors.md");
@@ -232,7 +231,7 @@ public class DemoPagesTests
     public async Task WhenErrorsPageIsLoaded_ThenTheBlocksWithoutAnErrorAreCreated()
     {
         // Arrange
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Errors.md");
@@ -249,19 +248,6 @@ public class DemoPagesTests
         // The first of two blocks with the same name keeps the name.
         Assert.Equal("First Twin", Assert.IsType<Motor>(page.Children["twin"]).Name);
     }
-
-    private static Task<MarkdownPageFixture> CreateFixtureAsync() =>
-        MarkdownPageFixture.CreateAsync(services =>
-        {
-            // The type registry reads the provider on first use, so the assemblies are added before anything is created.
-            var typeProvider = (TypeProvider)services
-                .Single(service => service.ServiceType == typeof(TypeProvider))
-                .ImplementationInstance!;
-
-            typeProvider
-                .AddAssembly(typeof(Card).Assembly)
-                .AddAssembly(typeof(Motor).Assembly);
-        });
 
     private static Task<MarkdownFile> AddDemoPageAsync(MarkdownPageFixture fixture, string fileName) =>
         fixture.AddPageAsync(fileName, ReadDemoPage(fileName));

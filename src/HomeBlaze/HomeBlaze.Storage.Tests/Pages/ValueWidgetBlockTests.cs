@@ -1,6 +1,4 @@
 using HomeBlaze.Components;
-using HomeBlaze.Samples;
-using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using MudBlazor;
 using Xunit;
@@ -10,22 +8,9 @@ namespace HomeBlaze.Storage.Tests.Pages;
 [Collection(MarkdownPageFixture.StorageCollection)]
 public class ValueWidgetBlockTests
 {
-    private static Task<MarkdownPageFixture> CreateFixtureAsync() =>
-        MarkdownPageFixture.CreateAsync(services =>
-        {
-            // The type registry reads the provider on first use, so the assemblies are added before anything is created.
-            var typeProvider = (TypeProvider)services
-                .Single(service => service.ServiceType == typeof(TypeProvider))
-                .ImplementationInstance!;
-
-            typeProvider
-                .AddAssembly(typeof(Card).Assembly)
-                .AddAssembly(typeof(Motor).Assembly);
-        });
-
     private static async Task<MarkdownFile> AddPageAsync(string content)
     {
-        var fixture = await CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
         return await fixture.AddPageAsync("page.md", content);
     }
 

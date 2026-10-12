@@ -31,7 +31,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenNoBlockIsShownAsError()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddPageAsync(fixture);
@@ -44,7 +44,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenItsOnlyMotorsAreTheTwoThatTheSamplesShowByName()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddPageAsync(fixture);
@@ -63,7 +63,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenEveryWidgetShowsAMotorOfThePageExceptThePathThatLeadsNowhere()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddPageAsync(fixture);
@@ -81,7 +81,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenEveryExpressionReadsFromAMotorOfThePage()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddPageAsync(fixture);
@@ -100,7 +100,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenTheCardsAreThoseOfTheSamples()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddPageAsync(fixture);
@@ -127,7 +127,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenOneCardUsesEveryNewOptionAndTheHeaderSlot()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddPageAsync(fixture);
@@ -143,7 +143,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenTheMapHasACasePerMotorStatusAndEveryWidgetRefersToIt()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         IPathScope page = await AddPageAsync(fixture);
@@ -167,7 +167,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenEveryValueWidgetReadsAPropertyOfAMotorOfThePage()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
         var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
 
         // Act
@@ -190,7 +190,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenEachNewWidgetTypeHasTheSamplesOfItsSection()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddPageAsync(fixture);
@@ -216,7 +216,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenTheFlowLayoutsHaveTheWidthsAndTheCellsOfTheirSamples()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddPageAsync(fixture);
@@ -230,7 +230,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenTheTabLayoutsHaveTheTabsOfTheirSamples()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await AddPageAsync(fixture);
@@ -275,7 +275,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenTheGridShowsTheMotorsByNameAndItsLastCellSpansTwoColumns()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         IPathScope page = await AddPageAsync(fixture);
@@ -292,7 +292,7 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenTheCanvasShowsTheMotorsByNameInNodesThatFitANarrowWindow()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         IPathScope page = await AddPageAsync(fixture);
