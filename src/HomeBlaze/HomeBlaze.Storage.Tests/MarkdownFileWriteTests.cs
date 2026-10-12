@@ -157,6 +157,27 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenReplaceTextRunsDuringAnotherWrite_ThenItWaitsAndReplacesInTheWrittenSource()
+    {
+        // Arrange - an editor save whose content is still being written.
+        WriteFile("Notes.md", "# Heading\n\nold");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        using var savedContent = new GatedStream("# Heading\n\nsaved by the editor"u8.ToArray());
+        var save = markdown.WriteAsync(savedContent, CancellationToken.None);
+        await savedContent.Started;
+
+        // Act
+        var replace = markdown.ReplaceTextAsync("saved by the editor", "changed by an agent", CancellationToken.None);
+        savedContent.Open();
+        await Task.WhenAll(save, replace);
+
+        // Assert
+        Assert.Equal("# Heading\n\nchanged by an agent", ReadFile("Notes.md"));
+        Assert.Equal("# Heading\n\nchanged by an agent", markdown.Content);
+    }
+
+    [Fact]
     public async Task WhenTheStorageIsNotLocal_ThenTheWriteOperationsAreRefusedWithoutWriting()
     {
         // Arrange
@@ -437,5 +458,40 @@ public class MarkdownFileWriteTests : IDisposable
         }
 
         _directory.Delete(recursive: true);
+    }
+
+    /// <summary>A stream whose reads wait until <see cref="Open"/> is called.</summary>
+    private sealed class GatedStream(byte[] content) : MemoryStream(content, writable: false)
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public void Open() => _gate.TrySetResult();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            _started.TrySetResult();
+            await _gate.Task.WaitAsync(cancellationToken);
+            return await base.ReadAsync(buffer, cancellationToken);
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            _started.TrySetResult();
+            _gate.Task.Wait();
+            return base.Read(buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            _started.TrySetResult();
+            _gate.Task.Wait();
+            return base.Read(buffer);
+        }
     }
 }

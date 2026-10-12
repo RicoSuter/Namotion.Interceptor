@@ -32,7 +32,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;
 
-    // Serializes the read-modify-write of ReplaceText with the other write operations of this file.
+    // Serializes every write of this file, so the read-modify-write of ReplaceText cannot interleave with another write.
+    // It is held while the storage reloads the file after a write, so nothing in that reload may write this file.
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     public IStorageContainer Storage { get; }
@@ -147,7 +148,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            await WriteBytesAsync(bytes, cancellationToken);
+            await WriteUnlockedAsync(bytes, cancellationToken);
         }
         finally
         {
@@ -200,7 +201,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             }
 
             var updated = string.Concat(source.AsSpan(0, index), newText, source.AsSpan(index + oldText.Length));
-            await WriteBytesAsync(MarkdownWriteRules.GetContentBytes(updated, nameof(newText)), cancellationToken);
+            await WriteUnlockedAsync(MarkdownWriteRules.GetContentBytes(updated, nameof(newText)), cancellationToken);
         }
         finally
         {
@@ -208,10 +209,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    private async Task WriteBytesAsync(byte[] bytes, CancellationToken cancellationToken)
+    private async Task WriteUnlockedAsync(byte[] bytes, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream(bytes, writable: false);
-        await WriteAsync(stream, cancellationToken);
+        await Storage.WriteBlobAsync(FullPath, stream, cancellationToken);
     }
 
     public Task OnFileChangedAsync(CancellationToken cancellationToken)
@@ -222,20 +223,34 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
 
-    public Task WriteAsync(Stream content, CancellationToken cancellationToken)
-        => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
+    public async Task WriteAsync(Stream content, CancellationToken cancellationToken)
+    {
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            await Storage.WriteBlobAsync(FullPath, content, cancellationToken);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
 
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
-        // Rebuild markdown with all embedded subjects serialized
-        Content = RebuildMarkdownContent();
-
-        // Write to storage
-        var bytes = Encoding.UTF8.GetBytes(Content);
-        using var stream = new MemoryStream(bytes);
-        await WriteAsync(stream, cancellationToken);
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Rebuild markdown with all embedded subjects serialized
+            Content = RebuildMarkdownContent();
+            await WriteUnlockedAsync(Encoding.UTF8.GetBytes(Content), cancellationToken);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
 
         return true;
     }
