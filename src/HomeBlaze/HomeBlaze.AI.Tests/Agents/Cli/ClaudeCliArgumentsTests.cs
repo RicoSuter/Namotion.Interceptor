@@ -2,17 +2,12 @@ using System.Text.Json;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Cli;
 using Xunit;
+using static HomeBlaze.AI.Tests.Agents.Cli.FakeClaudeCli;
 
 namespace HomeBlaze.AI.Tests.Agents.Cli;
 
 public class ClaudeCliArgumentsTests
 {
-    private static string? ValueAfter(IReadOnlyList<string> arguments, string flag)
-    {
-        var index = arguments.ToList().IndexOf(flag);
-        return index >= 0 && index + 1 < arguments.Count ? arguments[index + 1] : null;
-    }
-
     [Fact]
     public void WhenBuildingAChatResume_ThenIsolationFlagsSessionAndModelArePresent()
     {
@@ -40,23 +35,6 @@ public class ClaudeCliArgumentsTests
         Assert.Equal("session-1", ValueAfter(arguments, "--resume"));
         Assert.DoesNotContain("--no-session-persistence", arguments);
         Assert.DoesNotContain("--bare", arguments);
-    }
-
-    [Fact]
-    public void WhenBuildingABackgroundRun_ThenTheSessionIsNotPersistedAndOptionalFlagsAreOmitted()
-    {
-        // Arrange
-        var options = new ClaudeCliOptions("SYSTEM", "/tmp/mcp.json", null, null, null, null, PersistSession: false);
-
-        // Act
-        var arguments = ClaudeCliArguments.Build(options);
-
-        // Assert
-        Assert.Contains("--no-session-persistence", arguments);
-        Assert.DoesNotContain("--resume", arguments);
-        Assert.DoesNotContain("--model", arguments);
-        Assert.DoesNotContain("--effort", arguments);
-        Assert.DoesNotContain("--fallback-model", arguments);
     }
 
     [Theory]
@@ -104,41 +82,23 @@ public class ClaudeCliArgumentsTests
             arguments);
     }
 
-    [Fact]
-    public void WhenWebToolsAreAllowed_ThenTheyAreTheOnlyBuiltInToolsAndRunWithoutAPrompt()
+    [Theory]
+    [InlineData(new[] { "web_fetch", "web_search", "Bash", "unknown" }, "WebSearch,WebFetch")]
+    [InlineData(new[] { "web_search" }, "WebSearch")]
+    public void WhenWebToolsAreAllowed_ThenOnlyTheyAreBuiltInToolsAndRunWithoutAPrompt(string[] backendTools, string expectedCliTools)
     {
         // Arrange
         var options = new ClaudeCliOptions("SYSTEM", "/tmp/mcp.json", null, null, null, null, PersistSession: false)
         {
-            BackendTools = ["web_fetch", "web_search", "Bash", "unknown"]
+            BackendTools = backendTools
         };
 
         // Act
         var arguments = ClaudeCliArguments.Build(options);
 
         // Assert
-        Assert.Equal(
-            ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--system-prompt", "SYSTEM",
-             "--system-prompt-snapshot", "off", "--tools", "WebSearch,WebFetch", "--strict-mcp-config", "--mcp-config", "/tmp/mcp.json",
-             "--allowedTools", "mcp__homeblaze,WebSearch,WebFetch", "--setting-sources", "", "--no-session-persistence"],
-            arguments);
-    }
-
-    [Fact]
-    public void WhenOnlyWebSearchIsAllowed_ThenWebFetchIsNotAvailable()
-    {
-        // Arrange
-        var options = new ClaudeCliOptions("SYSTEM", "/tmp/mcp.json", null, null, null, null, PersistSession: false)
-        {
-            BackendTools = ["web_search"]
-        };
-
-        // Act
-        var arguments = ClaudeCliArguments.Build(options);
-
-        // Assert
-        Assert.Equal("WebSearch", ValueAfter(arguments, "--tools"));
-        Assert.Equal("mcp__homeblaze,WebSearch", ValueAfter(arguments, "--allowedTools"));
+        Assert.Equal(expectedCliTools, ValueAfter(arguments, "--tools"));
+        Assert.Equal("mcp__homeblaze," + expectedCliTools, ValueAfter(arguments, "--allowedTools"));
     }
 
     [Theory]

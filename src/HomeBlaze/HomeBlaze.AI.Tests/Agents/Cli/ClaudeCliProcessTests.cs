@@ -133,19 +133,6 @@ public class ClaudeCliProcessTests
 
         // Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
-        await AsyncTestHelpers.WaitUntilAsync(() => !IsRunning(cli.LastProcessId!.Value));
-    }
-
-    private static bool IsRunning(int processId)
-    {
-        try
-        {
-            using var process = System.Diagnostics.Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
+        await AsyncTestHelpers.WaitUntilAsync(() => !cli.IsLastProcessRunning);
     }
 }

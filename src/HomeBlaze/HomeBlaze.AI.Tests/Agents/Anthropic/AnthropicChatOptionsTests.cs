@@ -22,7 +22,7 @@ public class AnthropicChatOptionsTests
     public async Task WhenAnEffortIsSet_ThenTheRequestCarriesItAsOutputConfigEffort(AgentEffort effort, string expected)
     {
         // Arrange
-        var handler = new CapturingHandler();
+        var handler = new AnthropicStubHandler(HttpStatusCode.BadRequest, AnthropicStubHandler.ErrorBody("invalid_request_error", "captured"));
         using var client = CreateClient(handler);
         var options = AnthropicChatOptions.Create(Model, 1000, effort, []);
 
@@ -30,7 +30,7 @@ public class AnthropicChatOptionsTests
         await Assert.ThrowsAnyAsync<Exception>(() => client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], options));
 
         // Assert
-        var body = JsonDocument.Parse(handler.Body!).RootElement;
+        var body = JsonDocument.Parse(Assert.Single(handler.Requests).Body).RootElement;
         Assert.Equal(Model, body.GetProperty("model").GetString());
         Assert.Equal(1000, body.GetProperty("max_tokens").GetInt32());
         var message = Assert.Single(body.GetProperty("messages").EnumerateArray());
@@ -44,7 +44,7 @@ public class AnthropicChatOptionsTests
     public async Task WhenMaxEffortIsStreamedWithTools_ThenTheRequestCarriesTheChatMessagesToolsAndEffort()
     {
         // Arrange
-        var handler = new CapturingHandler();
+        var handler = new AnthropicStubHandler(HttpStatusCode.BadRequest, AnthropicStubHandler.ErrorBody("invalid_request_error", "captured"));
         using var client = CreateClient(handler);
         var options = AnthropicChatOptions.Create(Model, 1000, AgentEffort.Max, [CreateTool("browse")]);
 
@@ -60,7 +60,7 @@ public class AnthropicChatOptionsTests
         });
 
         // Assert
-        var body = JsonDocument.Parse(handler.Body!).RootElement;
+        var body = JsonDocument.Parse(Assert.Single(handler.Requests).Body).RootElement;
         Assert.True(body.GetProperty("stream").GetBoolean());
         Assert.Equal(Model, body.GetProperty("model").GetString());
         Assert.Equal(1000, body.GetProperty("max_tokens").GetInt32());
@@ -75,7 +75,7 @@ public class AnthropicChatOptionsTests
     public async Task WhenNoEffortIsSet_ThenTheRequestHasNoEffortAndNoThinking()
     {
         // Arrange
-        var handler = new CapturingHandler();
+        var handler = new AnthropicStubHandler(HttpStatusCode.BadRequest, AnthropicStubHandler.ErrorBody("invalid_request_error", "captured"));
         using var client = CreateClient(handler);
 
         // Act
@@ -83,7 +83,7 @@ public class AnthropicChatOptionsTests
             client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], AnthropicChatOptions.Create(Model, 1000, null, [])));
 
         // Assert
-        var body = JsonDocument.Parse(handler.Body!).RootElement;
+        var body = JsonDocument.Parse(Assert.Single(handler.Requests).Body).RootElement;
         Assert.Equal(Model, body.GetProperty("model").GetString());
         Assert.Equal(1000, body.GetProperty("max_tokens").GetInt32());
         Assert.False(body.TryGetProperty("output_config", out var outputConfig) && outputConfig.TryGetProperty("effort", out _));
@@ -95,15 +95,16 @@ public class AnthropicChatOptionsTests
     public async Task WhenWebToolsAreAllowed_ThenTheRequestCarriesTheServerToolsWithTheUseLimit()
     {
         // Arrange
-        var handler = new CapturingHandler();
+        var handler = new AnthropicStubHandler(HttpStatusCode.BadRequest, AnthropicStubHandler.ErrorBody("invalid_request_error", "captured"));
         using var client = CreateClient(handler);
-        var options = AnthropicChatOptions.Create(Model, 1000, null, [CreateTool("browse")], ["web_search", "web_fetch"], maxBackendToolUses: 7);
+        var options = AnthropicChatOptions.WithBackendToolUses(
+            AnthropicChatOptions.Create(Model, 1000, null, [CreateTool("browse")]), ["web_search", "web_fetch"], maxBackendToolUses: 7);
 
         // Act
         await Assert.ThrowsAnyAsync<Exception>(() => client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], options));
 
         // Assert
-        var tools = JsonDocument.Parse(handler.Body!).RootElement.GetProperty("tools").EnumerateArray().ToList();
+        var tools = JsonDocument.Parse(Assert.Single(handler.Requests).Body).RootElement.GetProperty("tools").EnumerateArray().ToList();
         Assert.Equal(3, tools.Count);
         Assert.Equal("browse", tools[0].GetProperty("name").GetString());
         Assert.Equal("""{"name":"web_search","type":"web_search_20260209","max_uses":7}""", tools[1].GetRawText());
@@ -114,15 +115,15 @@ public class AnthropicChatOptionsTests
     public async Task WhenNoWebToolIsAllowed_ThenTheRequestCarriesNoServerTool()
     {
         // Arrange
-        var handler = new CapturingHandler();
+        var handler = new AnthropicStubHandler(HttpStatusCode.BadRequest, AnthropicStubHandler.ErrorBody("invalid_request_error", "captured"));
         using var client = CreateClient(handler);
-        var options = AnthropicChatOptions.Create(Model, 1000, null, [CreateTool("browse")], [], maxBackendToolUses: 7);
+        var options = AnthropicChatOptions.WithBackendToolUses(AnthropicChatOptions.Create(Model, 1000, null, [CreateTool("browse")]), [], maxBackendToolUses: 7);
 
         // Act
         await Assert.ThrowsAnyAsync<Exception>(() => client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], options));
 
         // Assert
-        var tool = Assert.Single(JsonDocument.Parse(handler.Body!).RootElement.GetProperty("tools").EnumerateArray());
+        var tool = Assert.Single(JsonDocument.Parse(Assert.Single(handler.Requests).Body).RootElement.GetProperty("tools").EnumerateArray());
         Assert.Equal("browse", tool.GetProperty("name").GetString());
     }
 
@@ -137,19 +138,4 @@ public class AnthropicChatOptionsTests
         InputSchema = JsonDocument.Parse("""{"type":"object","properties":{}}""").RootElement,
         Handler = (_, _) => Task.FromResult<object?>(null)
     };
-
-    private sealed class CapturingHandler : HttpMessageHandler
-    {
-        public string? Body { get; private set; }
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Assert.NotNull(request.Content);
-            Body = await request.Content.ReadAsStringAsync(cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.BadRequest)
-            {
-                Content = new StringContent("""{"type":"error","error":{"type":"invalid_request_error","message":"captured"}}""")
-            };
-        }
-    }
 }

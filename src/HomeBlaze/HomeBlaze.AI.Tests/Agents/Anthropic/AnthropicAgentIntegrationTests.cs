@@ -39,12 +39,7 @@ public class AnthropicAgentIntegrationTests
         await test.Agent.SendMessageAsync("What is the value of /Temperature? Use the get_property tool.", CancellationToken.None);
 
         // Assert
-        foreach (var entry in test.Agent.Timeline.Entries)
-        {
-            _output.WriteLine($"{entry.Kind}: {entry.Text} (duration {entry.Duration}, tool calls: {string.Join(", ", entry.ToolCalls.Select(call => $"{call.Name}({call.Arguments}) error={call.IsError} result={call.ResultPreview}"))})");
-        }
-
-        _output.WriteLine($"Status: {test.Agent.Status}, message: {test.Agent.StatusMessage}");
+        test.WriteTimeline(_output);
 
         var reply = test.Agent.Timeline.Entries[^1];
         Assert.Equal(AgentTimelineEntryKind.Assistant, reply.Kind);

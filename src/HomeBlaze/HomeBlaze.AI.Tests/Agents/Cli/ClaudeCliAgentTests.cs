@@ -5,6 +5,7 @@ using HomeBlaze.AI.Agents.Cli;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
+using static HomeBlaze.AI.Tests.Agents.Cli.FakeClaudeCli;
 
 namespace HomeBlaze.AI.Tests.Agents.Cli;
 
@@ -29,12 +30,6 @@ public class ClaudeCliAgentTests
     {
         File.Delete(SessionPath(test));
         Directory.CreateDirectory(SessionPath(test));
-    }
-
-    private static string? ValueAfter(IReadOnlyList<string> arguments, string flag)
-    {
-        var index = arguments.ToList().IndexOf(flag);
-        return index >= 0 && index + 1 < arguments.Count ? arguments[index + 1] : null;
     }
 
     [UnixFact]
@@ -82,10 +77,10 @@ public class ClaudeCliAgentTests
     }
 
     [UnixFact]
-    public async Task WhenAQuietBackgroundRunHasTextBeforeAToolCall_ThenItIsQuietAndKeepsTheWholeAnswer()
+    public async Task WhenABackgroundRunHasTextBeforeAToolCall_ThenTheResultLineIsTheLastAnalysisAndTheEntryKeepsTheWholeAnswer()
     {
         // Arrange
-        using var cli = FakeClaudeCli.Create("text-tool-quiet.jsonl");
+        using var cli = FakeClaudeCli.Create("text-tool-text.jsonl");
         await using var test = await StartAsync(cli);
 
         // Act
@@ -93,9 +88,9 @@ public class ClaudeCliAgentTests
 
         // Assert
         var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
-        Assert.True(run.IsQuiet);
-        Assert.Equal("Checking the sensors.\n\n[quiet] nothing new", run.Text);
-        Assert.Null(test.Agent.LastAnalysis);
+        Assert.False(run.IsQuiet);
+        Assert.Equal("Checking the sensors.\n\nBoth logged.", run.Text);
+        Assert.Equal("Both logged.", test.Agent.LastAnalysis);
     }
 
     [UnixFact]
@@ -302,21 +297,8 @@ public class ClaudeCliAgentTests
 
         // Assert
         Assert.Contains("did not finish", test.Agent.StatusMessage);
-        await AsyncTestHelpers.WaitUntilAsync(() => !IsRunning(cli.LastProcessId!.Value), message: "The CLI process should be killed.");
+        await AsyncTestHelpers.WaitUntilAsync(() => !cli.IsLastProcessRunning, message: "The CLI process should be killed.");
         Assert.Empty(Directory.GetFiles(test.GetDataFilePath(AgentStorage.WorkingDirectorySuffix), ".mcp-*.json"));
-    }
-
-    private static bool IsRunning(int processId)
-    {
-        try
-        {
-            using var process = System.Diagnostics.Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
     }
 
     [UnixFact]

@@ -55,6 +55,30 @@ internal sealed class FakeClaudeCli : IDisposable
         }
     }
 
+    /// <summary>Whether the process of the last invocation still runs.</summary>
+    public bool IsLastProcessRunning
+    {
+        get
+        {
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(LastProcessId!.Value);
+                return !process.HasExited;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>The argument after <paramref name="flag"/>, or null when the flag is missing or last.</summary>
+    public static string? ValueAfter(IReadOnlyList<string> arguments, string flag)
+    {
+        var index = arguments.ToList().IndexOf(flag);
+        return index >= 0 && index + 1 < arguments.Count ? arguments[index + 1] : null;
+    }
+
     public void Dispose()
     {
         try

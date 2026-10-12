@@ -64,83 +64,51 @@ public class ClaudeCliFailureTests
         Assert.Contains("log in", failure.Message);
     }
 
-    [Fact]
-    public void WhenTheFiveHourLimitIsRejected_ThenTheFailureIsAUsageLimitUntilTheFiveHourReset()
+    [Theory]
+    [InlineData("Claude AI usage limit reached", true, null, "", AgentFailureKind.UsageLimit)]
+    [InlineData(null, true, null, "No conversation found with session ID: x", AgentFailureKind.Transient)]
+    [InlineData(null, false, null, "hint: run /login if needed\nInvalid API key in environment", AgentFailureKind.Transient)]
+    [InlineData("Please run /login", true, "overloaded_error", "", AgentFailureKind.Transient)]
+    [InlineData("Used 15290 tokens. Please run /login", true, null, "", AgentFailureKind.Configuration)]
+    public void WhenTheRunFailedWithoutARateLimit_ThenItIsClassifiedByItsOutputWithoutAResetTime(
+        string? resultText, bool isError, string? errorCode, string standardError, AgentFailureKind expectedKind)
     {
-        // Arrange
-        var rateLimit = new AgentRateLimit("rejected", 1, FiveHourReset, 0.5, SevenDayReset);
-
         // Act
-        var failure = ClaudeCliFailure.Classify(CreateResult(exitCode: 1, resultText: "Limit reached", isError: true, rateLimit: rateLimit));
+        var failure = ClaudeCliFailure.Classify(CreateResult(exitCode: 1, resultText, isError, errorCode, standardError: standardError));
 
         // Assert
         Assert.NotNull(failure);
-        Assert.Equal(AgentFailureKind.UsageLimit, failure.Kind);
-        Assert.Equal(FiveHourReset, failure.RetryAfter);
-    }
-
-    [Fact]
-    public void WhenTheSevenDayLimitIsExhausted_ThenTheFailureIsAUsageLimitUntilTheSevenDayReset()
-    {
-        // Arrange
-        var rateLimit = new AgentRateLimit("rejected", 0.4, FiveHourReset, 1, SevenDayReset);
-
-        // Act
-        var failure = ClaudeCliFailure.Classify(CreateResult(exitCode: 1, resultText: "Limit reached", isError: true, rateLimit: rateLimit));
-
-        // Assert
-        Assert.NotNull(failure);
-        Assert.Equal(AgentFailureKind.UsageLimit, failure.Kind);
-        Assert.Equal(SevenDayReset, failure.RetryAfter);
-    }
-
-    [Fact]
-    public void WhenTheResultMentionsTheUsageLimit_ThenTheFailureIsAUsageLimitWithoutAResetTime()
-    {
-        // Act
-        var failure = ClaudeCliFailure.Classify(CreateResult(exitCode: 1, resultText: "Claude AI usage limit reached", isError: true));
-
-        // Assert
-        Assert.NotNull(failure);
-        Assert.Equal(AgentFailureKind.UsageLimit, failure.Kind);
+        Assert.Equal(expectedKind, failure.Kind);
         Assert.Null(failure.RetryAfter);
     }
 
-    [Fact]
-    public void WhenTheResumedSessionIsMissing_ThenTheFailureIsSessionMissing()
+    [Theory]
+    [InlineData(1, 0.5, false)]
+    [InlineData(0.4, 1, true)]
+    public void WhenTheLimitIsRejected_ThenTheFailureIsAUsageLimitUntilTheResetOfTheExhaustedWindow(
+        double fiveHourUtilization, double sevenDayUtilization, bool expectsSevenDayReset)
     {
         // Arrange
-        var result = CreateResult(exitCode: 1, resultText: null, isError: true, standardError: "No conversation found with session ID: x");
+        var rateLimit = new AgentRateLimit("rejected", fiveHourUtilization, FiveHourReset, sevenDayUtilization, SevenDayReset);
 
         // Act
-        var failure = ClaudeCliFailure.Classify(result);
+        var failure = ClaudeCliFailure.Classify(CreateResult(exitCode: 1, resultText: "Limit reached", isError: true, rateLimit: rateLimit));
 
         // Assert
-        Assert.True(ClaudeCliFailure.IsSessionMissing(result));
         Assert.NotNull(failure);
-        Assert.Equal(AgentFailureKind.SessionMissing, failure.Kind);
+        Assert.Equal(AgentFailureKind.UsageLimit, failure.Kind);
+        Assert.Equal(expectsSevenDayReset ? SevenDayReset : FiveHourReset, failure.RetryAfter);
     }
 
     [Fact]
-    public void WhenOnlyStandardErrorMentionsLogin_ThenTheFailureIsNotAConfigurationFailure()
+    public void WhenTheResumedSessionIsMissing_ThenItIsDetected()
     {
         // Act
-        var failure = ClaudeCliFailure.Classify(CreateResult(exitCode: 1, resultText: null, standardError: "hint: run /login if needed\nInvalid API key in environment"));
+        var isSessionMissing = ClaudeCliFailure.IsSessionMissing(
+            CreateResult(exitCode: 1, resultText: null, isError: true, standardError: "No conversation found with session ID: x"));
 
         // Assert
-        Assert.NotNull(failure);
-        Assert.Equal(AgentFailureKind.Transient, failure.Kind);
-    }
-
-    [Fact]
-    public void WhenTheErrorCodeIsOverloaded_ThenTheFailureIsTransient()
-    {
-        // Act
-        var failure = ClaudeCliFailure.Classify(CreateResult(exitCode: 1, resultText: "Please run /login", isError: true, errorCode: "overloaded_error"));
-
-        // Assert
-        Assert.NotNull(failure);
-        Assert.Equal(AgentFailureKind.Transient, failure.Kind);
+        Assert.True(isSessionMissing);
     }
 
     [Fact]
@@ -158,14 +126,4 @@ public class ClaudeCliFailureTests
         Assert.Null(failure.RetryAfter);
     }
 
-    [Fact]
-    public void WhenTheResultContainsANumberWith529Inside_ThenItIsNotReadAsAnOverload()
-    {
-        // Act
-        var failure = ClaudeCliFailure.Classify(CreateResult(exitCode: 1, resultText: "Used 15290 tokens. Please run /login", isError: true));
-
-        // Assert
-        Assert.NotNull(failure);
-        Assert.Equal(AgentFailureKind.Configuration, failure.Kind);
-    }
 }

@@ -197,36 +197,23 @@ public class AnthropicAgentTests
             ];
     }
 
-    [Fact]
-    public async Task WhenTextPrecedesAToolCallInAQuietRun_ThenTheRunIsQuietAndKeepsTheWholeAnswer()
+    [Theory]
+    [InlineData("[quiet] nothing new", true, null)]
+    [InlineData("It is too warm.", false, "It is too warm.")]
+    public async Task WhenTextPrecedesAToolCallInABackgroundRun_ThenTheFinalTextDecidesQuietAndLastAnalysis(
+        string finalText, bool expectedIsQuiet, string? expectedLastAnalysis)
     {
         // Arrange
-        await using var test = await StartAsync(agent => RespondWithTextToolCallAndText(agent, "Let me check the temperature.", "[quiet] nothing new"));
+        await using var test = await StartAsync(agent => RespondWithTextToolCallAndText(agent, "Let me check the temperature.", finalText));
 
         // Act
         await test.RunNowAndWaitAsync();
 
         // Assert
         var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
-        Assert.True(run.IsQuiet);
-        Assert.Equal("Let me check the temperature.\n\n[quiet] nothing new", run.Text);
-        Assert.Null(test.Agent.LastAnalysis);
-    }
-
-    [Fact]
-    public async Task WhenTextPrecedesAToolCallInABackgroundRun_ThenTheLastAnalysisIsTheFinalText()
-    {
-        // Arrange
-        await using var test = await StartAsync(agent => RespondWithTextToolCallAndText(agent, "Let me check the temperature.", "It is too warm."));
-
-        // Act
-        await test.RunNowAndWaitAsync();
-
-        // Assert
-        var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
-        Assert.False(run.IsQuiet);
-        Assert.Equal("Let me check the temperature.\n\nIt is too warm.", run.Text);
-        Assert.Equal("It is too warm.", test.Agent.LastAnalysis);
+        Assert.Equal(expectedIsQuiet, run.IsQuiet);
+        Assert.Equal("Let me check the temperature.\n\n" + finalText, run.Text);
+        Assert.Equal(expectedLastAnalysis, test.Agent.LastAnalysis);
     }
 
     [Fact]
@@ -356,28 +343,7 @@ public class AnthropicAgentTests
     }
 
     [Fact]
-    public async Task WhenSummarizingFailed_ThenTheNextTurnDoesNotSummarizeAgain()
-    {
-        // Arrange
-        await using var test = await StartAsync(agent =>
-        {
-            agent.HistoryTokenBudget = 1000;
-            agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello"), Usage(5000)];
-            agent.Client.Summarize = () => throw new HttpRequestException("summary failed");
-        });
-        await test.Agent.SendMessageAsync("first", CancellationToken.None);
-        await test.Agent.SendMessageAsync("second", CancellationToken.None);
-
-        // Act
-        await test.Agent.SendMessageAsync("third", CancellationToken.None);
-
-        // Assert
-        Assert.Single(test.Agent.Client.SummaryOptions);
-        Assert.Equal("Hello", test.Agent.Timeline.Entries[^1].Text);
-    }
-
-    [Fact]
-    public async Task WhenSummarizingFails_ThenTheTurnSucceedsAndTheHistoryIsKept()
+    public async Task WhenSummarizingFails_ThenTheTurnSucceedsTheHistoryIsKeptAndTheNextTurnDoesNotSummarizeAgain()
     {
         // Arrange
         await using var test = await StartAsync(agent => agent.HistoryTokenBudget = 1000);
@@ -387,10 +353,13 @@ public class AnthropicAgentTests
 
         // Act
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
+        await test.Agent.SendMessageAsync("third", CancellationToken.None);
 
         // Assert
-        Assert.Equal(AgentTimelineEntryKind.Assistant, test.Agent.Timeline.Entries[^1].Kind);
-        Assert.Equal("Hello again", test.Agent.Timeline.Entries[^1].Text);
+        Assert.Single(test.Agent.Client.SummaryOptions);
+        Assert.Equal(
+            [AgentTimelineEntryKind.Assistant, AgentTimelineEntryKind.Assistant],
+            test.Agent.Timeline.Entries.Where(entry => entry.Text == "Hello again").Select(entry => entry.Kind));
         var session = await File.ReadAllTextAsync(SessionPath(test));
         Assert.Contains("\"first\"", session);
         Assert.Contains("\"second\"", session);
@@ -405,7 +374,7 @@ public class AnthropicAgentTests
         HttpStatusCode statusCode, string errorType, ServiceStatus expectedStatus, string expectedText)
     {
         // Arrange
-        var handler = new StubHandler(statusCode, ErrorBody(errorType, $"Request with key {ApiKey} failed"));
+        var handler = new AnthropicStubHandler(statusCode, AnthropicStubHandler.ErrorBody(errorType, $"Request with key {ApiKey} failed"));
         await using var test = await StartAsync(agent => agent.HttpHandler = handler);
 
         // Act
@@ -427,7 +396,7 @@ public class AnthropicAgentTests
     public async Task WhenTheRequestIsSent_ThenItEnablesPromptCachingAndUsesTheConfiguredModelAndLimit()
     {
         // Arrange
-        var handler = new StubHandler(HttpStatusCode.InternalServerError, ErrorBody("api_error", "failed"));
+        var handler = new AnthropicStubHandler(HttpStatusCode.InternalServerError, AnthropicStubHandler.ErrorBody("api_error", "failed"));
         await using var test = await StartAsync(agent =>
         {
             agent.HttpHandler = handler;
@@ -448,7 +417,7 @@ public class AnthropicAgentTests
     public async Task WhenTheApiKeyChanges_ThenANewClientSendsTheNewKey()
     {
         // Arrange
-        var handler = new StubHandler(HttpStatusCode.InternalServerError, ErrorBody("api_error", "failed"));
+        var handler = new AnthropicStubHandler(HttpStatusCode.InternalServerError, AnthropicStubHandler.ErrorBody("api_error", "failed"));
         await using var test = await StartAsync(agent => agent.HttpHandler = handler);
         await test.Agent.SendMessageAsync("first", CancellationToken.None);
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
@@ -466,7 +435,7 @@ public class AnthropicAgentTests
     public async Task WhenThePromptIsTooLong_ThenTheErrorPointsToANewConversation()
     {
         // Arrange
-        var handler = new StubHandler(HttpStatusCode.BadRequest, ErrorBody("invalid_request_error", "prompt is too long: 210000 tokens > 200000 maximum"));
+        var handler = new AnthropicStubHandler(HttpStatusCode.BadRequest, AnthropicStubHandler.ErrorBody("invalid_request_error", "prompt is too long: 210000 tokens > 200000 maximum"));
         await using var test = await StartAsync(agent => agent.HttpHandler = handler);
 
         // Act
@@ -483,9 +452,9 @@ public class AnthropicAgentTests
     public async Task WhenTheStreamReportsAnError_ThenTheErrorMessageIsShown()
     {
         // Arrange
-        var handler = new StubHandler(
+        var handler = new AnthropicStubHandler(
             HttpStatusCode.OK,
-            "event: error\ndata: " + ErrorBody("overloaded_error", "Overloaded") + "\n\n",
+            "event: error\ndata: " + AnthropicStubHandler.ErrorBody("overloaded_error", "Overloaded") + "\n\n",
             "text/event-stream");
         await using var test = await StartAsync(agent => agent.HttpHandler = handler);
 
@@ -521,13 +490,7 @@ public class AnthropicAgentTests
                 BlockStop(4),
                 MessageDelta("tool_use"),
                 """{"type":"message_stop"}"""),
-            Stream(
-                MessageStart("msg_2"),
-                BlockStart(0, """{"type":"text","text":""}"""),
-                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"The SDK is 10."}}""",
-                BlockStop(0),
-                MessageDelta("end_turn"),
-                """{"type":"message_stop"}"""));
+            TextAnswerStream("msg_2", "The SDK is 10."));
         await using var test = await StartAsync(agent =>
         {
             agent.HttpHandler = handler;
@@ -581,13 +544,7 @@ public class AnthropicAgentTests
                 BlockStop(1),
                 MessageDelta("pause_turn"),
                 """{"type":"message_stop"}"""),
-            Stream(
-                MessageStart("msg_2"),
-                BlockStart(0, """{"type":"text","text":""}"""),
-                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"No results."}}""",
-                BlockStop(0),
-                MessageDelta("end_turn"),
-                """{"type":"message_stop"}"""));
+            TextAnswerStream("msg_2", "No results."));
         await using var test = await StartAsync(agent =>
         {
             agent.HttpHandler = handler;
@@ -629,13 +586,7 @@ public class AnthropicAgentTests
                 BlockStop(2),
                 MessageDelta("tool_use"),
                 """{"type":"message_stop"}"""),
-            Stream(
-                MessageStart("msg_2"),
-                BlockStart(0, """{"type":"text","text":""}"""),
-                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"The page is unavailable."}}""",
-                BlockStop(0),
-                MessageDelta("end_turn"),
-                """{"type":"message_stop"}"""));
+            TextAnswerStream("msg_2", "The page is unavailable."));
         await using var test = await StartAsync(agent =>
         {
             agent.HttpHandler = handler;
@@ -663,26 +614,7 @@ public class AnthropicAgentTests
     public async Task WhenToolCallsUsedPartOfTheBudget_ThenTheNextRequestLimitsTheWebToolsToTheRest()
     {
         // Arrange - the first response searches once and calls get_property, which leaves 5 - 2 calls.
-        var handler = new SequenceHandler(
-            Stream(
-                MessageStart("msg_1"),
-                BlockStart(0, """{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}"""),
-                InputDelta(0, """{"query":"dotnet sdk"}"""),
-                BlockStop(0),
-                BlockStart(1, """{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}"""),
-                BlockStop(1),
-                BlockStart(2, """{"type":"tool_use","id":"toolu_1","name":"get_property","input":{}}"""),
-                InputDelta(2, """{"path":"/Temperature"}"""),
-                BlockStop(2),
-                MessageDelta("tool_use"),
-                """{"type":"message_stop"}"""),
-            Stream(
-                MessageStart("msg_2"),
-                BlockStart(0, """{"type":"text","text":""}"""),
-                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done."}}""",
-                BlockStop(0),
-                MessageDelta("end_turn"),
-                """{"type":"message_stop"}"""));
+        var handler = CreateSearchThenGetPropertyHandler();
         await using var test = await StartAsync(agent =>
         {
             agent.HttpHandler = handler;
@@ -705,26 +637,7 @@ public class AnthropicAgentTests
     public async Task WhenTheBudgetIsUsedUp_ThenTheWebToolsKeepAUseLimitOfOne()
     {
         // Arrange
-        var handler = new SequenceHandler(
-            Stream(
-                MessageStart("msg_1"),
-                BlockStart(0, """{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}"""),
-                InputDelta(0, """{"query":"dotnet sdk"}"""),
-                BlockStop(0),
-                BlockStart(1, """{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}"""),
-                BlockStop(1),
-                BlockStart(2, """{"type":"tool_use","id":"toolu_1","name":"get_property","input":{}}"""),
-                InputDelta(2, """{"path":"/Temperature"}"""),
-                BlockStop(2),
-                MessageDelta("tool_use"),
-                """{"type":"message_stop"}"""),
-            Stream(
-                MessageStart("msg_2"),
-                BlockStart(0, """{"type":"text","text":""}"""),
-                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done."}}""",
-                BlockStop(0),
-                MessageDelta("end_turn"),
-                """{"type":"message_stop"}"""));
+        var handler = CreateSearchThenGetPropertyHandler();
         await using var test = await StartAsync(agent =>
         {
             agent.HttpHandler = handler;
@@ -750,13 +663,7 @@ public class AnthropicAgentTests
     public async Task WhenNoWebToolIsAllowed_ThenTheRequestHasNoServerToolAndNoWebLine()
     {
         // Arrange
-        var handler = new SequenceHandler(Stream(
-            MessageStart("msg_1"),
-            BlockStart(0, """{"type":"text","text":""}"""),
-            """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi."}}""",
-            BlockStop(0),
-            MessageDelta("end_turn"),
-            """{"type":"message_stop"}"""));
+        var handler = new SequenceHandler(TextAnswerStream("msg_1", "Hi."));
         await using var test = await StartAsync(agent => agent.HttpHandler = handler);
 
         // Act
@@ -768,6 +675,30 @@ public class AnthropicAgentTests
         Assert.DoesNotContain(body.GetProperty("tools").EnumerateArray(), tool => tool.GetProperty("name").GetString() is "web_search" or "web_fetch");
         Assert.Equal("Hi.", test.Agent.Timeline.Entries[^1].Text);
     }
+
+    // The first response searches once and calls get_property; the second answers.
+    private static SequenceHandler CreateSearchThenGetPropertyHandler() => new(
+        Stream(
+            MessageStart("msg_1"),
+            BlockStart(0, """{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}"""),
+            InputDelta(0, """{"query":"dotnet sdk"}"""),
+            BlockStop(0),
+            BlockStart(1, """{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}"""),
+            BlockStop(1),
+            BlockStart(2, """{"type":"tool_use","id":"toolu_1","name":"get_property","input":{}}"""),
+            InputDelta(2, """{"path":"/Temperature"}"""),
+            BlockStop(2),
+            MessageDelta("tool_use"),
+            """{"type":"message_stop"}"""),
+        TextAnswerStream("msg_2", "Done."));
+
+    private static string TextAnswerStream(string id, string text) => Stream(
+        MessageStart(id),
+        BlockStart(0, """{"type":"text","text":""}"""),
+        $$$"""{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":{{{JsonSerializer.Serialize(text)}}}}}""",
+        BlockStop(0),
+        MessageDelta("end_turn"),
+        """{"type":"message_stop"}""");
 
     private static string Stream(params string[] events) =>
         string.Concat(events.Select(data => $"event: {JsonDocument.Parse(data).RootElement.GetProperty("type").GetString()}\ndata: {data}\n\n"));
@@ -798,45 +729,6 @@ public class AnthropicAgentTests
             Bodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));
             var stream = streams[Math.Min(Bodies.Count, streams.Length) - 1];
             var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(stream, System.Text.Encoding.UTF8, "text/event-stream") };
-            response.Headers.Add("x-should-retry", "false");
-            return response;
-        }
-    }
-
-    private static string ErrorBody(string type, string message) =>
-        JsonSerializer.Serialize(new Dictionary<string, object>
-        {
-            ["type"] = "error",
-            ["error"] = new Dictionary<string, string> { ["type"] = type, ["message"] = message }
-        });
-
-    private sealed record CapturedRequest(string? ApiKeyHeader, bool HasAuthorization, string Body);
-
-    private sealed class StubHandler : HttpMessageHandler
-    {
-        private readonly HttpStatusCode _statusCode;
-        private readonly string _body;
-        private readonly string _mediaType;
-
-        public StubHandler(HttpStatusCode statusCode, string body, string mediaType = "application/json")
-        {
-            _statusCode = statusCode;
-            _body = body;
-            _mediaType = mediaType;
-        }
-
-        public List<CapturedRequest> Requests { get; } = [];
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Assert.NotNull(request.Content);
-            Requests.Add(new CapturedRequest(
-                request.Headers.TryGetValues("x-api-key", out var values) ? values.Single() : null,
-                request.Headers.Authorization is not null,
-                await request.Content.ReadAsStringAsync(cancellationToken)));
-
-            var response = new HttpResponseMessage(_statusCode) { Content = new StringContent(_body, System.Text.Encoding.UTF8, _mediaType) };
-            // Keeps the SDK from retrying, which would wait between attempts.
             response.Headers.Add("x-should-retry", "false");
             return response;
         }

@@ -14,6 +14,7 @@ using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Testing;
+using Xunit.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -190,6 +191,17 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
         var runCount = Agent.RunCount;
         Agent.RunNow();
         await AsyncTestHelpers.WaitUntilAsync(() => Agent.RunCount > runCount && !Agent.IsBusy);
+    }
+
+    /// <summary>Writes the timeline entries and the status of the agent to the test output.</summary>
+    public void WriteTimeline(ITestOutputHelper output)
+    {
+            foreach (var entry in Agent.Timeline.Entries)
+            {
+                output.WriteLine($"{entry.Kind}: {entry.Text} (duration {entry.Duration}, tool calls: {string.Join(", ", entry.ToolCalls.Select(call => $"{call.Name}({call.Arguments}) error={call.IsError} result={call.ResultPreview}"))})");
+            }
+
+            output.WriteLine($"Status: {Agent.Status}, message: {Agent.StatusMessage}");
     }
 
     public async ValueTask DisposeAsync()
