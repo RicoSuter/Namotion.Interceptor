@@ -79,8 +79,12 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
             if (root == null)
                 return null;
 
-            var remainingPath = path[1..];
-            return _resolveCache.GetOrAdd((path, style), _ => ResolveInternal(root, remainingPath, style));
+            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again.
+            var key = (path, style);
+            if (_resolveCache.TryGetValue(key, out var cached))
+                return cached;
+
+            return _resolveCache.GetOrAdd(key, ResolveInternal(root, path[1..], style));
         }
 
         // Explicit relative: ./...
