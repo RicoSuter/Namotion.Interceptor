@@ -554,6 +554,124 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
+    public async Task WhenAChatTurnRuns_ThenTheLastActivityIsSetButNotTheLastRun()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        var userEntry = test.Agent.Timeline.Entries[0];
+        Assert.NotNull(test.Agent.LastActivityTime);
+        Assert.True(test.Agent.LastActivityTime >= userEntry.Timestamp);
+        Assert.True(test.Agent.LastActivityTime <= test.Agent.Timeline.Entries[^1].Timestamp);
+        Assert.Null(test.Agent.LastRunTime);
+        Assert.Equal(0, test.Agent.RunCount);
+    }
+
+    [Fact]
+    public async Task WhenAChatTurnFails_ThenTheLastActivityIsSet()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = (_, _, _) =>
+            throw new AgentTurnException(AgentFailureKind.Transient, "backend broke"));
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(AgentTimelineEntryKind.Error, test.Agent.Timeline.Entries[^1].Kind);
+        Assert.NotNull(test.Agent.LastActivityTime);
+        Assert.Null(test.Agent.LastRunTime);
+    }
+
+    [Fact]
+    public async Task WhenAChatMessageIsNotAnswered_ThenTheLastActivityIsNotSet()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The agent is not running.", test.Agent.Timeline.Entries[^1].Text);
+        Assert.Null(test.Agent.LastActivityTime);
+    }
+
+    [Fact]
+    public async Task WhenABackgroundRunRuns_ThenTheLastActivityAndTheLastRunAreItsStart()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+
+        // Act
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+
+        // Assert
+        Assert.NotNull(test.Agent.LastRunTime);
+        Assert.Equal(test.Agent.LastRunTime, test.Agent.LastActivityTime);
+        Assert.Equal(test.Agent.Timeline.Entries[^1].Timestamp, test.Agent.LastActivityTime);
+    }
+
+    [Fact]
+    public async Task WhenTheAgentRestarts_ThenTheLastActivityComesFromTheStatsFile()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        var lastActivity = test.Agent.LastActivityTime;
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        var statsPath = Path.Combine(test.DataDirectory, "Agents", "Agent.stats.json");
+        Assert.True(JsonDocument.Parse(await File.ReadAllTextAsync(statsPath)).RootElement.TryGetProperty("lastActivityTime", out _));
+
+        // Act
+        await RestartAsync(test.Agent);
+
+        // Assert
+        Assert.NotNull(lastActivity);
+        Assert.Equal(lastActivity, test.Agent.LastActivityTime);
+        Assert.Null(test.Agent.LastRunTime);
+    }
+
+    [Fact]
+    public async Task WhenTheStatsFileHasNoLastActivity_ThenItIsTakenFromTheNewestTimelineEntry()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.stats.json"), """{"backgroundRunCount":0}""");
+
+        // Act
+        await RestartAsync(test.Agent);
+
+        // Assert
+        Assert.Equal(test.Agent.Timeline.Entries[^1].Timestamp, test.Agent.LastActivityTime);
+    }
+
+    [Fact]
+    public async Task WhenANewConversationStarts_ThenTheLastActivityIsKept()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        var lastActivity = test.Agent.LastActivityTime;
+
+        // Act
+        await test.Agent.NewConversationAsync(CancellationToken.None);
+        await RestartAsync(test.Agent);
+
+        // Assert
+        Assert.NotNull(lastActivity);
+        Assert.Equal(lastActivity, test.Agent.LastActivityTime);
+    }
+
+    [Fact]
     public async Task WhenTheAgentRestarts_ThenTheRunCountComesFromTheStatsFileAndTheLastRunFromTheTimeline()
     {
         // Arrange

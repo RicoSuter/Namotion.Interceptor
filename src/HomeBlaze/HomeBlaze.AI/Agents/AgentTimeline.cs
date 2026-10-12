@@ -148,6 +148,13 @@ public sealed class AgentTimeline
     /// <summary>The start time of the newest background run, successful or not.</summary>
     public DateTimeOffset? GetLastBackgroundRunTime() => Entries.LastOrDefault(IsBackgroundRun)?.Timestamp;
 
+    /// <summary>
+    /// The time of the newest entry that belongs to a turn: a user message, a reply or a background run; null when
+    /// there is none.
+    /// </summary>
+    public DateTimeOffset? GetLastActivityTime() => Entries.LastOrDefault(entry =>
+        entry.Kind is AgentTimelineEntryKind.User or AgentTimelineEntryKind.Assistant || IsBackgroundRun(entry))?.Timestamp;
+
     /// <summary>The newest non-quiet background runs, oldest first.</summary>
     public IReadOnlyList<AgentTimelineEntry> GetRecentBackgroundResults(int count)
     {

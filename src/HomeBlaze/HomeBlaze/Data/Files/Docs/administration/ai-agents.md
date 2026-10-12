@@ -124,7 +124,7 @@ All settings are `[Configuration]` properties, stored in the agent's JSON file. 
 
 The effort is passed to the CLI as `--effort` and to the API as `output_config.effort`. On the API, any effort turns on adaptive thinking, whose tokens count against `MaxTokens`; without an effort the model's default applies.
 
-The agent also has state properties that show in its property panel and that MCP clients can read: `Status`, `StatusMessage`, `IsBusy`, `Last Analysis` (the newest background result that was not quiet), `Last Background Run`, `Background Runs` and, for CLI agents, the subscription usage of the last five hours and seven days.
+The agent also has state properties that show in its property panel and that MCP clients can read: `Status`, `StatusMessage`, `IsBusy`, `Last Analysis` (the newest background result that was not quiet), `Last Activity` (the start of the newest chat turn or background run, also shown on the Activity tab), `Last Background Run`, `Background Runs` and, for CLI agents, the subscription usage of the last five hours and seven days.
 
 ---
 
@@ -251,7 +251,7 @@ Besides its configuration file, each agent keeps its data in the `Agents` folder
 | `<name>.timeline.jsonl` | The timeline as JSON Lines. The newest 500 entries are kept; tool results are kept as previews of up to 2000 characters |
 | `<name>.memory.json` | The memory entries |
 | `<name>.session.json` | The chat session: the CLI session id, or the messages and summary of an `AnthropicAgent` |
-| `<name>.stats.json` | The number of background runs |
+| `<name>.stats.json` | The number of background runs and the time of the last activity |
 | `<name>.workdir/` | The working directory of the CLI |
 
 Renaming or moving the agent's file changes its path and so starts with new, empty files; the old files stay until you delete them. Deleting the files of an agent resets its timeline, memory, chat and run count.

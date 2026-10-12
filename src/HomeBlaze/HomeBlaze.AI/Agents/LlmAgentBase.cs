@@ -117,21 +117,28 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     [State("Last Analysis", Position = 4)]
     public partial string? LastAnalysis { get; internal set; }
 
+    /// <summary>
+    /// The start of the newest turn, chat or background, also of one that failed or was cancelled. Kept across
+    /// restarts and new conversations.
+    /// </summary>
+    [State("Last Activity", Position = 5)]
+    public partial DateTimeOffset? LastActivityTime { get; internal set; }
+
     /// <summary>The start of the newest background run, also of one that failed or was cancelled; chat turns do not count.</summary>
-    [State("Last Background Run", Position = 5)]
+    [State("Last Background Run", Position = 6)]
     public partial DateTimeOffset? LastRunTime { get; internal set; }
 
     /// <summary>
     /// The number of background runs, also those that failed or were cancelled; chat turns do not count. Kept across
     /// restarts and new conversations; deleting the agent's data files resets it.
     /// </summary>
-    [State("Background Runs", Position = 6)]
+    [State("Background Runs", Position = 7)]
     public partial int RunCount { get; internal set; }
 
-    [State("Usage (5 hours)", Position = 7)]
+    [State("Usage (5 hours)", Position = 8)]
     public partial double? FiveHourUsage { get; internal set; }
 
-    [State("Usage (7 days)", Position = 8)]
+    [State("Usage (7 days)", Position = 9)]
     public partial double? SevenDayUsage { get; internal set; }
 
     [Derived]
@@ -254,6 +261,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             try
             {
                 var started = BeginTurn("Answering");
+                await WriteRunStatisticsAsync();
                 var progress = CreateProgress();
                 var tools = CreateToolSet(progress);
                 var message = AgentPromptBuilder.BuildChatMessage(text, Timeline.GetFindingsSinceLastReply());
@@ -721,10 +729,16 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     };
 
     /// <summary>Counts a background run and persists the count; the caller holds the turn gate.</summary>
-    private async Task CountBackgroundRunAsync(DateTimeOffset started)
+    private Task CountBackgroundRunAsync(DateTimeOffset started)
     {
         LastRunTime = started;
         RunCount++;
+        return WriteRunStatisticsAsync();
+    }
+
+    /// <summary>Persists the run count and the last activity; the caller holds the turn gate.</summary>
+    private async Task WriteRunStatisticsAsync()
+    {
         var path = GetStoragePath(StatsSuffix);
         if (path is null)
         {
@@ -734,26 +748,28 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         try
         {
             // Not cancellable: the count of a finished run is written even while the host stops.
-            var content = JsonSerializer.Serialize(new AgentStats(RunCount), JsonSerializerOptions.Web);
+            var content = JsonSerializer.Serialize(new AgentStats(RunCount, LastActivityTime), JsonSerializerOptions.Web);
             await AtomicFile.WriteAllTextAsync(path, content, CancellationToken.None);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(exception, "The run count of agent {Agent} could not be written.", Title);
+            _logger.LogWarning(exception, "The run statistics of agent {Agent} could not be written.", Title);
         }
     }
 
     /// <summary>
-    /// Restores the run count from the stats file, or counts the background runs in the timeline when there is
-    /// none, and the last run from the timeline; the caller holds the turn gate.
+    /// Restores the run count and the last activity from the stats file, or from the timeline when the file or the
+    /// value is missing, and the last run from the timeline; the caller holds the turn gate.
     /// </summary>
     private async Task RestoreRunStatisticsAsync(CancellationToken cancellationToken)
     {
+        var statistics = await ReadRunStatisticsAsync(cancellationToken);
         LastRunTime = Timeline.GetLastBackgroundRunTime();
-        RunCount = await ReadRunCountAsync(cancellationToken) ?? Timeline.Entries.Count(AgentTimeline.IsBackgroundRun);
+        RunCount = statistics?.BackgroundRunCount ?? Timeline.Entries.Count(AgentTimeline.IsBackgroundRun);
+        LastActivityTime = statistics?.LastActivityTime ?? Timeline.GetLastActivityTime();
     }
 
-    private async Task<int?> ReadRunCountAsync(CancellationToken cancellationToken)
+    private async Task<AgentStats?> ReadRunStatisticsAsync(CancellationToken cancellationToken)
     {
         var path = GetStoragePath(StatsSuffix);
         if (path is null)
@@ -764,7 +780,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         try
         {
             var content = await File.ReadAllTextAsync(path, cancellationToken);
-            return JsonSerializer.Deserialize<AgentStats>(content, JsonSerializerOptions.Web)?.BackgroundRunCount;
+            return JsonSerializer.Deserialize<AgentStats>(content, JsonSerializerOptions.Web);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -772,12 +788,13 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
-            _logger.LogWarning(exception, "The stats file of agent {Agent} could not be read; the run count is taken from the timeline.", Title);
+            _logger.LogWarning(exception, "The stats file of agent {Agent} could not be read; the run statistics are taken from the timeline.", Title);
             return null;
         }
     }
 
-    private sealed record AgentStats(int BackgroundRunCount);
+    // LastActivityTime is missing in files written before it existed and then reads as null.
+    private sealed record AgentStats(int BackgroundRunCount, DateTimeOffset? LastActivityTime = null);
 
     private async Task<AgentTurnResult> RunTurnAsync(
         AgentTurnKind kind, string message, AgentToolSet tools, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
@@ -887,7 +904,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
         IsBusy = true;
         SetStatusIfStarted(ServiceStatus.Running, statusMessage);
-        return _services.TimeProvider.GetUtcNow();
+        var started = _services.TimeProvider.GetUtcNow();
+        LastActivityTime = started;
+        return started;
     }
 
     private void EndTurn()

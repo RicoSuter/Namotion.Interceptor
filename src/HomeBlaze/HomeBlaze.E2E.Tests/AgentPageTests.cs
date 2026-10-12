@@ -100,6 +100,46 @@ public class AgentPageTests
     }
 
     [Fact]
+    public async Task WhenAChatTurnRan_ThenTheActivityTabShowsTheLastActivityInTilesThatFitTheWidth()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // The fake CLI is a shell script.
+        }
+
+        // Arrange - the rate limit line adds the two usage tiles, so the tab shows all five.
+        const string output = """
+            {"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}
+            {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}},"session_id":"e2e-session"}
+            {"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.18,"resetsAt":1791663000},"seven_day":{"utilization":0.73,"resetsAt":1791748800}}}}
+            {"type":"result","subtype":"success","is_error":false,"result":"Hello","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}
+            """;
+
+        // Act & Assert
+        await RunChatAsync(output, async page =>
+        {
+            await Assertions.Expect(page.GetByTestId("agent-reply").Last).ToContainTextAsync("Hello", new() { Timeout = ReplyTimeout });
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Activity" }).ClickAsync();
+            var stats = page.GetByTestId("agent-stats");
+            await Assertions.Expect(stats.Locator(":scope > *")).ToHaveCountAsync(5, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(stats).ToContainTextAsync("Last activity");
+            await Assertions.Expect(stats).ToContainTextAsync("Last background run");
+            Assert.DoesNotContain("never", await stats.Locator(":scope > *").Nth(2).InnerTextAsync());
+
+            foreach (var (width, expectedRows) in new[] { (1440, 1), (390, 3) })
+            {
+                await page.SetViewportSizeAsync(width, 900);
+                await page.WaitForFunctionAsync(
+                    "expected => new Set([...document.querySelector('[data-testid=agent-stats]').children].map(tile => Math.round(tile.getBoundingClientRect().top))).size === expected",
+                    expectedRows);
+                var overflows = await stats.EvaluateAsync<bool>(
+                    "grid => grid.scrollWidth > grid.clientWidth || [...grid.children].some(tile => tile.scrollWidth > tile.clientWidth)");
+                Assert.False(overflows, $"The stat tiles overflow at a width of {width} px.");
+            }
+        });
+    }
+
+    [Fact]
     public async Task WhenTheCliIsNotLoggedIn_ThenTheChatShowsTheLoginError()
     {
         if (OperatingSystem.IsWindows())
