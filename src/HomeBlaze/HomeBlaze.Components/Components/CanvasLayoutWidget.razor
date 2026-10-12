@@ -8,7 +8,7 @@
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
 
-<div class="canvas-layout-container"
+<div class="canvas-layout-container @(IsEditing ? "editing" : "")"
      style="position: relative; width: 100%; min-height: @(Canvas?.MinHeight ?? 400)px;"
      @onclick="OnCanvasClick"
      @onclick:stopPropagation="true">
@@ -65,7 +65,8 @@
 </div>
 
 <style>
-    .canvas-layout-container {
+    /* The outline shows the area of the layout, so it is drawn in edit mode only. */
+    .canvas-layout-container.editing {
         background: rgba(0,0,0,0.02);
         border: 1px dashed rgba(128,128,128,0.3);
     }

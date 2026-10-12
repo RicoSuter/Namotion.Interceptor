@@ -22,7 +22,7 @@
             <MudTabPanel Tag="@tab"
                          Text="@tab.Title"
                          Icon="@MudBlazorIconResolver.ResolveOrNull(tab.Icon)">
-                <div class="tab-layout-panel layout-cell pa-4" data-testid="tab-panel">
+                <div class="tab-layout-panel layout-cell pt-4" data-testid="tab-panel">
                     <SubjectComponent @key="tab" Subject="@tab.Content" Type="SubjectComponentType.Widget" />
                 </div>
             </MudTabPanel>

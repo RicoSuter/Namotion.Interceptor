@@ -8,7 +8,7 @@
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
 
-<div class="grid-layout-container"
+<div class="grid-layout-container @(IsEditing ? "editing" : "")"
      style="display: grid;
             grid-template-rows: repeat(@(Grid?.Rows ?? 1), 1fr);
             grid-template-columns: repeat(@(Grid?.Columns ?? 1), 1fr);
@@ -71,7 +71,8 @@
 </div>
 
 <style>
-    .grid-layout-container {
+    /* The outline shows the area of the layout, so it is drawn in edit mode only. */
+    .grid-layout-container.editing {
         background: rgba(0,0,0,0.02);
         border: 1px dashed rgba(128,128,128,0.3);
         padding: 8px;
