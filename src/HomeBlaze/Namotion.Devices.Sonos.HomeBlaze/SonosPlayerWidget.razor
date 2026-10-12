@@ -27,7 +27,8 @@
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
             @if (Player?.CurrentTrackImageUri is { } image && image != _failedImageUri)
             {
-                <img src="@image" alt="" width="64" height="64" class="rounded flex-shrink-0" style="object-fit: cover"
+                @* The size is a style, because a page sets the height of its pictures and that overrides a height attribute. *@
+                <img src="@image" alt="" class="rounded flex-shrink-0" style="width: 64px; height: 64px; object-fit: cover"
                      @onerror="@(() => _failedImageUri = image)" />
             }
             else
