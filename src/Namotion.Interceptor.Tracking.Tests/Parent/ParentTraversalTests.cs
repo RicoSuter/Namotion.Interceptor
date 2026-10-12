@@ -57,6 +57,141 @@ public class ParentTraversalTests
         // Assert
         Assert.Null(result);
     }
+
+    [Fact]
+    public void WhenTwoMatchesAreOnOneChain_ThenReturnsTheNearer()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var nearer = new MarkedTraversalNode();
+        var between = new TraversalNode();
+        var farther = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(subject, nearer);
+        ParentTraversalGraph.Link(nearer, between);
+        ParentTraversalGraph.Link(between, farther);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(nearer, result);
+    }
+
+    [Fact]
+    public void WhenMatchIsTwoHundredLevelsUp_ThenFindsIt()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var topOfChain = ParentTraversalGraph.LinkChain(subject, 199);
+        var root = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(topOfChain, root);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(root, result);
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsItsOwnOnlyParent_ThenReturnsNull()
+    {
+        // Arrange
+        var subject = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(subject, subject);
+
+        // Act
+        var result = await ParentTraversalGraph.FindMarkerWithinTimeoutAsync(subject);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    public static TheoryData<int, int> CycleAndTailLengths()
+    {
+        var data = new TheoryData<int, int>();
+        foreach (var cycleLength in new[] { 1, 2, 3, 4, 5, 8, 9 })
+        {
+            for (var tailLength = 0; tailLength <= 4; tailLength++)
+            {
+                data.Add(cycleLength, tailLength);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(CycleAndTailLengths))]
+    public async Task WhenChainEndsInCycleWithoutMatch_ThenReturnsNull(int cycleLength, int tailLength)
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        ParentTraversalGraph.LinkTailAndCycle(subject, tailLength, cycleLength);
+
+        // Act
+        var result = await ParentTraversalGraph.FindMarkerWithinTimeoutAsync(subject);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public async Task WhenMatchIsInsideCycle_ThenFindsIt(int markedCyclePosition)
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var cycle = ParentTraversalGraph.LinkTailAndCycle(
+            subject, tailLength: 3, cycleLength: 5, markedCyclePosition);
+
+        // Act
+        var result = await ParentTraversalGraph.FindMarkerWithinTimeoutAsync(subject);
+
+        // Assert
+        Assert.Same(cycle[markedCyclePosition], result);
+    }
+
+    [Fact]
+    public void WhenChainReachesSubjectWithTwoParents_ThenFindsMatchAboveSecondParent()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var branching = ParentTraversalGraph.LinkChain(subject, 2);
+        var deadEnd = new TraversalNode();
+        var second = new TraversalNode();
+        var match = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(branching, deadEnd);
+        ParentTraversalGraph.Link(branching, second);
+        ParentTraversalGraph.Link(second, match);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(match, result);
+    }
+
+    [Fact]
+    public async Task WhenBranchLeadsOnlyBackToMatchingSubject_ThenReturnsNull()
+    {
+        // Arrange
+        var subject = new MarkedTraversalNode();
+        var branching = ParentTraversalGraph.LinkChain(subject, 2);
+        var deadEnd = new TraversalNode();
+        ParentTraversalGraph.Link(branching, deadEnd);
+        ParentTraversalGraph.Link(branching, subject);
+
+        // Act
+        var result = await ParentTraversalGraph.FindMarkerWithinTimeoutAsync(subject);
+
+        // Assert
+        Assert.Null(result);
+    }
 }
 
 [InterceptorSubject]
