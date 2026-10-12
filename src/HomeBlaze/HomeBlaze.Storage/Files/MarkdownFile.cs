@@ -140,10 +140,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     /// <summary>
     /// Replaces the whole Markdown source of the file. Embedded subject blocks must stay exactly as they are, and raw HTML,
-    /// element attributes and links other than http, https and mailto only as far as the file already has them.
+    /// images and media, custom containers, math and diagram blocks, element attributes and links other than http, https
+    /// and mailto only as far as the file already has them.
     /// </summary>
     /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes, or adds or
-    /// changes embedded subjects or HTML.</exception>
+    /// changes such content.</exception>
     /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
     [Operation(Title = "Replace Content", Description = "Replaces the whole markdown source of this file.", Icon = "EditNote")]
     public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
@@ -168,7 +169,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// under the rules of <see cref="ReplaceContentAsync"/>.
     /// </summary>
     /// <exception cref="ArgumentException">The text is empty, not found, found more than once, the result is larger than
-    /// <see cref="MaxContentSize"/> bytes, or it adds or changes embedded subjects or HTML.</exception>
+    /// <see cref="MaxContentSize"/> bytes, or it adds or changes such content.</exception>
     /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
     [Operation(Title = "Replace Text", Description = "Replaces one exact, unique passage of the markdown source.", Icon = "FindReplace")]
     public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)

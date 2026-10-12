@@ -7,6 +7,8 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Markdig;
+using Markdig.Extensions.CustomContainers;
+using Markdig.Extensions.Mathematics;
 using Markdig.Renderers;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
@@ -404,9 +406,9 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
-    /// Collects what in a Markdown source makes the page run code or subjects rather than show text, the way the page
-    /// parses it: the embedded subject blocks, and the raw HTML, element attributes and links with a scheme other than
-    /// http, https or mailto, each as its source text.
+    /// Collects what in a Markdown source makes the page run code or subjects, or load content, rather than show text,
+    /// the way the page parses it: the embedded subject blocks, and the raw HTML, images and media embeds, custom
+    /// containers, math and diagram blocks, element attributes and links with a scheme other than http, https or mailto.
     /// </summary>
     internal static (List<string> SubjectBlocks, List<string> ActiveMarkup) GetActiveContent(string source)
     {
@@ -428,8 +430,25 @@ public sealed partial class MarkdownContentParser
                 case HtmlInline htmlInline:
                     activeMarkup.Add("html:" + htmlInline.Tag);
                     break;
+                // An image loads from its host when the page is shown, and media links render images and video or
+                // audio URLs as players and frames of other sites.
+                case LinkInline { IsImage: true } image:
+                    activeMarkup.Add("image:" + image.Url);
+                    break;
                 case LinkInline { Url: { } url } when !IsSafeUrl(url):
                     activeMarkup.Add("url:" + url);
+                    break;
+                case CustomContainer container:
+                    activeMarkup.Add("container:" + container.Info + " " + container.Arguments);
+                    break;
+                case CustomContainerInline:
+                    activeMarkup.Add("container:inline");
+                    break;
+                case MathBlock math:
+                    activeMarkup.Add("math:" + math.Lines);
+                    break;
+                case FencedCodeBlock { Info: { } info } diagram when DiagramLanguages.Contains(info):
+                    activeMarkup.Add("diagram:" + info + ":" + diagram.Lines);
                     break;
                 case AutolinkInline { IsEmail: false } autolink when !IsSafeUrl(autolink.Url):
                     activeMarkup.Add("url:" + autolink.Url);
@@ -448,6 +467,9 @@ public sealed partial class MarkdownContentParser
 
         return (subjectBlocks, activeMarkup);
     }
+
+    // The fenced code languages the diagrams extension renders as diagrams instead of code.
+    private static readonly HashSet<string> DiagramLanguages = new(StringComparer.OrdinalIgnoreCase) { "mermaid", "nomnoml" };
 
     /// <summary>
     /// Whether a link target is relative or uses http, https or mailto. Browsers ignore whitespace and control

@@ -54,13 +54,13 @@ internal static class MarkdownWriteRules
 
     /// <summary>The message of the error for a write that adds or changes active content.</summary>
     public const string ActiveContentMessage =
-        "Embedded subjects, HTML, element attributes and links other than http, https and mailto cannot be added or changed " +
-        "through these operations; use the page editor.";
+        "Embedded subjects, HTML, images and media, custom containers, math and diagram blocks, element attributes and " +
+        "links other than http, https and mailto cannot be added or changed through these operations; use the page editor.";
 
     /// <summary>
     /// Ensures that the new source of a page keeps its embedded subject blocks exactly as they are, since adding,
-    /// changing or removing one creates, reconfigures or detaches a running subject, and adds no raw HTML, element
-    /// attributes or script links that the old source does not already contain.
+    /// changing or removing one creates, reconfigures or detaches a running subject, and adds none of the other active
+    /// content of <see cref="ActiveContentMessage"/> that the old source does not already contain.
     /// </summary>
     /// <exception cref="ArgumentException">The new source adds or changes such content.</exception>
     public static void EnsureActiveContentUnchanged(string oldSource, string newSource, string parameterName)
@@ -76,7 +76,7 @@ internal static class MarkdownWriteRules
     }
 
     /// <summary>
-    /// Ensures that the source of a new page has no embedded subject block, raw HTML, element attributes or script links.
+    /// Ensures that the source of a new page has none of the active content of <see cref="ActiveContentMessage"/>.
     /// </summary>
     /// <exception cref="ArgumentException">The source has such content.</exception>
     public static void EnsureNoActiveContent(string source, string parameterName)

@@ -625,7 +625,7 @@ public partial class FluentStorageContainer :
     /// Creates a Markdown file in the root folder of this storage and adds it as a page.
     /// </summary>
     /// <exception cref="ArgumentException">The name is not a plain file name ending in .md, the file exists, or the
-    /// content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes or has embedded subjects, HTML or script links.</exception>
+    /// content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes or has embedded subjects, HTML, images or other active content.</exception>
     /// <exception cref="InvalidOperationException">The storage is not local.</exception>
     [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
     public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)

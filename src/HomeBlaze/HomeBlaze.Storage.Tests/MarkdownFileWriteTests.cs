@@ -182,6 +182,8 @@ public class MarkdownFileWriteTests : IDisposable
 
         <div class="note">Handle with care</div>
 
+        ![Wiring](https://example.com/wiring.png)
+
         ```subject(motor)
         {
           "$type": "HomeBlaze.Samples.Motor",
@@ -204,6 +206,14 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("rpm.", "rpm. [Details](jav&#x61;script:alert(1))")]
     [InlineData("rpm.", "rpm. [Details][manual]\n\n[manual]: JavaScript:alert(1)")]
     [InlineData("rpm.", "rpm. <javascript:alert(1)>")]
+    [InlineData("rpm.", "rpm.\n\n![](https://www.youtube.com/watch?v=x)")]
+    [InlineData("rpm.", "rpm.\n\n![](https://h/x.mp4)")]
+    [InlineData("rpm.", "rpm. ![Pixel](https://tracker.example.com/pixel.png)")]
+    [InlineData("rpm.", "rpm. ![Pixel][pixel]\n\n[pixel]: https://tracker.example.com/pixel.png")]
+    [InlineData("rpm.", "rpm.\n\n:::warning\nCareful\n:::")]
+    [InlineData("rpm.", "rpm.\n\n$$\nx^2\n$$")]
+    [InlineData("rpm.", "rpm.\n\n```mermaid\ngraph TD; A-->B\n```")]
+    [InlineData("(https://example.com/wiring.png)", "(https://example.com/other.png)")]
     public async Task WhenReplacingTextAddsOrChangesActiveContent_ThenItIsRejectedAndTheFileIsUnchanged(string oldText, string newText)
     {
         // Arrange
@@ -214,7 +224,7 @@ public class MarkdownFileWriteTests : IDisposable
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(
             () => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
-        Assert.StartsWith("Embedded subjects, HTML, element attributes and links", exception.Message);
+        Assert.StartsWith("Embedded subjects, HTML, images and media", exception.Message);
         Assert.Equal(PageWithActiveContent, ReadFile("Motors.md"));
     }
 
@@ -223,6 +233,8 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("rpm.", "rpm. See [the manual](https://example.com/manual) or [the notes](Notes.md).")]
     [InlineData("rpm.", "rpm.\n\n| Speed | State |\n|:-----:|------:|\n| 1000 | ok |\n\n- [x] checked[^1]\n\n[^1]: A footnote.")]
     [InlineData("<div class=\"note\">Handle with care</div>\n\n", "")]
+    [InlineData("![Wiring](https://example.com/wiring.png)\n\n", "")]
+    [InlineData("rpm.", "rpm.\n\n```csharp\nvar speed = 1000;\n```")]
     public async Task WhenReplacingTextKeepsTheActiveContent_ThenTheTextIsChanged(string oldText, string newText)
     {
         // Arrange
@@ -273,6 +285,8 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("# Notes <span>inline</span>")]
     [InlineData("# Notes {style=\"color:red\"}")]
     [InlineData("[Run](javascript:alert(1))")]
+    [InlineData("![](https://www.youtube.com/watch?v=x)")]
+    [InlineData(":::note\nText\n:::")]
     public async Task WhenANewFileHasActiveContent_ThenCreatingItIsRejected(string content)
     {
         // Arrange

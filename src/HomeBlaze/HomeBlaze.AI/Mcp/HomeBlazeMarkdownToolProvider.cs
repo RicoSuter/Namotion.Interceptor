@@ -29,8 +29,8 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     public const string CreateMarkdownToolName = "create_markdown";
 
     private const string ActiveContentRule =
-        "Embedded subject blocks must stay exactly as they are, and HTML, element attributes and links other than http, " +
-        "https and mailto cannot be added. ";
+        "Embedded subject blocks must stay exactly as they are, and HTML, images and media, custom containers, math and " +
+        "diagram blocks, element attributes and links other than http, https and mailto cannot be added. ";
 
     private const string EditMarkdownDescription =
         "Replace one passage of a Markdown page or document (*.md): old_text must occur exactly once in the Markdown source, " +
@@ -49,7 +49,8 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     private const string CreateMarkdownDescription =
         "Create a Markdown page or document: folder_path is the path of a local storage folder or storage, name a plain " +
         "file name ending in .md that does not exist there yet, content the Markdown source (at most 64 KB) without " +
-        "embedded subject blocks, HTML or links other than http, https and mailto. " +
+        "embedded subject blocks, HTML, images and media, custom containers, math and diagram blocks, element attributes " +
+        "or links other than http, https and mailto. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private static readonly MarkdownTool EditMarkdownTool = new(
