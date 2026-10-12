@@ -256,16 +256,7 @@
             if (configurationOwner is IConfigurable configurable)
             {
                 var configurationWriter = RootManager.GetConfigurationWriter(configurationOwner);
-                var isWritten = await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
-
-                // The root manager is only the fallback for a subject that no writer holds, such as one that
-                // is being created and is added to its storage afterwards.
-                if (!isWritten && !ReferenceEquals(configurationWriter, RootManager))
-                {
-                    Snackbar.Add("The configuration was not saved: its storage is not connected or does not hold the subject any more.", Severity.Error);
-                    return;
-                }
-
+                await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
                 await configurable.ApplyConfigurationAsync(cancellationToken);
             }
 

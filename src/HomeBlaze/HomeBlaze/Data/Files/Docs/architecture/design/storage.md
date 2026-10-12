@@ -143,7 +143,7 @@ A connection to the storage owns its worker, its index and its timers. Connectin
 
 `StopAsync` stops the file watcher and the timers, so the tree no longer follows the storage, while writes still work. A pass that is running or already queued on the worker still completes. Behind those passes the worker releases the subjects that a pass created and did not place, because no pass places them any more. The stop does not wait for that. `StartAsync` connects again. A connect that its caller cancels, which a stop during the first pass does, leaves the status at `Disconnected` and not at `Error`. Unless the storage was stopped, the connection goes on following its storage and the cancelled first pass is retried like one that failed, so the pass that finishes sets the status. `Dispose` ends the connection for good: a connect afterwards fails.
 
-An operation that still waits on the worker when its connection ends fails with "Storage not connected", like an operation that arrives afterwards. Saving configuration returns `false` in both cases, which the edit panel reports as an error.
+An operation that still waits on the worker when its connection ends fails with "Storage not connected", like an operation that arrives afterwards. Saving configuration returns `false` in both cases.
 
 #### Known Limitations and Follow-ups
 
@@ -170,6 +170,7 @@ An operation that still waits on the worker when its connection ends fails with 
 - **Files that vanish during a listing.** A file that is deleted while the storage is listed can fail that pass, which is then retried.
 - **Cancelled calls.** A call that was given up because its caller was cancelled also makes the client refuse calls until it returns, so a pass in that moment fails and the status shows `Error` until the call has returned and the pass that then runs has finished.
 - **Cancelled operations.** A queued operation whose caller cancels is only dropped when the worker reaches it.
+- **A save that wrote nothing.** A writer returns `false` for a subject it does not hold and for a storage that is not connected, and the edit panel shows "Configuration saved." all the same. A save that arrives while its storage connects again is therefore reported as saved although nothing was written.
 - **Deleting a subject whose file became a folder.** Deleting a subject deletes what is at the path of its file. When that file was replaced by a folder of the same name and no pass has seen it yet, the folder is deleted with everything in it.
 - **Saves over outside edits.** Saving a subject writes its file as the subject holds it. An edit that was made to the file outside the application and that no pass has applied yet is overwritten.
 - **Foreign write right after an own write.** After a write, the worker records the hash of what it wrote and then reads the size and time of the file. A write by someone else that lands in between is recorded as the own content, so no pass loads it until the file changes again or an event names it.
