@@ -639,7 +639,17 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             return ValueTask.CompletedTask;
         }
 
-        foreach (var change in changes.Span)
+        if (CanRequestRun())
+        {
+            RequestRunOnWatchedChange(changes.Span, resolver, watchPaths);
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    private void RequestRunOnWatchedChange(ReadOnlySpan<SubjectPropertyChange> changes, ISubjectPathResolver resolver, string[] watchPaths)
+    {
+        foreach (var change in changes)
         {
             var subjectPath = resolver.GetPath(change.Property.Subject, PathStyle.Canonical);
             if (subjectPath is not null && AgentWatchPaths.Matches(subjectPath, change.Property.Name, watchPaths))
@@ -654,11 +664,21 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                     _scheduler?.RequestRun("change");
                 }
 
-                break;
+                return;
             }
         }
+    }
 
-        return ValueTask.CompletedTask;
+    /// <summary>
+    /// Whether a change request could start a run: the agent runs and no run is pending, since a request would
+    /// coalesce into the pending run, which reads the watched state only when it starts.
+    /// </summary>
+    private bool CanRequestRun()
+    {
+        lock (_stateLock)
+        {
+            return _scheduler is { IsRunPending: false };
+        }
     }
 
     // The scheduler callback: an exception escaping it ends the scheduler loop, so only cancellation of the

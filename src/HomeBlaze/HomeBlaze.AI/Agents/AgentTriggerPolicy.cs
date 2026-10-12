@@ -28,6 +28,9 @@ public sealed class AgentTriggerPolicy
     /// <summary>Why automatic runs are paused, or null.</summary>
     public string? PauseReason { get; private set; }
 
+    /// <summary>Whether a requested run has not started yet.</summary>
+    public bool IsRunPending => _pendingReason is not null;
+
     /// <summary>
     /// Applies new intervals, restarts the poll period and lifts a pause caused by a configuration error.
     /// </summary>

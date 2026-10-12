@@ -23,6 +23,24 @@ public class AgentTriggerPolicyTests
     }
 
     [Fact]
+    public void WhenARunIsRequested_ThenItIsPendingUntilItIsTaken()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, TimeSpan.Zero, Start);
+        var pendingBefore = policy.IsRunPending;
+
+        // Act
+        policy.RequestRun("change");
+        var pendingAfterRequest = policy.IsRunPending;
+        policy.TryTakeDueRun(Start, out _);
+
+        // Assert
+        Assert.False(pendingBefore);
+        Assert.True(pendingAfterRequest);
+        Assert.False(policy.IsRunPending);
+    }
+
+    [Fact]
     public void WhenThePollIntervalElapses_ThenAPollRunIsDue()
     {
         // Arrange

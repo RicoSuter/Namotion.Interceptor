@@ -48,6 +48,18 @@ public sealed class AgentTriggerScheduler
         }
     }
 
+    /// <summary>Whether a requested run has not started yet; a further request would coalesce into it.</summary>
+    public bool IsRunPending
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _policy.IsRunPending;
+            }
+        }
+    }
+
     /// <summary>Applies new intervals; see <see cref="AgentTriggerPolicy.Reconfigure"/>.</summary>
     public void Reconfigure(TimeSpan? pollInterval, TimeSpan minRunInterval)
     {
