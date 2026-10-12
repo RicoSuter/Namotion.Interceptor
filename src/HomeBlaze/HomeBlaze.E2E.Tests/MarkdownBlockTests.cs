@@ -579,6 +579,50 @@ public class MarkdownBlockTests
         Assert.Contains("Text inside the card\n::\n\nText after the card", source);
     }
 
+    [Fact]
+    public async Task WhenValueTileIsCreatedInTheEditor_ThenItsBlockIsWrittenToThePage()
+    {
+        // Arrange
+        await WriteScratchPageAsync("# Scratch\n\nText before the block\n");
+
+        var page = await OpenPageAsync(ScratchPage);
+        await Assertions.Expect(page.GetByText("Text before the block")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await SelectEditModeAsync(page, "Split");
+
+        var textLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "Text before the block" });
+        await Assertions.Expect(textLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await textLine.ClickAsync();
+
+        await page.GetByTestId("create-subject-button").ClickAsync();
+        await Assertions.Expect(SubjectSetupDialogTests.TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Act: the tile is found in the group "Dashboard" under its display name
+        await page.GetByTestId("type-group-dashboard").ClickAsync();
+        var tileRow = SubjectSetupDialogTests.TypeRows(page).Filter(new() { HasText = "Value tile" });
+        await Assertions.Expect(tileRow).ToHaveCountAsync(1);
+        await tileRow.ClickAsync();
+
+        var dialog = SubjectSetupDialogTests.Dialog(page);
+        var createButton = SubjectSetupDialogTests.CreateButton(page);
+        await Assertions.Expect(createButton).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await dialog.GetByLabel("Path", new() { Exact = true }).FillAsync("scratchmotor/CurrentSpeed");
+        await Assertions.Expect(createButton).ToBeEnabledAsync(new() { Timeout = 30000 });
+        await createButton.ClickAsync();
+
+        // Assert: the block is in the editor and in the file, with its head line and a closing line
+        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = 30000 });
+        var headLine = page.Locator(
+            ".monaco-editor .view-line", new() { HasTextString = ":: HomeBlaze.Components.ValueTile" });
+        await Assertions.Expect(headLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        var lines = (await File.ReadAllTextAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n").Split('\n');
+        var headLineIndex = Array.FindIndex(lines, line => line.StartsWith(":: HomeBlaze.Components.ValueTile", StringComparison.Ordinal));
+        Assert.True(headLineIndex >= 0, "The page has no head line of a ValueTile.");
+        Assert.Contains("Path=scratchmotor/CurrentSpeed", lines[headLineIndex]);
+        Assert.Equal("::", lines[headLineIndex + 1]);
+        Assert.Contains("Text before the block", lines);
+    }
+
     private static ILocator GetTab(ILocator tabLayout, string title)
     {
         return tabLayout.GetByRole(AriaRole.Tab, new() { Name = title, Exact = true });

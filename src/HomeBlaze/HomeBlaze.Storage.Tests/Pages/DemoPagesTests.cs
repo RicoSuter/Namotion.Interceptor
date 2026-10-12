@@ -66,7 +66,7 @@ public class DemoPagesTests
     }
 
     [Fact]
-    public async Task WhenDashboardPageIsLoaded_ThenItsFourTabsHoldTheLayoutsOfTheDashboard()
+    public async Task WhenDashboardPageIsLoaded_ThenItsTabsHoldTheLayoutsOfTheDashboard()
     {
         // Arrange
         var fixture = await CreateFixtureAsync();
@@ -76,16 +76,16 @@ public class DemoPagesTests
 
         // Assert
         var dashboard = Assert.Single(page.Children.Values.OfType<TabLayout>());
-        Assert.Equal(["Dashboard", "Devices", "Grid and Canvas", "On This Page"], dashboard.Tabs.Select(tab => tab.Title));
+        Assert.Equal(["Devices", "Grid and Canvas", "On This Page"], dashboard.Tabs.Select(tab => tab.Title));
         Assert.Equal(4, PageErrorBoxes.Flatten(page.Children.Values).OfType<TabLayout>().Count());
 
         // Tabs three levels deep: the tab of the devices holds a tab layout, and its tab of the fans holds another one.
-        var devices = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[1]));
+        var devices = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[0]));
         Assert.Equal(["Pumps", "Fans", "Conveyor", "Sample Devices"], devices.Tabs.Select(tab => tab.Title));
         var fans = Assert.Single(FindInTab<TabLayout>(devices.Tabs[1]));
         Assert.Equal(["Cooling Fan", "Exhaust Fan"], fans.Tabs.Select(tab => tab.Title));
 
-        var gridAndCanvas = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[2]));
+        var gridAndCanvas = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[1]));
         Assert.Equal(["Grid", "Canvas"], gridAndCanvas.Tabs.Select(tab => tab.Title));
         var grid = Assert.Single(FindInTab<GridLayout>(gridAndCanvas.Tabs[0]));
         Assert.Equal((2, 3, 5), (grid.Rows, grid.Columns, grid.Cells.Count));
@@ -93,10 +93,46 @@ public class DemoPagesTests
         Assert.Equal(3, canvas.Nodes.Count);
 
         // The motor that the page creates is shown once more by its name, in the same tab.
-        var ownTab = PageErrorBoxes.Flatten([dashboard.Tabs[3]]).ToList();
+        var ownTab = PageErrorBoxes.Flatten([dashboard.Tabs[2]]).ToList();
         var motor = Assert.Single(ownTab.OfType<Motor>());
         Assert.Equal("Dashboard Motor", motor.Name);
         Assert.Same(motor, Assert.Single(ownTab.OfType<Widget>()).ResolvedSubject);
+    }
+
+    [Fact]
+    public async Task WhenDashboardPageIsLoaded_ThenItUsesEveryValueWidgetAndEachMapOfAWidgetIsTheMapOfThePage()
+    {
+        // Arrange
+        var fixture = await CreateFixtureAsync();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Dashboard.md");
+
+        // Assert
+        var subjects = PageErrorBoxes.Flatten(page.Children.Values).ToList();
+        var map = Assert.IsType<ValueMap>(((IPathScope)page).TryGetNamedSubject("motorstate"));
+        Assert.Equal(Enum.GetNames<MotorStatus>(), map.Cases.Select(valueCase => valueCase.Value));
+
+        var tiles = subjects.OfType<ValueTile>().ToList();
+        Assert.Equal(5, tiles.Count);
+        Assert.All(tiles, tile => Assert.StartsWith("/Demo/", tile.Path));
+
+        var cards = subjects.OfType<Card>().Where(card => card.Subtitle is not null).ToList();
+        Assert.Equal(5, cards.Count);
+        Assert.All(cards, card => Assert.Single(Assert.IsType<MarkdownFragment>(card.HeaderRight).Children.Values.OfType<Indicator>()));
+
+        var panels = Assert.Single(subjects.OfType<ExpansionPanels>());
+        Assert.Equal(["Drives", "Fans", "All Motors"], panels.Panels.Select(panel => panel.Title));
+        Assert.Equal([true, false, false], panels.Panels.Select(panel => panel.Expanded));
+
+        Assert.NotEmpty(subjects.OfType<ValueList>());
+        Assert.NotEmpty(subjects.OfType<Progress>());
+        Assert.NotEmpty(subjects.OfType<Alert>());
+
+        var maps = subjects.OfType<ValueRow>().Select(row => row.Map)
+            .Concat(subjects.OfType<Indicator>().Select(indicator => indicator.Map))
+            .Where(name => name is not null);
+        Assert.All(maps, name => Assert.Equal("motorstate", name));
     }
 
     [Fact]
