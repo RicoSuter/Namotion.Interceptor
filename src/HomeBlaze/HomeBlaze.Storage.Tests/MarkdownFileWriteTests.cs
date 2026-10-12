@@ -297,6 +297,8 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("no:tes.md")]
     [InlineData("no*tes.md")]
     [InlineData("no\ntes.md")]
+    [InlineData("no\u200Btes.md")]
+    [InlineData("notes\u202Edm.txt.md")]
     public async Task WhenTheNameIsNotAPlainMarkdownFileName_ThenCreatingTheFileIsRejected(string name)
     {
         // Arrange

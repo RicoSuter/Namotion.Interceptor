@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -63,14 +64,14 @@ internal static class MarkdownWriteRules
             name == name.Trim() &&
             !name.StartsWith('.') &&
             name.IndexOfAny(InvalidFileNameCharacters) < 0 &&
-            !name.Any(char.IsControl) &&
+            !name.Any(character => char.IsControl(character) || char.GetUnicodeCategory(character) == UnicodeCategory.Format) &&
             !StoragePathFilter.IsTemporaryFile(name);
 
         if (!isValid)
         {
             throw new ArgumentException(
                 $"'{name}' is not a valid Markdown file name: use a plain file name ending in .md, without folders, " +
-                "a leading dot or any of the characters / \\ : * ? \" < > |.", parameterName);
+                "a leading dot, invisible formatting characters or any of the characters / \\ : * ? \" < > |.", parameterName);
         }
     }
 }
