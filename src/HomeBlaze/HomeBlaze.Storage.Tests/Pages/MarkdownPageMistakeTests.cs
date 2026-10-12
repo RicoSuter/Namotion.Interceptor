@@ -1000,7 +1000,7 @@ public class MarkdownPageMistakeTests
         "Line 2: Motor has no slots, so 'Footer' cannot be used inside it.")]
     [InlineData(
         ":: HomeBlaze.Components.Card Titel=x\n::",
-        "Line 1: Card has no configuration property 'Titel'. Available: Icon, Title.")]
+        "Line 1: Card has no configuration property 'Titel'. Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.")]
     public async Task WhenNameIsUnknown_ThenTheMessageListsTheNamesOrSaysThatTheTypeHasNone(string source, string expectedBox)
     {
         // Arrange

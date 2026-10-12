@@ -359,7 +359,7 @@ The body of the card.
 ~~~~
 
 ~~~~text
-Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Available: Icon, Title.
+Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.
 ~~~~
 
 ### Closing and Nesting
@@ -711,7 +711,7 @@ The footer of the card.
 ~~~~
 
 ~~~~text
-Line 4: Card has no slot 'Footr'. Available: Content, Footer.
+Line 4: Card has no slot 'Footr'. Available: Content, Footer, HeaderRight.
 ~~~~
 
 **Arguments on a slot that holds content.** The footer of a card is content and has no properties.
