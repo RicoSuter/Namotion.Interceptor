@@ -195,6 +195,132 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenStorageIsStoppedAfterPassThatEndedEarly_ThenDeviceThatPassCreatedIsDetachedAndStopped()
+    {
+        // Arrange: the first pass creates the device and ends before it places anything.
+        WriteFile("A.json", RecordingDevice.Serialize("A"));
+        WriteFile("B.gated");
+        WriteFile("C.gated");
+        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
+        var device = Assert.Single(RecordingDevice.Created);
+        await device.WhenStartedAsync();
+        _client!.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+
+        // Act: what the host does with a storage that leaves the tree, such as one whose file was deleted.
+        await storage.StopAsync(CancellationToken.None);
+
+        // Assert
+        await device.WhenStoppedAsync();
+        Assert.Empty(storage.Children);
+        Assert.Equal(1, _recorder.CountDetachesOf(device));
+        Assert.False(IsAttached(device));
+    }
+
+    [Fact]
+    public async Task WhenStorageIsStoppedDuringItsFirstPass_ThenDeviceThatPassCreatedIsDetachedAndStopped()
+    {
+        // Arrange
+        WriteFile("A.json", RecordingDevice.Serialize("A"));
+        WriteFile("B.gated");
+        WriteFile("C.gated");
+        var gate = GatedFile.PauseNextLoad();
+        var storage = await StartHostedStorageAsync();
+        await gate.WhenReachedAsync();
+        var device = Assert.Single(RecordingDevice.Created);
+        await device.WhenStartedAsync();
+
+        // Act: the stop cancels the first pass, which ends before it places anything.
+        var stop = storage.StopAsync(CancellationToken.None);
+        gate.Release();
+        await stop;
+
+        // Assert
+        await device.WhenStoppedAsync();
+        Assert.Empty(storage.Children);
+        Assert.Equal(1, _recorder.CountDetachesOf(device));
+        Assert.False(IsAttached(device));
+    }
+
+    [Fact]
+    public async Task WhenStorageIsStopped_ThenPlacedDeviceIsNeitherDetachedNorStopped()
+    {
+        // Arrange
+        WriteFile("A.json", RecordingDevice.Serialize("A"));
+        WriteFile("Page.md", SerializePageWithDevice("embedded"));
+        var storage = await StartHostedStorageAsync();
+        await storage.ExecuteTask!;
+        var devices = RecordingDevice.Created;
+
+        // Act
+        await storage.StopAsync(CancellationToken.None);
+        await storage.WriteConfigurationAsync(devices[0], CancellationToken.None);
+
+        // Assert: the save ran on the worker behind what the stop left there.
+        await WaitUntilHostHasHandledEveryChangeAsync();
+        Assert.Equal(2, devices.Count);
+        foreach (var device in devices)
+        {
+            Assert.Equal(0, _recorder.CountDetachesOf(device));
+            Assert.True(IsAttached(device));
+            Assert.False(device.IsStopped);
+        }
+    }
+
+    [Theory]
+    [InlineData("X/A.json", "X/A/Page.md", "A.json")]
+    [InlineData("Docs.json", "Other/Page.md", "Other/Docs.json")]
+    public async Task WhenDeviceMovesToAnotherFolderAndFolderTakesOverItsKey_ThenItIsNeitherDetachedNorStopped(
+        string devicePath, string pagePath, string movedPath)
+    {
+        // Arrange: in the first row the folder of the page asks for the key that the device holds, and is left out.
+        WriteFile(devicePath, RecordingDevice.Serialize("device"));
+        var storage = await StartHostedStorageAsync();
+        await storage.ExecuteTask!;
+        var device = Assert.Single(RecordingDevice.Created);
+        await device.WhenStartedAsync();
+        WriteFile(pagePath);
+        await storage.ReconcileAsync();
+
+        // Act
+        Directory.CreateDirectory(Path.GetDirectoryName(GetFullPath(movedPath))!);
+        File.Move(GetFullPath(devicePath), GetFullPath(movedPath));
+        await storage.ReconcileAsync();
+
+        // Assert
+        await WaitUntilHostHasHandledEveryChangeAsync();
+        Assert.Same(device, FindSubject(storage, movedPath[..^".json".Length]));
+        Assert.IsType<MarkdownFile>(FindSubject(storage, pagePath));
+        Assert.Single(RecordingDevice.Created, created => created.Name == "device");
+        Assert.Equal(0, _recorder.CountDetachesOf(device));
+        Assert.False(device.IsStopped);
+    }
+
+    [Fact]
+    public async Task WhenDeviceMovesToKeyOfFileThatIsDeletedInTheSamePass_ThenItIsNeitherDetachedNorStopped()
+    {
+        // Arrange: the plain file "A" holds the key that the device asks for once its file is in the same folder.
+        WriteFile("Source/A.json", RecordingDevice.Serialize("device"));
+        WriteFile("Target/A");
+        var storage = await StartHostedStorageAsync();
+        await storage.ExecuteTask!;
+        var device = Assert.Single(RecordingDevice.Created);
+        await device.WhenStartedAsync();
+
+        // Act
+        File.Delete(GetFullPath("Target/A"));
+        File.Move(GetFullPath("Source/A.json"), GetFullPath("Target/A.json"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        await WaitUntilHostHasHandledEveryChangeAsync();
+        Assert.Same(device, FindSubject(storage, "Target/A"));
+        Assert.Single(RecordingDevice.Created, created => created.Name == "device");
+        Assert.Equal(0, _recorder.CountDetachesOf(device));
+        Assert.False(device.IsStopped);
+    }
+
+    [Fact]
     public async Task WhenPlacedDeviceIsRemoved_ThenItIsDetachedOnce()
     {
         // Arrange
@@ -382,6 +508,19 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
         await device.WhenStoppedAsync();
         Assert.Equal(1, _recorder.CountAttachesOf(device));
         Assert.Equal(1, _recorder.CountDetachesOf(device));
+    }
+
+    /// <summary>The subject under the keys of a path, which name a folder each up to the last one.</summary>
+    private static IInterceptorSubject FindSubject(FluentStorageContainer storage, string keyPath)
+    {
+        var keys = keyPath.Split('/');
+        var children = storage.Children;
+        foreach (var key in keys[..^1])
+        {
+            children = Assert.IsType<VirtualFolder>(children[key]).Children;
+        }
+
+        return children[keys[^1]];
     }
 
     private static string SerializePageWithDevice(string deviceName)

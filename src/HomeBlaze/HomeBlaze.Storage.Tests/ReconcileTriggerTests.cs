@@ -8,7 +8,7 @@ public class ReconcileTriggerTests
     private readonly List<(IReadOnlySet<string> NamedPaths, bool AllNamed)> _passes = [];
     private TaskCompletionSource? _runningPass;
     private Func<Task>? _failPass;
-    private bool _isPassFinished = true;
+    private ReconcileOutcome _outcome = ReconcileOutcome.Finished;
 
     [Fact]
     public void WhenPathChanges_ThenPassRunsAfterQuietPeriod()
@@ -291,10 +291,10 @@ public class ReconcileTriggerTests
     {
         // Arrange
         using var trigger = CreateTrigger();
-        _isPassFinished = false;
+        _outcome = ReconcileOutcome.Failed;
         trigger.NotifyChanged("Home.md");
         _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
-        _isPassFinished = true;
+        _outcome = ReconcileOutcome.Finished;
 
         // Act
         _timeProvider.Advance(ReconcileTrigger.MaximumDelay - TimeSpan.FromMilliseconds(1));
@@ -314,7 +314,7 @@ public class ReconcileTriggerTests
     {
         // Arrange
         using var trigger = CreateTrigger();
-        _isPassFinished = false;
+        _outcome = ReconcileOutcome.Failed;
 
         // Act
         trigger.NotifyChanged("Home.md");
@@ -330,16 +330,16 @@ public class ReconcileTriggerTests
     {
         // Arrange
         using var trigger = CreateTrigger();
-        _isPassFinished = false;
+        _outcome = ReconcileOutcome.Failed;
         trigger.NotifyChanged("Home.md");
         _timeProvider.Advance(TimeSpan.FromHours(1));
-        _isPassFinished = true;
+        _outcome = ReconcileOutcome.Finished;
         trigger.NotifyChanged("Home.md");
         _timeProvider.Advance(TimeSpan.FromHours(1));
         var passesBeforeLaterFailure = _passes.Count;
 
         // Act
-        _isPassFinished = false;
+        _outcome = ReconcileOutcome.Failed;
         trigger.NotifyChanged("Home.md");
         _timeProvider.Advance(TimeSpan.FromHours(1));
 
@@ -353,7 +353,7 @@ public class ReconcileTriggerTests
     {
         // Arrange
         using var trigger = CreateTrigger();
-        _isPassFinished = false;
+        _outcome = ReconcileOutcome.Failed;
         _runningPass = new TaskCompletionSource();
         trigger.NotifyChanged("First.md");
         _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
@@ -362,7 +362,7 @@ public class ReconcileTriggerTests
         // Act
         var failedPass = _runningPass;
         _runningPass = null;
-        _isPassFinished = true;
+        _outcome = ReconcileOutcome.Finished;
         failedPass.SetResult();
         _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
         var passesAfterQuietPeriod = _passes.Count;
@@ -379,7 +379,7 @@ public class ReconcileTriggerTests
     {
         // Arrange
         var trigger = CreateTrigger();
-        _isPassFinished = false;
+        _outcome = ReconcileOutcome.Failed;
         trigger.NotifyChanged("Home.md");
         _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
 
@@ -397,7 +397,7 @@ public class ReconcileTriggerTests
     {
         // Arrange
         var trigger = CreateTrigger();
-        _isPassFinished = false;
+        _outcome = ReconcileOutcome.Failed;
         _runningPass = new TaskCompletionSource();
         trigger.NotifyChanged("Home.md");
         _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
@@ -430,6 +430,56 @@ public class ReconcileTriggerTests
     }
 
     [Fact]
+    public void WhenPassIsRefused_ThenNoRetryFollowsUntilStorageAnswersAgain()
+    {
+        // Arrange: a pass fails, and its retry is refused because the storage does not answer.
+        using var trigger = CreateTrigger();
+        _outcome = ReconcileOutcome.Failed;
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+        _outcome = ReconcileOutcome.Refused;
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+        var passesWhileStorageRefuses = _passes.Count;
+        var armedTimersWhileStorageRefuses = _timeProvider.ArmedTimerCount;
+
+        // Act
+        _outcome = ReconcileOutcome.Finished;
+        trigger.NotifyStorageAnswersAgain();
+        _timeProvider.Advance(TimeSpan.Zero);
+
+        // Assert: the pass that failed has kept what it was asked to look at, so the later pass names nothing.
+        Assert.Equal(2, passesWhileStorageRefuses);
+        Assert.Equal(0, armedTimersWhileStorageRefuses);
+        Assert.Equal(3, _passes.Count);
+        Assert.Empty(_passes[2].NamedPaths);
+        Assert.False(_passes[2].AllNamed);
+    }
+
+    [Fact]
+    public void WhenRetryIsRefused_ThenItDoesNotCountAsOneOfTheRetries()
+    {
+        // Arrange
+        using var trigger = CreateTrigger();
+        _outcome = ReconcileOutcome.Failed;
+        trigger.NotifyChanged("Home.md");
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+        _outcome = ReconcileOutcome.Refused;
+        _timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+        var passesWhileStorageRefuses = _passes.Count;
+
+        // Act: the pass for the storage that answers again fails, and so does every pass after it.
+        _outcome = ReconcileOutcome.Failed;
+        trigger.NotifyStorageAnswersAgain();
+        _timeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Assert: after the pass that failed first and its refused retry, the pass that was asked for is the
+        // first of the retries that are left.
+        Assert.Equal(2, passesWhileStorageRefuses);
+        Assert.Equal(2 + ReconcileTrigger.MaximumRetryCount, _passes.Count);
+        Assert.Equal(0, _timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
     public async Task WhenTriggerIsCreatedWithinFlow_ThenItsPassesDoNotCarryThatFlow()
     {
         // Arrange
@@ -441,7 +491,7 @@ public class ReconcileTriggerTests
             (_, _) =>
             {
                 flowOfPass.TrySetResult(flow.Value);
-                return Task.FromResult(true);
+                return Task.FromResult(ReconcileOutcome.Finished);
             },
             TimeSpan.Zero);
 
@@ -457,9 +507,9 @@ public class ReconcileTriggerTests
             async (namedPaths, allNamed) =>
             {
                 _passes.Add((namedPaths, allNamed));
-                var isFinished = _isPassFinished;
+                var outcome = _outcome;
                 await (_failPass?.Invoke() ?? _runningPass?.Task ?? Task.CompletedTask);
-                return isFinished;
+                return outcome;
             },
             periodicInterval ?? TimeSpan.Zero,
             _timeProvider);

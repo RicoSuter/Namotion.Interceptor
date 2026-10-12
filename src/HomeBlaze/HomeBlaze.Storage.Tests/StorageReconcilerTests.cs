@@ -7,6 +7,7 @@ using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests;
@@ -1046,6 +1047,39 @@ public class StorageReconcilerTests : StorageTestBase
         Assert.IsType<OperationCanceledException>(exception, exactMatch: false);
         Assert.Equal(StorageStatus.Disconnected, storage.Status);
         Assert.Empty(storage.Children);
+    }
+
+    [Fact]
+    public async Task WhenConnectIsCancelledByItsCallerDuringFirstPass_ThenLaterPassLoadsTheStorageAndSetsTheStatus()
+    {
+        // Arrange: without a periodic pass, so that only the retry of the cancelled pass can run one.
+        var timeProvider = new ManualTimeProvider();
+        var storage = CreateStorage(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+        });
+        WriteFile("First.gated");
+        WriteFile("Second.gated");
+        var gate = GatedFile.PauseNextLoad();
+        using var cancellation = new CancellationTokenSource();
+        var connect = storage.ConnectAsync(cancellation.Token);
+        await gate.WhenReachedAsync();
+        await cancellation.CancelAsync();
+        gate.Release();
+        var exception = await Record.ExceptionAsync(() => connect);
+        var statusAfterConnect = storage.Status;
+        var childrenAfterConnect = storage.Children.Keys.ToList();
+
+        // Act
+        timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Connected);
+        Assert.IsType<OperationCanceledException>(exception, exactMatch: false);
+        Assert.Equal(StorageStatus.Disconnected, statusAfterConnect);
+        Assert.Empty(childrenAfterConnect);
+        Assert.Equal(["First.gated", "Second.gated"], storage.Children.Keys.Order());
     }
 
     [Fact]

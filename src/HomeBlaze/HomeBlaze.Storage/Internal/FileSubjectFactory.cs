@@ -105,6 +105,9 @@ internal sealed class FileSubjectFactory
     private void ReleaseUnreferenced(IInterceptorSubject subject)
     {
         // A subject that a property holds leaves the context with the assignment that removes it from there.
+        // Both answers are acted on after the lock of the lifecycle is released, which TryRunWhileAttached
+        // warns against. Its callback cannot do it either, because that must not change the graph. It is
+        // safe only because nothing but the worker of the storage has a subject that is not placed.
         if (subject.GetReferenceCount() == 0 &&
             _serviceProvider.GetService<IInterceptorSubjectContext>() is { } context &&
             context.TryGetLifecycleInterceptor() is { } lifecycle &&

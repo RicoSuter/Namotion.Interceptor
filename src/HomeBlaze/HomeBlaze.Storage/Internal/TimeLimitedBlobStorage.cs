@@ -20,6 +20,7 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
     private readonly Action? _verifyRoot;
+    private readonly Action? _whenAnswersAgain;
 
     private int _abandonedCallCount;
 
@@ -31,12 +32,18 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
     /// be examined. For a storage that lists such a root as empty, and that creates the root again when it is
     /// asked about a path in a folder or writes one.
     /// </param>
-    public TimeLimitedBlobStorage(IBlobStorage inner, TimeProvider timeProvider, ILogger? logger, Action? verifyRoot = null)
+    /// <param name="whenAnswersAgain">
+    /// Runs each time the last call that was given up has returned, so that calls are taken again. It runs on
+    /// the thread on which that call ended and must neither block nor throw.
+    /// </param>
+    public TimeLimitedBlobStorage(
+        IBlobStorage inner, TimeProvider timeProvider, ILogger? logger, Action? verifyRoot = null, Action? whenAnswersAgain = null)
     {
         _inner = inner;
         _timeProvider = timeProvider;
         _logger = logger;
         _verifyRoot = verifyRoot;
+        _whenAnswersAgain = whenAnswersAgain;
     }
 
     /// <summary>
@@ -98,7 +105,7 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
         if (IsUnresponsive)
         {
             throw new StorageUnresponsiveException(
-                $"The storage is unresponsive, {Describe(operation, target)} was not started: an earlier call was given up and has not returned yet.", this);
+                $"The storage is unresponsive, {Describe(operation, target)} was not started: an earlier call was given up and has not returned yet.", this, isRefusal: true);
         }
 
         // On the thread pool, because a storage can do its work before it returns its task.
@@ -113,7 +120,7 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
 
         cancellationToken.ThrowIfCancellationRequested();
         throw new StorageUnresponsiveException(
-            $"The storage did not complete {Describe(operation, target)} within {StorageCallTimeout.Limit.TotalSeconds:0} seconds.", this);
+            $"The storage did not complete {Describe(operation, target)} within {StorageCallTimeout.Limit.TotalSeconds:0} seconds.", this, isRefusal: false);
     }
 
     private static string Describe(string operation, object? target)
@@ -146,7 +153,10 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
                 }
                 finally
                 {
-                    Interlocked.Decrement(ref _abandonedCallCount);
+                    if (Interlocked.Decrement(ref _abandonedCallCount) == 0)
+                    {
+                        _whenAnswersAgain?.Invoke();
+                    }
                 }
             },
             CancellationToken.None,

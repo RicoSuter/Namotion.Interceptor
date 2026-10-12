@@ -18,6 +18,8 @@ namespace HomeBlaze.Storage.Internal;
 /// <remarks>Not thread-safe. Every member runs on the <see cref="StorageWorker"/>.</remarks>
 internal sealed class StorageReconciler
 {
+    internal const int MaximumUnfinishedNamedPathCount = 1000;
+
     private readonly IBlobStorage _client;
     private readonly FluentStorageContainer _storage;
     private readonly FileSubjectFactory _subjectFactory;
@@ -30,7 +32,7 @@ internal sealed class StorageReconciler
     private readonly CancellationToken _connectionToken;
 
     // What the pass that runs was asked to look at. Kept after a pass that ended before it applied its result,
-    // for the pass after it.
+    // for the pass after it. More paths than the maximum are kept as "every file".
     private IReadOnlySet<string>? _unfinishedNamedPaths;
     private bool _isEveryFileNamedByUnfinishedPass;
 
@@ -69,19 +71,22 @@ internal sealed class StorageReconciler
     /// </exception>
     /// <remarks>
     /// A pass that ends early leaves what it was asked to look at to the next pass, which looks at that as well.
+    /// More than <see cref="MaximumUnfinishedNamedPathCount"/> paths are left as every file.
     /// </remarks>
     public async Task ReconcileAsync(IReadOnlySet<string> namedPaths, bool allNamed, CancellationToken cancellationToken)
     {
         var isEveryFileNamed = allNamed || _isEveryFileNamedByUnfinishedPass;
-        if (_unfinishedNamedPaths is { Count: > 0 } unfinishedNamedPaths)
+        if (!isEveryFileNamed && _unfinishedNamedPaths is { Count: > 0 } unfinishedNamedPaths)
         {
             namedPaths = namedPaths.Count == 0
                 ? unfinishedNamedPaths
                 : new HashSet<string>(unfinishedNamedPaths.Concat(namedPaths), StringComparer.Ordinal);
         }
 
-        _unfinishedNamedPaths = namedPaths;
-        _isEveryFileNamedByUnfinishedPass = isEveryFileNamed;
+        // Bounded: while no pass finishes, every event adds its paths, also those of files that are long gone.
+        var isKeptAsEveryFile = isEveryFileNamed || namedPaths.Count > MaximumUnfinishedNamedPathCount;
+        _unfinishedNamedPaths = isKeptAsEveryFile ? null : namedPaths;
+        _isEveryFileNamedByUnfinishedPass = isKeptAsEveryFile;
 
         var listing = await ListAsync(cancellationToken);
         var movableEntries = RemoveMissingEntries(listing);
@@ -214,12 +219,20 @@ internal sealed class StorageReconciler
             // removed: one assignment detaches before it attaches, which would stop and restart the subject.
             if (_hasUnappliedMove)
             {
+                var placedSubjects = new HashSet<IInterceptorSubject>(
+                    childrenByFolder.Values.SelectMany(children => children.Values), ReferenceEqualityComparer.Instance);
+
                 foreach (var folder in folders)
                 {
                     var union = new Dictionary<string, IInterceptorSubject>(GetChildren(folder));
                     foreach (var (key, subject) in childrenByFolder[folder])
                     {
-                        union[key] = subject;
+                        // A subject that moves away keeps its key in this step: its new holder would detach
+                        // it here, before the folder it moves to is assigned.
+                        if (!union.TryGetValue(key, out var current) || !placedSubjects.Contains(current))
+                        {
+                            union[key] = subject;
+                        }
                     }
 
                     AssignChildren(folder, union);
@@ -272,8 +285,8 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Releases every subject of the index that never reached the tree, for when the connection has ended and
-    /// no pass will place them.
+    /// Releases every subject of the index that never reached the tree, for when the connection has ended or
+    /// the storage was stopped, and no pass will place them.
     /// </summary>
     public void ReleaseUnplacedSubjects()
     {

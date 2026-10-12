@@ -45,7 +45,11 @@ internal sealed class StorageConnection : IDisposable
         ILogger? logger)
     {
         _client = new TimeLimitedBlobStorage(
-            client, timeProvider, logger, storageDirectory is null ? null : () => VerifyDirectory(storageDirectory));
+            client,
+            timeProvider,
+            logger,
+            storageDirectory is null ? null : () => VerifyDirectory(storageDirectory),
+            () => _trigger?.NotifyStorageAnswersAgain());
         Settings = settings;
         _storageDirectory = storageDirectory;
         _timeProvider = timeProvider;
@@ -82,7 +86,7 @@ internal sealed class StorageConnection : IDisposable
     /// that makes the connection the current one, and so never after <see cref="StopTrigger"/>.
     /// </summary>
     /// <param name="runPass">Runs a pass of this connection, see <see cref="ReconcileTrigger"/>.</param>
-    public void StartTrigger(Func<IReadOnlySet<string>, bool, Task<bool>> runPass)
+    public void StartTrigger(Func<IReadOnlySet<string>, bool, Task<ReconcileOutcome>> runPass)
     {
         var trigger = new ReconcileTrigger(runPass, TimeSpan.FromSeconds(Settings.ReconcileIntervalSeconds), _timeProvider, _logger);
         _trigger = trigger;
@@ -114,16 +118,37 @@ internal sealed class StorageConnection : IDisposable
         {
             // Does nothing for a watcher that StopTrigger has disposed meanwhile.
             fileWatcher.Start();
-            return fileWatcher.IsRunning;
+            if (!fileWatcher.IsRunning)
+            {
+                return false;
+            }
+
+            Volatile.Write(ref _hasFileWatcherFailedToStart, false);
+            return true;
         }
         catch (Exception exception)
         {
-            // A warning for the first failure only: every pass tries again.
+            // A warning for the first failure since the watcher last ran: every pass tries again.
             var level = Interlocked.Exchange(ref _hasFileWatcherFailedToStart, true) ? LogLevel.Debug : LogLevel.Warning;
             _logger?.Log(level, exception, "File watching cannot start for: {Path}. It is tried again with every pass.", _storageDirectory);
             return false;
         }
     }
+
+    /// <summary>
+    /// Tells how a pass that failed with the exception is tried again: by the trigger, or, when this storage
+    /// refused a call of the pass, once the storage answers again.
+    /// </summary>
+    public ReconcileOutcome GetOutcomeOfFailedPass(Exception exception)
+        => exception is StorageUnresponsiveException { IsRefusal: true } refusal && ReferenceEquals(refusal.Storage, _client)
+            ? ReconcileOutcome.Refused
+            : ReconcileOutcome.Failed;
+
+    /// <summary>
+    /// Handles a failure as if the file watcher that is running had raised it.
+    /// </summary>
+    internal void SimulateFileWatcherError(Exception exception)
+        => _fileWatcher?.SimulateError(exception);
 
     /// <inheritdoc cref="ReconcileTrigger.NotifyPassFailed"/>
     public void NotifyPassFailed()

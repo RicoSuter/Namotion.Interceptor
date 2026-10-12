@@ -679,6 +679,43 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         Assert.Equal(["Notes.md"], childrenAfterConnect);
     }
 
+    [Fact]
+    public async Task WhenFileWatcherCannotStartAgainAfterItRan_ThenThatIsLoggedAsWarningOncePerOutage()
+    {
+        // Arrange: the file watcher cannot start at connect, because the directory appears only when the
+        // warning about that is logged. A later pass starts it.
+        var directory = Path.Combine(StorageDirectory.FullName, "Late");
+        var warningCount = 0;
+        var logger = new CallbackLogger((level, message) =>
+        {
+            if (level == LogLevel.Warning && message.StartsWith("File watching cannot start", StringComparison.Ordinal) &&
+                Interlocked.Increment(ref warningCount) == 1)
+            {
+                WriteFile("Late/Notes.md");
+            }
+        });
+        var storage = CreateStorage(enableFileWatching: true, logger: logger, configure: container =>
+        {
+            // A clock that does not move, so that only the test runs a pass.
+            container.TimeProvider = new ManualTimeProvider();
+            container.ReconcileIntervalSeconds = 0;
+            container.ConnectionString = directory;
+        });
+        await storage.ConnectAsync(CancellationToken.None);
+        await storage.ReconcileAsync();
+        var warningCountAfterFirstOutage = Volatile.Read(ref warningCount);
+
+        // Act: the file watcher fails, and cannot start in the two passes that follow.
+        Directory.Delete(directory, recursive: true);
+        storage.SimulateFileWatcherError(new IOException("The watched directory is gone."));
+        await storage.ReconcileAsync();
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(1, warningCountAfterFirstOutage);
+        Assert.Equal(2, Volatile.Read(ref warningCount));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -866,6 +903,112 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Connected);
         Assert.IsType<IOException>(exception);
         Assert.Equal(StorageStatus.Error, statusAfterConnect);
+        Assert.Equal(["Home.md"], storage.Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenStorageAnswersAgainAfterRetryWasRefused_ThenPassRunsAtOnce()
+    {
+        // Arrange
+        WriteFile("Home.md");
+        var stalled = await StallPeriodicPassUntilItsRetryIsRefusedAsync();
+        var callCountBeforeRetry = stalled.CallCountBeforeRetry;
+        var callCountAfterRetry = stalled.Client.CallCount;
+        var statusWhileStorageRefuses = stalled.Storage.Status;
+        WriteFile("Added.md");
+
+        // Act: the periodic timer and the timer of the pass that is asked for.
+        stalled.Client.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => stalled.TimeProvider.ArmedTimerCount == 2);
+        stalled.TimeProvider.Advance(TimeSpan.Zero);
+
+        // Assert: the retry did not reach the storage, and nothing waits for the periodic pass.
+        await AsyncTestHelpers.WaitUntilAsync(() => stalled.Storage.Status == StorageStatus.Connected);
+        Assert.Equal(callCountBeforeRetry, callCountAfterRetry);
+        Assert.Equal(StorageStatus.Error, statusWhileStorageRefuses);
+        Assert.Equal(["Added.md", "Home.md"], stalled.Storage.Children.Keys.Order());
+    }
+
+    [Fact]
+    public async Task WhenRetryOfPassIsRefused_ThenEveryOtherRetryIsStillLeft()
+    {
+        // Arrange
+        WriteFile("Home.md");
+        var stalled = await StallPeriodicPassUntilItsRetryIsRefusedAsync();
+        var timeProvider = stalled.TimeProvider;
+        var movedDirectory = StorageDirectory.FullName + "-moved";
+        Directory.Move(StorageDirectory.FullName, movedDirectory);
+
+        int armedTimersAfterLastRetry;
+        try
+        {
+            // Act: the storage answers again, but its directory is gone, so every pass from here on fails.
+            // Each wait is for the periodic timer and the timer of the next pass.
+            stalled.Client.Release();
+            await AsyncTestHelpers.WaitUntilAsync(() => timeProvider.ArmedTimerCount == 2);
+            timeProvider.Advance(TimeSpan.Zero);
+            for (var failedPassCount = 3; failedPassCount < 2 + ReconcileTrigger.MaximumRetryCount; failedPassCount++)
+            {
+                var expectedCount = failedPassCount;
+                await AsyncTestHelpers.WaitUntilAsync(() => stalled.GetFailedPassCount() == expectedCount && timeProvider.ArmedTimerCount == 2);
+                timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+            }
+
+            await AsyncTestHelpers.WaitUntilAsync(() => stalled.GetFailedPassCount() == 2 + ReconcileTrigger.MaximumRetryCount);
+            await AsyncTestHelpers.WaitUntilAsync(() => timeProvider.ArmedTimerCount == 1);
+            armedTimersAfterLastRetry = timeProvider.ArmedTimerCount;
+        }
+        finally
+        {
+            PutStorageDirectoryBack(movedDirectory);
+        }
+
+        // Assert: after the pass that stalled and its refused retry, the pass that was asked for is the first
+        // of the retries that are left, and nothing follows the last of them but the periodic pass.
+        Assert.Equal(1, armedTimersAfterLastRetry);
+        Assert.Equal(StorageStatus.Error, stalled.Storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenFirstPassIsRefused_ThenNoRetryIsArmedAndPassRunsOnceStorageAnswersAgain()
+    {
+        // Arrange: a read arrives once the new connection can be found, which is before its first pass lists.
+        // The caller of the read gives up, and the read has not returned when the first pass lists.
+        var timeProvider = new ManualTimeProvider();
+        var hookedTimeProvider = new HookedTimeProvider(timeProvider);
+        PausableBlobStorage? client = null;
+        Task? read = null;
+        using var cancellation = new CancellationTokenSource();
+        WriteFile("Home.md");
+        var storage = CreateStorage(configure: container =>
+        {
+            container.TimeProvider = hookedTimeProvider;
+            container.ReconcileIntervalSeconds = 0;
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        });
+        hookedTimeProvider.BeforeNextTimerIsCreated(() =>
+        {
+            var readReached = client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+            read = storage.GetBlobMetadataAsync("Home.md", cancellation.Token);
+            readReached.Wait(WatcherTimeout);
+            cancellation.Cancel();
+            SpinWait.SpinUntil(() => storage.IsStorageUnresponsive, WatcherTimeout);
+        });
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => storage.ConnectAsync(CancellationToken.None));
+        var statusAfterConnect = storage.Status;
+        var armedTimersAfterConnect = timeProvider.ArmedTimerCount;
+        await Record.ExceptionAsync(() => read!);
+        client!.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive && timeProvider.ArmedTimerCount == 1);
+        timeProvider.Advance(TimeSpan.Zero);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Connected);
+        Assert.IsType<StorageUnresponsiveException>(exception);
+        Assert.Equal(StorageStatus.Error, statusAfterConnect);
+        Assert.Equal(0, armedTimersAfterConnect);
         Assert.Equal(["Home.md"], storage.Children.Keys);
     }
 
@@ -1364,6 +1507,54 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
 
     // What the file watcher logs within its start, once the file system watches. Nothing else shows that point.
     private const string WatcherStartedMessage = "File watching enabled";
+
+    // What a pass of the trigger logs when it fails. Nothing else shows that such a pass has ended.
+    private const string FailedPassMessage = "Failed to reconcile the storage";
+
+    /// <summary>
+    /// Connects a storage with a periodic pass every 300 seconds and lets that pass stall at its listing until
+    /// it is given up. Its retry then runs while the listing has not returned, and is refused.
+    /// </summary>
+    private async Task<StalledStorage> StallPeriodicPassUntilItsRetryIsRefusedAsync()
+    {
+        var timeProvider = new ManualTimeProvider();
+        PausableBlobStorage? client = null;
+        var failedPassCount = 0;
+        var logger = new CallbackLogger((_, message) =>
+        {
+            if (message.StartsWith(FailedPassMessage, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref failedPassCount);
+            }
+        });
+        var storage = CreateStorage(logger: logger, configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 300;
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        });
+        await storage.ConnectAsync(CancellationToken.None);
+        var listingReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        timeProvider.Advance(TimeSpan.FromSeconds(300));
+        await listingReached;
+
+        // The periodic timer and the timer of the limit, and then the periodic timer and the timer of the retry.
+        await AsyncTestHelpers.WaitUntilAsync(() => timeProvider.ArmedTimerCount == 2);
+        timeProvider.Advance(StorageCallTimeout.Limit);
+        await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref failedPassCount) == 1 && timeProvider.ArmedTimerCount == 2);
+        var callCountBeforeRetry = client.CallCount;
+        timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+        await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref failedPassCount) == 2);
+
+        return new StalledStorage(storage, client, timeProvider, callCountBeforeRetry, () => Volatile.Read(ref failedPassCount));
+    }
+
+    private sealed record StalledStorage(
+        FluentStorageContainer Storage,
+        PausableBlobStorage Client,
+        ManualTimeProvider TimeProvider,
+        int CallCountBeforeRetry,
+        Func<int> GetFailedPassCount);
 
     /// <summary>
     /// Moves the storage directory back to where it was, in place of a directory that was created there meanwhile.

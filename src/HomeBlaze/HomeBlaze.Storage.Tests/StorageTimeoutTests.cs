@@ -163,6 +163,39 @@ public class StorageTimeoutTests : StorageTestBase
         Assert.Equal("other", file.Content);
     }
 
+    [Theory]
+    [InlineData(StorageReconciler.MaximumUnfinishedNamedPathCount / 2, "first")]
+    [InlineData(StorageReconciler.MaximumUnfinishedNamedPathCount / 2 + 1, "other")]
+    public async Task WhenFailedPassesNamePaths_ThenNextPassComparesEveryFileOnlyWhenMoreWereNamedThanAreKept(
+        int pathCountPerPass, string expectedContent)
+    {
+        // Arrange: the file changes without a new size or time, and no pass names it.
+        WriteFile("Data.gated", "first");
+        var storage = await ConnectAsync();
+        var file = (GatedFile)storage.Children["Data.gated"];
+        ChangeContentOnly("Data.gated", "other");
+        var movedDirectory = StorageDirectory.FullName + "-moved";
+        Directory.Move(StorageDirectory.FullName, movedDirectory);
+        try
+        {
+            for (var pass = 0; pass < 2; pass++)
+            {
+                await storage.ReconcileAsync(Enumerable.Range(0, pathCountPerPass).Select(index => $"Camera/{pass}-{index}.jpg").ToHashSet());
+            }
+        }
+        finally
+        {
+            Directory.Move(movedDirectory, StorageDirectory.FullName);
+        }
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(expectedContent, file.Content);
+    }
+
     [Fact]
     public async Task WhenPassFailsAtItsListing_ThenNextPassOpensNoUnchangedFile()
     {

@@ -3,11 +3,29 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
+/// How a reconcile pass ended, as the <see cref="ReconcileTrigger"/> needs to know it.
+/// </summary>
+internal enum ReconcileOutcome
+{
+    /// <summary>The pass finished, or it ended with its connection. Nothing follows from it.</summary>
+    Finished,
+
+    /// <summary>The pass failed and is tried again.</summary>
+    Failed,
+
+    /// <summary>
+    /// The pass failed because the storage refused a call while an earlier one had not returned. It is not
+    /// tried again by itself: <see cref="ReconcileTrigger.NotifyStorageAnswersAgain"/> asks for the next pass.
+    /// </summary>
+    Refused
+}
+
+/// <summary>
 /// Decides when a reconcile pass runs. Changes are collected until the storage has been quiet for
 /// <see cref="QuietPeriod"/>, but no longer than <see cref="MaximumDelay"/>. A periodic pass covers changes
-/// that no event reported. A pass that did not finish is followed by another one after
-/// <see cref="MaximumDelay"/>, at most <see cref="MaximumRetryCount"/> times in a row. Only one pass runs at a
-/// time, and whatever arrives during it leads to one more.
+/// that no event reported. A pass that failed is followed by another one after <see cref="MaximumDelay"/>, at
+/// most <see cref="MaximumRetryCount"/> times in a row. Only one pass runs at a time, and whatever arrives
+/// during it leads to one more.
 /// </summary>
 internal sealed class ReconcileTrigger : IDisposable
 {
@@ -21,7 +39,7 @@ internal sealed class ReconcileTrigger : IDisposable
     // The longest period a timer accepts.
     private static readonly TimeSpan MaximumPeriodicInterval = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
 
-    private readonly Func<IReadOnlySet<string>, bool, Task<bool>> _runPass;
+    private readonly Func<IReadOnlySet<string>, bool, Task<ReconcileOutcome>> _runPass;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
     private readonly ITimer _timer;
@@ -39,9 +57,9 @@ internal sealed class ReconcileTrigger : IDisposable
     private int _retryCount;
 
     /// <param name="runPass">
-    /// Runs a pass with the named paths and whether every file counts as named, and returns whether the pass
-    /// finished. False asks for another pass. It is called on the thread of a timer and must return its task
-    /// without waiting for the pass. Must not throw.
+    /// Runs a pass with the named paths and whether every file counts as named, and returns how the pass
+    /// ended. It is called on the thread of a timer and must return its task without waiting for the pass.
+    /// Must not throw.
     /// </param>
     /// <param name="periodicInterval">
     /// How often a pass runs without any change. Zero or less switches it off, and an interval longer than a
@@ -50,7 +68,7 @@ internal sealed class ReconcileTrigger : IDisposable
     /// <param name="timeProvider">The clock and timer source, the system one by default.</param>
     /// <param name="logger">Receives a pass that threw despite the contract.</param>
     public ReconcileTrigger(
-        Func<IReadOnlySet<string>, bool, Task<bool>> runPass,
+        Func<IReadOnlySet<string>, bool, Task<ReconcileOutcome>> runPass,
         TimeSpan periodicInterval,
         TimeProvider? timeProvider = null,
         ILogger? logger = null)
@@ -93,8 +111,15 @@ internal sealed class ReconcileTrigger : IDisposable
         => Request(null, allNamed: true, atOnce: true);
 
     /// <summary>
-    /// Reports that a pass which this trigger did not start has not finished, so that it is retried like one
-    /// of its own.
+    /// Reports that the storage answers again after it refused calls, so that a pass runs at once. It names
+    /// nothing: a pass that was refused has kept what it was asked to look at.
+    /// </summary>
+    public void NotifyStorageAnswersAgain()
+        => Request(null, allNamed: false, atOnce: true);
+
+    /// <summary>
+    /// Reports that a pass which this trigger did not start has failed, so that it is retried like one of
+    /// its own.
     /// </summary>
     public void NotifyPassFailed()
     {
@@ -103,7 +128,7 @@ internal sealed class ReconcileTrigger : IDisposable
             // A pass that runs or waits for the worker is the retry, and reports its own outcome.
             if (!_isDisposed && !_isRunning)
             {
-                ArmTimerAfterPass(isFinished: false);
+                ArmTimerAfterPass(ReconcileOutcome.Failed);
             }
         }
     }
@@ -147,14 +172,14 @@ internal sealed class ReconcileTrigger : IDisposable
         _timer.Change(delay > TimeSpan.Zero ? delay : TimeSpan.Zero, Timeout.InfiniteTimeSpan);
     }
 
-    private void ArmTimerAfterPass(bool isFinished)
+    private void ArmTimerAfterPass(ReconcileOutcome outcome)
     {
         var delay = QuietPeriod;
-        if (isFinished)
+        if (outcome == ReconcileOutcome.Finished)
         {
             _retryCount = 0;
         }
-        else if (_retryCount < MaximumRetryCount)
+        else if (outcome == ReconcileOutcome.Failed && _retryCount < MaximumRetryCount)
         {
             _retryCount++;
 
@@ -197,10 +222,10 @@ internal sealed class ReconcileTrigger : IDisposable
 
     private async Task RunPassAsync(IReadOnlySet<string> namedPaths, bool allNamed)
     {
-        var isFinished = false;
+        var outcome = ReconcileOutcome.Failed;
         try
         {
-            isFinished = await _runPass(namedPaths, allNamed);
+            outcome = await _runPass(namedPaths, allNamed);
         }
         catch (Exception exception)
         {
@@ -213,7 +238,7 @@ internal sealed class ReconcileTrigger : IDisposable
                 _isRunning = false;
                 if (!_isDisposed)
                 {
-                    ArmTimerAfterPass(isFinished);
+                    ArmTimerAfterPass(outcome);
                 }
             }
         }

@@ -139,6 +139,34 @@ public sealed class TimeLimitedBlobStorageTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenLastOfTwoAbandonedCallsReturns_ThenStorageTellsOnceThatItAnswersAgain()
+    {
+        // Arrange
+        var client = new TwoCallBlobStorage();
+        var answersAgainCount = 0;
+        using var storage = new TimeLimitedBlobStorage(
+            client, _timeProvider, logger: null, whenAnswersAgain: () => Interlocked.Increment(ref answersAgainCount));
+        var listing = storage.ListAsync();
+        var exists = storage.ExistsAsync(["Notes.md"]);
+        await client.WhenBothCallsHaveArrivedAsync();
+        await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == 2);
+        _timeProvider.Advance(StorageCallTimeout.Limit);
+        await Assert.ThrowsAsync<StorageUnresponsiveException>(() => listing);
+        await Assert.ThrowsAsync<StorageUnresponsiveException>(() => exists);
+
+        // Act: released on a thread of the pool, which then also runs what follows from the return of the call.
+        await Task.Run(client.ReleaseListing);
+        var countAfterFirstReturn = Volatile.Read(ref answersAgainCount);
+        await Task.Run(client.ReleaseExists);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref answersAgainCount) > 0);
+        Assert.Equal(0, countAfterFirstReturn);
+        Assert.Equal(1, Volatile.Read(ref answersAgainCount));
+        Assert.False(storage.IsUnresponsive);
+    }
+
+    [Fact]
     public async Task WhenCallExceedsTheLimit_ThenExceptionNamesOperationAndPath()
     {
         // Arrange

@@ -63,6 +63,9 @@ public partial class FluentStorageContainer :
     /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
     internal bool IsStorageUnresponsive => _connection is { IsStorageUnresponsive: true };
 
+    /// <inheritdoc cref="StorageConnection.SimulateFileWatcherError"/>
+    internal void SimulateFileWatcherError(Exception exception) => _connection?.SimulateFileWatcherError(exception);
+
     /// <summary>
     /// Storage type identifier (e.g., "disk", "azure-blob").
     /// </summary>
@@ -162,7 +165,10 @@ public partial class FluentStorageContainer :
     /// the subject tree stays as it is. The connection stays open, so subjects can still be read and saved.
     /// <see cref="StartAsync"/> connects again and follows the storage as before.
     /// </summary>
-    /// <remarks>A pass that is running or already queued on the worker still completes.</remarks>
+    /// <remarks>
+    /// A pass that is running or already queued on the worker still completes. What such a pass or an earlier
+    /// one created and did not place is released after it, because no pass places it any more.
+    /// </remarks>
     public override Task StopAsync(CancellationToken cancellationToken)
     {
         StorageConnection? connection;
@@ -172,8 +178,33 @@ public partial class FluentStorageContainer :
             connection = _connection;
         }
 
-        connection?.StopTrigger();
+        if (connection != null)
+        {
+            connection.StopTrigger();
+            _ = ReleaseUnplacedSubjectsAsync(connection);
+        }
+
         return base.StopAsync(cancellationToken);
+    }
+
+    // Not waited for by the stop: the worker can be held by a pass, or by a storage that does not answer.
+    private async Task ReleaseUnplacedSubjectsAsync(StorageConnection connection)
+    {
+        try
+        {
+            await connection.Worker.RunAsync(
+                _ =>
+                {
+                    connection.Reconciler.ReleaseUnplacedSubjects();
+                    return Task.CompletedTask;
+                },
+                connection.Token);
+        }
+        catch (Exception exception)
+        {
+            // The end of a connection releases them as well.
+            _logger?.LogDebug(exception, "The subjects that are not placed were not released when the storage was stopped");
+        }
     }
 
     /// <summary>
@@ -340,16 +371,15 @@ public partial class FluentStorageContainer :
             {
                 await connection.Reconciler.ReconcileAsync(NoPaths, allNamed: false, token);
             }
-            catch (Exception)
+            catch (Exception exception)
             {
                 // Cancelled by the caller of the connect, or with the connection, whose status nobody reads.
-                if (token.IsCancellationRequested)
+                SetStatus(connection, token.IsCancellationRequested ? StorageStatus.Disconnected : StorageStatus.Error);
+
+                // Also after a cancellation by the caller: unless the storage was stopped, the connection goes
+                // on following it, and only another pass replaces that status.
+                if (connection.GetOutcomeOfFailedPass(exception) == ReconcileOutcome.Failed)
                 {
-                    SetStatus(connection, StorageStatus.Disconnected);
-                }
-                else
-                {
-                    SetStatus(connection, StorageStatus.Error);
                     connection.NotifyPassFailed();
                 }
 
@@ -407,14 +437,14 @@ public partial class FluentStorageContainer :
     internal Task ReconcileAsync(IReadOnlySet<string>? namedPaths = null, bool allNamed = false)
         => _connection is { } connection ? ReconcileAsync(connection, namedPaths ?? NoPaths, allNamed) : Task.CompletedTask;
 
-    /// <returns>False when the pass failed and another one should follow. True also for a pass that ended with its connection.</returns>
-    private async Task<bool> ReconcileAsync(StorageConnection connection, IReadOnlySet<string> namedPaths, bool allNamed)
+    /// <returns>How the pass ended. A pass that ended with its connection counts as finished.</returns>
+    private async Task<ReconcileOutcome> ReconcileAsync(StorageConnection connection, IReadOnlySet<string> namedPaths, bool allNamed)
     {
         // Not on the worker, which a watcher that stalls while it starts would hold. Changes since the watcher
         // stopped have raised no event, so every file counts as named.
         allNamed |= connection.TryStartFileWatcher();
 
-        var isFinished = true;
+        var outcome = ReconcileOutcome.Finished;
         try
         {
             await connection.Worker.RunAsync(async token =>
@@ -428,7 +458,7 @@ public partial class FluentStorageContainer :
                 {
                     SetStatus(connection, StorageStatus.Error);
                     _logger?.LogError(exception, "Failed to reconcile the storage, another pass tries again");
-                    isFinished = false;
+                    outcome = connection.GetOutcomeOfFailedPass(exception);
                 }
             }, connection.Token);
         }
@@ -437,7 +467,7 @@ public partial class FluentStorageContainer :
             _logger?.LogDebug(exception, "A pass ended with its connection");
         }
 
-        return isFinished;
+        return outcome;
     }
 
     /// <summary>
