@@ -106,3 +106,30 @@ Exclusive B text
 :: HomeBlaze.Components.Alert Severity=Warning
 Alert text
 ::
+
+:: HomeBlaze.Components.Card Title="Aligned Card" Subtitle="Header and rows" Icon=Bolt IconColor=Primary
+::: HomeBlaze.Components.ValueList
+:::: Value Path=valuemotor/TargetSpeed Label="Aligned Icon" Icon=Speed
+:::: Value Path=valuemotor/Temperature Label="Aligned Plain"
+:::: Value Path=valuemotor/CurrentSpeed Label="Aligned Bar" Icon=Speed
+::::: HomeBlaze.Components.Progress Path=valuemotor/CurrentSpeed Min=0 Max=1600
+:::: Value Path=valuemotor/TargetSpeed Label="Aligned Text"
+{{ valuemotor/CurrentSpeed }} von
+::: HeaderRight
+:::: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=status
+::
+
+:: HomeBlaze.Components.FlowLayout MinWidth=225
+::: Item
+:::: HomeBlaze.Components.Card Title="Narrow Card" Icon=Bolt
+::::: HomeBlaze.Components.ValueList
+:::::: Value Path=valuemotor/TargetSpeed Label="Speed" Icon=Speed
+::::::: HomeBlaze.Components.Progress Path=valuemotor/CurrentSpeed Min=0 Max=1600
+:::::: Value Path=valuemotor/Temperature Label="Heat"
+::: Item
+Second narrow cell
+::: Item
+Third narrow cell
+::: Item
+Fourth narrow cell
+::

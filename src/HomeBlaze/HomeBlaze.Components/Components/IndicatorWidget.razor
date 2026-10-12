@@ -28,12 +28,12 @@
     else if (reading.IsMissing)
     {
         <MudTooltip Text="@indicator.Path">
-            <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" data-testid="indicator">@reading.Text</MudChip>
+            <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" Class="ma-0" data-testid="indicator">@reading.Text</MudChip>
         </MudTooltip>
     }
     else
     {
-        <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" data-testid="indicator">@reading.Text</MudChip>
+        <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" Class="ma-0" data-testid="indicator">@reading.Text</MudChip>
     }
 }
 

@@ -596,7 +596,7 @@ The arguments of a `Value` block:
 | `Icon` | Text | None | The [icon](#icons) at the start of the row |
 | `Map` | Text | None | The name or the path of a [ValueMap](#valuemap) |
 
-Rows with a label and an icon. The first two rows have an icon, so the third row is indented to line up with their labels:
+Rows with a label and an icon. The first two rows have an icon, so the third row keeps the room of an icon, which lines up its label with theirs:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -649,9 +649,9 @@ A row with content and without a path, and a row with a `Progress` as content. T
 :::: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Min=0 Max=3000
 ::
 
-- **Aligned labels**: When at least one row has an icon, the rows without one are indented, so that all labels line up. An icon that comes from a case of a map counts as well.
+- **Aligned labels**: When at least one row has an icon, the rows without one keep the room of an icon, so that all labels line up. An icon that comes from a case of a map counts as well. In a card the icons of the rows stand below the icon of its header and the labels below its title.
 - **Colour and icon of a case**: A matching case gives the value text its colour and the row its icon, see [ValueMap](#valuemap).
-- **Content and value**: Content and a value can stand in the same row. The content comes first, and the value stays at the right.
+- **Content and value**: Content and a value can stand in the same row. The content takes the room between the label and the value: a `Progress` fills it, and a text stands at the right end of it, right before the value.
 - **Rows only**: A `ValueList` has no default slot. Content outside of a `Value` block is an error.
 
 ## ValueTile
@@ -791,7 +791,7 @@ Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so
 - **The range**: The bar is empty at `Min` and full at `Max`. A value outside the range gives an empty or a full bar. The default range from 0 to 1 is what a property with the unit percent holds. A value from 0 to 100 needs `Max=100`.
 - **No bar**: A value that is no number, a value that is not set and a range in which `Max` is not above `Min` show a dash in place of the bar.
 - **No text**: The bar has no text. Show the number with an expression, or put the bar into a row of a [ValueList](#valuelist), where the value stands next to it.
-- **Width**: Alone, a bar is as wide as the place it stands in. In a row of a value list it is at least 120 pixels wide.
+- **Width**: Alone, a bar is as wide as the place it stands in. In a row of a value list it fills the room between the label and the value, and it is at least 48 pixels wide.
 
 ## ExpansionPanels
 

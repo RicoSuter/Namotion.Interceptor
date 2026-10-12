@@ -19,24 +19,37 @@
     }
 }
 
-<MudList T="string" Dense="true" ReadOnly="true" data-testid="value-list">
+<MudList T="string" Dense="true" ReadOnly="true" Padding="false" data-testid="value-list">
     @for (var index = 0; index < rows.Length; index++)
     {
         var row = rows[index];
         var reading = readings[index];
         var icon = icons[index];
 
+        @* No gutters, so that the rows start and end where the text around the list does. Inside a card that is where the icon and the title of its header start and where the content of its header ends. *@
         <MudListItem T="string"
                      @key="row"
                      Class="value-list-item"
-                     Icon="@icon"
-                     Inset="@(anyIcon && icon is null)"
+                     Gutters="false"
                      data-testid="value-row">
             <div class="d-flex align-center gap-2">
-                <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="value-label">@ValueReader.GetLabel(reading, row.Label)</MudText>
+                @* The icon is not the Icon of the list item, whose column is wider than the avatar of a card header. Its 8 pixels and the gap add up to the 16 that MudCardHeader leaves between avatar and title, so that labels line up with titles. *@
+                @if (icon is not null)
+                {
+                    <MudIcon Icon="@icon" Class="flex-shrink-0 me-2" Style="color: var(--mud-palette-action-default);" data-testid="value-icon" />
+                }
+                else if (anyIcon)
+                {
+                    <MudIcon Class="flex-shrink-0 me-2" aria-hidden="true" data-testid="value-icon-space" />
+                }
+
+                @* The label takes the free room, and with content it is the content that does. *@
+                <MudText Typo="Typo.body2" Class="@(row.Content is null ? "flex-grow-1 ma-0" : "ma-0")" data-testid="value-label">@ValueReader.GetLabel(reading, row.Label)</MudText>
                 @if (row.Content is not null)
                 {
-                    <SubjectComponent Subject="@row.Content" Type="SubjectComponentType.Widget" />
+                    <div class="flex-grow-1 mud-typography-align-right" data-testid="value-content">
+                        <SubjectComponent Subject="@row.Content" Type="SubjectComponentType.Widget" />
+                    </div>
                 }
 
                 @if (reading is not null)

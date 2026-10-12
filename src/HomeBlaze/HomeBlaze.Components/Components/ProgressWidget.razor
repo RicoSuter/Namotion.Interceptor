@@ -20,13 +20,13 @@
     }
     else
     {
-        @* A row wraps its content in elements that take the width of their content, and a percentage width of the bar has nothing to refer to there. The minimum width is what the bar gets in a row. *@
+        @* In a row the bar fills the room between the label and the value. The minimum width keeps it visible when that room is small. *@
         <MudProgressLinear Value="@percent.Value"
                            Min="0"
                            Max="100"
                            Color="@progress.Color"
                            Rounded="true"
-                           Style="min-width: 120px;"
+                           Style="min-width: 48px;"
                            data-testid="progress"
                            data-percent="@percent.Value.ToString("0.##", CultureInfo.InvariantCulture)" />
     }

@@ -34,6 +34,9 @@ public class ValueWidgetTests
     private static ILocator GetRow(IPage page, string label) =>
         page.GetByTestId("value-row").Filter(new() { Has = page.GetByTestId("value-label").GetByText(label, new() { Exact = true }) });
 
+    private static ILocator GetCardRow(ILocator card, string label) =>
+        card.GetByTestId("value-row").Filter(new() { Has = card.Page.GetByTestId("value-label").GetByText(label, new() { Exact = true }) });
+
     private static ILocator GetPanel(IPage page, string title) =>
         page.GetByTestId("expansion-panel").Filter(new() { HasText = title });
 
@@ -43,7 +46,31 @@ public class ValueWidgetTests
 
     // The path of an icon is what tells two icons of MudBlazor apart.
     private static Task<string?> GetIconShapeAsync(ILocator row) =>
-        row.Locator(".mud-list-item-icon svg path").Last.GetAttributeAsync("d");
+        row.GetByTestId("value-icon").Locator("path").Last.GetAttributeAsync("d");
+
+    // Positions are fractions of a pixel, because the sizes of fonts and the shares of a flex row are, so the tolerance of 1 pixel
+    // is for rounding. A line that is off by a gutter or a margin is 4 pixels or more away.
+    private const double PositionTolerance = 1.0;
+
+    private static async Task<ElementBox> GetBoxAsync(ILocator locator)
+    {
+        var box = await locator.BoundingBoxAsync();
+        Assert.NotNull(box);
+        return new ElementBox(box.X, box.Y, box.X + box.Width, box.Y + box.Height);
+    }
+
+    private sealed record ElementBox(double Left, double Top, double Right, double Bottom)
+    {
+        public double CenterY => (Top + Bottom) / 2;
+    }
+
+    private async Task<(IPage Page, ILocator Card)> OpenAlignedCardAsync(string title)
+    {
+        var page = await OpenPageAsync();
+        var card = GetCard(page, title);
+        await Assertions.Expect(card.GetByTestId("value-text").Last).ToBeVisibleAsync(new() { Timeout = Timeout });
+        return (page, card);
+    }
 
     [Fact]
     public async Task WhenCardHasHeaderOptions_ThenHeaderShowsThem()
@@ -253,6 +280,126 @@ public class ValueWidgetTests
     }
 
     [Fact]
+    public async Task WhenValueListIsInACard_ThenTheIconsOfItsRowsLineUpWithTheIconOfTheHeader()
+    {
+        // Arrange
+        var (_, card) = await OpenAlignedCardAsync("Aligned Card");
+
+        // Act
+        var headerIcon = await GetBoxAsync(card.GetByTestId("card-icon"));
+        var iconRow = await GetBoxAsync(GetCardRow(card, "Aligned Icon").GetByTestId("value-icon"));
+        var barRow = await GetBoxAsync(GetCardRow(card, "Aligned Bar").GetByTestId("value-icon"));
+
+        // Assert
+        Assert.Equal(headerIcon.Left, iconRow.Left, PositionTolerance);
+        Assert.Equal(headerIcon.Left, barRow.Left, PositionTolerance);
+    }
+
+    [Fact]
+    public async Task WhenValueListIsInACard_ThenTheLabelsOfItsRowsLineUpWithTheTitleWithOrWithoutAnIcon()
+    {
+        // Arrange
+        var (_, card) = await OpenAlignedCardAsync("Aligned Card");
+
+        // Act
+        var title = await GetBoxAsync(card.GetByTestId("card-title"));
+        var withIcon = await GetBoxAsync(GetCardRow(card, "Aligned Icon").GetByTestId("value-label"));
+        var withoutIcon = await GetBoxAsync(GetCardRow(card, "Aligned Plain").GetByTestId("value-label"));
+
+        // Assert
+        Assert.Equal(title.Left, withIcon.Left, PositionTolerance);
+        Assert.Equal(title.Left, withoutIcon.Left, PositionTolerance);
+    }
+
+    [Fact]
+    public async Task WhenCardHasAnIndicatorInItsHeader_ThenTheValuesOfTheRowsEndWhereTheIndicatorEndsAndItStandsOnTheTitleLine()
+    {
+        // Arrange
+        var (_, card) = await OpenAlignedCardAsync("Aligned Card");
+
+        // Act
+        var indicator = await GetBoxAsync(card.GetByTestId("card-header-right").GetByTestId("indicator"));
+        var title = await GetBoxAsync(card.GetByTestId("card-title"));
+
+        // Assert
+        foreach (var label in new[] { "Aligned Icon", "Aligned Plain", "Aligned Bar", "Aligned Text" })
+        {
+            var value = await GetBoxAsync(GetCardRow(card, label).GetByTestId("value-text"));
+            Assert.Equal(indicator.Right, value.Right, PositionTolerance);
+        }
+
+        Assert.Equal(title.CenterY, indicator.CenterY, PositionTolerance);
+    }
+
+    [Fact]
+    public async Task WhenRowHasContent_ThenTheBarFillsTheRoomBeforeTheValueAndTextStandsRightBeforeIt()
+    {
+        // Arrange
+        var (_, card) = await OpenAlignedCardAsync("Aligned Card");
+
+        // Act
+        var bar = await GetBoxAsync(GetCardRow(card, "Aligned Bar").GetByTestId("progress"));
+        var barValue = await GetBoxAsync(GetCardRow(card, "Aligned Bar").GetByTestId("value-text"));
+        var barLabel = await GetBoxAsync(GetCardRow(card, "Aligned Bar").GetByTestId("value-label"));
+        var textRow = GetCardRow(card, "Aligned Text");
+        var textValue = await GetBoxAsync(textRow.GetByTestId("value-text"));
+        var textRight = await textRow.GetByTestId("value-content").EvaluateAsync<double>(
+            """
+            element => {
+                const range = document.createRange();
+                range.selectNodeContents(element);
+                return range.getBoundingClientRect().right;
+            }
+            """);
+
+        // Assert: the gap between two parts of a row is 8 pixels.
+        Assert.Equal(barLabel.Right + 8, bar.Left, PositionTolerance);
+        Assert.Equal(barValue.Left - 8, bar.Right, PositionTolerance);
+        Assert.Equal(textValue.Left - 8, textRight, PositionTolerance);
+    }
+
+    [Fact]
+    public async Task WhenCardIsNarrow_ThenItsRowsDoNotOverflowAndTheBarIsStillVisible()
+    {
+        // Arrange
+        var (_, card) = await OpenAlignedCardAsync("Narrow Card");
+
+        // Act
+        var cardBox = await GetBoxAsync(card);
+        var overflow = await card.EvaluateAsync<double[]>(
+            "card => [card, ...card.querySelectorAll('[data-testid=value-row]')].map(element => element.scrollWidth - element.clientWidth)");
+        var value = await GetBoxAsync(GetCardRow(card, "Speed").GetByTestId("value-text"));
+        var bar = await GetBoxAsync(GetCardRow(card, "Speed").GetByTestId("progress"));
+        var content = await GetBoxAsync(card.Locator(".mud-card-content"));
+
+        // Assert: the cell is narrower than the card of the dashboard, which has to fit as well.
+        Assert.True(cardBox.Right - cardBox.Left < 280, $"The card is {cardBox.Right - cardBox.Left} pixels wide");
+        Assert.All(overflow, scrollOverflow => Assert.Equal(0, scrollOverflow));
+        Assert.True(value.Right <= cardBox.Right, $"The value ends at {value.Right}, the card at {cardBox.Right}");
+        Assert.Equal(content.Right - 16, value.Right, PositionTolerance);
+        Assert.True(bar.Right - bar.Left >= 40, $"The bar is {bar.Right - bar.Left} pixels wide");
+    }
+
+    [Fact]
+    public async Task WhenValueListIsNotInACard_ThenItsRowsStartAtTheLeftEdgeOfTheTextAroundIt()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var row = GetRow(page, "Soll");
+        await Assertions.Expect(row.GetByTestId("value-text")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var heading = await GetBoxAsync(page.Locator("h1").First);
+        var icon = await GetBoxAsync(row.GetByTestId("value-icon"));
+        var value = await GetBoxAsync(row.GetByTestId("value-text"));
+        var list = await GetBoxAsync(row.Locator("xpath=ancestor::*[@data-testid='value-list']"));
+
+        // Assert
+        Assert.Equal(heading.Left, icon.Left, PositionTolerance);
+        Assert.Equal(list.Right, value.Right, PositionTolerance);
+    }
+
+    [Fact]
     public async Task WhenIndicatorIsAChip_ThenItShowsTheTextOfTheCase()
     {
         // Arrange & Act
@@ -301,7 +448,7 @@ public class ValueWidgetTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("value-map-error")).ToHaveTextAsync("Cannot resolve map: nomap", new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByTestId("indicator")).ToHaveCountAsync(3);
+        await Assertions.Expect(page.Locator("[data-testid=indicator]:not([data-testid=card] *)")).ToHaveCountAsync(3);
     }
 
     [Fact]
