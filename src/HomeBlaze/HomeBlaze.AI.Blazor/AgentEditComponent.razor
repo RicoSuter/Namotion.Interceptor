@@ -92,6 +92,11 @@
                                     <MudText Typo="Typo.caption" Color="Color.Warning">Can change devices and send notifications</MudText>
                                 </MudStack>
                             }
+                            @if (tool.LoadsWebContent)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Public"
+                                         Class="ml-0" data-testid="agent-edit-tool-web-warning">Loads untrusted web content</MudChip>
+                            }
                         </MudStack>
                     </MudSwitch>
                 </MudItem>
@@ -216,7 +221,7 @@
         var turnTimeout = agent.TurnTimeout;
         _turnTimeout = AgentTimeSpanInput.Format(turnTimeout > TimeSpan.Zero && turnTimeout <= AgentTimeSpanInput.MaximumTurnTimeout ? turnTimeout : TimeSpan.Zero);
         _allowedTools = new HashSet<string>(agent.AllowedTools, StringComparer.Ordinal);
-        _toolOptions = AgentToolOptions.Create(ToolSource, agent.AllowedTools);
+        _toolOptions = AgentToolOptions.Create(ToolSource, agent.AllowedTools, agent.SupportedBackendTools);
         _maxToolCalls = agent.MaxToolCallsPerTurn;
         if (agent is ClaudeCliAgent cliAgent)
         {

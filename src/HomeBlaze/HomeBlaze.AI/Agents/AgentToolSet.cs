@@ -106,6 +106,21 @@ public sealed class AgentToolSet
         }
     };
 
+    /// <summary>
+    /// Records a call of a backend tool, which the backend ran itself, so it shows in the timeline and counts against
+    /// the turn's budget: graph tool calls beyond the budget then return an error. The backend tool call itself
+    /// cannot be refused.
+    /// </summary>
+    /// <param name="name">The backend tool name, such as <c>web_search</c>.</param>
+    /// <param name="arguments">The arguments as JSON.</param>
+    /// <param name="result">The result, truncated for the preview.</param>
+    /// <param name="isError">Whether the call failed.</param>
+    public void RecordBackendCall(string name, string arguments, string result, bool isError)
+    {
+        Interlocked.Increment(ref _callCount);
+        Record(new AgentToolCall(name, arguments, Truncate(result), isError));
+    }
+
     private void Record(AgentToolCall call)
     {
         ImmutableInterlocked.Update(ref _calls, calls => calls.Add(call));

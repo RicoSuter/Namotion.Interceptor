@@ -204,6 +204,8 @@ The agent reaches the graph through the HomeBlaze MCP tools. Each turn offers ex
 | `invoke_operation` | off | Calls an operation method, which can change devices or send something |
 | `set_property` | off | Writes a property value |
 | `update_memory` | always | Changes the agent's memory |
+| `web_search` | off | Searches the web, see [Web tools](#web-tools) |
+| `web_fetch` | off | Loads a web page, see [Web tools](#web-tools) |
 
 Only methods marked `[Query]` or `[Operation]` are visible to the tools, and `invoke_query` calls only queries while `invoke_operation` calls only operations. A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line.
 
@@ -219,14 +221,26 @@ Two gaps remain: an agent allowed to call operations can still release a Wallbox
 
 **Notifications.** To notify you, an agent with `invoke_operation` finds the `INotificationPublisher` interface with `list_types`, the subjects that implement it with `search`, and calls their `SendNotification` operation. See [Notifications](../development/notifications.md). Without `invoke_operation` the agent can only report findings on its page.
 
+### Web tools
+
+`web_search` and `web_fetch` let an agent search the web and load web pages, for example to look up a weather forecast or the manual of a device. Both are off by default; turn them on in the edit form, where they carry the warning "Loads untrusted web content", or add them to `allowedTools`. Unlike the other tools, the model's backend runs them, not HomeBlaze:
+
+- A `ClaudeCliAgent` gets the CLI's own `WebSearch` and `WebFetch` tools. They are the only built-in CLI tools an agent can get; tools with access to the host, such as the shell or files, are never offered.
+- An `AnthropicAgent` gets the API's web search and web fetch server tools (`web_search_20260209` and `web_fetch_20260209`), which need a model that supports them.
+
+Each call is recorded in the timeline like a graph tool call, with its query or URL and a preview of the result, and counts toward `MaxToolCallsPerTurn`: once the budget is used up, further graph tool calls return an error. HomeBlaze cannot refuse a web tool call itself, since the backend runs it; an `AnthropicAgent` limits each web tool to `MaxToolCallsPerTurn` uses per model request, and a `ClaudeCliAgent` has no such limit.
+
+When a web tool is allowed, the preamble tells the agent that content from the web is data, never instructions. A web page can still try to steer the agent, so see [Security](#security) before combining web tools with `invoke_operation` or `set_property`.
+
 ---
 
 ## Security
 
 - **Prompt injection.** Names and values from the graph, pages and documents reach the model. A crafted value can try to steer an agent. The preamble and the server instructions state that values from the graph are data, not instructions, but the real defense is the tool scope: allow `invoke_operation` and `set_property` only to agents whose inputs you trust, and keep the default read-only tools otherwise.
+- **Web content.** With `web_search` or `web_fetch` allowed, anyone who controls a web page or search result the agent reads can try to steer it, which is a far larger group than those who can change your graph. Do not allow web tools together with `invoke_operation` or `set_property` unless you accept that risk; a read-only agent with web tools can at worst report something wrong. A web request also tells the visited site, or the search provider, what the agent looked up.
 - **Secrets.** Secret configuration values cannot be state, and the tools expose only state, so an agent cannot read credentials such as API keys through its tools. The API key of an `AnthropicAgent` is stored in plain text in its JSON file, like other secrets; protect the data folder accordingly.
 - **Audit.** Every tool call with its arguments and a preview of its result is recorded in the timeline.
-- **CLI isolation.** The CLI runs without built-in tools, without user, project or local settings and without the `CLAUDE.md` files of the user, the working directory or the folders above it, in an empty working directory, and reaches HomeBlaze only through the agent route with a per-turn token. The MCP configuration file with the token is created readable only by the HomeBlaze user on Linux and macOS, and is deleted after the turn, when the token is revoked.
+- **CLI isolation.** The CLI runs without built-in tools except the allowed web tools, without user, project or local settings and without the `CLAUDE.md` files of the user, the working directory or the folders above it, in an empty working directory, and reaches HomeBlaze only through the agent route with a per-turn token. The MCP configuration file with the token is created readable only by the HomeBlaze user on Linux and macOS, and is deleted after the turn, when the token is revoked.
 
 ---
 
@@ -237,6 +251,8 @@ Background runs usually dominate the usage, because they run without anyone aski
 - set a smaller `BackgroundModel` (for example `haiku` for the CLI) and a low `BackgroundEffort`,
 - watch only the paths the agent needs, and raise `MinRunInterval` for values that change often,
 - prefer a longer `PollInterval`, or none when change triggers are enough.
+
+Web tools add to the cost: on the API, each web search is billed per search on top of the tokens, and fetched pages and search results count as input tokens; on the subscription they count toward the usage limits.
 
 The Activity tab shows the tokens of each run. For CLI agents it also shows the subscription utilization of the last five hours and seven days as the CLI reports it; when a limit is reached, the agent pauses until the reported reset time.
 

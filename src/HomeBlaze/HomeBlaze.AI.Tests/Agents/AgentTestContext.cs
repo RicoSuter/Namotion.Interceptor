@@ -40,7 +40,8 @@ public partial class AgentTestRoot
 // cross-assembly subject inheritance in the generator.
 public class FakeAgent : LlmAgentBase
 {
-    public FakeAgent(AgentServices services, ILogger? logger = null) : base(services, logger ?? NullLogger.Instance)
+    public FakeAgent(AgentServices services, ILogger? logger = null, IReadOnlyList<AgentBackendTool>? supportedBackendTools = null)
+        : base(services, logger ?? NullLogger.Instance, supportedBackendTools)
     {
     }
 

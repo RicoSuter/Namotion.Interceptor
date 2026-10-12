@@ -91,6 +91,41 @@ public class AnthropicChatOptionsTests
         Assert.Equal("ephemeral", body.GetProperty("cache_control").GetProperty("type").GetString());
     }
 
+    [Fact]
+    public async Task WhenWebToolsAreAllowed_ThenTheRequestCarriesTheServerToolsWithTheUseLimit()
+    {
+        // Arrange
+        var handler = new CapturingHandler();
+        using var client = CreateClient(handler);
+        var options = AnthropicChatOptions.Create(Model, 1000, null, [CreateTool("browse")], ["web_search", "web_fetch"], maxBackendToolUses: 7);
+
+        // Act
+        await Assert.ThrowsAnyAsync<Exception>(() => client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], options));
+
+        // Assert
+        var tools = JsonDocument.Parse(handler.Body!).RootElement.GetProperty("tools").EnumerateArray().ToList();
+        Assert.Equal(3, tools.Count);
+        Assert.Equal("browse", tools[0].GetProperty("name").GetString());
+        Assert.Equal("""{"name":"web_search","type":"web_search_20260209","max_uses":7}""", tools[1].GetRawText());
+        Assert.Equal("""{"name":"web_fetch","type":"web_fetch_20260209","max_uses":7}""", tools[2].GetRawText());
+    }
+
+    [Fact]
+    public async Task WhenNoWebToolIsAllowed_ThenTheRequestCarriesNoServerTool()
+    {
+        // Arrange
+        var handler = new CapturingHandler();
+        using var client = CreateClient(handler);
+        var options = AnthropicChatOptions.Create(Model, 1000, null, [CreateTool("browse")], [], maxBackendToolUses: 7);
+
+        // Act
+        await Assert.ThrowsAnyAsync<Exception>(() => client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], options));
+
+        // Assert
+        var tool = Assert.Single(JsonDocument.Parse(handler.Body!).RootElement.GetProperty("tools").EnumerateArray());
+        Assert.Equal("browse", tool.GetProperty("name").GetString());
+    }
+
     private static IChatClient CreateClient(HttpMessageHandler handler) =>
         new AnthropicClient { ApiKey = "test-key", HttpClient = new HttpClient(handler), MaxRetries = 0 }
             .AsIChatClient(defaultModelId: null, defaultMaxOutputTokens: 4000);

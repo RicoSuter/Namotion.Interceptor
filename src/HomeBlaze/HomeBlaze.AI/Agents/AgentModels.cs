@@ -55,7 +55,14 @@ public sealed record AgentTurnRequest(
     string UserMessage,
     string? Model,
     AgentEffort? Effort,
-    AgentToolSet Tools);
+    AgentToolSet Tools)
+{
+    /// <summary>
+    /// The names of the backend tools this turn may use, such as <c>web_search</c>: the allowed ones the agent type
+    /// supports. The backend records their calls with <see cref="AgentToolSet.RecordBackendCall"/>.
+    /// </summary>
+    public IReadOnlyList<string> BackendTools { get; init; } = [];
+}
 
 /// <summary>
 /// The outcome of a successful turn.

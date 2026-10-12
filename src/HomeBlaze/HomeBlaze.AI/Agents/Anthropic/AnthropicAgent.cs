@@ -49,7 +49,7 @@ public partial class AnthropicAgent : LlmAgentBase
     private long _compactionFloor;
 
     public AnthropicAgent(AgentServices services, ILogger<AnthropicAgent> logger)
-        : base(services, logger)
+        : base(services, logger, AgentBackendTool.WebTools)
     {
         _logger = logger;
         MaxTokens = 16000;
@@ -115,7 +115,8 @@ public partial class AnthropicAgent : LlmAgentBase
         var messages = isChat
             ? _history.BuildRequestMessages(request.SystemPrompt, request.UserMessage)
             : [new ChatMessage(ChatRole.System, request.SystemPrompt), new ChatMessage(ChatRole.User, request.UserMessage)];
-        var options = AnthropicChatOptions.Create(model, maxTokens, request.Effort, request.Tools.Tools);
+        var options = AnthropicChatOptions.Create(
+            model, maxTokens, request.Effort, request.Tools.Tools, request.BackendTools, MaxToolCallsPerTurn);
 
         var innerClient = GetChatClient(apiKey, maxTokens);
 
@@ -124,7 +125,8 @@ public partial class AnthropicAgent : LlmAgentBase
         // change mid-turn invalidates the thinking blocks the API expects back. Not disposed: that would dispose
         // the reused inner client.
         var iterationLimit = (int)Math.Min((long)Math.Max(MaxToolCallsPerTurn, 0) + ExtraToolIterations, int.MaxValue);
-        var client = new FunctionInvokingChatClient(innerClient)
+        var client = new FunctionInvokingChatClient(
+            request.BackendTools.Count > 0 ? new AnthropicServerToolClient(innerClient, request.Tools) : innerClient)
         {
             MaximumIterationsPerRequest = iterationLimit,
             MaximumConsecutiveErrorsPerRequest = iterationLimit

@@ -24,6 +24,24 @@ public sealed record ClaudeRateLimitEvent(AgentRateLimit RateLimit) : ClaudeStre
 /// <summary>An assistant message the CLI marked with an error code, for example <c>authentication_failed</c>.</summary>
 public sealed record ClaudeAssistantErrorEvent(string Code) : ClaudeStreamEvent;
 
+/// <summary>A tool call the model made, as a complete assistant message reports it.</summary>
+/// <param name="Id">The tool use id, which the result refers to.</param>
+/// <param name="Name">The tool name, for example <c>WebSearch</c> or <c>mcp__homeblaze__browse</c>.</param>
+/// <param name="Arguments">The input as JSON.</param>
+public sealed record ClaudeToolUse(string Id, string Name, string Arguments);
+
+/// <summary>The tool calls of an assistant message.</summary>
+public sealed record ClaudeToolUseEvent(IReadOnlyList<ClaudeToolUse> ToolUses) : ClaudeStreamEvent;
+
+/// <summary>The result of a tool call.</summary>
+/// <param name="ToolUseId">The id of the tool use.</param>
+/// <param name="Content">The text of the result.</param>
+/// <param name="IsError">Whether the call failed.</param>
+public sealed record ClaudeToolResult(string ToolUseId, string Content, bool IsError);
+
+/// <summary>The tool results of a user message.</summary>
+public sealed record ClaudeToolResultEvent(IReadOnlyList<ClaudeToolResult> Results) : ClaudeStreamEvent;
+
 /// <summary>The final result of the run.</summary>
 public sealed record ClaudeResultEvent(string? SessionId, string Subtype, bool IsError, string? Text, AgentUsage? Usage) : ClaudeStreamEvent;
 
@@ -90,7 +108,12 @@ public static class ClaudeStreamJsonParser
 
         if (type.ValueEquals("assistant"u8))
         {
-            return GetString(root, "error"u8) is { } code ? new ClaudeAssistantErrorEvent(code) : null;
+            return GetString(root, "error"u8) is { } code ? new ClaudeAssistantErrorEvent(code) : ParseToolUses(root);
+        }
+
+        if (type.ValueEquals("user"u8))
+        {
+            return ParseToolResults(root);
         }
 
         return type.ValueEquals("result"u8) ? ParseResult(root) : null;
@@ -117,6 +140,75 @@ public static class ClaudeStreamJsonParser
         return HasString(delta, "type"u8, "text_delta"u8) && GetString(delta, "text"u8) is { } text
             ? new ClaudeTextDeltaEvent(text)
             : null;
+    }
+
+    private static ClaudeToolUseEvent? ParseToolUses(JsonElement root)
+    {
+        List<ClaudeToolUse>? toolUses = null;
+        foreach (var block in GetContentBlocks(root))
+        {
+            if (HasString(block, "type"u8, "tool_use"u8) &&
+                GetString(block, "id"u8) is { } id &&
+                GetString(block, "name"u8) is { } name)
+            {
+                var arguments = block.TryGetProperty("input"u8, out var input) ? input.GetRawText() : "{}";
+                (toolUses ??= []).Add(new ClaudeToolUse(id, name, arguments));
+            }
+        }
+
+        return toolUses is null ? null : new ClaudeToolUseEvent(toolUses);
+    }
+
+    private static ClaudeToolResultEvent? ParseToolResults(JsonElement root)
+    {
+        List<ClaudeToolResult>? results = null;
+        foreach (var block in GetContentBlocks(root))
+        {
+            if (HasString(block, "type"u8, "tool_result"u8) && GetString(block, "tool_use_id"u8) is { } toolUseId)
+            {
+                var isError = block.TryGetProperty("is_error"u8, out var error) && error.ValueKind == JsonValueKind.True;
+                (results ??= []).Add(new ClaudeToolResult(toolUseId, GetResultText(block), isError));
+            }
+        }
+
+        return results is null ? null : new ClaudeToolResultEvent(results);
+    }
+
+    private static JsonElement.ArrayEnumerator GetContentBlocks(JsonElement root) =>
+        TryGetObject(root, "message"u8, out var message) &&
+        message.TryGetProperty("content"u8, out var content) &&
+        content.ValueKind == JsonValueKind.Array
+            ? content.EnumerateArray()
+            : default;
+
+    // A result is a string or a list of content blocks, of which the text blocks are joined.
+    private static string GetResultText(JsonElement block)
+    {
+        if (!block.TryGetProperty("content"u8, out var content))
+        {
+            return string.Empty;
+        }
+
+        if (content.ValueKind == JsonValueKind.String)
+        {
+            return content.GetString() ?? string.Empty;
+        }
+
+        if (content.ValueKind != JsonValueKind.Array)
+        {
+            return content.GetRawText();
+        }
+
+        var texts = new List<string>();
+        foreach (var item in content.EnumerateArray())
+        {
+            if (HasString(item, "type"u8, "text"u8) && GetString(item, "text"u8) is { } text)
+            {
+                texts.Add(text);
+            }
+        }
+
+        return string.Join('\n', texts);
     }
 
     private static ClaudeRateLimitEvent? ParseRateLimit(JsonElement root)

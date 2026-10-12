@@ -22,7 +22,7 @@ public partial class ClaudeCliAgent : LlmAgentBase
     private string? _sessionId;
 
     public ClaudeCliAgent(AgentServices services, ILogger<ClaudeCliAgent> logger)
-        : base(services, logger)
+        : base(services, logger, ClaudeCliArguments.SupportedBackendTools)
     {
         _logger = logger;
         CliPath = "claude";
@@ -128,9 +128,12 @@ public partial class ClaudeCliAgent : LlmAgentBase
             request.Effort,
             FallbackModel,
             resumeSessionId,
-            PersistSession: request.Kind == AgentTurnKind.Chat);
+            PersistSession: request.Kind == AgentTurnKind.Chat)
+        {
+            BackendTools = request.BackendTools
+        };
         var invocation = new ClaudeCliInvocation(CliPath, ClaudeCliArguments.Build(options), WorkingDirectory, request.UserMessage);
-        return ClaudeCliProcess.RunAsync(invocation, progress, cancellationToken);
+        return ClaudeCliProcess.RunAsync(invocation, progress, cancellationToken, request.Tools);
     }
 
     private void DeleteConfiguration(string path)

@@ -10,7 +10,8 @@ namespace HomeBlaze.AI.Blazor;
 /// <param name="Description">A short summary for known tools, else the tool description; null when unknown.</param>
 /// <param name="IsOffered">Whether the installation currently offers the tool.</param>
 /// <param name="CanChangeState">Whether the tool can change devices, including sending notifications.</param>
-public sealed record AgentToolOption(string Name, string? Description, bool IsOffered, bool CanChangeState);
+/// <param name="LoadsWebContent">Whether the tool is a backend tool that brings untrusted web content into the turn.</param>
+public sealed record AgentToolOption(string Name, string? Description, bool IsOffered, bool CanChangeState, bool LoadsWebContent = false);
 
 /// <summary>
 /// Builds the allowed-tools toggles of the agent edit form.
@@ -38,9 +39,11 @@ public static class AgentToolOptions
     };
 
     /// <summary>
-    /// Lists the tools of <paramref name="toolSource"/>, or <see cref="FallbackToolNames"/> when listing fails.
+    /// Lists the tools of <paramref name="toolSource"/>, or <see cref="FallbackToolNames"/> when listing fails, followed
+    /// by the backend tools of the agent type.
     /// </summary>
-    public static IReadOnlyList<AgentToolOption> Create(IAgentToolSource toolSource, IEnumerable<string> allowedTools)
+    public static IReadOnlyList<AgentToolOption> Create(
+        IAgentToolSource toolSource, IEnumerable<string> allowedTools, IReadOnlyList<AgentBackendTool>? backendTools = null)
     {
         IReadOnlyList<McpToolInfo>? offeredTools;
         try
@@ -52,17 +55,19 @@ public static class AgentToolOptions
             offeredTools = null;
         }
 
-        return Create(offeredTools, allowedTools);
+        return Create(offeredTools, allowedTools, backendTools);
     }
 
     /// <summary>
-    /// Creates a toggle per offered tool, read-only tools first, followed by a toggle per allowed name that is not
-    /// offered, so it can be turned off. update_memory is excluded because it is always available. Known tools
-    /// are described by a short summary instead of their tool description.
+    /// Creates a toggle per offered tool, read-only tools first, then a toggle per backend tool of the agent type,
+    /// followed by a toggle per allowed name that is not offered, so it can be turned off. update_memory is excluded
+    /// because it is always available. Known tools are described by a short summary instead of their tool description.
     /// </summary>
     /// <param name="offeredTools">The offered tools, null to use <see cref="FallbackToolNames"/>.</param>
     /// <param name="allowedTools">The configured allowed tool names.</param>
-    public static IReadOnlyList<AgentToolOption> Create(IReadOnlyList<McpToolInfo>? offeredTools, IEnumerable<string> allowedTools)
+    /// <param name="backendTools">The backend tools the agent type supports.</param>
+    public static IReadOnlyList<AgentToolOption> Create(
+        IReadOnlyList<McpToolInfo>? offeredTools, IEnumerable<string> allowedTools, IReadOnlyList<AgentBackendTool>? backendTools = null)
     {
         var offered = offeredTools?.Select(tool => (tool.Name, (string?)tool.Description))
             ?? FallbackToolNames.Select(name => (name, (string?)null));
@@ -78,6 +83,14 @@ public static class AgentToolOptions
         }
 
         var sorted = options.OrderBy(option => option.CanChangeState).ToList();
+        foreach (var backendTool in backendTools ?? [])
+        {
+            if (names.Add(backendTool.Name))
+            {
+                sorted.Add(new AgentToolOption(backendTool.Name, backendTool.Summary, IsOffered: true, CanChangeState: false, backendTool.LoadsWebContent));
+            }
+        }
+
         foreach (var name in allowedTools)
         {
             if (names.Add(name))

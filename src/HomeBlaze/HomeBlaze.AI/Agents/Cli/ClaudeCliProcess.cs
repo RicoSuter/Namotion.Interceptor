@@ -66,10 +66,20 @@ public static class ClaudeCliProcess
     /// <summary>
     /// Runs the invocation to completion.
     /// </summary>
+    /// <param name="invocation">The invocation.</param>
+    /// <param name="progress">Receives the streamed text.</param>
+    /// <param name="cancellationToken">Kills the process tree when cancelled.</param>
+    /// <param name="backendToolCalls">
+    /// Records each finished call of a built-in CLI tool, such as <c>WebSearch</c> as <c>web_search</c>, when its result
+    /// arrives; calls of MCP tools are not recorded here, since the MCP route records them.
+    /// </param>
     /// <exception cref="AgentTurnException">The CLI could not be started (<see cref="AgentFailureKind.Configuration"/>).</exception>
     /// <exception cref="OperationCanceledException">The token was cancelled; the process tree has been killed.</exception>
     public static async Task<ClaudeCliRunResult> RunAsync(
-        ClaudeCliInvocation invocation, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
+        ClaudeCliInvocation invocation,
+        IProgress<AgentTurnUpdate> progress,
+        CancellationToken cancellationToken,
+        AgentToolSet? backendToolCalls = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var process = StartProcess(invocation);
@@ -86,7 +96,7 @@ public static class ClaudeCliProcess
             standardErrorTask = ReadLimitedAsync(process.StandardError, cancellationToken);
             standardInputTask = WriteStandardInputAsync(process.StandardInput, invocation.StandardInput, cancellationToken);
 
-            var output = new OutputCollector();
+            var output = new OutputCollector(backendToolCalls);
             while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
             {
                 output.Apply(ClaudeStreamJsonParser.Parse(line), progress);
@@ -274,7 +284,10 @@ public static class ClaudeCliProcess
     private struct OutputCollector
     {
         private const string SegmentSeparator = "\n\n";
+        private const string McpToolPrefix = "mcp__";
 
+        private readonly AgentToolSet? _backendToolCalls;
+        private Dictionary<string, ClaudeToolUse>? _pendingBuiltInToolUses;
         private StringBuilder? _text;
         private int _lastSegmentStart;
         private bool _isNewBlock;
@@ -283,10 +296,21 @@ public static class ClaudeCliProcess
         private AgentRateLimit? _rateLimit;
         private ClaudeResultEvent? _result;
 
+        public OutputCollector(AgentToolSet? backendToolCalls)
+        {
+            _backendToolCalls = backendToolCalls;
+        }
+
         public void Apply(ClaudeStreamEvent? streamEvent, IProgress<AgentTurnUpdate> progress)
         {
             switch (streamEvent)
             {
+                case ClaudeToolUseEvent toolUses when _backendToolCalls is not null:
+                    RememberBuiltInToolUses(toolUses.ToolUses);
+                    break;
+                case ClaudeToolResultEvent results when _pendingBuiltInToolUses is not null:
+                    ReportBuiltInToolCalls(results.Results);
+                    break;
                 case ClaudeInitEvent init:
                     _sessionId = init.SessionId;
                     break;
@@ -320,6 +344,29 @@ public static class ClaudeCliProcess
             standardError,
             _text?.ToString(),
             _text?.ToString(_lastSegmentStart, _text.Length - _lastSegmentStart));
+
+        private void RememberBuiltInToolUses(IReadOnlyList<ClaudeToolUse> toolUses)
+        {
+            foreach (var toolUse in toolUses)
+            {
+                if (!toolUse.Name.StartsWith(McpToolPrefix, StringComparison.Ordinal))
+                {
+                    (_pendingBuiltInToolUses ??= [])[toolUse.Id] = toolUse;
+                }
+            }
+        }
+
+        private readonly void ReportBuiltInToolCalls(IReadOnlyList<ClaudeToolResult> results)
+        {
+            foreach (var result in results)
+            {
+                if (_pendingBuiltInToolUses!.Remove(result.ToolUseId, out var toolUse))
+                {
+                    _backendToolCalls!.RecordBackendCall(
+                        ClaudeCliArguments.GetBackendToolName(toolUse.Name) ?? toolUse.Name, toolUse.Arguments, result.Content, result.IsError);
+                }
+            }
+        }
 
         // The separator is streamed too, so the live text and the stored answer read the same.
         private void AppendText(string text, IProgress<AgentTurnUpdate> progress)

@@ -193,7 +193,8 @@ public sealed class AnthropicHistory
         {
             switch (content)
             {
-                case TextReasoningContent:
+                // Server tool blocks hold the fetched web content; later turns get the answer that used it.
+                case TextReasoningContent or WebSearchToolCallContent or WebSearchToolResultContent:
                     break;
                 case FunctionResultContent result:
                     contents.Add(NormalizeToolResult(result));

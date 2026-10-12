@@ -123,4 +123,24 @@ public class AgentToolSetTests
         Assert.Contains("browse", call.ResultPreview);
         Assert.IsType<AgentToolCallCompleted>(Assert.Single(reported));
     }
+
+    [Fact]
+    public async Task WhenABackendToolCallIsRecorded_ThenItShowsAsACallAndCountsAgainstTheBudget()
+    {
+        // Arrange
+        var updates = new List<AgentTurnUpdate>();
+        var toolSet = AgentToolSet.Create([Tool("browse")], ["browse"], MemoryTool, maxToolCalls: 1, new SynchronousProgress<AgentTurnUpdate>(updates.Add));
+
+        // Act
+        toolSet.RecordBackendCall("web_search", """{"query":"weather"}""", new string('x', 3000), isError: false);
+        var result = await toolSet.Tools[0].Handler(JsonSerializer.SerializeToElement(new { }), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["web_search", "browse"], toolSet.Calls.Select(call => call.Name));
+        Assert.Equal("""{"query":"weather"}""", toolSet.Calls[0].Arguments);
+        Assert.Equal(2003, toolSet.Calls[0].ResultPreview.Length);
+        Assert.True(toolSet.Calls[1].IsError);
+        Assert.Contains("budget", JsonSerializer.Serialize(result));
+        Assert.Equal(2, updates.Count);
+    }
 }

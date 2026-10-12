@@ -105,4 +105,34 @@ public class ClaudeStreamJsonParserTests
         // Assert
         Assert.Equal(expected, Assert.IsType<ClaudeRateLimitEvent>(parsed).RateLimit.FiveHourUtilization);
     }
+
+    [Fact]
+    public void WhenParsingAWebSearchRun_ThenToolUsesAndResultsAreExtracted()
+    {
+        // Act
+        var events = ParseFixture("web-search.jsonl");
+
+        // Assert
+        var toolUses = Assert.Single(events.OfType<ClaudeToolUseEvent>()).ToolUses;
+        Assert.Equal(["WebSearch", "mcp__homeblaze__get_property"], toolUses.Select(toolUse => toolUse.Name));
+        Assert.Equal("""{"query":"latest released version of .NET SDK 2026"}""", toolUses[0].Arguments);
+        var results = events.OfType<ClaudeToolResultEvent>().SelectMany(result => result.Results).ToList();
+        Assert.Equal(["toolu_01J9wstnXj6ijoAjQpXyLuPi", "toolu_2"], results.Select(result => result.ToolUseId));
+        Assert.StartsWith("Web search results for query", results[0].Content);
+        Assert.Equal("21.5", results[1].Content);
+        Assert.False(results[0].IsError);
+    }
+
+    [Fact]
+    public void WhenAToolResultIsMarkedAsError_ThenTheResultIsAnError()
+    {
+        // Act
+        var parsed = ClaudeStreamJsonParser.Parse(
+            """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Fetch failed","is_error":true}]}}""");
+
+        // Assert
+        var result = Assert.Single(Assert.IsType<ClaudeToolResultEvent>(parsed).Results);
+        Assert.True(result.IsError);
+        Assert.Equal("Fetch failed", result.Content);
+    }
 }

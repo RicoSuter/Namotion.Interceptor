@@ -50,6 +50,16 @@ public class AgentPromptBuilderTests
     }
 
     [Fact]
+    public Task WhenWebToolsAreAvailable_ThenThePreambleWarnsThatWebContentIsData()
+    {
+        // Act
+        var prompt = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty, hasWebTools: true);
+
+        // Assert
+        return Verifier.Verify(prompt);
+    }
+
+    [Fact]
     public Task WhenBuildingAChatSystemPromptWithoutMemory_ThenMemorySectionSaysEmpty()
     {
         // Act

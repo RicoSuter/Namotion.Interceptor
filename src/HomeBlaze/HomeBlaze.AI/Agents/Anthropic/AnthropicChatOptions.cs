@@ -18,13 +18,26 @@ public static class AnthropicChatOptions
     /// <param name="maxOutputTokens">The output token limit, including thinking tokens.</param>
     /// <param name="effort">The effort, or null for the model's default.</param>
     /// <param name="tools">The tools the model may call.</param>
-    public static ChatOptions Create(string model, int maxOutputTokens, AgentEffort? effort, IReadOnlyList<McpToolInfo> tools)
+    /// <param name="backendTools">
+    /// The backend tools the model may use, <c>web_search</c> and <c>web_fetch</c>, which the API runs as server tools
+    /// with at most <paramref name="maxBackendToolUses"/> uses each per request.
+    /// </param>
+    /// <param name="maxBackendToolUses">The use limit of each server tool per request.</param>
+    public static ChatOptions Create(
+        string model,
+        int maxOutputTokens,
+        AgentEffort? effort,
+        IReadOnlyList<McpToolInfo> tools,
+        IReadOnlyList<string>? backendTools = null,
+        int maxBackendToolUses = 0)
     {
-        var aiTools = new List<AITool>(tools.Count);
+        var aiTools = new List<AITool>(tools.Count + 2);
         foreach (var tool in tools)
         {
             aiTools.Add(tool.ToAIFunction());
         }
+
+        AddServerTools(aiTools, backendTools, maxBackendToolUses);
 
         // An explicit MaxOutputTokens stops the client from raising max_tokens above the configured limit to fit a thinking budget.
         var options = new ChatOptions
@@ -65,5 +78,24 @@ public static class AnthropicChatOptions
         };
 
         return options;
+    }
+
+    private static void AddServerTools(List<AITool> aiTools, IReadOnlyList<string>? backendTools, int maxBackendToolUses)
+    {
+        if (backendTools is null)
+        {
+            return;
+        }
+
+        long maxUses = Math.Max(maxBackendToolUses, 1);
+        if (backendTools.Contains(AgentBackendTool.WebSearch.Name))
+        {
+            aiTools.Add(new ToolUnion(new WebSearchTool20260209 { MaxUses = maxUses }).AsAITool());
+        }
+
+        if (backendTools.Contains(AgentBackendTool.WebFetch.Name))
+        {
+            aiTools.Add(new ToolUnion(new WebFetchTool20260209 { MaxUses = maxUses }).AsAITool());
+        }
     }
 }

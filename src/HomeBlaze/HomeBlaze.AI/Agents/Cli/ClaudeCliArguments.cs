@@ -21,7 +21,13 @@ public sealed record ClaudeCliOptions(
     AgentEffort? Effort,
     string? FallbackModel,
     string? ResumeSessionId,
-    bool PersistSession);
+    bool PersistSession)
+{
+    /// <summary>
+    /// The backend tools the turn may use, such as <c>web_search</c>; names without a CLI tool are ignored.
+    /// </summary>
+    public IReadOnlyList<string> BackendTools { get; init; } = [];
+}
 
 /// <summary>
 /// Builds the command line of the Claude CLI for agent turns.
@@ -31,13 +37,42 @@ public static class ClaudeCliArguments
     /// <summary>The MCP server name, which prefixes its tools as <c>mcp__homeblaze__</c>.</summary>
     public const string McpServerName = "homeblaze";
 
+    // Only web tools: built-in tools with host access (shell, files, agents) are never offered.
+    private static readonly (string BackendTool, string CliTool)[] CliTools =
+    [
+        (AgentBackendTool.WebSearch.Name, "WebSearch"),
+        (AgentBackendTool.WebFetch.Name, "WebFetch")
+    ];
+
+    /// <summary>The backend tools a CLI agent supports.</summary>
+    public static IReadOnlyList<AgentBackendTool> SupportedBackendTools { get; } = AgentBackendTool.WebTools;
+
+    /// <summary>The backend tool name of a CLI built-in tool, or null when it is not one of the mapped tools.</summary>
+    public static string? GetBackendToolName(string cliToolName)
+    {
+        foreach (var (backendTool, cliTool) in CliTools)
+        {
+            if (cliTool == cliToolName)
+            {
+                return backendTool;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>
-    /// Builds the arguments. The run is isolated from the host user's setup: no built-in tools, only the HomeBlaze
-    /// MCP server, no user, project or local settings, hooks, plugins or CLAUDE.md files. <c>--bare</c> is not used
-    /// because it disables OAuth login.
+    /// Builds the arguments. The run is isolated from the host user's setup: no built-in tools except the allowed web
+    /// tools, only the HomeBlaze MCP server, no user, project or local settings, hooks, plugins or CLAUDE.md files.
+    /// <c>--bare</c> is not used because it disables OAuth login.
     /// </summary>
     public static IReadOnlyList<string> Build(ClaudeCliOptions options)
     {
+        var cliTools = CliTools
+            .Where(tool => options.BackendTools.Contains(tool.BackendTool))
+            .Select(tool => tool.CliTool)
+            .ToList();
+
         // --tools, --mcp-config and --allowedTools take several values and are terminated by the next flag, so each must
         // stay followed by a flag and no positional prompt may be appended; the prompt goes through standard input.
         var arguments = new List<string>
@@ -49,10 +84,11 @@ public static class ClaudeCliArguments
             "--system-prompt", options.SystemPrompt,
             // The default snapshots the prompt per session, which would hide later memory edits from a resumed chat.
             "--system-prompt-snapshot", "off",
-            "--tools", string.Empty,
+            // Comma-separated in one value each: the built-in tools, and the tools that run without a permission prompt.
+            "--tools", string.Join(',', cliTools),
             "--strict-mcp-config",
             "--mcp-config", options.McpConfigurationPath,
-            "--allowedTools", "mcp__" + McpServerName,
+            "--allowedTools", string.Join(',', cliTools.Prepend("mcp__" + McpServerName)),
             // No source at all: "project" would load CLAUDE.md from the working directory and every folder above it.
             "--setting-sources", string.Empty
         };

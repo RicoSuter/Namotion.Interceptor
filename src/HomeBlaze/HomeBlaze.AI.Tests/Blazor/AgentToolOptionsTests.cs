@@ -38,6 +38,38 @@ public class AgentToolOptionsTests
     }
 
     [Fact]
+    public void WhenTheAgentTypeSupportsWebTools_ThenTheyFollowTheGraphToolsWithTheirSummaryAndWebWarning()
+    {
+        // Arrange
+        var offeredTools = new[] { CreateTool("set_property"), CreateTool("browse") };
+
+        // Act
+        var options = AgentToolOptions.Create(offeredTools, ["web_search", "removed_tool"], AgentBackendTool.WebTools);
+
+        // Assert
+        Assert.Equal(["browse", "set_property", "web_search", "web_fetch", "removed_tool"], options.Select(option => option.Name));
+        Assert.Equal([false, false, true, true, false], options.Select(option => option.LoadsWebContent));
+        Assert.Equal([false, true, false, false, false], options.Select(option => option.CanChangeState));
+        Assert.Equal(["Searches the web.", "Loads a web page."], options.Skip(2).Take(2).Select(option => option.Description));
+        Assert.True(options[2].IsOffered);
+    }
+
+    [Fact]
+    public void WhenTheAgentTypeSupportsNoWebTool_ThenAnAllowedWebToolIsListedAsNotOffered()
+    {
+        // Arrange
+        var offeredTools = new[] { CreateTool("browse") };
+
+        // Act
+        var options = AgentToolOptions.Create(offeredTools, ["web_search"]);
+
+        // Assert
+        Assert.Equal(["browse", "web_search"], options.Select(option => option.Name));
+        Assert.False(options[1].IsOffered);
+        Assert.False(options[1].LoadsWebContent);
+    }
+
+    [Fact]
     public void WhenAnAllowedToolIsNotOffered_ThenItIsListedLastAsNotOffered()
     {
         // Arrange

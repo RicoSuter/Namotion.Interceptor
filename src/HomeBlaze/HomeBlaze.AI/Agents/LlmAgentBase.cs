@@ -67,10 +67,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private string? _storageName;
     private volatile bool _isStorageLoaded;
 
-    protected LlmAgentBase(AgentServices services, ILogger logger)
+    /// <param name="services">The services shared by agents.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="supportedBackendTools">The backend tools this agent type can run; none when null.</param>
+    protected LlmAgentBase(AgentServices services, ILogger logger, IReadOnlyList<AgentBackendTool>? supportedBackendTools = null)
     {
         _services = services;
         _logger = logger;
+        SupportedBackendTools = supportedBackendTools ?? [];
         Timeline = new AgentTimeline(filePath: null);
         Memory = new AgentMemory(filePath: null, services.TimeProvider);
         WatchPaths = [];
@@ -161,6 +165,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     public string? Title => Name ?? GetType().Name;
 
     public string? IconName => "SmartToy";
+
+    /// <summary>
+    /// The backend tools this agent type can run, which are enabled by adding their names to <see cref="AllowedTools"/>.
+    /// </summary>
+    public IReadOnlyList<AgentBackendTool> SupportedBackendTools { get; }
 
     /// <summary>The timeline of background runs and chat.</summary>
     public AgentTimeline Timeline { get; private set; }
@@ -848,13 +857,18 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         AgentTurnKind kind, string message, AgentToolSet tools, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
         var isBackground = kind == AgentTurnKind.Background;
+        var allowedTools = AllowedTools;
+        var backendTools = SupportedBackendTools.Where(tool => allowedTools.Contains(tool.Name)).ToList();
         var request = new AgentTurnRequest(
             kind,
-            AgentPromptBuilder.BuildSystemPrompt(kind, Instructions, Memory.GetSnapshot()),
+            AgentPromptBuilder.BuildSystemPrompt(kind, Instructions, Memory.GetSnapshot(), backendTools.Exists(tool => tool.LoadsWebContent)),
             message,
             isBackground ? BackgroundModel ?? Model : Model,
             isBackground ? BackgroundEffort ?? Effort : Effort,
-            tools);
+            tools)
+        {
+            BackendTools = backendTools.ConvertAll(tool => tool.Name)
+        };
 
         var turnTimeout = TurnTimeout;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

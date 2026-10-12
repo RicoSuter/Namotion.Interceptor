@@ -86,4 +86,72 @@ public class ClaudeCliArgumentsTests
         Assert.Equal("http://127.0.0.1:5192/mcp/agents", server.GetProperty("url").GetString());
         Assert.Equal("Bearer TOKEN", server.GetProperty("headers").GetProperty("Authorization").GetString());
     }
+
+    [Fact]
+    public void WhenNoBackendToolIsAllowed_ThenNoBuiltInToolIsAvailableAndOnlyTheMcpServerIsAllowed()
+    {
+        // Arrange
+        var options = new ClaudeCliOptions("SYSTEM", "/tmp/mcp.json", null, null, null, null, PersistSession: false);
+
+        // Act
+        var arguments = ClaudeCliArguments.Build(options);
+
+        // Assert
+        Assert.Equal(
+            ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--system-prompt", "SYSTEM",
+             "--system-prompt-snapshot", "off", "--tools", "", "--strict-mcp-config", "--mcp-config", "/tmp/mcp.json",
+             "--allowedTools", "mcp__homeblaze", "--setting-sources", "", "--no-session-persistence"],
+            arguments);
+    }
+
+    [Fact]
+    public void WhenWebToolsAreAllowed_ThenTheyAreTheOnlyBuiltInToolsAndRunWithoutAPrompt()
+    {
+        // Arrange
+        var options = new ClaudeCliOptions("SYSTEM", "/tmp/mcp.json", null, null, null, null, PersistSession: false)
+        {
+            BackendTools = ["web_fetch", "web_search", "Bash", "unknown"]
+        };
+
+        // Act
+        var arguments = ClaudeCliArguments.Build(options);
+
+        // Assert
+        Assert.Equal(
+            ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--system-prompt", "SYSTEM",
+             "--system-prompt-snapshot", "off", "--tools", "WebSearch,WebFetch", "--strict-mcp-config", "--mcp-config", "/tmp/mcp.json",
+             "--allowedTools", "mcp__homeblaze,WebSearch,WebFetch", "--setting-sources", "", "--no-session-persistence"],
+            arguments);
+    }
+
+    [Fact]
+    public void WhenOnlyWebSearchIsAllowed_ThenWebFetchIsNotAvailable()
+    {
+        // Arrange
+        var options = new ClaudeCliOptions("SYSTEM", "/tmp/mcp.json", null, null, null, null, PersistSession: false)
+        {
+            BackendTools = ["web_search"]
+        };
+
+        // Act
+        var arguments = ClaudeCliArguments.Build(options);
+
+        // Assert
+        Assert.Equal("WebSearch", ValueAfter(arguments, "--tools"));
+        Assert.Equal("mcp__homeblaze,WebSearch", ValueAfter(arguments, "--allowedTools"));
+    }
+
+    [Theory]
+    [InlineData("WebSearch", "web_search")]
+    [InlineData("WebFetch", "web_fetch")]
+    [InlineData("Bash", null)]
+    [InlineData("mcp__homeblaze__browse", null)]
+    public void WhenMappingACliToolName_ThenOnlyWebToolsHaveABackendToolName(string cliToolName, string? expected)
+    {
+        // Act
+        var name = ClaudeCliArguments.GetBackendToolName(cliToolName);
+
+        // Assert
+        Assert.Equal(expected, name);
+    }
 }

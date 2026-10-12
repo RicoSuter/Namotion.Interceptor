@@ -357,6 +357,31 @@ public class AgentPageTests
     }
 
     [Fact]
+    public async Task WhenEditingACliAgent_ThenTheWebToolsAreOfferedWithTheWebWarning()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}browser/{ResultAgentPath}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // The edit button is prerendered, and a click before the circuit is connected is lost.
+        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        var editButton = page.Locator("#scrollContainer [data-testid='edit-subject-button']").Last;
+        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+
+        // Act
+        await editButton.ClickAsync();
+
+        // Assert
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        var webSearch = dialog.GetByTestId("agent-edit-tool-web_search");
+        await Assertions.Expect(webSearch).ToContainTextAsync("Searches the web.", new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(webSearch.GetByTestId("agent-edit-tool-web-warning")).ToHaveTextAsync("Loads untrusted web content");
+        await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-web_fetch")).ToContainTextAsync("Loads a web page.");
+        await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-browse").GetByTestId("agent-edit-tool-web-warning")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenSendingWithEnterAfterScrollingUpInALongTimeline_ThenTheMessageAndReplyShowAtTheBottom()
     {
         if (OperatingSystem.IsWindows())
