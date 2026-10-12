@@ -396,6 +396,22 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenThePageHasWindowsLineEndingsAndTheNewContentHasLineFeeds_ThenTheBlocksKeepTheirText()
+    {
+        // Arrange
+        const string content = "# Motors\r\n\r\n:: HomeBlaze.Samples.Motor#motor Name=Motor\r\n::\r\n\r\nText";
+        WriteFile("Motors.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act
+        await markdown.ReplaceContentAsync("# All motors\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor\n::\n\nText", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# All motors\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor\r\n::\n\nText", ReadFile("Motors.md"));
+    }
+
+    [Fact]
     public async Task WhenReplacingTheContentRemovesABlock_ThenItIsRejected()
     {
         // Arrange

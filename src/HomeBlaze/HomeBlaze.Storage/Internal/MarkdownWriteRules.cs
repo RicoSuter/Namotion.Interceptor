@@ -61,7 +61,8 @@ internal static class MarkdownWriteRules
     private const string ActiveContentMessage =
         $"Blocks cannot be added, changed or removed, and {MarkdownFile.ActiveContent} cannot be added or changed through " +
         "these operations; use the page editor. A block starts with a line of two or more colons and ends with its closing " +
-        "line, and text directly after a block without a closing line belongs to that block.";
+        "line, and text directly after a block without a closing line belongs to that block. Keep each block exactly as " +
+        "ReadRawContent shows it, with *** where it hides a secret value.";
 
     private const string BlockPositionMessage =
         "The change adds or removes an expression, or the first text, before a block without a #name, which would create " +
@@ -98,6 +99,40 @@ internal static class MarkdownWriteRules
         {
             throw new ArgumentException(BlockPositionMessage, parameterName);
         }
+    }
+
+    /// <summary>
+    /// Gets the source to write for a page whose current source is <paramref name="source"/> when a change was made to
+    /// <paramref name="redactedSource"/>, the view of the page with secret values hidden, and gave
+    /// <paramref name="newContent"/>. Each block must be exactly as in the redacted view, and gets its text from the source
+    /// back, so a hidden value is kept and a guessed one is not accepted.
+    /// </summary>
+    /// <exception cref="ArgumentException">The new content changes a block of the redacted view or breaks another rule of
+    /// <see cref="EnsureActiveContentUnchanged"/>.</exception>
+    public static string RestoreBlocks(string source, string redactedSource, string newContent, string parameterName)
+    {
+        var blocks = GetBlocks(MarkdownPageParser.Parse(source));
+        var redactedBlocks = GetBlocks(MarkdownPageParser.Parse(redactedSource));
+        var newBlocks = GetBlocks(MarkdownPageParser.Parse(newContent));
+        if (blocks.Count != redactedBlocks.Count ||
+            !redactedBlocks.Select(block => block.Text).SequenceEqual(newBlocks.Select(block => block.Text), StringComparer.Ordinal))
+        {
+            throw new ArgumentException(ActiveContentMessage, parameterName);
+        }
+
+        var restored = new StringBuilder(newContent.Length);
+        var copied = 0;
+        for (var index = 0; index < newBlocks.Count; index++)
+        {
+            var newSpan = newBlocks[index].Span;
+            var span = blocks[index].Span;
+            restored.Append(newContent, copied, newSpan.Start - copied).Append(source, span.Start, span.Length);
+            copied = newSpan.End;
+        }
+
+        var result = restored.Append(newContent, copied, newContent.Length - copied).ToString();
+        EnsureActiveContentUnchanged(source, result, parameterName);
+        return result;
     }
 
     /// <summary>

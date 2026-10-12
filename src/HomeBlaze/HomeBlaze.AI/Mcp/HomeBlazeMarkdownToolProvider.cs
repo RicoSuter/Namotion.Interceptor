@@ -34,14 +34,16 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     private const string BlocksRule =
         "Blocks, which start with a line of two or more colons (::) and create widgets, layouts, slots, subjects and " +
         "styled sections, must stay exactly as they are and in the same order, including their content up to their " +
-        "closing line; text directly after a block without a closing line belongs to that block.";
+        "closing line; text directly after a block without a closing line belongs to that block. Keep a block with a " +
+        "hidden secret value (***) exactly as ReadRawContent shows it; the page keeps the real value. Expressions and the " +
+        "first text cannot be added or removed before a block without a #name.";
 
     private static readonly string MaxContentSizeText = $"at most {MarkdownFile.MaxContentSize / 1024} KB";
 
     private static readonly string EditMarkdownDescription =
         "Replace one passage of a Markdown page or document (*.md): old_text must occur exactly once in the Markdown source, " +
         $"as returned by {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent (with {{{{ path }}}} expressions unevaluated), and is replaced by new_text. " +
-        $"Prefer this over {WriteMarkdownToolName} for small changes. Only Markdown files in local storage can be changed. " +
+        $"Prefer this over {WriteMarkdownToolName} for small changes and on pages with hidden secret values. Only Markdown files in local storage can be changed. " +
         $"{BlocksRule} {MarkdownFile.ActiveContent} cannot be added. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 

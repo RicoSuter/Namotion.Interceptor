@@ -208,23 +208,25 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         _parser.RenderContent(ReadRawContent(), this, includeSourcePaths == true);
 
     /// <summary>
-    /// Replaces the whole Markdown source of the file. Its blocks must stay exactly as they are, in the same order, and
-    /// the <see cref="ActiveContent"/> may only appear as far as the file already has it.
+    /// Replaces the whole Markdown source of the file as <see cref="ReadRawContent"/> shows it. Its blocks must stay
+    /// exactly as that view shows them, with <c>***</c> where it hides a secret value, and keep their secret values. The
+    /// <see cref="ActiveContent"/> may only appear as far as the file already has it.
     /// </summary>
-    /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes, adds, changes or
-    /// removes a block, or adds such content.</exception>
+    /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes, adds, changes,
+    /// removes or moves a block, or adds such content.</exception>
     /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
     [Operation(Title = "Replace Content", Description = "Replaces the whole markdown source of this file.", Icon = "EditNote")]
     public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
     {
         MarkdownWriteRules.EnsureLocal(Storage);
-        var bytes = MarkdownWriteRules.GetContentBytes(content, nameof(content));
+        MarkdownWriteRules.GetContentBytes(content, nameof(content));
 
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            MarkdownWriteRules.EnsureActiveContentUnchanged(await ReadSourceUnlockedAsync(cancellationToken), content, nameof(content));
-            await WriteUnlockedAsync(bytes, cancellationToken);
+            var source = await ReadSourceUnlockedAsync(cancellationToken);
+            var redactedSource = RedactSource(source, out _);
+            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, content, nameof(content)));
         }
         finally
         {
@@ -233,11 +235,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Replaces the one occurrence of <paramref name="oldText"/> in the Markdown source of the file with <paramref name="newText"/>,
-    /// under the rules of <see cref="ReplaceContentAsync"/>.
+    /// Replaces the one occurrence of <paramref name="oldText"/> in the Markdown source of the file as
+    /// <see cref="ReadRawContent"/> shows it with <paramref name="newText"/>, under the rules of <see cref="ReplaceContentAsync"/>.
+    /// An occurrence that overlaps a hidden secret value does not count.
     /// </summary>
     /// <exception cref="ArgumentException">The text is empty, not found, found more than once, the result is larger than
-    /// <see cref="MaxContentSize"/> bytes, or it adds, changes or removes a block or adds such content.</exception>
+    /// <see cref="MaxContentSize"/> bytes, or it adds, changes, removes or moves a block or adds such content.</exception>
     /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
     [Operation(Title = "Replace Text", Description = "Replaces one exact, unique passage of the markdown source.", Icon = "FindReplace")]
     public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)
@@ -253,32 +256,69 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
+            // The passage is searched in the view without secret values, so that its result cannot tell a secret value.
             var source = await ReadSourceUnlockedAsync(cancellationToken);
-            var index = source.IndexOf(oldText, StringComparison.Ordinal);
-            if (index < 0)
-            {
-                throw new ArgumentException(
-                    $"The text to replace was not found in {Name}. It must match the Markdown source exactly, including whitespace and line breaks.",
-                    nameof(oldText));
-            }
+            var redactedSource = RedactSource(source, out var redactedSpans);
+            var index = FindUniquePassage(redactedSource, redactedSpans, oldText);
 
-            // Searching from index + 1 also finds an overlapping second occurrence, which makes the passage ambiguous as well.
-            if (source.IndexOf(oldText, index + 1, StringComparison.Ordinal) >= 0)
-            {
-                throw new ArgumentException(
-                    $"The text to replace occurs more than once in {Name}; include more of the surrounding text so it is unique.",
-                    nameof(oldText));
-            }
-
-            var updated = string.Concat(source.AsSpan(0, index), newText, source.AsSpan(index + oldText.Length));
-            var bytes = MarkdownWriteRules.GetContentBytes(updated, nameof(newText));
-            MarkdownWriteRules.EnsureActiveContentUnchanged(source, updated, nameof(newText));
-            await WriteUnlockedAsync(bytes, cancellationToken);
+            var updated = string.Concat(redactedSource.AsSpan(0, index), newText, redactedSource.AsSpan(index + oldText.Length));
+            MarkdownWriteRules.GetContentBytes(updated, nameof(newText));
+            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, updated, nameof(newText)));
         }
         finally
         {
             _writeLock.Release();
         }
+    }
+
+    /// <summary>Gets the position of the one occurrence of the passage that overlaps no hidden secret value.</summary>
+    private int FindUniquePassage(string redactedSource, List<MarkdownSpan> redactedSpans, string oldText)
+    {
+        var index = -1;
+        var count = 0;
+
+        // Searching from the next character also finds an overlapping second occurrence, which makes the passage ambiguous as well.
+        for (var match = redactedSource.IndexOf(oldText, StringComparison.Ordinal);
+             match >= 0;
+             match = redactedSource.IndexOf(oldText, match + 1, StringComparison.Ordinal))
+        {
+            var end = match + oldText.Length;
+            if (!redactedSpans.Exists(span => span.Start < end && match < span.End))
+            {
+                index = match;
+                count++;
+            }
+        }
+
+        if (count == 0)
+        {
+            throw new ArgumentException(
+                $"The text to replace was not found in {Name}. It must match the Markdown source as ReadRawContent shows it " +
+                "exactly, including whitespace and line breaks, and must not include a hidden secret value (***).",
+                "oldText");
+        }
+
+        if (count > 1)
+        {
+            throw new ArgumentException(
+                $"The text to replace occurs more than once in {Name}; include more of the surrounding text so it is unique.",
+                "oldText");
+        }
+
+        return index;
+    }
+
+    /// <summary>
+    /// Gets the source with its secret values hidden, as <see cref="ReadRawContent"/> shows it when the source is the
+    /// one last parsed. A source that was not parsed yet has no subjects to tell the secret values, so every configuration
+    /// value of its blocks is hidden.
+    /// </summary>
+    private string RedactSource(string source, out List<MarkdownSpan> redactedSpans)
+    {
+        var snapshot = _parseResult;
+        return snapshot.Page is { } page && page.Source == source
+            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, out redactedSpans)
+            : EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>(), out redactedSpans);
     }
 
     // Reads from storage rather than Content, which lags behind an external edit until its file event arrives.
@@ -289,10 +329,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return await reader.ReadToEndAsync(cancellationToken);
     }
 
-    private async Task WriteUnlockedAsync(byte[] bytes, CancellationToken cancellationToken)
+    // Not cancelled once the content is decided: a cancelled reload after the write would leave the parse snapshot of
+    // the old content, which a later configuration write-back would write back.
+    private async Task WriteUnlockedAsync(string content)
     {
-        using var stream = new MemoryStream(bytes, writable: false);
-        await Storage.WriteBlobAsync(FullPath, stream, cancellationToken);
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content), writable: false);
+        await Storage.WriteBlobAsync(FullPath, stream, CancellationToken.None);
     }
 
     public Task OnFileChangedAsync(CancellationToken cancellationToken)
@@ -344,7 +386,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             _parseResult = snapshot with { Page = MarkdownPageParser.Parse(content) };
             Content = content;
 
-            await WriteUnlockedAsync(Encoding.UTF8.GetBytes(content), cancellationToken);
+            await WriteUnlockedAsync(content);
         }
         finally
         {

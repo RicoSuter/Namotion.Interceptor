@@ -162,7 +162,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         WriteFile("Notes.md", "# Notes\n\n:: HomeBlaze.Samples.Motor#motor TargetSpeed=1000\n::\n\nThe freezer is cold.");
 
         // Act
-        var edit = await CallAsync(tools["edit_markdown"], new { path = NotesPath, old_text = "TargetSpeed=1000", new_text = "TargetSpeed=5000" });
+        var edit = await CallAsync(tools["edit_markdown"], new { path = NotesPath, old_text = "is cold.", new_text = "is cold.\n\n:: HomeBlaze.Samples.Motor#other\n::" });
         var write = await CallAsync(tools["write_markdown"], new { path = NotesPath, content = "# Notes\n\nNo motor any more." });
         var create = await CallAsync(tools["create_markdown"], new { folder_path = "/Storage", name = "New.md", content = ":: HomeBlaze.Components.Widget Path=/Storage\n::" });
 

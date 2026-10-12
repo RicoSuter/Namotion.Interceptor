@@ -468,6 +468,65 @@ public class MarkdownFileTests
         Assert.Equal(content, markdown.Content);
     }
 
+    private static readonly string PageWithSecretBlock =
+        $":: {typeof(EmbeddedSecretDevice).FullName}#gateway Host=gateway-host Password=s3cr3t\n::\n\nThe gateway is at {{{{ gateway/Host }}}}.";
+
+    [Theory]
+    [InlineData("Password=s")]
+    [InlineData("Password=s3cr3t")]
+    [InlineData("s3cr3t")]
+    [InlineData("Password=***")]
+    public async Task WhenAPassageProbesASecretValue_ThenItIsNotFoundLikeAWrongGuess(string probe)
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync(PageWithSecretBlock);
+        var wrongGuess = probe.Replace("s3cr3t", "x9y8z7").Replace("Password=s", "Password=x").Replace("***", "xyz");
+
+        // Act
+        var probeException = await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceTextAsync(probe, probe, CancellationToken.None));
+        var wrongGuessException = await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceTextAsync(wrongGuess, wrongGuess, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(wrongGuessException.Message, probeException.Message);
+        Assert.StartsWith("The text to replace was not found in page.md.", probeException.Message);
+        Assert.Equal(PageWithSecretBlock, await ReadStoredPageAsync(markdown));
+    }
+
+    [Theory]
+    [InlineData("s3cr3t")]
+    [InlineData("wrong-guess")]
+    public async Task WhenTheContentRepeatsABlockWithARealOrAGuessedSecretValue_ThenBothAreRejectedAlike(string password)
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync(PageWithSecretBlock);
+        var content = PageWithSecretBlock.Replace("Password=s3cr3t", "Password=" + password) + "\n\nAdded text.";
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceContentAsync(content, CancellationToken.None));
+        Assert.StartsWith("Blocks cannot be added, changed or removed", exception.Message);
+        Assert.Equal(PageWithSecretBlock, await ReadStoredPageAsync(markdown));
+    }
+
+    [Fact]
+    public async Task WhenTheContentRepeatsTheBlocksAsReadRawContentShowsThem_ThenTheSecretValuesAreKept()
+    {
+        // Arrange
+        var markdown = await CreatePageInGraphAsync(PageWithSecretBlock);
+        var content = markdown.ReadRawContent()!.Replace("The gateway", "The main gateway") + "\n\nAdded text.";
+
+        // Act
+        await markdown.ReplaceContentAsync(content, CancellationToken.None);
+        await markdown.ReplaceTextAsync("Added text.", "Added and changed text.", CancellationToken.None);
+
+        // Assert
+        Assert.Contains("Password=***", content);
+        Assert.Equal(
+            PageWithSecretBlock.Replace("The gateway", "The main gateway") + "\n\nAdded and changed text.",
+            await ReadStoredPageAsync(markdown));
+    }
+
     [Fact]
     public async Task WhenABlockShowsASecretConfigurationPropertyInItsContent_ThenItsExpressionHasNoValue()
     {
@@ -648,6 +707,13 @@ public class MarkdownFileTests
         var parser = serviceProvider.GetRequiredService<MarkdownContentParser>();
         var serializer = serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>();
         return new MarkdownFile(storage, path, parser, serializer);
+    }
+
+    private static async Task<string> ReadStoredPageAsync(MarkdownFile markdown)
+    {
+        await using var stream = await markdown.ReadAsync(CancellationToken.None);
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync();
     }
 
     private static async Task WriteFileAsync(FluentStorageContainer storage, string path, string content)
