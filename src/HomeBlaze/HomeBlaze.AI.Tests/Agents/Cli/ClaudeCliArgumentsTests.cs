@@ -97,8 +97,11 @@ public class ClaudeCliArgumentsTests
         var arguments = ClaudeCliArguments.Build(options);
 
         // Assert
-        Assert.Equal(expectedCliTools, ValueAfter(arguments, "--tools"));
-        Assert.Equal("mcp__homeblaze," + expectedCliTools, ValueAfter(arguments, "--allowedTools"));
+        Assert.Equal(
+            ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--system-prompt", "SYSTEM",
+             "--system-prompt-snapshot", "off", "--tools", expectedCliTools, "--strict-mcp-config", "--mcp-config", "/tmp/mcp.json",
+             "--allowedTools", "mcp__homeblaze," + expectedCliTools, "--setting-sources", "", "--no-session-persistence"],
+            arguments);
     }
 
     [Theory]

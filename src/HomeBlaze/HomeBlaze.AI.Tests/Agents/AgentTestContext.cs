@@ -14,9 +14,9 @@ using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Testing;
-using Xunit.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Xunit.Abstractions;
 
 namespace HomeBlaze.AI.Tests.Agents;
 
@@ -196,12 +196,12 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
     /// <summary>Writes the timeline entries and the status of the agent to the test output.</summary>
     public void WriteTimeline(ITestOutputHelper output)
     {
-            foreach (var entry in Agent.Timeline.Entries)
-            {
-                output.WriteLine($"{entry.Kind}: {entry.Text} (duration {entry.Duration}, tool calls: {string.Join(", ", entry.ToolCalls.Select(call => $"{call.Name}({call.Arguments}) error={call.IsError} result={call.ResultPreview}"))})");
-            }
+        foreach (var entry in Agent.Timeline.Entries)
+        {
+            output.WriteLine($"{entry.Kind}: {entry.Text} (duration {entry.Duration}, tool calls: {string.Join(", ", entry.ToolCalls.Select(call => $"{call.Name}({call.Arguments}) error={call.IsError} result={call.ResultPreview}"))})");
+        }
 
-            output.WriteLine($"Status: {Agent.Status}, message: {Agent.StatusMessage}");
+        output.WriteLine($"Status: {Agent.Status}, message: {Agent.StatusMessage}");
     }
 
     public async ValueTask DisposeAsync()
