@@ -149,7 +149,21 @@ public static class SubjectRegistryExtensions
     /// <returns>Null when the subject is part of no configuration, such as a file in a storage.</returns>
     public static IInterceptorSubject? TryGetConfigurationOwner(this IInterceptorSubject subject)
     {
-        if (subject is IConfigurable)
+        return subject.TryGetConfigurationOwner(static candidate => candidate is IConfigurable);
+    }
+
+    /// <summary>
+    /// Finds the nearest subject that matches the predicate and whose configuration contains this subject: the
+    /// subject itself when it matches, else a parent that holds it through [Configuration] properties only.
+    /// </summary>
+    /// <param name="subject">The subject to start from.</param>
+    /// <param name="isOwner">Decides whether a subject is the owner that is looked for.</param>
+    /// <returns>Null when there is none.</returns>
+    public static IInterceptorSubject? TryGetConfigurationOwner(
+        this IInterceptorSubject subject,
+        Func<IInterceptorSubject, bool> isOwner)
+    {
+        if (isOwner(subject))
             return subject;
 
         var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { subject };
@@ -166,13 +180,13 @@ public static class SubjectRegistryExtensions
                     continue;
 
                 var parentSubject = parent.Property.Subject;
-                if (parentSubject is IConfigurable)
+                if (!visited.Add(parentSubject))
+                    continue;
+
+                if (isOwner(parentSubject))
                     return parentSubject;
 
-                if (visited.Add(parentSubject))
-                {
-                    queue.Enqueue(parentSubject);
-                }
+                queue.Enqueue(parentSubject);
             }
         }
 

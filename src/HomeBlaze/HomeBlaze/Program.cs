@@ -44,9 +44,9 @@ builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 
 // Seeding must run before AddHomeBlazePlugins, which reads the plugin configuration during registration.
-var seededFileCount = DataDirectorySeeder.SeedIfMissing(
-    HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
-    builder.Configuration[HomeBlazePaths.SeedDirectoryKey]);
+var rootConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(builder.Configuration);
+var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
+var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
 
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
@@ -81,6 +81,22 @@ var app = builder.Build();
 if (seededFileCount > 0)
 {
     app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
+}
+
+// Replaced on every start, unlike the seeded files, so the documentation always matches the running version.
+// It must stay before app.Run, which starts the storage file watcher. Outdated documentation must not keep
+// the application down, so a failure is only logged.
+try
+{
+    var replacedFileCount = DataDirectorySeeder.ReplaceDocumentation(rootConfigurationPath, seedDirectory);
+    if (replacedFileCount > 0)
+    {
+        app.Logger.LogInformation("Replaced the documentation with {Count} files from the seed directory.", replacedFileCount);
+    }
+}
+catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+{
+    app.Logger.LogWarning(exception, "Could not replace the documentation from the seed directory. It may be outdated or incomplete until the next start.");
 }
 
 // Configure TypeProvider with application-specific assemblies

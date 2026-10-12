@@ -9,6 +9,7 @@ public sealed record SubjectSetupOptions
 {
     /// <summary>
     /// Optional callback that establishes the parent chain, invoked after the edits are applied and before they are persisted.
+    /// Without it nothing is persisted, and the caller stores the subject of the result.
     /// </summary>
     /// <remarks>
     /// The callback must attach the subject to a parent. A subject that has no parent after the callback returned

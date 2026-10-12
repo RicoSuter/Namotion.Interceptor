@@ -1,35 +1,38 @@
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Decides which storage paths never become subjects, shared by the startup scan and the file watcher.
+/// Decides which storage paths never become subjects, for the listing of a pass and the file watcher alike.
 /// </summary>
 internal static class StoragePathFilter
 {
     /// <summary>
-    /// Checks whether the path or one of its parent folders is hidden, i.e. starts with a dot (e.g. .DS_Store, .idea/workspace.xml).
+    /// Checks whether the path never becomes a subject: the path or one of its parent folders is hidden, which
+    /// is a name that starts with a dot (.DS_Store, .idea/workspace.xml), or has a temporary name.
     /// </summary>
-    public static bool IsHidden(ReadOnlySpan<char> path)
+    /// <remarks>
+    /// Only for paths within the storage and with forward slashes: an absolute path can have such a folder
+    /// above the storage.
+    /// </remarks>
+    public static bool IsIgnored(ReadOnlySpan<char> path)
     {
-        for (var index = 0; index < path.Length; index++)
+        while (!path.IsEmpty)
         {
-            if (path[index] == '.' && (index == 0 || path[index - 1] is '/' or '\\'))
+            var separatorIndex = path.IndexOf('/');
+            var segment = separatorIndex < 0 ? path : path[..separatorIndex];
+            if (segment.StartsWith('.') || IsTemporaryName(segment))
             {
                 return true;
             }
+
+            path = separatorIndex < 0 ? [] : path[(separatorIndex + 1)..];
         }
 
         return false;
     }
 
-    /// <summary>
-    /// Checks whether the path is a temporary file that editors write before renaming it to the real name.
-    /// </summary>
-    public static bool IsTemporaryFile(string path)
-    {
-        var fileName = Path.GetFileName(path);
-        return fileName.StartsWith('~') ||
-               fileName.EndsWith('~') ||
-               fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
-               fileName.Contains(".tmp.", StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsTemporaryName(ReadOnlySpan<char> name)
+        => name.StartsWith('~') ||
+           name.EndsWith('~') ||
+           name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+           name.Contains(".tmp.", StringComparison.OrdinalIgnoreCase);
 }

@@ -383,7 +383,7 @@ internal static class MarkdownWriteRules
             !name.StartsWith('.') &&
             name.IndexOfAny(InvalidFileNameCharacters) < 0 &&
             !name.Any(character => char.IsControl(character) || char.GetUnicodeCategory(character) == UnicodeCategory.Format) &&
-            !StoragePathFilter.IsTemporaryFile(name);
+            !StoragePathFilter.IsIgnored(name);
 
         if (!isValid)
         {

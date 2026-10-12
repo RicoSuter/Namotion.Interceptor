@@ -171,8 +171,9 @@ public class PageEditTests
             // Act
             await saveButton.ClickAsync();
 
-            // Assert - the editor stays open after a save, and what it wrote itself is no external change.
-            await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            // Assert - the editor stays open after a save, and what it applied itself is no external change.
+            // The subject has no file of its own, so nothing is written and the notification says so.
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToBeVisibleAsync(new() { Timeout = 5000 });
             Assert.Equal(3, subject.Limit);
             await Assertions.Expect(page.GetByText("Configuration was changed externally")).ToHaveCountAsync(0);
         }
