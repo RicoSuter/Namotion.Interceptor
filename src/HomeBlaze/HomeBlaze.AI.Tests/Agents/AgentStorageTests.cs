@@ -221,19 +221,18 @@ public class AgentStorageTests
     {
         // Arrange
         await using var test = await AgentTestContext<FakeAgent>.StartAsync(services => new FakeAgent(services), agentName: "My_Agent");
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await test.StopAgentAsync();
         var directory = Path.Combine(test.DataDirectory, "Agents");
         Directory.CreateDirectory(directory);
         await File.WriteAllTextAsync(Path.Combine(directory, "My_Agent.timeline.jsonl"),
             """{"kind":"User","timestamp":"2026-10-10T12:00:00+00:00","text":"Hello from before"}""" + "\n");
 
         // Act
-        await ((IHostedService)test.Agent).StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Timeline.Entries.Count == 1);
+        await test.RestartAgentAsync();
 
         // Assert
-        Assert.Equal("Hello from before", test.Agent.Timeline.Entries[0].Text);
-        Assert.True(File.Exists(Path.Combine(directory, AgentStorage.GetName("/My_Agent") + ".timeline.jsonl")));
+        Assert.Equal("Hello from before", Assert.Single(test.Agent.Timeline.Entries).Text);
+        Assert.True(File.Exists(test.GetDataFilePath(AgentStorage.TimelineSuffix)));
         Assert.False(File.Exists(Path.Combine(directory, "My_Agent.timeline.jsonl")));
     }
 }

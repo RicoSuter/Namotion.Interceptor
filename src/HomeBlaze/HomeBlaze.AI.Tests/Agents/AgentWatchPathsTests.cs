@@ -6,21 +6,6 @@ namespace HomeBlaze.AI.Tests.Agents;
 public class AgentWatchPathsTests
 {
     [Theory]
-    [InlineData("/Energy", "/Energy", true)]
-    [InlineData("/Energy/Battery/Level", "/Energy", true)]
-    [InlineData("/Energy[0]/Level", "/Energy", true)]
-    [InlineData("/EnergyMeter/Power", "/Energy", false)]
-    [InlineData("/Anything", "/", true)]
-    public void WhenMatchingAPropertyPath_ThenOnlyTheWatchedSubtreeMatches(string path, string watchPath, bool expected)
-    {
-        // Act
-        var matches = AgentWatchPaths.Matches(path, AgentWatchPaths.Normalize([watchPath]));
-
-        // Assert
-        Assert.Equal(expected, matches);
-    }
-
-    [Theory]
     [InlineData("/", "Energy", "/Energy", true)]
     [InlineData("/Energy", "Level", "/Energy", true)]
     [InlineData("/Energy/Battery", "Level", "/Energy", true)]

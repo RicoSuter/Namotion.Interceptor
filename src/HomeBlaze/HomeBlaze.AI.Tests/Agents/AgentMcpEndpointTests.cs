@@ -77,7 +77,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         }
     }
 
-    private static AgentToolSet CreateToolSet(int maxToolCalls = 10)
+    private static AgentToolSet CreateToolSet()
     {
         var browse = new McpToolInfo
         {
@@ -87,7 +87,32 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
             Handler = (input, _) => Task.FromResult<object?>("browsed " + input.GetProperty("path").GetString())
         };
         var memory = new AgentMemory(filePath: null, TimeProvider.System);
-        return AgentToolSet.Create([browse], ["browse"], memory.CreateUpdateTool(), maxToolCalls, progress: null);
+        return AgentToolSet.Create([browse], ["browse"], memory.CreateUpdateTool(), maxToolCalls: 10, progress: null);
+    }
+
+    private async Task<HttpResponseMessage> PostToAgentRouteAsync(string? token, string? remoteAddress = null, string? localAddress = null)
+    {
+        using var httpClient = new HttpClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route)
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        };
+        if (token is not null)
+        {
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        }
+
+        if (remoteAddress is not null)
+        {
+            request.Headers.Add(RemoteAddressTestHeader, remoteAddress);
+        }
+
+        if (localAddress is not null)
+        {
+            request.Headers.Add(LocalAddressTestHeader, localAddress);
+        }
+
+        return await httpClient.SendAsync(request);
     }
 
     private Task<McpClient> ConnectAsync(string token) =>
@@ -146,11 +171,8 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
     [Fact]
     public async Task WhenNoTokenIsSent_ThenTheRequestIsRejected()
     {
-        // Arrange
-        using var httpClient = new HttpClient();
-
         // Act
-        using var response = await httpClient.PostAsync(_baseAddress + AgentMcpEndpoint.Route, new StringContent("{}", Encoding.UTF8, "application/json"));
+        using var response = await PostToAgentRouteAsync(token: null);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -164,29 +186,9 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         var registration = _registry.Register(CreateToolSet());
         var token = registration.Token;
         registration.Dispose();
-        using var httpClient = new HttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
         // Act
-        using var response = await httpClient.SendAsync(request);
-
-        // Assert
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task WhenTheRequestIsNotFromLoopback_ThenAValidTokenIsRejected()
-    {
-        // Arrange
-        using var registration = _registry.Register(CreateToolSet());
-        using var httpClient = new HttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", registration.Token);
-        request.Headers.Add(RemoteAddressTestHeader, "192.0.2.1");
-
-        // Act
-        using var response = await httpClient.SendAsync(request);
+        using var response = await PostToAgentRouteAsync(token);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -211,24 +213,16 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData("192.0.2.1", true)]
-    [InlineData("192.0.2.10", false)]
-    public async Task WhenTheRequestIsNotFromTheSameHostOrHasNoToken_ThenItIsRejected(string remoteAddress, bool sendToken)
+    [InlineData("192.0.2.1", null, true)]
+    [InlineData("192.0.2.1", "192.0.2.10", true)]
+    [InlineData("192.0.2.10", "192.0.2.10", false)]
+    public async Task WhenTheRequestIsNotFromTheSameHostOrHasNoToken_ThenItIsRejected(string remoteAddress, string? localAddress, bool sendToken)
     {
         // Arrange
         using var registration = _registry.Register(CreateToolSet());
-        using var httpClient = new HttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
-        if (sendToken)
-        {
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", registration.Token);
-        }
-
-        request.Headers.Add(RemoteAddressTestHeader, remoteAddress);
-        request.Headers.Add(LocalAddressTestHeader, "192.0.2.10");
 
         // Act
-        using var response = await httpClient.SendAsync(request);
+        using var response = await PostToAgentRouteAsync(sendToken ? registration.Token : null, remoteAddress, localAddress);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);

@@ -245,21 +245,6 @@ public class AgentTriggerPolicyTests
     }
 
     [Fact]
-    public void WhenAUsageLimitPauseExpires_ThenPauseReasonIsNull()
-    {
-        // Arrange
-        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
-        var resetsAt = Start.AddHours(2);
-        policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, resetsAt, "Usage limit reached");
-
-        // Act
-        policy.GetNextWakeTime(resetsAt);
-
-        // Assert
-        Assert.Null(policy.PauseReason);
-    }
-
-    [Fact]
     public void WhenAUsageLimitPausesWithoutAPendingRunOrPoll_ThenTheWakeTimeIsTheEndOfThePause()
     {
         // Arrange

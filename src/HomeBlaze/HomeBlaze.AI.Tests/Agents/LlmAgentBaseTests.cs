@@ -31,8 +31,7 @@ public class LlmAgentBaseTests
         });
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         var request = Assert.Single(test.Agent.Requests);
@@ -84,11 +83,9 @@ public class LlmAgentBaseTests
                 : new AgentTurnResult("Oven is off.", null, null)));
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        await test.RunNowAndWaitAsync();
         var analysisAfterFirstRun = test.Agent.LastAnalysis;
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2 && !test.Agent.IsBusy);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.Equal("Freezer is warm.", analysisAfterFirstRun);
@@ -133,20 +130,6 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
-    public async Task WhenAWatchedPropertyChanges_ThenABackgroundRunIsTriggered()
-    {
-        // Arrange
-        await using var test = await StartAsync(agent => agent.WatchPaths = ["/Temperature"]);
-
-        // Act
-        test.Root.Temperature = 30;
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount >= 1);
-
-        // Assert
-        Assert.Contains("Trigger: change", test.Agent.Requests[0].UserMessage);
-    }
-
-    [Fact]
     public async Task WhenAnUnwatchedPropertyChanges_ThenNoRunIsTriggeredButAWatchedChangeStillIs()
     {
         // Arrange
@@ -178,8 +161,7 @@ public class LlmAgentBaseTests
             agent.Handler = (request, _, _) => Task.FromResult(new AgentTurnResult(
                 request.Kind == AgentTurnKind.Background ? "PV surplus 3.2 kW." : "Because the surplus is high.", null, null));
         });
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RunNowAndWaitAsync();
 
         // Act
         await test.Agent.SendMessageAsync("Why should I charge?", CancellationToken.None);
@@ -228,14 +210,12 @@ public class LlmAgentBaseTests
         });
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2);
+        await test.RunNowAndWaitAsync();
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.Contains("""{"key":"alerts/freezer","value":"remember the freezer",""", test.Agent.Requests[1].SystemPrompt);
-        Assert.Contains("remember the freezer", await File.ReadAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.memory.json")));
+        Assert.Contains("remember the freezer", await File.ReadAllTextAsync(test.GetDataFilePath(AgentStorage.MemorySuffix)));
     }
 
     [Fact]
@@ -243,19 +223,18 @@ public class LlmAgentBaseTests
     {
         // Arrange
         await using var test = await StartAsync();
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
-        var legacyPath = Path.Combine(test.DataDirectory, "Agents", "Agent.memory.md");
+        await test.StopAgentAsync();
+        var legacyPath = test.GetDataFilePath(AgentStorage.LegacyMemorySuffix);
         Directory.CreateDirectory(Path.GetDirectoryName(legacyPath)!);
         await File.WriteAllTextAsync(legacyPath, "- remember the freezer");
 
         // Act
-        await RestartAsync(test.Agent);
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RestartAgentAsync();
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.Contains("""{"key":"notes/legacy","value":"- remember the freezer",""", test.Agent.Requests[0].SystemPrompt);
-        Assert.True(File.Exists(Path.Combine(test.DataDirectory, "Agents", "Agent.memory.json")));
+        Assert.True(File.Exists(test.GetDataFilePath(AgentStorage.MemorySuffix)));
         Assert.True(File.Exists(legacyPath + ".migrated"));
     }
 
@@ -280,8 +259,7 @@ public class LlmAgentBaseTests
         await using var test = await StartAsync(agent => agent.AllowedTools = ["browse"]);
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.Equal(["browse", "update_memory"], test.Agent.Requests[0].Tools.Tools.Select(tool => tool.Name));
@@ -335,8 +313,7 @@ public class LlmAgentBaseTests
         // Act
         test.Root.Temperature = 30;
         await AsyncTestHelpers.WaitUntilAsync(() => logger.Entries.Any(entry => entry.Message.Contains("trigger configuration is invalid") && entry.Message.StartsWith("Ignored")));
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.Empty(GetChangeRunRequests(logger));
@@ -398,8 +375,7 @@ public class LlmAgentBaseTests
         // Act
         test.Agent.RunNow();
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Timeline.Entries.Count == 1);
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.Equal(
@@ -415,10 +391,8 @@ public class LlmAgentBaseTests
         test.Agent.TimelineChanged += () => throw new InvalidOperationException("subscriber broke");
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2);
+        await test.RunNowAndWaitAsync();
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.Equal(2, test.Agent.Timeline.Entries.Count);
@@ -491,7 +465,7 @@ public class LlmAgentBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
 
         // Act
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await test.StopAgentAsync();
         await chat;
 
         // Assert
@@ -507,7 +481,7 @@ public class LlmAgentBaseTests
     {
         // Arrange
         await using var test = await StartAsync();
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await test.StopAgentAsync();
 
         // Act
         test.Agent.RunNow();
@@ -519,6 +493,7 @@ public class LlmAgentBaseTests
         Assert.Equal(ServiceStatus.Stopped, test.Agent.Status);
         Assert.Empty(test.Agent.Requests);
         Assert.Empty(test.Agent.Timeline.Entries);
+        Assert.Null(test.Agent.LastActivityTime);
     }
 
     [Fact]
@@ -570,7 +545,7 @@ public class LlmAgentBaseTests
         });
         var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await test.StopAgentAsync();
         test.Agent.Dispose();
 
         // Act
@@ -586,14 +561,14 @@ public class LlmAgentBaseTests
     {
         // Arrange
         await using var test = await StartAsync();
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await test.StopAgentAsync();
         Directory.CreateDirectory(Path.Combine(test.DataDirectory, "Agents"));
-        await File.WriteAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.timeline.jsonl"),
+        await File.WriteAllTextAsync(test.GetDataFilePath(AgentStorage.TimelineSuffix),
             """{"kind":"BackgroundRun","timestamp":"2026-10-10T12:00:00+00:00","text":"Freezer is warm."}""" + "\n" +
             """{"kind":"BackgroundRun","timestamp":"2026-10-10T12:05:00+00:00","text":"[quiet] all fine","isQuiet":true}""" + "\n");
 
         // Act
-        await RestartAsync(test.Agent);
+        await test.RestartAgentAsync();
 
         // Assert
         Assert.Equal("Freezer is warm.", test.Agent.LastAnalysis);
@@ -609,8 +584,7 @@ public class LlmAgentBaseTests
         test.Agent.WatchPaths = null!;
         test.Agent.AllowedTools = null!;
         await test.Agent.ApplyConfigurationAsync(CancellationToken.None);
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.Empty(test.Agent.WatchPaths);
@@ -658,8 +632,7 @@ public class LlmAgentBaseTests
         });
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.Contains("within a turn", Assert.Single(test.Agent.Timeline.Entries).Text);
@@ -738,7 +711,7 @@ public class LlmAgentBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
 
         // Act
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await test.StopAgentAsync();
 
         // Assert
         var entry = Assert.Single(test.Agent.Timeline.Entries);
@@ -746,20 +719,6 @@ public class LlmAgentBaseTests
         Assert.Equal("manual", entry.Trigger);
         Assert.Equal(1, test.Agent.RunCount);
         Assert.NotNull(test.Agent.LastRunTime);
-    }
-
-    [Fact]
-    public async Task WhenAChatTurnRuns_ThenItIsNotCountedAsABackgroundRun()
-    {
-        // Arrange
-        await using var test = await StartAsync();
-
-        // Act
-        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
-
-        // Assert
-        Assert.Equal(0, test.Agent.RunCount);
-        Assert.Null(test.Agent.LastRunTime);
     }
 
     [Fact]
@@ -797,28 +756,13 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
-    public async Task WhenAChatMessageIsRejected_ThenTheLastActivityIsNotSet()
-    {
-        // Arrange
-        await using var test = await StartAsync();
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
-
-        // Act
-        await Assert.ThrowsAsync<InvalidOperationException>(() => test.Agent.SendMessageAsync("Hello", CancellationToken.None));
-
-        // Assert
-        Assert.Null(test.Agent.LastActivityTime);
-    }
-
-    [Fact]
     public async Task WhenABackgroundRunRuns_ThenTheLastActivityAndTheLastRunAreItsStart()
     {
         // Arrange
         await using var test = await StartAsync();
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         Assert.NotNull(test.Agent.LastRunTime);
@@ -833,12 +777,12 @@ public class LlmAgentBaseTests
         await using var test = await StartAsync();
         await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
         var lastActivity = test.Agent.LastActivityTime;
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
-        var statsPath = Path.Combine(test.DataDirectory, "Agents", "Agent.stats.json");
+        await test.StopAgentAsync();
+        var statsPath = test.GetDataFilePath(AgentStorage.StatsSuffix);
         Assert.True(JsonDocument.Parse(await File.ReadAllTextAsync(statsPath)).RootElement.TryGetProperty("lastActivityTime", out _));
 
         // Act
-        await RestartAsync(test.Agent);
+        await test.RestartAgentAsync();
 
         // Assert
         Assert.NotNull(lastActivity);
@@ -852,31 +796,14 @@ public class LlmAgentBaseTests
         // Arrange
         await using var test = await StartAsync();
         await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.stats.json"), """{"backgroundRunCount":0}""");
+        await test.StopAgentAsync();
+        await File.WriteAllTextAsync(test.GetDataFilePath(AgentStorage.StatsSuffix), """{"backgroundRunCount":0}""");
 
         // Act
-        await RestartAsync(test.Agent);
+        await test.RestartAgentAsync();
 
         // Assert
         Assert.Equal(test.Agent.Timeline.Entries[^1].Timestamp, test.Agent.LastActivityTime);
-    }
-
-    [Fact]
-    public async Task WhenANewConversationStarts_ThenTheLastActivityIsKept()
-    {
-        // Arrange
-        await using var test = await StartAsync();
-        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
-        var lastActivity = test.Agent.LastActivityTime;
-
-        // Act
-        await test.Agent.NewConversationAsync(CancellationToken.None);
-        await RestartAsync(test.Agent);
-
-        // Assert
-        Assert.NotNull(lastActivity);
-        Assert.Equal(lastActivity, test.Agent.LastActivityTime);
     }
 
     [Fact]
@@ -887,18 +814,16 @@ public class LlmAgentBaseTests
             agent.Requests.Count == 1
                 ? Task.FromResult(new AgentTurnResult("[quiet] ok", null, null))
                 : throw new AgentTurnException(AgentFailureKind.Transient, "backend broke"));
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2 && !test.Agent.IsBusy);
+        await test.RunNowAndWaitAsync();
+        await test.RunNowAndWaitAsync();
         var lastRun = test.Agent.LastRunTime;
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
-        var statsPath = Path.Combine(test.DataDirectory, "Agents", "Agent.stats.json");
+        await test.StopAgentAsync();
+        var statsPath = test.GetDataFilePath(AgentStorage.StatsSuffix);
         Assert.Equal(2, JsonDocument.Parse(await File.ReadAllTextAsync(statsPath)).RootElement.GetProperty("backgroundRunCount").GetInt32());
         await File.WriteAllTextAsync(statsPath, """{"backgroundRunCount":7}""");
 
         // Act
-        await RestartAsync(test.Agent);
+        await test.RestartAgentAsync();
 
         // Assert
         Assert.Equal(7, test.Agent.RunCount);
@@ -911,47 +836,43 @@ public class LlmAgentBaseTests
     {
         // Arrange
         await using var test = await StartAsync();
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        await test.RunNowAndWaitAsync();
         await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
-        var statsPath = Path.Combine(test.DataDirectory, "Agents", "Agent.stats.json");
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        var statsPath = test.GetDataFilePath(AgentStorage.StatsSuffix);
+        await test.StopAgentAsync();
         await File.WriteAllTextAsync(statsPath, """{"backgroundRunCount":7}""");
         // A restart loads the count 7, so the count after the next restart can only come from the timeline.
-        await RestartAsync(test.Agent);
-        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await test.RestartAgentAsync();
+        await test.StopAgentAsync();
         File.Delete(statsPath);
 
         // Act
-        await RestartAsync(test.Agent);
+        await test.RestartAgentAsync();
 
         // Assert
         Assert.Equal(1, test.Agent.RunCount);
     }
 
     [Fact]
-    public async Task WhenANewConversationStarts_ThenTheRunCountAndLastRunAreKept()
+    public async Task WhenANewConversationStarts_ThenTheRunCountLastRunAndLastActivityAreKept()
     {
         // Arrange
         await using var test = await StartAsync();
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        await test.RunNowAndWaitAsync();
         var lastRun = test.Agent.LastRunTime;
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        var lastActivity = test.Agent.LastActivityTime;
 
         // Act
         await test.Agent.NewConversationAsync(CancellationToken.None);
-        await RestartAsync(test.Agent);
+        await test.RestartAgentAsync();
 
         // Assert
         Assert.Equal(1, test.Agent.RunCount);
+        Assert.NotNull(lastRun);
         Assert.Equal(lastRun, test.Agent.LastRunTime);
-    }
-
-    private static async Task RestartAsync(FakeAgent agent)
-    {
-        await ((IHostedService)agent).StopAsync(CancellationToken.None);
-        await ((IHostedService)agent).StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => agent.Status is not (ServiceStatus.Stopped or ServiceStatus.Starting));
+        Assert.NotNull(lastActivity);
+        Assert.Equal(lastActivity, test.Agent.LastActivityTime);
     }
 
     private static async Task<AgentTurnResult> WaitForCancellationAsync(

@@ -13,6 +13,7 @@ using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -103,18 +104,32 @@ internal sealed class TestDataDirectory : IDataDirectoryProvider
     public string DataDirectory { get; }
 }
 
+internal static class AgentTestContext
+{
+    /// <summary>Creates the agent services for a graph whose tools read from <paramref name="root"/>.</summary>
+    public static AgentServices CreateServices(
+        AgentTestRoot root, AgentTurnTokenRegistry? tokenRegistry = null, Uri? endpoint = null, TimeProvider? timeProvider = null) =>
+        new(new TestAgentToolSource(() => root),
+            tokenRegistry ?? new AgentTurnTokenRegistry(),
+            new FixedEndpointAddress(endpoint),
+            timeProvider ?? TimeProvider.System);
+}
+
 /// <summary>
 /// A graph with a root, an agent attached under /Agent (or another name), path resolution and a data directory.
 /// </summary>
 internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
     where TAgent : LlmAgentBase
 {
-    private AgentTestContext(string dataDirectory, AgentTestRoot root, TAgent agent, AgentServices services)
+    private readonly string _agentName;
+
+    private AgentTestContext(string dataDirectory, AgentTestRoot root, TAgent agent, AgentServices services, string agentName)
     {
         DataDirectory = dataDirectory;
         Root = root;
         Agent = agent;
         Services = services;
+        _agentName = agentName;
     }
 
     public string DataDirectory { get; }
@@ -146,25 +161,47 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
         context.AddService(new SubjectPathResolver(() => root));
         context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
 
-        var services = new AgentServices(
-            new TestAgentToolSource(() => root),
-            tokenRegistry ?? new AgentTurnTokenRegistry(),
-            new FixedEndpointAddress(endpoint),
-            timeProvider ?? TimeProvider.System);
+        var services = AgentTestContext.CreateServices(root, tokenRegistry, endpoint, timeProvider);
         var agent = createAgent(services);
         agent.MinRunInterval = TimeSpan.Zero;
         configure?.Invoke(agent);
         root.Children = new Dictionary<string, IInterceptorSubject> { [agentName] = agent };
 
-        await ((IHostedService)agent).StartAsync(CancellationToken.None);
-        await Namotion.Interceptor.Testing.AsyncTestHelpers.WaitUntilAsync(
-            () => agent.Status is not (ServiceStatus.Stopped or ServiceStatus.Starting), message: "The agent should finish starting.");
-        return new AgentTestContext<TAgent>(dataDirectory, root, agent, services);
+        var test = new AgentTestContext<TAgent>(dataDirectory, root, agent, services, agentName);
+        await test.StartAgentAsync();
+        return test;
+    }
+
+    /// <summary>The path of the agent's data file with the given suffix, such as <see cref="AgentStorage.SessionSuffix"/>.</summary>
+    public string GetDataFilePath(string suffix) => Path.Combine(DataDirectory, "Agents", AgentStorage.GetName("/" + _agentName) + suffix);
+
+    public Task StopAgentAsync() => ((IHostedService)Agent).StopAsync(CancellationToken.None);
+
+    /// <summary>Stops the agent if it runs, starts it again and waits until it finished starting.</summary>
+    public async Task RestartAgentAsync()
+    {
+        await StopAgentAsync();
+        await StartAgentAsync();
+    }
+
+    /// <summary>Starts a background run and waits until it is counted and the agent is no longer busy.</summary>
+    public async Task RunNowAndWaitAsync()
+    {
+        var runCount = Agent.RunCount;
+        Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => Agent.RunCount > runCount && !Agent.IsBusy);
     }
 
     public async ValueTask DisposeAsync()
     {
-        await ((IHostedService)Agent).StopAsync(CancellationToken.None);
+        await StopAgentAsync();
         Directory.Delete(DataDirectory, recursive: true);
+    }
+
+    private async Task StartAgentAsync()
+    {
+        await ((IHostedService)Agent).StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Agent.Status is not (ServiceStatus.Stopped or ServiceStatus.Starting), message: "The agent should finish starting.");
     }
 }

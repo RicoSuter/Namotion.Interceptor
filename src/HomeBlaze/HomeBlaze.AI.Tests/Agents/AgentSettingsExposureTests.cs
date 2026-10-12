@@ -28,7 +28,7 @@ public class AgentSettingsExposureTests
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
         var root = new AgentTestRoot(context);
-        var services = new AgentServices(new TestAgentToolSource(() => root), new AgentTurnTokenRegistry(), new FixedEndpointAddress(null), TimeProvider.System);
+        var services = AgentTestContext.CreateServices(root);
         root.Children = new Dictionary<string, IInterceptorSubject>
         {
             ["Cli"] = new ClaudeCliAgent(services, NullLogger<ClaudeCliAgent>.Instance),

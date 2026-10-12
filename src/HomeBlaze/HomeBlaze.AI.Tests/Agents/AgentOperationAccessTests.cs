@@ -64,7 +64,7 @@ public class AgentOperationAccessTests
                 () => new MethodPropertyInitializer(),
                 handler => handler is MethodPropertyInitializer);
         var root = new AgentTestRoot(context);
-        var agentServices = new AgentServices(new TestAgentToolSource(() => root), new AgentTurnTokenRegistry(), new FixedEndpointAddress(null), TimeProvider.System);
+        var agentServices = AgentTestContext.CreateServices(root);
         var agent = new FakeAgent(agentServices);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
 

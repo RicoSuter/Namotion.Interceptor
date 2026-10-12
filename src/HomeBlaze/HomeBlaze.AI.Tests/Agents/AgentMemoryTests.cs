@@ -8,8 +8,17 @@ public sealed class AgentMemoryTests : IDisposable
 {
     private static readonly DateTimeOffset Start = new(2026, 10, 11, 8, 0, 0, TimeSpan.Zero);
 
-    private readonly string _directory = Directory.CreateTempSubdirectory("agent-memory").FullName;
+    private readonly string _directory;
+    private readonly string _path;
+    private readonly string _legacyPath;
     private readonly ManualTimeProvider _time = new(Start);
+
+    public AgentMemoryTests()
+    {
+        _directory = Directory.CreateTempSubdirectory("agent-memory").FullName;
+        _path = Path.Combine(_directory, "agent.memory.json");
+        _legacyPath = Path.Combine(_directory, "agent.memory.md");
+    }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
@@ -245,12 +254,11 @@ public sealed class AgentMemoryTests : IDisposable
     public async Task WhenMemoryIsWritten_ThenItIsPersistedAndReloaded()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        var memory = new AgentMemory(path, _time);
+        var memory = new AgentMemory(_path, _time);
 
         // Act
         await memory.UpdateAsync([AgentMemoryChange.Set("alerts/freezer", "notified at 14:05")], CancellationToken.None);
-        var reloaded = new AgentMemory(path, _time);
+        var reloaded = new AgentMemory(_path, _time);
         await reloaded.LoadAsync(CancellationToken.None);
 
         // Assert
@@ -262,22 +270,20 @@ public sealed class AgentMemoryTests : IDisposable
     public async Task WhenAnOldMarkdownMemoryExists_ThenItIsMigratedOnceIntoALegacyEntry()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        var legacyPath = Path.Combine(_directory, "agent.memory.md");
-        await File.WriteAllTextAsync(legacyPath, "# Memory\n- alerted about the freezer\n");
-        File.SetLastWriteTimeUtc(legacyPath, Start.UtcDateTime);
-        var memory = new AgentMemory(path, _time, legacyFilePath: legacyPath);
+        await File.WriteAllTextAsync(_legacyPath, "# Memory\n- alerted about the freezer\n");
+        File.SetLastWriteTimeUtc(_legacyPath, Start.UtcDateTime);
+        var memory = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
 
         // Act
         await memory.LoadAsync(CancellationToken.None);
-        var reloaded = new AgentMemory(path, _time, legacyFilePath: legacyPath);
+        var reloaded = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
         await reloaded.LoadAsync(CancellationToken.None);
 
         // Assert
         var entry = Assert.Single(memory.GetSnapshot().Entries);
         Assert.Equal(new AgentMemoryEntry(AgentMemory.LegacyKey, "# Memory\n- alerted about the freezer", Start), entry);
-        Assert.False(File.Exists(legacyPath));
-        Assert.True(File.Exists(legacyPath + ".migrated"));
+        Assert.False(File.Exists(_legacyPath));
+        Assert.True(File.Exists(_legacyPath + ".migrated"));
         Assert.Equal(memory.GetSnapshot().Entries.AsEnumerable(), reloaded.GetSnapshot().Entries.AsEnumerable());
     }
 
@@ -285,16 +291,15 @@ public sealed class AgentMemoryTests : IDisposable
     public async Task WhenTheFileIsDamaged_ThenMemoryStartsEmptyAndTheFileIsKeptAside()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        await File.WriteAllTextAsync(path, "{ not json");
-        var memory = new AgentMemory(path, _time);
+        await File.WriteAllTextAsync(_path, "{ not json");
+        var memory = new AgentMemory(_path, _time);
 
         // Act
         await memory.LoadAsync(CancellationToken.None);
 
         // Assert
         Assert.Empty(memory.GetSnapshot().Entries);
-        Assert.Equal("{ not json", await File.ReadAllTextAsync(path + ".damaged"));
+        Assert.Equal("{ not json", await File.ReadAllTextAsync(_path + ".damaged"));
     }
 
     [Fact]
@@ -315,13 +320,12 @@ public sealed class AgentMemoryTests : IDisposable
     public async Task WhenTheUiAndTheAgentWriteConcurrently_ThenEveryWriteIsKeptAndTheFileMatchesTheSnapshot()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        var memory = new AgentMemory(path, _time);
+        var memory = new AgentMemory(_path, _time);
 
         // Act
         await Task.WhenAll(Enumerable.Range(0, 40).Select(index => Task.Run(() =>
             memory.UpdateAsync([AgentMemoryChange.Set($"{(index % 2 == 0 ? "ui" : "agent")}/{index}", "v")], CancellationToken.None))));
-        var reloaded = new AgentMemory(path, _time);
+        var reloaded = new AgentMemory(_path, _time);
         await reloaded.LoadAsync(CancellationToken.None);
 
         // Assert
@@ -333,13 +337,12 @@ public sealed class AgentMemoryTests : IDisposable
     public async Task WhenUpdatingAFileBackedMemoryBeforeItWasLoaded_ThenTheStoredEntriesAreKept()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        await WriteMemoryFileAsync(path, ("alerts/freezer", "notified"));
-        var memory = new AgentMemory(path, _time);
+        await WriteMemoryFileAsync(("alerts/freezer", "notified"));
+        var memory = new AgentMemory(_path, _time);
 
         // Act
         await memory.UpdateAsync([AgentMemoryChange.Set("trends/power", "rising")], CancellationToken.None);
-        var reloaded = new AgentMemory(path, _time);
+        var reloaded = new AgentMemory(_path, _time);
         await reloaded.LoadAsync(CancellationToken.None);
 
         // Assert
@@ -350,10 +353,8 @@ public sealed class AgentMemoryTests : IDisposable
     public async Task WhenUpdatingBeforeTheLegacyFileWasMigrated_ThenTheMigrationRunsFirst()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        var legacyPath = Path.Combine(_directory, "agent.memory.md");
-        await File.WriteAllTextAsync(legacyPath, "- old note");
-        var memory = new AgentMemory(path, _time, legacyFilePath: legacyPath);
+        await File.WriteAllTextAsync(_legacyPath, "- old note");
+        var memory = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
 
         // Act
         await memory.UpdateAsync([AgentMemoryChange.Set("trends/power", "rising")], CancellationToken.None);
@@ -366,11 +367,9 @@ public sealed class AgentMemoryTests : IDisposable
     public async Task WhenTheLegacyFileIsOverTheLimits_ThenItIsMigratedWhole()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        var legacyPath = Path.Combine(_directory, "agent.memory.md");
         var content = string.Join('\n', Enumerable.Range(0, 1000).Select(index => $"- note {index}"));
-        await File.WriteAllTextAsync(legacyPath, content);
-        var memory = new AgentMemory(path, _time, legacyFilePath: legacyPath);
+        await File.WriteAllTextAsync(_legacyPath, content);
+        var memory = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
 
         // Act
         await memory.LoadAsync(CancellationToken.None);
@@ -384,9 +383,8 @@ public sealed class AgentMemoryTests : IDisposable
     public async Task WhenTheMemoryIsOverTheSizeLimit_ThenAShrinkingChangeSucceedsAndAGrowingOneIsRejected()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        await WriteMemoryFileAsync(path, ("notes/legacy", new string('x', AgentMemory.MaxSize)), ("notes/small", "abc"));
-        var memory = new AgentMemory(path, _time);
+        await WriteMemoryFileAsync(("notes/legacy", new string('x', AgentMemory.MaxSize)), ("notes/small", "abc"));
+        var memory = new AgentMemory(_path, _time);
         await memory.LoadAsync(CancellationToken.None);
 
         // Act
@@ -433,49 +431,45 @@ public sealed class AgentMemoryTests : IDisposable
     public async Task WhenBothTheFileAndTheLegacyFileExist_ThenTheLegacyFileIsRetiredWithoutMigratingAgain()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        var legacyPath = Path.Combine(_directory, "agent.memory.md");
-        await WriteMemoryFileAsync(path, ("alerts/freezer", "notified"));
-        await File.WriteAllTextAsync(legacyPath, "- old note");
-        var memory = new AgentMemory(path, _time, legacyFilePath: legacyPath);
+        await WriteMemoryFileAsync(("alerts/freezer", "notified"));
+        await File.WriteAllTextAsync(_legacyPath, "- old note");
+        var memory = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
 
         // Act
         await memory.LoadAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(["alerts/freezer"], memory.GetSnapshot().Entries.Select(entry => entry.Key));
-        Assert.False(File.Exists(legacyPath));
-        Assert.True(File.Exists(legacyPath + ".migrated"));
+        Assert.False(File.Exists(_legacyPath));
+        Assert.True(File.Exists(_legacyPath + ".migrated"));
     }
 
     [Fact]
     public async Task WhenTheFileHasInvalidEntries_ThenTheyAreSkippedOuterSlashesAreNormalizedAndTheFileIsKeptAside()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        await WriteMemoryFileAsync(path, ("/alerts/freezer/", "notified"), ("bad key", "dropped"));
-        var memory = new AgentMemory(path, _time);
+        await WriteMemoryFileAsync(("/alerts/freezer/", "notified"), ("bad key", "dropped"));
+        var memory = new AgentMemory(_path, _time);
 
         // Act
         await memory.LoadAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(["alerts/freezer"], memory.GetSnapshot().Entries.Select(entry => entry.Key));
-        Assert.Contains("bad key", await File.ReadAllTextAsync(path + ".damaged"));
+        Assert.Contains("bad key", await File.ReadAllTextAsync(_path + ".damaged"));
     }
 
     [Fact]
     public async Task WhenMemoryIsWritten_ThenTheFileIsIndentedWithAVersion()
     {
         // Arrange
-        var path = Path.Combine(_directory, "agent.memory.json");
-        var memory = new AgentMemory(path, _time);
+        var memory = new AgentMemory(_path, _time);
 
         // Act
         await memory.UpdateAsync([AgentMemoryChange.Set("räume/küche", "-8 °C")], CancellationToken.None);
 
         // Assert
-        var json = await File.ReadAllTextAsync(path);
+        var json = await File.ReadAllTextAsync(_path);
         Assert.Equal(1, JsonDocument.Parse(json).RootElement.GetProperty("version").GetInt32());
         Assert.Contains("\n  ", json);
         Assert.Contains("küche", json);
@@ -556,13 +550,13 @@ public sealed class AgentMemoryTests : IDisposable
         Assert.Empty(memory.GetSnapshot().Entries);
     }
 
-    private async Task WriteMemoryFileAsync(string path, params (string Key, string Value)[] entries)
+    private async Task WriteMemoryFileAsync(params (string Key, string Value)[] entries)
     {
         var file = new
         {
             version = 1,
             entries = entries.Select(entry => new { key = entry.Key, value = entry.Value, updated = Start }).ToArray()
         };
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(file));
+        await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(file));
     }
 }

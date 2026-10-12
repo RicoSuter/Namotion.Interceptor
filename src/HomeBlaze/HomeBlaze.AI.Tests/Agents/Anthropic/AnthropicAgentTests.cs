@@ -87,8 +87,7 @@ public class AnthropicAgentTests
                 configure?.Invoke(agent);
             });
 
-    private static string SessionPath(AgentTestContext<TestableAnthropicAgent> test) =>
-        Path.Combine(test.DataDirectory, "Agents", "Agent.session.json");
+    private static string SessionPath(AgentTestContext<TestableAnthropicAgent> test) => test.GetDataFilePath(AgentStorage.SessionSuffix);
 
     private static ChatResponseUpdate Usage(long inputTokens) =>
         new(ChatRole.Assistant, [new UsageContent(new UsageDetails { InputTokenCount = inputTokens, OutputTokenCount = 10 })]);
@@ -118,9 +117,7 @@ public class AnthropicAgentTests
         // Arrange
         await using var test = await StartAsync();
         await test.Agent.SendMessageAsync("first", CancellationToken.None);
-        await test.Agent.StopAsync(CancellationToken.None);
-        await test.Agent.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Running);
+        await test.RestartAgentAsync();
 
         // Act
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
@@ -134,11 +131,10 @@ public class AnthropicAgentTests
     {
         // Arrange
         await using var test = await StartAsync();
-        await test.Agent.StopAsync(CancellationToken.None);
+        await test.StopAgentAsync();
         Directory.CreateDirectory(Path.GetDirectoryName(SessionPath(test))!);
         await File.WriteAllTextAsync(SessionPath(test), "{ damaged");
-        await test.Agent.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Running);
+        await test.RestartAgentAsync();
 
         // Act
         await test.Agent.SendMessageAsync("hello", CancellationToken.None);
@@ -208,8 +204,7 @@ public class AnthropicAgentTests
         await using var test = await StartAsync(agent => RespondWithTextToolCallAndText(agent, "Let me check the temperature.", "[quiet] nothing new"));
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
@@ -225,8 +220,7 @@ public class AnthropicAgentTests
         await using var test = await StartAsync(agent => RespondWithTextToolCallAndText(agent, "Let me check the temperature.", "It is too warm."));
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
@@ -280,8 +274,7 @@ public class AnthropicAgentTests
         await using var test = await StartAsync();
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RunNowAndWaitAsync();
         await test.Agent.SendMessageAsync("chat", CancellationToken.None);
 
         // Assert

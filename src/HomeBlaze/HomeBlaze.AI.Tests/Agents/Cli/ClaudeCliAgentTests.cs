@@ -22,8 +22,7 @@ public class ClaudeCliAgentTests
             },
             Endpoint);
 
-    private static string SessionPath(AgentTestContext<ClaudeCliAgent> test) =>
-        Path.Combine(test.DataDirectory, "Agents", "Agent.session.json");
+    private static string SessionPath(AgentTestContext<ClaudeCliAgent> test) => test.GetDataFilePath(AgentStorage.SessionSuffix);
 
     // A directory at the session path makes reading, replacing and deleting the session file fail.
     private static void ReplaceSessionFileWithDirectory(AgentTestContext<ClaudeCliAgent> test)
@@ -54,7 +53,7 @@ public class ClaudeCliAgentTests
         Assert.Equal("d57c5029-b6b6-4e1a-8767-6df4d71bb4ba", ValueAfter(cli.Invocations[1], "--resume"));
         Assert.Equal("opus", ValueAfter(cli.Invocations[1], "--model"));
         Assert.Equal("Hello world", test.Agent.Timeline.Entries[^1].Text);
-        Assert.Contains("d57c5029", await File.ReadAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.session.json")));
+        Assert.Contains("d57c5029", await File.ReadAllTextAsync(SessionPath(test)));
     }
 
     [UnixFact]
@@ -90,8 +89,7 @@ public class ClaudeCliAgentTests
         await using var test = await StartAsync(cli);
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
@@ -107,10 +105,9 @@ public class ClaudeCliAgentTests
         using var cli = FakeClaudeCli.Create("success.jsonl");
         await using var test = await StartAsync(cli);
         await test.Agent.SendMessageAsync("first", CancellationToken.None);
-        await test.Agent.StopAsync(CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.session.json"), """{"sessionId":"stored-session"}""");
-        await test.Agent.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Running);
+        await test.StopAgentAsync();
+        await File.WriteAllTextAsync(SessionPath(test), """{"sessionId":"stored-session"}""");
+        await test.RestartAgentAsync();
 
         // Act
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
@@ -126,10 +123,9 @@ public class ClaudeCliAgentTests
         using var cli = FakeClaudeCli.Create("success.jsonl");
         await using var test = await StartAsync(cli);
         await test.Agent.SendMessageAsync("first", CancellationToken.None);
-        await test.Agent.StopAsync(CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.session.json"), "not json");
-        await test.Agent.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Running);
+        await test.StopAgentAsync();
+        await File.WriteAllTextAsync(SessionPath(test), "not json");
+        await test.RestartAgentAsync();
 
         // Act
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
@@ -146,10 +142,9 @@ public class ClaudeCliAgentTests
         using var cli = FakeClaudeCli.Create("success.jsonl");
         await using var test = await StartAsync(cli);
         await test.Agent.SendMessageAsync("first", CancellationToken.None);
-        await test.Agent.StopAsync(CancellationToken.None);
+        await test.StopAgentAsync();
         ReplaceSessionFileWithDirectory(test);
-        await test.Agent.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Running);
+        await test.RestartAgentAsync();
 
         // Act
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
@@ -226,8 +221,7 @@ public class ClaudeCliAgentTests
         await using var test = await StartAsync(cli, agent => agent.BackgroundModel = "haiku");
 
         // Act
-        test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+        await test.RunNowAndWaitAsync();
 
         // Assert
         var arguments = Assert.Single(cli.Invocations);
@@ -237,8 +231,8 @@ public class ClaudeCliAgentTests
         Assert.Contains(Endpoint.ToString(), cli.LastMcpConfiguration);
         Assert.Contains("Bearer ", cli.LastMcpConfiguration);
         Assert.Contains("Trigger: manual", cli.LastStandardInput);
-        Assert.Empty(Directory.GetFiles(Path.Combine(test.DataDirectory, "Agents", "Agent.workdir"), ".mcp-*.json"));
-        Assert.False(File.Exists(Path.Combine(test.DataDirectory, "Agents", "Agent.session.json")));
+        Assert.Empty(Directory.GetFiles(test.GetDataFilePath(AgentStorage.WorkingDirectorySuffix), ".mcp-*.json"));
+        Assert.False(File.Exists(SessionPath(test)));
     }
 
     [UnixFact]
@@ -254,7 +248,7 @@ public class ClaudeCliAgentTests
 
         // Assert
         Assert.Contains("log in", test.Agent.StatusMessage);
-        Assert.Empty(Directory.GetFiles(Path.Combine(test.DataDirectory, "Agents", "Agent.workdir"), ".mcp-*.json"));
+        Assert.Empty(Directory.GetFiles(test.GetDataFilePath(AgentStorage.WorkingDirectorySuffix), ".mcp-*.json"));
     }
 
     [UnixFact]
@@ -309,7 +303,7 @@ public class ClaudeCliAgentTests
         // Assert
         Assert.Contains("did not finish", test.Agent.StatusMessage);
         await AsyncTestHelpers.WaitUntilAsync(() => !IsRunning(cli.LastProcessId!.Value), message: "The CLI process should be killed.");
-        Assert.Empty(Directory.GetFiles(Path.Combine(test.DataDirectory, "Agents", "Agent.workdir"), ".mcp-*.json"));
+        Assert.Empty(Directory.GetFiles(test.GetDataFilePath(AgentStorage.WorkingDirectorySuffix), ".mcp-*.json"));
     }
 
     private static bool IsRunning(int processId)

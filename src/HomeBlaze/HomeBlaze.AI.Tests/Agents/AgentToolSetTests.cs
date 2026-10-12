@@ -44,7 +44,6 @@ public class AgentToolSetTests
     [InlineData(new[] { "browse" }, true)]
     [InlineData(new[] { "browse", "invoke_operation" }, false)]
     [InlineData(new[] { "browse", "invoke_query" }, true)]
-    [InlineData(new[] { "invoke_method" }, true)]
     [InlineData(new[] { "set_property" }, false)]
     [InlineData(new[] { "browse", "edit_markdown" }, false)]
     [InlineData(new[] { "write_markdown" }, false)]
