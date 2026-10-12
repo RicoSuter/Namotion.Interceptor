@@ -59,6 +59,22 @@ public class SubjectPathResolverSecretTests
         Assert.NotNull(resolver.ResolveProperty("/RawSource", PathStyle.Canonical));
     }
 
+    [Fact]
+    public void WhenResolvingAPlainOrADerivedPropertyForDisplay_ThenOnlyTheDerivedOneIsResolved()
+    {
+        // Arrange
+        var (resolver, _) = CreateResolver();
+
+        // Act
+        var plain = resolver.ResolveDisplayableProperty("/PlainText", PathStyle.Canonical);
+        var derived = resolver.ResolveValue("/DerivedText", PathStyle.Canonical);
+
+        // Assert
+        Assert.Null(plain);
+        Assert.NotNull(resolver.ResolveProperty("/PlainText", PathStyle.Canonical));
+        Assert.Equal("visible!", derived);
+    }
+
     private static (SubjectPathResolver Resolver, SecretConfigTestSubject Root) CreateResolver()
     {
         var context = InterceptorSubjectContext.Create()

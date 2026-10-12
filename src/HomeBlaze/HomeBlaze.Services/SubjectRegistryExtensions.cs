@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Parent;
@@ -66,13 +67,32 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Gets whether a page expression may show the value of the property: it is no secret configuration property and
-    /// not marked with <see cref="ExcludeFromExpressionsAttribute"/>.
+    /// Gets whether a page expression may show the value of the property: an intercepted (partial) or a derived property
+    /// that is no secret configuration property and is not marked with <see cref="ExcludeFromExpressionsAttribute"/>.
     /// </summary>
+    /// <remarks>
+    /// A plain public property is registered as well, but it is no tracked value of the subject and can hold internal
+    /// data, such as the text of an answer while an agent writes it, so it is not shown.
+    /// </remarks>
     public static bool IsDisplayable(this RegisteredSubjectProperty property)
     {
-        return property.GetConfigurationMetadata()?.IsSecret != true &&
-            !property.ReflectionAttributes.OfType<ExcludeFromExpressionsAttribute>().Any();
+        if (property.GetConfigurationMetadata()?.IsSecret == true)
+        {
+            return false;
+        }
+
+        var isDerived = false;
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            if (attribute is ExcludeFromExpressionsAttribute)
+            {
+                return false;
+            }
+
+            isDerived |= attribute is DerivedAttribute;
+        }
+
+        return isDerived || property.Reference.Metadata.IsIntercepted;
     }
 
     /// <summary>

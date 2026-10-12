@@ -977,7 +977,13 @@ Use this for internal subjects that are part of a parent subject's implementatio
 
 ### Excluding Properties from Page Expressions
 
-A `{{ path }}` expression on a page shows the value of any property it reaches, except a secret configuration property. A property whose value can hold secrets in another form, such as the raw source of a file, is marked with `[ExcludeFromExpressions]`, and an expression that reaches it shows nothing:
+A `{{ path }}` expression on a page shows the value of a property it reaches when the property is a partial (intercepted) property or a `[Derived]` property. It shows nothing for:
+
+- A plain public property, which is registered too but is no tracked value of the subject and can hold internal data, such as the text an agent is still writing. Mark a computed value that pages should show with `[Derived]`.
+- A secret configuration property (`[Configuration(IsSecret = true)]`).
+- A property marked with `[ExcludeFromExpressions]`, for a value that can hold secrets in another form, such as the raw source of a file.
+
+Every other configuration value of any subject is shown by design, also to an AI agent that reads a page with `ReadEvaluatedContent`, while the MCP tools themselves expose only state. Mark a value that must not appear on a page as secret.
 
 ```csharp
 [ExcludeFromExpressions]

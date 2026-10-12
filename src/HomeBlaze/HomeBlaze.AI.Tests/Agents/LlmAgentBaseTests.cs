@@ -4,6 +4,7 @@ using System.Reactive.Linq;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking;
@@ -16,6 +17,33 @@ public class LlmAgentBaseTests
 {
     private static Task<AgentTestContext<FakeAgent>> StartAsync(Action<FakeAgent>? configure = null) =>
         AgentTestContext<FakeAgent>.StartAsync(services => new FakeAgent(services), configure);
+
+    [Fact]
+    public async Task WhenAPageExpressionReadsTheTextAnAgentStreams_ThenItHasNoValue()
+    {
+        // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var test = await StartAsync(agent => agent.Handler = async (_, progress, cancellationToken) =>
+        {
+            progress.Report(new AgentTextDelta("The answer so far"));
+            await release.Task.WaitAsync(cancellationToken);
+            return new AgentTurnResult("The answer so far", null, null);
+        });
+        var resolver = new SubjectPathResolver(() => test.Root);
+        var send = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.StreamingText.Length > 0, message: "The agent should stream text.");
+
+        // Act
+        var value = resolver.ResolveScopedValue("/Agent/StreamingText", PathStyle.Canonical, test.Root);
+        var relativeValue = resolver.ResolveValue("Agent/StreamingText", PathStyle.Canonical, test.Root);
+
+        // Assert
+        Assert.Null(value);
+        Assert.Null(relativeValue);
+        Assert.NotNull(resolver.ResolveProperty("/Agent/StreamingText", PathStyle.Canonical));
+        release.SetResult();
+        await send;
+    }
 
     [Fact]
     public async Task WhenARunIsRequestedManually_ThenABackgroundTurnRunsWithTheBackgroundModelAndWatchedState()

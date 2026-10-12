@@ -150,6 +150,11 @@ public partial class SecretConfigTestSubject
 
     [ExcludeFromExpressions]
     public partial string? RawSource { get; set; }
+
+    public string PlainText => "internal " + SecretKey;
+
+    [Derived]
+    public string? DerivedText => PublicConfig + "!";
 }
 
 [InterceptorSubject]
