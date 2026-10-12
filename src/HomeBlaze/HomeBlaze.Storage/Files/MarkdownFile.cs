@@ -31,8 +31,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// The active content, besides blocks, that the write operations cannot add to a file.
     /// </summary>
     public const string ActiveContent =
-        "HTML, images and media, math and diagram blocks, element attributes and links other than " +
-        "http, https and mailto";
+        "HTML, images and media, math and diagram blocks, element attributes, abbreviation definitions and links other " +
+        "than http, https and mailto";
 
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;

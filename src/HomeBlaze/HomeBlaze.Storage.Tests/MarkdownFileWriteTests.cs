@@ -286,6 +286,7 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("rpm.", "rpm. ![Pixel](https://tracker.example.com/pixel.png)")]
     [InlineData("rpm.", "rpm. ![Pixel][pixel]\n\n[pixel]: https://tracker.example.com/pixel.png")]
     [InlineData("rpm.", "rpm.\n\n:::warning\nCareful\n:::")]
+    [InlineData("rpm.", "rpm.\n\n*[motor]: The motor of the page")]
     [InlineData("rpm.", "rpm.\n\n$$\nx^2\n$$")]
     [InlineData("rpm.", "rpm.\n\n```mermaid\ngraph TD; A-->B\n```")]
     [InlineData("(https://example.com/wiring.png)", "(https://example.com/other.png)")]
@@ -358,7 +359,7 @@ public class MarkdownFileWriteTests : IDisposable
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(
             () => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
-        Assert.StartsWith("The change adds or removes an expression, or the first text, before a block without a #name", exception.Message);
+        Assert.StartsWith("The change adds or removes an expression, the first text, or text between two blocks before a block without a #name", exception.Message);
         Assert.Equal(PageWithUnnamedBlock, ReadFile("Motors.md"));
     }
 
@@ -374,7 +375,7 @@ public class MarkdownFileWriteTests : IDisposable
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(
             () => markdown.ReplaceContentAsync("# Motors\n\n" + content, CancellationToken.None));
-        Assert.StartsWith("The change adds or removes an expression, or the first text", exception.Message);
+        Assert.StartsWith("The change adds or removes an expression, the first text", exception.Message);
         Assert.Equal(content, ReadFile("Motors.md"));
     }
 

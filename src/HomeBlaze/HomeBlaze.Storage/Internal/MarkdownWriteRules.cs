@@ -3,6 +3,7 @@ using System.Text;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
+using Markdig.Extensions.Abbreviations;
 using Markdig.Extensions.Mathematics;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
@@ -65,9 +66,9 @@ internal static class MarkdownWriteRules
         "subject(name) code block exactly as ReadRawContent shows it, with *** where it hides a secret value.";
 
     private const string BlockPositionMessage =
-        "The change adds or removes an expression, or the first text, before a block without a #name, which would create " +
-        "the subject of that block again. Change the text elsewhere or keep the expressions and paragraphs before such a " +
-        "block, or ask an operator to give the block a #name in the page editor.";
+        "The change adds or removes an expression, the first text, or text between two blocks before a block without a " +
+        "#name, which would create the subject of that block again. Change the text elsewhere or keep the expressions and " +
+        "the text before such a block where they are, or ask an operator to give the block a #name in the page editor.";
 
     private const string SubjectFenceKind = "SubjectFence";
 
@@ -79,8 +80,7 @@ internal static class MarkdownWriteRules
 
     /// <summary>
     /// Ensures that the new source of a page keeps its blocks and old subject(name) code blocks exactly as they are, in the
-    /// same order and each block without a #name directly on the page at the same position among the content of the
-    /// page, and adds none of the
+    /// same order and each block without a #name at the same position among the content around it, and adds none of the
     /// <see cref="MarkdownFile.ActiveContent"/> that the old source does not already contain. A new page passes an empty
     /// old source.
     /// </summary>
@@ -228,26 +228,41 @@ internal static class MarkdownWriteRules
             }
         }
 
+        // An abbreviation definition changes the text everywhere on the page, also inside blocks and expressions.
+        if (page.Document.GetAbbreviations() is { } abbreviations)
+        {
+            activeMarkup.AddRange(abbreviations.Values.Select(abbreviation => "abbreviation:" + abbreviation.Label + "=" + abbreviation.Text));
+        }
+
         return new ActiveContentOfPage(GetUnits(page), GetUnnamedBlockPositions(page), activeMarkup);
     }
 
     /// <summary>
-    /// Gets the position among the content of the page of each widget block without a #name directly on the page, the
-    /// position that its key holds.
+    /// Gets the position of each block without a #name among the content around it, with the positions of the blocks
+    /// around it, which is what its key holds.
     /// </summary>
-    private static List<int> GetUnnamedBlockPositions(MarkdownPage page)
+    private static List<string> GetUnnamedBlockPositions(MarkdownPage page)
     {
-        var positions = new List<int>();
-        var segments = MarkdownSegmentBuilder.Build(page);
+        var positions = new List<string>();
+        AddUnnamedBlockPositions(MarkdownSegmentBuilder.Build(page), string.Empty, positions);
+        return positions;
+    }
+
+    private static void AddUnnamedBlockPositions(IReadOnlyList<MarkdownSegment> segments, string path, List<string> positions)
+    {
         for (var index = 0; index < segments.Count; index++)
         {
-            if (segments[index] is BlockMarkdownSegment { Block: { Kind: MarkdownBlockKind.Widget, Head.Id: null } })
+            if (segments[index] is BlockMarkdownSegment blockSegment)
             {
-                positions.Add(index);
+                var blockPath = path + "/" + index.ToString(CultureInfo.InvariantCulture);
+                if (blockSegment.Block.Head is { Id: null })
+                {
+                    positions.Add(blockPath);
+                }
+
+                AddUnnamedBlockPositions(blockSegment.Content, blockPath, positions);
             }
         }
-
-        return positions;
     }
 
     /// <summary>
@@ -365,5 +380,5 @@ internal static class MarkdownWriteRules
     /// <summary>The kind of a unit, its text for the comparison and its span in its source.</summary>
     private readonly record struct UnitText(string Kind, string Text, MarkdownSpan Span);
 
-    private sealed record ActiveContentOfPage(List<UnitText> Units, List<int> UnnamedBlockPositions, List<string> ActiveMarkup);
+    private sealed record ActiveContentOfPage(List<UnitText> Units, List<string> UnnamedBlockPositions, List<string> ActiveMarkup);
 }
