@@ -177,6 +177,28 @@ public class ParentTraversalTests
     }
 
     [Fact]
+    public void WhenTwoBranchesHaveMatchesAtDifferentDistances_ThenReturnsTheNearer()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var longBranch = new TraversalNode();
+        var shortBranch = new TraversalNode();
+        var farther = new MarkedTraversalNode();
+        var nearer = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(subject, longBranch);
+        ParentTraversalGraph.Link(subject, shortBranch);
+        var topOfLongBranch = ParentTraversalGraph.LinkChain(longBranch, 1);
+        ParentTraversalGraph.Link(topOfLongBranch, farther);
+        ParentTraversalGraph.Link(shortBranch, nearer);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(nearer, result);
+    }
+
+    [Fact]
     public async Task WhenBranchLeadsOnlyBackToMatchingSubject_ThenReturnsNull()
     {
         // Arrange
