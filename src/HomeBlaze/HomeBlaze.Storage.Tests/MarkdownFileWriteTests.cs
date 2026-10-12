@@ -285,6 +285,7 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("rpm.", "rpm.\n\n![](https://h/x.mp4)")]
     [InlineData("rpm.", "rpm. ![Pixel](https://tracker.example.com/pixel.png)")]
     [InlineData("rpm.", "rpm. ![Pixel][pixel]\n\n[pixel]: https://tracker.example.com/pixel.png")]
+    [InlineData("rpm.", "rpm.\n\n:::warning\nCareful\n:::")]
     [InlineData("rpm.", "rpm.\n\n$$\nx^2\n$$")]
     [InlineData("rpm.", "rpm.\n\n```mermaid\ngraph TD; A-->B\n```")]
     [InlineData("(https://example.com/wiring.png)", "(https://example.com/other.png)")]
@@ -312,6 +313,7 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("![Wiring](https://example.com/wiring.png)\n\n", "")]
     [InlineData("rpm.", "rpm.\n\n```csharp\nvar speed = 1000;\n```")]
     [InlineData("rpm.", "rpm.\n\n```text\n:: HomeBlaze.Samples.Motor\n::\n```")]
+    [InlineData("# Motors", "# שלום עולם {dir=rtl}")]
     public async Task WhenReplacingTextKeepsTheBlocksAndTheActiveContent_ThenTheTextIsChanged(string oldText, string newText)
     {
         // Arrange
@@ -338,8 +340,59 @@ public class MarkdownFileWriteTests : IDisposable
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
             () => markdown.ReplaceTextAsync("Card text", "Card text\n\nAppended by an agent.", CancellationToken.None));
-        await markdown.ReplaceTextAsync("# Motors", "# Motors\n\nAdded before the block.", CancellationToken.None);
-        Assert.Equal("# Motors\n\nAdded before the block.\n\n:: HomeBlaze.Components.Card Title=Notes\nCard text", ReadFile("Motors.md"));
+        Assert.Equal(content, ReadFile("Motors.md"));
+    }
+
+    private const string PageWithUnnamedBlock = "# Motors\n\n:: HomeBlaze.Samples.Motor Name=Unnamed\n::\n\nAfter the motor.";
+
+    [Theory]
+    [InlineData("# Motors", "# Motors at {{ /Devices/Speed }}")]
+    [InlineData("# Motors\n\n", "# Motors\n\nThe speed is {{ /Devices/Speed }}.\n\n")]
+    public async Task WhenAnExpressionIsAddedBeforeABlockWithoutAName_ThenItIsRejectedBecauseTheSubjectWouldStartAgain(string oldText, string newText)
+    {
+        // Arrange
+        WriteFile("Motors.md", PageWithUnnamedBlock);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
+        Assert.StartsWith("The change adds or removes an expression, or the first text, before a block without a #name", exception.Message);
+        Assert.Equal(PageWithUnnamedBlock, ReadFile("Motors.md"));
+    }
+
+    [Fact]
+    public async Task WhenTheFirstTextIsAddedBeforeABlockWithoutAName_ThenItIsRejectedBecauseTheSubjectWouldStartAgain()
+    {
+        // Arrange
+        const string content = ":: HomeBlaze.Samples.Motor Name=Unnamed\n::\n\nAfter the motor.";
+        WriteFile("Motors.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceContentAsync("# Motors\n\n" + content, CancellationToken.None));
+        Assert.StartsWith("The change adds or removes an expression, or the first text", exception.Message);
+        Assert.Equal(content, ReadFile("Motors.md"));
+    }
+
+    [Theory]
+    [InlineData("# Motors", "# All motors\n\nA paragraph added before the motor.")]
+    [InlineData("After the motor.", "After the motor at {{ /Devices/Speed }}.\n\nAnd more.")]
+    public async Task WhenTextChangesBeforeOrAfterABlockWithoutANameWithoutMovingIt_ThenTheTextIsChanged(string oldText, string newText)
+    {
+        // Arrange
+        WriteFile("Motors.md", PageWithUnnamedBlock);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act
+        await markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(PageWithUnnamedBlock.Replace(oldText, newText), ReadFile("Motors.md"));
     }
 
     [Fact]
@@ -397,6 +450,7 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("# Notes\n\n:: HomeBlaze.Components.Widget Path=/Devices/Motor\n::")]
     [InlineData("# Notes\n\n:: {.highlight}\nText\n::")]
     [InlineData("# Notes\n\n::")]
+    [InlineData(":::note\nText\n:::")]
     [InlineData("# Notes\n\n<img src=x onerror=alert(1)>")]
     [InlineData("# Notes <span>inline</span>")]
     [InlineData("# Notes {style=\"color:red\"}")]
@@ -408,8 +462,9 @@ public class MarkdownFileWriteTests : IDisposable
         var storage = await ConnectAsync();
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
             () => storage.CreateMarkdownFileAsync("Notes.md", content, CancellationToken.None));
+        Assert.StartsWith("Blocks cannot be added, changed or removed", exception.Message);
         Assert.False(File.Exists(GetFullPath("Notes.md")));
     }
 

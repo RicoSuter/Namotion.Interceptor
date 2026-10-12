@@ -63,39 +63,51 @@ internal static class MarkdownWriteRules
         "these operations; use the page editor. A block starts with a line of two or more colons and ends with its closing " +
         "line, and text directly after a block without a closing line belongs to that block.";
 
+    private const string BlockPositionMessage =
+        "The change adds or removes an expression, or the first text, before a block without a #name, which would create " +
+        "the subject of that block again. Change the text elsewhere or keep the expressions and paragraphs before such a " +
+        "block, or ask an operator to give the block a #name in the page editor.";
+
+    // The attribute that the globalization extension sets on an element with right-to-left text.
+    private const string DirectionAttribute = "dir";
+
     // The fenced code languages the diagrams extension renders as diagrams instead of code.
     private static readonly HashSet<string> DiagramLanguages = new(StringComparer.OrdinalIgnoreCase) { "mermaid", "nomnoml" };
 
     /// <summary>
-    /// Ensures that the new source of a page keeps its blocks exactly as they are, in the same order, and adds none of the
+    /// Ensures that the new source of a page keeps its blocks exactly as they are, in the same order and each block without
+    /// a #name directly on the page at the same position among the content of the page, and adds none of the
     /// <see cref="MarkdownFile.ActiveContent"/> that the old source does not already contain. A new page passes an empty
     /// old source.
     /// </summary>
     /// <exception cref="ArgumentException">The new source adds, changes, removes or moves a block, or adds such content.</exception>
     public static void EnsureActiveContentUnchanged(string oldSource, string newSource, string parameterName)
     {
-        var (oldBlocks, oldMarkup) = GetActiveContent(oldSource);
-        var (newBlocks, newMarkup) = GetActiveContent(newSource);
+        var oldContent = GetActiveContent(oldSource);
+        var newContent = GetActiveContent(newSource);
 
         // Adding, changing, removing or moving a block would create, reconfigure or detach a running subject.
-        if (!oldBlocks.SequenceEqual(newBlocks, StringComparer.Ordinal) || !IsContainedIn(newMarkup, oldMarkup))
+        if (!oldContent.Blocks.Select(block => block.Text).SequenceEqual(newContent.Blocks.Select(block => block.Text), StringComparer.Ordinal) ||
+            !IsContainedIn(newContent.ActiveMarkup, oldContent.ActiveMarkup))
         {
             throw new ArgumentException(ActiveContentMessage, parameterName);
+        }
+
+        // The page knows such a block by its type and its position, so a new position would create its subject again.
+        if (!oldContent.UnnamedBlockPositions.SequenceEqual(newContent.UnnamedBlockPositions))
+        {
+            throw new ArgumentException(BlockPositionMessage, parameterName);
         }
     }
 
     /// <summary>
     /// Collects what in a Markdown source makes the page run code or subjects, or load content, rather than show text,
-    /// the way the page parses it: the blocks, each with its kind and its whole text, and the
-    /// <see cref="MarkdownFile.ActiveContent"/>.
+    /// the way the page parses it: the blocks, each with its kind and its whole text, the positions of the blocks without
+    /// a #name directly on the page, and the <see cref="MarkdownFile.ActiveContent"/>.
     /// </summary>
-    internal static (List<string> Blocks, List<string> ActiveMarkup) GetActiveContent(string source)
+    private static ActiveContentOfPage GetActiveContent(string source)
     {
         var page = MarkdownPageParser.Parse(source);
-
-        var blocks = new List<string>();
-        CollectBlocks(page.Blocks, page.Source, GetLineEnds(page.Source), blocks);
-
         var activeMarkup = new List<string>();
         foreach (var node in page.Document.Descendants())
         {
@@ -129,28 +141,56 @@ internal static class MarkdownWriteRules
                     break;
             }
 
-            // Identifiers and classes only style the page; other attributes can hold script, for example onclick.
-            if (node.TryGetAttributes() is { Properties: { Count: > 0 } properties })
+            // Identifiers and classes only style the page, and the globalization extension sets dir for right-to-left
+            // text; other attributes can hold script, for example onclick.
+            if (node.TryGetAttributes() is { Properties: { Count: > 0 } properties } &&
+                properties.Any(property => property.Key != DirectionAttribute))
             {
                 activeMarkup.Add("attributes:" + string.Join(" ", properties.Select(property => property.Key + "=" + property.Value)));
             }
         }
 
-        return (blocks, activeMarkup);
+        return new ActiveContentOfPage(GetBlocks(page), GetUnnamedBlockPositions(page), activeMarkup);
     }
 
     /// <summary>
-    /// Adds each block with its kind and its text from the head line to its last line, which includes its configuration,
-    /// its content and the blocks inside it. A block in a list item or a quote is added like a block directly on the page.
+    /// Gets the position among the content of the page of each widget block without a #name directly on the page, the
+    /// position that its key holds.
     /// </summary>
-    private static void CollectBlocks(IReadOnlyList<MarkdownBlock> blocks, string source, List<int> lineEnds, List<string> collected)
+    private static List<int> GetUnnamedBlockPositions(MarkdownPage page)
     {
-        foreach (var block in blocks)
+        var positions = new List<int>();
+        var segments = MarkdownSegmentBuilder.Build(page);
+        for (var index = 0; index < segments.Count; index++)
+        {
+            if (segments[index] is BlockMarkdownSegment { Block: { Kind: MarkdownBlockKind.Widget, Head.Id: null } })
+            {
+                positions.Add(index);
+            }
+        }
+
+        return positions;
+    }
+
+    /// <summary>
+    /// Gets each block with its kind and its text from the head line to its last line, which includes its configuration,
+    /// its content and the blocks inside it. A block in a list item or a quote is taken like a block directly on the page.
+    /// The text is compared with line feeds as line endings.
+    /// </summary>
+    private static List<BlockText> GetBlocks(MarkdownPage page)
+    {
+        var source = page.Source;
+        var lineEnds = GetLineEnds(source);
+        var blocks = new List<BlockText>(page.Blocks.Count);
+        foreach (var block in page.Blocks)
         {
             var end = lineEnds[Math.Clamp(block.EndLine, 1, lineEnds.Count) - 1];
             var start = Math.Min(block.HeadSpan.Start, end);
-            collected.Add(block.Kind + ":" + source[start..end]);
+            var text = block.Kind + ":" + source[start..end].Replace("\r\n", "\n", StringComparison.Ordinal);
+            blocks.Add(new BlockText(text, new MarkdownSpan(start, end - start)));
         }
+
+        return blocks;
     }
 
     // The position after the last character of each line, before its line ending, by 0-based line.
@@ -228,4 +268,9 @@ internal static class MarkdownWriteRules
                 "a leading dot, invisible formatting characters or any of the characters / \\ : * ? \" < > |.", parameterName);
         }
     }
+
+    /// <summary>The text of a block for the comparison and the span of the block in its source.</summary>
+    private readonly record struct BlockText(string Text, MarkdownSpan Span);
+
+    private sealed record ActiveContentOfPage(List<BlockText> Blocks, List<int> UnnamedBlockPositions, List<string> ActiveMarkup);
 }
