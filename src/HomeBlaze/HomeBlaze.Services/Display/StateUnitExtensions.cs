@@ -71,13 +71,7 @@ public static class StateUnitExtensions
         {
             var unit = stateMetadata.Unit;
 
-            // Percent and Currency use special formatting, not auto-scaling
-            if (unit == StateUnit.Percent)
-            {
-                var percent = Math.Round(Convert.ToDecimal(value) * 100m, 1);
-                return $"{percent.ToString("0.##", CultureInfo.InvariantCulture)}%";
-            }
-
+            // Currency and HexColor use special formatting, not auto-scaling
             if (unit == StateUnit.Currency)
             {
                 return $"{value:C}";
@@ -88,15 +82,22 @@ public static class StateUnitExtensions
                 return value.ToString() ?? "";
             }
 
-            // Try to convert to decimal for auto-scaling
+            // Try to convert to decimal for the percent form and for auto-scaling
             try
             {
                 var decimalValue = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+                if (unit == StateUnit.Percent)
+                {
+                    var percent = Math.Round(decimalValue * 100m, 1);
+                    return $"{percent.ToString("0.##", CultureInfo.InvariantCulture)}%";
+                }
+
                 return FormatWithUnit(decimalValue, unit);
             }
             catch
             {
-                // Fall through to default formatting for non-convertible types
+                // Fall through to default formatting for a value that is no number a decimal can hold,
+                // such as a text, NaN or an infinity
             }
         }
 

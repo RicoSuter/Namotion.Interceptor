@@ -5,6 +5,7 @@ using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -290,6 +291,54 @@ public class StateUnitExtensionsTests
 
         // Assert
         Assert.Equal(timeZone.Placeholder, result);
+    }
+
+    [Theory]
+    [InlineData(double.NaN, "NaN")]
+    [InlineData(double.PositiveInfinity, "Infinity")]
+    [InlineData(double.NegativeInfinity, "-Infinity")]
+    public void WhenPercentValueIsNoFiniteNumber_ThenRendersItWithoutAUnit(double value, string expected)
+    {
+        // Arrange
+        var property = GetRatioProperty();
+
+        // Act
+        var result = property.GetPropertyDisplayValue(value);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenPercentValueIsText_ThenRendersTheTextItself()
+    {
+        // Arrange
+        var property = GetRatioProperty();
+
+        // Act
+        var result = property.GetPropertyDisplayValue("offline");
+
+        // Assert
+        Assert.Equal("offline", result);
+    }
+
+    [Fact]
+    public void WhenPercentValueIsTooLargeToScale_ThenRendersItWithoutAUnit()
+    {
+        // Arrange
+        var property = GetRatioProperty();
+
+        // Act
+        var result = property.GetPropertyDisplayValue(decimal.MaxValue);
+
+        // Assert
+        Assert.Equal("79228162514264337593543950335", result);
+    }
+
+    private static RegisteredSubjectProperty GetRatioProperty()
+    {
+        var subject = new DisplayTestSubject(CreateContext());
+        return subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(DisplayTestSubject.Ratio))!;
     }
 }
 
