@@ -13,10 +13,8 @@ public static class DataDirectorySeeder
     /// </summary>
     public const string SeedRootFileName = "Root.json";
 
-    /// <summary>
-    /// Path of the documentation directory, relative to both the seed directory and the data directory.
-    /// </summary>
-    public const string DocumentationDirectory = "Files/Docs";
+    // Relative to both the seed directory and the data directory.
+    private const string DocumentationDirectory = "Files/Docs";
 
     /// <summary>
     /// Copies the seed directory into the folder of <paramref name="rootConfigurationPath"/> when that file does not exist
@@ -79,8 +77,8 @@ public static class DataDirectorySeeder
     }
 
     /// <summary>
-    /// Replaces the <see cref="DocumentationDirectory"/> in the folder of <paramref name="rootConfigurationPath"/> with the one
-    /// of <paramref name="seedDirectory"/>: the target is deleted with everything in it, then the seed's files are copied.
+    /// Replaces the documentation directory (<c>Files/Docs</c>) in the folder of <paramref name="rootConfigurationPath"/> with
+    /// the one of <paramref name="seedDirectory"/>: the target is deleted with everything in it, then the seed's files are copied.
     /// Nothing is deleted or copied when <paramref name="seedDirectory"/> is not set or does not contain that directory.
     /// </summary>
     /// <returns>The number of copied files; zero when nothing was copied.</returns>

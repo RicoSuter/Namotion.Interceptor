@@ -45,19 +45,6 @@ var rootConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(builder.Conf
 var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
 var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
 
-// Replaced on every start, unlike the seeded files, so the documentation always matches the running version.
-// A failure is only logged, once the logger exists: outdated documentation must not keep the application down.
-var replacedDocumentationFileCount = 0;
-Exception? documentationReplacementException = null;
-try
-{
-    replacedDocumentationFileCount = DataDirectorySeeder.ReplaceDocumentation(rootConfigurationPath, seedDirectory);
-}
-catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-{
-    documentationReplacementException = exception;
-}
-
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
@@ -93,13 +80,20 @@ if (seededFileCount > 0)
     app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
 }
 
-if (documentationReplacementException is not null)
+// Replaced on every start, unlike the seeded files, so the documentation always matches the running version.
+// It must stay before app.Run, which starts the storage file watcher. Outdated documentation must not keep
+// the application down, so a failure is only logged.
+try
 {
-    app.Logger.LogWarning(documentationReplacementException, "Could not replace the documentation from the seed directory. It may be outdated or incomplete until the next start.");
+    var replacedFileCount = DataDirectorySeeder.ReplaceDocumentation(rootConfigurationPath, seedDirectory);
+    if (replacedFileCount > 0)
+    {
+        app.Logger.LogInformation("Replaced the documentation with {Count} files from the seed directory.", replacedFileCount);
+    }
 }
-else if (replacedDocumentationFileCount > 0)
+catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 {
-    app.Logger.LogInformation("Replaced the documentation with {Count} files from the seed directory.", replacedDocumentationFileCount);
+    app.Logger.LogWarning(exception, "Could not replace the documentation from the seed directory. It may be outdated or incomplete until the next start.");
 }
 
 // Configure TypeProvider with application-specific assemblies

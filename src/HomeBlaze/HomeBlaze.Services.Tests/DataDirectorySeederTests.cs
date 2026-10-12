@@ -26,6 +26,12 @@ public class DataDirectorySeederTests : IDisposable
         File.WriteAllText(Path.Combine(SeedDocumentationDirectory, "guides", "setup.md"), "seed-setup");
     }
 
+    private void WriteExistingDocumentation()
+    {
+        Directory.CreateDirectory(DataDocumentationDirectory);
+        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
+    }
+
     [Fact]
     public void WhenRootFileIsMissingAndSeedIsSet_ThenSeedIsCopied()
     {
@@ -171,8 +177,7 @@ public class DataDirectorySeederTests : IDisposable
     public void WhenSeedDirectoryIsNotSet_ThenTargetDirectoryIsKept(string? seedDirectory)
     {
         // Arrange
-        Directory.CreateDirectory(DataDocumentationDirectory);
-        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
+        WriteExistingDocumentation();
 
         // Act
         var copiedFileCount = DataDirectorySeeder.ReplaceDocumentation(RootFile, seedDirectory);
@@ -186,8 +191,7 @@ public class DataDirectorySeederTests : IDisposable
     public void WhenSeedDirectoryDoesNotExist_ThenTargetDirectoryIsKept()
     {
         // Arrange
-        Directory.CreateDirectory(DataDocumentationDirectory);
-        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
+        WriteExistingDocumentation();
 
         // Act
         var copiedFileCount = DataDirectorySeeder.ReplaceDocumentation(RootFile, Path.Combine(_seedDirectory.FullName, "missing"));
@@ -201,8 +205,7 @@ public class DataDirectorySeederTests : IDisposable
     public void WhenSeedHasNoDocumentationDirectory_ThenTargetDirectoryIsKept()
     {
         // Arrange
-        Directory.CreateDirectory(DataDocumentationDirectory);
-        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
+        WriteExistingDocumentation();
 
         // Act
         var copiedFileCount = DataDirectorySeeder.ReplaceDocumentation(RootFile, _seedDirectory.FullName);
