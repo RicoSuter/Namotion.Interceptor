@@ -1,8 +1,9 @@
 @using System.Runtime.CompilerServices
 @inject ITimeZoneDisplay TimeZone
 
-@* Tiles at least 150 px wide fill each row, so the three to five tiles wrap evenly on any width. *@
-<div class="mb-3" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 8px;"
+@* Stats at least 150 px wide fill each row, so the three to five values sit in one row on wide screens and wrap
+   evenly on narrow ones. *@
+<div class="mb-4" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 16px;"
      data-testid="agent-stats">
     @StatTile("Background runs", Agent.RunCount.ToString())
     @StatTile("Last background run", Agent.LastRunTime is { } lastRun ? TimeZone.Format(lastRun) : "never")
@@ -15,7 +16,7 @@
 </div>
 
 @* Below the small breakpoint each run stacks into labeled lines instead of a wide table. *@
-<MudTable T="AgentTimelineEntry" Items="GetRuns()" Dense="true" Hover="true" Elevation="0" Outlined="true"
+<MudTable T="AgentTimelineEntry" Items="GetRuns()" Dense="true" Hover="true" Elevation="0" Class="mud-background"
           Breakpoint="Breakpoint.Xs" RowsPerPage="RunsPerPage" data-testid="agent-runs">
     <HeaderContent>
         <MudTh>Time</MudTh>
@@ -92,8 +93,8 @@
             : entry.Text;
 
     private static RenderFragment StatTile(string label, string value) =>
-        @<MudPaper Outlined="true" Class="pa-3 mud-height-full">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">@label</MudText>
+        @<MudStack Spacing="0">
             <MudText Typo="Typo.h6">@value</MudText>
-        </MudPaper>;
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@label</MudText>
+        </MudStack>;
 }

@@ -4,55 +4,54 @@
 <MudGrid Spacing="4">
     <MudItem xs="12" md="6">
         <MudText Typo="Typo.h6" Class="mb-1">Settings</MudText>
-        <MudSimpleTable Dense="true" Elevation="0" Outlined="true">
-            <tbody>
-                @SettingRow("Model", Agent.Model ?? "default")
-                @SettingRow("Effort", Agent.Effort?.ToString() ?? "default")
-                @SettingRow("Background model", Agent.BackgroundModel ?? "same as model")
-                @SettingRow("Background effort", Agent.BackgroundEffort?.ToString() ?? "same as effort")
-                @SettingRow("Watch paths", @<text>
-                    @if (Agent.WatchPaths.Length == 0)
-                    {
-                        <text>none</text>
-                    }
-                    @foreach (var path in Agent.WatchPaths)
-                    {
-                        <div>@path</div>
-                    }
-                </text>)
-                @SettingRow("Poll interval", Agent.PollInterval is { } pollInterval && pollInterval > TimeSpan.Zero ? AgentTimeSpanInput.Format(pollInterval) : "none")
-                @SettingRow("Minimum run interval", AgentTimeSpanInput.Format(Agent.GetEffectiveMinRunInterval()))
-                @SettingRow("Allowed tools", @<text>
-                    @if (Agent.AllowedTools.Length > 0)
-                    {
-                        <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1" Class="py-1">
-                            @foreach (var tool in Agent.AllowedTools)
-                            {
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">@tool</MudChip>
-                            }
-                        </MudStack>
-                    }
-                    else
-                    {
-                        <text>none (memory only)</text>
-                    }
-                </text>)
-                @SettingRow("Turn timeout", Agent.GetEffectiveTurnTimeout() is { } turnTimeout ? AgentTimeSpanInput.Format(turnTimeout) : "none")
-                @SettingRow("Tool calls per turn", Agent.MaxToolCallsPerTurn.ToString())
-                @if (Agent is ClaudeCliAgent cliAgent)
+        @* A borderless label and value list; on phones each label sits above its value. *@
+        <MudGrid Spacing="0" data-testid="agent-settings">
+            @SettingRow("Model", Agent.Model ?? "default")
+            @SettingRow("Effort", Agent.Effort?.ToString() ?? "default")
+            @SettingRow("Background model", Agent.BackgroundModel ?? "same as model")
+            @SettingRow("Background effort", Agent.BackgroundEffort?.ToString() ?? "same as effort")
+            @SettingRow("Watch paths", @<text>
+                @if (Agent.WatchPaths.Length == 0)
                 {
-                    @SettingRow("CLI path", cliAgent.CliPath)
-                    @SettingRow("Fallback model", cliAgent.FallbackModel ?? "none")
+                    <text>none</text>
                 }
-                @if (Agent is AnthropicAgent anthropicAgent)
+                @foreach (var path in Agent.WatchPaths)
                 {
-                    @SettingRow("API key", string.IsNullOrWhiteSpace(anthropicAgent.ApiKey) ? "not set" : "set")
-                    @SettingRow("Max output tokens", anthropicAgent.MaxTokens.ToString())
-                    @SettingRow("History token budget", anthropicAgent.HistoryTokenBudget > 0 ? anthropicAgent.HistoryTokenBudget.ToString() : "never summarize")
+                    <div>@path</div>
                 }
-            </tbody>
-        </MudSimpleTable>
-        <MudText Typo="Typo.caption" Class="d-block mt-1 mud-text-secondary">Change settings with the subject's Edit action.</MudText>
+            </text>)
+            @SettingRow("Poll interval", Agent.PollInterval is { } pollInterval && pollInterval > TimeSpan.Zero ? AgentTimeSpanInput.Format(pollInterval) : "none")
+            @SettingRow("Minimum run interval", AgentTimeSpanInput.Format(Agent.GetEffectiveMinRunInterval()))
+            @SettingRow("Allowed tools", @<text>
+                @if (Agent.AllowedTools.Length > 0)
+                {
+                    <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1">
+                        @foreach (var tool in Agent.AllowedTools)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">@tool</MudChip>
+                        }
+                    </MudStack>
+                }
+                else
+                {
+                    <text>none (memory only)</text>
+                }
+            </text>)
+            @SettingRow("Turn timeout", Agent.GetEffectiveTurnTimeout() is { } turnTimeout ? AgentTimeSpanInput.Format(turnTimeout) : "none")
+            @SettingRow("Tool calls per turn", Agent.MaxToolCallsPerTurn.ToString())
+            @if (Agent is ClaudeCliAgent cliAgent)
+            {
+                @SettingRow("CLI path", cliAgent.CliPath)
+                @SettingRow("Fallback model", cliAgent.FallbackModel ?? "none")
+            }
+            @if (Agent is AnthropicAgent anthropicAgent)
+            {
+                @SettingRow("API key", string.IsNullOrWhiteSpace(anthropicAgent.ApiKey) ? "not set" : "set")
+                @SettingRow("Max output tokens", anthropicAgent.MaxTokens.ToString())
+                @SettingRow("History token budget", anthropicAgent.HistoryTokenBudget > 0 ? anthropicAgent.HistoryTokenBudget.ToString() : "never summarize")
+            }
+        </MudGrid>
+        <MudText Typo="Typo.caption" Class="d-block mt-2 mud-text-secondary">Change settings with the subject's Edit action.</MudText>
     </MudItem>
     <MudItem xs="12" md="6">
         <MudText Typo="Typo.h6" Class="mb-1">Instructions</MudText>
@@ -122,7 +121,7 @@
             <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@MemoryEditor.Error</MudAlert>
         }
         @* Below the small breakpoint each entry stacks into labeled lines instead of a wide table. *@
-        <MudTable T="AgentMemoryEntry" Items="memory.Entries" Dense="true" Hover="true" Elevation="0" Outlined="true"
+        <MudTable T="AgentMemoryEntry" Items="memory.Entries" Dense="true" Hover="true" Elevation="0" Class="mud-background"
                   Breakpoint="Breakpoint.Xs" data-testid="agent-memory">
             <HeaderContent>
                 <MudTh>Key</MudTh>
@@ -181,10 +180,14 @@
 
     private static RenderFragment SettingRow(string label, string value) => SettingRow(label, @<text>@value</text>);
 
-    // Values such as paths break anywhere so that narrow screens wrap them instead of widening the table.
+    // Values such as paths break anywhere so that narrow screens wrap them instead of overflowing.
     private static RenderFragment SettingRow(string label, RenderFragment value) =>
-        @<tr>
-            <td class="mud-text-secondary">@label</td>
-            <td style="overflow-wrap: anywhere;">@value</td>
-        </tr>;
+        @<text>
+            <MudItem xs="12" sm="4" Class="pt-2 pb-0 py-sm-1 pr-sm-4">
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">@label</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="8" Class="pt-0 pb-1 py-sm-1">
+                <MudText Typo="Typo.body2" HtmlTag="div" Style="overflow-wrap: anywhere;">@value</MudText>
+            </MudItem>
+        </text>;
 }

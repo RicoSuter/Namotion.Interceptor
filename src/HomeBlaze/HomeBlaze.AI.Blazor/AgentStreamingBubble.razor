@@ -5,7 +5,7 @@
 }
 @* Laid out like the final reply, with the progress overlaid on the bottom padding, so the reply replaces it
    without a jump. *@
-<MudPaper Class="pa-3 my-2 relative overflow-hidden" Elevation="0" Outlined="true" Style="max-width: min(100%, 56rem);" data-testid="agent-streaming">
+<div class="py-2 my-2 relative" style="max-width: min(100%, 56rem);" data-testid="agent-streaming">
     <AgentMarkdown>
         @foreach (var segment in _stableSegments)
         {
@@ -13,8 +13,8 @@
         }
         @_tailHtml
     </AgentMarkdown>
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="position: absolute; left: 0; right: 0; bottom: 0;" />
-</MudPaper>
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Rounded="true" Size="Size.Small" Style="position: absolute; left: 0; right: 0; bottom: 0;" />
+</div>
 
 @code {
     private LlmAgentBase? _subscribed;

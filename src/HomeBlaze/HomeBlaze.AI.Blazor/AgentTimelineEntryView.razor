@@ -14,10 +14,10 @@
         </MudPaper>
         break;
     case AgentTimelineEntryKind.Assistant:
-        <MudPaper Class="pa-3 my-2" Elevation="0" Outlined="true" Style="max-width: min(100%, 56rem);" data-testid="agent-reply">
+        <div class="py-2 my-2" style="max-width: min(100%, 56rem);" data-testid="agent-reply">
             <AgentMarkdown>@_html</AgentMarkdown>
             <AgentToolCalls Calls="Entry.ToolCalls" />
-        </MudPaper>
+        </div>
         break;
     case AgentTimelineEntryKind.BackgroundRun when Entry.IsQuiet:
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="my-1 mud-text-secondary">
@@ -29,7 +29,7 @@
         </MudStack>
         break;
     case AgentTimelineEntryKind.BackgroundRun:
-        <MudPaper Class="pa-3 my-2" Elevation="0" Outlined="true" data-testid="agent-background-run">
+        <div class="py-2 my-2" style="max-width: min(100%, 56rem);" data-testid="agent-background-run">
             <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mb-1">
                 <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Color="Color.Info" Size="Size.Small" />
                 <MudText Typo="Typo.subtitle2">Background run</MudText>
@@ -42,12 +42,13 @@
                            data-testid="agent-show-full-answer">@(_showsFullAnswer ? "Show result only" : "Show full answer")</MudButton>
             }
             <AgentToolCalls Calls="Entry.ToolCalls" />
-        </MudPaper>
+        </div>
         break;
     case AgentTimelineEntryKind.Error:
-        <MudAlert Severity="Severity.Error" Dense="true" Class="my-2" data-testid="agent-error">
-            <span style="white-space: pre-wrap; overflow-wrap: anywhere;">@Entry.Text</span>
-        </MudAlert>
+        <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2" Class="py-2 my-2 mud-error-text" data-testid="agent-error">
+            <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Color="Color.Error" Size="Size.Small" Class="mt-1" />
+            <MudText Style="white-space: pre-wrap; overflow-wrap: anywhere;">@Entry.Text</MudText>
+        </MudStack>
         break;
     case AgentTimelineEntryKind.Divider:
         <MudDivider Class="mt-4 mb-1" />

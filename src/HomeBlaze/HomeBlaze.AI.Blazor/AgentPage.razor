@@ -51,8 +51,9 @@
                            OnClick="NewConversationAsync" Disabled="@agent.IsBusy">New conversation</MudButton>
             </div>
         </MudStack>
-        <MudTabs Elevation="0" Outlined="true" Rounded="true" ApplyEffectsToContainer="true" MinimumTabWidth="96px"
-                 Class="flex-grow-1 overflow-hidden" TabPanelsClass="pa-2 pa-sm-3 overflow-y-auto">
+        @* A plain underlined tab bar on the page background, with the content aligned to the title. *@
+        <MudTabs Elevation="0" Border="true" MinimumTabWidth="96px" TabHeaderClass="mud-background"
+                 Class="flex-grow-1 overflow-hidden" TabPanelsClass="flex-grow-1 pt-3 overflow-y-auto">
             <MudTabPanel Text="Chat" PanelClass="mud-height-full"><AgentChatTab Agent="agent" TimeZoneVersion="_timeZoneVersion" /></MudTabPanel>
             <MudTabPanel Text="Activity"><AgentActivityTab Agent="agent" /></MudTabPanel>
             <MudTabPanel Text="Configuration"><AgentConfigurationTab Agent="agent" MemoryEditor="_memoryEditor!" /></MudTabPanel>
