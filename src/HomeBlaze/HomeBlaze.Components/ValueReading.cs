@@ -20,6 +20,9 @@ public sealed record ValueReading(
     string? Icon,
     string? MapError)
 {
+    /// <summary>The reading of a widget that has no value to show and knows no property and no map.</summary>
+    public static ValueReading Missing { get; } = new(null, null, ValueReader.MissingText, Color.Default, null, null);
+
     /// <summary>Whether there is no value to show.</summary>
     public bool IsMissing => Value is null;
 }

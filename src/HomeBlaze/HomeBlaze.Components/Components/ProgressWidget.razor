@@ -1,9 +1,7 @@
 @using System.Globalization
-@using HomeBlaze.Components.Abstractions.TimeZones
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Progress))]
 @implements ISubjectComponent
 @inject SubjectPathResolver PathResolver
-@inject ITimeZoneDisplay TimeZone
 
 @{
     var progress = Subject as Progress;
@@ -12,13 +10,13 @@
 @if (progress is not null)
 {
     // Read once per render and never kept: the read is what the tracking scope records.
-    var reading = ValueReader.Read(PathResolver, progress, progress.Path, null, TimeZone);
-    var percent = ValueReader.GetProgressPercent(reading.Value, progress.Min, progress.Max);
+    var value = ValueReader.ReadValue(PathResolver, progress, progress.Path);
+    var percent = ValueReader.GetProgressPercent(value, progress.Min, progress.Max);
 
     if (percent is null)
     {
         // A value that is no number has no bar, and neither has an empty range.
-        <ValueText Reading="@(reading with { Value = null, Text = ValueReader.MissingText })" Path="@progress.Path" />
+        <ValueText Reading="@ValueReading.Missing" Path="@progress.Path" />
     }
     else
     {

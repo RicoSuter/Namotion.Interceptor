@@ -36,7 +36,7 @@ public static class ValueReader
     {
         var valueMap = ResolveMap(resolver, widget, map, out var mapError);
 
-        var property = string.IsNullOrEmpty(path) ? null : ResolveProperty(resolver, widget, path);
+        var property = ResolveProperty(resolver, widget, path);
         var value = property?.GetValue();
         if (property is null || value is null)
         {
@@ -56,6 +56,13 @@ public static class ValueReader
             string.IsNullOrEmpty(matched?.Icon) ? null : matched.Icon,
             mapError);
     }
+
+    /// <summary>
+    /// Reads the value at the path alone, for a widget that shows no text of it.
+    /// Null when the path is null, empty or leads nowhere.
+    /// </summary>
+    public static object? ReadValue(SubjectPathResolver resolver, IInterceptorSubject widget, string? path) =>
+        ResolveProperty(resolver, widget, path)?.GetValue();
 
     /// <summary>
     /// Gets the label of a value: the given one, otherwise the title the property declares, otherwise its name.
@@ -125,8 +132,13 @@ public static class ValueReader
 
     // The path of a property and that of a map are written by the author of a page, and a malformed one
     // must not take the page down. This holds for both resolving methods below.
-    private static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
+    private static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string? path)
     {
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
         try
         {
             return resolver.ResolveScopedProperty(path, PathStyle.Canonical, widget);

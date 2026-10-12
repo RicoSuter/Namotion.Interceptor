@@ -151,6 +151,52 @@ public class ValueReaderTests
     }
 
     [Fact]
+    public async Task WhenValueIsReadAlone_ThenItIsTheValueOfTheProperty()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var value = ValueReader.ReadValue(resolver, page, "meter/Power");
+
+        // Assert
+        Assert.Equal(1234.5m, value);
+    }
+
+    [Theory]
+    [InlineData("meter/Temperature")]
+    [InlineData("nothing/Power")]
+    [InlineData("meter/Power[")]
+    [InlineData("")]
+    [InlineData(null)]
+    public async Task WhenValueIsReadAloneAndIsMissingOrPathLeadsNowhere_ThenItIsNull(string? path)
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var value = ValueReader.ReadValue(resolver, page, path);
+
+        // Assert
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenReadingIsTheMissingOne_ThenItShowsTheDashAndNoError()
+    {
+        // Act
+        var reading = ValueReading.Missing;
+
+        // Assert
+        Assert.True(reading.IsMissing);
+        Assert.Equal(ValueReader.MissingText, reading.Text);
+        Assert.Equal(Color.Default, reading.Color);
+        Assert.Null(reading.Property);
+        Assert.Null(reading.Icon);
+        Assert.Null(reading.MapError);
+    }
+
+    [Fact]
     public async Task WhenLabelIsNotGiven_ThenItIsTheTitleOrTheNameOfTheProperty()
     {
         // Arrange
