@@ -150,9 +150,48 @@ public class PlaywrightFixture : IAsyncLifetime
         var file = (MarkdownFile)folder.Children[name];
         var bytes = Encoding.UTF8.GetBytes(content);
 
-        // The server reads the file again after every write and keeps it open while it parses the page, which can
-        // still be going on for the write of the test before this one. A sharing violation fails when the file is
-        // opened and writes nothing, so the write is safe to try again.
+        await RetryWhileFileIsHeldAsync(
+            () =>
+            {
+                // The condition is synchronous. The write runs on the thread pool so that waiting for it here
+                // cannot block a continuation that would want the synchronization context of the test.
+                Task.Run(async () =>
+                {
+                    using var stream = new MemoryStream(bytes);
+                    await file.WriteAsync(stream, CancellationToken.None);
+                }).GetAwaiter().GetResult();
+            },
+            $"The page {name} could not be written before the test started");
+    }
+
+    /// <summary>
+    /// The path of a page of the demo folder on disk, which the server reads and writes.
+    /// </summary>
+    public string GetDemoPagePath(string name) => GetPagePath(Path.Combine("Demo", name));
+
+    /// <summary>
+    /// The path on disk of a page, given relative to the test data folder of the server.
+    /// </summary>
+    public string GetPagePath(string relativePath)
+        => Path.Combine(ServerServices.GetRequiredService<RootManager>().DataDirectory, "TestData", relativePath);
+
+    /// <summary>
+    /// Reads a file that the server may hold open, such as a page that it is loading again after a write.
+    /// </summary>
+    public async Task<string> ReadFileAsync(string path)
+    {
+        var content = string.Empty;
+        await RetryWhileFileIsHeldAsync(
+            () => content = File.ReadAllText(path),
+            $"The file {path} could not be read");
+        return content;
+    }
+
+    // The server reads a file again after every write and keeps it open while it parses the page, which can still be
+    // going on for the write of the test before this one. A sharing violation fails when the file is opened and
+    // reads or writes nothing, so the operation is safe to try again.
+    private static async Task RetryWhileFileIsHeldAsync(Action operation, string failureMessage)
+    {
         IOException? lastError = null;
         try
         {
@@ -161,13 +200,7 @@ public class PlaywrightFixture : IAsyncLifetime
                 {
                     try
                     {
-                        // The condition is synchronous. The write runs on the thread pool so that waiting for it here
-                        // cannot block a continuation that would want the synchronization context of the test.
-                        Task.Run(async () =>
-                        {
-                            using var stream = new MemoryStream(bytes);
-                            await file.WriteAsync(stream, CancellationToken.None);
-                        }).GetAwaiter().GetResult();
+                        operation();
                         return true;
                     }
                     catch (IOException exception)
@@ -180,7 +213,7 @@ public class PlaywrightFixture : IAsyncLifetime
         }
         catch (TimeoutException) when (lastError is not null)
         {
-            throw new IOException($"The page {name} could not be written before the test started", lastError);
+            throw new IOException(failureMessage, lastError);
         }
     }
 
