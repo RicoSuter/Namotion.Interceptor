@@ -31,17 +31,11 @@ public class HomeBlazeMcpToolProviderTests
             Parameters = []
         });
 
-        var tool = factory.CreateTools().First(t => t.Name == "list_methods");
-
         // Act
-        var input = JsonSerializer.SerializeToElement(new { path = "" });
-        var result = await tool.Handler(input, CancellationToken.None);
-        var json = JsonSerializer.SerializeToElement(result);
+        var method = await ListMethodAsync(factory, "TurnOn");
 
         // Assert
-        Assert.True(json.TryGetProperty("methods", out var methods));
-        var methodArray = methods.EnumerateArray().ToArray();
-        Assert.Contains(methodArray, m => m.GetProperty("name").GetString() == "TurnOn");
+        Assert.Equal("Turn On", method.GetProperty("title").GetString());
     }
 
     [Fact]
