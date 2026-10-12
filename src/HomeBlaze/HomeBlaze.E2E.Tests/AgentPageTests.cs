@@ -20,6 +20,7 @@ public class AgentPageTests
     private const string AgentPath = "Agents/TestAgent";
     private const string TimelineAgentPath = "Agents/TimelineAgent";
     private const string ScrollAgentPath = "Agents/ScrollAgent";
+    private const string TypingAgentPath = "Agents/TypingAgent";
     private const string ResultAgentPath = "Agents/ResultAgent";
     private const int PageLoadTimeout = 30000;
     private const int ReplyTimeout = 30000;
@@ -476,6 +477,71 @@ public class AgentPageTests
     /// Opens the page of an agent that a test seeds with timeline entries, once the agent has loaded its storage, which
     /// would replace entries appended before.
     /// </summary>
+    [Fact]
+    public async Task WhenTypingIntoTheChatInput_ThenTheTimelineStaysStill()
+    {
+        // Arrange - a separate agent whose timeline is long enough to scroll; nothing is sent.
+        var (page, resolver, agent) = await OpenSeededAgentPageAsync(TypingAgentPath);
+        try
+        {
+            var start = DateTimeOffset.UtcNow.AddDays(-1);
+            for (var index = 0; index < 60; index++)
+            {
+                await agent.Timeline.AppendAsync(new AgentTimelineEntry
+                {
+                    Kind = index % 2 == 0 ? AgentTimelineEntryKind.User : AgentTimelineEntryKind.Assistant,
+                    Timestamp = start.AddMinutes(index),
+                    Text = $"Entry {index}"
+                }, CancellationToken.None);
+            }
+
+            await page.ReloadAsync();
+            var timelineLocator = page.GetByTestId("agent-timeline");
+            await Assertions.Expect(timelineLocator).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            var timeline = await timelineLocator.ElementHandleAsync();
+            var input = page.GetByTestId("agent-chat-input").Locator("textarea");
+
+            // Act & Assert - at the bottom, then scrolled up, the rows keep their place on every keystroke and the
+            // timeline does not scroll at all, not even for a moment that a later frame corrects.
+            await AssertTypingKeepsTheTimelineStillAsync(page, timeline, input, "Pinned to the bottom ");
+
+            await timelineLocator.HoverAsync();
+            await page.Mouse.WheelAsync(0, -400);
+            await WaitForDistanceToBottomAsync(page, timeline, "> 300");
+            await AssertTypingKeepsTheTimelineStillAsync(page, timeline, input, "and scrolled up too.");
+        }
+        finally
+        {
+            DeleteAgentData(resolver, agent);
+        }
+    }
+
+    private static async Task AssertTypingKeepsTheTimelineStillAsync(IPage page, IElementHandle timeline, ILocator input, string text)
+    {
+        // The row in the middle of the view is followed; scroll events are counted while typing.
+        await timeline.EvaluateAsync(
+            "timeline => { const view = timeline.getBoundingClientRect(); " +
+            "window.__typingRow = [...timeline.querySelectorAll('[data-testid=agent-timeline-row]')].find(row => row.getBoundingClientRect().bottom > view.top + view.height / 2); " +
+            "window.__typingScrolls = 0; window.__typingListener = () => window.__typingScrolls++; timeline.addEventListener('scroll', window.__typingListener); }");
+        await input.FocusAsync();
+        var offset = await ReadTypingRowOffsetAsync(page, timeline);
+        foreach (var character in text)
+        {
+            await page.Keyboard.TypeAsync(character.ToString());
+            Assert.Equal(offset, await ReadTypingRowOffsetAsync(page, timeline), 1.0);
+        }
+
+        var scrolls = await timeline.EvaluateAsync<int>("timeline => { timeline.removeEventListener('scroll', window.__typingListener); return window.__typingScrolls; }");
+        Assert.Equal(0, scrolls);
+    }
+
+    // Read after two animation frames, so the browser has laid out and painted what the keystroke changed.
+    private static Task<double> ReadTypingRowOffsetAsync(IPage page, IElementHandle timeline) =>
+        page.EvaluateAsync<double>(
+            "timeline => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(" +
+            "window.__typingRow.getBoundingClientRect().top - timeline.getBoundingClientRect().top))))",
+            timeline);
+
     private async Task<(IPage Page, SubjectPathResolver Resolver, ClaudeCliAgent Agent)> OpenSeededAgentPageAsync(string agentPath)
     {
         var page = await _fixture.CreatePageAsync();

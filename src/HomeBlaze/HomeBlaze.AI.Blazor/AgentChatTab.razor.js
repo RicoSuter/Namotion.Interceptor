@@ -21,6 +21,20 @@ export function attachEnterToSend(container, dotNetReference) {
     // A hybrid device switches pointers when a keyboard or mouse is attached, so the keyboard hint follows.
     const onPointerChange = () => dotNetReference.invokeMethodAsync('SetSendsOnEnter', finePointer.matches);
 
+    // MudBlazor's auto-sizing sets the textarea's height to 0 to measure it, on every input and again whenever the
+    // value is rendered. For that moment the timeline above is taller, so the browser clamps its scroll position and
+    // the chat jumps while typing. The container keeps the text field's height as of the last frame: resize
+    // observations never see the measurement, which starts and ends within one task, while a real change in height
+    // is observed before the next paint and moves the minimum with it.
+    const field = container.firstElementChild ?? textarea;
+    const heightKeeper = new ResizeObserver(() => {
+        // Measured without the old minimum, which would hide a shrinking field; margins count, so the container's
+        // own height is the one kept.
+        container.style.minHeight = '';
+        container.style.minHeight = `${container.offsetHeight}px`;
+    });
+    heightKeeper.observe(field);
+
     textarea.addEventListener('keydown', onKeyDown);
     finePointer.addEventListener('change', onPointerChange);
     return {
@@ -28,6 +42,8 @@ export function attachEnterToSend(container, dotNetReference) {
         dispose: () => {
             textarea.removeEventListener('keydown', onKeyDown);
             finePointer.removeEventListener('change', onPointerChange);
+            heightKeeper.disconnect();
+            container.style.minHeight = '';
         }
     };
 }
