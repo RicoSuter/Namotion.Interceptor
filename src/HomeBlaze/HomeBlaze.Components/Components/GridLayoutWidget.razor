@@ -181,17 +181,20 @@
 
     private async Task AddCellAt(int row, int column)
     {
-        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            if (Grid == null) return;
+            BeforeSave = subject =>
+            {
+                if (Grid == null) return;
 
-            var cell = SubjectFactory.CreateSubject<GridCell>();
-            cell.Row = row;
-            cell.Column = column;
-            cell.Child = subject;
+                var cell = SubjectFactory.CreateSubject<GridCell>();
+                cell.Row = row;
+                cell.Column = column;
+                cell.Child = subject;
 
-            // Replace list to trigger property setter and parent tracking
-            Grid.Cells = [.. Grid.Cells, cell];
+                // Replace list to trigger property setter and parent tracking
+                Grid.Cells = [.. Grid.Cells, cell];
+            }
         });
     }
 

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.Components.Tests" />
         <InternalsVisibleTo Include="HomeBlaze.Services.Tests" />
     </ItemGroup>
 

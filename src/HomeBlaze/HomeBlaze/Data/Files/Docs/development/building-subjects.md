@@ -281,11 +281,92 @@ public partial class Motor : ITitleProvider
 ### IIconProvider
 
 ```csharp
-using MudBlazor;
-
 public partial class Motor : IIconProvider
 {
-    public string? Icon => Icons.Material.Filled.Settings;
+    public string? IconName => "Settings";  // Name of a Material filled icon, shown in navigation, browser, etc.
+}
+```
+
+## Create Dialog
+
+Every registered, non-abstract subject type that implements `IConfigurable` is offered in the create dialog, which is opened from a storage folder, from the markdown editor and from the grid and canvas layouts. The dialog shows a searchable list of types with a group sidebar, and then a configure page for the chosen type. The configure page shows the type's Setup component when it has one, otherwise its Edit component, and otherwise the generated properties editor for its `[Configuration]` properties. Setup and Edit components receive `IsCreating = true`. "Back" on the configure page returns to the list. Typing in the search box selects the group "All" so that a match is never hidden behind a group that was selected before, and selecting a group during a search narrows the matches to it.
+
+The dialog describes a type with attributes on the class. All of them are optional:
+
+| Attribute | Purpose | Without it |
+|-----------|---------|------------|
+| `[DisplayName("Motor")]` | Title in the list and in the dialog title, in sentence case | Class name split into words in sentence case: `ShellyDevice` becomes "Shelly device" and `HTTPServer` becomes "HTTP server" |
+| `[Description("...")]` | One sentence below the title, also searched | No description |
+| `[Category("Samples")]` | Group in the sidebar, see [Groups](#groups) | Group "Other", listed last |
+| `[SubjectIcon("Settings")]` | Icon in the list, using the same names as `IIconProvider.IconName`. An unknown icon name shows the generic article icon | Icon of the group for a [built-in group](#groups), otherwise a generic icon |
+
+`[DisplayName]`, `[Description]` and `[Category]` come from `System.ComponentModel`, `[SubjectIcon]` from `HomeBlaze.Abstractions.Attributes`. The create dialog attributes, including the two under [Hiding a Type](#hiding-a-type), are read from the class itself and are not inherited from a base class.
+
+```csharp
+using System.ComponentModel;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor.Attributes;
+
+[Category("Samples")]
+[Description("Simulated motor with speed control and temperature monitoring")]
+[DisplayName("Motor")]
+[SubjectIcon("Settings")]
+[InterceptorSubject]
+public partial class Motor : BackgroundService, IConfigurable
+{
+    // ...
+}
+```
+
+`[SubjectIcon]` is needed in addition to `IIconProvider` because the dialog has no instance to ask, and an instance's icon often depends on its state.
+
+### Groups
+
+A type belongs to exactly one group, the one that its `[Category]` names. The sidebar lists the groups alphabetically, with "Other" last. Use the built-in group that says what the type is for:
+
+| Group | Use it for |
+|-------|------------|
+| Climate | Heating, cooling and weather |
+| Dashboard | Layouts and the widgets that are placed in them |
+| Energy | Inverters, energy meters, batteries and vehicle chargers |
+| Hardware | Local hardware access, such as GPIO pins |
+| History | Stores that record history |
+| Integrations | Connections to external systems, such as an OPC UA client or server |
+| Lighting | Lights and lighting bridges |
+| Media | Audio and video players |
+| Samples | Examples and simulated devices |
+| Switches | Switches, relays and smart plugs |
+| System | Parts of HomeBlaze itself, such as storage and plugins |
+
+When none of them fits, name a new group in `[Category]`. Using the name is all it takes to create the group, and group names are compared ignoring case. A type in such a group that sets no `[SubjectIcon]` gets a generic icon.
+
+### Name of a New Subject
+
+Where the new subject needs a name, the dialog asks for it on the configure page and suggests the class name, with a number appended when it is already used (`Motor`, `Motor2`). A name that already exists in the same place is rejected, and the messages name the field by its label ("This file name is already used").
+
+- In a storage folder the field is labelled "File name" and shows the suffix `.json`. The file name is part of the subject's path, and the path is its ID, so it should not be changed later.
+- In the markdown editor the field is labelled "Block name" and has no suffix. It becomes the `#name` of the new block, so it must also be a valid block name: it starts with a letter or `_` and contains only letters, digits, `_` and `-`.
+- The grid and canvas layouts ask for no name.
+
+### Hiding a Type
+
+Two attributes from `HomeBlaze.Abstractions.Attributes` control whether a type is offered:
+
+- `[ExcludeFromCreation]`: the type is never offered. Use it for a type that only exists as part of another subject, such as the cell of a grid.
+- `[SingleInstance]`: the type is offered only while no instance of it exists in the subject graph. An instance of a derived type does not count.
+
+```csharp
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
+
+[ExcludeFromCreation]
+[InterceptorSubject]
+public partial class GridCell : IConfigurable
+{
+    // ...
 }
 ```
 
@@ -496,6 +577,7 @@ This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for 
 ## Complete Example: Motor
 
 ```csharp
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
@@ -504,6 +586,10 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Samples;
 
+[Category("Samples")]
+[Description("Simulated motor with speed control and temperature monitoring")]
+[DisplayName("Motor")]
+[SubjectIcon("Settings")]
 [InterceptorSubject]
 public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
 {
@@ -549,7 +635,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     // Display interfaces
 
     public string? Title => Name;
-    public string? Icon { get; } = null;
+    public string? IconName => "Settings";
 
     // Constructor with defaults
 
@@ -705,6 +791,9 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
+| `[Slot]` | Content that a markdown page fills in | No | Rendered by the widget |
+| `[DisplayName]`, `[Description]`, `[Category]`, `[SubjectIcon]` | Describe the type in the create dialog | No | In the create dialog |
+| `[ExcludeFromCreation]`, `[SingleInstance]` | Hide the type from the create dialog | No | No |
 
 | Interface | Purpose |
 |-----------|---------|
@@ -729,7 +818,7 @@ Core platform interfaces and attributes:
 
 | Area | Contents |
 |------|----------|
-| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `StateUnit` |
+| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
 | Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
@@ -758,7 +847,7 @@ See [Project Structure](../architecture/project-structure.md) for the full depen
 
 ### Constructor Injection
 
-Subjects can inject services via constructor. The system uses `ActivatorUtilities.CreateInstance` to resolve dependencies from the DI container.
+Subjects can inject services via constructor. The system uses `ActivatorUtilities.CreateInstance` to resolve dependencies from the DI container. This also holds for a subject that is nested in the configuration of another subject, for example the child of a grid cell, and for a subject that a block on a markdown page creates.
 
 **Basic pattern** (HomeBlaze services only):
 
@@ -811,7 +900,7 @@ Use paths to reference subjects in the object graph. See [Paths](../administrati
 | `../` (parent) | `../Sibling/Property` |
 | Brackets | `/Devices[0]` (for non-inlined collection indices) |
 
-Use `SubjectPathResolver.ResolveSubject()` to resolve paths in code:
+Use `SubjectPathResolver` to resolve paths in code. A subject that takes a path from its configuration calls `ResolveScopedSubject` and passes itself:
 
 ```csharp
 [Derived]
@@ -822,10 +911,12 @@ private IInterceptorSubject? ResolveSubject()
     if (string.IsNullOrEmpty(Path))
         return null;
 
-    // ResolveSubject handles /, ./, ../, and relative paths
-    return _pathResolver.ResolveSubject(Path, PathStyle.Canonical);
+    // Handles /, ./, ../, relative paths and the names of blocks on a markdown page
+    return _pathResolver.ResolveScopedSubject(Path, PathStyle.Canonical, this);
 }
 ```
+
+`ResolveScopedSubject` and `ResolveScopedValue` are extension methods in `HomeBlaze.Services`. When the subject is on a markdown page, a relative path starts at the page and its first segment can be the name of a block on that page, as [Paths](../administration/paths.md) describes for page authors. When the subject is not on a page, they resolve relative to the subject, like `ResolveSubject` and `ResolveValue` with the subject as the third argument.
 
 ### SubjectPathField Component
 
@@ -975,6 +1066,394 @@ When a widget has a corresponding Edit component, the host automatically renders
 - Clicking opens the `SubjectEditDialog` with the Edit component
 - No boilerplate needed in widget components
 
+### Content Slots
+
+A widget type can take content from the markdown page it is used on: text, expressions and other widgets. The type declares where the content goes with `[Slot]` on properties, and the page fills these properties from the content of the block. The attribute is in `HomeBlaze.Abstractions.Attributes`.
+
+[Markdown Pages](../administration/pages.md) is the guide for the page side: the colon lines that open and end a block, the arguments and what a page author sees when something is wrong. [Page Widgets](../administration/page-widgets.md) is the reference of the widgets that ship, and [Page Errors](../administration/page-errors.md) lists the messages. This section is the side of the widget author. Its samples of page source use the names of that guide: a block starts with a head line of colons and a name, a block whose name has no dot is a slot block, and a closing line is written only where the next head line does not end the block.
+
+#### Declaring Slots
+
+The type of the property decides what a block produces, and the name of the slot decides what a block is called on the page.
+
+| Declaration | Blocks on the page | Value of the property |
+|-------------|--------------------|-----------------------|
+| `[Slot(IsDefault = true)] IInterceptorSubject? Content` | Everything in the widget block that is not a slot block | The content, or `null` when there is none |
+| `[Slot] IInterceptorSubject? Footer` | One `Footer` block | The content of that block, or `null` without a block |
+| `[Slot("Item")] IInterceptorSubject[] Items` | Any number of `Item` blocks | One content value per block, in page order |
+| `[Slot] Sidebar? Sidebar` | One `Sidebar` block with arguments | One `Sidebar` that the page created, or `null` without a block |
+| `[Slot("Tab")] Tab[] Tabs` | Any number of `Tab` blocks with arguments | One `Tab` per block, in page order |
+
+**The default slot.** `IsDefault = true` makes a slot the place for everything in the widget block that is not a slot block. `Card` declares its body this way:
+
+```csharp
+[Slot(IsDefault = true)]
+public partial IInterceptorSubject? Content { get; set; }
+```
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Conveyor Belt"
+This text, the expression {{ ../Conveyor/CurrentSpeed }} and the widget below are the value of `Content`.
+
+::: HomeBlaze.Components.Widget Path=../Conveyor
+:::
+::
+~~~~
+
+**A named slot.** Without a name in the attribute, the slot has the name of the property. `Card` declares its footer this way, and the page fills it with a `Footer` block:
+
+```csharp
+[Slot]
+public partial IInterceptorSubject? Footer { get; set; }
+```
+
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Conveyor Belt"
+The body of the card.
+
+::: Footer
+This text is the value of `Footer`.
+:::
+::
+~~~~
+
+**A block name that differs from the property name, and a list of content.** The name in the attribute is what one block is called on the page. An array takes one value per block, so the property has a plural name and the block the singular. `FlowLayout` declares its cells this way:
+
+```csharp
+[Slot("Item")]
+public partial IInterceptorSubject[] Items { get; set; }
+```
+
+~~~~markdown
+:: HomeBlaze.Components.FlowLayout
+::: Item
+The first value of `Items`.
+:::
+::: Item
+The second value of `Items`.
+:::
+::
+~~~~
+
+**A list of typed values.** When the type of the slot is a subject class of your own, the page creates one instance of that class per block. The arguments of the block set the `[Configuration]` properties of the instance, the block can have a `#name`, and the content of the block goes to the default slot of the instance. `TabLayout` gets its tabs this way, and `Tab` is the class of one tab:
+
+```csharp
+[InterceptorSubject]
+public partial class TabLayout : IConfigurable, ITitleProvider
+{
+    public TabLayout()
+    {
+        Tabs = [];
+    }
+
+    [Slot("Tab")]
+    public partial Tab[] Tabs { get; set; }
+
+    public string? Title => null;
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class Tab : IConfigurable
+{
+    [Configuration]
+    public partial string? Title { get; set; }
+
+    [Configuration]
+    public partial string? Icon { get; set; }
+
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Content { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+```
+
+~~~~markdown
+:: HomeBlaze.Components.TabLayout
+::: Tab#cooling Title="Cooling Fan" Icon=AcUnit
+The value of `Content` of the first `Tab`.
+:::
+::: Tab#exhaust Title="Exhaust Fan"
+The value of `Content` of the second `Tab`.
+:::
+::
+~~~~
+
+**A single typed value.** The same without an array: one block creates one instance. None of the widgets that ship has such a slot. The `SidebarLayout` of ["A Complete Widget"](#a-complete-widget) below declares one:
+
+```csharp
+[Slot]
+public partial Sidebar? Sidebar { get; set; }
+```
+
+~~~~markdown
+:: MyCompany.Widgets.SidebarLayout
+::: Sidebar#menu Width=200
+The value of `Content` of the `Sidebar`.
+:::
+
+The value of `Content` of the layout.
+::
+~~~~
+
+What a page author cannot do with each kind:
+
+- **Content slots take no arguments**: A block for a slot of the type `IInterceptorSubject` takes no arguments, no `#name` and no `json` block. The page shows an error for them.
+- **Typed slots are configured like widget blocks**: A block for a slot with a class of your own takes the `[Configuration]` properties of that class as arguments and in a `json` block, with the same checks as a widget block.
+- **One block for a single value**: A second block for a slot that is no array is an error on the page.
+
+#### Rules for a Slot Property
+
+A slot property must meet these rules. A declaration that breaks one cannot be used: every block of that type then shows an error box with the message of the table, with the short type name and a colon before it, like "Gauge: the slot 'Content' needs a setter." No instance is created.
+
+| Rule | Message when it is broken |
+|------|---------------------------|
+| The property is a `partial` property of an `[InterceptorSubject]` class. The page writes through the intercepted property, which is what attaches the content to the object graph | `the slot 'Content' must be a partial property of a subject class.` |
+| The property has a setter | `the slot 'Content' needs a setter.` |
+| The type is `IInterceptorSubject`, a subject class, or an array of one of them | `the slot 'Content' must hold subjects.` |
+| A subject class as slot type can be created, so it is no interface and no abstract class | `the type GaugeBase of the slot 'Scale' cannot be created because it is abstract or an interface.` |
+| The slot name is not empty | `the slot of the property 'Content' needs a name.` |
+| The slot name contains no dot, because a name with a dot is a type name on a page | `the slot name 'My.Slot' must not contain a dot.` |
+| The slot name can be written as the name of a slot block: it starts with a letter or `_` and has only letters, digits and `_` | `the slot name 'My-Item' cannot be written on a page. A slot name starts with a letter or '_' and has only letters, digits and '_'.` |
+| Each slot name is declared once per type | `the slot 'Content' is declared twice.` |
+| A type has at most one default slot | `there is more than one default slot.` |
+| The default slot has the type `IInterceptorSubject` and is no array | `the default slot 'Content' must be of type IInterceptorSubject.` |
+
+More that a declaration should follow:
+
+- **Name**: The slot name defaults to the property name and is case-sensitive. For an array, set the singular explicitly, like `[Slot("Item")]` on `Items`.
+- **Arrays**: Initialize an array property with an empty array in the constructor. All values of one slot have the same type. Mixed types in one list slot are not supported.
+- **The class of a typed slot**: It must implement `IConfigurable` and be known to HomeBlaze like every subject type. Otherwise the page shows "The type 'MyCompany.Widgets.Sidebar' of the slot 'Sidebar' could not be created. It must be a registered configurable subject type." Give it a default slot of its own when its blocks should take content. Put `[ExcludeFromCreation]` on it, because it only exists inside its widget and the create dialog would offer it on its own otherwise, see [Hiding a Type](#hiding-a-type).
+- **Not configuration**: A slot property is not configuration and is not saved. The content lives in the text of the page. Do not put `[Configuration]` on it.
+
+#### Rendering Slots
+
+A widget component renders a slot with `SubjectComponent` and does not need to know what the content is. The value of a content slot is a subject that stands for the content of the block. Treat it as opaque and render it.
+
+**One slot.** `CardWidget.razor` renders the body and the footer of a card (shortened):
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Card))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4 card-widget" Elevation="2">
+    <MudText Typo="Typo.h6">@CardSubject?.Title</MudText>
+
+    <SubjectComponent Subject="@CardSubject?.Content" Type="SubjectComponentType.Widget" />
+
+    @if (CardSubject?.Footer is not null)
+    {
+        <MudDivider Class="my-2" />
+        <SubjectComponent Subject="@CardSubject.Footer" Type="SubjectComponentType.Widget" />
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Card? CardSubject => Subject as Card;
+}
+```
+
+**A list slot.** `FlowLayoutWidget.razor` renders one cell per value of `Items` (shortened):
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FlowLayout))]
+@implements ISubjectComponent
+
+<div class="flow-layout" style="display: grid; gap: 16px;">
+    @foreach (var item in Flow?.Items ?? [])
+    {
+        <div class="flow-layout-item">
+            <SubjectComponent Subject="@item" Type="SubjectComponentType.Widget" />
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private FlowLayout? Flow => Subject as FlowLayout;
+}
+```
+
+**Typed slot values.** `TabLayoutWidget.razor` reads the configuration of each `Tab` and renders its content (shortened):
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(TabLayout))]
+@implements ISubjectComponent
+
+@{
+    // Read once per render and never kept: a reload assigns a new array.
+    var tabs = Layout?.Tabs ?? [];
+}
+
+<MudTabs KeepPanelsAlive="true">
+    @foreach (var tab in tabs)
+    {
+        <MudTabPanel Text="@tab.Title">
+            <SubjectComponent @key="tab" Subject="@tab.Content" Type="SubjectComponentType.Widget" />
+        </MudTabPanel>
+    }
+</MudTabs>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private TabLayout? Layout => Subject as TabLayout;
+}
+```
+
+Rules for rendering:
+
+- **`null` renders nothing**: `SubjectComponent` with a slot that is `null` renders nothing. Test for `null` only when the widget shows something around the slot, like the divider of the card. A slot block without content gives a value that is not `null` and renders nothing.
+- **Read in the render, keep nothing**: Read slot properties inside the render and do not keep their values in fields. The page renders again when a property changes that was read while it rendered, and a change of the page text assigns new values and new arrays.
+- **Content that renders later is not tracked**: Content inside a child component that renders on its own later is not tracked that way, for example a tab panel that is only created when it is first opened. `TabLayout` keeps all its panels alive for this reason.
+- **Identity of typed values**: A typed value whose block has a `#name` stays the same instance when the page text changes, so a component can compare instances to keep its state. `TabLayoutWidget.razor` keeps the selected tab this way and compares it with the tabs of the current render only.
+
+#### A Subject on a Page: Identity and Lifecycle
+
+What a widget author must know about the life of a subject that a page creates. It holds for the subject of a widget block and for a typed slot value alike.
+
+- **`IConfigurable` is required**: A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `TabLayout`. For a type without it, the page shows an error that says the type cannot be used as a block.
+- **Names of the configuration**: A page names a `[Configuration]` property by its property name, for example `TargetSpeed=1200` on the head line and `"TargetSpeed"` in the `json` block, also for the properties of nested objects and subjects. Configuration files keep camelCase, and a page uses the property names. An explicit JSON name on a property, such as `[JsonPropertyName]`, applies to configuration files only.
+- **Creation**: The page creates the subject through the service provider, so constructor injection works, then sets the `[Configuration]` properties that the block names and then fills the slots. It does not call `ApplyConfigurationAsync` for a new subject.
+- **Kept across reloads**: The page is read again with every change of its text. While the block stays, the page keeps the instance and updates it in place: it sets every `[Configuration]` property that the block names again, also when the value did not change, calls `ApplyConfigurationAsync`, and assigns the slots again. Expect all of this to run often.
+- **A new instance**: The page creates a new instance when the name, the position or the type of the block changes, when an argument is removed from the block, and when the block around it gets a new instance. The section "What an Edit of the Page Keeps" of [Markdown Pages](../administration/pages.md#what-an-edit-of-the-page-keeps) has the rules as a page author sees them.
+- **Slot values**: A content slot keeps its value while its block stays, and a list slot gets a new array on every reload. A slot whose block was removed is set to `null`, or to an empty array.
+- **Subjects in the configuration**: A subject that is a value of a `[Configuration]` property, like the child of a grid cell, is created again on every reload, because the configuration is applied again.
+- **Release after an error**: The subject of a block that ends as an error box is released again. This also holds for the typed slot values and nested subjects that were created for it. A hosted subject can therefore get `StopAsync` without a preceding `StartAsync`.
+- **Failures are shown**: An exception from the constructor, from a property setter or from `ApplyConfigurationAsync` does not take the page down. The block shows an error box with the message of the exception, and the log has the stack trace.
+- **Never wait for the own page**: A subject must not wait for a write or a reload of its own page from its constructor, from a property setter or from `ApplyConfigurationAsync`. The reloads of one page run one after the other, so such a wait would never end.
+- **Paths**: A subject that resolves a path from its configuration should call `ResolveScopedSubject` or `ResolveScopedValue`, so that the path starts at the page and can use the names of blocks. See "Referencing Other Subjects" above.
+
+#### A Complete Widget
+
+A layout that shows page content next to a sidebar, from the subject to the component to the page. The sidebar is a typed slot value with a width, and the main content is the default slot.
+
+The subjects, in a subject project as [Project Structure](#project-structure) describes it:
+
+```csharp
+using System.ComponentModel;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
+
+namespace MyCompany.Widgets;
+
+/// <summary>
+/// The sidebar of a <see cref="SidebarLayout"/>.
+/// </summary>
+[ExcludeFromCreation]
+[InterceptorSubject]
+public partial class Sidebar : IConfigurable
+{
+    public Sidebar()
+    {
+        Width = 240;
+    }
+
+    /// <summary>
+    /// The width of the sidebar in pixels.
+    /// </summary>
+    [Configuration]
+    public partial int Width { get; set; }
+
+    /// <summary>
+    /// What the sidebar shows.
+    /// </summary>
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Content { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>
+/// Shows page content next to a sidebar.
+/// </summary>
+[Category("Dashboard")]
+[Description("Shows page content next to a sidebar")]
+[InterceptorSubject]
+public partial class SidebarLayout : IConfigurable
+{
+    /// <summary>
+    /// The main content.
+    /// </summary>
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Content { get; set; }
+
+    /// <summary>
+    /// The sidebar, created from the <c>Sidebar</c> block.
+    /// </summary>
+    [Slot]
+    public partial Sidebar? Sidebar { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+```
+
+The widget component, in the UI project next to it. `SubjectComponent` is in `HomeBlaze.Components`:
+
+```razor
+@using HomeBlaze.Components
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SidebarLayout))]
+@implements ISubjectComponent
+
+@{
+    // Read once per render and never kept: a reload can assign another sidebar.
+    var sidebar = Layout?.Sidebar;
+}
+
+<div style="display: flex; gap: 16px;">
+    @if (sidebar is not null)
+    {
+        <div style="flex: 0 0 @(sidebar.Width)px; min-width: 0;">
+            <SubjectComponent Subject="@sidebar.Content" Type="SubjectComponentType.Widget" />
+        </div>
+    }
+
+    <div style="flex: 1; min-width: 0;">
+        <SubjectComponent Subject="@Layout?.Content" Type="SubjectComponentType.Widget" />
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SidebarLayout? Layout => Subject as SidebarLayout;
+}
+```
+
+A page that uses it:
+
+~~~~markdown
+:: MyCompany.Widgets.SidebarLayout#factory
+::: Sidebar#menu Width=200
+**Motors**
+
+The conveyor runs at {{ ../Conveyor/CurrentSpeed }} RPM.
+:::
+
+::: HomeBlaze.Components.Card Title="Conveyor Belt"
+:::: HomeBlaze.Components.Widget Path=../Conveyor
+::::
+:::
+::
+~~~~
+
+The page author sees the sidebar with a width of 200 pixels at the left and the card at its right. `Width=200` sets `Sidebar.Width`, the text in the `Sidebar` block is `Sidebar.Content`, and the card is `SidebarLayout.Content`.
+
 ### Edit Components
 
 Edit components provide configuration forms:
@@ -983,26 +1462,51 @@ Edit components provide configuration forms:
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
 @implements ISubjectEditComponent
 
-<MudTextField @bind-Value="MotorSubject.Name" Label="Name" />
-<MudNumericField @bind-Value="MotorSubject.TargetSpeed" Label="Target Speed" />
+<MudTextField @bind-Value="_name"
+              @bind-Value:after="OnFieldChanged"
+              Label="Name"
+              Required="true"
+              Immediate="true" />
 
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    [Parameter]
+    public bool IsCreating { get; set; }
+
     private Motor? MotorSubject => Subject as Motor;
 
-    public bool IsValid => !string.IsNullOrWhiteSpace(MotorSubject?.Name);
-    public bool IsDirty { get; private set; }
+    private string _name = string.Empty;
+    private string _originalName = string.Empty;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_name);
+    public bool IsDirty => _name != _originalName;
 
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
 
-    public Task SaveAsync(CancellationToken cancellationToken = default)
+    protected override void OnInitialized()
     {
-        // Save logic here
-        IsDirty = false;
-        IsDirtyChanged?.Invoke(false);
+        _name = MotorSubject?.Name ?? string.Empty;
+        _originalName = _name;
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (MotorSubject != null && IsValid)
+        {
+            MotorSubject.Name = _name;
+            _originalName = _name;
+            IsDirtyChanged?.Invoke(false);
+        }
+
         return Task.CompletedTask;
     }
 }
@@ -1016,7 +1520,10 @@ Edit components provide configuration forms:
 | `IsDirty` | Have changes been made? |
 | `IsValidChanged` | Event fired when validity changes |
 | `IsDirtyChanged` | Event fired when dirty state changes |
+| `IsCreating` | Set by the hosting panel: `true` while the subject is being created, `false` while it is edited |
 | `SaveAsync` | Persist changes |
+
+A component raises `IsValidChanged` whenever `IsValid` changes. The remarks on `ISubjectEditComponent.IsValidChanged` describe what the dialogs and the page editor do with it. The handler of `@bind-Value:after` runs each time the bound value is committed, whichever way it changed (typing, pasting, autofill), which a key handler such as `OnKeyUp` does not cover. A text field commits its value when it loses focus, and with `Immediate="true"` on every keystroke.
 
 ### Edit Component Lifecycle: OnInitialized vs OnParametersSet
 
@@ -1037,15 +1544,16 @@ Edit components provide configuration forms:
 
 <MudForm>
     <MudTextField @bind-Value="_name"
+                  @bind-Value:after="OnFieldChanged"
                   Label="Name"
                   Required="true"
-                  OnKeyUp="OnFieldChanged" />
+                  Immediate="true" />
 
     <MudNumericField @bind-Value="_targetSpeed"
+                     @bind-Value:after="OnFieldChanged"
                      Label="Target Speed (RPM)"
                      Min="0" Max="10000"
-                     Class="mt-4"
-                     OnChange="OnFieldChanged" />
+                     Class="mt-4" />
 </MudForm>
 
 @code {
@@ -1166,7 +1674,7 @@ protected override void OnParametersSet()
 
 This pattern applies to:
 - **Edit components** (opened via SubjectEditDialog)
-- **Setup/creation wizards** (SubjectSetupDialog uses the same edit components with `IsCreating = true`)
+- **The create dialog** (SubjectSetupDialog hosts the same edit components with `IsCreating = true`)
 - **Widget components** (if they use local state for inline editing)
 - **Configuration editors** (ConfigurationPropertiesEditor pattern)
 

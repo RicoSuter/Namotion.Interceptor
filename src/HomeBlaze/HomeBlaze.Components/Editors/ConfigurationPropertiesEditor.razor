@@ -1,4 +1,6 @@
 @implements IDisposable
+@using System.Reactive.Concurrency
+@using System.Reactive.Linq
 @using HomeBlaze.Abstractions.Metadata
 
 @if (!_configurationProperties.Any())
@@ -24,7 +26,8 @@ else
         </MudAlert>
     }
 
-    <MudForm IsValid="@_isFormValid" IsValidChanged="OnFormValidChanged">
+    @* Evaluated without the default delay, so that a click that follows an edit already meets its result. *@
+    <MudForm @ref="_form" ValidationDelay="0" ErrorsChanged="OnFormErrorsChanged">
         @foreach (var prop in _configurationProperties)
         {
             var isSecret = prop.GetConfigurationMetadata()?.IsSecret == true;
@@ -37,8 +40,9 @@ else
 }
 
 @code {
-    private bool _isFormValid;
-    private bool _isSaving;
+    private MudForm? _form;
+    private bool? _reportedIsValid;
+    private volatile bool _isSaving;
     private bool _externalChangeDetected;
     private List<string> _errors = [];
 
@@ -53,16 +57,59 @@ else
     [Parameter]
     public EventCallback<bool> IsValidChanged { get; set; }
 
-    public bool IsValid => _isFormValid || !_configurationProperties.Any();
-
-    private async Task OnFormValidChanged(bool isFormValid)
+    /// <summary>
+    /// Gets whether no field shows an error and every property that cannot hold null has a value.
+    /// </summary>
+    public bool IsValid
     {
-        _isFormValid = isFormValid;
-        await IsValidChanged.InvokeAsync(IsValid);
+        get
+        {
+            // The MudForm only counts once it was evaluated, which the first edit causes. Until then it reports
+            // every form with a required field as invalid, although all of them are prefilled from the subject.
+            if (_form is { IsTouched: true, IsValid: false })
+            {
+                return false;
+            }
+
+            foreach (var property in _configurationProperties)
+            {
+                if (_editValues[property.Name] is null && EditedPropertyValues.IsRequired(property.Type))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
     }
 
+    // Raised after every evaluation of the form, also when it changed its validity and not its errors, as
+    // for text that is no number.
+    private Task OnFormErrorsChanged(string[] errors) => ReportIsValidAsync();
+
+    private async Task ReportIsValidAsync()
+    {
+        var isValid = IsValid;
+        if (_reportedIsValid != isValid)
+        {
+            _reportedIsValid = isValid;
+            await IsValidChanged.InvokeAsync(isValid);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ReportIsValidAsync();
+        }
+    }
+
+    /// <summary>
+    /// Gets whether the last <see cref="ApplyChanges"/> failed.
+    /// </summary>
     public bool HasErrors => _errors.Any();
-    
+
     protected override void OnInitialized()
     {
         _changeSubscription?.Dispose();
@@ -94,14 +141,16 @@ else
 
         try
         {
-            var observable = Subject.Context.GetPropertyChangeObservable();
-            _changeSubscription = observable
+            // The filter runs inside the write, where it still meets _isSaving for what the editor sets and sets
+            // back itself. What passes is handled off the write, which every other writer of the context waits for.
+            _changeSubscription = Subject.Context
+                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+                .Where(change => change.Property.Subject == Subject && !_isSaving)
+                .ObserveOn(Scheduler.Default)
                 .Subscribe(
                     onNext: change =>
                     {
-                        if (change.Property.Subject == Subject &&
-                            !_isSaving &&
-                            change.Property.TryGetRegisteredProperty()?.IsConfigurationProperty() == true)
+                        if (change.Property.TryGetRegisteredProperty()?.IsConfigurationProperty() == true)
                         {
                             _externalChangeDetected = true;
                             InvokeAsync(StateHasChanged);
@@ -122,50 +171,29 @@ else
         {
             _modifiedSecrets.Add(propertyName);
         }
+
+        await ReportIsValidAsync();
     }
 
     /// <summary>
-    /// Applies all edited values to the subject.
+    /// Applies the edited values to the subject as <see cref="EditedPropertyValues.Apply"/> does: nothing is set
+    /// when one of them cannot be converted, and the values already set are set back when a setter rejects its
+    /// value. <see cref="HasErrors"/> is true in both cases.
     /// </summary>
+    /// <remarks>
+    /// A value that cannot be set back stays changed on the subject, which is shown as an error of its own.
+    /// </remarks>
     public void ApplyChanges()
     {
         if (Subject == null) return;
 
-        _errors = [];
         _isSaving = true;
         try
         {
-            foreach (var property in _configurationProperties)
-            {
-                var newValue = _editValues[property.Name];
-
-                // Skip secret properties that were not modified by the user
-                if (property.GetConfigurationMetadata()?.IsSecret == true
-                    && !_modifiedSecrets.Contains(property.Name))
-                {
-                    continue;
-                }
-
-                var currentValue = property.GetValue();
-
-                if (!Equals(newValue, currentValue))
-                {
-                    try
-                    {
-                        var underlyingType = Nullable.GetUnderlyingType(property.Type) ?? property.Type;
-                        if (newValue != null && newValue.GetType() != underlyingType)
-                        {
-                            newValue = Convert.ChangeType(newValue, underlyingType);
-                        }
-
-                        property.SetValue(newValue);
-                    }
-                    catch (Exception ex)
-                    {
-                        _errors.Add($"Failed to set '{property.GetDisplayName()}': {ex.Message}");
-                    }
-                }
-            }
+            // A secret is shown empty, so only one that the user entered is an edit.
+            _errors = EditedPropertyValues.Apply(_configurationProperties
+                .Where(property => property.GetConfigurationMetadata()?.IsSecret != true || _modifiedSecrets.Contains(property.Name))
+                .Select(property => KeyValuePair.Create(property, _editValues[property.Name])));
         }
         finally
         {

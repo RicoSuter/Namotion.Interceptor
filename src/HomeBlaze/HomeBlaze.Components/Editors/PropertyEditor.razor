@@ -1,6 +1,6 @@
 @{
     var underlyingType = Nullable.GetUnderlyingType(Property.Type) ?? Property.Type;
-    var isRequired = !IsNullableType(Property.Type);
+    var isRequired = EditedPropertyValues.IsRequired(Property.Type);
 }
 
 @if (underlyingType == typeof(string))
@@ -127,12 +127,5 @@ else
         {
             await OnValueChanged(newValue);
         }
-    }
-
-    private static bool IsNullableType(Type type)
-    {
-        return Nullable.GetUnderlyingType(type) != null ||
-               !type.IsValueType ||
-               (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>));
     }
 }

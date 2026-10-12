@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
@@ -17,6 +18,10 @@ namespace HomeBlaze.Storage;
 /// Storage root using FluentStorage. Implements IStorageContainer and IConfigurationWriter.
 /// Supports FileSystemWatcher for reactive file monitoring on disk storage.
 /// </summary>
+[Category("System")]
+[Description("Mounts a storage location and loads the files in it as subjects")]
+[DisplayName("Storage")]
+[SubjectIcon("Storage")]
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
@@ -76,6 +81,9 @@ public partial class FluentStorageContainer :
     /// </summary>
     [State]
     public partial StorageStatus Status { get; set; }
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
 
     public string Title => string.IsNullOrEmpty(ConnectionString)
         ? "Storage"
@@ -609,7 +617,7 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Opens the create subject wizard to add a new subject to this storage.
+    /// Opens the create subject dialog to add a new subject to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)

@@ -1,4 +1,5 @@
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
@@ -73,5 +74,64 @@ public class VirtualFolderTests
 
         // Assert
         Assert.Equal("Folder", folder.IconName);
+    }
+
+    [Fact]
+    public void WhenFolderHasNoChildren_ThenChildNamesIsEmpty()
+    {
+        // Arrange
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
+        var folder = new VirtualFolder(storage, "test/");
+
+        // Act
+        var childNames = folder.ChildNames;
+
+        // Assert
+        Assert.Empty(childNames);
+    }
+
+    [Fact]
+    public void WhenFolderHasChildren_ThenChildNamesAreTheKeysOfTheChildren()
+    {
+        // Arrange
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
+        var folder = new VirtualFolder(storage, "test/")
+        {
+            Children = new Dictionary<string, IInterceptorSubject>
+            {
+                ["Devices"] = new VirtualFolder(storage, "test/Devices/"),
+                ["Notes.md"] = new GenericFile(storage, "test/Notes.md")
+            }
+        };
+
+        // Act
+        var childNames = folder.ChildNames;
+
+        // Assert
+        Assert.Equal(["Devices", "Notes.md"], childNames.Order());
+    }
+
+    [Fact]
+    public void WhenChildrenChangeAfterReading_ThenChildNamesReadBeforeAreUnchanged()
+    {
+        // Arrange
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
+        var children = new Dictionary<string, IInterceptorSubject>
+        {
+            ["Motor"] = new VirtualFolder(storage, "test/Motor/")
+        };
+        var folder = new VirtualFolder(storage, "test/") { Children = children };
+        var childNames = folder.ChildNames;
+
+        // Act - the same dictionary is changed, which a view of its keys would follow.
+        children.Remove("Motor");
+        children["Pump"] = new VirtualFolder(storage, "test/Pump/");
+
+        // Assert
+        Assert.Equal(["Motor"], childNames);
+        Assert.Equal(["Pump"], folder.ChildNames);
     }
 }

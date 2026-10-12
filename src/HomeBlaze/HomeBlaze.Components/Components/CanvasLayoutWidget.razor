@@ -177,17 +177,20 @@
         x = SnapToGrid(x);
         y = SnapToGrid(y);
 
-        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            if (Canvas == null) return;
+            BeforeSave = subject =>
+            {
+                if (Canvas == null) return;
 
-            var node = SubjectFactory.CreateSubject<CanvasNode>();
-            node.X = x;
-            node.Y = y;
-            node.Child = subject;
+                var node = SubjectFactory.CreateSubject<CanvasNode>();
+                node.X = x;
+                node.Y = y;
+                node.Child = subject;
 
-            // Replace list to trigger property setter and parent tracking
-            Canvas.Nodes = [.. Canvas.Nodes, node];
+                // Replace list to trigger property setter and parent tracking
+                Canvas.Nodes = [.. Canvas.Nodes, node];
+            }
         });
     }
 

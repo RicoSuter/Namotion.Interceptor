@@ -17,8 +17,13 @@ public interface ISubjectEditComponent : ISubjectComponent
     bool IsDirty { get; }
 
     /// <summary>
-    /// Raised when IsValid changes.
+    /// Raised with the new value whenever <see cref="IsValid"/> changes.
     /// </summary>
+    /// <remarks>
+    /// The create dialog, the edit dialog and the page editor enable their confirm button from
+    /// <see cref="IsValid"/> and follow this event. A component that changes its validity without raising it
+    /// is only picked up at the next interaction in its form.
+    /// </remarks>
     event Action<bool>? IsValidChanged;
 
     /// <summary>

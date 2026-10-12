@@ -68,13 +68,15 @@ public class Mcp3008Configuration  // Value object - all saved
 
 ## Implementation
 
-Uses `System.Text.Json` with custom `ConfigurationJsonTypeInfoResolver`:
+Uses `System.Text.Json` with custom `ConfigurationJsonTypeInfoResolver`. The options for configuration files:
 
 ```csharp
 var options = new JsonSerializerOptions
 {
-    TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(),
+    TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider),
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     WriteIndented = true
 };
 ```
+
+The serializer has a second set of options for the blocks of a markdown page, which name every property by its C# property name, like `TargetSpeed`. Each method of `ConfigurableSubjectSerializer` that reads or writes JSON takes a `ConfigurationNaming`: `JsonProperty` is the default and the naming of configuration files, and `CSharpProperty` is the naming of pages. See [Markdown Pages](../administration/pages.md#names) for the page side.
