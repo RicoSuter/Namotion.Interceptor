@@ -175,7 +175,8 @@ internal sealed class StorageConnection : IDisposable
     }
 
     // The disk client lists a directory that is missing or cannot be reached as empty, and a pass would take
-    // that for a storage whose files are all gone.
+    // that for a storage whose files are all gone. It also creates a missing directory again when it writes
+    // or is asked about a path in a folder, and the next pass would then find a directory that is there.
     private static void VerifyDirectory(string directory)
     {
         // Throws for a path that cannot be examined, where Directory.Exists only answers false.

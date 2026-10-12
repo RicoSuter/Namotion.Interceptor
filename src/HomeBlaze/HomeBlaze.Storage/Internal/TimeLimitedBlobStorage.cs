@@ -27,8 +27,9 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
     /// <param name="timeProvider">The clock of the limit.</param>
     /// <param name="logger">Receives what a call that was given up does later.</param>
     /// <param name="verifyRoot">
-    /// Runs as the first part of every listing and throws when the root of the storage cannot be examined, for
-    /// a storage that lists such a root as empty.
+    /// Runs as the first part of every call that names a path and throws when the root of the storage cannot
+    /// be examined. For a storage that lists such a root as empty, and that creates the root again when it is
+    /// asked about a path in a folder or writes one.
     /// </param>
     public TimeLimitedBlobStorage(IBlobStorage inner, TimeProvider timeProvider, ILogger? logger, Action? verifyRoot = null)
     {
@@ -44,39 +45,37 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
     public bool IsUnresponsive => Volatile.Read(ref _abandonedCallCount) > 0;
 
     public Task<IReadOnlyCollection<Blob>> ListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
-        => RunAsync(
-            nameof(ListAsync),
-            options?.FolderPath ?? "/",
-            () =>
-            {
-                // Part of the call, so that a root that stalls when it is examined is limited like the listing.
-                _verifyRoot?.Invoke();
-                return _inner.ListAsync(options, cancellationToken);
-            },
-            cancellationToken);
+        => RunAsync(nameof(ListAsync), options?.FolderPath ?? "/", () => VerifyRoot().ListAsync(options, cancellationToken), cancellationToken);
 
     public Task WriteAsync(string fullPath, Stream dataStream, bool append = false, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(WriteAsync), fullPath, () => _inner.WriteAsync(fullPath, dataStream, append, cancellationToken), cancellationToken);
+        => RunAsync(nameof(WriteAsync), fullPath, () => VerifyRoot().WriteAsync(fullPath, dataStream, append, cancellationToken), cancellationToken);
 
     public Task<Stream> OpenReadAsync(string fullPath, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(OpenReadAsync), fullPath, () => _inner.OpenReadAsync(fullPath, cancellationToken), cancellationToken);
+        => RunAsync(nameof(OpenReadAsync), fullPath, () => VerifyRoot().OpenReadAsync(fullPath, cancellationToken), cancellationToken);
 
     public Task DeleteAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(DeleteAsync), fullPaths, () => _inner.DeleteAsync(fullPaths, cancellationToken), cancellationToken);
+        => RunAsync(nameof(DeleteAsync), fullPaths, () => VerifyRoot().DeleteAsync(fullPaths, cancellationToken), cancellationToken);
 
     public Task<IReadOnlyCollection<bool>> ExistsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(ExistsAsync), fullPaths, () => _inner.ExistsAsync(fullPaths, cancellationToken), cancellationToken);
+        => RunAsync(nameof(ExistsAsync), fullPaths, () => VerifyRoot().ExistsAsync(fullPaths, cancellationToken), cancellationToken);
 
     public Task<IReadOnlyCollection<Blob>> GetBlobsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(GetBlobsAsync), fullPaths, () => _inner.GetBlobsAsync(fullPaths, cancellationToken), cancellationToken);
+        => RunAsync(nameof(GetBlobsAsync), fullPaths, () => VerifyRoot().GetBlobsAsync(fullPaths, cancellationToken), cancellationToken);
 
     public Task SetBlobsAsync(IEnumerable<Blob> blobs, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(SetBlobsAsync), null, () => _inner.SetBlobsAsync(blobs, cancellationToken), cancellationToken);
+        => RunAsync(nameof(SetBlobsAsync), null, () => VerifyRoot().SetBlobsAsync(blobs, cancellationToken), cancellationToken);
 
     public Task<ITransaction> OpenTransactionAsync()
         => RunAsync(nameof(OpenTransactionAsync), null, () => _inner.OpenTransactionAsync(), CancellationToken.None);
 
     public void Dispose() => _inner.Dispose();
+
+    // Within the call, so that a root that stalls when it is examined is limited like the call itself.
+    private IBlobStorage VerifyRoot()
+    {
+        _verifyRoot?.Invoke();
+        return _inner;
+    }
 
     private Task RunAsync(string operation, object? target, Func<Task> start, CancellationToken cancellationToken)
         => RunAsync(

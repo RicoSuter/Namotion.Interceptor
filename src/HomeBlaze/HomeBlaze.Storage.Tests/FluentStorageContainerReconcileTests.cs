@@ -908,6 +908,149 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenSubjectIsSavedWhileStorageDirectoryIsGone_ThenNextPassStillFailsAndKeepsEverySubject()
+    {
+        // Arrange: the directory is gone, and the pass that sees it fails and keeps the tree.
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        WriteFile("Docs/Page.md");
+        WriteFile("Notes.md");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        var detaches = CountDetachesOf(storage.Children["Notes.md"]);
+        var movedDirectory = StorageDirectory.FullName + "-moved";
+        Directory.Move(StorageDirectory.FullName, movedDirectory);
+
+        Exception? exception;
+        bool isDirectoryCreated;
+        StorageStatus statusAfterNextPass;
+        List<string> childrenAfterNextPass;
+        try
+        {
+            await storage.ReconcileAsync();
+
+            // Act
+            motor.Name = "Saved while the directory was gone";
+            exception = await Record.ExceptionAsync(() => storage.WriteConfigurationAsync(motor, CancellationToken.None));
+            isDirectoryCreated = Directory.Exists(StorageDirectory.FullName);
+            await storage.ReconcileAsync();
+            statusAfterNextPass = storage.Status;
+            childrenAfterNextPass = storage.Children.Keys.Order().ToList();
+        }
+        finally
+        {
+            PutStorageDirectoryBack(movedDirectory);
+        }
+
+        // Assert
+        Assert.IsType<IOException>(exception, exactMatch: false);
+        Assert.False(isDirectoryCreated);
+        Assert.Equal(StorageStatus.Error, statusAfterNextPass);
+        Assert.Equal(["Docs", "Motor", "Notes.md"], childrenAfterNextPass);
+        Assert.Equal(0, detaches.Count);
+    }
+
+    [Theory]
+    [InlineData("add")]
+    [InlineData("add into new folder")]
+    [InlineData("write blob")]
+    [InlineData("write blob in folder")]
+    [InlineData("write new blob")]
+    [InlineData("save configuration")]
+    [InlineData("save embedded subject")]
+    [InlineData("delete blob")]
+    [InlineData("delete subject")]
+    public async Task WhenStorageIsChangedWhileItsDirectoryIsGone_ThenOperationFailsAsThePassDoesAndDirectoryIsNotCreated(string operation)
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        WriteFile("Docs/Page.md", "first");
+        WriteFile("Notes.md", "first");
+        WriteFile("Embedding.md", $"# Page\n\n```subject(motor)\n{SerializeMotor("Embedded")}\n```\n");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Embedding.md"]);
+        var contentBefore = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]).Content;
+        var movedDirectory = StorageDirectory.FullName + "-moved";
+        Directory.Move(StorageDirectory.FullName, movedDirectory);
+
+        Exception? exception;
+        bool isDirectoryCreated;
+        try
+        {
+            // Act
+            using var content = new MemoryStream("second"u8.ToArray());
+            exception = await Record.ExceptionAsync(() => operation switch
+            {
+                "add" => storage.AddSubjectAsync("Added.json", CreateMotor("Added"), CancellationToken.None),
+                "add into new folder" => storage.AddSubjectAsync("New/Added.json", CreateMotor("Added"), CancellationToken.None),
+                "write blob" => storage.WriteBlobAsync("Notes.md", content, CancellationToken.None),
+                "write blob in folder" => storage.WriteBlobAsync("Docs/Page.md", content, CancellationToken.None),
+                "write new blob" => storage.WriteBlobAsync("New/Data.bin", content, CancellationToken.None),
+                "save configuration" => storage.WriteConfigurationAsync(motor, CancellationToken.None),
+                "save embedded subject" => page.WriteConfigurationAsync(page.Children["motor"], CancellationToken.None),
+                "delete blob" => storage.DeleteBlobAsync("Docs/Page.md", CancellationToken.None),
+                _ => storage.DeleteSubjectAsync(motor, CancellationToken.None)
+            });
+            isDirectoryCreated = Directory.Exists(StorageDirectory.FullName);
+        }
+        finally
+        {
+            PutStorageDirectoryBack(movedDirectory);
+        }
+
+        await storage.ReconcileAsync();
+
+        // Assert: nothing of the tree or of the files has changed.
+        Assert.IsType<IOException>(exception, exactMatch: false);
+        Assert.False(isDirectoryCreated);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["Docs", "Embedding.md", "Motor", "Notes.md"], storage.Children.Keys.Order());
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Equal("first", contentBefore);
+        Assert.Equal("first", Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]).Content);
+        Assert.Equal("first", File.ReadAllText(GetFullPath("Docs/Page.md")));
+    }
+
+    [Theory]
+    [InlineData("read")]
+    [InlineData("metadata")]
+    public async Task WhenPathInFolderIsReadWhileStorageDirectoryIsGone_ThenReadFailsAndDirectoryIsNotCreated(string call)
+    {
+        // Arrange: the disk client creates the folder of a path it is asked about, and with it the directory.
+        WriteFile("Docs/Page.md");
+        WriteFile("Notes.md");
+        var storage = await ConnectAsync();
+        var movedDirectory = StorageDirectory.FullName + "-moved";
+        Directory.Move(StorageDirectory.FullName, movedDirectory);
+
+        Exception? exception;
+        bool isDirectoryCreated;
+        StorageStatus statusAfterPass;
+        List<string> childrenAfterPass;
+        try
+        {
+            // Act
+            exception = await Record.ExceptionAsync(() => call == "read"
+                ? storage.ReadBlobAsync("Docs/Page.md", CancellationToken.None)
+                : storage.GetBlobMetadataAsync("Docs/Page.md", CancellationToken.None));
+            isDirectoryCreated = Directory.Exists(StorageDirectory.FullName);
+            await storage.ReconcileAsync();
+            statusAfterPass = storage.Status;
+            childrenAfterPass = storage.Children.Keys.Order().ToList();
+        }
+        finally
+        {
+            PutStorageDirectoryBack(movedDirectory);
+        }
+
+        // Assert
+        Assert.IsType<IOException>(exception, exactMatch: false);
+        Assert.False(isDirectoryCreated);
+        Assert.Equal(StorageStatus.Error, statusAfterPass);
+        Assert.Equal(["Docs", "Notes.md"], childrenAfterPass);
+    }
+
+    [Fact]
     public async Task WhenStorageIsInMemory_ThenPassNeedsNoDirectory()
     {
         // Arrange
@@ -1221,6 +1364,19 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
 
     // What the file watcher logs within its start, once the file system watches. Nothing else shows that point.
     private const string WatcherStartedMessage = "File watching enabled";
+
+    /// <summary>
+    /// Moves the storage directory back to where it was, in place of a directory that was created there meanwhile.
+    /// </summary>
+    private void PutStorageDirectoryBack(string movedDirectory)
+    {
+        if (Directory.Exists(StorageDirectory.FullName))
+        {
+            Directory.Delete(StorageDirectory.FullName, recursive: true);
+        }
+
+        Directory.Move(movedDirectory, StorageDirectory.FullName);
+    }
 
     /// <summary>
     /// Waits for something that passes started by the trigger bring about, with a clock that only the test moves.
