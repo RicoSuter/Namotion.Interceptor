@@ -192,6 +192,77 @@ public class ParentTraversalTests
         // Assert
         Assert.Null(result);
     }
+
+    [Fact]
+    public void WhenMatchIsOnOneParentChain_ThenSearchDoesNotAllocate()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var topOfChain = ParentTraversalGraph.LinkChain(subject, 7);
+        ParentTraversalGraph.Link(topOfChain, new MarkedTraversalNode());
+
+        // Act
+        var (allocated, matches) = MeasureSearch(subject);
+
+        // Assert
+        Assert.Equal(MeasuredSearches, matches);
+        Assert.Equal(0L, allocated);
+    }
+
+    [Fact]
+    public void WhenOneParentChainHasNoMatch_ThenSearchDoesNotAllocate()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        ParentTraversalGraph.LinkChain(subject, 8);
+
+        // Act
+        var (allocated, matches) = MeasureSearch(subject);
+
+        // Assert
+        Assert.Equal(0, matches);
+        Assert.Equal(0L, allocated);
+    }
+
+    [Fact]
+    public void WhenOneParentChainEndsInCycleWithoutMatch_ThenSearchDoesNotAllocate()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        ParentTraversalGraph.LinkTailAndCycle(subject, tailLength: 2, cycleLength: 5);
+
+        // Act
+        var (allocated, matches) = MeasureSearch(subject);
+
+        // Assert
+        Assert.Equal(0, matches);
+        Assert.Equal(0L, allocated);
+    }
+
+    private const int MeasuredSearches = 1000;
+
+    private static (long Allocated, int Matches) MeasureSearch(IInterceptorSubject subject)
+    {
+        // Warm up so JIT compilation and the first read of each parent list do not land inside the
+        // measured window.
+        for (var i = 0; i < 100; i++)
+        {
+            subject.TryGetFirstParent<ITraversalMarker>();
+        }
+
+        var matches = 0;
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < MeasuredSearches; i++)
+        {
+            if (subject.TryGetFirstParent<ITraversalMarker>() is not null)
+            {
+                matches++;
+            }
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        return (allocated, matches);
+    }
 }
 
 [InterceptorSubject]

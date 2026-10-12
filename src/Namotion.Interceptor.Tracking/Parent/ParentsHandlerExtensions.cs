@@ -21,15 +21,70 @@ public static class ParentsHandlerExtensions
     }
 
     /// <summary>
-    /// Tries to find the first parent of the specified type by traversing the parent hierarchy.
-    /// Returns null if not found instead of throwing.
+    /// Tries to find the nearest parent of the specified type by traversing the parent hierarchy.
+    /// The subject itself is never returned. Returns null if not found instead of throwing.
     /// </summary>
     public static TRoot? TryGetFirstParent<TRoot>(this IInterceptorSubject subject)
         where TRoot : class
     {
+        // Subjects with one parent each are walked without allocating. The checkpoint detects a cycle on
+        // such a chain (Brent's algorithm): it is always a subject that was checked before, so meeting it
+        // again means the walk passed every subject of the cycle.
+        var current = subject;
+        var checkpoint = subject;
+        var stepsSinceCheckpoint = 0L;
+        var stepsUntilCheckpoint = 1L;
+
+        while (true)
+        {
+            var parents = current.GetParents();
+            if (parents.Length == 0)
+            {
+                return null;
+            }
+
+            if (parents.Length > 1)
+            {
+                return FindFirstParentBreadthFirst<TRoot>(subject, current);
+            }
+
+            var parent = parents[0];
+            if (parent.Equals(default))
+            {
+                return null;
+            }
+
+            current = parent.Property.Subject;
+            if (ReferenceEquals(current, checkpoint))
+            {
+                return null;
+            }
+
+            if (current is TRoot root && !ReferenceEquals(current, subject))
+            {
+                return root;
+            }
+
+            stepsSinceCheckpoint++;
+            if (stepsSinceCheckpoint == stepsUntilCheckpoint)
+            {
+                checkpoint = current;
+                stepsSinceCheckpoint = 0;
+                stepsUntilCheckpoint *= 2;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Searches breadth first from <paramref name="start"/>, which was reached from
+    /// <paramref name="subject"/> over subjects with one parent each that are no match.
+    /// </summary>
+    private static TRoot? FindFirstParentBreadthFirst<TRoot>(IInterceptorSubject subject, IInterceptorSubject start)
+        where TRoot : class
+    {
         var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         var queue = new Queue<IInterceptorSubject>();
-        queue.Enqueue(subject);
+        queue.Enqueue(start);
 
         while (queue.Count > 0)
         {
