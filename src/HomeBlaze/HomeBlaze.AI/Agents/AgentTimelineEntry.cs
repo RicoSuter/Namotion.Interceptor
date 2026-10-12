@@ -41,8 +41,8 @@ public sealed record AgentTimelineEntry
     public bool IsQuiet { get; init; }
 
     /// <summary>
-    /// Why a background run started, for example <c>poll</c>, <c>change</c> or <c>manual</c>; also set on the error
-    /// entry of a background run that failed or was cancelled, and null on chat entries.
+    /// Why a background run started, one of <see cref="AgentTriggers"/>; also set on the error entry of a background
+    /// run that failed or was cancelled, and null on chat entries.
     /// </summary>
     public string? Trigger { get; init; }
 

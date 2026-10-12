@@ -672,7 +672,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
                 lock (_stateLock)
                 {
-                    _scheduler?.RequestRun("change");
+                    _scheduler?.RequestRun(AgentTriggers.Change);
                 }
 
                 return;

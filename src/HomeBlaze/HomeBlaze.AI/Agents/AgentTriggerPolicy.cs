@@ -62,7 +62,7 @@ public sealed class AgentTriggerPolicy
     /// <summary>Requests a run that ignores cooldown, backoff and pauses.</summary>
     public void RequestManualRun()
     {
-        _pendingReason = "manual";
+        _pendingReason = AgentTriggers.Manual;
         _pendingIsManual = true;
     }
 
@@ -75,7 +75,7 @@ public sealed class AgentTriggerPolicy
 
         if (_nextPoll is { } nextPoll && now >= nextPoll)
         {
-            _pendingReason ??= "poll";
+            _pendingReason ??= AgentTriggers.Poll;
             _nextPoll = now + _pollInterval;
         }
 

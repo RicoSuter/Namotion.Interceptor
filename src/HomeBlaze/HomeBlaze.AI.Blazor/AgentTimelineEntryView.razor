@@ -24,7 +24,7 @@
             <MudIcon Icon="@Icons.Material.Outlined.CheckCircle" Size="Size.Small" />
             <MudText Typo="Typo.caption">
                 @(QuietCount <= 1 ? "Quiet background run" : $"{QuietCount} quiet background runs, newest")
-                @TimeZone.Format(Entry.Timestamp) · @Entry.Trigger · @Entry.ResultText
+                @TimeZone.Format(Entry.Timestamp) · @AgentTriggerLabels.Format(Entry.Trigger) · @_quietText
             </MudText>
         </MudStack>
         break;
@@ -33,7 +33,7 @@
             <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mb-1">
                 <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Color="Color.Info" Size="Size.Small" />
                 <MudText Typo="Typo.subtitle2">Background run</MudText>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.Format(Entry.Timestamp) · @Entry.Trigger</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.Format(Entry.Timestamp) · @AgentTriggerLabels.Format(Entry.Trigger)</MudText>
             </MudStack>
             <AgentMarkdown>@(_showsFullAnswer ? _fullAnswerHtml : _html)</AgentMarkdown>
             @if (Entry.FinalText is not null)
@@ -60,6 +60,7 @@
     private AgentTimelineEntry? _htmlEntry;
     private MarkupString _html;
     private MarkupString _fullAnswerHtml;
+    private string? _quietText;
     private bool _showsFullAnswer;
     private bool _renderedShowsFullAnswer;
     private int _renderedQuietCount;
@@ -90,6 +91,9 @@
                 AgentTimelineEntryKind.BackgroundRun when !Entry.IsQuiet => new MarkupString(AgentMarkdownRenderer.ToHtml(Entry.ResultText)),
                 _ => default
             };
+            _quietText = Entry is { Kind: AgentTimelineEntryKind.BackgroundRun, IsQuiet: true }
+                ? AgentMarkdownRenderer.ToPlainText(Entry.ResultText)
+                : null;
         }
     }
 
