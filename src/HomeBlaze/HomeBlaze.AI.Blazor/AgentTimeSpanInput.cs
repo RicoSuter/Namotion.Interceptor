@@ -8,8 +8,7 @@ namespace HomeBlaze.AI.Blazor;
 /// </summary>
 public static class AgentTimeSpanInput
 {
-    /// <summary>The largest accepted time span.</summary>
-    public static readonly TimeSpan Maximum = TimeSpan.FromDays(365);
+    private static readonly TimeSpan Maximum = TimeSpan.FromDays(365);
 
     /// <summary>The largest turn timeout the runtime enforces; a longer one applies no limit.</summary>
     public static readonly TimeSpan MaximumTurnTimeout = LlmAgentBase.MaximumTurnTimeout;
@@ -18,7 +17,7 @@ public static class AgentTimeSpanInput
     public static string Format(TimeSpan value) => value.ToString("c", CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// Parses [d.]hh:mm[:ss] into a time span between zero and <see cref="Maximum"/>. A bare number is rejected
+    /// Parses [d.]hh:mm[:ss] into a time span between zero and 365 days. A bare number is rejected
     /// because it would parse as days.
     /// </summary>
     public static bool TryParse(string? text, out TimeSpan value)

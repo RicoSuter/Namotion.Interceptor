@@ -6,11 +6,11 @@
 
 @if (Agent is not null)
 {
-    <MudForm data-testid="agent-edit-form">
+    <MudForm>
         <MudTextField T="string" Label="Name" @bind-Value="_name" @bind-Value:after="OnChanged" Immediate="true"
-                      HelperText="Shown as the agent's title. Empty: the type name." data-testid="agent-edit-name" />
+                      HelperText="Shown as the agent's title. Empty: the type name." />
         <MudTextField T="string" Label="Instructions" @bind-Value="_instructions" @bind-Value:after="OnChanged" Lines="6" Immediate="true"
-                      HelperText="What the agent watches for and how it should react." Class="mt-4" data-testid="agent-edit-instructions" />
+                      HelperText="What the agent watches for and how it should react." Class="mt-4" />
 
         <MudText Typo="Typo.subtitle2" Class="mt-6">Models</MudText>
         <MudGrid Spacing="2">
@@ -43,13 +43,11 @@
 
         <MudText Typo="Typo.subtitle2" Class="mt-6">Triggers and limits</MudText>
         <MudTextField T="string" Label="Watch paths" @bind-Value="_watchPaths" @bind-Value:after="OnChanged" Lines="3" Immediate="true"
-                      HelperText="One path per line. Changes below these paths trigger a run, and their state is included in it."
-                      data-testid="agent-edit-watch-paths" />
+                      HelperText="One path per line. Changes below these paths trigger a run, and their state is included in it." />
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="6" md="3">
                 <MudTextField T="string" Label="Poll interval" @bind-Value="_pollInterval" @bind-Value:after="OnChanged" Immediate="true"
-                              HelperText="[d.]hh:mm:ss, empty for none" Validation="@(new Func<string?, string?>(ValidateOptionalTimeSpan))"
-                              data-testid="agent-edit-poll-interval" />
+                              HelperText="[d.]hh:mm:ss, empty for none" Validation="@(new Func<string?, string?>(ValidateOptionalTimeSpan))" />
             </MudItem>
             <MudItem xs="12" sm="6" md="3">
                 <MudTextField T="string" Label="Minimum run interval" @bind-Value="_minRunInterval" @bind-Value:after="OnChanged" Immediate="true"
@@ -129,11 +127,10 @@
             <MudText Typo="Typo.subtitle2" Class="mt-6">Anthropic API</MudText>
             @* The stored key is never loaded into the form; an empty field keeps it. *@
             <MudTextField T="string" Label="API key" @bind-Value="_apiKey" @bind-Value:after="OnChanged" InputType="InputType.Password" Immediate="true"
-                          HelperText="@(_hasStoredApiKey ? "A key is stored. Leave empty to keep it." : "Required.")" autocomplete="new-password"
-                          data-testid="agent-edit-api-key" />
+                          HelperText="@(_hasStoredApiKey ? "A key is stored. Leave empty to keep it." : "Required.")" autocomplete="new-password" />
             <MudGrid Spacing="2">
                 <MudItem xs="12" sm="6">
-                    <MudNumericField T="int" Label="Max output tokens" @bind-Value="_maxTokens" @bind-Value:after="OnChanged" Min="256"
+                    <MudNumericField T="int" Label="Max output tokens" @bind-Value="_maxTokens" @bind-Value:after="OnChanged" Min="MinimumMaxTokens"
                                      HelperText="Per model request, including thinking." />
                 </MudItem>
                 <MudItem xs="12" sm="6">
@@ -147,6 +144,7 @@
 
 @code {
     private const string TimeSpanErrorText = "Use [d.]hh:mm:ss, at most 365 days";
+    private const int MinimumMaxTokens = 256;
     private const string TurnTimeoutErrorText = "Use [d.]hh:mm:ss, at most 24 days; 00:00:00 for none";
 
     private static readonly AgentEffort?[] EffortValues = [null, .. Enum.GetValues<AgentEffort>().Cast<AgentEffort?>()];
@@ -194,7 +192,7 @@
         _maxToolCalls > 0 &&
         (Agent is not ClaudeCliAgent || !string.IsNullOrWhiteSpace(_cliPath)) &&
         (Agent is not AnthropicAgent ||
-            ((_hasStoredApiKey || !string.IsNullOrWhiteSpace(_apiKey)) && !string.IsNullOrWhiteSpace(_model) && _maxTokens >= 256 && _historyTokenBudget >= 0));
+            ((_hasStoredApiKey || !string.IsNullOrWhiteSpace(_apiKey)) && !string.IsNullOrWhiteSpace(_model) && _maxTokens >= MinimumMaxTokens && _historyTokenBudget >= 0));
 
     private LlmAgentBase? Agent => Subject as LlmAgentBase;
 

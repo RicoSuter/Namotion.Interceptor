@@ -23,12 +23,7 @@ public static class AgentToolOptions
 {
     /// <summary>The tool names shown when the offered tools cannot be listed.</summary>
     public static IReadOnlyList<string> FallbackToolNames { get; } =
-        [
-            "browse", "search", "get_property", "list_types", "list_methods", "invoke_query", "get_property_history", "invoke_operation", "set_property",
-            HomeBlazeMarkdownToolProvider.EditMarkdownToolName, HomeBlazeMarkdownToolProvider.WriteMarkdownToolName, HomeBlazeMarkdownToolProvider.CreateMarkdownToolName
-        ];
-
-    private const string MemoryToolName = "update_memory";
+        [.. AgentToolSet.DefaultAllowedTools, .. AgentToolSet.StateChangingTools];
 
     // Operator-facing summaries; the MCP descriptions are written for the model and are long.
     private static readonly Dictionary<string, string> Summaries = new(StringComparer.Ordinal)
@@ -89,7 +84,7 @@ public static class AgentToolOptions
             ?? FallbackToolNames.Select(name => (name, (string?)null));
 
         var options = new List<AgentToolOption>();
-        var names = new HashSet<string>(StringComparer.Ordinal) { MemoryToolName };
+        var names = new HashSet<string>(StringComparer.Ordinal) { AgentMemory.ToolName };
         foreach (var (name, description) in offered)
         {
             if (names.Add(name))

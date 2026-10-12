@@ -119,9 +119,8 @@ export function attachStickToBottom(scroller) {
         lastTop = top;
     };
 
-    // Observations are delivered once per frame after layout and before paint, so streamed text scrolls at most once
-    // per frame and without showing the unscrolled state first. The content grows with entries and streamed text; the
-    // scroller shrinks when the input grows or an on-screen keyboard opens.
+    // The content grows with entries and streamed text; the scroller shrinks when the input grows or an on-screen
+    // keyboard opens.
     // Browsers without scroll anchoring leave the view where it was when rows are added above, so the held row is
     // moved back once it has moved.
     const resizeObserver = new ResizeObserver(() => {

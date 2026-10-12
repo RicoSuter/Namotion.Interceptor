@@ -5,8 +5,7 @@
         {
             <MudTooltip Text="@($"{call.Arguments}\n{call.ResultPreview}")">
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                         Color="@(call.IsError ? Color.Error : Color.Default)" Icon="@Icons.Material.Filled.Build"
-                         data-testid="agent-tool-call">
+                         Color="@(call.IsError ? Color.Error : Color.Default)" Icon="@Icons.Material.Filled.Build">
                     @call.Name
                 </MudChip>
             </MudTooltip>

@@ -20,8 +20,8 @@ public sealed class AgentToolSet
     /// <summary>The graph tools that can change state: devices, notifications or pages.</summary>
     public static readonly IReadOnlyList<string> StateChangingTools =
     [
-        "set_property",
         HomeBlazeMcpToolProvider.InvokeOperationToolName,
+        "set_property",
         HomeBlazeMarkdownToolProvider.EditMarkdownToolName,
         HomeBlazeMarkdownToolProvider.WriteMarkdownToolName,
         HomeBlazeMarkdownToolProvider.CreateMarkdownToolName

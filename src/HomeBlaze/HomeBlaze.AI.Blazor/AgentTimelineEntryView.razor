@@ -20,7 +20,7 @@
         </MudPaper>
         break;
     case AgentTimelineEntryKind.BackgroundRun when Entry.IsQuiet:
-        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="my-1 mud-text-secondary" data-testid="agent-quiet-runs">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="my-1 mud-text-secondary">
             <MudIcon Icon="@Icons.Material.Outlined.CheckCircle" Size="Size.Small" />
             <MudText Typo="Typo.caption">
                 @(QuietCount <= 1 ? "Quiet background run" : $"{QuietCount} quiet background runs, newest")
@@ -107,8 +107,7 @@
         _showsFullAnswer = !_showsFullAnswer;
     }
 
-    // Entries are immutable, so an entry renders again only when it is replaced (a growing quiet group), the
-    // display time zone changed or the full answer was toggled. Compared by reference: records compare by value, which would cost a deep compare.
+    // Compared by reference: records compare by value, which would cost a deep compare.
     protected override bool ShouldRender() =>
         !ReferenceEquals(_renderedEntry, Entry) ||
         _renderedQuietCount != QuietCount ||

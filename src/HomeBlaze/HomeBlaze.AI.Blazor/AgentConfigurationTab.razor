@@ -70,9 +70,9 @@
         </MudText>
         @if (!MemoryEditor.IsAvailable)
         {
-            <MudText Typo="Typo.caption" Class="d-block mud-text-secondary" data-testid="agent-memory-not-loaded">@AgentMemoryEditor.NotLoadedText</MudText>
+            <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">@AgentMemoryEditor.NotLoadedText</MudText>
         }
-        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="my-2" data-testid="agent-memory-size">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="my-2">
             <MudProgressLinear Value="@GetUsage(memory)" Color="@(GetUsage(memory) >= 90 ? Color.Warning : Color.Primary)"
                                Rounded="true" Size="Size.Small" Class="flex-grow-1" Style="max-width: 240px;" aria-label="Memory usage" />
             <MudText Typo="Typo.caption" Class="mud-text-secondary">
@@ -81,7 +81,7 @@
         </MudStack>
         @if (MemoryEditor.IsEditing)
         {
-            <MudPaper Outlined="true" Class="pa-3 mb-2" data-testid="agent-memory-form">
+            <MudPaper Outlined="true" Class="pa-3 mb-2">
                 <MudText Typo="Typo.subtitle2" Class="mb-2">@(MemoryEditor.OriginalKey is null ? "New entry" : "Edit entry")</MudText>
                 <MudStack Spacing="2">
                     <div data-testid="agent-memory-key">
@@ -107,10 +107,10 @@
                 }
                 @if (MemoryEditor.Error is not null)
                 {
-                    <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" data-testid="agent-memory-error">@MemoryEditor.Error</MudAlert>
+                    <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@MemoryEditor.Error</MudAlert>
                 }
                 <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2" Class="mt-2">
-                    <MudButton Variant="Variant.Text" OnClick="MemoryEditor.Cancel" Disabled="MemoryEditor.IsSaving" data-testid="agent-memory-cancel">Cancel</MudButton>
+                    <MudButton Variant="Variant.Text" OnClick="MemoryEditor.Cancel" Disabled="MemoryEditor.IsSaving">Cancel</MudButton>
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="MemoryEditor.SaveAsync"
                                Disabled="@(MemoryEditor.IsSaving || string.IsNullOrWhiteSpace(MemoryEditor.Key) || string.IsNullOrWhiteSpace(MemoryEditor.Value) || MemoryEditor.ValueError is not null)"
                                data-testid="agent-memory-save">Save</MudButton>
@@ -119,7 +119,7 @@
         }
         else if (MemoryEditor.Error is not null)
         {
-            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="agent-memory-error">@MemoryEditor.Error</MudAlert>
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@MemoryEditor.Error</MudAlert>
         }
         @* Below the small breakpoint each entry stacks into labeled lines instead of a wide table. *@
         <MudTable T="AgentMemoryEntry" Items="memory.Entries" Dense="true" Hover="true" Elevation="0" Outlined="true"
@@ -132,18 +132,18 @@
             </HeaderContent>
             <RowTemplate>
                 @* The wrapping styles sit on inner elements: on phones the cell also renders its data label, which must not wrap. *@
-                <MudTd DataLabel="Key"><span style="overflow-wrap: anywhere;" data-testid="agent-memory-entry-key">@context.Key</span></MudTd>
-                <MudTd DataLabel="Value"><div style="white-space: pre-wrap; overflow-wrap: anywhere;" data-testid="agent-memory-entry-value">@context.Value</div></MudTd>
+                <MudTd DataLabel="Key"><span style="overflow-wrap: anywhere;">@context.Key</span></MudTd>
+                <MudTd DataLabel="Value"><div style="white-space: pre-wrap; overflow-wrap: anywhere;">@context.Value</div></MudTd>
                 <MudTd DataLabel="Updated" Style="white-space: nowrap;">@TimeZone.Format(context.Updated)</MudTd>
                 <MudTd>
                     <div class="d-flex justify-end flex-nowrap">
                         <MudTooltip Text="Edit">
                             <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="@($"Edit {context.Key}")"
-                                           OnClick="@(() => MemoryEditor.StartEdit(context))" Disabled="@(MemoryEditor.IsSaving || MemoryEditor.IsEditing)" data-testid="agent-memory-edit" />
+                                           OnClick="@(() => MemoryEditor.StartEdit(context))" Disabled="@(MemoryEditor.IsSaving || MemoryEditor.IsEditing)" />
                         </MudTooltip>
                         <MudTooltip Text="Delete">
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" aria-label="@($"Delete {context.Key}")"
-                                           OnClick="@(() => DeleteAsync(context))" Disabled="MemoryEditor.IsSaving" data-testid="agent-memory-delete" />
+                                           OnClick="@(() => DeleteAsync(context))" Disabled="MemoryEditor.IsSaving" />
                         </MudTooltip>
                     </div>
                 </MudTd>
