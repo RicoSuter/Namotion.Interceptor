@@ -55,10 +55,9 @@ public partial class FluentStorageContainer :
     public partial string StorageType { get; set; }
 
     /// <summary>
-    /// Connection string or path for the storage. Secret, because the connection string of a cloud storage holds its
-    /// credentials.
+    /// Connection string or path for the storage.
     /// </summary>
-    [Configuration(IsSecret = true)]
+    [Configuration]
     public partial string ConnectionString { get; set; }
 
     /// <summary>
