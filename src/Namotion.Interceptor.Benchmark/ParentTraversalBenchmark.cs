@@ -12,6 +12,8 @@ namespace Namotion.Interceptor.Benchmark;
 public partial class ParentTraversalNode
 {
     public partial ParentTraversalNode? Child { get; set; }
+
+    public partial ParentTraversalNode? OtherChild { get; set; }
 }
 
 [InterceptorSubject]
@@ -28,12 +30,17 @@ public class ParentTraversalBenchmark
     private const int Operations = 256;
     private const int ChainLength = 8;
     private const int ChainLengthBelowBranch = 4;
+    private const int CycleLengthAboveSubject = 9;
+    private const int LongChainLength = 16;
 
     private ParentTraversalNode _leafBelowMatch;
     private ParentTraversalNode _leafWithoutMatch;
     private ParentTraversalNode _nodeOnCycle;
     private ParentTraversalNode _leafBelowBranch;
     private ParentTraversalNode _nodeWithTwoParents;
+    private ParentTraversalNode _nodeBelowCycle;
+    private ParentTraversalNode _leafBelowChainIntoCycle;
+    private ParentTraversalNode _leafBelowBranchWithoutMatch;
 
     [GlobalSetup]
     public void Setup()
@@ -67,6 +74,30 @@ public class ParentTraversalBenchmark
         _nodeWithTwoParents = shared;
         _leafBelowBranch = AppendChain(shared, ChainLengthBelowBranch);
 
+        var cycleAboveSubjectStart = new ParentTraversalNode(context);
+        var cycleAboveSubjectEnd = AppendChain(cycleAboveSubjectStart, CycleLengthAboveSubject - 1);
+        cycleAboveSubjectEnd.Child = cycleAboveSubjectStart;
+        _nodeBelowCycle = new ParentTraversalNode();
+        cycleAboveSubjectStart.OtherChild = _nodeBelowCycle;
+
+        var cycleOfTwoStart = new ParentTraversalNode(context);
+        var cycleOfTwoEnd = new ParentTraversalNode();
+        cycleOfTwoStart.Child = cycleOfTwoEnd;
+        cycleOfTwoEnd.Child = cycleOfTwoStart;
+        var firstBelowCycleOfTwo = new ParentTraversalNode();
+        cycleOfTwoEnd.OtherChild = firstBelowCycleOfTwo;
+        _leafBelowChainIntoCycle = AppendChain(firstBelowCycleOfTwo, LongChainLength - 1);
+
+        var plainBranchRoot = new ParentTraversalNode(context);
+        var plainLeft = new ParentTraversalNode();
+        var plainRight = new ParentTraversalNode();
+        plainBranchRoot.Child = plainLeft;
+        plainBranchRoot.OtherChild = plainRight;
+        var plainShared = new ParentTraversalNode();
+        plainLeft.Child = plainShared;
+        plainRight.Child = plainShared;
+        _leafBelowBranchWithoutMatch = AppendChain(plainShared, ChainLengthBelowBranch);
+
         Ensure(CountOneParentSteps(_leafBelowMatch) == ChainLength, nameof(FindOnChain));
         Ensure(ReferenceEquals(_leafBelowMatch.TryGetFirstParent<ParentTraversalMarkedNode>(), markedRoot), nameof(FindOnChain));
 
@@ -81,6 +112,18 @@ public class ParentTraversalBenchmark
 
         Ensure(_nodeWithTwoParents.GetParents().Length == 2, nameof(FindWithBranchAtSubject));
         Ensure(ReferenceEquals(_nodeWithTwoParents.TryGetFirstParent<ParentTraversalMarkedNode>(), branchRoot), nameof(FindWithBranchAtSubject));
+
+        Ensure(ReferenceEquals(StepUp(_nodeBelowCycle, 1), cycleAboveSubjectStart), nameof(MissBelowCycle));
+        Ensure(ReferenceEquals(StepUp(cycleAboveSubjectStart, CycleLengthAboveSubject), cycleAboveSubjectStart), nameof(MissBelowCycle));
+        Ensure(_nodeBelowCycle.TryGetFirstParent<ParentTraversalMarkedNode>() is null, nameof(MissBelowCycle));
+
+        Ensure(ReferenceEquals(StepUp(_leafBelowChainIntoCycle, LongChainLength), cycleOfTwoEnd), nameof(MissBelowChainIntoCycle));
+        Ensure(ReferenceEquals(StepUp(cycleOfTwoEnd, 2), cycleOfTwoEnd), nameof(MissBelowChainIntoCycle));
+        Ensure(_leafBelowChainIntoCycle.TryGetFirstParent<ParentTraversalMarkedNode>() is null, nameof(MissBelowChainIntoCycle));
+
+        Ensure(CountOneParentSteps(_leafBelowBranchWithoutMatch) == ChainLengthBelowBranch, nameof(MissAboveBranch));
+        Ensure(plainShared.GetParents().Length == 2, nameof(MissAboveBranch));
+        Ensure(_leafBelowBranchWithoutMatch.TryGetFirstParent<ParentTraversalMarkedNode>() is null, nameof(MissAboveBranch));
     }
 
     /// <summary>
@@ -96,16 +139,34 @@ public class ParentTraversalBenchmark
     public int MissOnChain() => CountMatches(_leafWithoutMatch);
 
     /// <summary>
-    /// Eight subjects with one parent each that form a cycle, without a match.
+    /// Eight subjects with one parent each that form a cycle through the subject, without a match.
     /// </summary>
     [Benchmark(OperationsPerInvoke = Operations)]
     public int MissOnCycle() => CountMatches(_nodeOnCycle);
+
+    /// <summary>
+    /// The subject hangs below a cycle of nine subjects with one parent each, without a match.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = Operations)]
+    public int MissBelowCycle() => CountMatches(_nodeBelowCycle);
+
+    /// <summary>
+    /// Sixteen subjects with one parent each below a cycle of two, without a match.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = Operations)]
+    public int MissBelowChainIntoCycle() => CountMatches(_leafBelowChainIntoCycle);
 
     /// <summary>
     /// Four subjects with one parent each, then a subject with two parents, with the match above both.
     /// </summary>
     [Benchmark(OperationsPerInvoke = Operations)]
     public int FindAboveBranch() => CountMatches(_leafBelowBranch);
+
+    /// <summary>
+    /// Four subjects with one parent each, then a subject with two parents, without a match above.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = Operations)]
+    public int MissAboveBranch() => CountMatches(_leafBelowBranchWithoutMatch);
 
     /// <summary>
     /// The subject itself has two parents, with the match above both.
