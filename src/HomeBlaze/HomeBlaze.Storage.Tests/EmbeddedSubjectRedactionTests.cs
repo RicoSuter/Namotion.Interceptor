@@ -88,9 +88,82 @@ public class EmbeddedSubjectRedactionTests
         Assert.Contains("numbered-host", result);
     }
 
+    [Fact]
+    public void WhenNestedJsonDoesNotMatchTheValuesOfTheSubject_ThenItIsHidden()
+    {
+        // Arrange: no primary at runtime, a dictionary entry and a list item without a counterpart, a list item of
+        // another type and a key that is no configuration property.
+        var context = SubjectContextFactory.Create(new ServiceCollection());
+        var group = new NestedSecretDeviceGroup(context)
+        {
+            Gateways = new Dictionary<string, EmbeddedSecretDevice> { ["north"] = new() { Host = "north-host" } },
+            Backups = [new EmbeddedSecretDevice { Host = "backup-host" }]
+        };
+
+        var device = typeof(EmbeddedSecretDevice).FullName;
+        var source = $$"""
+            :: {{typeof(NestedSecretDeviceGroup).FullName}}#group
+            ```json
+            {
+              "Primary": { "$type": "{{device}}", "Password": "primary-secret" },
+              "Gateways": {
+                "north": { "$type": "{{device}}", "Host": "north-host", "Token": "token-secret" },
+                "south": { "$type": "{{device}}", "Password": "south-secret" }
+              },
+              "Backups": [
+                { "$type": "Other.Device", "Password": "other-type-secret" },
+                { "$type": "{{device}}", "Password": "extra-item-secret" }
+              ]
+            }
+            ```
+            ::
+            """;
+
+        // Act
+        var result = EmbeddedSubjectRedaction.Redact(
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = group });
+
+        // Assert
+        Assert.DoesNotContain("primary-secret", result);
+        Assert.DoesNotContain("token-secret", result);
+        Assert.DoesNotContain("south-secret", result);
+        Assert.DoesNotContain("other-type-secret", result);
+        Assert.DoesNotContain("extra-item-secret", result);
+        Assert.Contains("north-host", result);
+    }
+
+    [Fact]
+    public void WhenABlockIsInsideAnInvalidBlock_ThenItsArgumentsAndItsJsonBlockAreRedacted()
+    {
+        // Arrange
+        const string source = """
+            :: HomeBlaze.Components.Card "broken
+            ::: Namotion.Devices.Shelly.ShellyDevice#s Password=hunter2
+            ```json
+            { "Password": "json-hunter2" }
+            ```
+            :::
+            ::
+            """;
+
+        // Act
+        var result = EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>());
+
+        // Assert
+        Assert.Equal("""
+            :: HomeBlaze.Components.Card ***
+            ::: Namotion.Devices.Shelly.ShellyDevice#s Password=***
+            ```json
+            ***
+            ```
+            :::
+            ::
+            """, result);
+    }
+
     [Theory]
     [InlineData(":: HomeBlaze.Samples.Motor#motor Password=s3cr3t \"broken\n::", ":: HomeBlaze.Samples.Motor#motor ***\n::")]
-    [InlineData(":: Password=s3cr3t\n::", ":: ***\n::")]
+    [InlineData(":: Password=s3cr3t\n::", ":: Password ***\n::")]
     [InlineData(":: HomeBlaze.Samples.Motor#bad=s3cr3t Name=x\n::", ":: HomeBlaze.Samples.Motor ***\n::")]
     public void WhenAHeadLineCannotBeRead_ThenEverythingAfterTheFenceAndTheNameIsRedacted(string source, string expected)
     {

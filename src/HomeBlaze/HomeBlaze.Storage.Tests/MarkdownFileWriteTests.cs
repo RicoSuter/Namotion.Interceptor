@@ -395,6 +395,60 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal(PageWithUnnamedBlock.Replace(oldText, newText), ReadFile("Motors.md"));
     }
 
+    [Theory]
+    [InlineData("- Item\n\n  :: HomeBlaze.Samples.Motor Password=s3cr3t\n  ```json\n  {\n    \"Password\": \"json-secret\"\n  }\n  ```\n  ::\n\nText at the end.")]
+    [InlineData("> :: HomeBlaze.Samples.Motor Password=s3cr3t\n> ```json\n> {\n>   \"Password\": \"json-secret\"\n> }\n> ```\n> ::\n\nText at the end.")]
+    [InlineData(":: Password=s3cr3t\n::\n\nText at the end.")]
+    [InlineData("# Old\n\n```subject(gateway)\n{ \"password\": \"s3cr3t\" }\n```\n\nText at the end.")]
+    public async Task WhenAPageHasHiddenValuesOutsideOfValidBlocks_ThenAnUnrelatedEditKeepsThemAndWritesNothingElse(string content)
+    {
+        // Arrange
+        WriteFile("Motors.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act
+        await markdown.ReplaceTextAsync("Text at the end.", "Changed text at the end.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(content.Replace("Text at the end.", "Changed text at the end."), ReadFile("Motors.md"));
+        Assert.DoesNotContain("s3cr3t", markdown.ReadRawContent());
+    }
+
+    [Theory]
+    [InlineData("# Old\n\n```subject(gateway)\n{ \"password\": \"s3cr3t\" }\n```\n\nText.")]
+    [InlineData("# Old\n\nText.\n\n```subject(gateway)\n{ \"password\": \"s3cr3t\" }\n")]
+    public async Task WhenAnEditChangesAnOldSubjectFence_ThenItIsRejectedAndTheFileIsUnchanged(string content)
+    {
+        // Arrange
+        WriteFile("Motors.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+        var view = markdown.ReadRawContent()!;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceContentAsync(view.Replace("***", "{ }"), CancellationToken.None));
+        Assert.StartsWith("Blocks cannot be added, changed or removed", exception.Message);
+        Assert.Equal(content, ReadFile("Motors.md"));
+    }
+
+    [Fact]
+    public async Task WhenTextIsAddedAfterAnOldSubjectFenceWithoutAClosingFence_ThenItIsRejectedBecauseItBelongsToTheFence()
+    {
+        // Arrange
+        const string content = "# Old\n\n```subject(gateway)\n{ \"password\": \"s3cr3t\" }\n";
+        WriteFile("Motors.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceContentAsync(markdown.ReadRawContent() + "\nMore text.", CancellationToken.None));
+        Assert.StartsWith("Blocks cannot be added, changed or removed", exception.Message);
+        Assert.Equal(content, ReadFile("Motors.md"));
+    }
+
     [Fact]
     public async Task WhenThePageHasWindowsLineEndingsAndTheNewContentHasLineFeeds_ThenTheBlocksKeepTheirText()
     {

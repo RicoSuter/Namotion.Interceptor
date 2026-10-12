@@ -227,8 +227,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         try
         {
             var source = await ReadSourceUnlockedAsync(cancellationToken);
-            var redactedSource = RedactSource(source, out _);
-            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, content, nameof(content)));
+            var redactedSource = RedactSource(source, out var redactions);
+            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, content, nameof(content)));
         }
         finally
         {
@@ -260,12 +260,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             // The passage is searched in the view without secret values, so that its result cannot tell a secret value.
             var source = await ReadSourceUnlockedAsync(cancellationToken);
-            var redactedSource = RedactSource(source, out var redactedSpans);
-            var index = FindUniquePassage(redactedSource, redactedSpans, oldText);
+            var redactedSource = RedactSource(source, out var redactions);
+            var index = FindUniquePassage(redactedSource, redactions, oldText);
 
             var updated = string.Concat(redactedSource.AsSpan(0, index), newText, redactedSource.AsSpan(index + oldText.Length));
             MarkdownWriteRules.GetContentBytes(updated, nameof(newText));
-            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, updated, nameof(newText)));
+            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, updated, nameof(newText)));
         }
         finally
         {
@@ -274,7 +274,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>Gets the position of the one occurrence of the passage that overlaps no hidden secret value.</summary>
-    private int FindUniquePassage(string redactedSource, List<MarkdownSpan> redactedSpans, string oldText)
+    private int FindUniquePassage(string redactedSource, List<EmbeddedSubjectRedaction.Redaction> redactions, string oldText)
     {
         var index = -1;
         var count = 0;
@@ -285,7 +285,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
              match = redactedSource.IndexOf(oldText, match + 1, StringComparison.Ordinal))
         {
             var end = match + oldText.Length;
-            if (!redactedSpans.Exists(span => span.Start < end && match < span.End))
+            if (!redactions.Exists(redaction => redaction.Redacted.Start < end && match < redaction.Redacted.End))
             {
                 index = match;
                 count++;
@@ -315,12 +315,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// one last parsed. A source that was not parsed yet has no subjects to tell the secret values, so every configuration
     /// value of its blocks is hidden.
     /// </summary>
-    private string RedactSource(string source, out List<MarkdownSpan> redactedSpans)
+    private string RedactSource(string source, out List<EmbeddedSubjectRedaction.Redaction> redactions)
     {
         var snapshot = _parseResult;
         return snapshot.Page is { } page && page.Source == source
-            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, out redactedSpans)
-            : EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>(), out redactedSpans);
+            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, out redactions)
+            : EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>(), out redactions);
     }
 
     // Reads from storage rather than Content, which lags behind an external edit until its file event arrives.

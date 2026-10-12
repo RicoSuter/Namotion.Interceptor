@@ -61,12 +61,6 @@ public sealed class MarkdownBlock
 
     public MarkdownSpan? ConfigurationSpan { get; init; }
 
-    /// <summary>
-    /// The span of a <c>json</c> code block that is the first thing inside the block, also for a block that it does not
-    /// configure, such as an invalid block. Equals <see cref="ConfigurationSpan"/> for a widget or slot block.
-    /// </summary>
-    internal MarkdownSpan? JsonFenceSpan { get; init; }
-
     public IReadOnlyList<MarkdownBlock> Children => ChildList;
 
     /// <summary>The list behind <see cref="Children"/>, which only the parser fills.</summary>
@@ -250,6 +244,15 @@ public sealed class MarkdownPage
 
     internal MarkdownBlock GetBlock(MarkdownBlockContainer container) => _containers[container];
 
+    /// <summary>
+    /// Gets the block of a node. A node inside an invalid block, which the parser does not read, is described as a block
+    /// at a place that allows no block, with an index of -1.
+    /// </summary>
+    internal MarkdownBlock DescribeBlock(MarkdownBlockContainer container) =>
+        _containers.TryGetValue(container, out var block)
+            ? block
+            : MarkdownPageParser.CreateBlock(container, Source, allowsBlocks: false, hasOwner: false);
+
     internal void Register(MarkdownBlockContainer container, MarkdownBlock block)
     {
         _containers[container] = block;
@@ -289,6 +292,9 @@ public static class MarkdownPageParser
 
     /// <summary>Finds the end of the line at <paramref name="position"/>, before its line ending, for the redaction of a page.</summary>
     internal static int GetLineEnd(string source, int position) => FindLineEnd(source, position);
+
+    /// <summary>Gets the position after the last character of a code block, also of one that is never closed.</summary>
+    internal static int GetCodeBlockEnd(string source, CodeBlock block) => FindCodeBlockEnd(source, block);
 
     private static MarkdownSpan[] FindCodeSpans(string source, MarkdownDocument document)
     {
@@ -375,7 +381,7 @@ public static class MarkdownPageParser
         }
     }
 
-    private static MarkdownBlock CreateBlock(
+    internal static MarkdownBlock CreateBlock(
         MarkdownBlockContainer container, string source, bool allowsBlocks, bool hasOwner)
     {
         var headStart = container.Span.Start;
@@ -421,12 +427,12 @@ public static class MarkdownPageParser
         }
 
         string? configurationJson = null;
-        MarkdownSpan? jsonFenceSpan = null;
+        MarkdownSpan? configurationSpan = null;
         var isOwner = kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot;
-        if (container.Count > 0 && container[0] is FencedCodeBlock { Info: "json" } configuration)
+        if (isOwner && container.Count > 0 && container[0] is FencedCodeBlock { Info: "json" } configuration)
         {
-            configurationJson = isOwner ? configuration.Lines.ToString() : null;
-            jsonFenceSpan = new MarkdownSpan(
+            configurationJson = configuration.Lines.ToString();
+            configurationSpan = new MarkdownSpan(
                 configuration.Span.Start, FindCodeBlockEnd(source, configuration) - configuration.Span.Start);
         }
 
@@ -441,8 +447,7 @@ public static class MarkdownPageParser
             HasClosingLine = container.HasClosingLine || container.IsClosingLine,
             HeadSpan = headSpan,
             ConfigurationJson = configurationJson,
-            ConfigurationSpan = isOwner ? jsonFenceSpan : null,
-            JsonFenceSpan = jsonFenceSpan
+            ConfigurationSpan = configurationSpan
         };
     }
 

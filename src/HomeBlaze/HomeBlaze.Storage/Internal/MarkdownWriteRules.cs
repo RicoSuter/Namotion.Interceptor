@@ -61,13 +61,15 @@ internal static class MarkdownWriteRules
     private const string ActiveContentMessage =
         $"Blocks cannot be added, changed or removed, and {MarkdownFile.ActiveContent} cannot be added or changed through " +
         "these operations; use the page editor. A block starts with a line of two or more colons and ends with its closing " +
-        "line, and text directly after a block without a closing line belongs to that block. Keep each block exactly as " +
-        "ReadRawContent shows it, with *** where it hides a secret value.";
+        "line, and text directly after a block without a closing line belongs to that block. Keep each block and each old " +
+        "subject(name) code block exactly as ReadRawContent shows it, with *** where it hides a secret value.";
 
     private const string BlockPositionMessage =
         "The change adds or removes an expression, or the first text, before a block without a #name, which would create " +
         "the subject of that block again. Change the text elsewhere or keep the expressions and paragraphs before such a " +
         "block, or ask an operator to give the block a #name in the page editor.";
+
+    private const string SubjectFenceKind = "SubjectFence";
 
     // The attribute that the globalization extension sets on an element with right-to-left text.
     private const string DirectionAttribute = "dir";
@@ -76,8 +78,9 @@ internal static class MarkdownWriteRules
     private static readonly HashSet<string> DiagramLanguages = new(StringComparer.OrdinalIgnoreCase) { "mermaid", "nomnoml" };
 
     /// <summary>
-    /// Ensures that the new source of a page keeps its blocks exactly as they are, in the same order and each block without
-    /// a #name directly on the page at the same position among the content of the page, and adds none of the
+    /// Ensures that the new source of a page keeps its blocks and old subject(name) code blocks exactly as they are, in the
+    /// same order and each block without a #name directly on the page at the same position among the content of the
+    /// page, and adds none of the
     /// <see cref="MarkdownFile.ActiveContent"/> that the old source does not already contain. A new page passes an empty
     /// old source.
     /// </summary>
@@ -88,7 +91,7 @@ internal static class MarkdownWriteRules
         var newContent = GetActiveContent(newSource);
 
         // Adding, changing, removing or moving a block would create, reconfigure or detach a running subject.
-        if (!oldContent.Blocks.Select(block => block.Text).SequenceEqual(newContent.Blocks.Select(block => block.Text), StringComparer.Ordinal) ||
+        if (!oldContent.Units.Select(unit => unit.Text).SequenceEqual(newContent.Units.Select(unit => unit.Text), StringComparer.Ordinal) ||
             !IsContainedIn(newContent.ActiveMarkup, oldContent.ActiveMarkup))
         {
             throw new ArgumentException(ActiveContentMessage, parameterName);
@@ -103,36 +106,76 @@ internal static class MarkdownWriteRules
 
     /// <summary>
     /// Gets the source to write for a page whose current source is <paramref name="source"/> when a change was made to
-    /// <paramref name="redactedSource"/>, the view of the page with secret values hidden, and gave
-    /// <paramref name="newContent"/>. Each block must be exactly as in the redacted view, and gets its text from the source
-    /// back, so a hidden value is kept and a guessed one is not accepted.
+    /// <paramref name="redactedSource"/>, the view of the page with secret values hidden by <paramref name="redactions"/>,
+    /// and gave <paramref name="newContent"/>. Each block and old subject(name) code block must be exactly as in the view
+    /// and gets its text from the source back, so a hidden value is kept and a guessed one is not accepted.
     /// </summary>
-    /// <exception cref="ArgumentException">The new content changes a block of the redacted view or breaks another rule of
+    /// <exception cref="ArgumentException">The new content changes such a unit of the view or breaks another rule of
     /// <see cref="EnsureActiveContentUnchanged"/>.</exception>
-    public static string RestoreBlocks(string source, string redactedSource, string newContent, string parameterName)
+    public static string RestoreBlocks(
+        string source,
+        string redactedSource,
+        IReadOnlyList<EmbeddedSubjectRedaction.Redaction> redactions,
+        string newContent,
+        string parameterName)
     {
-        var blocks = GetBlocks(MarkdownPageParser.Parse(source));
-        var redactedBlocks = GetBlocks(MarkdownPageParser.Parse(redactedSource));
-        var newBlocks = GetBlocks(MarkdownPageParser.Parse(newContent));
-        if (blocks.Count != redactedBlocks.Count ||
-            !redactedBlocks.Select(block => block.Text).SequenceEqual(newBlocks.Select(block => block.Text), StringComparer.Ordinal))
+        // Every redaction is inside a unit, so a unit of the source maps to the view by the redactions before its end.
+        var units = GetUnits(MarkdownPageParser.Parse(source));
+        var newUnits = GetUnits(MarkdownPageParser.Parse(newContent));
+        if (units.Count != newUnits.Count)
         {
             throw new ArgumentException(ActiveContentMessage, parameterName);
         }
 
+        for (var index = 0; index < units.Count; index++)
+        {
+            var start = MapToView(units[index].Span.Start, redactions);
+            var end = MapToView(units[index].Span.End, redactions);
+            var viewText = units[index].Kind + ":" + NormalizeLineEndings(redactedSource[start..end]);
+            if (!string.Equals(viewText, newUnits[index].Text, StringComparison.Ordinal))
+            {
+                throw new ArgumentException(ActiveContentMessage, parameterName);
+            }
+        }
+
         var restored = new StringBuilder(newContent.Length);
         var copied = 0;
-        for (var index = 0; index < newBlocks.Count; index++)
+        for (var index = 0; index < newUnits.Count; index++)
         {
-            var newSpan = newBlocks[index].Span;
-            var span = blocks[index].Span;
+            var newSpan = newUnits[index].Span;
+            var span = units[index].Span;
             restored.Append(newContent, copied, newSpan.Start - copied).Append(source, span.Start, span.Length);
             copied = newSpan.End;
         }
 
         var result = restored.Append(newContent, copied, newContent.Length - copied).ToString();
         EnsureActiveContentUnchanged(source, result, parameterName);
+
+        // The size of the content was checked before, so only the hidden values can make the result too large, and the
+        // message must not tell by how much.
+        if (Encoding.UTF8.GetByteCount(result) > MarkdownFile.MaxContentSize)
+        {
+            throw new ArgumentException(
+                $"The Markdown source would be larger than the limit of {MarkdownFile.MaxContentSize} bytes.", parameterName);
+        }
+
         return result;
+    }
+
+    private static int MapToView(int position, IReadOnlyList<EmbeddedSubjectRedaction.Redaction> redactions)
+    {
+        var shift = 0;
+        foreach (var redaction in redactions)
+        {
+            if (redaction.Source.End > position)
+            {
+                break;
+            }
+
+            shift += redaction.Redacted.Length - redaction.Source.Length;
+        }
+
+        return position + shift;
     }
 
     /// <summary>
@@ -185,7 +228,7 @@ internal static class MarkdownWriteRules
             }
         }
 
-        return new ActiveContentOfPage(GetBlocks(page), GetUnnamedBlockPositions(page), activeMarkup);
+        return new ActiveContentOfPage(GetUnits(page), GetUnnamedBlockPositions(page), activeMarkup);
     }
 
     /// <summary>
@@ -208,25 +251,40 @@ internal static class MarkdownWriteRules
     }
 
     /// <summary>
-    /// Gets each block with its kind and its text from the head line to its last line, which includes its configuration,
-    /// its content and the blocks inside it. A block in a list item or a quote is taken like a block directly on the page.
-    /// The text is compared with line feeds as line endings.
+    /// Gets the units that must stay as they are, in order: each block with its kind and its text from the head line to
+    /// its last line, which includes its configuration, its content and the blocks inside it, and each fenced code block
+    /// of the old subject(name) form outside of them, up to its closing fence or the end of the page. A block in a list
+    /// item or a quote is taken like a block directly on the page. The text is compared with line feeds as line endings.
     /// </summary>
-    private static List<BlockText> GetBlocks(MarkdownPage page)
+    private static List<UnitText> GetUnits(MarkdownPage page)
     {
         var source = page.Source;
         var lineEnds = GetLineEnds(source);
-        var blocks = new List<BlockText>(page.Blocks.Count);
+        var units = new List<UnitText>(page.Blocks.Count);
         foreach (var block in page.Blocks)
         {
             var end = lineEnds[Math.Clamp(block.EndLine, 1, lineEnds.Count) - 1];
             var start = Math.Min(block.HeadSpan.Start, end);
-            var text = block.Kind + ":" + source[start..end].Replace("\r\n", "\n", StringComparison.Ordinal);
-            blocks.Add(new BlockText(text, new MarkdownSpan(start, end - start)));
+            units.Add(new UnitText(block.Kind.ToString(), block.Kind + ":" + NormalizeLineEndings(source[start..end]), new MarkdownSpan(start, end - start)));
         }
 
-        return blocks;
+        var blockCount = units.Count;
+        foreach (var codeBlock in page.Document.Descendants<FencedCodeBlock>())
+        {
+            var start = codeBlock.Span.Start;
+            if (MarkdownSegmentBuilder.IsOldSubjectFence(codeBlock) &&
+                !units.Take(blockCount).Any(unit => unit.Span.Start <= start && start < unit.Span.End))
+            {
+                var end = MarkdownPageParser.GetCodeBlockEnd(source, codeBlock);
+                units.Add(new UnitText(SubjectFenceKind, SubjectFenceKind + ":" + NormalizeLineEndings(source[start..end]), new MarkdownSpan(start, end - start)));
+            }
+        }
+
+        units.Sort(static (left, right) => left.Span.Start.CompareTo(right.Span.Start));
+        return units;
     }
+
+    private static string NormalizeLineEndings(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal);
 
     // The position after the last character of each line, before its line ending, by 0-based line.
     private static List<int> GetLineEnds(string source)
@@ -304,8 +362,8 @@ internal static class MarkdownWriteRules
         }
     }
 
-    /// <summary>The text of a block for the comparison and the span of the block in its source.</summary>
-    private readonly record struct BlockText(string Text, MarkdownSpan Span);
+    /// <summary>The kind of a unit, its text for the comparison and its span in its source.</summary>
+    private readonly record struct UnitText(string Kind, string Text, MarkdownSpan Span);
 
-    private sealed record ActiveContentOfPage(List<BlockText> Blocks, List<int> UnnamedBlockPositions, List<string> ActiveMarkup);
+    private sealed record ActiveContentOfPage(List<UnitText> Units, List<int> UnnamedBlockPositions, List<string> ActiveMarkup);
 }
