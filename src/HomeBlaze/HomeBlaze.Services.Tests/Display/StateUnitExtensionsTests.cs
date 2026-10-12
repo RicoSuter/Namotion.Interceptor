@@ -1,5 +1,5 @@
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Host.Services.Display;
+using HomeBlaze.Services.Display;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
@@ -9,7 +9,7 @@ using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using HomeBlaze.Components.Abstractions.TimeZones;
 
-namespace HomeBlaze.Host.Services.Tests.Display;
+namespace HomeBlaze.Services.Tests.Display;
 
 public class StateUnitExtensionsTests
 {

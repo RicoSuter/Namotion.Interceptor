@@ -2,11 +2,10 @@ using System.Collections;
 using System.Globalization;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
-using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 
-namespace HomeBlaze.Host.Services.Display;
+namespace HomeBlaze.Services.Display;
 
 /// <summary>
 /// Extension methods for formatting property values with unit support.
