@@ -185,6 +185,32 @@ public class SubjectSetupDialogTests
     }
 
     [Fact]
+    public async Task WhenTheDialogOpens_ThenTheItemTypesOfSlotsAreNotOffered()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+
+        // Act
+        await OpenDialogAsync(page);
+
+        // Assert - a tab, a row of a value list, a panel and a case of a value map only exist inside their widgets.
+        await Assertions.Expect(TypeRow(page, "valuetile")).ToBeVisibleAsync();
+        await Assertions.Expect(TypeRow(page, "tablayout")).ToBeVisibleAsync();
+        foreach (var typeName in new[] { "tab", "valuerow", "expansionpanel", "valuemapcase" })
+        {
+            await Assertions.Expect(TypeRow(page, typeName)).ToHaveCountAsync(0);
+        }
+
+        await Assertions.Expect(Dialog(page).GetByText("Value tile", new() { Exact = true })).ToBeVisibleAsync();
+        // A type without a display name is listed under its class name split into words, so these are
+        // the names that the dialog would show for the excluded types.
+        foreach (var displayName in new[] { "Tab", "Value row", "Expansion panel", "Value map case" })
+        {
+            await Assertions.Expect(Dialog(page).GetByText(displayName, new() { Exact = true })).ToHaveCountAsync(0);
+        }
+    }
+
+    [Fact]
     public async Task WhenTheDialogOpens_ThenThePickerIsDescribedForAssistiveTechnology()
     {
         // Arrange

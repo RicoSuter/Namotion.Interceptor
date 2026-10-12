@@ -2,7 +2,6 @@ using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Services;
 
@@ -11,8 +10,6 @@ namespace HomeBlaze.Services;
 /// </summary>
 public static class SubjectPathResolverScopeExtensions
 {
-    private const int MaximumSingleParentDepth = 64;
-
     /// <summary>
     /// Resolves a subject from a path. A relative path resolves from the scope of
     /// <paramref name="from"/>, and its first segment can be a name the scope knows.
@@ -24,7 +21,7 @@ public static class SubjectPathResolverScopeExtensions
         PathStyle style,
         IInterceptorSubject from)
     {
-        var scope = FindScope(from);
+        var scope = SubjectScopeFinder.FindNearest<IPathScope>(from);
         if (scope is not IInterceptorSubject scopeSubject)
         {
             return resolver.ResolveSubject(path, style, from);
@@ -55,35 +52,8 @@ public static class SubjectPathResolverScopeExtensions
     }
 
     /// <summary>
-    /// Resolves a property value for display from a path whose last segment is the property name, through
-    /// <see cref="ResolveScopedDisplayableProperty"/>, so the value of a secret configuration property is never returned.
-    /// </summary>
-    public static object? ResolveScopedValue(
-        this SubjectPathResolver resolver,
-        string path,
-        PathStyle style,
-        IInterceptorSubject from)
-    {
-        return resolver.ResolveScopedDisplayableProperty(path, style, from)?.GetValue();
-    }
-
-    /// <summary>
-    /// Resolves a property for showing its value, for example in a page expression: the same as
-    /// <see cref="ResolveScopedProperty"/>, except that a property that is not <see cref="SubjectRegistryExtensions.IsDisplayable"/>, such as a secret configuration property, resolves to null, as if it did not exist.
-    /// </summary>
-    public static RegisteredSubjectProperty? ResolveScopedDisplayableProperty(
-        this SubjectPathResolver resolver,
-        string path,
-        PathStyle style,
-        IInterceptorSubject from)
-    {
-        var property = resolver.ResolveScopedProperty(path, style, from);
-        return property is not null && property.IsDisplayable() ? property : null;
-    }
-
-    /// <summary>
-    /// Resolves a property from a path whose last segment is the property name,
-    /// with the subject part resolved by <see cref="ResolveScopedSubject"/>.
+    /// Resolves the property a path ends at. The last segment of the path is the property name,
+    /// and the part before it is resolved by <see cref="ResolveScopedSubject"/>.
     /// </summary>
     public static RegisteredSubjectProperty? ResolveScopedProperty(
         this SubjectPathResolver resolver,
@@ -99,7 +69,7 @@ public static class SubjectPathResolverScopeExtensions
         var lastSlash = path.LastIndexOf('/');
         if (lastSlash < 0)
         {
-            var scopeSubject = FindScope(from) as IInterceptorSubject ?? from;
+            var scopeSubject = SubjectScopeFinder.FindNearest<IPathScope>(from) as IInterceptorSubject ?? from;
             return scopeSubject.TryGetRegisteredProperty(path);
         }
 
@@ -113,33 +83,30 @@ public static class SubjectPathResolverScopeExtensions
         return subject?.TryGetRegisteredProperty(propertyName);
     }
 
-    private static IPathScope? FindScope(IInterceptorSubject subject)
+    /// <summary>
+    /// Resolves a property for showing its value, for example in a page expression or a value widget: the same as
+    /// <see cref="ResolveScopedProperty"/>, except that a property that is not
+    /// <see cref="SubjectRegistryExtensions.IsDisplayable"/>, such as a secret configuration property, resolves to null,
+    /// as if it did not exist.
+    /// </summary>
+    public static RegisteredSubjectProperty? ResolveScopedDisplayableProperty(
+        this SubjectPathResolver resolver,
+        string path,
+        PathStyle style,
+        IInterceptorSubject from)
     {
-        // The usual chain has one parent per subject and is walked without an allocation. The search that
-        // handles several parents and cycles allocates, so it only runs when the chain branches or is
-        // longer than any real nesting.
-        var current = subject;
-        for (var depth = 0; depth < MaximumSingleParentDepth; depth++)
-        {
-            if (current is IPathScope scope)
-            {
-                return scope;
-            }
-
-            var parents = current.GetParents();
-            if (parents.Length == 0)
-            {
-                return null;
-            }
-
-            if (parents.Length > 1)
-            {
-                break;
-            }
-
-            current = parents[0].Property.Subject;
-        }
-
-        return current as IPathScope ?? current.TryGetFirstParent<IPathScope>();
+        var property = resolver.ResolveScopedProperty(path, style, from);
+        return property is not null && property.IsDisplayable() ? property : null;
     }
+
+    /// <summary>
+    /// Resolves the value for display of the property that <see cref="ResolveScopedDisplayableProperty"/> finds for the
+    /// path, so the value of a property that is not displayable is never returned.
+    /// </summary>
+    public static object? ResolveScopedValue(
+        this SubjectPathResolver resolver,
+        string path,
+        PathStyle style,
+        IInterceptorSubject from) =>
+        resolver.ResolveScopedDisplayableProperty(path, style, from)?.GetValue();
 }

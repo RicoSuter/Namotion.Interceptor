@@ -91,7 +91,7 @@ public class MarkdownShortFormTests
         string withEveryClosingLine, string shortForm)
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
         var serializer = fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>();
         var expectedPage = await fixture.AddPageAsync("Expected.md", withEveryClosingLine);
 
@@ -108,7 +108,7 @@ public class MarkdownShortFormTests
     public async Task WhenLayoutIsWrittenInTheShortForm_ThenEveryBlockFillsTheSlotItIsIn()
     {
         // Arrange
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync("Short.md", LayoutInTheShortForm);
@@ -205,7 +205,7 @@ public class MarkdownShortFormTests
             "::: Item",
             ":::: HomeBlaze.Components.Card#second Title=B"
         ];
-        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
         var typeProvider = fixture.Services.GetRequiredService<TypeProvider>();
         var editorPage = MarkdownPageParser.Parse(string.Join('\n', lines));
 

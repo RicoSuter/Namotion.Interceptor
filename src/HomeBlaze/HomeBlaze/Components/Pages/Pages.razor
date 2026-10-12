@@ -123,6 +123,15 @@
 
     private HotKeysContext? _hotKeysContext;
 
+    // How long the page waits after a change of the paths before it renders. Attaches and detaches come in bursts,
+    // such as the subjects of a device that connects, and every one of them inside this time ends in the same render.
+    // Nobody waits for a device that appears, so the time is long enough to keep a graph that changes all the time
+    // from rendering every open page more than a few times per second.
+    private static readonly TimeSpan PathsChangedRenderDelay = TimeSpan.FromMilliseconds(250);
+
+    private int _isPathsChangedRenderPending;
+    private volatile bool _isDisposed;
+
     private enum PageEditMode
     {
         View, // Read-only rendered page
@@ -133,6 +142,51 @@
 
     private bool IsEditing => _editMode != PageEditMode.View;
     private bool ShowEditor => _editMode is PageEditMode.Split or PageEditMode.Source;
+
+    protected override void OnInitialized()
+    {
+        // The resolver caches an absolute path, so a widget or an expression reads no property on the way to its target
+        // and the tracking scope does not see that an entry on the way appeared, was replaced or left.
+        PathResolver.PathsChanged += OnPathsChanged;
+    }
+
+    // Runs on the thread that changes the graph, inside the lock of the lifecycle interceptor.
+    private void OnPathsChanged()
+    {
+        if (Interlocked.Exchange(ref _isPathsChangedRenderPending, 1) == 0)
+        {
+            // Not Task.Run, which would carry the execution context of the writing thread into the render: that context
+            // can hold the read recorder of the tracking scope of another page.
+            ThreadPool.UnsafeQueueUserWorkItem(static page => _ = page.RenderAfterPathsChangedAsync(), this, preferLocal: false);
+        }
+    }
+
+    private async Task RenderAfterPathsChangedAsync()
+    {
+        await Task.Delay(PathsChangedRenderDelay).ConfigureAwait(false);
+
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                // Cleared on the dispatcher, as the last thing before the render. A change that comes while this callback
+                // still waits for the dispatcher is covered by the render below, so it queues nothing and at most one
+                // callback of a page waits there. A change that comes during the render finds the flag clear and causes another one.
+                Volatile.Write(ref _isPathsChangedRenderPending, 0);
+
+                if (!_isDisposed)
+                {
+                    StateHasChanged();
+                }
+            });
+        }
+        catch
+        {
+            // The dispatch can fail before the callback runs, for example when the circuit is gone. A flag that stayed set
+            // would keep the page from ever rendering for a change of the paths again.
+            Volatile.Write(ref _isPathsChangedRenderPending, 0);
+        }
+    }
 
     protected override Task OnAfterRenderAsync(bool firstRender)
     {
@@ -288,6 +342,9 @@
 
     public async ValueTask DisposeAsync()
     {
+        _isDisposed = true;
+        PathResolver.PathsChanged -= OnPathsChanged;
+
         if (_hotKeysContext != null)
         {
             await _hotKeysContext.DisposeAsync();

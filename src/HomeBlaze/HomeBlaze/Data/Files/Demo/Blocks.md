@@ -38,7 +38,7 @@ A motor next to this page, referenced by a relative path:
 ::: HomeBlaze.Components.Widget Path=../Conveyor
 :::
 
-The named motor has a temperature of {{ cardmotor/Temperature }} °C.
+The named motor has a temperature of {{ cardmotor/Temperature }}.
 ::
 
 ## Flow
@@ -73,7 +73,7 @@ Each `Tab` block is one tab. A tab with a name, like `#cooling`, stays the same 
 
 :: HomeBlaze.Components.TabLayout
 ::: Tab#cooling Title="Cooling Fan" Icon=Home
-The cooling fan has a temperature of {{ ../CoolingFan/Temperature }} °C.
+The cooling fan has a temperature of {{ ../CoolingFan/Temperature }}.
 
 :::: HomeBlaze.Components.Widget Path=../CoolingFan
 ::::

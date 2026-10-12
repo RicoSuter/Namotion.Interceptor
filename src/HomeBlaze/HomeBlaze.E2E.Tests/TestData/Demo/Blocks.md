@@ -26,7 +26,7 @@ A motor next to this page, referenced by a relative path:
 ::: HomeBlaze.Components.Widget Path=../Motor
 :::
 
-The named motor has a temperature of {{ cardmotor/Temperature }} °C.
+The named motor has a temperature of {{ cardmotor/Temperature }}.
 ::
 
 ## Flow

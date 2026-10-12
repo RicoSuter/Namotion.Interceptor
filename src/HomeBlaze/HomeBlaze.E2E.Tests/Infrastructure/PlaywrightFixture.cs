@@ -1,7 +1,9 @@
+using System.Text;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
@@ -37,6 +39,10 @@ public class PlaywrightFixture : IAsyncLifetime
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
 
+        // The registry of the components and the serializer of the configuration read the types once, when the first page asks
+        // for a component or for a configuration, so the test subject and its widget are added before any page is requested.
+        _factory.ServerServices.GetRequiredService<TypeProvider>().AddTypes([typeof(ControlsTestSubject), typeof(ControlsTestWidget)]);
+
         // The root subject is loaded by a background service, so the server serves requests before the
         // object graph behind them exists. The UI waits that window out on its own, but the wait would
         // otherwise land inside the first test's own timeout instead of here.
@@ -60,7 +66,8 @@ public class PlaywrightFixture : IAsyncLifetime
         // Registered once for the whole run, so that every test sees the same types. Resolving a qualified
         // name adds the type to the registry.
         var typeRegistry = _factory.ServerServices.GetRequiredService<SubjectTypeRegistry>();
-        if (typeRegistry.ResolveType(typeof(PlainConfigurableSubject).AssemblyQualifiedName!) is null)
+        if (typeRegistry.ResolveType(typeof(PlainConfigurableSubject).AssemblyQualifiedName!) is null
+            || typeRegistry.ResolveType(typeof(ControlsTestSubject).AssemblyQualifiedName!) is null)
         {
             throw new InvalidOperationException("The test-only subject type could not be registered");
         }
@@ -95,15 +102,35 @@ public class PlaywrightFixture : IAsyncLifetime
     /// show the generated properties editor. The serializer does not know the test-only type, so it cannot be
     /// created through the create dialog, which stores it in a file.
     /// </summary>
+    /// <param name="name">The name of the subject under the root, or null for a new one.</param>
+    /// <param name="label">The label of the subject, which it has before it enters the graph.</param>
     /// <returns>The name of the subject under the root, which is its path, and the subject.</returns>
-    public (string Name, PlainConfigurableSubject Subject) AddPlainSubjectToRoot()
+    public (string Name, PlainConfigurableSubject Subject) AddPlainSubjectToRoot(string? name = null, string label = "Original label")
     {
-        var name = $"Plain{Guid.NewGuid():N}";
+        name ??= CreatePlainSubjectName();
         var root = GetRoot();
-        var subject = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
-        subject.Label = "Original label";
+        var subject = CreatePlainSubject(label);
         root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
         return (name, subject);
+    }
+
+    /// <summary>
+    /// Creates a name that no subject under the root has, for a test that opens a page before the subject exists.
+    /// </summary>
+    public static string CreatePlainSubjectName() => $"Plain{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// Puts a new subject in the place of a subject of <see cref="AddPlainSubjectToRoot"/> in one write, like a
+    /// device that connects again and gets a new subject under the name it had.
+    /// </summary>
+    /// <returns>The subject that is under the root now.</returns>
+    public PlainConfigurableSubject ReplacePlainSubjectInRoot(string name, PlainConfigurableSubject replaced, string label)
+    {
+        var root = GetRoot();
+        var subject = CreatePlainSubject(label);
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
+        ServerServices.GetRequiredService<SubjectFactory>().DiscardSubject(replaced);
+        return subject;
     }
 
     /// <summary>
@@ -116,6 +143,90 @@ public class PlaywrightFixture : IAsyncLifetime
         children.Remove(name);
         root.Children = children;
         ServerServices.GetRequiredService<SubjectFactory>().DiscardSubject(subject);
+    }
+
+    /// <summary>
+    /// Writes a page of the demo folder, given by its file name, through the page like an editor does, which also
+    /// loads the page again.
+    /// </summary>
+    public async Task WriteDemoPageAsync(string name, string content)
+    {
+        var folder = (VirtualFolder)GetRoot().Children["Demo"];
+        var file = (MarkdownFile)folder.Children[name];
+        var bytes = Encoding.UTF8.GetBytes(content);
+
+        await RetryWhileFileIsHeldAsync(
+            () =>
+            {
+                // The condition is synchronous. The write runs on the thread pool so that waiting for it here
+                // cannot block a continuation that would want the synchronization context of the test.
+                Task.Run(async () =>
+                {
+                    using var stream = new MemoryStream(bytes);
+                    await file.WriteAsync(stream, CancellationToken.None);
+                }).GetAwaiter().GetResult();
+            },
+            $"The page {name} could not be written before the test started");
+    }
+
+    /// <summary>
+    /// The path of a page of the demo folder on disk, which the server reads and writes.
+    /// </summary>
+    public string GetDemoPagePath(string name) => GetPagePath(Path.Combine("Demo", name));
+
+    /// <summary>
+    /// The path on disk of a page, given relative to the test data folder of the server.
+    /// </summary>
+    public string GetPagePath(string relativePath)
+        => Path.Combine(ServerServices.GetRequiredService<RootManager>().DataDirectory, "TestData", relativePath);
+
+    /// <summary>
+    /// Reads a file that the server may hold open, such as a page that it is loading again after a write.
+    /// </summary>
+    public async Task<string> ReadFileAsync(string path)
+    {
+        var content = string.Empty;
+        await RetryWhileFileIsHeldAsync(
+            () => content = File.ReadAllText(path),
+            $"The file {path} could not be read");
+        return content;
+    }
+
+    // The server reads a file again after every write and keeps it open while it parses the page, which can still be
+    // going on for the write of the test before this one. A sharing violation fails when the file is opened and
+    // reads or writes nothing, so the operation is safe to try again.
+    private static async Task RetryWhileFileIsHeldAsync(Action operation, string failureMessage)
+    {
+        IOException? lastError = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    try
+                    {
+                        operation();
+                        return true;
+                    }
+                    catch (IOException exception)
+                    {
+                        lastError = exception;
+                        return false;
+                    }
+                },
+                TimeSpan.FromSeconds(60));
+        }
+        catch (TimeoutException) when (lastError is not null)
+        {
+            throw new IOException(failureMessage, lastError);
+        }
+    }
+
+    private PlainConfigurableSubject CreatePlainSubject(string label)
+    {
+        var subject = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
+        subject.Label = label;
+        return subject;
     }
 
     private FluentStorageContainer GetRoot()

@@ -27,4 +27,28 @@ public class MudBlazorIconResolverTests
         // Assert
         Assert.Equal(Icons.Material.Filled.Article, icon);
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void WhenIconNameOfAnOptionIsNotSet_ThenThereIsNoIcon(string? iconName)
+    {
+        // Act
+        var icon = MudBlazorIconResolver.ResolveOrNull(iconName);
+
+        // Assert
+        Assert.Null(icon);
+    }
+
+    [Theory]
+    [InlineData("Hub", Icons.Material.Filled.Hub)]
+    [InlineData("NoSuchIconName", Icons.Material.Filled.Article)]
+    public void WhenIconNameOfAnOptionIsSet_ThenItIsResolvedLikeAnyIconName(string iconName, string expected)
+    {
+        // Act
+        var icon = MudBlazorIconResolver.ResolveOrNull(iconName);
+
+        // Assert
+        Assert.Equal(expected, icon);
+    }
 }

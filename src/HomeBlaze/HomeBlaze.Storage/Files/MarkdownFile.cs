@@ -20,7 +20,7 @@ namespace HomeBlaze.Storage.Files;
 [InterceptorSubject]
 [FileExtension(".md")]
 [FileExtension(".markdown")]
-public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter, IPathScope
+public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter, IPathScope, ILinkScope
 {
     /// <summary>
     /// The largest Markdown source, in UTF-8 bytes, that the write operations accept, measured as the caller writes it,
@@ -205,6 +205,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         return _namedSubjects.GetValueOrDefault(name);
     }
+
+    /// <inheritdoc />
+    public string ResolveLink(string link) => _parser.ResolveLink(link, this);
 
     /// <summary>
     /// Returns the Markdown source with unevaluated {{ path }} expressions. Secret configuration values in the blocks

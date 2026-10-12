@@ -108,10 +108,10 @@ The navigation follows pages that are added, removed or changed while a browser 
 An expression is a path in double curly braces, like `{{ mymotor/CurrentSpeed }}`. The page shows the value of the property at that path and updates it when the value changes.
 
 ~~~~markdown
-The conveyor runs at {{ /Demo/Conveyor/CurrentSpeed }} RPM and has a temperature of {{ /Demo/Conveyor/Temperature }} °C.
+The conveyor runs at {{ /Demo/Conveyor/CurrentSpeed }} RPM and has a temperature of {{ /Demo/Conveyor/Temperature }}.
 ~~~~
 
-The reader sees the sentence with the two numbers in place of the expressions, and the numbers change while the page is open. The spaces inside the braces are optional.
+The reader sees the sentence with the two values in place of the expressions, and the values change while the page is open. The temperature comes with its unit, so the sentence does not write one. The spaces inside the braces are optional.
 
 - **Live**: The value updates when the property changes.
 - **HTML-safe**: The value is HTML-encoded, so a value can never add markup to the page.
@@ -133,6 +133,29 @@ The last segment of the path is the name of a property. Everything before it lea
 
 [Paths](paths.md) describes the path syntax in full. Its section "Paths on Markdown Pages" explains where a relative path starts and when a name is used.
 
+### Expression Formats
+
+An expression shows the formatted value by default. A format after a `|` at the end of the expression chooses the form:
+
+| Written | Shows | A temperature of 21.5 degrees Celsius |
+|---------|-------|---------------------------------------|
+| `{{ mymotor/Temperature }}` | The formatted value | `21.5°C` |
+| `{{ mymotor/Temperature \| display }}` | The formatted value, with the format written out | `21.5°C` |
+| `{{ mymotor/Temperature \| raw }}` | The raw value | `21.5` |
+
+Inside a markdown table the `|` of an expression is written `\|`, as in the table above, because a cell of a table ends at every `|` that is not escaped.
+
+- **Formatted value**: The text that the property panel shows for the property. It has the unit of the property, scaled where the unit allows it: 1234 W shows as `1.23 kW`. A number has at most two decimals, a boolean shows `Yes` or `No`, and a date is written in the time zone of the viewer.
+- **Raw value**: The plain value with a dot as the decimal separator on every system, and a date as ISO 8601. It has no unit, no scaling and no rounding, which makes it the form for an HTML attribute and for CSS, where a unit or a `Yes` would be wrong.
+- **Missing value**: A value that is not set shows nothing in both forms.
+- **Unknown format**: A format other than `display` and `raw` shows `Unknown format 'name'` in place of the value. [Page Errors](page-errors.md#expression-errors) has the message.
+
+A `style` attribute needs the raw value. In this sample the width of the bar is the speed of the conveyor in RPM divided by ten, in pixels:
+
+~~~~markdown
+<div style="height: 8px; background: var(--mud-palette-primary); width: calc({{ /Demo/Conveyor/CurrentSpeed | raw }} * 0.1px)"></div>
+~~~~
+
 ### Where an Expression Works
 
 - **In text**: In running text, in a heading, in a table cell, inside bold or italic text and in the text of a link.
@@ -140,7 +163,7 @@ The last segment of the path is the name of a property. Everything before it lea
 - **Inside HTML that you write**: In the text of an element and inside an attribute. This also holds for a `<code>` and a `<pre>` element.
 
 ~~~~markdown
-<span title="Target: {{ /Demo/Conveyor/TargetSpeed }} RPM">Speed: {{ /Demo/Conveyor/CurrentSpeed }} RPM</span>
+<span title="Target: {{ /Demo/Conveyor/TargetSpeed | raw }} RPM">Speed: {{ /Demo/Conveyor/CurrentSpeed }} RPM</span>
 ~~~~
 
 The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target speed.
@@ -154,8 +177,8 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 
 ### Expression Limits
 
-- **No formatting**: An expression shows the value as it is. Units, rounding and conditions are not supported.
-- **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list, it shows a technical type name.
+- **Two formats**: An expression has the formatted value and the raw value. Another unit, another number of decimals and conditions are not supported.
+- **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
 - **No braces and no `<` in a path**: The path cannot contain `{`, `}` or `<`. [Paths](paths.md) says how to write a file name that contains one of them.
 - **Single braces in text can disappear**: The markdown renderer reads single braces anywhere in the text of a page as attributes, and removes them from the text, when they are empty or when everything between them reads as attributes: a word like `{id}`, a class like `{.wide}`, an id like `{#top}` or a pair like `{key=value}`, also several of them with spaces between. `Use /api/{id}` is then shown as "Use /api/". To show such braces, put the text in inline code, or write a backslash before the opening brace, as in `/api/\{id}`. A heading that starts with `#` is the exception: such braces cut the heading off, so that everything from the opening brace to the end of the line is lost, also inside inline code and after a backslash. `## Path {id} syntax` is shown as "Path". Keep such braces out of these headings.
@@ -269,10 +292,10 @@ A card with a name and two arguments.
 | Text with spaces, or empty text | In double quotes | `Title="Motor Card"`, `Title=""` | `Title` of `Card` |
 | Path | As it is | `Path=/Devices/Sonos/Players[RINCON_000E58A0B1C201400]` | `Path` of `Widget` |
 | Whole number | Digits, with a `-` before a negative number | `MinWidth=320` | `MinWidth` of `FlowLayout` |
-| Number with a fraction | Digits, a dot and the digits of the fraction, with a `-` before a negative number | `RainCumulativeOffset=12.5` | None of the widgets that ship has one. `RainCumulativeOffset` of the device type `EcowittGateway` is an example |
+| Number with a fraction | Digits, a dot and the digits of the fraction, with a `-` before a negative number | `Maximum=2.5` | `Maximum` of `Progress` |
 | Yes or no | `true` or `false`. Upper and lower case do not matter for these two words, so `True` works as well | `IsSnapToGridEnabled=true` | `IsSnapToGridEnabled` of `CanvasLayout` |
 | Duration | Hours, minutes and seconds with colons, optionally with a fraction of a second | `SimulationInterval=00:00:01`, `SimulationInterval=00:00:00.500` | `SimulationInterval` of `Motor` |
-| One of a fixed set of values | The name of the value | `Mode=Input` | None of the widgets that ship has one. `Mode` of the device type `GpioPin` is an example |
+| One of a fixed set of values | The name of the value | `IconColor=Warning`, `Severity=Error`, `Kind=Icon` | `IconColor` of `Card`, `Severity` of `Alert`, `Kind` of `Indicator` |
 
 - **Without quotes**: A value without quotes runs up to the next space. It can contain any character except a space and a double quote, so a path with slashes and brackets needs no quotes.
 - **With quotes**: Inside double quotes, write `\"` for a double quote and `\\` for a backslash. Every other character stands for itself, so `\n` is a backslash and an `n` and no line break. A text with a line break goes into the [`json` block](#the-json-block).
@@ -300,6 +323,10 @@ Line 1: 'fast' is not a valid value for 'TargetSpeed'. Expected a value of type 
 ~~~~
 
 `Int32` is the technical name for a whole number, `Boolean` for yes or no and `TimeSpan` for a duration.
+
+#### Links in Block Options
+
+The `Href` and the `Image` of a `Card` are links, and they are written like a link in the text of the page. A link to a page is relative to the page, as in `Href="Blocks.md"` or `Href="../Docs/administration/pages.md#blocks"`. A route of the application, like `/pages/Demo/Blocks.md`, and a web address, like `https://example.com/picture.png`, are used as written. Any other relative link, such as `picture.png`, is used as written too, because only links to pages are resolved. The page keeps the value as you wrote it, and the card resolves it when it is shown. Editing the block in the page editor therefore writes your text back and not the resolved route.
 
 ### Names
 
@@ -338,7 +365,7 @@ The body of the card.
 ~~~~
 
 ~~~~text
-Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Available: Icon, Title.
+Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.
 ~~~~
 
 ### Closing and Nesting
@@ -589,7 +616,7 @@ The footer of the card, with a value: {{ ../Conveyor/TargetSpeed }} RPM.
 ::
 ~~~~
 
-**A slot whose blocks create a subject.** Some slots do not hold content directly. Each of their blocks creates a subject of a type that the widget chose, and the block takes the arguments of that type, an optional `#name` and a `json` block, like a widget block. The content of the block goes to the default slot of that subject. The `Tab` of a `TabLayout` is such a slot: each `Tab` block creates a tab with a `Title` and an `Icon`.
+**A slot whose blocks create a subject.** Some slots do not hold content directly. Each of their blocks creates a subject of a type that the widget chose, and the block takes the arguments of that type, an optional `#name` and a `json` block, like a widget block. The content of the block goes to the default slot of that subject. The `Tab` of a `TabLayout` is such a slot: each `Tab` block creates a tab with a `Title` and an `Icon`. The `Panel` of `ExpansionPanels` and the `Value` of a `ValueList` work the same way, and so does the `Case` of a `ValueMap`, which takes arguments but no content.
 
 ~~~~markdown
 :: HomeBlaze.Components.TabLayout
@@ -634,7 +661,7 @@ The footer of the card.
 Rules for all slots:
 
 - **Directly inside the widget**: A slot block stands directly inside the widget block that declares the slot. One level deeper, for example a `Footer` inside an `Item`, it is an error.
-- **Content only**: A slot that holds content takes no arguments, no `#name` and no `json` block. `Footer`, `Content` and `Item` are such slots.
+- **Content only**: A slot that holds content takes no arguments, no `#name` and no `json` block. `Footer`, `HeaderRight`, `Content` and `Item` are such slots.
 - **Empty lines are no content**: A block with nothing but empty lines in it has no content. Everything else is content, also an HTML comment. One case differs: where a widget has no place for loose content, for example between the `Item` blocks of a `FlowLayout`, an HTML comment is left out and is no error.
 - **An empty slot block**: A slot block without content still fills its slot. A card with an empty `Footer` block shows the divider of the footer with nothing below it.
 
@@ -690,7 +717,7 @@ The footer of the card.
 ~~~~
 
 ~~~~text
-Line 4: Card has no slot 'Footr'. Available: Content, Footer.
+Line 4: Card has no slot 'Footr'. Available: Content, Footer, HeaderRight.
 ~~~~
 
 **Arguments on a slot that holds content.** The footer of a card is content and has no properties.
@@ -837,14 +864,21 @@ These widgets ship with HomeBlaze and are made for pages. [Page Widgets](page-wi
 
 | Widget | What it is for | Reference |
 |--------|----------------|-----------|
-| `Card` | A titled box around page content, with a footer if you want one | [Card](page-widgets.md#card) |
+| `Card` | A titled box around page content, with a subtitle, a link, a header corner and a footer if you want them | [Card](page-widgets.md#card) |
 | `FlowLayout` | Cells next to each other that wrap to the width of the screen, for example cards side by side | [FlowLayout](page-widgets.md#flowlayout) |
 | `TabLayout` | Several tabs with page content, one of them shown at a time | [TabLayout](page-widgets.md#tablayout) |
 | `Widget` | The widget of a subject that exists somewhere else: in a file of its own, or in another block of the page | [Widget](page-widgets.md#widget) |
 | `GridLayout` | A grid with a fixed number of rows and columns and one subject per cell | [GridLayout](page-widgets.md#gridlayout) |
 | `CanvasLayout` | An area on which subjects are placed at any position | [CanvasLayout](page-widgets.md#canvaslayout) |
+| `ValueMap` | Text, colour and icon per value, read by the value widgets. It shows nothing itself | [ValueMap](page-widgets.md#valuemap) |
+| `ValueList` | Rows that each show a label and a value, for example the values of a device | [ValueList](page-widgets.md#valuelist) |
+| `ValueTile` | A small box with a label and one large value | [ValueTile](page-widgets.md#valuetile) |
+| `Indicator` | A state as a coloured chip or as an icon | [Indicator](page-widgets.md#indicator) |
+| `Progress` | A number as a bar between a minimum and a maximum | [Progress](page-widgets.md#progress) |
+| `ExpansionPanels` | Page content in panels that open and close | [ExpansionPanels](page-widgets.md#expansionpanels) |
+| `Alert` | A highlighted box for a note or a warning | [Alert](page-widgets.md#alert) |
 
-The names for the `Icon` of a card and of a tab are described under [Icons](page-widgets.md#icons).
+The names for an `Icon` are described under [Icons](page-widgets.md#icons), and the names for a colour under [Colours](page-widgets.md#colours).
 
 Every other type that can be configured works as a block as well, for example the sample motor or a device: its arguments are its configuration properties, and it shows the widget that its type has. A type without a widget shows the notice "No Widget component for" with its name.
 
@@ -925,7 +959,7 @@ Editing a subject elsewhere in the UI, for example through the edit button of it
 
 ## Not Supported
 
-- Formatting in expressions, like units, rounding and conditions.
+- More formats for expressions than `display` and `raw`, like another unit, another number of decimals or conditions.
 - Expressions in arguments. The value of an argument is fixed text.
 - Short names for types. A block always has the full type name.
 - The cells of a `GridLayout` and the nodes of a `CanvasLayout` as blocks. They are part of the configuration and stand in the `json` block.
@@ -1015,7 +1049,7 @@ This motor belongs to the page.
 
 :: HomeBlaze.Components.TabLayout#fans
 ::: Tab#cooling Title="Cooling Fan" Icon=AcUnit
-Temperature: **{{ /Demo/CoolingFan/Temperature }}** °C
+Temperature: **{{ /Demo/CoolingFan/Temperature }}**
 
 :::: HomeBlaze.Components.Widget Path=/Demo/CoolingFan
 ::::

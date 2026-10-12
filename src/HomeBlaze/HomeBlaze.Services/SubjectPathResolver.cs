@@ -25,6 +25,20 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     // (path, style) → Subject resolve cache (absolute paths only)
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
 
+    /// <summary>
+    /// Raised when a subject was attached to or detached from the graph: a path may lead to another subject than
+    /// before or to none, and a subject may have other paths. Whoever shows something that was resolved from a path
+    /// resolves it again.
+    /// </summary>
+    /// <remarks>
+    /// Raised once per attached or detached reference, so in bursts, on the thread that changes the graph and inside
+    /// the lock of the lifecycle interceptor that serializes all changes of the graph. A handler must return at once
+    /// and must not throw: it must not block, wait for another thread, change the graph or render. It notes the change
+    /// and does its work on another thread. Blazor's <c>InvokeAsync</c> does not qualify, because it runs the callback
+    /// inline when the dispatcher is idle.
+    /// </remarks>
+    public event Action? PathsChanged;
+
     /// <param name="getRoot">
     /// Resolves the current graph root. A delegate rather than the RootManager itself, because
     /// RootManager needs this resolver registered in the context before it loads the graph, and taking
@@ -65,8 +79,12 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
             if (root == null)
                 return null;
 
-            var remainingPath = path[1..];
-            return _resolveCache.GetOrAdd((path, style), _ => ResolveInternal(root, remainingPath, style));
+            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again.
+            var key = (path, style);
+            if (_resolveCache.TryGetValue(key, out var cached))
+                return cached;
+
+            return _resolveCache.GetOrAdd(key, ResolveInternal(root, path[1..], style));
         }
 
         // Explicit relative: ./...
@@ -156,11 +174,12 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     }
 
     /// <summary>
-    /// Invalidates caches when subject graph changes.
+    /// Invalidates caches when subject graph changes and raises <see cref="PathsChanged"/>.
     /// </summary>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         ClearCaches();
+        PathsChanged?.Invoke();
     }
 
     private void ClearCaches()
