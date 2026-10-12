@@ -257,10 +257,123 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var bar = page.GetByTestId("progress");
+        var bar = GetBarOutsideRows(page);
         await Assertions.Expect(bar).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Assertions.Expect(bar).ToHaveAttributeAsync("data-percent", "50");
     }
+
+    [Fact]
+    public async Task WhenRowHasAProgressAsContent_ThenTheBarHasAWidthAndStandsBeforeTheValue()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var row = GetRow(page, "Balken");
+        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveTextAsync("800", new() { Timeout = Timeout });
+
+        // Assert
+        var bar = row.GetByTestId("progress");
+        await Assertions.Expect(bar).ToBeVisibleAsync();
+        var barBox = await bar.BoundingBoxAsync();
+        var valueBox = await row.GetByTestId("value-text").BoundingBoxAsync();
+        Assert.True(barBox!.Width >= 100, $"The bar is {barBox.Width} pixels wide");
+        Assert.True(barBox.X + barBox.Width <= valueBox!.X, $"The bar ends at {barBox.X + barBox.Width}, the value starts at {valueBox.X}");
+    }
+
+    [Fact]
+    public async Task WhenCardHasImageAndFooter_ThenBothAreShown()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var card = GetCard(page, "Picture Card");
+        await Assertions.Expect(card.GetByTestId("card-footer")).ToHaveTextAsync("Picture card footer", new() { Timeout = Timeout });
+        var media = card.Locator(".mud-card-media");
+        await Assertions.Expect(media).ToHaveCountAsync(1);
+        await Assertions.Expect(media).ToHaveAttributeAsync("style", new Regex(@"background-image:\s*url\(.*/favicon\.ico"));
+    }
+
+    private static ILocator GetPanel(IPage page, string title) =>
+        page.GetByTestId("expansion-panel").Filter(new() { HasText = title });
+
+    [Fact]
+    public async Task WhenPanelIsExpandedOnThePage_ThenItsContentIsVisible()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var content = GetPanel(page, "Open Panel").GetByTestId("expansion-panel-content");
+        await Assertions.Expect(content).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(content).ToContainTextAsync("Open panel target 800");
+    }
+
+    [Fact]
+    public async Task WhenClosedPanelIsOpened_ThenItsContentShowsALiveValue()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var panel = GetPanel(page, "Closed Panel");
+        var content = panel.GetByTestId("expansion-panel-content");
+        await Assertions.Expect(content).ToBeAttachedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(content).ToBeHiddenAsync();
+
+        // Act
+        await panel.GetByText("Closed Panel", new() { Exact = true }).ClickAsync();
+
+        // Assert
+        await Assertions.Expect(content).ToBeVisibleAsync();
+        await Assertions.Expect(content).ToContainTextAsync(new Regex(@"speed [1-9]\d* RPM"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenLayoutIsSingle_ThenOpeningAPanelClosesTheOther()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var first = GetPanel(page, "Exclusive A").GetByTestId("expansion-panel-content");
+        var second = GetPanel(page, "Exclusive B").GetByTestId("expansion-panel-content");
+        await Assertions.Expect(first).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(second).ToBeHiddenAsync();
+
+        // Act
+        await GetPanel(page, "Exclusive B").GetByText("Exclusive B", new() { Exact = true }).ClickAsync();
+
+        // Assert
+        await Assertions.Expect(second).ToBeVisibleAsync();
+        await Assertions.Expect(first).ToBeHiddenAsync();
+    }
+
+    [Fact]
+    public async Task WhenPageHasAlert_ThenItShowsItsTextAndTheIconOfItsSeverity()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var alert = page.GetByTestId("alert");
+        await Assertions.Expect(alert).ToContainTextAsync("Alert text", new() { Timeout = Timeout });
+        await Assertions.Expect(alert).ToHaveClassAsync(new Regex("mud-alert-text-warning"));
+        await Assertions.Expect(alert.Locator("svg")).ToHaveCountAsync(1);
+    }
+
+    [Fact]
+    public async Task WhenAlertHasAOneLineText_ThenTheTextIsCentredNextToTheIcon()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var alert = page.GetByTestId("alert");
+        await Assertions.Expect(alert).ToContainTextAsync("Alert text", new() { Timeout = Timeout });
+
+        // Assert
+        var icon = await alert.Locator("svg").BoundingBoxAsync();
+        var text = await alert.Locator("p").BoundingBoxAsync();
+        Assert.InRange(Math.Abs((icon!.Y + icon.Height / 2) - (text!.Y + text.Height / 2)), 0, 4);
+    }
+
+    // A progress in the content of a row is a bar too, and the test of the share means the one on its own.
+    private static ILocator GetBarOutsideRows(IPage page) =>
+        page.Locator("[data-testid=progress]:not([data-testid=value-row] *)");
 
     // The path of an icon is what tells two icons of MudBlazor apart.
     private static Task<string?> GetIconShapeAsync(ILocator row) =>

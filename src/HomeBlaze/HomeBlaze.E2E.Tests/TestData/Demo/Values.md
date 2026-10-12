@@ -70,3 +70,32 @@ Body of the plain card.
 
 :: HomeBlaze.Components.Progress Path=valuemotor/Name
 ::
+
+:: HomeBlaze.Components.Card Title="Picture Card" Image="/favicon.ico"
+Body of the picture card.
+::: Footer
+Picture card footer
+::
+
+:: HomeBlaze.Components.ValueList
+::: Value Path=valuemotor/TargetSpeed Label="Balken"
+:::: HomeBlaze.Components.Progress Path=valuemotor/TargetSpeed Min=0 Max=1600
+::
+
+:: HomeBlaze.Components.ExpansionPanels
+::: Panel Title="Open Panel" Icon=Bed Expanded=true
+Open panel target {{ valuemotor/TargetSpeed }}
+::: Panel Title="Closed Panel"
+Closed panel speed {{ valuemotor/CurrentSpeed }} RPM
+::
+
+:: HomeBlaze.Components.ExpansionPanels Single=true
+::: Panel Title="Exclusive A" Expanded=true
+Exclusive A text
+::: Panel Title="Exclusive B"
+Exclusive B text
+::
+
+:: HomeBlaze.Components.Alert Severity=Warning
+Alert text
+::

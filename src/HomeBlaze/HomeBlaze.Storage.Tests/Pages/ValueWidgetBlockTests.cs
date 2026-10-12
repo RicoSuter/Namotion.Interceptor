@@ -110,4 +110,48 @@ public class ValueWidgetBlockTests
         Assert.Equal(1600, bar.Max);
         Assert.Equal(Color.Success, bar.Color);
     }
+
+    [Fact]
+    public async Task WhenPageHasExpansionPanelsAndAlert_ThenTheyHaveTheirOptionsAndDefaults()
+    {
+        // Arrange & Act
+        var page = await AddPageAsync("""
+            :: HomeBlaze.Components.ExpansionPanels#panels Single=true
+            ::: Panel Title="One" Icon=Bed Expanded=true
+            First
+            ::: Panel Title="Two"
+            Second
+            ::
+
+            :: HomeBlaze.Components.Alert#plain
+            Plain
+            ::
+
+            :: HomeBlaze.Components.Alert#warning Severity=Warning Variant=Outlined Icon=Bolt
+            Warning
+            ::
+            """);
+
+        // Assert
+        Assert.DoesNotContain("markdown-block-error", MarkdownPageFixture.Html(page.Children));
+
+        var panels = Assert.IsType<ExpansionPanels>(page.Children["panels"]);
+        Assert.True(panels.Single);
+        Assert.Equal(2, panels.Panels.Length);
+        Assert.Equal("One", panels.Panels[0].Title);
+        Assert.Equal("Bed", panels.Panels[0].Icon);
+        Assert.True(panels.Panels[0].Expanded);
+        Assert.NotNull(panels.Panels[0].Content);
+        Assert.False(panels.Panels[1].Expanded);
+
+        var plain = Assert.IsType<Alert>(page.Children["plain"]);
+        Assert.Equal(Severity.Info, plain.Severity);
+        Assert.Equal(Variant.Text, plain.Variant);
+        Assert.NotNull(plain.Content);
+
+        var warning = Assert.IsType<Alert>(page.Children["warning"]);
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Equal(Variant.Outlined, warning.Variant);
+        Assert.Equal("Bolt", warning.Icon);
+    }
 }
