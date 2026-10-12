@@ -485,9 +485,10 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// IConfigurationWriter - Saves the subject to its file.
+    /// IConfigurationWriter - Saves the file of the subject, or of the subject it is nested in through
+    /// [Configuration] properties.
     /// </summary>
-    /// <returns>False when the subject is not the subject of a file in this storage, or the storage is not connected.</returns>
+    /// <returns>False when no file in this storage contains the subject, or the storage is not connected.</returns>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = _connection;
@@ -499,10 +500,13 @@ public partial class FluentStorageContainer :
         {
             await connection.Worker.RunAsync(async token =>
             {
-                if (!connection.Index.TryGetEntry(subject, out var entry))
+                // Only the subject of a file has an entry. A subject nested in its configuration is written with it.
+                StorageEntry? entry = null;
+                var fileSubject = subject.TryGetConfigurationOwner(candidate => connection.Index.TryGetEntry(candidate, out entry));
+                if (fileSubject is null || entry is null)
                     return;
 
-                await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(subject)), token);
+                await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);
                 isWritten = true;
 
                 _logger?.LogDebug("Saved subject to storage: {Path}", entry.Path);

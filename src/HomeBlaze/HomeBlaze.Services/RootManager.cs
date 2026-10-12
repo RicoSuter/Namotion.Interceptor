@@ -135,17 +135,17 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     }
 
     /// <summary>
-    /// Writes the root subject configuration to disk if this is the root subject.
-    /// Called by ConfigurationManager when [Configuration] properties change.
+    /// Writes the root configuration to disk when the subject is the root or nested in its configuration.
     /// </summary>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        if (subject != Root)
+        var root = Root;
+        if (root == null || subject.TryGetConfigurationOwner(candidate => ReferenceEquals(candidate, root)) == null)
             return false;
 
         _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
 
-        var json = _serializer.Serialize(Root);
+        var json = _serializer.Serialize(root);
         await File.WriteAllTextAsync(ConfigurationPath, json, cancellationToken);
 
         _logger?.LogInformation("Root configuration saved successfully");

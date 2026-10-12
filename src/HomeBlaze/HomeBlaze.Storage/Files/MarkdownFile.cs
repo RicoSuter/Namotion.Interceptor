@@ -9,9 +9,7 @@ using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Tracking.Parent;
 using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
 
 namespace HomeBlaze.Storage.Files;
@@ -213,26 +211,27 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return true;
     }
 
-    private (int BlockIndex, IInterceptorSubject Subject)? FindBlock(
+    private static (int BlockIndex, IInterceptorSubject Subject)? FindBlock(
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
     {
         // The edited subject can be nested in the configuration of a block subject, for example a grid cell.
-        for (var current = subject; current is not null && !ReferenceEquals(current, this); current = GetSingleParent(current))
+        var blockIndex = -1;
+        var blockSubject = subject.TryGetConfigurationOwner(candidate =>
         {
-            foreach (var (blockIndex, blockSubject) in blockSubjects)
+            foreach (var (index, candidateBlockSubject) in blockSubjects)
             {
-                if (ReferenceEquals(blockSubject, current))
+                if (ReferenceEquals(candidateBlockSubject, candidate))
                 {
-                    return (blockIndex, current);
+                    blockIndex = index;
+                    return true;
                 }
             }
-        }
 
-        return null;
+            return false;
+        });
+
+        return blockSubject is null ? null : (blockIndex, blockSubject);
     }
-
-    private static IInterceptorSubject? GetSingleParent(IInterceptorSubject subject) =>
-        subject.TryGetRegisteredSubject()?.Parents is { Length: 1 } parents ? parents[0].Property.Subject : null;
 
     private static string FormatFilename(string name)
     {

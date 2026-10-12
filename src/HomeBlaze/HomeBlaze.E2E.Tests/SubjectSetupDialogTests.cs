@@ -824,9 +824,9 @@ public class SubjectSetupDialogTests
             await SaveButton(editDialog).ClickAsync();
 
             // Assert - the notification is the last step of persisting. The subject has no file of its own,
-            // so there is nothing on disk to read.
+            // so nothing is written and the notification says so.
             await Assertions.Expect(editDialog).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
-            await Assertions.Expect(page.GetByText("Configuration saved."))
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved"))
                 .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
             Assert.Equal("Changed label", subject.Label);
             Assert.Equal(3, subject.Limit);
@@ -1007,6 +1007,11 @@ public class SubjectSetupDialogTests
 
             // Assert
             await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // The dialog persists nothing here, because its caller stores the subject. A notification of the
+            // dialog would be shown by the time it has closed.
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToHaveCountAsync(0);
+
             await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath), TimeSpan.FromSeconds(10));
 
             // The file holds the edits of the motor form only when they were applied before it was written.
@@ -1042,6 +1047,42 @@ public class SubjectSetupDialogTests
                 // The failure of the test itself is the one to report.
                 _output.WriteLine($"Deleting {filePath} failed: {exception}");
             }
+        }
+    }
+
+    [Fact]
+    public async Task WhenApplyingTheConfigurationOfACreatedSubjectFails_ThenTheFailureIsReportedAndTheSubjectIsStored()
+    {
+        // A storage without a connection string cannot connect, which is what applying its configuration does.
+        var name = $"CreatedStorage{Guid.NewGuid():N}";
+        var filePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{name}.json");
+        var root = Assert.IsType<FluentStorageContainer>(_fixture.ServerServices.GetRequiredService<RootManager>().Root);
+        try
+        {
+            // Arrange
+            var page = await _fixture.CreatePageAsync();
+            await OpenDialogAsync(page);
+            await PickTypeAsync(page, "fluentstoragecontainer");
+            await NameInput(page).FillAsync(name);
+            await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // Act
+            await CreateButton(page).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(page.GetByText("Error applying configuration"))
+                .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath), TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            if (root.Children.TryGetValue(name, out var created))
+            {
+                await root.DeleteSubjectAsync(created, CancellationToken.None);
+            }
+
+            File.Delete(filePath);
         }
     }
 

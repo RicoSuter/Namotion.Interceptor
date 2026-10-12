@@ -486,6 +486,44 @@ public class MarkdownWidgetBlockTests
     }
 
     [Fact]
+    public async Task WhenSubjectIsHeldThroughStatePropertyOfBlockSubject_ThenWriteConfigurationReturnsFalse()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content = $":: {typeof(ConfigurationWriterTestSubject).FullName}#block Name=Block\n::";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var held = new ConfigurationWriterTestSubject();
+        ((ConfigurationWriterTestSubject)page.Children["block"]).StateItem = held;
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(held, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenSubjectInConfigurationOfBlockSubjectHasAnotherParent_ThenItsBlockIsWritten()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $":: {typeof(ConfigurationWriterTestSubject).FullName}#block Name=Block\n::");
+        var block = (ConfigurationWriterTestSubject)page.Children["block"];
+        var nested = new ConfigurationWriterTestSubject { Name = "Nested" };
+        block.Items = [nested];
+        block.StateItem = nested;
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(nested, CancellationToken.None);
+
+        // Assert
+        Assert.True(handled);
+        Assert.Contains("Nested", await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
     public async Task WhenSubjectIsNotFromThePage_ThenWriteConfigurationReturnsFalse()
     {
         // Arrange
