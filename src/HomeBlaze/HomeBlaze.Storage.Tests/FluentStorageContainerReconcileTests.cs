@@ -680,6 +680,45 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenLaterPassStartsTheFileWatcher_ThenOnlyThatPassComparesEveryFileByContent()
+    {
+        // Arrange: the file watcher cannot start at connect, because the directory appears only when the
+        // warning about that is logged. While nothing watches, the page changes without a new size or time.
+        var directory = Path.Combine(StorageDirectory.FullName, "Late");
+        var logger = new CallbackLogger((level, _) =>
+        {
+            if (level == LogLevel.Warning && !Directory.Exists(directory))
+            {
+                WriteFile("Late/Page.md", "aaaa");
+            }
+        });
+        var storage = CreateStorage(enableFileWatching: true, logger: logger, configure: container =>
+        {
+            // A clock that does not move, so that only the test runs a pass.
+            container.TimeProvider = new ManualTimeProvider();
+            container.ReconcileIntervalSeconds = 0;
+            container.ConnectionString = directory;
+        });
+        await storage.ConnectAsync(CancellationToken.None);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Page.md"]);
+        var pagePath = Path.Combine(directory, "Page.md");
+        var modified = File.GetLastWriteTimeUtc(pagePath);
+        File.WriteAllText(pagePath, "bbbb");
+        File.SetLastWriteTimeUtc(pagePath, modified);
+
+        // Act: the first pass starts the file watcher, the second one finds it running.
+        await storage.ReconcileAsync();
+        var contentAfterPassThatStartsWatcher = page.Content;
+        File.WriteAllText(pagePath, "cccc");
+        File.SetLastWriteTimeUtc(pagePath, modified);
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("bbbb", contentAfterPassThatStartsWatcher);
+        Assert.Equal("bbbb", page.Content);
+    }
+
+    [Fact]
     public async Task WhenFileWatcherCannotStartAgainAfterItRan_ThenThatIsLoggedAsWarningOncePerOutage()
     {
         // Arrange: the file watcher cannot start at connect, because the directory appears only when the

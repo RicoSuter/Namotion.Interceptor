@@ -321,6 +321,29 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenFileOfUnplacedDeviceIsDeletedThroughTheStorage_ThenThatDeviceIsDetachedAndStopped()
+    {
+        // Arrange: the first pass creates the device and ends before it places anything.
+        WriteFile("A.json", RecordingDevice.Serialize("A"));
+        WriteFile("B.gated");
+        WriteFile("C.gated");
+        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
+        var device = Assert.Single(RecordingDevice.Created);
+        await device.WhenStartedAsync();
+        _client!.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+
+        // Act
+        await storage.DeleteBlobAsync("A.json", CancellationToken.None);
+
+        // Assert
+        Assert.False(File.Exists(GetFullPath("A.json")));
+        await device.WhenStoppedAsync();
+        Assert.Equal(1, _recorder.CountDetachesOf(device));
+        Assert.False(IsAttached(device));
+    }
+
+    [Fact]
     public async Task WhenPlacedDeviceIsRemoved_ThenItIsDetachedOnce()
     {
         // Arrange

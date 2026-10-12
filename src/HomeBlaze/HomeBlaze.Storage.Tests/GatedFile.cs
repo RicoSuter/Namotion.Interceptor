@@ -16,6 +16,7 @@ public partial class GatedFile : IStorageFile
 {
     private static readonly ConcurrentQueue<Gate> Gates = new();
     private static int _loadCount;
+    private static int _createdWithFlowCount;
     private static Exception? _nextLoadFailure;
     private static Func<GatedFile, CancellationToken, Task>? _nextLoadCallback;
 
@@ -36,10 +37,21 @@ public partial class GatedFile : IStorageFile
         Storage = storage;
         FullPath = fullPath;
         Name = Path.GetFileName(fullPath);
+
+        if (!ExecutionContext.IsFlowSuppressed())
+        {
+            Interlocked.Increment(ref _createdWithFlowCount);
+        }
     }
 
     /// <summary>The number of loads since the last <see cref="Reset"/>.</summary>
     public static int LoadCount => Volatile.Read(ref _loadCount);
+
+    /// <summary>
+    /// The number of instances since the last <see cref="Reset"/> whose constructor ran with the execution
+    /// flow of the code that created them.
+    /// </summary>
+    public static int CreatedWithFlowCount => Volatile.Read(ref _createdWithFlowCount);
 
     /// <summary>
     /// Makes the next load pause until the returned gate is released. Loads without a gate run through.
@@ -67,6 +79,7 @@ public partial class GatedFile : IStorageFile
     {
         Gates.Clear();
         Volatile.Write(ref _loadCount, 0);
+        Volatile.Write(ref _createdWithFlowCount, 0);
         Volatile.Write(ref _nextLoadFailure, null);
         Volatile.Write(ref _nextLoadCallback, null);
     }

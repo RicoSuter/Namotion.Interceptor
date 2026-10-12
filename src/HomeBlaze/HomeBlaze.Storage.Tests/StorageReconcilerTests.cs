@@ -929,6 +929,54 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenPassQueuedBehindFailedFirstPassFinishes_ThenConnectDoesNotReplaceItsStatus()
+    {
+        // Arrange: what the connect does after its first pass is posted here and runs only when the test says so.
+        PausableBlobStorage? client = null;
+        FluentStorageContainer? storage = null;
+        Task? listingOfFirstPassReached = null;
+        WriteFile("Notes.md");
+        var connectContext = new ManualSynchronizationContext();
+        var previousContext = SynchronizationContext.Current;
+        Task<FluentStorageContainer> connect;
+        SynchronizationContext.SetSynchronizationContext(connectContext);
+        try
+        {
+            connect = ConnectAsync(configure: container =>
+            {
+                storage = container;
+                container.ClientDecorator = inner =>
+                {
+                    client = new PausableBlobStorage(inner);
+                    listingOfFirstPassReached = client.PauseNext(nameof(IBlobStorage.ListAsync));
+                    return client;
+                };
+            });
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        // A second pass is queued behind the first one, as the trigger does for a change during startup.
+        await listingOfFirstPassReached!;
+        var secondPass = storage!.ReconcileAsync();
+
+        // Act
+        client!.FailHangingCall(new IOException("The share did not answer."));
+        await secondPass;
+        var statusAfterSecondPass = storage.Status;
+        connectContext.RunAll();
+        var exception = await Record.ExceptionAsync(() => connect);
+
+        // Assert
+        Assert.IsType<IOException>(exception);
+        Assert.Equal(StorageStatus.Connected, statusAfterSecondPass);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+    }
+
+    [Fact]
     public async Task WhenUnchangedConfigurationIsAppliedWhileStorageConnects_ThenItWaitsAndNothingIsLoadedAgain()
     {
         // Arrange
@@ -1384,6 +1432,79 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenMarkdownFileUpdatesEmbeddedSubject_ThenItsConfigurationIsWrittenWithoutTheFlowOfThePass()
+    {
+        // Arrange
+        WriteFile("Page.md", $"# Page\n\n```subject(embedded)\n{CallbackSubject.Serialize("first")}\n```\n");
+        var storage = await ConnectAsync();
+        var embedded = Assert.IsType<CallbackSubject>(Assert.IsType<MarkdownFile>(storage.Children["Page.md"]).Children["embedded"]);
+        var recorder = new ConfigurationWriteFlowRecorder(embedded);
+        Context!.AddService<IWriteInterceptor>(recorder);
+
+        // Act
+        WriteFile("Page.md", $"# Page\n\n```subject(embedded)\n{CallbackSubject.Serialize("second, with another size")}\n```\n");
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("second, with another size", embedded.Name);
+        Assert.Equal([true], recorder.IsFlowSuppressedPerWrite);
+    }
+
+    [Fact]
+    public async Task WhenChangedJsonSubjectFileIsApplied_ThenItsConfigurationIsWrittenWithoutTheFlowOfThePass()
+    {
+        // Arrange
+        WriteFile("Subject.json", CallbackSubject.Serialize("first"));
+        var storage = await ConnectAsync();
+        var subject = Assert.IsType<CallbackSubject>(storage.Children["Subject"]);
+        var recorder = new ConfigurationWriteFlowRecorder(subject);
+        Context!.AddService<IWriteInterceptor>(recorder);
+
+        // Act
+        WriteFile("Subject.json", CallbackSubject.Serialize("second, with another size"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("second, with another size", subject.Name);
+        Assert.Equal([true], recorder.IsFlowSuppressedPerWrite);
+    }
+
+    [Fact]
+    public async Task WhenPassReleasesSubjectThatIsNotPlaced_ThenLifecycleHandlersRunWithoutTheFlowOfThePass()
+    {
+        // Arrange: the folder "Motor" holds the key that Motor.json asks for.
+        WriteFile("Motor/Page.md");
+        var storage = await ConnectAsync();
+        var recorder = new LifecycleFlowRecorder();
+        Context!.AddService<ILifecycleHandler>(recorder);
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        var changes = recorder.Changes;
+        Assert.IsType<VirtualFolder>(storage.Children["Motor"]);
+        Assert.Contains(changes, change => change is { Subject: Samples.Motor, IsContextDetach: true });
+        Assert.All(changes, change => Assert.True(change.IsFlowSuppressed, $"{change.Subject.GetType().Name}, context attach: {change.IsContextAttach}"));
+    }
+
+    [Fact]
+    public async Task WhenPassCreatesFileSubject_ThenItsConstructorRunsWithoutTheFlowOfThePass()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        WriteFile("Data.gated");
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.IsType<GatedFile>(storage.Children["Data.gated"]);
+        Assert.Equal(0, GatedFile.CreatedWithFlowCount);
+    }
+
+    [Fact]
     public async Task WhenSubjectFailsToRefreshAfterBlobIsWritten_ThenWriteSucceedsAndNextPassLoadsItAgain()
     {
         // Arrange
@@ -1584,9 +1705,9 @@ public class StorageReconcilerTests : StorageTestBase
 
     private sealed class LifecycleFlowRecorder : ILifecycleHandler
     {
-        private readonly List<(IInterceptorSubject Subject, bool IsContextAttach, bool IsFlowSuppressed)> _changes = [];
+        private readonly List<(IInterceptorSubject Subject, bool IsContextAttach, bool IsContextDetach, bool IsFlowSuppressed)> _changes = [];
 
-        public IReadOnlyList<(IInterceptorSubject Subject, bool IsContextAttach, bool IsFlowSuppressed)> Changes
+        public IReadOnlyList<(IInterceptorSubject Subject, bool IsContextAttach, bool IsContextDetach, bool IsFlowSuppressed)> Changes
         {
             get
             {
@@ -1603,9 +1724,41 @@ public class StorageReconcilerTests : StorageTestBase
             {
                 lock (_changes)
                 {
-                    _changes.Add((change.Subject, change.IsContextAttach, ExecutionContext.IsFlowSuppressed()));
+                    _changes.Add((change.Subject, change.IsContextAttach, change.IsContextDetach, ExecutionContext.IsFlowSuppressed()));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Records for every write of the name of one subject whether it ran without the execution flow.
+    /// </summary>
+    private sealed class ConfigurationWriteFlowRecorder(CallbackSubject subject) : IWriteInterceptor
+    {
+        private readonly List<bool> _isFlowSuppressedPerWrite = [];
+
+        public IReadOnlyList<bool> IsFlowSuppressedPerWrite
+        {
+            get
+            {
+                lock (_isFlowSuppressedPerWrite)
+                {
+                    return _isFlowSuppressedPerWrite.ToList();
+                }
+            }
+        }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, subject) && context.Property.Name == nameof(CallbackSubject.Name))
+            {
+                lock (_isFlowSuppressedPerWrite)
+                {
+                    _isFlowSuppressedPerWrite.Add(ExecutionContext.IsFlowSuppressed());
+                }
+            }
+
+            next(ref context);
         }
     }
 
