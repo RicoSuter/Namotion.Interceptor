@@ -8,7 +8,7 @@ namespace HomeBlaze.AI.Agents;
 /// The names of an agent's data files: a flat storage name derived from the agent's canonical path, followed by
 /// one suffix per file.
 /// </summary>
-public static class AgentStorage
+internal static class AgentStorage
 {
     /// <summary>The suffix of the timeline file.</summary>
     public const string TimelineSuffix = ".timeline.jsonl";

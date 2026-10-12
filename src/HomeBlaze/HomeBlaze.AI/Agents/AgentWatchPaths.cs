@@ -3,7 +3,7 @@ namespace HomeBlaze.AI.Agents;
 /// <summary>
 /// Watch path matching of agents.
 /// </summary>
-public static class AgentWatchPaths
+internal static class AgentWatchPaths
 {
     /// <summary>
     /// Trims entries, drops blank ones, adds a leading slash and removes a trailing one.

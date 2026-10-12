@@ -7,7 +7,7 @@ namespace HomeBlaze.AI.Blazor;
 /// </summary>
 /// <param name="FirstIndex">The index of the oldest entry of the row.</param>
 /// <param name="LastIndex">The index of the newest entry of the row, the one the row shows.</param>
-public readonly record struct AgentTimelineRow(int FirstIndex, int LastIndex)
+internal readonly record struct AgentTimelineRow(int FirstIndex, int LastIndex)
 {
     /// <summary>How many entries the row stands for.</summary>
     public int EntryCount => LastIndex - FirstIndex + 1;
@@ -16,7 +16,7 @@ public readonly record struct AgentTimelineRow(int FirstIndex, int LastIndex)
 /// <summary>
 /// Limits the chat to the newest rows of the timeline.
 /// </summary>
-public static class AgentTimelineRows
+internal static class AgentTimelineRows
 {
     /// <summary>How many rows the chat shows at first and adds per "Show earlier".</summary>
     public const int PageSize = 50;

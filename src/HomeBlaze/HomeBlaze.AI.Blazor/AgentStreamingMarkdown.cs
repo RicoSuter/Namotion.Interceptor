@@ -3,7 +3,7 @@ namespace HomeBlaze.AI.Blazor;
 /// <summary>
 /// Splits Markdown that is still streaming into a stable prefix, whose blocks are complete, and the tail after it.
 /// </summary>
-public static class AgentStreamingMarkdown
+internal static class AgentStreamingMarkdown
 {
     /// <summary>
     /// Returns the length of the longest prefix of <paramref name="text"/> that ends after a blank line outside a

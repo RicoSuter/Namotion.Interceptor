@@ -9,7 +9,7 @@ namespace HomeBlaze.AI.Agents.Cli;
 /// <param name="Arguments">Arguments, passed without a shell.</param>
 /// <param name="WorkingDirectory">Working directory of the process.</param>
 /// <param name="StandardInput">Written to standard input, which is then closed.</param>
-public sealed record ClaudeCliInvocation(string FileName, IReadOnlyList<string> Arguments, string WorkingDirectory, string StandardInput);
+internal sealed record ClaudeCliInvocation(string FileName, IReadOnlyList<string> Arguments, string WorkingDirectory, string StandardInput);
 
 /// <summary>What a CLI invocation produced.</summary>
 /// <param name="ExitCode">Exit code of the process.</param>
@@ -25,7 +25,7 @@ public sealed record ClaudeCliInvocation(string FileName, IReadOnlyList<string> 
 /// The streamed answer text, with a blank line between text segments of different content blocks, or null when no
 /// text was streamed.
 /// </param>
-public sealed record ClaudeCliRunResult(
+internal sealed record ClaudeCliRunResult(
     int ExitCode,
     string? SessionId,
     string? ResultText,
@@ -40,7 +40,7 @@ public sealed record ClaudeCliRunResult(
 /// <summary>
 /// Runs the Claude CLI, streams its text deltas and collects its result. Cancellation kills the whole process tree.
 /// </summary>
-public static class ClaudeCliProcess
+internal static class ClaudeCliProcess
 {
     private const int MaxStandardErrorLength = 16 * 1024;
 

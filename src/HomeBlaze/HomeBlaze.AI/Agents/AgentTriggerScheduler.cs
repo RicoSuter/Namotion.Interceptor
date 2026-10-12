@@ -4,7 +4,7 @@ namespace HomeBlaze.AI.Agents;
 /// Runs background turns when <see cref="AgentTriggerPolicy"/> says they are due. Requests may arrive from any
 /// thread; runs never overlap, and requests during a run coalesce into one follow-up run.
 /// </summary>
-public sealed class AgentTriggerScheduler
+internal sealed class AgentTriggerScheduler
 {
     // Task.Delay rejects delays above about 49.7 days; the 1-day cap keeps long waits within that and re-checked.
     private static readonly TimeSpan MaximumDelay = TimeSpan.FromDays(1);

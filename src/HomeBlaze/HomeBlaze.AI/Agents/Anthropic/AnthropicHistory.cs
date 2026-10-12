@@ -8,7 +8,7 @@ namespace HomeBlaze.AI.Agents.Anthropic;
 /// <summary>
 /// The outcome of <see cref="AnthropicHistory.CompactAsync"/>.
 /// </summary>
-public enum AnthropicCompactionOutcome
+internal enum AnthropicCompactionOutcome
 {
     /// <summary>The older messages were replaced by a new summary.</summary>
     Compacted,
@@ -27,7 +27,7 @@ public enum AnthropicCompactionOutcome
 /// Not thread-safe; the owning agent uses it from one turn at a time. Stored messages are normalized so that a
 /// restored history sends the same request bytes as the original, which keeps the prompt cache valid.
 /// </remarks>
-public sealed class AnthropicHistory
+internal sealed class AnthropicHistory
 {
     private const int ToolResultPreviewLength = 500;
     private const string SummaryPropertyName = "summary";

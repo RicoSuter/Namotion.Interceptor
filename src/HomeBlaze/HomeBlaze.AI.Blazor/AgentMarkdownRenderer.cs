@@ -11,7 +11,7 @@ namespace HomeBlaze.AI.Blazor;
 /// links with a target other than an absolute http, https or mailto URL are reduced to their text, and images are
 /// rendered as links so nothing loads without a click.
 /// </summary>
-public static class AgentMarkdownRenderer
+internal static class AgentMarkdownRenderer
 {
     private static readonly MarkdownPipeline Pipeline = CreatePipeline();
 

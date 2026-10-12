@@ -3,52 +3,52 @@ using System.Text.Json;
 namespace HomeBlaze.AI.Agents.Cli;
 
 /// <summary>An event of the Claude CLI stream-json output that agents use.</summary>
-public abstract record ClaudeStreamEvent;
+internal abstract record ClaudeStreamEvent;
 
 /// <summary>The session started; carries the id to resume it.</summary>
-public sealed record ClaudeInitEvent(string SessionId) : ClaudeStreamEvent;
+internal sealed record ClaudeInitEvent(string SessionId) : ClaudeStreamEvent;
 
 /// <summary>A chunk of answer text.</summary>
-public sealed record ClaudeTextDeltaEvent(string Text) : ClaudeStreamEvent;
+internal sealed record ClaudeTextDeltaEvent(string Text) : ClaudeStreamEvent;
 
 /// <summary>A model message or one of its content blocks started, so the next text starts a new segment.</summary>
-public sealed record ClaudeBlockStartEvent : ClaudeStreamEvent
+internal sealed record ClaudeBlockStartEvent : ClaudeStreamEvent
 {
     /// <summary>The shared instance; the event carries no data.</summary>
     public static readonly ClaudeBlockStartEvent Instance = new();
 }
 
 /// <summary>Subscription utilization.</summary>
-public sealed record ClaudeRateLimitEvent(AgentRateLimit RateLimit) : ClaudeStreamEvent;
+internal sealed record ClaudeRateLimitEvent(AgentRateLimit RateLimit) : ClaudeStreamEvent;
 
 /// <summary>An assistant message the CLI marked with an error code, for example <c>authentication_failed</c>.</summary>
-public sealed record ClaudeAssistantErrorEvent(string Code) : ClaudeStreamEvent;
+internal sealed record ClaudeAssistantErrorEvent(string Code) : ClaudeStreamEvent;
 
 /// <summary>A tool call the model made, as a complete assistant message reports it.</summary>
 /// <param name="Id">The tool use id, which the result refers to.</param>
 /// <param name="Name">The tool name, for example <c>WebSearch</c> or <c>mcp__homeblaze__browse</c>.</param>
 /// <param name="Arguments">The input as JSON.</param>
-public sealed record ClaudeToolUse(string Id, string Name, string Arguments);
+internal sealed record ClaudeToolUse(string Id, string Name, string Arguments);
 
 /// <summary>The tool calls of an assistant message.</summary>
-public sealed record ClaudeToolUseEvent(IReadOnlyList<ClaudeToolUse> ToolUses) : ClaudeStreamEvent;
+internal sealed record ClaudeToolUseEvent(IReadOnlyList<ClaudeToolUse> ToolUses) : ClaudeStreamEvent;
 
 /// <summary>The result of a tool call.</summary>
 /// <param name="ToolUseId">The id of the tool use.</param>
 /// <param name="Content">The text of the result.</param>
 /// <param name="IsError">Whether the call failed.</param>
-public sealed record ClaudeToolResult(string ToolUseId, string Content, bool IsError);
+internal sealed record ClaudeToolResult(string ToolUseId, string Content, bool IsError);
 
 /// <summary>The tool results of a user message.</summary>
-public sealed record ClaudeToolResultEvent(IReadOnlyList<ClaudeToolResult> Results) : ClaudeStreamEvent;
+internal sealed record ClaudeToolResultEvent(IReadOnlyList<ClaudeToolResult> Results) : ClaudeStreamEvent;
 
 /// <summary>The final result of the run.</summary>
-public sealed record ClaudeResultEvent(string? SessionId, string Subtype, bool IsError, string? Text, AgentUsage? Usage) : ClaudeStreamEvent;
+internal sealed record ClaudeResultEvent(string? SessionId, string Subtype, bool IsError, string? Text, AgentUsage? Usage) : ClaudeStreamEvent;
 
 /// <summary>
 /// Parses lines of <c>claude -p --output-format stream-json --verbose --include-partial-messages</c>.
 /// </summary>
-public static class ClaudeStreamJsonParser
+internal static class ClaudeStreamJsonParser
 {
     // DateTimeOffset.FromUnixTimeSeconds throws outside this range.
     private const long MinimumUnixSeconds = -62_135_596_800;

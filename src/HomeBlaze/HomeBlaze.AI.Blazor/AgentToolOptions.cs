@@ -13,13 +13,13 @@ namespace HomeBlaze.AI.Blazor;
 /// <param name="CanChangeState">Whether the tool can change state: devices, notifications or pages.</param>
 /// <param name="LoadsWebContent">Whether the tool is a backend tool that brings untrusted web content into the turn.</param>
 /// <param name="ChangesPages">Whether the tool changes Markdown pages and documents rather than devices.</param>
-public sealed record AgentToolOption(
+internal sealed record AgentToolOption(
     string Name, string? Description, bool IsOffered, bool CanChangeState, bool LoadsWebContent = false, bool ChangesPages = false);
 
 /// <summary>
 /// Builds the allowed-tools toggles of the agent edit form.
 /// </summary>
-public static class AgentToolOptions
+internal static class AgentToolOptions
 {
     /// <summary>The tool names shown when the offered tools cannot be listed.</summary>
     public static IReadOnlyList<string> FallbackToolNames { get; } =

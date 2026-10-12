@@ -4,7 +4,7 @@ namespace HomeBlaze.AI.Mcp;
 /// The orientation texts for clients of the HomeBlaze MCP tools: the server instructions for external MCP
 /// clients, and the parts the built-in agent preamble shares with them.
 /// </summary>
-public static class HomeBlazeMcpInstructions
+internal static class HomeBlazeMcpInstructions
 {
     /// <summary>Where the documentation and context of the installation is and how to read it.</summary>
     public const string MarkdownPages =

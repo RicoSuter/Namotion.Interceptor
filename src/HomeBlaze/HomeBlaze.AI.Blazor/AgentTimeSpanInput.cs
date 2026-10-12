@@ -6,7 +6,7 @@ namespace HomeBlaze.AI.Blazor;
 /// <summary>
 /// Formats and parses the time span fields of the agent edit form.
 /// </summary>
-public static class AgentTimeSpanInput
+internal static class AgentTimeSpanInput
 {
     private static readonly TimeSpan Maximum = TimeSpan.FromDays(365);
 

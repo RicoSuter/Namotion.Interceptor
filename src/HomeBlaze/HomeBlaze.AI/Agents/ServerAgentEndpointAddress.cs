@@ -7,7 +7,7 @@ namespace HomeBlaze.AI.Agents;
 /// <summary>
 /// Derives the agent route from the addresses the web server listens on, preferring HTTP and a loopback address.
 /// </summary>
-public sealed class ServerAgentEndpointAddress : IAgentEndpointAddress
+internal sealed class ServerAgentEndpointAddress : IAgentEndpointAddress
 {
     private readonly IServer _server;
 

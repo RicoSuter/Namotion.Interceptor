@@ -15,7 +15,7 @@ namespace HomeBlaze.AI.Mcp;
 /// <summary>
 /// Builds the HomeBlaze MCP tool configuration shared by the MCP server and the built-in agents.
 /// </summary>
-public static class HomeBlazeMcpConfigurationFactory
+internal static class HomeBlazeMcpConfigurationFactory
 {
     /// <summary>
     /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the

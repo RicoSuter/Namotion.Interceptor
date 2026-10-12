@@ -24,7 +24,7 @@ public enum AgentEffort
 /// <summary>
 /// Conversions of <see cref="AgentEffort"/>.
 /// </summary>
-public static class AgentEffortExtensions
+internal static class AgentEffortExtensions
 {
     /// <summary>
     /// The value used by the Claude CLI <c>--effort</c> flag and the API <c>output_config.effort</c> field.
@@ -149,7 +149,7 @@ public sealed class AgentTurnException : Exception
 /// An <see cref="IProgress{T}"/> that calls the handler synchronously on the reporting thread, unlike
 /// <see cref="Progress{T}"/>, which posts to the captured synchronization context.
 /// </summary>
-public sealed class SynchronousProgress<T> : IProgress<T>
+internal sealed class SynchronousProgress<T> : IProgress<T>
 {
     private readonly Action<T> _handler;
 

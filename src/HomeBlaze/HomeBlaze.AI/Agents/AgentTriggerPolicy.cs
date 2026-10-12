@@ -4,7 +4,7 @@ namespace HomeBlaze.AI.Agents;
 /// Decides when background runs are due: poll interval, change requests coalesced by the minimum run interval,
 /// manual runs, failure backoff and pauses. Not thread-safe; <see cref="AgentTriggerScheduler"/> serializes access.
 /// </summary>
-public sealed class AgentTriggerPolicy
+internal sealed class AgentTriggerPolicy
 {
     private static readonly TimeSpan MaximumBackoff = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan MaximumInterval = TimeSpan.FromDays(365);

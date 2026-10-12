@@ -7,7 +7,7 @@ namespace HomeBlaze.AI.Agents.Anthropic;
 /// <summary>
 /// Builds the chat options of an Anthropic turn.
 /// </summary>
-public static class AnthropicChatOptions
+internal static class AnthropicChatOptions
 {
     /// <summary>
     /// Creates the options for one model request of a turn. Any effort enables adaptive thinking and is sent as

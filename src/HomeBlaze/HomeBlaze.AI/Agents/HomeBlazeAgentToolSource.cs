@@ -7,7 +7,7 @@ namespace HomeBlaze.AI.Agents;
 /// <summary>
 /// Creates the HomeBlaze MCP tools for agents with <see cref="HomeBlazeMcpConfigurationFactory.CreateForAgents"/>.
 /// </summary>
-public sealed class HomeBlazeAgentToolSource : IAgentToolSource
+internal sealed class HomeBlazeAgentToolSource : IAgentToolSource
 {
     private readonly IServiceProvider _serviceProvider;
 

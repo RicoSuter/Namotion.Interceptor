@@ -10,7 +10,7 @@ namespace HomeBlaze.AI.Agents;
 /// <summary>
 /// What the state of a watched path holds.
 /// </summary>
-public enum AgentWatchedStateKind
+internal enum AgentWatchedStateKind
 {
     /// <summary>The browse result of the subject at the path, as text.</summary>
     Subject,
@@ -28,10 +28,10 @@ public enum AgentWatchedStateKind
 /// <param name="Path">The normalized watch path.</param>
 /// <param name="Kind">What <paramref name="Value"/> holds.</param>
 /// <param name="Value">The state; see <see cref="AgentWatchedStateKind"/>.</param>
-public sealed record AgentWatchedState(string Path, AgentWatchedStateKind Kind, JsonElement Value);
+internal sealed record AgentWatchedState(string Path, AgentWatchedStateKind Kind, JsonElement Value);
 
 /// <summary>Builds the prompts of agent turns.</summary>
-public static class AgentPromptBuilder
+internal static class AgentPromptBuilder
 {
     /// <summary>The marker a background reply starts with when nothing is noteworthy.</summary>
     public const string QuietMarker = "[quiet]";

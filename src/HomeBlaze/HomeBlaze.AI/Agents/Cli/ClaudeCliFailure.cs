@@ -5,7 +5,7 @@ namespace HomeBlaze.AI.Agents.Cli;
 /// <summary>
 /// Classifies failed CLI runs.
 /// </summary>
-public static class ClaudeCliFailure
+internal static class ClaudeCliFailure
 {
     /// <summary>Whether the run failed because the session to resume does not exist.</summary>
     public static bool IsSessionMissing(ClaudeCliRunResult result) =>

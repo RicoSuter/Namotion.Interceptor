@@ -16,7 +16,7 @@ public sealed class AgentTurnTokenRegistry
     /// <summary>
     /// Registers the tools of a turn. Dispose the registration when the turn ends.
     /// </summary>
-    public AgentTurnRegistration Register(AgentToolSet toolSet)
+    internal AgentTurnRegistration Register(AgentToolSet toolSet)
     {
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var key = Hash(token);
@@ -36,7 +36,7 @@ public sealed class AgentTurnTokenRegistry
 /// <summary>
 /// The token of a running turn. Disposing revokes it.
 /// </summary>
-public sealed class AgentTurnRegistration : IDisposable
+internal sealed class AgentTurnRegistration : IDisposable
 {
     private Action? _revoke;
 

@@ -14,7 +14,7 @@ namespace HomeBlaze.AI.Agents.Cli;
 /// <param name="FallbackModel">Model used when the main model is overloaded.</param>
 /// <param name="ResumeSessionId">Chat session to continue.</param>
 /// <param name="PersistSession">False for background runs, which leave no session behind.</param>
-public sealed record ClaudeCliOptions(
+internal sealed record ClaudeCliOptions(
     string SystemPrompt,
     string McpConfigurationPath,
     string? Model,
@@ -32,7 +32,7 @@ public sealed record ClaudeCliOptions(
 /// <summary>
 /// Builds the command line of the Claude CLI for agent turns.
 /// </summary>
-public static class ClaudeCliArguments
+internal static class ClaudeCliArguments
 {
     /// <summary>The MCP server name, which prefixes its tools as <c>mcp__homeblaze__</c>.</summary>
     public const string McpServerName = "homeblaze";
