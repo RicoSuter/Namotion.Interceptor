@@ -31,7 +31,7 @@ public class ParentTraversalBenchmark
     private const int ChainLength = 8;
     private const int ChainLengthBelowBranch = 4;
     private const int CycleLengthAboveSubject = 9;
-    private const int LongChainLength = 16;
+    private const int LongChainLength = 64;
 
     private ParentTraversalNode _leafBelowMatch;
     private ParentTraversalNode _leafWithoutMatch;
@@ -80,13 +80,11 @@ public class ParentTraversalBenchmark
         _nodeBelowCycle = new ParentTraversalNode();
         cycleAboveSubjectStart.OtherChild = _nodeBelowCycle;
 
-        var cycleOfTwoStart = new ParentTraversalNode(context);
-        var cycleOfTwoEnd = new ParentTraversalNode();
-        cycleOfTwoStart.Child = cycleOfTwoEnd;
-        cycleOfTwoEnd.Child = cycleOfTwoStart;
-        var firstBelowCycleOfTwo = new ParentTraversalNode();
-        cycleOfTwoEnd.OtherChild = firstBelowCycleOfTwo;
-        _leafBelowChainIntoCycle = AppendChain(firstBelowCycleOfTwo, LongChainLength - 1);
+        var ownParent = new ParentTraversalNode(context);
+        ownParent.Child = ownParent;
+        var firstBelowOwnParent = new ParentTraversalNode();
+        ownParent.OtherChild = firstBelowOwnParent;
+        _leafBelowChainIntoCycle = AppendChain(firstBelowOwnParent, LongChainLength - 1);
 
         var plainBranchRoot = new ParentTraversalNode(context);
         var plainLeft = new ParentTraversalNode();
@@ -117,8 +115,8 @@ public class ParentTraversalBenchmark
         Ensure(ReferenceEquals(StepUp(cycleAboveSubjectStart, CycleLengthAboveSubject), cycleAboveSubjectStart), nameof(MissBelowCycle));
         Ensure(_nodeBelowCycle.TryGetFirstParent<ParentTraversalMarkedNode>() is null, nameof(MissBelowCycle));
 
-        Ensure(ReferenceEquals(StepUp(_leafBelowChainIntoCycle, LongChainLength), cycleOfTwoEnd), nameof(MissBelowChainIntoCycle));
-        Ensure(ReferenceEquals(StepUp(cycleOfTwoEnd, 2), cycleOfTwoEnd), nameof(MissBelowChainIntoCycle));
+        Ensure(ReferenceEquals(StepUp(_leafBelowChainIntoCycle, LongChainLength), ownParent), nameof(MissBelowChainIntoCycle));
+        Ensure(ReferenceEquals(StepUp(ownParent, 1), ownParent), nameof(MissBelowChainIntoCycle));
         Ensure(_leafBelowChainIntoCycle.TryGetFirstParent<ParentTraversalMarkedNode>() is null, nameof(MissBelowChainIntoCycle));
 
         Ensure(CountOneParentSteps(_leafBelowBranchWithoutMatch) == ChainLengthBelowBranch, nameof(MissAboveBranch));
@@ -151,7 +149,8 @@ public class ParentTraversalBenchmark
     public int MissBelowCycle() => CountMatches(_nodeBelowCycle);
 
     /// <summary>
-    /// Sixteen subjects with one parent each below a cycle of two, without a match.
+    /// Sixty-four subjects with one parent each below a subject that is its own parent, without a match.
+    /// A long chain into a short cycle is the shape in which the search reads the most parents twice.
     /// </summary>
     [Benchmark(OperationsPerInvoke = Operations)]
     public int MissBelowChainIntoCycle() => CountMatches(_leafBelowChainIntoCycle);
