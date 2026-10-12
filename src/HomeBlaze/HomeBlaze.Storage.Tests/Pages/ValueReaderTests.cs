@@ -144,6 +144,26 @@ public class ValueReaderTests
         Assert.Equal($"Cannot resolve map: {map}", reading.MapError);
     }
 
+    [Theory]
+    [InlineData("meter/Power[")]
+    [InlineData("meter/Power/Extra")]
+    [InlineData("[")]
+    [InlineData("../../../x")]
+    public async Task WhenPathIsMalformed_ThenReadingIsMissingAndNothingThrows(string malformed)
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var asPath = ValueReader.Read(resolver, page, malformed, null, null);
+        var asMap = ValueReader.Read(resolver, page, "meter/Power", malformed, null);
+
+        // Assert
+        Assert.True(asPath.IsMissing);
+        Assert.Equal(ValueReader.MissingText, asPath.Text);
+        Assert.Equal($"Cannot resolve map: {malformed}", asMap.MapError);
+    }
+
     [Fact]
     public async Task WhenLabelIsNotGiven_ThenItIsTheTitleOrTheNameOfTheProperty()
     {
@@ -155,10 +175,12 @@ public class ValueReaderTests
         var given = ValueReader.GetLabel(reading, "Leistung");
         var fromProperty = ValueReader.GetLabel(reading, null);
         var withoutReading = ValueReader.GetLabel(null, null);
+        var fromTitle = ValueReader.GetLabel(ValueReader.Read(resolver, page, "meter/Flow", null, null), null);
 
         // Assert
         Assert.Equal("Leistung", given);
         Assert.Equal("Power", fromProperty);
+        Assert.Equal("Flow rate", fromTitle);
         Assert.Equal(string.Empty, withoutReading);
     }
 
@@ -199,6 +221,9 @@ public class ValueReaderTests
         Assert.Null(ValueReader.GetProgressPercent(true, 0, 1));
         Assert.Null(ValueReader.GetProgressPercent("0.5", 0, 1));
         Assert.Null(ValueReader.GetProgressPercent(0.5, 1, 1));
+        Assert.Null(ValueReader.GetProgressPercent(double.NaN, 0, 1));
+        Assert.Null(ValueReader.GetProgressPercent(0.5, double.NaN, 1));
+        Assert.Null(ValueReader.GetProgressPercent(0.5, 0, double.NaN));
         Assert.Equal(50, ValueReader.GetProgressPercent(0.5m, 0, 1));
         Assert.Equal(50, ValueReader.GetProgressPercent(5, 0, 10));
     }

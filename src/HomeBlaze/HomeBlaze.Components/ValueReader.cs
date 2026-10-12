@@ -5,6 +5,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using MudBlazor;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Components;
 
@@ -35,7 +36,7 @@ public static class ValueReader
     {
         var valueMap = ResolveMap(resolver, widget, map, out var mapError);
 
-        var property = string.IsNullOrEmpty(path) ? null : TryResolve(() => resolver.ResolveScopedProperty(path, PathStyle.Canonical, widget));
+        var property = string.IsNullOrEmpty(path) ? null : ResolveProperty(resolver, widget, path);
         var value = property?.GetValue();
         if (property is null || value is null)
         {
@@ -66,8 +67,7 @@ public static class ValueReader
             return label;
         }
 
-        var property = reading?.Property;
-        return property?.GetStateMetadata()?.Title ?? property?.Name ?? string.Empty;
+        return reading?.Property?.GetDisplayName() ?? string.Empty;
     }
 
     /// <summary>
@@ -85,16 +85,21 @@ public static class ValueReader
 
     /// <summary>
     /// Gets where a number stands between minimum and maximum, from 0 to 100, or null when the value is
-    /// no number or the range is empty.
+    /// no number (NaN included) or the range is empty or has a NaN bound.
     /// </summary>
     public static double? GetProgressPercent(object? value, double minimum, double maximum)
     {
-        if (maximum <= minimum || !IsNumber(value))
+        if (double.IsNaN(minimum) || double.IsNaN(maximum) || maximum <= minimum || !IsNumber(value))
         {
             return null;
         }
 
         var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        if (double.IsNaN(number))
+        {
+            return null;
+        }
+
         return Math.Clamp((number - minimum) / (maximum - minimum) * FullPercent, 0, FullPercent);
     }
 
@@ -109,7 +114,7 @@ public static class ValueReader
             return null;
         }
 
-        if (TryResolve(() => resolver.ResolveScopedSubject(map, PathStyle.Canonical, widget)) is ValueMap valueMap)
+        if (ResolveSubject(resolver, widget, map) is ValueMap valueMap)
         {
             return valueMap;
         }
@@ -119,12 +124,23 @@ public static class ValueReader
     }
 
     // A path is written by the author of a page, and a malformed one must not take the page down.
-    private static T? TryResolve<T>(Func<T?> resolve)
-        where T : class
+    private static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
     {
         try
         {
-            return resolve();
+            return resolver.ResolveScopedProperty(path, PathStyle.Canonical, widget);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IInterceptorSubject? ResolveSubject(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
+    {
+        try
+        {
+            return resolver.ResolveScopedSubject(path, PathStyle.Canonical, widget);
         }
         catch
         {

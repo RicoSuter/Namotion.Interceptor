@@ -542,5 +542,9 @@ public partial class TestMeter : IConfigurable
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; set; }
 
+    [Configuration]
+    [State("Flow rate")]
+    public partial decimal Flow { get; set; }
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
