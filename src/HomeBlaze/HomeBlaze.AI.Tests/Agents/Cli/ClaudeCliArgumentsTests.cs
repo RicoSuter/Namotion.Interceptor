@@ -33,7 +33,7 @@ public class ClaudeCliArgumentsTests
         Assert.Contains("--strict-mcp-config", arguments);
         Assert.Equal("/tmp/mcp.json", ValueAfter(arguments, "--mcp-config"));
         Assert.Equal("mcp__homeblaze", ValueAfter(arguments, "--allowedTools"));
-        Assert.Equal("project", ValueAfter(arguments, "--setting-sources"));
+        Assert.Equal(string.Empty, ValueAfter(arguments, "--setting-sources"));
         Assert.Equal("opus", ValueAfter(arguments, "--model"));
         Assert.Equal("xhigh", ValueAfter(arguments, "--effort"));
         Assert.Equal("sonnet", ValueAfter(arguments, "--fallback-model"));

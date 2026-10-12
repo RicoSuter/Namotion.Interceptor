@@ -33,7 +33,8 @@ public static class ClaudeCliArguments
 
     /// <summary>
     /// Builds the arguments. The run is isolated from the host user's setup: no built-in tools, only the HomeBlaze
-    /// MCP server, no user settings, hooks or plugins. <c>--bare</c> is not used because it disables OAuth login.
+    /// MCP server, no user, project or local settings, hooks, plugins or CLAUDE.md files. <c>--bare</c> is not used
+    /// because it disables OAuth login.
     /// </summary>
     public static IReadOnlyList<string> Build(ClaudeCliOptions options)
     {
@@ -52,7 +53,8 @@ public static class ClaudeCliArguments
             "--strict-mcp-config",
             "--mcp-config", options.McpConfigurationPath,
             "--allowedTools", "mcp__" + McpServerName,
-            "--setting-sources", "project"
+            // No source at all: "project" would load CLAUDE.md from the working directory and every folder above it.
+            "--setting-sources", string.Empty
         };
 
         if (!string.IsNullOrWhiteSpace(options.Model))
