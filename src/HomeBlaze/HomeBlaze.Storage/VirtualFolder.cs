@@ -106,7 +106,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// Creates a Markdown file in this folder and adds it as a page.
     /// </summary>
     /// <exception cref="ArgumentException">The name is not a plain file name ending in .md, the file exists, or the
-    /// content is larger than <see cref="Files.MarkdownFile.MaxContentSize"/> bytes.</exception>
+    /// content is larger than <see cref="Files.MarkdownFile.MaxContentSize"/> bytes or has embedded subjects, HTML or script links.</exception>
     /// <exception cref="InvalidOperationException">The folder is not in local storage.</exception>
     [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
     public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)

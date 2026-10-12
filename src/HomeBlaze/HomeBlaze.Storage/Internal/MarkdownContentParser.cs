@@ -8,6 +8,9 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Markdig;
 using Markdig.Renderers;
+using Markdig.Renderers.Html;
+using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -397,6 +400,70 @@ public sealed partial class MarkdownContentParser
             // Invalid JSON - return null
         }
         return null;
+    }
+
+    /// <summary>
+    /// Collects what in a Markdown source makes the page run code or subjects rather than show text, the way the page
+    /// parses it: the embedded subject blocks, and the raw HTML, element attributes and links with a scheme other than
+    /// http, https or mailto, each as its source text.
+    /// </summary>
+    internal static (List<string> SubjectBlocks, List<string> ActiveMarkup) GetActiveContent(string source)
+    {
+        var subjectBlocks = SubjectBlockRegex().Matches(source).Select(match => match.Value).ToList();
+
+        // Every block becomes the same marker, so the markup of a page whose blocks are unchanged parses the same.
+        var markdown = SubjectBlockRegex().Replace(
+            FrontmatterParser.GetContentAfterFrontmatter(source), SubjectMarkerPrefix + SubjectMarkerSuffix);
+        var document = Markdown.Parse(markdown, Pipeline);
+
+        var activeMarkup = new List<string>();
+        foreach (var node in document.Descendants())
+        {
+            switch (node)
+            {
+                case HtmlBlock htmlBlock:
+                    activeMarkup.Add("html:" + htmlBlock.Lines);
+                    break;
+                case HtmlInline htmlInline:
+                    activeMarkup.Add("html:" + htmlInline.Tag);
+                    break;
+                case LinkInline { Url: { } url } when !IsSafeUrl(url):
+                    activeMarkup.Add("url:" + url);
+                    break;
+                case AutolinkInline { IsEmail: false } autolink when !IsSafeUrl(autolink.Url):
+                    activeMarkup.Add("url:" + autolink.Url);
+                    break;
+                case LinkReferenceDefinition { Url: { } url } when !IsSafeUrl(url):
+                    activeMarkup.Add("url:" + url);
+                    break;
+            }
+
+            // Identifiers and classes only style the page; other attributes can hold script, for example onclick.
+            if (node.TryGetAttributes() is { Properties: { Count: > 0 } properties })
+            {
+                activeMarkup.Add("attributes:" + string.Join(" ", properties.Select(property => property.Key + "=" + property.Value)));
+            }
+        }
+
+        return (subjectBlocks, activeMarkup);
+    }
+
+    /// <summary>
+    /// Whether a link target is relative or uses http, https or mailto. Browsers ignore whitespace and control
+    /// characters in a scheme, so they are removed before it is compared.
+    /// </summary>
+    private static bool IsSafeUrl(string url)
+    {
+        var colon = url.IndexOf(':');
+        if (colon < 0 || url.AsSpan(0, colon).IndexOfAny('/', '?', '#') >= 0)
+        {
+            return true;
+        }
+
+        var scheme = new string(url.AsSpan(0, colon).ToArray().Where(character => !char.IsWhiteSpace(character) && !char.IsControl(character)).ToArray());
+        return scheme.Equals("http", StringComparison.OrdinalIgnoreCase) ||
+               scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ||
+               scheme.Equals("mailto", StringComparison.OrdinalIgnoreCase);
     }
 
     // Parsed segment types - internal for testing

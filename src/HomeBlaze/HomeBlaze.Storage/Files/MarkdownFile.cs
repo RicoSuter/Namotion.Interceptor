@@ -135,9 +135,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         _parser.RenderContent(Content, this, includeSourcePaths == true);
 
     /// <summary>
-    /// Replaces the whole Markdown source of the file.
+    /// Replaces the whole Markdown source of the file. Embedded subject blocks must stay exactly as they are, and raw HTML,
+    /// element attributes and links other than http, https and mailto only as far as the file already has them.
     /// </summary>
-    /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes.</exception>
+    /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes, or adds or
+    /// changes embedded subjects or HTML.</exception>
     /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
     [Operation(Title = "Replace Content", Description = "Replaces the whole markdown source of this file.", Icon = "EditNote")]
     public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
@@ -148,6 +150,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
+            MarkdownWriteRules.EnsureActiveContentUnchanged(await ReadSourceUnlockedAsync(cancellationToken), content, nameof(content));
             await WriteUnlockedAsync(bytes, cancellationToken);
         }
         finally
@@ -157,10 +160,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Replaces the one occurrence of <paramref name="oldText"/> in the Markdown source of the file with <paramref name="newText"/>.
+    /// Replaces the one occurrence of <paramref name="oldText"/> in the Markdown source of the file with <paramref name="newText"/>,
+    /// under the rules of <see cref="ReplaceContentAsync"/>.
     /// </summary>
-    /// <exception cref="ArgumentException">The text is empty, not found, found more than once, or the result is larger than
-    /// <see cref="MaxContentSize"/> bytes.</exception>
+    /// <exception cref="ArgumentException">The text is empty, not found, found more than once, the result is larger than
+    /// <see cref="MaxContentSize"/> bytes, or it adds or changes embedded subjects or HTML.</exception>
     /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
     [Operation(Title = "Replace Text", Description = "Replaces one exact, unique passage of the markdown source.", Icon = "FindReplace")]
     public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)
@@ -176,14 +180,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            // Read from storage rather than Content, which lags behind an external edit until its file event arrives.
-            string source;
-            await using (var stream = await ReadAsync(cancellationToken))
-            using (var reader = new StreamReader(stream))
-            {
-                source = await reader.ReadToEndAsync(cancellationToken);
-            }
-
+            var source = await ReadSourceUnlockedAsync(cancellationToken);
             var index = source.IndexOf(oldText, StringComparison.Ordinal);
             if (index < 0)
             {
@@ -201,12 +198,22 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             }
 
             var updated = string.Concat(source.AsSpan(0, index), newText, source.AsSpan(index + oldText.Length));
-            await WriteUnlockedAsync(MarkdownWriteRules.GetContentBytes(updated, nameof(newText)), cancellationToken);
+            var bytes = MarkdownWriteRules.GetContentBytes(updated, nameof(newText));
+            MarkdownWriteRules.EnsureActiveContentUnchanged(source, updated, nameof(newText));
+            await WriteUnlockedAsync(bytes, cancellationToken);
         }
         finally
         {
             _writeLock.Release();
         }
+    }
+
+    // Reads from storage rather than Content, which lags behind an external edit until its file event arrives.
+    private async Task<string> ReadSourceUnlockedAsync(CancellationToken cancellationToken)
+    {
+        await using var stream = await ReadAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync(cancellationToken);
     }
 
     private async Task WriteUnlockedAsync(byte[] bytes, CancellationToken cancellationToken)

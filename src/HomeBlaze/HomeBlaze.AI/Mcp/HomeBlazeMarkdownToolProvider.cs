@@ -28,21 +28,28 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     /// <summary>The name of the tool that creates a Markdown file in a folder.</summary>
     public const string CreateMarkdownToolName = "create_markdown";
 
+    private const string ActiveContentRule =
+        "Embedded subject blocks must stay exactly as they are, and HTML, element attributes and links other than http, " +
+        "https and mailto cannot be added. ";
+
     private const string EditMarkdownDescription =
         "Replace one passage of a Markdown page or document (*.md): old_text must occur exactly once in the Markdown source, " +
         "as returned by invoke_query method ReadRawContent (with {{ path }} expressions unevaluated), and is replaced by new_text. " +
         "Prefer this over write_markdown for small changes. Only Markdown files in local storage can be changed. " +
+        ActiveContentRule +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private const string WriteMarkdownDescription =
         "Replace the whole Markdown source of a Markdown page or document (*.md) with content (at most 64 KB). Read the " +
         "source first with invoke_query method ReadRawContent and keep what should stay; for small changes use edit_markdown. " +
         "Only Markdown files in local storage can be changed. " +
+        ActiveContentRule +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private const string CreateMarkdownDescription =
         "Create a Markdown page or document: folder_path is the path of a local storage folder or storage, name a plain " +
-        "file name ending in .md that does not exist there yet, content the Markdown source (at most 64 KB). " +
+        "file name ending in .md that does not exist there yet, content the Markdown source (at most 64 KB) without " +
+        "embedded subject blocks, HTML or links other than http, https and mailto. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private static readonly MarkdownTool EditMarkdownTool = new(

@@ -177,6 +177,113 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal("# Heading\n\nchanged by an agent", markdown.Content);
     }
 
+    private const string PageWithActiveContent = """
+        # Motors
+
+        <div class="note">Handle with care</div>
+
+        ```subject(motor)
+        {
+          "$type": "HomeBlaze.Samples.Motor",
+          "name": "Motor",
+          "targetSpeed": 1000
+        }
+        ```
+
+        The motor runs at {{ motor/CurrentSpeed }} rpm.
+        """;
+
+    [Theory]
+    [InlineData("The motor runs at", "The motor runs at\n\n```subject(other)\n{ \"$type\": \"HomeBlaze.Samples.Motor\" }\n```\n\nIt runs at")]
+    [InlineData("\"targetSpeed\": 1000", "\"targetSpeed\": 2000")]
+    [InlineData("rpm.", "rpm. <img src=x onerror=alert(1)>")]
+    [InlineData("rpm.", "rpm.\n\n<script>alert(1)</script>")]
+    [InlineData("Handle with care", "Handle <b onclick=\"alert(1)\">with</b> care")]
+    [InlineData("# Motors", "# Motors {onclick=\"alert(1)\"}")]
+    [InlineData("rpm.", "rpm. [Details](javascript:alert(1))")]
+    [InlineData("rpm.", "rpm. [Details](jav&#x61;script:alert(1))")]
+    [InlineData("rpm.", "rpm. [Details][manual]\n\n[manual]: JavaScript:alert(1)")]
+    [InlineData("rpm.", "rpm. <javascript:alert(1)>")]
+    public async Task WhenReplacingTextAddsOrChangesActiveContent_ThenItIsRejectedAndTheFileIsUnchanged(string oldText, string newText)
+    {
+        // Arrange
+        WriteFile("Motors.md", PageWithActiveContent);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
+        Assert.StartsWith("Embedded subjects, HTML, element attributes and links", exception.Message);
+        Assert.Equal(PageWithActiveContent, ReadFile("Motors.md"));
+    }
+
+    [Theory]
+    [InlineData("The motor runs at", "The conveyor motor runs at")]
+    [InlineData("rpm.", "rpm. See [the manual](https://example.com/manual) or [the notes](Notes.md).")]
+    [InlineData("rpm.", "rpm.\n\n| Speed | State |\n|:-----:|------:|\n| 1000 | ok |\n\n- [x] checked[^1]\n\n[^1]: A footnote.")]
+    [InlineData("<div class=\"note\">Handle with care</div>\n\n", "")]
+    public async Task WhenReplacingTextKeepsTheActiveContent_ThenTheTextIsChanged(string oldText, string newText)
+    {
+        // Arrange
+        WriteFile("Motors.md", PageWithActiveContent);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act
+        await markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(PageWithActiveContent.Replace(oldText, newText), ReadFile("Motors.md"));
+    }
+
+    [Fact]
+    public async Task WhenReplacingTheContentRemovesAnEmbeddedSubject_ThenItIsRejected()
+    {
+        // Arrange
+        WriteFile("Motors.md", PageWithActiveContent);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceContentAsync("# Motors\n\nNo motor any more.", CancellationToken.None));
+        Assert.Equal(PageWithActiveContent, ReadFile("Motors.md"));
+    }
+
+    [Fact]
+    public async Task WhenReplacingTheContentKeepsTheBlocksAndHtml_ThenItIsWritten()
+    {
+        // Arrange
+        WriteFile("Motors.md", PageWithActiveContent);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+        var content = PageWithActiveContent.Replace("# Motors", "# All motors") + "\n\nUpdated by an agent.";
+
+        // Act
+        await markdown.ReplaceContentAsync(content, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(content, ReadFile("Motors.md"));
+    }
+
+    [Theory]
+    [InlineData("# Notes\n\n```subject(motor)\n{ \"$type\": \"HomeBlaze.Samples.Motor\" }\n```")]
+    [InlineData("# Notes\n\n<img src=x onerror=alert(1)>")]
+    [InlineData("# Notes <span>inline</span>")]
+    [InlineData("# Notes {style=\"color:red\"}")]
+    [InlineData("[Run](javascript:alert(1))")]
+    public async Task WhenANewFileHasActiveContent_ThenCreatingItIsRejected(string content)
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => storage.CreateMarkdownFileAsync("Notes.md", content, CancellationToken.None));
+        Assert.False(File.Exists(GetFullPath("Notes.md")));
+    }
+
     [Fact]
     public async Task WhenTheStorageIsNotLocal_ThenTheWriteOperationsAreRefusedWithoutWriting()
     {
@@ -418,6 +525,7 @@ public class MarkdownFileWriteTests : IDisposable
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+        typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
 
         var services = new ServiceCollection();
         context = SubjectContextFactory.Create(services);
