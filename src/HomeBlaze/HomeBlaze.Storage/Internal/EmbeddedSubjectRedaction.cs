@@ -19,8 +19,9 @@ internal static class EmbeddedSubjectRedaction
 
     /// <summary>
     /// Returns the source with each secret value in an embedded subject block replaced by <see cref="RedactedValue"/>,
-    /// found through the configuration metadata of the subject the block created. A block without a subject or
-    /// with JSON that cannot be read keeps only its type. Blocks without secret values stay as they are.
+    /// found through the configuration metadata of the subject the block created. A block without a subject keeps only
+    /// its type, a block whose JSON cannot be read as an object becomes <see cref="RedactedValue"/>, and a block
+    /// without secret values stays as it is.
     /// </summary>
     public static string? Redact(string? source, IDictionary<string, IInterceptorSubject> children)
     {
@@ -50,12 +51,12 @@ internal static class EmbeddedSubjectRedaction
         }
         catch (JsonException)
         {
-            return KeepTypeOnly(json);
+            return RedactedValue;
         }
 
         if (node is not JsonObject jsonObject)
         {
-            return KeepTypeOnly(json);
+            return RedactedValue;
         }
 
         return RedactObject(jsonObject, subject) ? jsonObject.ToJsonString(IndentedOptions) : null;
@@ -94,7 +95,7 @@ internal static class EmbeddedSubjectRedaction
                 return RedactObject(childObject, child);
             case IDictionary dictionary when node is JsonObject entries:
                 var isRedacted = false;
-                foreach (var (key, entry) in entries.ToList())
+                foreach (var (key, entry) in entries)
                 {
                     if (entry is not null && dictionary.Contains(key))
                     {
