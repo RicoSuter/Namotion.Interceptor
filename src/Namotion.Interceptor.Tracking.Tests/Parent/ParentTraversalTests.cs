@@ -109,6 +109,28 @@ public class ParentTraversalTests
         Assert.Null(result);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(17)]
+    public async Task WhenMatchingSubjectIsOnCycleWithoutOtherMatch_ThenReturnsNull(int cycleLength)
+    {
+        // Arrange
+        var subject = new MarkedTraversalNode();
+        var lastOfCycle = ParentTraversalGraph.LinkChain(subject, cycleLength - 1);
+        ParentTraversalGraph.Link(lastOfCycle, subject);
+
+        // Act
+        var result = await ParentTraversalGraph.FindMarkerWithinTimeoutAsync(subject);
+
+        // Assert
+        Assert.Null(result);
+    }
+
     public static TheoryData<int, int> CycleAndTailLengths()
     {
         var data = new TheoryData<int, int>();
