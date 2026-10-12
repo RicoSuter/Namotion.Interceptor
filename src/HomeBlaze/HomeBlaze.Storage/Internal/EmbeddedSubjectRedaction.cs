@@ -19,6 +19,8 @@ internal static class EmbeddedSubjectRedaction
 {
     private const string RedactedValue = "***";
 
+    private static readonly char[] LineEndCharacters = ['\r', '\n'];
+
     private static readonly JsonSerializerOptions UnixIndentedOptions = new() { WriteIndented = true, NewLine = "\n" };
     private static readonly JsonSerializerOptions WindowsIndentedOptions = new() { WriteIndented = true, NewLine = "\r\n" };
 
@@ -88,6 +90,20 @@ internal static class EmbeddedSubjectRedaction
         var copied = 0;
         foreach (var (span, text) in replacements)
         {
+            // Spans do not overlap on a page that the parser reads as usual. Should they, the overlapping text is
+            // hidden with the replacement before it.
+            if (span.Start < copied)
+            {
+                if (span.End > copied)
+                {
+                    var previous = redactions[^1];
+                    redactions[^1] = previous with { Source = new MarkdownSpan(previous.Source.Start, span.End - previous.Source.Start) };
+                    copied = span.End;
+                }
+
+                continue;
+            }
+
             result.Append(source, copied, span.Start - copied);
             redactions.Add(new Redaction(span, new MarkdownSpan(result.Length, text.Length)));
             result.Append(text);
@@ -131,7 +147,7 @@ internal static class EmbeddedSubjectRedaction
 
         var start = codeBlock.Lines.Lines[0].Slice.Start;
         var end = MarkdownPageParser.GetLineEnd(source, codeBlock.Lines.Lines[codeBlock.Lines.Count - 1].Slice.Start);
-        var lineStart = start == 0 ? 0 : source.LastIndexOf('\n', start - 1) + 1;
+        var lineStart = start == 0 ? 0 : source.LastIndexOfAny(LineEndCharacters, start - 1) + 1;
         var linePrefix = source[lineStart..start];
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source, start);
         var prefixedText = text.Replace(lineEnding, lineEnding + linePrefix, StringComparison.Ordinal);

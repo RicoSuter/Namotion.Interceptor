@@ -568,6 +568,22 @@ public class MarkdownFileTests
     }
 
     [Fact]
+    public async Task WhenThePageEndsItsLinesWithCarriageReturnsAlone_ThenItIsRedactedAndAnEditKeepsTheSecret()
+    {
+        // Arrange
+        var page = $"# Gateway\r\r:: {typeof(EmbeddedSecretDevice).FullName}#gateway Host=h Password=s3cr3t\r::\r\rText.";
+        var markdown = await CreatePageInGraphAsync(page);
+
+        // Act
+        var view = markdown.ReadRawContent();
+        await markdown.ReplaceTextAsync("Text.", "Changed text.", CancellationToken.None);
+
+        // Assert
+        Assert.DoesNotContain("s3cr3t", view);
+        Assert.Equal(page.Replace("Text.", "Changed text."), await ReadStoredPageAsync(markdown));
+    }
+
+    [Fact]
     public async Task WhenABlockShowsASecretConfigurationPropertyInItsContent_ThenItsExpressionHasNoValue()
     {
         // Arrange

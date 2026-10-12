@@ -131,6 +131,11 @@ internal static class MarkdownWriteRules
         {
             var start = MapToView(units[index].Span.Start, redactions);
             var end = MapToView(units[index].Span.End, redactions);
+            if (start < 0 || end < start || end > redactedSource.Length)
+            {
+                throw new ArgumentException(ActiveContentMessage, parameterName);
+            }
+
             var viewText = units[index].Kind + ":" + NormalizeLineEndings(redactedSource[start..end]);
             if (!string.Equals(viewText, newUnits[index].Text, StringComparison.Ordinal))
             {
@@ -143,6 +148,12 @@ internal static class MarkdownWriteRules
         for (var index = 0; index < newUnits.Count; index++)
         {
             var newSpan = newUnits[index].Span;
+            if (newSpan.Start < copied)
+            {
+                // Units overlap only on a page that the parser does not read as usual.
+                throw new ArgumentException(ActiveContentMessage, parameterName);
+            }
+
             var span = units[index].Span;
             restored.Append(newContent, copied, newSpan.Start - copied).Append(source, span.Start, span.Length);
             copied = newSpan.End;
@@ -295,15 +306,24 @@ internal static class MarkdownWriteRules
         return units;
     }
 
-    private static string NormalizeLineEndings(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal);
+    private static string NormalizeLineEndings(string text) =>
+        text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
     // The position after the last character of each line, before its line ending, by 0-based line.
     private static List<int> GetLineEnds(string source)
     {
+        // A carriage return alone ends a line as well, as for the parser.
         var lineEnds = new List<int>();
-        for (var lineFeed = source.IndexOf('\n'); lineFeed >= 0; lineFeed = source.IndexOf('\n', lineFeed + 1))
+        for (var index = 0; index < source.Length; index++)
         {
-            lineEnds.Add(lineFeed > 0 && source[lineFeed - 1] == '\r' ? lineFeed - 1 : lineFeed);
+            if (source[index] == '\n')
+            {
+                lineEnds.Add(index > 0 && source[index - 1] == '\r' ? index - 1 : index);
+            }
+            else if (source[index] == '\r' && (index + 1 == source.Length || source[index + 1] != '\n'))
+            {
+                lineEnds.Add(index);
+            }
         }
 
         lineEnds.Add(source.Length);
