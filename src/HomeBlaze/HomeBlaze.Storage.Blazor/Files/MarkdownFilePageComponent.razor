@@ -5,12 +5,14 @@
 @using Namotion.Interceptor
 @using HomeBlaze.Services
 @using HomeBlaze.Components.Abstractions.TimeZones
+@using Microsoft.JSInterop
 
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
 @implements ISubjectComponent
 @implements IDisposable
 @inject ITimeZoneDisplay TimeZone
+@inject IJSRuntime JsRuntime
 
 <CascadingValue Value="@IsEditing" Name="IsEditing">
     <div class="markdown-content" style="position: relative;">
@@ -44,6 +46,8 @@
     .markdown-content th, .markdown-content td { border: 1px solid rgba(128,128,128,0.3); padding: 0.5rem; text-align: left; }
     .markdown-content th { background: rgba(0,0,0,0.05); font-weight: 500; }
     .markdown-content blockquote { border-left: 4px solid rgba(128,128,128,0.3); margin: 1rem 0; padding-left: 1rem; color: rgba(128,128,128,0.8); }
+    .markdown-content img { max-width: 100%; height: auto; }
+    .markdown-content img:not([width]) { max-height: 80vh; }
     .markdown-content a { color: #7e6fff; text-decoration: none; }
     .markdown-content a:hover { text-decoration: underline; }
     .markdown-content .markdown-block-error { border: 1px solid var(--mud-palette-error); color: var(--mud-palette-error); border-radius: 4px; padding: 0.5rem 0.75rem; margin: 0.75rem 0; font-family: monospace; font-size: 0.85rem; }
@@ -56,6 +60,8 @@
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
 
+    private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownFilePageComponent.razor.js";
+
     private MarkdownFile? File => Subject as MarkdownFile;
 
     private bool IsLoading => File?.Content is null;
@@ -67,6 +73,25 @@
     }
 
     private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            // The script keeps watching the pictures of every page of the tab, so its module is not kept here.
+            await using var module = await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            await module.InvokeVoidAsync("watchPictures");
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone, so there is no page with pictures to watch.
+        }
+    }
 
     public void Dispose()
     {
