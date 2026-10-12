@@ -15,6 +15,17 @@ public class DataDirectorySeederTests : IDisposable
 
     private string RootFile => Path.Combine(_dataDirectory.FullName, "Root.json");
 
+    private string SeedDocumentationDirectory => Path.Combine(_seedDirectory.FullName, "Files", "Docs");
+
+    private string DataDocumentationDirectory => Path.Combine(_dataDirectory.FullName, "Files", "Docs");
+
+    private void WriteSeedDocumentation()
+    {
+        Directory.CreateDirectory(Path.Combine(SeedDocumentationDirectory, "guides"));
+        File.WriteAllText(Path.Combine(SeedDocumentationDirectory, "home.md"), "seed-home");
+        File.WriteAllText(Path.Combine(SeedDocumentationDirectory, "guides", "setup.md"), "seed-setup");
+    }
+
     [Fact]
     public void WhenRootFileIsMissingAndSeedIsSet_ThenSeedIsCopied()
     {
@@ -97,6 +108,114 @@ public class DataDirectorySeederTests : IDisposable
         Assert.Equal(2, copiedFileCount);
         Assert.Equal("user-plugins", File.ReadAllText(Path.Combine(_dataDirectory.FullName, "Files", "Plugins.json")));
         Assert.True(File.Exists(RootFile));
+    }
+
+    [Fact]
+    public void WhenTargetDirectoryHasOtherContent_ThenItIsReplacedWithSeedContent()
+    {
+        // Arrange
+        WriteSeedDocumentation();
+        Directory.CreateDirectory(Path.Combine(DataDocumentationDirectory, "removed-folder"));
+        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
+        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "removed.md"), "old-removed");
+        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "removed-folder", "page.md"), "old-page");
+
+        // Act
+        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
+            RootFile, _seedDirectory.FullName, DataDirectorySeeder.DocumentationDirectory);
+
+        // Assert
+        Assert.Equal(2, copiedFileCount);
+        Assert.Equal("seed-home", File.ReadAllText(Path.Combine(DataDocumentationDirectory, "home.md")));
+        Assert.Equal("seed-setup", File.ReadAllText(Path.Combine(DataDocumentationDirectory, "guides", "setup.md")));
+        Assert.False(File.Exists(Path.Combine(DataDocumentationDirectory, "removed.md")));
+        Assert.False(Directory.Exists(Path.Combine(DataDocumentationDirectory, "removed-folder")));
+    }
+
+    [Fact]
+    public void WhenTargetDirectoryDoesNotExist_ThenItIsCreatedFromSeed()
+    {
+        // Arrange
+        WriteSeedDocumentation();
+
+        // Act
+        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
+            RootFile, _seedDirectory.FullName, DataDirectorySeeder.DocumentationDirectory);
+
+        // Assert
+        Assert.Equal(2, copiedFileCount);
+        Assert.Equal("seed-home", File.ReadAllText(Path.Combine(DataDocumentationDirectory, "home.md")));
+        Assert.Equal("seed-setup", File.ReadAllText(Path.Combine(DataDocumentationDirectory, "guides", "setup.md")));
+    }
+
+    [Fact]
+    public void WhenDirectoryIsReplaced_ThenFilesOutsideItAreKept()
+    {
+        // Arrange
+        WriteSeedDocumentation();
+        File.WriteAllText(RootFile, "existing");
+        Directory.CreateDirectory(Path.Combine(_dataDirectory.FullName, "Files"));
+        File.WriteAllText(Path.Combine(_dataDirectory.FullName, "Files", "Plugins.json"), "user-plugins");
+
+        // Act
+        DataDirectorySeeder.ReplaceDirectory(
+            RootFile, _seedDirectory.FullName, DataDirectorySeeder.DocumentationDirectory);
+
+        // Assert
+        Assert.Equal("existing", File.ReadAllText(RootFile));
+        Assert.Equal("user-plugins", File.ReadAllText(Path.Combine(_dataDirectory.FullName, "Files", "Plugins.json")));
+        Assert.False(Directory.Exists(Path.Combine(_dataDirectory.FullName, "Files", "Devices")));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void WhenSeedDirectoryIsNotSet_ThenTargetDirectoryIsKept(string? seedDirectory)
+    {
+        // Arrange
+        Directory.CreateDirectory(DataDocumentationDirectory);
+        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
+
+        // Act
+        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
+            RootFile, seedDirectory, DataDirectorySeeder.DocumentationDirectory);
+
+        // Assert
+        Assert.Equal(0, copiedFileCount);
+        Assert.Equal("old-home", File.ReadAllText(Path.Combine(DataDocumentationDirectory, "home.md")));
+    }
+
+    [Fact]
+    public void WhenSeedDirectoryDoesNotExist_ThenTargetDirectoryIsKept()
+    {
+        // Arrange
+        Directory.CreateDirectory(DataDocumentationDirectory);
+        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
+
+        // Act
+        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
+            RootFile, Path.Combine(_seedDirectory.FullName, "missing"), DataDirectorySeeder.DocumentationDirectory);
+
+        // Assert
+        Assert.Equal(0, copiedFileCount);
+        Assert.Equal("old-home", File.ReadAllText(Path.Combine(DataDocumentationDirectory, "home.md")));
+    }
+
+    [Fact]
+    public void WhenSeedHasNoSuchDirectory_ThenTargetDirectoryIsKept()
+    {
+        // Arrange
+        Directory.CreateDirectory(DataDocumentationDirectory);
+        File.WriteAllText(Path.Combine(DataDocumentationDirectory, "home.md"), "old-home");
+
+        // Act
+        var copiedFileCount = DataDirectorySeeder.ReplaceDirectory(
+            RootFile, _seedDirectory.FullName, DataDirectorySeeder.DocumentationDirectory);
+
+        // Assert
+        Assert.Equal(0, copiedFileCount);
+        Assert.Equal("old-home", File.ReadAllText(Path.Combine(DataDocumentationDirectory, "home.md")));
     }
 
     public void Dispose()
