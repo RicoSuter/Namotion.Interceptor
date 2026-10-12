@@ -659,7 +659,15 @@ public partial class FluentStorageContainer :
 
             var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken)
                 ?? throw new InvalidOperationException($"No subject could be created for '{path}'.");
-            AddToHierarchy(path, subject);
+
+            lock (_hierarchyLock)
+            {
+                // Checked again under the lock: a scan or file event may have added the file while it loaded.
+                if (!_pathRegistry.TryGetSubject(path, out _))
+                {
+                    AddToHierarchy(path, subject);
+                }
+            }
         }
         finally
         {
