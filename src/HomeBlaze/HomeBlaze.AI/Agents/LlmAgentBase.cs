@@ -471,7 +471,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
         var context = ((IInterceptorSubject)this).Context;
         var resolver = context.TryGetService<ISubjectPathResolver>();
-        var scheduler = new AgentTriggerScheduler(_services.TimeProvider, pollInterval: null, TimeSpan.Zero, RunBackgroundAsync);
+        var scheduler = new AgentTriggerScheduler(_services.TimeProvider, pollInterval: null, TimeSpan.Zero, RunBackgroundAsync, OnPauseLifted);
         using var processor = new ChangeQueueProcessor(
             this,
             context,
@@ -918,6 +918,18 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
         IsBusy = false;
         RaiseTimelineChanged();
+    }
+
+    private void OnPauseLifted()
+    {
+        lock (_stateLock)
+        {
+            // A running turn reports the status itself when it ends.
+            if (!IsBusy)
+            {
+                SetIdle();
+            }
+        }
     }
 
     /// <summary>Reports the idle status of a started agent; a stopped or starting agent keeps its status.</summary>

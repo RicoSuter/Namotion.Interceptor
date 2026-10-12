@@ -257,6 +257,29 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
+    public async Task WhenAUsageLimitPauseEnds_ThenTheAgentIsIdleAgainWithoutARun()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services),
+            agent => agent.Handler = (_, _, _) => throw new AgentTurnException(
+                AgentFailureKind.UsageLimit, "Usage limit reached", retryAfter: time.GetUtcNow().AddMinutes(10)),
+            timeProvider: time);
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable && !test.Agent.IsBusy);
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromMinutes(10));
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Running);
+
+        // Assert
+        Assert.Equal("Idle", test.Agent.StatusMessage);
+        Assert.Single(test.Agent.Requests);
+    }
+
+    [Fact]
     public async Task WhenAChatTurnThrowsAnUnexpectedException_ThenTheFailureIsRecordedInsteadOfThrown()
     {
         // Arrange

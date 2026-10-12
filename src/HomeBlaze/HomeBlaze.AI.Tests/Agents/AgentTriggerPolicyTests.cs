@@ -242,6 +242,37 @@ public class AgentTriggerPolicyTests
     }
 
     [Fact]
+    public void WhenAUsageLimitPausesWithoutAPendingRunOrPoll_ThenTheWakeTimeIsTheEndOfThePause()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+        var resetsAt = Start.AddHours(2);
+        policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, resetsAt, "Usage limit reached");
+
+        // Act
+        var wakeTime = policy.GetNextWakeTime(Start);
+
+        // Assert
+        Assert.Equal(resetsAt, wakeTime);
+    }
+
+    [Fact]
+    public void WhenAUsageLimitPauseHasEnded_ThenTheWakeTimeNoLongerIncludesIt()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+        var resetsAt = Start.AddHours(2);
+        policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, resetsAt, "Usage limit reached");
+
+        // Act
+        var wakeTime = policy.GetNextWakeTime(resetsAt);
+
+        // Assert
+        Assert.Null(wakeTime);
+        Assert.Null(policy.PauseReason);
+    }
+
+    [Fact]
     public void WhenAUsageLimitFailureOccursWhileAConfigurationPauseIsActive_ThenThePauseReasonStaysTheConfigurationMessage()
     {
         // Arrange

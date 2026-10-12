@@ -11,6 +11,7 @@ public sealed class AgentTriggerScheduler
 
     private readonly TimeProvider _timeProvider;
     private readonly Func<string, CancellationToken, Task> _runBackground;
+    private readonly Action? _onPauseLifted;
     private readonly Lock _lock = new();
     private readonly AgentTriggerPolicy _policy;
     private TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -19,14 +20,19 @@ public sealed class AgentTriggerScheduler
     /// <param name="pollInterval">The poll interval, null for none.</param>
     /// <param name="minRunInterval">The minimum time between the starts of two automatic runs.</param>
     /// <param name="runBackground">Runs one background turn; must handle its own failures and report them.</param>
+    /// <param name="onPauseLifted">
+    /// Called on the loop, outside any lock, when a usage-limit pause ended because its time passed; must not throw.
+    /// </param>
     public AgentTriggerScheduler(
         TimeProvider timeProvider,
         TimeSpan? pollInterval,
         TimeSpan minRunInterval,
-        Func<string, CancellationToken, Task> runBackground)
+        Func<string, CancellationToken, Task> runBackground,
+        Action? onPauseLifted = null)
     {
         _timeProvider = timeProvider;
         _runBackground = runBackground;
+        _onPauseLifted = onPauseLifted;
         _policy = new AgentTriggerPolicy(pollInterval, minRunInterval, timeProvider.GetUtcNow());
     }
 
@@ -104,15 +110,18 @@ public sealed class AgentTriggerScheduler
             string? reason = null;
             DateTimeOffset? wakeAt;
             Task wakeSignal;
+            bool isPauseLifted;
             lock (_lock)
             {
                 var now = _timeProvider.GetUtcNow();
+                var wasPaused = _policy.PauseReason is not null;
                 if (_policy.TryTakeDueRun(now, out var dueReason))
                 {
                     reason = dueReason;
                 }
 
                 wakeAt = _policy.GetNextWakeTime(now);
+                isPauseLifted = wasPaused && _policy.PauseReason is null;
 
                 // Captured under the lock together with the policy state, so a request after this point completes
                 // this very task; a completed signal only means state changed before it was read here.
@@ -122,6 +131,11 @@ public sealed class AgentTriggerScheduler
                 }
 
                 wakeSignal = _wake.Task;
+            }
+
+            if (isPauseLifted)
+            {
+                _onPauseLifted?.Invoke();
             }
 
             if (reason is not null)

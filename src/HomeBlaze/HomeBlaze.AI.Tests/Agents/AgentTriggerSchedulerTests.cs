@@ -132,4 +132,29 @@ public class AgentTriggerSchedulerTests
         Assert.Null(scheduler.PauseReason);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => loop);
     }
+
+    [Fact]
+    public async Task WhenAUsageLimitPauseEndsWithoutAPendingRun_ThenThePauseIsLiftedAndReported()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        var liftedCount = 0;
+        var scheduler = new AgentTriggerScheduler(time, pollInterval: null, TimeSpan.Zero,
+            (_, _) => Task.CompletedTask,
+            () => Interlocked.Increment(ref liftedCount));
+        using var cancellation = new CancellationTokenSource();
+        var loop = scheduler.RunAsync(cancellation.Token);
+        scheduler.ReportFailure(new AgentTurnException(
+            AgentFailureKind.UsageLimit, "Usage limit reached", retryAfter: time.GetUtcNow().AddMinutes(10)));
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromMinutes(10));
+        await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref liftedCount) == 1);
+        await cancellation.CancelAsync();
+
+        // Assert
+        Assert.Null(scheduler.PauseReason);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => loop);
+    }
 }

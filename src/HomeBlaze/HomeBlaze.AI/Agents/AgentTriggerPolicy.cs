@@ -95,7 +95,8 @@ public sealed class AgentTriggerPolicy
     }
 
     /// <summary>
-    /// The next time a run may become due, or null when only a new request can make one due.
+    /// The next time a run may become due or a usage-limit pause ends, or null when only a new request can change
+    /// either.
     /// </summary>
     public DateTimeOffset? GetNextWakeTime(DateTimeOffset now)
     {
@@ -107,12 +108,9 @@ public sealed class AgentTriggerPolicy
             pendingDue = _pendingIsManual ? now : GetEarliestAutomaticStart(now);
         }
 
-        return (pendingDue, _nextPoll) switch
-        {
-            (null, var poll) => poll,
-            (var pending, null) => pending,
-            ({ } pending, { } poll) => pending < poll ? pending : poll
-        };
+        // The end of a usage-limit pause changes the pause reason even when no run is pending.
+        var pauseEnd = _isPausedUntilReconfigured ? null : _pausedUntil;
+        return Min(Min(pendingDue, _nextPoll), pauseEnd);
     }
 
     /// <summary>Resets backoff and lifts every pause.</summary>
@@ -175,4 +173,11 @@ public sealed class AgentTriggerPolicy
 
     private static DateTimeOffset Max(DateTimeOffset value, DateTimeOffset? candidate)
         => candidate is { } other && other > value ? other : value;
+
+    private static DateTimeOffset? Min(DateTimeOffset? first, DateTimeOffset? second) => (first, second) switch
+    {
+        (null, _) => second,
+        (_, null) => first,
+        ({ } firstTime, { } secondTime) => firstTime < secondTime ? firstTime : secondTime
+    };
 }

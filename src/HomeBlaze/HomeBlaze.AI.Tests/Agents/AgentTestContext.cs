@@ -128,7 +128,8 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
         Func<AgentServices, TAgent> createAgent,
         Action<TAgent>? configure = null,
         Uri? endpoint = null,
-        AgentTurnTokenRegistry? tokenRegistry = null)
+        AgentTurnTokenRegistry? tokenRegistry = null,
+        TimeProvider? timeProvider = null)
     {
         var dataDirectory = Directory.CreateTempSubdirectory("agent-test").FullName;
         var context = InterceptorSubjectContext.Create()
@@ -147,7 +148,7 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
             new TestAgentToolSource(() => root),
             tokenRegistry ?? new AgentTurnTokenRegistry(),
             new FixedEndpointAddress(endpoint),
-            TimeProvider.System);
+            timeProvider ?? TimeProvider.System);
         var agent = createAgent(services);
         agent.MinRunInterval = TimeSpan.Zero;
         configure?.Invoke(agent);
