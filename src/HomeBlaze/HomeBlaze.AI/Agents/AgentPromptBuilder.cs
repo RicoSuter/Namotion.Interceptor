@@ -170,9 +170,21 @@ public static class AgentPromptBuilder
     }
 
     /// <summary>
-    /// Whether a background reply starts with <see cref="QuietMarker"/>, ignoring case and leading whitespace.
+    /// Whether a line of a background reply starts with <see cref="QuietMarker"/>, ignoring case and leading
+    /// whitespace; models sometimes write a sentence before the marker line.
     /// </summary>
-    public static bool IsQuiet(string text) => text.TrimStart().StartsWith(QuietMarker, StringComparison.OrdinalIgnoreCase);
+    public static bool IsQuiet(string text)
+    {
+        foreach (var line in text.AsSpan().EnumerateLines())
+        {
+            if (line.TrimStart().StartsWith(QuietMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string FormatTime(DateTimeOffset time) => time.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
 }

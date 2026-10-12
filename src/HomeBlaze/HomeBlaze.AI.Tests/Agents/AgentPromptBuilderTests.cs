@@ -95,7 +95,10 @@ public class AgentPromptBuilderTests
     [InlineData("[quiet] nothing new", true)]
     [InlineData("  [QUIET] calm", true)]
     [InlineData("Freezer is warm [quiet]", false)]
-    public void WhenCheckingForTheQuietMarker_ThenOnlyALeadingMarkerCounts(string text, bool expected)
+    [InlineData("All values are in range.\n[quiet] nothing new", true)]
+    [InlineData("All values are in range.\r\n   [Quiet] calm", true)]
+    [InlineData("Freezer is warm.\nNot [quiet] at all", false)]
+    public void WhenCheckingForTheQuietMarker_ThenOnlyAMarkerAtTheStartOfALineCounts(string text, bool expected)
     {
         // Act
         var isQuiet = AgentPromptBuilder.IsQuiet(text);
