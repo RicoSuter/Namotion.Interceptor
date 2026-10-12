@@ -33,7 +33,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private volatile MarkdownParseResult _parseResult;
 
     // A parse changes the subjects it reuses in place, so two reloads at once would leave the nested subjects
-    // from one parse and the snapshot from another. Only LoadFileAsync takes this. A write-back must not:
+    // from one parse and the snapshot from another. Only OnFileChangedAsync takes this. A write-back must not:
     // the storage reloads the file as part of the write, and that reload would wait for the write-back that
     // waits for the write.
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
@@ -108,7 +108,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         _serializer = serializer;
     }
 
-    private async Task LoadFileAsync(CancellationToken cancellationToken)
+    public async Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
         await _reloadLock.WaitAsync(cancellationToken);
         try
@@ -176,11 +176,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph", Icon = "Preview")]
     public string? ReadEvaluatedContent() => _parser.RenderContent(Content, this);
-
-    public Task OnFileChangedAsync(CancellationToken cancellationToken)
-    {
-        return LoadFileAsync(cancellationToken);
-    }
 
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
