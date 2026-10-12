@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -34,6 +35,9 @@ public partial class FluentStorageContainer :
 
     private readonly StoragePathRegistry _pathRegistry = new();
     private readonly Lock _hierarchyLock = new();
+
+    // Makes the existence check and the write of a new file one step, so two creations of the same name cannot both pass.
+    private readonly SemaphoreSlim _createFileLock = new(1, 1);
     private readonly FileSubjectFactory _subjectFactory;
     private readonly StorageHierarchyManager _hierarchyManager;
     private readonly ILogger<FluentStorageContainer>? _logger;
@@ -83,6 +87,11 @@ public partial class FluentStorageContainer :
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
+
+    /// <summary>
+    /// Whether the files are on the local disk or in memory, the only storage the Markdown write operations change.
+    /// </summary>
+    public bool IsLocal => StorageType is "disk" or "filesystem" or "inmemory";
 
     public string Title => string.IsNullOrEmpty(ConnectionString)
         ? "Storage"
@@ -611,6 +620,54 @@ public partial class FluentStorageContainer :
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+
+    /// <summary>
+    /// Creates a Markdown file in the root folder of this storage and adds it as a page.
+    /// </summary>
+    /// <exception cref="ArgumentException">The name is not a plain file name ending in .md, the file exists, or the
+    /// content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes.</exception>
+    /// <exception cref="InvalidOperationException">The storage is not local.</exception>
+    [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
+    public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
+        => CreateMarkdownFileAsync(folderPath: string.Empty, name, content, cancellationToken);
+
+    /// <summary>
+    /// Creates a Markdown file in the folder at <paramref name="folderPath"/>, relative to the storage root, and adds it as a page.
+    /// </summary>
+    internal async Task CreateMarkdownFileAsync(string folderPath, string name, string content, CancellationToken cancellationToken)
+    {
+        MarkdownWriteRules.ValidateFileName(name, nameof(name));
+        MarkdownWriteRules.EnsureLocal(this);
+
+        var bytes = MarkdownWriteRules.GetContentBytes(content, nameof(content));
+        var blob = new Blob(string.IsNullOrEmpty(folderPath) ? name : $"{folderPath.TrimEnd('/')}/{name}");
+        var path = blob.FullPath;
+
+        await _createFileLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_pathRegistry.TryGetSubject(path, out _) || await Client.ExistsAsync(path, cancellationToken))
+            {
+                throw new ArgumentException($"'{name}' already exists in this folder.", nameof(name));
+            }
+
+            _fileWatcher?.MarkAsOwnWrite(GetFileSystemPath(path));
+            using (var stream = new MemoryStream(bytes, writable: false))
+            {
+                await Client.WriteAsync(path, stream, append: false, cancellationToken: cancellationToken);
+            }
+
+            var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken)
+                ?? throw new InvalidOperationException($"No subject could be created for '{path}'.");
+            AddToHierarchy(path, subject);
+        }
+        finally
+        {
+            _createFileLock.Release();
+        }
+
+        _logger?.LogInformation("Created Markdown file: {Path}", path);
+    }
 
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the registry.

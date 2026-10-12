@@ -26,12 +26,23 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n[\s\S]*?```")]
     private static partial Regex SubjectBlockRegex();
 
+    /// <summary>The largest Markdown source, in UTF-8 bytes, that the write operations accept.</summary>
+    public const int MaxContentSize = 64 * 1024;
+
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;
+
+    // Serializes the read-modify-write of ReplaceText with the other write operations of this file.
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     public IStorageContainer Storage { get; }
     public string FullPath { get; }
     public string Name { get; }
+
+    /// <summary>
+    /// Whether the file is in local storage (on disk or in memory), the only storage the write operations change.
+    /// </summary>
+    public bool IsLocal => MarkdownWriteRules.IsLocal(Storage);
 
     [Derived]
     public string? Title => Frontmatter?.Title ?? FormatFilename(Name);
@@ -121,6 +132,87 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph. With includeSourcePaths set to true, each value is followed by the absolute path of its property in parentheses, which get_property reads when the property is exposed as state", Icon = "Preview")]
     public string? ReadEvaluatedContent(bool? includeSourcePaths = null) =>
         _parser.RenderContent(Content, this, includeSourcePaths == true);
+
+    /// <summary>
+    /// Replaces the whole Markdown source of the file.
+    /// </summary>
+    /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes.</exception>
+    /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
+    [Operation(Title = "Replace Content", Description = "Replaces the whole markdown source of this file.", Icon = "EditNote")]
+    public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
+    {
+        MarkdownWriteRules.EnsureLocal(Storage);
+        var bytes = MarkdownWriteRules.GetContentBytes(content, nameof(content));
+
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            await WriteBytesAsync(bytes, cancellationToken);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Replaces the one occurrence of <paramref name="oldText"/> in the Markdown source of the file with <paramref name="newText"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">The text is empty, not found, found more than once, or the result is larger than
+    /// <see cref="MaxContentSize"/> bytes.</exception>
+    /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
+    [Operation(Title = "Replace Text", Description = "Replaces one exact, unique passage of the markdown source.", Icon = "FindReplace")]
+    public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)
+    {
+        MarkdownWriteRules.EnsureLocal(Storage);
+        if (string.IsNullOrEmpty(oldText))
+        {
+            throw new ArgumentException("The text to replace must not be empty.", nameof(oldText));
+        }
+
+        ArgumentNullException.ThrowIfNull(newText);
+
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Read from storage rather than Content, which lags behind an external edit until its file event arrives.
+            string source;
+            await using (var stream = await ReadAsync(cancellationToken))
+            using (var reader = new StreamReader(stream))
+            {
+                source = await reader.ReadToEndAsync(cancellationToken);
+            }
+
+            var index = source.IndexOf(oldText, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                throw new ArgumentException(
+                    $"The text to replace was not found in {Name}. It must match the Markdown source exactly, including whitespace and line breaks.",
+                    nameof(oldText));
+            }
+
+            // Searching from index + 1 also finds an overlapping second occurrence, which makes the passage ambiguous as well.
+            if (source.IndexOf(oldText, index + 1, StringComparison.Ordinal) >= 0)
+            {
+                throw new ArgumentException(
+                    $"The text to replace occurs more than once in {Name}; include more of the surrounding text so it is unique.",
+                    nameof(oldText));
+            }
+
+            var updated = string.Concat(source.AsSpan(0, index), newText, source.AsSpan(index + oldText.Length));
+            await WriteBytesAsync(MarkdownWriteRules.GetContentBytes(updated, nameof(newText)), cancellationToken);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    private async Task WriteBytesAsync(byte[] bytes, CancellationToken cancellationToken)
+    {
+        using var stream = new MemoryStream(bytes, writable: false);
+        await WriteAsync(stream, cancellationToken);
+    }
 
     public Task OnFileChangedAsync(CancellationToken cancellationToken)
     {

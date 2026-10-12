@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -38,6 +39,11 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
+
+    /// <summary>
+    /// Whether the folder is in local storage (on disk or in memory), the only storage the Markdown write operations change.
+    /// </summary>
+    public bool IsLocal => MarkdownWriteRules.IsLocal(Storage);
 
     public VirtualFolder(IStorageContainer storage, string relativePath)
     {
@@ -95,4 +101,16 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+
+    /// <summary>
+    /// Creates a Markdown file in this folder and adds it as a page.
+    /// </summary>
+    /// <exception cref="ArgumentException">The name is not a plain file name ending in .md, the file exists, or the
+    /// content is larger than <see cref="Files.MarkdownFile.MaxContentSize"/> bytes.</exception>
+    /// <exception cref="InvalidOperationException">The folder is not in local storage.</exception>
+    [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
+    public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
+        => Storage is FluentStorageContainer storage
+            ? storage.CreateMarkdownFileAsync(RelativePath, name, content, cancellationToken)
+            : throw MarkdownWriteRules.CreateNotLocalException();
 }
