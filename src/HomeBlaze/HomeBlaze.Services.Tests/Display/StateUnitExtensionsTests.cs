@@ -1,13 +1,12 @@
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services.Display;
-using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
-using HomeBlaze.Components.Abstractions.TimeZones;
 
 namespace HomeBlaze.Services.Tests.Display;
 

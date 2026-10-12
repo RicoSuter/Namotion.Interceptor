@@ -17,7 +17,7 @@ public class CardTests
         .WithLifecycle();
 
     [Fact]
-    public void WhenCardIsCreated_ThenItLooksAsBefore()
+    public void WhenCardIsCreated_ThenItsNewOptionsDefaultToTheLookOfTheOldCard()
     {
         // Act
         var card = new Card(_context);

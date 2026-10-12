@@ -34,6 +34,17 @@ public class ValueWidgetTests
     private static ILocator GetRow(IPage page, string label) =>
         page.GetByTestId("value-row").Filter(new() { Has = page.GetByTestId("value-label").GetByText(label, new() { Exact = true }) });
 
+    private static ILocator GetPanel(IPage page, string title) =>
+        page.GetByTestId("expansion-panel").Filter(new() { HasText = title });
+
+    // A progress in the content of a row is a bar too, and the test of the share means the one on its own.
+    private static ILocator GetBarOutsideRows(IPage page) =>
+        page.Locator("[data-testid=progress]:not([data-testid=value-row] *)");
+
+    // The path of an icon is what tells two icons of MudBlazor apart.
+    private static Task<string?> GetIconShapeAsync(ILocator row) =>
+        row.Locator(".mud-list-item-icon svg path").Last.GetAttributeAsync("d");
+
     [Fact]
     public async Task WhenCardHasHeaderOptions_ThenHeaderShowsThem()
     {
@@ -240,7 +251,7 @@ public class ValueWidgetTests
     }
 
     [Fact]
-    public async Task WhenIndicatorHasNoValue_ThenChipShowsADash()
+    public async Task WhenIndicatorHasNoValue_ThenChipShowsADashWithThePathAsTooltip()
     {
         // Arrange & Act
         var page = await OpenPageAsync();
@@ -310,9 +321,6 @@ public class ValueWidgetTests
         await Assertions.Expect(media).ToHaveCountAsync(1);
         await Assertions.Expect(media).ToHaveAttributeAsync("style", new Regex(@"background-image:\s*url\(.*/favicon\.ico"));
     }
-
-    private static ILocator GetPanel(IPage page, string title) =>
-        page.GetByTestId("expansion-panel").Filter(new() { HasText = title });
 
     [Fact]
     public async Task WhenPanelIsExpandedOnThePage_ThenItsContentIsVisible()
@@ -388,12 +396,4 @@ public class ValueWidgetTests
         var text = await alert.Locator("p").BoundingBoxAsync();
         Assert.InRange(Math.Abs((icon!.Y + icon.Height / 2) - (text!.Y + text.Height / 2)), 0, 4);
     }
-
-    // A progress in the content of a row is a bar too, and the test of the share means the one on its own.
-    private static ILocator GetBarOutsideRows(IPage page) =>
-        page.Locator("[data-testid=progress]:not([data-testid=value-row] *)");
-
-    // The path of an icon is what tells two icons of MudBlazor apart.
-    private static Task<string?> GetIconShapeAsync(ILocator row) =>
-        row.Locator(".mud-list-item-icon svg path").Last.GetAttributeAsync("d");
 }
