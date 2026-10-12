@@ -1,5 +1,7 @@
+using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Services.Tests.Serialization;
@@ -225,6 +227,57 @@ public partial class SubjectWithMixedProperties : IConfigurable
         StateOne = string.Empty;
         StateTwo = false;
     }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+public sealed class TestConstructorDependency;
+
+/// <summary>
+/// Subject that can only be created with a dependency, like a device that needs a logger.
+/// </summary>
+[InterceptorSubject]
+public partial class SubjectWithConstructorDependency : IConfigurable
+{
+    private readonly TestConstructorDependency _dependency;
+
+    public SubjectWithConstructorDependency(TestConstructorDependency dependency)
+    {
+        _dependency = dependency;
+        Config = string.Empty;
+    }
+
+    // A method, because System.Text.Json would bind the constructor parameter to a public property of
+    // that name and pass null instead of failing the way a subject with a private dependency does.
+    public TestConstructorDependency GetDependency() => _dependency;
+
+    [Configuration]
+    public partial string Config { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>
+/// Subject that hosts a child of any configurable type, like a grid cell.
+/// </summary>
+[InterceptorSubject]
+public partial class SubjectWithAnyChild : IConfigurable
+{
+    [Configuration]
+    public partial IInterceptorSubject? Child { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>
+/// Subject whose configuration property rejects a value outside its range in the setter, after the constructor ran.
+/// </summary>
+[InterceptorSubject]
+public partial class SubjectWithValidatedProperty : IConfigurable
+{
+    [Configuration]
+    [Range(0, 10)]
+    public partial int Level { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

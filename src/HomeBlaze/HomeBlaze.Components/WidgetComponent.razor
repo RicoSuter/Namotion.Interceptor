@@ -1,22 +1,53 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Widget))]
 @implements ISubjectComponent
 
-@if (ResolvedSubject != null)
+@{
+    // Resolved once per render and never kept: the read is what the tracking scope records.
+    var widget = Subject as Widget;
+    var resolvedSubject = widget?.ResolvedSubject;
+}
+
+@if (widget is null || resolvedSubject is null)
 {
-    <SubjectComponent Subject="@ResolvedSubject" Type="SubjectComponentType.Widget" />
+    <MudAlert Severity="Severity.Error" Dense="true">
+        Cannot resolve path: @widget?.Path
+    </MudAlert>
+}
+else if (widget.IsSelfOrAncestor(resolvedSubject) || IsShownByOuterReference(widget))
+{
+    <MudAlert Severity="Severity.Warning" Dense="true" data-testid="widget-cycle">
+        Cannot show path: @widget.Path (it contains this widget)
+    </MudAlert>
 }
 else
 {
-    <MudAlert Severity="Severity.Error" Dense="true">
-        Cannot resolve path: @WidgetSubject?.Path
-    </MudAlert>
+    <CascadingValue Value="this" IsFixed="true">
+        <SubjectComponent Subject="@resolvedSubject" Type="SubjectComponentType.Widget" />
+    </CascadingValue>
 }
 
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
-    private Widget? WidgetSubject => Subject as Widget;
+    /// <summary>
+    /// The nearest reference that this one is shown inside of, through any number of other components.
+    /// </summary>
+    [CascadingParameter]
+    private WidgetComponent? OuterReference { get; set; }
 
-    private IInterceptorSubject? ResolvedSubject => WidgetSubject?.ResolvedSubject;
+    // Widget.IsSelfOrAncestor only sees containment. References that show the container of each other form
+    // a cycle that exists in the components alone: the same widget is then already being shown further out.
+    private bool IsShownByOuterReference(Widget widget)
+    {
+        for (var outer = OuterReference; outer is not null; outer = outer.OuterReference)
+        {
+            if (ReferenceEquals(outer.Subject, widget))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

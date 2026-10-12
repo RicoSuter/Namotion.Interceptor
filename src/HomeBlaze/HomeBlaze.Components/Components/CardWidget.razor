@@ -1,0 +1,43 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Card))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4 card-widget" Elevation="2" data-testid="card">
+    @if (!string.IsNullOrEmpty(CardSubject?.Title) || !string.IsNullOrEmpty(CardSubject?.Icon))
+    {
+        <div class="d-flex align-center mb-2">
+            @if (!string.IsNullOrEmpty(CardSubject?.Icon))
+            {
+                <MudIcon Icon="@MudBlazorIconResolver.Resolve(CardSubject.Icon)" Class="mr-2" />
+            }
+            <MudText Typo="Typo.h6">@CardSubject?.Title</MudText>
+        </div>
+    }
+
+    <SubjectComponent Subject="@CardSubject?.Content" Type="SubjectComponentType.Widget" />
+
+    @if (CardSubject?.Footer is not null)
+    {
+        <MudDivider Class="my-2" />
+        <SubjectComponent Subject="@CardSubject.Footer" Type="SubjectComponentType.Widget" />
+    }
+</MudPaper>
+
+<style>
+    /* The distance between two paragraphs of a page, so that cards below each other do not touch. */
+    .card-widget {
+        margin-bottom: 0.75rem;
+    }
+
+    /* A layout cell spaces its content itself, so the card that ends the cell adds nothing below.
+       The two wrappers are those of SubjectComponent, for the content of the cell and for the card. */
+    .layout-cell > .subject-component-wrapper > .subject-component-wrapper:last-of-type > .card-widget {
+        margin-bottom: 0;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Card? CardSubject => Subject as Card;
+}

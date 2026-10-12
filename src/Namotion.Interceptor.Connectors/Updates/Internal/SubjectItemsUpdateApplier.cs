@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Text.Json;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -135,16 +134,27 @@ internal static class SubjectItemsUpdateApplier
         SubjectUpdateApplyContext context)
     {
         var targetKeyType = property.Type.GetDictionaryKeyAndValueTypes().Key;
-        var workingDictionary = new Dictionary<object, IInterceptorSubject>();
+        var existingDictionary = property.GetValue() is { } existingValue
+            ? SubjectValueConvert.ToSubjectDictionary(existingValue)
+            : null;
+        var workingDictionary = new Dictionary<object, IInterceptorSubject>(existingDictionary?.Count ?? 0);
         var structureChanged = false;
 
-        var existingValue = property.GetValue();
-        if (existingValue is not null)
+        if (existingDictionary is not null)
         {
-            foreach (DictionaryEntry entry in SubjectValueConvert.ToSubjectDictionary(existingValue))
+            // Not foreach, which would box a DictionaryEntry per entry.
+            var enumerator = existingDictionary.GetEnumerator();
+            try
             {
-                if (entry.Value is IInterceptorSubject subject)
-                    workingDictionary[entry.Key] = subject;
+                while (enumerator.MoveNext())
+                {
+                    if (enumerator.Value is IInterceptorSubject subject)
+                        workingDictionary[enumerator.Key] = subject;
+                }
+            }
+            finally
+            {
+                (enumerator as IDisposable)?.Dispose();
             }
         }
 

@@ -1,4 +1,3 @@
-@using System.Text.RegularExpressions
 @using BlazorMonaco.Editor
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Components
@@ -10,6 +9,7 @@
 @using HomeBlaze.Storage.Blazor.Models
 @using HomeBlaze.Storage.Files
 @using HomeBlaze.Storage.Internal
+@using HomeBlaze.Storage.Pages
 @using Microsoft.AspNetCore.Components.Sections
 @using Microsoft.JSInterop
 @using MudBlazor
@@ -17,9 +17,11 @@
 
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
+@inject ISnackbar Snackbar
 @inject ConfigurableSubjectSerializer Serializer
 @inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
+@inject TypeProvider TypeProvider
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
 @implements ISubjectEditComponent
@@ -173,39 +175,56 @@ else
 
     private async Task OnEditSubjectClick(DecorationRegion region)
     {
-        if (File == null || _editor == null)
+        if (File == null || _editor == null || region.BlockIndex is not { } blockIndex)
             return;
 
-        // Get the subject from File.Children
-        if (!File.Children.TryGetValue(region.Name, out var subject))
-            return;
+        // _currentContent follows the editor with a delay, and the comparison below must see what was typed last.
+        _currentContent = await _editor.GetValue();
 
-        // Open the SubjectEditDialog using the static ShowAsync method
+        // The subject belongs to the block of the saved page. Opening the dialog on editor text that
+        // differs would show the saved values and then replace what was typed, or write into another block.
+        if (MarkdownBlockMatcher.FindSavedBlock(_currentContent, File.Content, blockIndex) is null)
+        {
+            Snackbar.Add($"Save the page before editing {region.Name}. The text up to the end of this block has changes that are not saved.", Severity.Warning);
+            return;
+        }
+
+        // The region is from the last content change and the page can have been parsed again since,
+        // so the subject is looked up now.
+        if (File.GetBlockSubject(blockIndex) is not { } subject)
+        {
+            Snackbar.Add($"{region.Name} cannot be edited because the block did not create a subject.", Severity.Warning);
+            return;
+        }
+
         var dialog = await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, subject, $"Edit {region.Name}");
         var result = await dialog.Result;
 
         if (result?.Canceled != false)
             return;
 
-        // Serialize the updated subject back to JSON
-        var newJson = Serializer.Serialize(subject);
+        // Saving in the dialog wrote the configuration into the saved page, so its head line and json
+        // fence no longer equal the editor text and only the text before the block is compared.
+        if (MarkdownBlockMatcher.FindSavedBlockAfterWriteBack(_currentContent, File.Content, blockIndex) is not { } block)
+        {
+            Snackbar.Add($"The page changed while {region.Name} was edited, so the editor text was not updated. Reload the page before saving it.", Severity.Warning);
+            return;
+        }
 
-        // Replace the subject block in the content
-        var pattern = $@"```subject\({Regex.Escape(region.Name)}\)\s*\n[\s\S]*?```";
-        var replacement = $"```subject({region.Name})\n{newJson}\n```";
-        _currentContent = Regex.Replace(_currentContent, pattern, replacement);
+        _currentContent = MarkdownBlockWriter.WriteConfiguration(
+            _currentContent, block, Serializer.Serialize(subject, ConfigurationNaming.CSharpProperty));
 
         // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
 
-        // Refresh decorations
-        await RefreshDecorationsAsync();
-
         // Save the file, which also reloads it on the worker of its storage. The reload keeps the edited
         // subject and applies its configuration.
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
+
+        // After the reload, so that the regions carry the subjects of the reloaded page.
+        await RefreshDecorationsAsync();
 
         // Update dirty state
         _originalContent = _currentContent;
@@ -278,12 +297,12 @@ else
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
 
-        // Refresh decorations
-        await RefreshDecorationsAsync();
-
         // Save the file, which also reloads it on the worker of its storage
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
+
+        // After the reload, so that the regions carry the subjects of the reloaded page.
+        await RefreshDecorationsAsync();
 
         // Update dirty state
         _originalContent = _currentContent;
@@ -295,15 +314,14 @@ else
         if (File == null || _editor == null)
             return;
 
-        // The block name is the subject's key in the page, so the names of the other blocks are taken.
-        var existingNames = MarkdownDecorationParser.Parse(_currentContent)
-            .Where(region => region.Type == DecorationRegionType.SubjectBlock)
-            .Select(region => region.Name)
-            .ToArray();
+        // _currentContent follows the editor with a delay, and the names must be those of what was typed last.
+        _currentContent = await _editor.GetValue();
 
+        // The name becomes the #id of the block. It is checked while the dialog is open, because the
+        // subject that was configured in it is gone once the dialog has closed.
         var result = await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            NameField = new SubjectNameOptions("Block name", "", existingNames)
+            NameField = MarkdownBlockNames.CreateNameOptions(_currentContent)
         });
 
         if (result?.Name is null)
@@ -312,7 +330,7 @@ else
         string json;
         try
         {
-            json = Serializer.Serialize(result.Subject);
+            json = Serializer.Serialize(result.Subject, ConfigurationNaming.CSharpProperty);
         }
         finally
         {
@@ -320,44 +338,50 @@ else
             SubjectFactory.DiscardSubject(result.Subject);
         }
 
-        // Create the subject block
-        var subjectBlock = $"```subject({result.Name})\n{json}\n```";
-
-        // Get cursor position to insert at
-        var position = await _editor.GetPosition();
-        var lines = _currentContent.Split('\n');
+        // The editor gives the text with one line ending for all lines.
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(_currentContent);
+        var typeName = result.Subject.GetType().FullName!;
 
         // Insert at cursor line (or end if no cursor)
-        var insertLine = position?.LineNumber ?? lines.Length;
+        var position = await _editor.GetPosition();
+        var lines = _currentContent.Split(lineEnding);
         var newLines = new List<string>(lines);
 
-        // Add a blank line before if not at start
+        // Inside a block, the new block goes after the json block of that block and gets one colon more
+        // than the block that it is then inside of. It always gets a closing line, so that the lines
+        // after it are not inside it.
+        var editorPage = MarkdownPageParser.Parse(_currentContent);
+        var insertLine = Math.Min(editorPage.GetLineForNewBlock(position?.LineNumber ?? lines.Length), lines.Length + 1);
+        var fenceLength = editorPage.GetFenceLengthForNewBlock(
+            insertLine, name => TypeProvider.Types.FirstOrDefault(type => type.FullName == name));
+        var blockLines = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json, fenceLength, lineEnding).Split(lineEnding);
+
+        // The parser accepts a block without blank lines around it. They keep the page text readable.
         if (insertLine > 1 && !string.IsNullOrWhiteSpace(lines[insertLine - 2]))
         {
             newLines.Insert(insertLine - 1, "");
             insertLine++;
         }
 
-        // Insert the subject block
-        newLines.InsertRange(insertLine - 1, subjectBlock.Split('\n'));
+        newLines.InsertRange(insertLine - 1, blockLines);
 
-        // Add a blank line after
-        if (insertLine + 2 < newLines.Count && !string.IsNullOrWhiteSpace(newLines[insertLine + 2]))
+        var lineAfterBlock = insertLine - 1 + blockLines.Length;
+        if (lineAfterBlock < newLines.Count && !string.IsNullOrWhiteSpace(newLines[lineAfterBlock]))
         {
-            newLines.Insert(insertLine + 2, "");
+            newLines.Insert(lineAfterBlock, "");
         }
 
-        _currentContent = string.Join('\n', newLines);
+        _currentContent = string.Join(lineEnding, newLines);
 
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
 
-        // Refresh decorations
-        await RefreshDecorationsAsync();
-
         // Save the file, which also reloads it on the worker of its storage
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
+
+        // After the reload, so that the regions carry the subjects of the reloaded page.
+        await RefreshDecorationsAsync();
 
         // Update dirty state
         _originalContent = _currentContent;
@@ -370,7 +394,8 @@ else
             return;
 
         // Parse decoration regions from current content
-        _decorationRegions = MarkdownDecorationParser.Parse(_currentContent, File?.Children);
+        Func<int, IInterceptorSubject?>? getBlockSubject = File is null ? null : File.GetBlockSubject;
+        _decorationRegions = MarkdownDecorationParser.Parse(_currentContent, getBlockSubject);
 
         // Convert to Monaco decorations
         var decorations = _decorationRegions.Select(region => new ModelDeltaDecoration
@@ -438,6 +463,9 @@ else
 
         _originalContent = content;
         _currentContent = content;
+
+        // The storage reloads the file as part of the write, so the regions get the subjects of the saved page.
+        await RefreshDecorationsAsync();
 
         IsDirtyChanged?.Invoke(false);
     }

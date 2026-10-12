@@ -29,7 +29,7 @@ Both approaches work on the same underlying files. The UI is a management layer 
 
 ---
 
-## Storage & `Root.json` {#rootjson}
+## Storage and the Root File
 
 `Root.json` at the top of the [data folder](configuration.md#data-folder) defines the storage location. It is `Data/Root.json` when running from source and `/data/Root.json` in the container.
 
@@ -54,7 +54,7 @@ For the design rationale (pluggable backends, recovery behavior), see [Storage D
 
 ---
 
-## File Types {#file-types}
+## File Types
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
@@ -136,7 +136,7 @@ Use the `Widget` subject to embed another subject's widget by path:
 
 The widget looks up the subject at the specified path and renders its registered component.
 
-For embedding widgets inline within markdown pages, see [Markdown Pages: Embedded Subjects](pages.md#embedded-subjects).
+For putting widgets on markdown pages with blocks, see [Markdown Pages: Blocks](pages.md#blocks).
 
 ---
 
@@ -159,7 +159,7 @@ The demo includes pre-configured motors in the `demo/` folder:
 1. **Organize by function**: Group related subjects in folders
 2. **Use descriptive names**: `conveyor-motor.json` is clearer than `m1.json`
 3. **Keep paths short**: Deep nesting makes paths harder to maintain
-4. **Use inline subjects for page-specific data**: Don't pollute the global graph
+4. **Use blocks for page-specific subjects**: A subject that only one page needs is created by a block on that page. Don't pollute the global graph
 5. **Leverage live updates**: Properties update automatically, no refresh needed
 
 ---

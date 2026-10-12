@@ -1,4 +1,5 @@
 using HomeBlaze.Storage.Blazor.Models;
+using HomeBlaze.Storage.Internal;
 
 namespace HomeBlaze.Storage.Blazor.Tests;
 
@@ -60,58 +61,6 @@ public class MarkdownDecorationParserTests
         Assert.All(regions, r => Assert.Equal(DecorationRegionType.Expression, r.Type));
         Assert.Equal("motor.Temperature", regions[0].Name);
         Assert.Equal("motor.Speed", regions[1].Name);
-    }
-
-    [Fact]
-    public void Parse_SubjectBlock_ReturnsOneRegion()
-    {
-        // Arrange
-        var content = """
-            # Motor Status
-
-            ```subject(mymotor)
-            {
-              "$type": "HomeBlaze.Devices.Motor"
-            }
-            ```
-            """;
-
-        // Act
-        var regions = MarkdownDecorationParser.Parse(content);
-
-        // Assert
-        var region = Assert.Single(regions);
-        Assert.Equal(DecorationRegionType.SubjectBlock, region.Type);
-        Assert.Equal("mymotor", region.Name);
-        Assert.Equal(3, region.StartLine);
-        Assert.Equal(1, region.StartColumn);
-    }
-
-    [Fact]
-    public void Parse_MixedContent_ReturnsBothTypes()
-    {
-        // Arrange
-        var content = """
-            # Motor Dashboard
-
-            Current temperature: {{ mymotor.Temperature }}
-
-            ```subject(mymotor)
-            {
-              "$type": "HomeBlaze.Devices.Motor"
-            }
-            ```
-
-            Speed: {{ mymotor.Speed }}
-            """;
-
-        // Act
-        var regions = MarkdownDecorationParser.Parse(content);
-
-        // Assert
-        Assert.Equal(3, regions.Count);
-        Assert.Equal(2, regions.Count(r => r.Type == DecorationRegionType.Expression));
-        Assert.Single(regions, r => r.Type == DecorationRegionType.SubjectBlock);
     }
 
     [Fact]
@@ -185,17 +134,228 @@ public class MarkdownDecorationParserTests
     }
 
     [Fact]
-    public void Parse_MultilineSubjectBlock_CorrectEndPosition()
+    public void WhenContentHasWidgetBlock_ThenRegionCoversTheHeadLine()
     {
         // Arrange
-        var content = "Line 1\nLine 2\n```subject(test)\n{\n  \"type\": \"Test\"\n}\n```\nLine 8";
+        const string content = "Line 1\n\n:: Demo.Motor#mymotor Speed=3000\n::\n";
+
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal(DecorationRegionType.SubjectBlock, region.Type);
+        Assert.Equal("mymotor", region.Name);
+        Assert.Equal(0, region.BlockIndex);
+        Assert.Equal((3, 1, 3, 33), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+    }
+
+    [Fact]
+    public void WhenBlockHasNoId_ThenNameIsTheShortTypeName()
+    {
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(":: Demo.Samples.Motor\n::\n"));
+
+        // Assert
+        Assert.Equal("Motor", region.Name);
+    }
+
+    [Fact]
+    public void WhenBlockHasJsonFence_ThenRegionEndsAfterTheFence()
+    {
+        // Arrange
+        const string content = ":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }\n```\n::\n";
+
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal(1, region.StartLine);
+        Assert.Equal(4, region.EndLine);
+    }
+
+    [Fact]
+    public void WhenBlocksAreNested_ThenRegionsDoNotOverlap()
+    {
+        // Arrange
+        const string content = ":: Demo.Card Title=A\ntext\n\n::: Demo.Widget Path=/x\n:::\n::\n";
 
         // Act
         var regions = MarkdownDecorationParser.Parse(content);
 
         // Assert
-        var region = Assert.Single(regions);
-        Assert.Equal(3, region.StartLine);
-        Assert.Equal(7, region.EndLine);
+        Assert.Equal(2, regions.Count);
+        Assert.True(regions[0].ContainsPosition(1, 5));
+        Assert.False(regions[0].ContainsPosition(4, 5));
+        Assert.True(regions[1].ContainsPosition(4, 5));
+    }
+
+    [Theory]
+    [InlineData("::Demo.Motor Speed=1", 21)]
+    [InlineData(":: Demo.Motor Speed=1", 22)]
+    [InlineData("::::  Demo.Motor Speed=1", 25)]
+    public void WhenHeadLineHasAnyFenceLengthAndSpacing_ThenTheRegionCoversTheWholeHeadLine(string headLine, int endColumn)
+    {
+        // Arrange
+        var content = $"text\n\n{headLine}\n{headLine[..headLine.IndexOf('D')].TrimEnd()}\n";
+
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal((3, 1, 3, endColumn), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+        Assert.Equal("Motor", region.Name);
+    }
+
+    [Fact]
+    public void WhenSlotBlockHasNoSubject_ThenItGetsNoRegion()
+    {
+        // Arrange
+        const string content = ":: Demo.Card\n::: Footer\ntext\n:::\n::\n";
+
+        // Act
+        var regions = MarkdownDecorationParser.Parse(content, _ => null);
+
+        // Assert
+        Assert.Equal("Card", Assert.Single(regions).Name);
+    }
+
+    [Fact]
+    public void WhenBlockCreatedASubject_ThenItsRegionCarriesTheSubject()
+    {
+        // Arrange
+        var subject = new HtmlSegment("subject of the second block");
+        const string content = ":: Demo.Motor#first\n::\n\n:: Demo.Motor#second\n::\n";
+
+        // Act
+        var regions = MarkdownDecorationParser.Parse(content, blockIndex => blockIndex == 1 ? subject : null);
+
+        // Assert
+        Assert.Equal(2, regions.Count);
+        Assert.Null(regions[0].Subject);
+        Assert.Same(subject, regions[1].Subject);
+    }
+
+    [Fact]
+    public void WhenSlotBlockHasSubject_ThenItGetsARegionWithTheSubject()
+    {
+        // Arrange
+        var subject = new HtmlSegment("subject of the slot");
+        const string content = ":: Demo.Card\n::: Footer\ntext\n:::\n::\n";
+
+        // Act
+        var regions = MarkdownDecorationParser.Parse(content, blockIndex => blockIndex == 1 ? subject : null);
+
+        // Assert
+        Assert.Equal(2, regions.Count);
+        Assert.Equal("Footer", regions[1].Name);
+        Assert.Same(subject, regions[1].Subject);
+        Assert.Equal(1, regions[1].BlockIndex);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Motor Speed=1\ntext\n")]
+    [InlineData(":: Demo.Motor Speed=1\ntext")]
+    [InlineData(":: Demo.Motor Speed=1")]
+    public void WhenBlockHasNoClosingLine_ThenItsRegionCoversTheHeadLine(string content)
+    {
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal(DecorationRegionType.SubjectBlock, region.Type);
+        Assert.Equal("Motor", region.Name);
+        Assert.Equal((1, 1, 1, 22), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+    }
+
+    [Fact]
+    public void WhenBlocksAreNestedWithoutClosingLines_ThenEachRegionCoversItsOwnHeadLineOnly()
+    {
+        // Arrange
+        const string content =
+            ":: Demo.Flow\n::: Item\n:::: Demo.Card Title=A\ntext of the card\n::::: Demo.Motor#m Speed=1\n\n::: Item\n:::: Demo.Card Title=B\n";
+
+        // Act
+        var regions = MarkdownDecorationParser.Parse(content, _ => null);
+
+        // Assert
+        Assert.Equal(
+            [("Flow", 1, 1, 1, 13), ("Card", 3, 1, 3, 23), ("m", 5, 1, 5, 27), ("Card", 8, 1, 8, 23)],
+            regions.Select(region => (region.Name, region.StartLine, region.StartColumn, region.EndLine, region.EndColumn)));
+        Assert.Equal([0, 2, 3, 5], regions.Select(region => region.BlockIndex));
+
+        // The cursor on a head line names its block, and the lines after it name none.
+        Assert.Equal("m", Assert.Single(regions, region => region.ContainsPosition(5, 8)).Name);
+        Assert.DoesNotContain(regions, region => region.ContainsPosition(4, 1));
+        Assert.DoesNotContain(regions, region => region.ContainsPosition(6, 1));
+        Assert.DoesNotContain(regions, region => region.ContainsPosition(7, 1));
+    }
+
+    [Theory]
+    // The head line of the next block ends the block.
+    [InlineData(":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }\n```\n:: Demo.Motor\n", 4, 4)]
+    // The page ends after the json block.
+    [InlineData(":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }\n```", 4, 4)]
+    // The json block is not closed either, so it runs to the end of the page.
+    [InlineData(":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }", 3, 16)]
+    [InlineData(":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }\n", 3, 16)]
+    public void WhenBlockWithoutClosingLineHasJsonFence_ThenRegionEndsAfterTheFence(string content, int endLine, int endColumn)
+    {
+        // Act
+        var region = MarkdownDecorationParser.Parse(content)[0];
+
+        // Assert
+        Assert.Equal("Grid", region.Name);
+        Assert.Equal((1, 1, endLine, endColumn), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Motor Speed=\"1\ntext\n::\n")]
+    [InlineData("::\ntext\n")]
+    public void WhenBlockIsInvalid_ThenItGetsNoRegion(string content)
+    {
+        // Act
+        var regions = MarkdownDecorationParser.Parse(content);
+
+        // Assert
+        Assert.Empty(regions);
+    }
+
+    [Fact]
+    public void WhenExpressionsAreInsideCode_ThenOnlyTheOneOutsideCodeGetsARegion()
+    {
+        // Arrange
+        const string content = "Live {{ a/B }} value\n\nWrite `{{ c/D }}` here\n\n```\n{{ e/F }}\n```\n";
+
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal(DecorationRegionType.Expression, region.Type);
+        Assert.Equal("a/B", region.Name);
+        Assert.Equal((1, 6, 1, 15), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+    }
+
+    [Fact]
+    public void WhenInlineCodeHasOnlyOpeningBraces_ThenTheExpressionAfterItGetsARegion()
+    {
+        // Arrange
+        const string content = "Start with `{{` to show {{ a/B }} here";
+
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal("a/B", region.Name);
+        Assert.Equal((1, 25, 1, 34), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+    }
+
+    [Fact]
+    public void WhenClosingBracesAreInsideInlineCode_ThenTheyCloseNoExpression()
+    {
+        // Act
+        var regions = MarkdownDecorationParser.Parse("Open with {{ and close with `}}` here");
+
+        // Assert
+        Assert.Empty(regions);
     }
 }

@@ -5,6 +5,7 @@ using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
@@ -48,6 +49,13 @@ public class PlaywrightFixture : IAsyncLifetime
         {
             throw new TimeoutException("The root subject was not loaded before the tests started", exception);
         }
+
+        // The storage of the root assigns its children in one step at the end of its scan, which runs
+        // after the root is loaded. A test that reads the graph directly would otherwise race the scan.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => GetRoot().Children.Count > 0,
+            TimeSpan.FromSeconds(60),
+            message: "The storage of the root did not finish its scan before the tests started");
 
         // Registered once for the whole run, so that every test sees the same types. Resolving a qualified
         // name adds the type to the registry.

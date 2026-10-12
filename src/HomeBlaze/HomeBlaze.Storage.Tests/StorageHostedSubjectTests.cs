@@ -3,6 +3,8 @@ using FluentStorage.Blobs;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
+using HomeBlaze.Storage.Tests.Pages;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Testing;
@@ -470,6 +472,62 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenKeyOfPageIsTaken_ThenEveryDeviceNestedInSlotsOfItsWidgetsIsDetachedAndStopped()
+    {
+        // Arrange: the subject of Page.md.json holds the key that Page.md asks for.
+        WriteFile("Page.md.json", SerializeMotor("Holds the key"));
+        var storage = await StartHostedStorageAsync();
+        await storage.ExecuteTask!;
+
+        // Act
+        WriteFile("Page.md", SerializePageWithNestedDevices());
+        await storage.ReconcileAsync();
+
+        // Assert
+        var devices = RecordingDevice.Created;
+        await WaitUntilHostHasHandledEveryChangeAsync();
+        Assert.IsType<Samples.Motor>(storage.Children["Page.md"]);
+        Assert.Equal(["content", "row", "rowOfRow"], devices.Select(device => device.Name).Order());
+        foreach (var device in devices)
+        {
+            Assert.Equal(1, _recorder.CountAttachesOf(device));
+            Assert.Equal(1, _recorder.CountDetachesOf(device));
+            Assert.False(IsAttached(device));
+            Assert.True(device.IsStopped);
+        }
+    }
+
+    [Fact]
+    public async Task WhenPlacedPageIsRemoved_ThenEveryDeviceNestedInSlotsOfItsWidgetsIsDetachedOnce()
+    {
+        // Arrange
+        WriteFile("A.md", SerializePageWithNestedDevices());
+        var storage = await StartHostedStorageAsync();
+        await storage.ExecuteTask!;
+        var devices = RecordingDevice.Created;
+        var panel = Assert.IsType<TestPanel>(Assert.IsType<MarkdownFile>(storage.Children["A.md"]).Children["panel"]);
+        var attachedBeforeRemoval = devices.Select(IsAttached).ToList();
+
+        // Act
+        File.Delete(GetFullPath("A.md"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        await WaitUntilHostHasHandledEveryChangeAsync();
+        Assert.Empty(storage.Children);
+        Assert.Equal(["content", "row", "rowOfRow"], devices.Select(device => device.Name).Order());
+        Assert.Equal([true, true, true], attachedBeforeRemoval);
+        Assert.Contains(devices, device => ReferenceEquals(device, Assert.IsType<MarkdownFragment>(panel.Content).Children["inContent"]));
+        foreach (var device in devices)
+        {
+            Assert.Equal(1, _recorder.CountAttachesOf(device));
+            Assert.Equal(1, _recorder.CountDetachesOf(device));
+            Assert.False(IsAttached(device));
+            Assert.True(device.IsStopped);
+        }
+    }
+
+    [Fact]
     public async Task WhenFirstPassTimesOutAfterLoadingPageAndStorageConnectsAgain_ThenDeviceEmbeddedInThatPageIsDetachedAndStopped()
     {
         // Arrange: the first pass loads the page with its device, loads B.gated and stalls on C.gated.
@@ -578,7 +636,25 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     }
 
     private static string SerializePageWithDevice(string deviceName)
-        => $"# Page\n\n```subject(device)\n{RecordingDevice.Serialize(deviceName)}\n```\n";
+        => $"# Page\n\n{RecordingDevice.SerializeBlock("device", deviceName)}";
+
+    /// <summary>
+    /// A page with a panel that holds one device in the fragment of its default slot, one in the fragment of a
+    /// row of its typed slot, and one in a row that is itself in that fragment.
+    /// </summary>
+    private static string SerializePageWithNestedDevices()
+    {
+        var panel = typeof(TestPanel).FullName;
+        var row = typeof(TestRow).FullName;
+        var device = typeof(RecordingDevice).FullName;
+        return $"# Page\n\n:: {panel}#panel\n" +
+               $"::: Row Label=A\n" +
+               $":::: {device}#inRow Name=row\n::::\n" +
+               $":::: {row}#rowInRow\n::::: {device}#inRowOfRow Name=rowOfRow\n:::::\n::::\n" +
+               $":::\n\n" +
+               $"::: {device}#inContent Name=content\n:::\n" +
+               $"::\n";
+    }
 
     private async Task<FluentStorageContainer> StartHostedStorageAsync()
     {

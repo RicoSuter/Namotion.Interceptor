@@ -38,6 +38,10 @@ public partial class CallbackSubject : IConfigurable
             }
             """;
 
+    /// <summary>The block of a markdown page that embeds an instance under the name of the block.</summary>
+    public static string SerializeBlock(string blockName, string name)
+        => $":: {typeof(CallbackSubject).FullName}#{blockName}\n```json\n{{ \"Name\": \"{name}\" }}\n```\n::\n";
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
         => Interlocked.Exchange(ref _nextApply, null) is { } callback
             ? callback(this, cancellationToken)

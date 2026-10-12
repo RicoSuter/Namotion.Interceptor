@@ -1337,7 +1337,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         WriteFile("Motor.json", SerializeMotor("Pump"));
         WriteFile("Docs/Page.md", "first");
         WriteFile("Notes.md", "first");
-        WriteFile("Embedding.md", $"# Page\n\n```subject(motor)\n{SerializeMotor("Embedded")}\n```\n");
+        WriteFile("Embedding.md", $"# Page\n\n:: {typeof(Samples.Motor).FullName}#motor Name=Embedded\n::\n");
         var storage = await ConnectAsync();
         var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
         var page = Assert.IsType<MarkdownFile>(storage.Children["Embedding.md"]);

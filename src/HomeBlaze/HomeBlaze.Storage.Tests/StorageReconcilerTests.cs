@@ -4,6 +4,8 @@ using FluentStorage.Blobs;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
+using HomeBlaze.Storage.Tests.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
@@ -561,28 +563,40 @@ public class StorageReconcilerTests : StorageTestBase
     [Fact]
     public async Task WhenMarkdownFileIsPutBackAfterFailedLoad_ThenPageHoldsThePreviousContentAndSaveKeepsIt()
     {
-        // Arrange
-        var content = $"# Page\n\n```subject(valve)\n{CallbackSubject.Serialize("first")}\n```\n";
-        var rejectedContent = content + "\n```subject(broken)\n{ \"$type\": \"typo, }\n```\n";
+        // Arrange: a block that cannot be read is shown as an error and does not fail the load, so the load
+        // fails in its last step, the assignment of the children. The page has the rejected content by then,
+        // and the subject that the load reused has the rejected configuration.
+        var content = $"# Page\n\n{CallbackSubject.SerializeBlock("valve", "first")}";
+        var rejectedContent = $"# Page\n\n{CallbackSubject.SerializeBlock("valve", "second, rejected")}";
         WriteFile("Page.md", content);
         var storage = await ConnectAsync();
         var page = Assert.IsType<MarkdownFile>(storage.Children["Page.md"]);
         var valve = Assert.IsType<CallbackSubject>(page.Children["valve"]);
+        var failingWrite = new FailingWrite(nameof(MarkdownFile.Children));
+        Context!.AddService<IWriteInterceptor>(failingWrite);
+        failingWrite.FailNext();
         WriteFile("Page.md", rejectedContent);
         await storage.ReconcileAsync(Named("Page.md"));
         var contentAfterFailedLoad = page.Content;
+        var nameAfterFailedLoad = valve.Name;
 
         // Act
         WriteFile("Page.md", content);
         await storage.ReconcileAsync(Named("Page.md"));
         var contentAfterFileWasPutBack = page.Content;
+        var nameAfterFileWasPutBack = valve.Name;
         valve.Name = "saved in the UI";
         await page.WriteConfigurationAsync(valve, CancellationToken.None);
 
         // Assert
         Assert.Equal(rejectedContent, contentAfterFailedLoad);
+        Assert.Equal("second, rejected", nameAfterFailedLoad);
         Assert.Equal(content, contentAfterFileWasPutBack);
-        Assert.DoesNotContain("subject(broken)", File.ReadAllText(GetFullPath("Page.md")));
+        Assert.Equal("first", nameAfterFileWasPutBack);
+        Assert.Same(valve, page.Children["valve"]);
+        var saved = File.ReadAllText(GetFullPath("Page.md"));
+        Assert.Contains("saved in the UI", saved);
+        Assert.DoesNotContain("rejected", saved);
     }
 
     [Fact]
@@ -1566,8 +1580,8 @@ public class StorageReconcilerTests : StorageTestBase
     public async Task WhenMarkdownFileLoadsEmbeddedSubjects_ThenLifecycleHandlersRunWithoutTheFlowOfThePass()
     {
         // Arrange
-        var firstBlock = $"```subject(first)\n{CallbackSubject.Serialize("first")}\n```\n";
-        var secondBlock = $"```subject(second)\n{CallbackSubject.Serialize("second")}\n```\n";
+        var firstBlock = CallbackSubject.SerializeBlock("first", "first");
+        var secondBlock = CallbackSubject.SerializeBlock("second", "second");
         var storage = await ConnectAsync();
         var recorder = new LifecycleFlowRecorder();
         Context!.AddService<ILifecycleHandler>(recorder);
@@ -1589,17 +1603,177 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenMarkdownFileLoadsSubjectsNestedInSlots_ThenLifecycleHandlersRunWithoutTheFlowOfThePass()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        var recorder = new LifecycleFlowRecorder();
+        Context!.AddService<ILifecycleHandler>(recorder);
+
+        // Act: the first pass creates the page with a panel that holds a subject in the fragment of its default
+        // slot and a row in its typed slot, which holds another one. The second reloads the page that is in the
+        // tree by then: the panel, the row and both fragments are kept, and each fragment gets one more subject.
+        // The third takes the row and the first subject of the default slot away again.
+        WriteFile("Page.md", SerializePageWithPanel(rowNames: ["inRow"], contentNames: ["inContent"]));
+        await storage.ReconcileAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Page.md"]);
+        var panel = Assert.IsType<TestPanel>(page.Children["panel"]);
+        var row = Assert.Single(panel.Rows);
+        var content = Assert.IsType<MarkdownFragment>(panel.Content);
+        var rowContent = Assert.IsType<MarkdownFragment>(row.Content);
+        var inContent = content.Children["inContent"];
+        var inRow = rowContent.Children["inRow"];
+
+        WriteFile("Page.md", SerializePageWithPanel(rowNames: ["inRow", "addedToRow"], contentNames: ["inContent", "addedToContent"]));
+        await storage.ReconcileAsync();
+        var addedToContent = content.Children["addedToContent"];
+        var addedToRow = rowContent.Children["addedToRow"];
+
+        WriteFile("Page.md", SerializePageWithPanel(rowNames: [], contentNames: ["addedToContent"]));
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Same(panel, page.Children["panel"]);
+        Assert.Same(content, panel.Content);
+        Assert.Empty(panel.Rows);
+        Assert.Equal(["addedToContent"], content.Children.Keys.Where(key => !key.StartsWith("Html_", StringComparison.Ordinal)));
+
+        var changes = recorder.Changes;
+        Assert.Equal(4, changes.Count(change => change is { Subject: CallbackSubject, IsContextAttach: true }));
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, content) && change.IsContextAttach);
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, row) && !change.IsContextAttach && !change.IsContextDetach);
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, inContent) && !change.IsContextAttach && !change.IsContextDetach);
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, addedToContent) && !change.IsContextAttach && !change.IsContextDetach);
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, addedToRow) && !change.IsContextAttach && !change.IsContextDetach);
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, inContent) && change.IsContextDetach);
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, row) && change.IsContextDetach);
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, rowContent) && change.IsContextDetach);
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, inRow) && change.IsContextDetach);
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, addedToRow) && change.IsContextDetach);
+        Assert.All(changes, change => Assert.True(change.IsFlowSuppressed, $"{change.Subject.GetType().Name}, context attach: {change.IsContextAttach}, context detach: {change.IsContextDetach}"));
+    }
+
+    [Fact]
+    public async Task WhenMarkdownFileUpdatesSubjectNestedInSlot_ThenItsConfigurationIsWrittenWithoutTheFlowOfThePass()
+    {
+        // Arrange
+        WriteFile("Page.md", SerializePageWithPanel(rowNames: ["inRow"], contentNames: [], subjectName: "first"));
+        var storage = await ConnectAsync();
+        var panel = Assert.IsType<TestPanel>(Assert.IsType<MarkdownFile>(storage.Children["Page.md"]).Children["panel"]);
+        var nested = Assert.IsType<CallbackSubject>(Assert.IsType<MarkdownFragment>(Assert.Single(panel.Rows).Content).Children["inRow"]);
+        var recorder = new ConfigurationWriteFlowRecorder(nested);
+        Context!.AddService<IWriteInterceptor>(recorder);
+
+        // Act
+        WriteFile("Page.md", SerializePageWithPanel(rowNames: ["inRow"], contentNames: [], subjectName: "second, with another size"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("second, with another size", nested.Name);
+        Assert.Equal([true], recorder.IsFlowSuppressedPerWrite);
+    }
+
+    [Fact]
+    public async Task WhenSubjectNestedInSlotOfPageIsSaved_ThenWriteReloadsThePageOnTheWorkerAndKeepsItsSubjects()
+    {
+        // Arrange
+        WriteFile("Page.md", SerializePageWithPanel(rowNames: ["inRow"], contentNames: ["inContent"], subjectName: "first"));
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Page.md"]);
+        var panel = Assert.IsType<TestPanel>(page.Children["panel"]);
+        var nested = Assert.IsType<CallbackSubject>(Assert.IsType<MarkdownFragment>(Assert.Single(panel.Rows).Content).Children["inRow"]);
+        var childrenBeforeSave = page.Children;
+        Task? callFromReload = null;
+        CallbackSubject.RunOnNextApply((_, cancellationToken) =>
+        {
+            // Not awaited: a block whose subject fails is shown as an error and leaves the page.
+            callFromReload = storage.WriteBlobAsync("Other.md", new MemoryStream("text"u8.ToArray()), cancellationToken);
+            return Task.CompletedTask;
+        });
+
+        // Act
+        nested.Name = "saved in the UI";
+        var isWritten = await page.WriteConfigurationAsync(nested, CancellationToken.None);
+
+        // Assert: the page was reloaded before the save returned, on the worker, where a call into the storage is refused.
+        Assert.True(isWritten);
+        Assert.NotNull(callFromReload);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => callFromReload);
+        Assert.False(File.Exists(GetFullPath("Other.md")));
+        Assert.NotSame(childrenBeforeSave, page.Children);
+        Assert.Same(panel, page.Children["panel"]);
+        Assert.Same(nested, Assert.IsType<MarkdownFragment>(Assert.Single(panel.Rows).Content).Children["inRow"]);
+        Assert.Equal("saved in the UI", nested.Name);
+        var saved = File.ReadAllText(GetFullPath("Page.md"));
+        Assert.Contains("saved in the UI", saved);
+        Assert.Equal(saved, page.Content);
+        Assert.Equal(new FileInfo(GetFullPath("Page.md")).Length, page.FileSize);
+        Assert.Equal("/Page.md", page.FullPath);
+    }
+
+    [Fact]
+    public async Task WhenMarkdownFileReleasesSubjectOfBlockThatBecomesAnError_ThenLifecycleHandlersRunWithoutTheFlowOfThePass()
+    {
+        // Arrange: the name is a number, which is found only when the configuration is set on the new subject.
+        var storage = await ConnectAsync();
+        var recorder = new LifecycleFlowRecorder();
+        Context!.AddService<ILifecycleHandler>(recorder);
+        WriteFile("Page.md", $"# Page\n\n:: {typeof(CallbackSubject).FullName}#broken\n```json\n{{ \"Name\": 5 }}\n```\n::\n");
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Page.md"]);
+        var changes = recorder.Changes;
+        Assert.False(page.Children.ContainsKey("broken"));
+        Assert.Contains(changes, change => change is { Subject: CallbackSubject, IsContextAttach: true });
+        Assert.Contains(changes, change => change is { Subject: CallbackSubject, IsContextDetach: true });
+        Assert.All(changes, change => Assert.True(change.IsFlowSuppressed, $"{change.Subject.GetType().Name}, context attach: {change.IsContextAttach}, context detach: {change.IsContextDetach}"));
+    }
+
+    /// <summary>
+    /// A page with a panel. The named subjects of the row are in the fragment of a row of its typed slot, which
+    /// is left out without any, and those of the content in the fragment of its default slot.
+    /// </summary>
+    private static string SerializePageWithPanel(string[] rowNames, string[] contentNames, string subjectName = "nested")
+    {
+        static string SerializeNested(string fence, string blockName, string name)
+            => $"{fence} {typeof(CallbackSubject).FullName}#{blockName}\n```json\n{{ \"Name\": \"{name}\" }}\n```\n{fence}\n";
+
+        var page = new StringBuilder($"# Page\n\n:: {typeof(TestPanel).FullName}#panel\n");
+        if (rowNames.Length > 0)
+        {
+            page.Append("::: Row Label=A\n");
+            foreach (var name in rowNames)
+            {
+                page.Append(SerializeNested("::::", name, subjectName));
+            }
+
+            page.Append(":::\n\n");
+        }
+
+        page.Append("Text of the default slot.\n\n");
+        foreach (var name in contentNames)
+        {
+            page.Append(SerializeNested(":::", name, subjectName));
+        }
+
+        return page.Append("::\n").ToString();
+    }
+
+    [Fact]
     public async Task WhenMarkdownFileUpdatesEmbeddedSubject_ThenItsConfigurationIsWrittenWithoutTheFlowOfThePass()
     {
         // Arrange
-        WriteFile("Page.md", $"# Page\n\n```subject(embedded)\n{CallbackSubject.Serialize("first")}\n```\n");
+        WriteFile("Page.md", $"# Page\n\n{CallbackSubject.SerializeBlock("embedded", "first")}");
         var storage = await ConnectAsync();
         var embedded = Assert.IsType<CallbackSubject>(Assert.IsType<MarkdownFile>(storage.Children["Page.md"]).Children["embedded"]);
         var recorder = new ConfigurationWriteFlowRecorder(embedded);
         Context!.AddService<IWriteInterceptor>(recorder);
 
         // Act
-        WriteFile("Page.md", $"# Page\n\n```subject(embedded)\n{CallbackSubject.Serialize("second, with another size")}\n```\n");
+        WriteFile("Page.md", $"# Page\n\n{CallbackSubject.SerializeBlock("embedded", "second, with another size")}");
         await storage.ReconcileAsync();
 
         // Assert
@@ -1877,7 +2051,7 @@ public class StorageReconcilerTests : StorageTestBase
 
         public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
-            if (change.Subject is Samples.Motor or MarkdownFile or CallbackSubject or HtmlSegment)
+            if (change.Subject is Samples.Motor or MarkdownFile or CallbackSubject or HtmlSegment or MarkdownFragment or TestPanel or TestRow)
             {
                 lock (_changes)
                 {
