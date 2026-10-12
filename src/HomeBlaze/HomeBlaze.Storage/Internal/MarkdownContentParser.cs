@@ -156,8 +156,10 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
-    /// Renders markdown content by replacing {{ path }} expressions with their resolved values.
-    /// Everything else stays as written, including the lines of the blocks and the front matter. An expression inside markdown code is kept as written.
+    /// Renders markdown content by replacing each {{ path }} expression that
+    /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value: also one in the front matter,
+    /// on the head line of a block or in an invalid block, which the page itself does not evaluate. An expression inside
+    /// markdown code is kept as written, and everything else stays as written.
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
     /// <param name="content">The markdown content.</param>

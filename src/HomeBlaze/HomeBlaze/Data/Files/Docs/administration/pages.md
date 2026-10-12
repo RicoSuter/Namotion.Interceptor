@@ -889,6 +889,8 @@ The page knows a block by its key. The key is the `#name` of the block. A block 
 
 Give every subject that has state a name, and name the blocks around it too: the card, the tab and the layout. A subject that must keep its state under all changes belongs in a file of its own, shown on the page through a `Widget` block.
 
+The Markdown tools of [AI agents](ai-agents.md#changing-pages) refuse a change that would create the subject of a block without a name directly on the page again.
+
 ---
 
 ## Editing in the Page Editor
