@@ -72,7 +72,7 @@ public class AgentStorageTests
             var name = AgentStorage.GetName("/Agents/My_Agent");
 
             // Act
-            AgentStorage.MigrateLegacyName(directory, "/Agents/My_Agent", logger);
+            AgentStorage.MigrateLegacyName(directory, "/Agents/My_Agent", NoSubjectAt, logger);
 
             // Assert
             Assert.Equal("timeline", File.ReadAllText(Path.Combine(directory, name + ".timeline.jsonl")));
@@ -91,30 +91,81 @@ public class AgentStorageTests
     }
 
     [Fact]
-    public void WhenAFileOfTheNewNameExists_ThenNothingIsMoved()
+    public void WhenAMigrationWasInterrupted_ThenTheRemainingFilesAreMovedAndMovedOnesAreKept()
     {
-        // Arrange
+        // Arrange - the timeline moved before the interruption, the memory did not.
         var directory = Directory.CreateTempSubdirectory("agent-storage-test").FullName;
         try
         {
             var name = AgentStorage.GetName("/Agents/My_Agent");
-            File.WriteAllText(Path.Combine(directory, "Agents_My_Agent.timeline.jsonl"), "old timeline");
-            File.WriteAllText(Path.Combine(directory, "Agents_My_Agent.memory.json"), "old memory");
             File.WriteAllText(Path.Combine(directory, name + ".timeline.jsonl"), "new timeline");
+            File.WriteAllText(Path.Combine(directory, "Agents_My_Agent.timeline.jsonl"), "stale timeline");
+            File.WriteAllText(Path.Combine(directory, "Agents_My_Agent.memory.json"), "memory");
 
             // Act
-            AgentStorage.MigrateLegacyName(directory, "/Agents/My_Agent", NullLogger.Instance);
+            AgentStorage.MigrateLegacyName(directory, "/Agents/My_Agent", NoSubjectAt, NullLogger.Instance);
+            AgentStorage.MigrateLegacyName(directory, "/Agents/My_Agent", NoSubjectAt, NullLogger.Instance);
 
             // Assert
             Assert.Equal("new timeline", File.ReadAllText(Path.Combine(directory, name + ".timeline.jsonl")));
-            Assert.False(File.Exists(Path.Combine(directory, name + ".memory.json")));
-            Assert.True(File.Exists(Path.Combine(directory, "Agents_My_Agent.memory.json")));
+            Assert.Equal("memory", File.ReadAllText(Path.Combine(directory, name + ".memory.json")));
+            Assert.False(File.Exists(Path.Combine(directory, "Agents_My_Agent.memory.json")));
+            Assert.True(File.Exists(Path.Combine(directory, "Agents_My_Agent.timeline.jsonl")));
         }
         finally
         {
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Theory]
+    [InlineData("/Agents/My_Agent", "Agents_My_Agent", "/Agents/My/Agent")]
+    [InlineData("/", "root", "/root")]
+    public void WhenTheEarlierNameIsTheNameOfAnotherSubject_ThenNothingIsMoved(string subjectPath, string legacyName, string otherPath)
+    {
+        // Arrange
+        var directory = Directory.CreateTempSubdirectory("agent-storage-test").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, legacyName + ".timeline.jsonl"), "timeline of the other agent");
+            var logger = new RecordingLogger();
+
+            // Act
+            AgentStorage.MigrateLegacyName(directory, subjectPath, path => path == otherPath, logger);
+
+            // Assert
+            Assert.Equal(legacyName, AgentStorage.GetName(otherPath));
+            Assert.Equal([legacyName + ".timeline.jsonl"], Directory.GetFileSystemEntries(directory).Select(Path.GetFileName));
+            Assert.Contains(logger.Warnings, message => message.Contains(otherPath));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void WhenTheRootAgentHasFilesOfTheEarlierName_ThenTheyAreMovedWhenNoSubjectUsesThatName()
+    {
+        // Arrange
+        var directory = Directory.CreateTempSubdirectory("agent-storage-test").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "root.timeline.jsonl"), "timeline");
+
+            // Act
+            AgentStorage.MigrateLegacyName(directory, "/", NoSubjectAt, NullLogger.Instance);
+
+            // Assert
+            Assert.Equal("timeline", File.ReadAllText(Path.Combine(directory, AgentStorage.GetName("/") + ".timeline.jsonl")));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static bool NoSubjectAt(string path) => false;
 
     [Fact]
     public void WhenTheNameIsUnchanged_ThenTheFilesStayWhereTheyAre()
@@ -127,7 +178,7 @@ public class AgentStorageTests
             Directory.CreateDirectory(Path.Combine(directory, "Agents_Claude.workdir"));
 
             // Act
-            AgentStorage.MigrateLegacyName(directory, "/Agents/Claude", NullLogger.Instance);
+            AgentStorage.MigrateLegacyName(directory, "/Agents/Claude", NoSubjectAt, NullLogger.Instance);
 
             // Assert
             Assert.Equal(["Agents_Claude.timeline.jsonl", "Agents_Claude.workdir"],
@@ -152,7 +203,7 @@ public class AgentStorageTests
             var logger = new RecordingLogger();
 
             // Act
-            AgentStorage.MigrateLegacyName(directory, "/Agents/My_Agent", logger);
+            AgentStorage.MigrateLegacyName(directory, "/Agents/My_Agent", NoSubjectAt, logger);
 
             // Assert
             Assert.True(File.Exists(Path.Combine(directory, "Agents_My_Agent.timeline.jsonl")));

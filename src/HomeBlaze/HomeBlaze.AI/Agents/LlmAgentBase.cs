@@ -585,12 +585,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     {
         var context = ((IInterceptorSubject)this).Context;
         var dataDirectory = context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
-        var path = context.TryGetService<ISubjectPathResolver>()?.GetPath(this, PathStyle.Canonical);
+        var resolver = context.TryGetService<ISubjectPathResolver>();
+        var path = resolver?.GetPath(this, PathStyle.Canonical);
         if (dataDirectory is not null && path is not null)
         {
             _storageDirectory = Path.Combine(dataDirectory, "Agents");
             _storageName = AgentStorage.GetName(path);
-            AgentStorage.MigrateLegacyName(_storageDirectory, path, _logger);
+            AgentStorage.MigrateLegacyName(
+                _storageDirectory, path, otherPath => resolver!.ResolveSubject(otherPath, PathStyle.Canonical) is not null, _logger);
             WorkingDirectory = Path.Combine(_storageDirectory, _storageName + AgentStorage.WorkingDirectorySuffix);
         }
         else

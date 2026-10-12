@@ -30,6 +30,7 @@ public static class AgentStorage
 
     private const string RootName = "_root";
     private const string HashSeparator = "__";
+    private const char PathSeparator = '/';
 
     // The Windows set, so data directories move between platforms without renames.
     private static readonly char[] InvalidFileNameCharacters = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
@@ -87,11 +88,17 @@ public static class AgentStorage
 
     /// <summary>
     /// Moves the files of the agent at <paramref name="subjectPath"/> from the name of the earlier scheme, which
-    /// mapped '/', '_' and invalid characters to '_' without a hash, to <see cref="GetName"/>. Nothing moves when the
-    /// names are equal, when a file of the new name exists or when there is no file of the earlier name. Failures are
+    /// mapped '/', '_' and invalid characters to '_' without a hash, to <see cref="GetName"/>. Each file moves only when
+    /// no file of the new name with its suffix exists, so a migration that stopped halfway completes on the next start.
+    /// Nothing moves when the names are equal, or when the earlier name is the current name of another path at which
+    /// <paramref name="isSubjectAt"/> finds a subject, since the files then belong to that subject. Failures are
     /// logged, not thrown.
     /// </summary>
-    public static void MigrateLegacyName(string directory, string subjectPath, ILogger logger)
+    /// <param name="directory">The directory of the agent data files.</param>
+    /// <param name="subjectPath">The canonical path of the agent.</param>
+    /// <param name="isSubjectAt">Whether a subject exists at a canonical path.</param>
+    /// <param name="logger">Receives the moves and failures.</param>
+    public static void MigrateLegacyName(string directory, string subjectPath, Func<string, bool> isSubjectAt, ILogger logger)
     {
         var name = GetName(subjectPath);
         var legacyName = GetLegacyName(subjectPath);
@@ -100,16 +107,19 @@ public static class AgentStorage
             return;
         }
 
+        if (GetPathOfName(legacyName) is { } owner && isSubjectAt(owner))
+        {
+            logger.LogWarning(
+                "The data files named {LegacyName} are not moved to the agent at {Path}: they are the files of the subject at {OwnerPath}.",
+                legacyName, subjectPath, owner);
+            return;
+        }
+
         try
         {
-            if (AllSuffixes.Any(suffix => Exists(Path.Combine(directory, name + suffix))))
-            {
-                return;
-            }
-
             var moves = AllSuffixes
                 .Select(suffix => (Source: Path.Combine(directory, legacyName + suffix), Target: Path.Combine(directory, name + suffix)))
-                .Where(move => Exists(move.Source))
+                .Where(move => Exists(move.Source) && !Exists(move.Target))
                 .ToList();
             if (moves.Count == 0)
             {
@@ -126,6 +136,16 @@ public static class AgentStorage
         {
             logger.LogWarning(exception, "The data files of the agent at {Path} could not be moved to {Name}.", subjectPath, name);
         }
+    }
+
+    /// <summary>
+    /// The path whose current name is <paramref name="name"/> when that name has no hash, else null. Such a name maps
+    /// each '/' to '_' and has no other '_', so its path is the name with '_' read as '/'.
+    /// </summary>
+    private static string? GetPathOfName(string name)
+    {
+        var path = PathSeparator + name.Replace('_', PathSeparator);
+        return GetName(path) == name ? path : null;
     }
 
     private static void Move(string source, string target, ILogger logger)
