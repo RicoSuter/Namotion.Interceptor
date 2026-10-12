@@ -44,7 +44,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 :::::: HomeBlaze.Components.Card Title="Compressor" Subtitle="Simulated motor" Icon=Bolt IconColor=Primary Href="/browser/Demo/Compressor"
 ::::::: HomeBlaze.Components.ValueList
 :::::::: Value Path=/Demo/Compressor/CurrentSpeed Icon=Speed
-::::::::: HomeBlaze.Components.Progress Path=/Demo/Compressor/CurrentSpeed Min=0 Max=3000
+::::::::: HomeBlaze.Components.Progress Path=/Demo/Compressor/CurrentSpeed Minimum=0 Maximum=3000
 :::::::: Value Path=/Demo/Compressor/TargetSpeed
 :::::::: Value Path=/Demo/Compressor/Temperature Icon=Thermostat
 :::::::: Value Path=/Demo/Compressor/IsAtTargetSpeed
@@ -54,7 +54,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 :::::: HomeBlaze.Components.Card Title="Water Pump" Subtitle="Simulated motor" Icon=WaterDrop IconColor=Info Href="/browser/Demo/WaterPump"
 ::::::: HomeBlaze.Components.ValueList
 :::::::: Value Path=/Demo/WaterPump/CurrentSpeed Icon=Speed
-::::::::: HomeBlaze.Components.Progress Path=/Demo/WaterPump/CurrentSpeed Min=0 Max=3000
+::::::::: HomeBlaze.Components.Progress Path=/Demo/WaterPump/CurrentSpeed Minimum=0 Maximum=3000
 :::::::: Value Path=/Demo/WaterPump/TargetSpeed
 :::::::: Value Path=/Demo/WaterPump/Temperature Icon=Thermostat
 :::::::: Value Path=/Demo/WaterPump/IsAtTargetSpeed
@@ -64,7 +64,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 :::::: HomeBlaze.Components.Card Title="Conveyor" Subtitle="Simulated motor" Icon=Settings IconColor=Secondary Href="/browser/Demo/Conveyor"
 ::::::: HomeBlaze.Components.ValueList
 :::::::: Value Path=/Demo/Conveyor/CurrentSpeed Icon=Speed
-::::::::: HomeBlaze.Components.Progress Path=/Demo/Conveyor/CurrentSpeed Min=0 Max=3000
+::::::::: HomeBlaze.Components.Progress Path=/Demo/Conveyor/CurrentSpeed Minimum=0 Maximum=3000
 :::::::: Value Path=/Demo/Conveyor/TargetSpeed
 :::::::: Value Path=/Demo/Conveyor/Temperature Icon=Thermostat
 :::::::: Value Path=/Demo/Conveyor/IsAtTargetSpeed
@@ -76,7 +76,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 :::::: HomeBlaze.Components.Card Title="Cooling Fan" Subtitle="Simulated motor" Icon=AcUnit IconColor=Info
 ::::::: HomeBlaze.Components.ValueList
 :::::::: Value Path=/Demo/CoolingFan/CurrentSpeed Icon=Speed
-::::::::: HomeBlaze.Components.Progress Path=/Demo/CoolingFan/CurrentSpeed Min=0 Max=3000
+::::::::: HomeBlaze.Components.Progress Path=/Demo/CoolingFan/CurrentSpeed Minimum=0 Maximum=3000
 :::::::: Value Path=/Demo/CoolingFan/TargetSpeed
 :::::::: Value Path=/Demo/CoolingFan/Temperature Icon=Thermostat
 :::::::: Value Path=/Demo/CoolingFan/IsAtTargetSpeed
@@ -86,7 +86,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 :::::: HomeBlaze.Components.Card Title="Exhaust Fan" Subtitle="Simulated motor" Icon=Air IconColor=Info
 ::::::: HomeBlaze.Components.ValueList
 :::::::: Value Path=/Demo/ExhaustFan/CurrentSpeed Icon=Speed
-::::::::: HomeBlaze.Components.Progress Path=/Demo/ExhaustFan/CurrentSpeed Min=0 Max=3000
+::::::::: HomeBlaze.Components.Progress Path=/Demo/ExhaustFan/CurrentSpeed Minimum=0 Maximum=3000
 :::::::: Value Path=/Demo/ExhaustFan/TargetSpeed
 :::::::: Value Path=/Demo/ExhaustFan/Temperature Icon=Thermostat
 :::::::: Value Path=/Demo/ExhaustFan/IsAtTargetSpeed

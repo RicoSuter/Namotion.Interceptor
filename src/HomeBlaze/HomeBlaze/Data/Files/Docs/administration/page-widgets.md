@@ -639,7 +639,7 @@ A row with content and without a path, and a row with a `Progress` as content. T
 ::: Value Label="Pump" Icon=WaterDrop
 {{ pump/CurrentSpeed }} of {{ pump/TargetSpeed }} RPM
 ::: Value Path=fan/CurrentSpeed Label="Fan" Icon=Air
-:::: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Min=0 Max=3000
+:::: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Minimum=0 Maximum=3000
 ::
 ~~~~
 
@@ -647,7 +647,7 @@ A row with content and without a path, and a row with a `Progress` as content. T
 ::: Value Label="Pump" Icon=WaterDrop
 {{ pump/CurrentSpeed }} of {{ pump/TargetSpeed }} RPM
 ::: Value Path=fan/CurrentSpeed Label="Fan" Icon=Air
-:::: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Min=0 Max=3000
+:::: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Minimum=0 Maximum=3000
 ::
 
 - **Aligned labels**: When at least one row has an icon, the rows without one keep the room of an icon, so that all labels line up. An icon that comes from a case of a map counts as well. In a card with an icon, a list in which at least one row has an icon lines up the icons of its rows with the icon of the header and its labels with the title.
@@ -769,29 +769,29 @@ A bar that shows where a number stands between a minimum and a maximum. Type nam
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Path` | Text | None | The [path](#value-widgets) of the property whose value the bar shows |
-| `Min` | Number with a fraction | `0` | The value at which the bar is empty |
-| `Max` | Number with a fraction | `1` | The value at which the bar is full |
+| `Minimum` | Number with a fraction | `0` | The value at which the bar is empty |
+| `Maximum` | Number with a fraction | `1` | The value at which the bar is full |
 | `Color` | Colour | `Primary` | The [colour](#colours) of the bar |
 
 Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so that is the end of the range. The second bar has another colour:
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.Progress Path=pump/CurrentSpeed Min=0 Max=3000
+:: HomeBlaze.Components.Progress Path=pump/CurrentSpeed Minimum=0 Maximum=3000
 ::
 
-:: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Min=0 Max=3000 Color=Success
+:: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Minimum=0 Maximum=3000 Color=Success
 ::
 ~~~~
 
-:: HomeBlaze.Components.Progress Path=pump/CurrentSpeed Min=0 Max=3000
+:: HomeBlaze.Components.Progress Path=pump/CurrentSpeed Minimum=0 Maximum=3000
 ::
 
-:: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Min=0 Max=3000 Color=Success
+:: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Minimum=0 Maximum=3000 Color=Success
 ::
 
-- **The range**: The bar is empty at `Min` and full at `Max`. A value outside the range gives an empty or a full bar. The default range from 0 to 1 is what a property with the unit percent holds. A value from 0 to 100 needs `Max=100`.
-- **No bar**: A value that is no number, a value that is not set and a range in which `Max` is not above `Min` show a dash in place of the bar.
+- **The range**: The bar is empty at `Minimum` and full at `Maximum`. A value outside the range gives an empty or a full bar. The default range from 0 to 1 is what a property with the unit percent holds. A value from 0 to 100 needs `Max=100`.
+- **No bar**: A value that is no number, a value that is not set and a range in which `Maximum` is not above `Minimum` show a dash in place of the bar.
 - **No text**: The bar has no text. Show the number with an expression, or put the bar into a row of a [ValueList](#valuelist), where the value stands next to it.
 - **Width**: Alone, a bar is as wide as the place it stands in. In a row of a value list it fills the room between the label and the value, and it is at least 48 pixels wide.
 

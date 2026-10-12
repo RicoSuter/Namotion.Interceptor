@@ -78,7 +78,7 @@ Body of the raised card.
 :: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=status
 ::
 
-:: HomeBlaze.Components.Progress Path=valuemotor/TargetSpeed Min=0 Max=1600
+:: HomeBlaze.Components.Progress Path=valuemotor/TargetSpeed Minimum=0 Maximum=1600
 ::
 
 :: HomeBlaze.Components.Progress Path=valuemotor/Name
@@ -92,7 +92,7 @@ Picture card footer
 
 :: HomeBlaze.Components.ValueList
 ::: Value Path=valuemotor/TargetSpeed Label="Balken"
-:::: HomeBlaze.Components.Progress Path=valuemotor/TargetSpeed Min=0 Max=1600
+:::: HomeBlaze.Components.Progress Path=valuemotor/TargetSpeed Minimum=0 Maximum=1600
 ::
 
 :: HomeBlaze.Components.ExpansionPanels
@@ -118,7 +118,7 @@ Alert text
 :::: Value Path=valuemotor/TargetSpeed Label="Aligned Icon" Icon=Speed
 :::: Value Path=valuemotor/Temperature Label="Aligned Plain"
 :::: Value Path=valuemotor/CurrentSpeed Label="Aligned Bar" Icon=Speed
-::::: HomeBlaze.Components.Progress Path=valuemotor/CurrentSpeed Min=0 Max=1600
+::::: HomeBlaze.Components.Progress Path=valuemotor/CurrentSpeed Minimum=0 Maximum=1600
 :::: Value Path=valuemotor/TargetSpeed Label="Aligned Text"
 {{ valuemotor/CurrentSpeed }} von
 ::: HeaderRight
@@ -137,7 +137,7 @@ Alert text
 :::: HomeBlaze.Components.Card Title="Narrow Card" Icon=Bolt
 ::::: HomeBlaze.Components.ValueList
 :::::: Value Path=valuemotor/TargetSpeed Label="Speed" Icon=Speed
-::::::: HomeBlaze.Components.Progress Path=valuemotor/CurrentSpeed Min=0 Max=1600
+::::::: HomeBlaze.Components.Progress Path=valuemotor/CurrentSpeed Minimum=0 Maximum=1600
 :::::: Value Path=valuemotor/Temperature Label="Heat"
 ::: Item
 Second narrow cell

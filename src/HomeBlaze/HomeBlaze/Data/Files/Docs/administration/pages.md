@@ -290,7 +290,7 @@ A card with a name and two arguments.
 | Text with spaces, or empty text | In double quotes | `Title="Motor Card"`, `Title=""` | `Title` of `Card` |
 | Path | As it is | `Path=/Devices/Sonos/Players[RINCON_000E58A0B1C201400]` | `Path` of `Widget` |
 | Whole number | Digits, with a `-` before a negative number | `MinWidth=320` | `MinWidth` of `FlowLayout` |
-| Number with a fraction | Digits, a dot and the digits of the fraction, with a `-` before a negative number | `Max=2.5` | `Max` of `Progress` |
+| Number with a fraction | Digits, a dot and the digits of the fraction, with a `-` before a negative number | `Maximum=2.5` | `Maximum` of `Progress` |
 | Yes or no | `true` or `false`. Upper and lower case do not matter for these two words, so `True` works as well | `IsSnapToGridEnabled=true` | `IsSnapToGridEnabled` of `CanvasLayout` |
 | Duration | Hours, minutes and seconds with colons, optionally with a fraction of a second | `SimulationInterval=00:00:01`, `SimulationInterval=00:00:00.500` | `SimulationInterval` of `Motor` |
 | One of a fixed set of values | The name of the value | `IconColor=Warning`, `Severity=Error`, `Kind=Icon` | `IconColor` of `Card`, `Severity` of `Alert`, `Kind` of `Indicator` |

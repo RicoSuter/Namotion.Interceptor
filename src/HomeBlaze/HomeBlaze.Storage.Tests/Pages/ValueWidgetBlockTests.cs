@@ -70,7 +70,7 @@ public class ValueWidgetBlockTests
             :: HomeBlaze.Components.Progress#plainbar Path=/a/Position
             ::
 
-            :: HomeBlaze.Components.Progress#bar Path=/a/Speed Min=10 Max=1600 Color=Success
+            :: HomeBlaze.Components.Progress#bar Path=/a/Speed Minimum=10 Maximum=1600 Color=Success
             ::
             """);
 
@@ -86,13 +86,13 @@ public class ValueWidgetBlockTests
         Assert.Equal("states", icon.Map);
 
         var plainBar = Assert.IsType<Progress>(page.Children["plainbar"]);
-        Assert.Equal(0, plainBar.Min);
-        Assert.Equal(1, plainBar.Max);
+        Assert.Equal(0, plainBar.Minimum);
+        Assert.Equal(1, plainBar.Maximum);
         Assert.Equal(Color.Primary, plainBar.Color);
 
         var bar = Assert.IsType<Progress>(page.Children["bar"]);
-        Assert.Equal(10, bar.Min);
-        Assert.Equal(1600, bar.Max);
+        Assert.Equal(10, bar.Minimum);
+        Assert.Equal(1600, bar.Maximum);
         Assert.Equal(Color.Success, bar.Color);
     }
 
