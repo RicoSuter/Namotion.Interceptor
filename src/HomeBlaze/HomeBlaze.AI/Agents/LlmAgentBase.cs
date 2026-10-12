@@ -24,11 +24,22 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <summary>The text of the error entry recorded for a chat message that was cancelled before a reply.</summary>
     public const string CancelledText = "Cancelled before a reply.";
 
+    /// <summary>The status message of a running agent without a turn.</summary>
+    public const string IdleStatusMessage = "Idle";
+
+    /// <summary>The status message while a chat turn runs.</summary>
+    public const string AnsweringStatusMessage = "Answering";
+
+    /// <summary>The status message while a background run runs.</summary>
+    public const string BackgroundRunStatusMessage = "Running";
+
+    /// <summary>The status message while a chat message waits for a background run to end.</summary>
+    public const string WaitingStatusMessage = "Waiting for the background run";
+
     /// <summary>The message of the exception thrown when a chat message is sent while the agent is not running.</summary>
     public const string NotRunningText = "The agent is not running.";
 
     private const int RecentResultCount = 5;
-    private const string WaitingStatusMessage = "Waiting for the background run";
     private static readonly TimeSpan ChangeBufferTime = TimeSpan.FromMilliseconds(100);
 
     // The agent whose turn the current async flow belongs to, so re-entering the turn gate fails fast.
@@ -278,7 +289,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             var isIdle = false;
             try
             {
-                var started = BeginTurn("Answering");
+                var started = BeginTurn(AnsweringStatusMessage);
                 await WriteRunStatisticsAsync();
                 var progress = CreateProgress();
                 var tools = CreateToolSet(progress);
@@ -660,7 +671,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         var isIdle = false;
         try
         {
-            started = BeginTurn("Running");
+            started = BeginTurn(BackgroundRunStatusMessage);
             var progress = CreateProgress();
             var tools = CreateToolSet(progress);
             var message = AgentPromptBuilder.BuildBackgroundMessage(
@@ -1011,7 +1022,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
             var pauseReason = scheduler.PauseReason;
             Status = pauseReason is null ? ServiceStatus.Running : ServiceStatus.Unavailable;
-            StatusMessage = pauseReason ?? "Idle";
+            StatusMessage = pauseReason ?? IdleStatusMessage;
         }
     }
 

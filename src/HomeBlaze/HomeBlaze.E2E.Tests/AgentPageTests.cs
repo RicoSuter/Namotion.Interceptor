@@ -246,7 +246,7 @@ public class AgentPageTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/{TimelineAgentPath}");
         await Assertions.Expect(page.GetByTestId("agent-status")).ToContainTextAsync(
-            new Regex("Running|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
+            new Regex("Idle|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
 
         var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
         var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + TimelineAgentPath, PathStyle.Canonical));
@@ -313,7 +313,7 @@ public class AgentPageTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/{ResultAgentPath}");
         var status = page.GetByTestId("agent-status");
-        await Assertions.Expect(status).ToContainTextAsync(new Regex("Running|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(status).ToContainTextAsync(new Regex("Idle|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
 
         var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
         var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + ResultAgentPath, PathStyle.Canonical));
@@ -333,7 +333,13 @@ public class AgentPageTests
             // Act
             await page.ReloadAsync();
 
-            // Assert - the card shows the result and the whole answer on request.
+            // Assert - one status chip, the card shows the result and the whole answer on request.
+            await Assertions.Expect(status.Locator(".mud-chip")).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
+            if (agent.Status == ServiceStatus.Running)
+            {
+                await Assertions.Expect(status).ToHaveTextAsync("Idle");
+            }
+
             var card = page.GetByTestId("agent-background-run").Last;
             var plainResult = result.Replace("**", string.Empty);
             await Assertions.Expect(card).ToContainTextAsync(plainResult, new() { Timeout = PageLoadTimeout });
@@ -363,7 +369,7 @@ public class AgentPageTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/{ScrollAgentPath}");
         await Assertions.Expect(page.GetByTestId("agent-status")).ToContainTextAsync(
-            new Regex("Running|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
+            new Regex("Idle|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
 
         var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
         var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + ScrollAgentPath, PathStyle.Canonical));

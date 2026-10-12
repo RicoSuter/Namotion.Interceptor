@@ -19,11 +19,19 @@
                     <MudIcon Icon="@Icons.Material.Filled.SmartToy" />
                     <MudText Typo="Typo.h5" Style="overflow-wrap: anywhere;">@agent.Title</MudText>
                 </MudStack>
+                @* One chip: the turn state while the service runs, otherwise the service status with its message. *@
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Style="min-width: 0;" data-testid="agent-status">
-                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(agent.Status)" Class="ma-0">@agent.Status</MudChip>
-                    @if (agent.StatusMessage is { Length: > 0 } statusMessage)
+                    @if (agent.Status == ServiceStatus.Running)
                     {
-                        <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">@statusMessage</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="@(agent.IsBusy ? Color.Info : Color.Success)" Class="ma-0">@GetTurnState(agent.StatusMessage)</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(agent.Status)" Class="ma-0">@agent.Status</MudChip>
+                        @if (agent.StatusMessage is { Length: > 0 } statusMessage)
+                        {
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">@statusMessage</MudText>
+                        }
                     }
                 </MudStack>
             </MudStack>
@@ -163,9 +171,16 @@
         }
     }
 
+    private static string GetTurnState(string? statusMessage) => statusMessage switch
+    {
+        LlmAgentBase.AnsweringStatusMessage => "Answering",
+        LlmAgentBase.BackgroundRunStatusMessage => "Running background",
+        LlmAgentBase.WaitingStatusMessage => "Waiting",
+        _ => "Idle"
+    };
+
     private static Color GetStatusColor(ServiceStatus status) => status switch
     {
-        ServiceStatus.Running => Color.Success,
         ServiceStatus.Unavailable => Color.Warning,
         ServiceStatus.Error => Color.Error,
         _ => Color.Default
