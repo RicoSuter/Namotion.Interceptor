@@ -407,8 +407,7 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Collects what in a Markdown source makes the page run code or subjects, or load content, rather than show text,
-    /// the way the page parses it: the embedded subject blocks, and the raw HTML, images and media embeds, custom
-    /// containers, math and diagram blocks, element attributes and links with a scheme other than http, https or mailto.
+    /// the way the page parses it: the embedded subject blocks, and the <see cref="Files.MarkdownFile.ActiveContent"/>.
     /// </summary>
     internal static (List<string> SubjectBlocks, List<string> ActiveMarkup) GetActiveContent(string source)
     {
