@@ -10,7 +10,7 @@ public static class HomeBlazePaths
     /// <summary>Setting that points to the root configuration file.</summary>
     public const string RootConfigurationFileKey = "HomeBlaze:RootConfigFile";
 
-    /// <summary>Setting that points to the folder copied into an empty data directory on first start.</summary>
+    /// <summary>Setting that points to the folder copied into an empty data directory on first start, and whose documentation directory replaces the data directory's one on every start.</summary>
     public const string SeedDirectoryKey = "HomeBlaze:SeedDirectory";
 
     /// <summary>Setting that overrides the plugin configuration file.</summary>

@@ -90,6 +90,8 @@ The container image sets it to `/data/Root.json`.
 
 Folder that is copied into the data folder on the first start, when the root configuration file does not exist. Existing files are never overwritten, and the root configuration file is copied last, so an interrupted copy is completed on the next start.
 
+Its `Files/Docs` folder is the exception: it replaces `Files/Docs` in the data folder on every start. See [Installation](installation.md#data-folder).
+
 | Setting | Default |
 |---------|---------|
 | `HomeBlaze:SeedDirectory` | not set (nothing is copied) |
