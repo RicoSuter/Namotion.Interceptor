@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Services;
@@ -54,10 +55,10 @@ public static class SubjectPathResolverScopeExtensions
     }
 
     /// <summary>
-    /// Resolves a property value from a path whose last segment is the property name,
-    /// with the subject part resolved by <see cref="ResolveScopedSubject"/>.
+    /// Resolves the property a path ends at. The last segment of the path is the property name,
+    /// and the part before it is resolved by <see cref="ResolveScopedSubject"/>.
     /// </summary>
-    public static object? ResolveScopedValue(
+    public static RegisteredSubjectProperty? ResolveScopedProperty(
         this SubjectPathResolver resolver,
         string path,
         PathStyle style,
@@ -72,7 +73,7 @@ public static class SubjectPathResolverScopeExtensions
         if (lastSlash < 0)
         {
             var scopeSubject = FindScope(from) as IInterceptorSubject ?? from;
-            return scopeSubject.TryGetRegisteredProperty(path)?.GetValue();
+            return scopeSubject.TryGetRegisteredProperty(path);
         }
 
         var propertyName = path[(lastSlash + 1)..];
@@ -82,8 +83,18 @@ public static class SubjectPathResolverScopeExtensions
         }
 
         var subject = resolver.ResolveScopedSubject(lastSlash == 0 ? "/" : path[..lastSlash], style, from);
-        return subject?.TryGetRegisteredProperty(propertyName)?.GetValue();
+        return subject?.TryGetRegisteredProperty(propertyName);
     }
+
+    /// <summary>
+    /// Resolves the value of the property that <see cref="ResolveScopedProperty"/> finds for the path.
+    /// </summary>
+    public static object? ResolveScopedValue(
+        this SubjectPathResolver resolver,
+        string path,
+        PathStyle style,
+        IInterceptorSubject from) =>
+        resolver.ResolveScopedProperty(path, style, from)?.GetValue();
 
     private static IPathScope? FindScope(IInterceptorSubject subject)
     {
