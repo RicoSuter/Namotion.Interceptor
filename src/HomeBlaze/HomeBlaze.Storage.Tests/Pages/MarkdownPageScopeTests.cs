@@ -525,4 +525,22 @@ public class MarkdownPageScopeTests
         Assert.Same(leaf, FindReference(page, "byName").Resolved);
         Assert.Equal(5, FindExpression(page.Children.Values, "leaf/Count").Value);
     }
+
+    [Fact]
+    public async Task WhenTargetOfAnAbsolutePathAppearsAfterThePageWasParsed_ThenTheValueOfTheExpressionIsPublished()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", "Title: {{ /later.md/Title }}");
+        var expression = FindExpression(page.Children.Values, "/later.md/Title");
+        var expressionChanges = RecordChangedProperties(expression);
+        Assert.Null(expression.Value);
+
+        // Act
+        await fixture.AddPageAsync("later.md", "---\ntitle: Later\n---\n\ntext");
+
+        // Assert
+        Assert.Contains(nameof(RenderExpression.Value), expressionChanges);
+        Assert.Equal("Later", expression.Value);
+    }
 }

@@ -31,6 +31,8 @@ public partial class RenderExpression : ITitleProvider
 
     public string? Title => null;
 
+    // No production code reads this. Its change notification is what renders the page again when the target of an
+    // absolute path appears after the page rendered, a case that the reads of a render miss because the resolver caches such paths.
     [Derived]
     public object? Value => ResolveProperty()?.GetValue();
 
@@ -48,10 +50,7 @@ public partial class RenderExpression : ITitleProvider
         _pathResolver = pathResolver;
     }
 
-    /// <summary>
-    /// Gets the property the path ends at, or null when the path leads nowhere.
-    /// </summary>
-    public RegisteredSubjectProperty? ResolveProperty()
+    private RegisteredSubjectProperty? ResolveProperty()
     {
         try
         {
@@ -76,7 +75,7 @@ public partial class RenderExpression : ITitleProvider
     /// Gets the value of a property as a page shows it in the format, with dates in the time zone or,
     /// when it is null, in that of the server. A missing property or value gives an empty text.
     /// </summary>
-    public static string GetText(RegisteredSubjectProperty? property, ExpressionFormat format, ITimeZoneDisplay? timeZone)
+    internal static string GetText(RegisteredSubjectProperty? property, ExpressionFormat format, ITimeZoneDisplay? timeZone)
     {
         var value = property?.GetValue();
         if (property is null || value is null)
