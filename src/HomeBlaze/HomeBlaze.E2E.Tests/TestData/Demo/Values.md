@@ -119,6 +119,13 @@ Alert text
 :::: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=status
 ::
 
+:: HomeBlaze.Components.Card Title="Icon Indicator Card" Icon=Bolt IconColor=Primary
+::: HomeBlaze.Components.ValueList
+:::: Value Path=valuemotor/TargetSpeed Label="Icon Row" Icon=Speed
+::: HeaderRight
+:::: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=status Kind=Icon
+::
+
 :: HomeBlaze.Components.FlowLayout MinWidth=225
 ::: Item
 :::: HomeBlaze.Components.Card Title="Narrow Card" Icon=Bolt

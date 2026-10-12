@@ -20,9 +20,14 @@ public class ValueWidgetTests
         _fixture = fixture;
     }
 
-    private async Task<IPage> OpenPageAsync()
+    private async Task<IPage> OpenPageAsync(int? viewportWidth = null)
     {
         var page = await _fixture.CreatePageAsync();
+        if (viewportWidth is not null)
+        {
+            await page.SetViewportSizeAsync(viewportWidth.Value, 800);
+        }
+
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Values.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
         return page;
@@ -52,24 +57,68 @@ public class ValueWidgetTests
     // is for rounding. A line that is off by a gutter or a margin is 4 pixels or more away.
     private const double PositionTolerance = 1.0;
 
-    private static async Task<ElementBox> GetBoxAsync(ILocator locator)
-    {
-        var box = await locator.BoundingBoxAsync();
-        Assert.NotNull(box);
-        return new ElementBox(box.X, box.Y, box.X + box.Width, box.Y + box.Height);
-    }
-
     private sealed record ElementBox(double Left, double Top, double Right, double Bottom)
     {
+        public double Width => Right - Left;
+
         public double CenterY => (Top + Bottom) / 2;
     }
 
-    private async Task<(IPage Page, ILocator Card)> OpenAlignedCardAsync(string title)
+    // One part of the page to measure: an element inside a card, inside a row of the card, or the text range of the element.
+    private sealed record Part(string? Card, string? Row, string Selector, bool TextOnly = false);
+
+    // The motor of the test page changes the text of its values every second and the width of a text moves the edges of
+    // what stands next to it. A test that compares edges therefore takes all of them from one evaluation, so that they belong to the same layout.
+    private static async Task<ElementBox[]> GetBoxesAsync(IPage page, params Part[] parts)
     {
-        var page = await OpenPageAsync();
-        var card = GetCard(page, title);
-        await Assertions.Expect(card.GetByTestId("value-text").Last).ToBeVisibleAsync(new() { Timeout = Timeout });
-        return (page, card);
+        var rectangles = await page.Locator("body").EvaluateAsync<double[][]>(
+            """
+            (root, parts) => parts.map(part => {
+                let scope = root;
+                if (part.card) {
+                    scope = [...root.querySelectorAll('[data-testid=card]')].find(card => card.textContent.includes(part.card));
+                }
+                if (part.row) {
+                    scope = [...scope.querySelectorAll('[data-testid=value-row]')]
+                        .find(row => row.querySelector('[data-testid=value-label]').textContent.trim() === part.row);
+                }
+                const element = part.selector === ':scope' ? scope : scope.querySelector(part.selector);
+                if (!element) {
+                    throw new Error('Nothing found for ' + JSON.stringify(part));
+                }
+                if (!part.textOnly) {
+                    const rectangle = element.getBoundingClientRect();
+                    return [rectangle.left, rectangle.top, rectangle.right, rectangle.bottom];
+                }
+                // The range of an element would include the boxes of its child elements, which are wider than their text.
+                const box = [Infinity, Infinity, -Infinity, -Infinity];
+                const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+                while (walker.nextNode()) {
+                    if (!walker.currentNode.textContent.trim()) {
+                        continue;
+                    }
+                    const range = document.createRange();
+                    range.selectNodeContents(walker.currentNode);
+                    const rectangle = range.getBoundingClientRect();
+                    box[0] = Math.min(box[0], rectangle.left);
+                    box[1] = Math.min(box[1], rectangle.top);
+                    box[2] = Math.max(box[2], rectangle.right);
+                    box[3] = Math.max(box[3], rectangle.bottom);
+                }
+                return box;
+            })
+            """,
+            parts.Select(part => new { card = part.Card, row = part.Row, selector = part.Selector, textOnly = part.TextOnly }).ToArray());
+
+        return rectangles.Select(values => new ElementBox(values[0], values[1], values[2], values[3])).ToArray();
+    }
+
+    private async Task<IPage> OpenPageWhenCardHasValuesAsync(string title)
+    {
+        // The cells of the narrow card are narrower than 280 pixels only for a window of about 1236 to 1347 pixels.
+        var page = await OpenPageAsync(viewportWidth: 1280);
+        await Assertions.Expect(GetCard(page, title).GetByTestId("value-text").Last).ToBeVisibleAsync(new() { Timeout = Timeout });
+        return page;
     }
 
     [Fact]
@@ -283,101 +332,119 @@ public class ValueWidgetTests
     public async Task WhenValueListIsInACard_ThenTheIconsOfItsRowsLineUpWithTheIconOfTheHeader()
     {
         // Arrange
-        var (_, card) = await OpenAlignedCardAsync("Aligned Card");
+        var page = await OpenPageWhenCardHasValuesAsync("Aligned Card");
 
         // Act
-        var headerIcon = await GetBoxAsync(card.GetByTestId("card-icon"));
-        var iconRow = await GetBoxAsync(GetCardRow(card, "Aligned Icon").GetByTestId("value-icon"));
-        var barRow = await GetBoxAsync(GetCardRow(card, "Aligned Bar").GetByTestId("value-icon"));
+        var boxes = await GetBoxesAsync(page,
+            new("Aligned Card", null, "[data-testid=card-icon]"),
+            new("Aligned Card", "Aligned Icon", "[data-testid=value-icon]"),
+            new("Aligned Card", "Aligned Bar", "[data-testid=value-icon]"));
 
         // Assert
-        Assert.Equal(headerIcon.Left, iconRow.Left, PositionTolerance);
-        Assert.Equal(headerIcon.Left, barRow.Left, PositionTolerance);
+        Assert.Equal(boxes[0].Left, boxes[1].Left, PositionTolerance);
+        Assert.Equal(boxes[0].Left, boxes[2].Left, PositionTolerance);
     }
 
     [Fact]
-    public async Task WhenValueListIsInACard_ThenTheLabelsOfItsRowsLineUpWithTheTitleWithOrWithoutAnIcon()
+    public async Task WhenValueListIsInACard_ThenTheLabelsOfItsRowsLineUpWithTheTitleAndARowWithoutAnIconKeepsTheRoomOfOne()
     {
         // Arrange
-        var (_, card) = await OpenAlignedCardAsync("Aligned Card");
+        var page = await OpenPageWhenCardHasValuesAsync("Aligned Card");
 
         // Act
-        var title = await GetBoxAsync(card.GetByTestId("card-title"));
-        var withIcon = await GetBoxAsync(GetCardRow(card, "Aligned Icon").GetByTestId("value-label"));
-        var withoutIcon = await GetBoxAsync(GetCardRow(card, "Aligned Plain").GetByTestId("value-label"));
+        var boxes = await GetBoxesAsync(page,
+            new("Aligned Card", null, "[data-testid=card-title]"),
+            new("Aligned Card", "Aligned Icon", "[data-testid=value-label]"),
+            new("Aligned Card", "Aligned Plain", "[data-testid=value-label]"),
+            new("Aligned Card", "Aligned Icon", "[data-testid=value-icon]"),
+            new("Aligned Card", "Aligned Plain", "[data-testid=value-icon-space]"),
+            new("Aligned Card", null, "[data-testid=card-icon]"));
 
         // Assert
-        Assert.Equal(title.Left, withIcon.Left, PositionTolerance);
-        Assert.Equal(title.Left, withoutIcon.Left, PositionTolerance);
+        Assert.Equal(boxes[0].Left, boxes[1].Left, PositionTolerance);
+        Assert.Equal(boxes[0].Left, boxes[2].Left, PositionTolerance);
+        Assert.Equal(boxes[3].Width, boxes[4].Width, PositionTolerance);
+        Assert.Equal(boxes[5].Left, boxes[4].Left, PositionTolerance);
     }
 
     [Fact]
     public async Task WhenCardHasAnIndicatorInItsHeader_ThenTheValuesOfTheRowsEndWhereTheIndicatorEndsAndItStandsOnTheTitleLine()
     {
         // Arrange
-        var (_, card) = await OpenAlignedCardAsync("Aligned Card");
+        var page = await OpenPageWhenCardHasValuesAsync("Aligned Card");
 
         // Act
-        var indicator = await GetBoxAsync(card.GetByTestId("card-header-right").GetByTestId("indicator"));
-        var title = await GetBoxAsync(card.GetByTestId("card-title"));
+        var boxes = await GetBoxesAsync(page,
+            new("Aligned Card", null, "[data-testid=card-header-right] [data-testid=indicator]"),
+            new("Aligned Card", null, "[data-testid=card-title]"),
+            new("Aligned Card", "Aligned Icon", "[data-testid=value-text]"),
+            new("Aligned Card", "Aligned Plain", "[data-testid=value-text]"),
+            new("Aligned Card", "Aligned Bar", "[data-testid=value-text]"),
+            new("Aligned Card", "Aligned Text", "[data-testid=value-text]"));
 
         // Assert
-        foreach (var label in new[] { "Aligned Icon", "Aligned Plain", "Aligned Bar", "Aligned Text" })
-        {
-            var value = await GetBoxAsync(GetCardRow(card, label).GetByTestId("value-text"));
-            Assert.Equal(indicator.Right, value.Right, PositionTolerance);
-        }
+        Assert.All(boxes.Skip(2), value => Assert.Equal(boxes[0].Right, value.Right, PositionTolerance));
+        Assert.Equal(boxes[1].CenterY, boxes[0].CenterY, PositionTolerance);
+    }
 
-        Assert.Equal(title.CenterY, indicator.CenterY, PositionTolerance);
+    [Fact]
+    public async Task WhenCardHasAnIconIndicatorInItsHeader_ThenItEndsWhereTheValuesEndAndStandsOnTheTitleLine()
+    {
+        // Arrange
+        var page = await OpenPageWhenCardHasValuesAsync("Icon Indicator Card");
+
+        // Act
+        var boxes = await GetBoxesAsync(page,
+            new("Icon Indicator Card", null, "[data-testid=card-header-right] [data-testid=indicator]"),
+            new("Icon Indicator Card", null, "[data-testid=card-title]"),
+            new("Icon Indicator Card", "Icon Row", "[data-testid=value-text]"));
+
+        // Assert
+        Assert.Equal(boxes[2].Right, boxes[0].Right, PositionTolerance);
+        Assert.Equal(boxes[1].CenterY, boxes[0].CenterY, PositionTolerance);
     }
 
     [Fact]
     public async Task WhenRowHasContent_ThenTheBarFillsTheRoomBeforeTheValueAndTextStandsRightBeforeIt()
     {
         // Arrange
-        var (_, card) = await OpenAlignedCardAsync("Aligned Card");
+        var page = await OpenPageWhenCardHasValuesAsync("Aligned Card");
 
         // Act
-        var bar = await GetBoxAsync(GetCardRow(card, "Aligned Bar").GetByTestId("progress"));
-        var barValue = await GetBoxAsync(GetCardRow(card, "Aligned Bar").GetByTestId("value-text"));
-        var barLabel = await GetBoxAsync(GetCardRow(card, "Aligned Bar").GetByTestId("value-label"));
-        var textRow = GetCardRow(card, "Aligned Text");
-        var textValue = await GetBoxAsync(textRow.GetByTestId("value-text"));
-        var textRight = await textRow.GetByTestId("value-content").EvaluateAsync<double>(
-            """
-            element => {
-                const range = document.createRange();
-                range.selectNodeContents(element);
-                return range.getBoundingClientRect().right;
-            }
-            """);
+        var boxes = await GetBoxesAsync(page,
+            new("Aligned Card", "Aligned Bar", "[data-testid=progress]"),
+            new("Aligned Card", "Aligned Bar", "[data-testid=value-label]"),
+            new("Aligned Card", "Aligned Bar", "[data-testid=value-text]"),
+            new("Aligned Card", "Aligned Text", "[data-testid=value-content]", TextOnly: true),
+            new("Aligned Card", "Aligned Text", "[data-testid=value-text]"));
 
         // Assert: the gap between two parts of a row is 8 pixels.
-        Assert.Equal(barLabel.Right + 8, bar.Left, PositionTolerance);
-        Assert.Equal(barValue.Left - 8, bar.Right, PositionTolerance);
-        Assert.Equal(textValue.Left - 8, textRight, PositionTolerance);
+        Assert.Equal(boxes[1].Right + 8, boxes[0].Left, PositionTolerance);
+        Assert.Equal(boxes[2].Left - 8, boxes[0].Right, PositionTolerance);
+        Assert.Equal(boxes[4].Left - 8, boxes[3].Right, PositionTolerance);
     }
 
     [Fact]
     public async Task WhenCardIsNarrow_ThenItsRowsDoNotOverflowAndTheBarIsStillVisible()
     {
         // Arrange
-        var (_, card) = await OpenAlignedCardAsync("Narrow Card");
+        var page = await OpenPageWhenCardHasValuesAsync("Narrow Card");
 
         // Act
-        var cardBox = await GetBoxAsync(card);
-        var overflow = await card.EvaluateAsync<double[]>(
+        var boxes = await GetBoxesAsync(page,
+            new("Narrow Card", null, ":scope"),
+            new("Narrow Card", "Speed", "[data-testid=value-text]"),
+            new("Narrow Card", "Speed", "[data-testid=progress]"),
+            new("Narrow Card", null, ".mud-card-content"));
+        var overflow = await GetCard(page, "Narrow Card").EvaluateAsync<double[]>(
             "card => [card, ...card.querySelectorAll('[data-testid=value-row]')].map(element => element.scrollWidth - element.clientWidth)");
-        var value = await GetBoxAsync(GetCardRow(card, "Speed").GetByTestId("value-text"));
-        var bar = await GetBoxAsync(GetCardRow(card, "Speed").GetByTestId("progress"));
-        var content = await GetBoxAsync(card.Locator(".mud-card-content"));
 
         // Assert: the cell is narrower than the card of the dashboard, which has to fit as well.
-        Assert.True(cardBox.Right - cardBox.Left < 280, $"The card is {cardBox.Right - cardBox.Left} pixels wide");
+        Assert.True(boxes[0].Width < 280, $"The card is {boxes[0].Width} pixels wide");
         Assert.All(overflow, scrollOverflow => Assert.Equal(0, scrollOverflow));
-        Assert.True(value.Right <= cardBox.Right, $"The value ends at {value.Right}, the card at {cardBox.Right}");
-        Assert.Equal(content.Right - 16, value.Right, PositionTolerance);
-        Assert.True(bar.Right - bar.Left >= 40, $"The bar is {bar.Right - bar.Left} pixels wide");
+        Assert.True(boxes[1].Right <= boxes[0].Right, $"The value ends at {boxes[1].Right}, the card at {boxes[0].Right}");
+        Assert.Equal(boxes[3].Right - 16, boxes[1].Right, PositionTolerance);
+        Assert.True(boxes[2].Width >= 40, $"The bar is {boxes[2].Width} pixels wide");
     }
 
     [Fact]
@@ -385,18 +452,59 @@ public class ValueWidgetTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var row = GetRow(page, "Soll");
-        await Assertions.Expect(row.GetByTestId("value-text")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetRow(page, "Soll").GetByTestId("value-text")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
-        var heading = await GetBoxAsync(page.Locator("h1").First);
-        var icon = await GetBoxAsync(row.GetByTestId("value-icon"));
-        var value = await GetBoxAsync(row.GetByTestId("value-text"));
-        var list = await GetBoxAsync(row.Locator("xpath=ancestor::*[@data-testid='value-list']"));
+        var boxes = await GetBoxesAsync(page,
+            new(null, null, ".markdown-content h1"),
+            new(null, "Soll", "[data-testid=value-icon]"),
+            new(null, "Soll", "[data-testid=value-text]"));
+        var listRight = await GetRow(page, "Soll").EvaluateAsync<double>(
+            "row => row.closest('[data-testid=value-list]').getBoundingClientRect().right");
 
         // Assert
-        Assert.Equal(heading.Left, icon.Left, PositionTolerance);
-        Assert.Equal(list.Right, value.Right, PositionTolerance);
+        Assert.Equal(boxes[0].Left, boxes[1].Left, PositionTolerance);
+        Assert.Equal(listRight, boxes[2].Right, PositionTolerance);
+    }
+
+    [Fact]
+    public async Task WhenRowHasAnIcon_ThenItHasTheMutedColourOfTheIconsOfAList()
+    {
+        // Arrange
+        var page = await OpenPageWhenCardHasValuesAsync("Aligned Card");
+
+        // Act: the variable is resolved next to the icon, because the theme may define it on an element below the body.
+        var colours = await GetCard(page, "Aligned Card").GetByTestId("value-icon").First.EvaluateAsync<string[]>(
+            """
+            icon => {
+                const probe = document.createElement('span');
+                probe.style.color = 'var(--mud-palette-action-default)';
+                icon.parentElement.appendChild(probe);
+                const expected = getComputedStyle(probe).color;
+                probe.remove();
+                return [getComputedStyle(icon).color, expected];
+            }
+            """);
+
+        // Assert
+        Assert.Equal(colours[1], colours[0]);
+        Assert.NotEqual("rgba(0, 0, 0, 0)", colours[1]);
+    }
+
+    [Fact]
+    public async Task WhenIndicatorIsAChip_ThenItAddsNoDistanceAroundItself()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var chip = page.GetByTestId("indicator").First;
+        await Assertions.Expect(chip).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var margins = await chip.EvaluateAsync<string[]>(
+            "chip => { const style = getComputedStyle(chip); return [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft]; }");
+
+        // Assert
+        Assert.All(margins, margin => Assert.Equal("0px", margin));
     }
 
     [Fact]
