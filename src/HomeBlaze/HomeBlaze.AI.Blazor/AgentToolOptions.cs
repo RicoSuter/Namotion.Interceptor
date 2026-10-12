@@ -1,4 +1,5 @@
 using HomeBlaze.AI.Agents;
+using HomeBlaze.AI.Mcp;
 using Namotion.Interceptor.Mcp;
 
 namespace HomeBlaze.AI.Blazor;
@@ -9,9 +10,11 @@ namespace HomeBlaze.AI.Blazor;
 /// <param name="Name">The tool name stored in <see cref="LlmAgentBase.AllowedTools"/>.</param>
 /// <param name="Description">A short summary for known tools, else the tool description; null when unknown.</param>
 /// <param name="IsOffered">Whether the installation currently offers the tool.</param>
-/// <param name="CanChangeState">Whether the tool can change devices, including sending notifications.</param>
+/// <param name="CanChangeState">Whether the tool can change state: devices, notifications or pages.</param>
 /// <param name="LoadsWebContent">Whether the tool is a backend tool that brings untrusted web content into the turn.</param>
-public sealed record AgentToolOption(string Name, string? Description, bool IsOffered, bool CanChangeState, bool LoadsWebContent = false);
+/// <param name="ChangesPages">Whether the tool changes Markdown pages and documents rather than devices.</param>
+public sealed record AgentToolOption(
+    string Name, string? Description, bool IsOffered, bool CanChangeState, bool LoadsWebContent = false, bool ChangesPages = false);
 
 /// <summary>
 /// Builds the allowed-tools toggles of the agent edit form.
@@ -20,7 +23,10 @@ public static class AgentToolOptions
 {
     /// <summary>The tool names shown when the offered tools cannot be listed.</summary>
     public static IReadOnlyList<string> FallbackToolNames { get; } =
-        ["browse", "search", "get_property", "list_types", "list_methods", "invoke_query", "get_property_history", "invoke_operation", "set_property"];
+        [
+            "browse", "search", "get_property", "list_types", "list_methods", "invoke_query", "get_property_history", "invoke_operation", "set_property",
+            HomeBlazeMarkdownToolProvider.EditMarkdownToolName, HomeBlazeMarkdownToolProvider.WriteMarkdownToolName, HomeBlazeMarkdownToolProvider.CreateMarkdownToolName
+        ];
 
     private const string MemoryToolName = "update_memory";
 
@@ -35,7 +41,17 @@ public static class AgentToolOptions
         ["invoke_query"] = "Calls read-only query methods, for example to read Markdown pages.",
         ["get_property_history"] = "Reads the recorded history of property values.",
         ["invoke_operation"] = "Runs operations on subjects, such as switching a device or sending a notification.",
-        ["set_property"] = "Writes property values of subjects."
+        ["set_property"] = "Writes property values of subjects.",
+        [HomeBlazeMarkdownToolProvider.EditMarkdownToolName] = "Replaces a passage of a Markdown page or document.",
+        [HomeBlazeMarkdownToolProvider.WriteMarkdownToolName] = "Replaces the whole text of a Markdown page or document.",
+        [HomeBlazeMarkdownToolProvider.CreateMarkdownToolName] = "Creates a Markdown page or document in a folder."
+    };
+
+    private static readonly HashSet<string> PageTools = new(StringComparer.Ordinal)
+    {
+        HomeBlazeMarkdownToolProvider.EditMarkdownToolName,
+        HomeBlazeMarkdownToolProvider.WriteMarkdownToolName,
+        HomeBlazeMarkdownToolProvider.CreateMarkdownToolName
     };
 
     /// <summary>
@@ -78,7 +94,8 @@ public static class AgentToolOptions
         {
             if (names.Add(name))
             {
-                options.Add(new AgentToolOption(name, Summaries.GetValueOrDefault(name) ?? description, IsOffered: true, CanChangeState(name)));
+                options.Add(new AgentToolOption(
+                    name, Summaries.GetValueOrDefault(name) ?? description, IsOffered: true, CanChangeState(name), ChangesPages: PageTools.Contains(name)));
             }
         }
 
@@ -95,7 +112,8 @@ public static class AgentToolOptions
         {
             if (names.Add(name))
             {
-                sorted.Add(new AgentToolOption(name, "Not offered by this installation.", IsOffered: false, CanChangeState(name)));
+                sorted.Add(new AgentToolOption(
+                    name, "Not offered by this installation.", IsOffered: false, CanChangeState(name), ChangesPages: PageTools.Contains(name)));
             }
         }
 

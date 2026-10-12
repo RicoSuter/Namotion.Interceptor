@@ -46,6 +46,9 @@ public class AgentToolSetTests
     [InlineData(new[] { "browse", "invoke_query" }, true)]
     [InlineData(new[] { "invoke_method" }, true)]
     [InlineData(new[] { "set_property" }, false)]
+    [InlineData(new[] { "browse", "edit_markdown" }, false)]
+    [InlineData(new[] { "write_markdown" }, false)]
+    [InlineData(new[] { "create_markdown" }, false)]
     public void WhenCheckingAllowedTools_ThenWriteToolsDisableReadOnly(string[] allowedTools, bool expected)
     {
         // Act

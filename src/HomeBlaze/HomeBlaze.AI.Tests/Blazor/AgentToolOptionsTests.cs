@@ -125,6 +125,37 @@ public class AgentToolOptionsTests
     }
 
     [Fact]
+    public void WhenMarkdownToolsAreOffered_ThenTheyAreListedAfterTheReadOnlyToolsAsChangingPages()
+    {
+        // Arrange
+        var offeredTools = new[] { CreateTool("create_markdown"), CreateTool("edit_markdown"), CreateTool("browse"), CreateTool("write_markdown"), CreateTool("invoke_operation") };
+
+        // Act
+        var options = AgentToolOptions.Create(offeredTools, []);
+
+        // Assert
+        Assert.Equal(["browse", "create_markdown", "edit_markdown", "write_markdown", "invoke_operation"], options.Select(option => option.Name));
+        Assert.Equal([false, true, true, true, true], options.Select(option => option.CanChangeState));
+        Assert.Equal([false, true, true, true, false], options.Select(option => option.ChangesPages));
+        Assert.Equal(
+            ["Creates a Markdown page or document in a folder.", "Replaces a passage of a Markdown page or document.", "Replaces the whole text of a Markdown page or document."],
+            options.Skip(1).Take(3).Select(option => option.Description));
+    }
+
+    [Fact]
+    public void WhenAMarkdownToolIsAllowedButNotOffered_ThenItIsStillMarkedAsChangingPages()
+    {
+        // Act
+        var options = AgentToolOptions.Create([CreateTool("browse")], ["edit_markdown"]);
+
+        // Assert
+        var option = Assert.Single(options, option => option.Name == "edit_markdown");
+        Assert.False(option.IsOffered);
+        Assert.True(option.CanChangeState);
+        Assert.True(option.ChangesPages);
+    }
+
+    [Fact]
     public void WhenListingTheToolsFails_ThenTheFallbackNamesAreListed()
     {
         // Arrange
@@ -138,6 +169,7 @@ public class AgentToolOptionsTests
         Assert.Contains("invoke_query", AgentToolOptions.FallbackToolNames);
         Assert.Contains("invoke_operation", AgentToolOptions.FallbackToolNames);
         Assert.DoesNotContain("invoke_method", AgentToolOptions.FallbackToolNames);
+        Assert.Contains("edit_markdown", AgentToolOptions.FallbackToolNames);
         Assert.All(options, option => Assert.False(string.IsNullOrEmpty(option.Description)));
         Assert.All(options, option => Assert.True(option.IsOffered));
     }

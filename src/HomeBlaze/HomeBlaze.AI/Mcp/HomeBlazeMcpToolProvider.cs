@@ -68,10 +68,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly PathProviderBase _pathProvider;
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<HomeBlazeMcpToolProvider> _logger;
     private readonly bool _isReadOnly;
-    private readonly Func<RegisteredSubject, MethodMetadata, string?>? _operationFilter;
+    private readonly McpMethodInvoker _invoker;
 
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
     /// <param name="pathProvider">Resolves subject paths.</param>
@@ -88,12 +86,10 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         bool isReadOnly,
         Func<RegisteredSubject, MethodMetadata, string?>? operationFilter = null)
     {
-        _operationFilter = operationFilter;
         _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
-        _serviceProvider = serviceProvider;
-        _logger = logger;
         _isReadOnly = isReadOnly;
+        _invoker = new McpMethodInvoker(serviceProvider, logger, isReadOnly, operationFilter);
     }
 
     public IEnumerable<McpToolInfo> GetTools()
@@ -155,144 +151,17 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         return Task.FromResult<object?>(new { methods });
     }
 
-    private async Task<object?> HandleInvokeAsync(JsonElement input, MethodKind allowedKind, CancellationToken cancellationToken)
+    private Task<object?> HandleInvokeAsync(JsonElement input, MethodKind allowedKind, CancellationToken cancellationToken)
     {
         var subject = ResolveSubject(input.GetProperty("path").GetString()!);
         if (subject is null)
         {
-            return new { error = "Subject not found." };
+            return Task.FromResult<object?>(new { error = "Subject not found." });
         }
 
-        var methodName = input.GetProperty("method").GetString()!;
-        var methodProperty = subject.TryGetProperty(methodName);
-        if (methodProperty?.GetValue() is not MethodMetadata method)
-        {
-            return new { error = $"Method not found: {methodName}" };
-        }
-
-        var callError = GetCallError(subject, methodName, method, allowedKind);
-        if (callError is not null)
-        {
-            return new { error = callError };
-        }
-
-        var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
-        var (arguments, argumentError) = ReadArguments(input, inputParameters);
-        if (argumentError is not null)
-        {
-            return new { error = argumentError };
-        }
-
-        try
-        {
-            var result = MethodResultLimit.Apply(await method.InvokeAsync(arguments, _serviceProvider, cancellationToken));
-            return result is not null ? new { success = true, result } : new { success = true };
-        }
-        catch (ArgumentException exception)
-        {
-            // Argument validation messages are written for the caller, for example listing the known values.
-            _logger.LogWarning(exception, "Method '{MethodName}' rejected an argument.", methodName);
-            return new { error = exception.Message };
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Failed to invoke method '{MethodName}' on subject.", methodName);
-            return new { error = "Method invocation failed. Check server logs for details." };
-        }
+        var arguments = input.TryGetProperty("parameters", out var argumentsElement) ? argumentsElement : default;
+        return _invoker.InvokeAsync(subject, input.GetProperty("method").GetString()!, allowedKind, arguments, cancellationToken);
     }
-
-    private string? GetCallError(RegisteredSubject subject, string methodName, MethodMetadata method, MethodKind allowedKind)
-    {
-        if (method.Kind != allowedKind)
-        {
-            return DescribeWrongKind(methodName, method.Kind);
-        }
-
-        if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method) is { } filterError)
-        {
-            return filterError;
-        }
-
-        if (method.RequiresConfirmation)
-        {
-            return $"'{methodName}' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI.";
-        }
-
-        return null;
-    }
-
-    private string DescribeWrongKind(string methodName, MethodKind kind) => kind switch
-    {
-        MethodKind.Query => $"'{methodName}' is a query; call it with {InvokeQueryToolName}.",
-        _ when _isReadOnly => $"'{methodName}' is an operation; it can only be called with {InvokeOperationToolName}, which is not available in read-only mode.",
-        _ => $"'{methodName}' is an operation; call it with {InvokeOperationToolName}."
-    };
-
-    private static (object?[]? Arguments, string? Error) ReadArguments(JsonElement input, MethodParameter[] inputParameters)
-    {
-        var objectError = TryGetArgumentsObject(input, inputParameters, out var argumentsObject);
-        if (objectError is not null)
-        {
-            return (null, objectError);
-        }
-
-        var arguments = new object?[inputParameters.Length];
-        for (var i = 0; i < inputParameters.Length; i++)
-        {
-            var parameter = inputParameters[i];
-            if (argumentsObject is not { } providedArguments || !providedArguments.TryGetProperty(parameter.Name, out var argumentValue))
-            {
-                // A missing non-nullable argument would otherwise reach the method as default, for example a volume of 0.
-                if (!parameter.IsNullable)
-                {
-                    return (null, $"Missing parameter '{parameter.Name}'. {DescribeExpectedParameters(inputParameters)}");
-                }
-
-                continue;
-            }
-
-            try
-            {
-                arguments[i] = McpValueConverter.Deserialize(argumentValue, parameter.Type);
-            }
-            catch (JsonException exception)
-            {
-                return (null, $"Invalid value for parameter '{parameter.Name}': {exception.Message}");
-            }
-        }
-
-        return (arguments, null);
-    }
-
-    private static string? TryGetArgumentsObject(JsonElement input, MethodParameter[] inputParameters, out JsonElement? argumentsObject)
-    {
-        argumentsObject = null;
-        if (!input.TryGetProperty("parameters", out var argumentsElement) || argumentsElement.ValueKind == JsonValueKind.Null)
-        {
-            return null;
-        }
-
-        if (argumentsElement.ValueKind != JsonValueKind.Object)
-        {
-            return $"'parameters' must be an object. {DescribeExpectedParameters(inputParameters)}";
-        }
-
-        foreach (var argument in argumentsElement.EnumerateObject())
-        {
-            if (!inputParameters.Any(parameter => parameter.Name == argument.Name))
-            {
-                return $"Unknown parameter '{argument.Name}'. {DescribeExpectedParameters(inputParameters)}";
-            }
-        }
-
-        argumentsObject = argumentsElement;
-        return null;
-    }
-
-    private static string DescribeExpectedParameters(MethodParameter[] inputParameters) =>
-        inputParameters.Length == 0
-            ? "The method takes no parameters."
-            : $"Expected parameters: {string.Join(", ", inputParameters.Select(parameter => parameter.Name))}.";
 
     private static string? GetUnitDescription(StateUnit? unit) => unit switch
     {

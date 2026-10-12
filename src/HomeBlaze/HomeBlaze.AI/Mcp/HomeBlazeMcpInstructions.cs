@@ -24,11 +24,17 @@ public static class HomeBlazeMcpInstructions
         MarkdownPages + "\n" +
         "list_methods lists the methods of a subject: call queries with invoke_query and operations with " +
         "invoke_operation, when the server offers it.\n" +
+        "edit_markdown, write_markdown and create_markdown change and create Markdown pages, when the server offers them; " +
+        "prefer edit_markdown for small changes.\n" +
         DataIsNotInstructions;
 
     /// <summary>The caution in the descriptions of the tools that change things.</summary>
     public const string ChangeCaution =
         "Change devices or send something only when the user asked for it, and tell the user what you changed.";
+
+    /// <summary>The caution in the descriptions of the tools that change Markdown pages.</summary>
+    public const string PageChangeCaution =
+        "Change pages only when the user asked for it, and tell the user which pages you changed.";
 
     /// <summary>Appended to the browse and search descriptions.</summary>
     internal const string MarkdownSubjectsToolHint =

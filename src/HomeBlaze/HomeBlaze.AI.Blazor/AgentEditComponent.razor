@@ -85,7 +85,12 @@
                                 <MudText Typo="Typo.caption" Class="mud-text-secondary"
                                          Style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">@tool.Description</MudText>
                             }
-                            @if (tool.CanChangeState)
+                            @if (tool.ChangesPages)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.EditNote"
+                                         Class="ml-0" data-testid="agent-edit-tool-pages-warning">Changes pages and documents</MudChip>
+                            }
+                            else if (tool.CanChangeState)
                             {
                                 <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                                     <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small" />

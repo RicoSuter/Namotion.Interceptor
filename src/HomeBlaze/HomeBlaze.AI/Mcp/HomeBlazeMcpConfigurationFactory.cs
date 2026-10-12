@@ -18,7 +18,7 @@ namespace HomeBlaze.AI.Mcp;
 public static class HomeBlazeMcpConfigurationFactory
 {
     /// <summary>
-    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, the
+    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the
     /// Markdown page hints of browse and search and every registered <see cref="McpToolProviderRegistration"/>.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
@@ -37,7 +37,7 @@ public static class HomeBlazeMcpConfigurationFactory
     /// <summary>
     /// Creates the configuration of the built-in agents' tools: the same as <see cref="Create(IServiceProvider, Func{IInterceptorSubject}, bool, IEnumerable{Func{McpToolProviderContext, IMcpToolProvider}}?)"/>,
     /// except that set_property refuses every property marked with <see cref="ConfigurationAttribute"/> and
-    /// invoke_operation refuses every operation of an agent (<see cref="LlmAgentBase"/>).
+    /// invoke_operation and the Markdown tools refuse every operation of an agent (<see cref="LlmAgentBase"/>).
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
@@ -92,6 +92,12 @@ public static class HomeBlazeMcpConfigurationFactory
                     rootSubjectProvider,
                     pathProvider, serviceProvider,
                     loggerFactory.CreateLogger<HomeBlazeMcpToolProvider>(),
+                    isReadOnly,
+                    operationFilter),
+                new HomeBlazeMarkdownToolProvider(
+                    rootSubjectProvider,
+                    pathProvider, serviceProvider,
+                    loggerFactory.CreateLogger<HomeBlazeMarkdownToolProvider>(),
                     isReadOnly,
                     operationFilter)
             },

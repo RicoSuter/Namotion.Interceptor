@@ -53,7 +53,7 @@ public class HomeBlazeMcpToolAnnotationTests
             Assert.False(tools[name]!.OpenWorldHint, name);
         }
 
-        foreach (var name in new[] { "set_property", "invoke_operation" })
+        foreach (var name in new[] { "set_property", "invoke_operation", "edit_markdown", "write_markdown", "create_markdown" })
         {
             Assert.False(tools[name]!.ReadOnlyHint, name);
             Assert.True(tools[name]!.DestructiveHint, name);

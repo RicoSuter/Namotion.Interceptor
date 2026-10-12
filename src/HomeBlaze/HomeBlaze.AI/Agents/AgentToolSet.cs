@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HomeBlaze.AI.Mcp;
 using Namotion.Interceptor.Mcp;
 
 namespace HomeBlaze.AI.Agents;
@@ -15,6 +16,16 @@ public sealed class AgentToolSet
     /// <summary>The graph tools a new agent allows by default. An empty allowed list allows no graph tools.</summary>
     public static readonly IReadOnlyList<string> DefaultAllowedTools =
         ["browse", "search", "get_property", "list_types", "list_methods", "invoke_query", "get_property_history"];
+
+    /// <summary>The graph tools that can change state: devices, notifications or pages.</summary>
+    public static readonly IReadOnlyList<string> StateChangingTools =
+    [
+        "set_property",
+        HomeBlazeMcpToolProvider.InvokeOperationToolName,
+        HomeBlazeMarkdownToolProvider.EditMarkdownToolName,
+        HomeBlazeMarkdownToolProvider.WriteMarkdownToolName,
+        HomeBlazeMarkdownToolProvider.CreateMarkdownToolName
+    ];
 
     private const int PreviewLength = 2000;
 
@@ -45,10 +56,10 @@ public sealed class AgentToolSet
     public IReadOnlyList<AgentToolCall> Calls => Volatile.Read(ref _calls);
 
     /// <summary>
-    /// Whether tools built for these allowed names must run in read-only mode, i.e. neither set_property nor invoke_operation is allowed.
+    /// Whether tools built for these allowed names must run in read-only mode, i.e. none of the <see cref="StateChangingTools"/> is allowed.
     /// </summary>
     public static bool IsReadOnly(IReadOnlyCollection<string> allowedTools) =>
-        !allowedTools.Contains("set_property") && !allowedTools.Contains("invoke_operation");
+        !StateChangingTools.Any(allowedTools.Contains);
 
     /// <summary>
     /// Creates the tool set of a turn.

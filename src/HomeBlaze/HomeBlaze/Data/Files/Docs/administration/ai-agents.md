@@ -203,6 +203,9 @@ The agent reaches the graph through the HomeBlaze MCP tools. Each turn offers ex
 | `get_property_history` | on | Reads the recorded history of a property |
 | `invoke_operation` | off | Calls an operation method, which can change devices or send something |
 | `set_property` | off | Writes a property value |
+| `edit_markdown` | off | Replaces one passage of a Markdown page or document, see [Changing pages](#changing-pages) |
+| `write_markdown` | off | Replaces the whole text of a Markdown page or document |
+| `create_markdown` | off | Creates a Markdown page or document in a folder |
 | `update_memory` | always | Changes the agent's memory |
 | `web_search` | off | Searches the web, see [Web tools](#web-tools) |
 | `web_fetch` | off | Loads a web page, see [Web tools](#web-tools) |
@@ -221,6 +224,10 @@ Two gaps remain: an agent allowed to call operations can still release a Wallbox
 
 **Notifications.** To notify you, an agent with `invoke_operation` finds the `INotificationPublisher` interface with `list_types`, the subjects that implement it with `search`, and calls their `SendNotification` operation. See [Notifications](../development/notifications.md). Without `invoke_operation` the agent can only report findings on its page.
 
+### Changing pages
+
+Markdown files in local storage (on disk) have three operations: `ReplaceText` replaces one exact passage that occurs once in the source, `ReplaceContent` replaces the whole source, and `CreateMarkdownFile` of a storage or folder creates a new file with a plain name ending in `.md`. The tools `edit_markdown`, `write_markdown` and `create_markdown` call exactly these operations, through the same path as `invoke_operation`, so each can be allowed on its own; the edit form marks them with "Changes pages and documents". `invoke_operation` is the broader permission: it reaches the same operations along with every other operation, so an agent with `invoke_operation` can change pages even with the three tools turned off. The operations accept at most 64 KB of source, refuse files in other storage, and write through the same path as the page editor, so an open page updates as after a save. JSON and other files cannot be read or written this way. The preamble tells the agent to change pages only when you asked for it or its instructions call for it, to prefer `edit_markdown` for small changes, and to say which pages it changed. Pages are not versioned by HomeBlaze, so keep the data folder under version control or backed up if agents may change pages.
+
 ### Web tools
 
 `web_search` and `web_fetch` let an agent search the web and load web pages, for example to look up a weather forecast or the manual of a device. Both are off by default; turn them on in the edit form, where they carry the warning "Loads untrusted web content", or add them to `allowedTools`. Unlike the other tools, the model's backend runs them, not HomeBlaze:
@@ -237,7 +244,8 @@ When a web tool is allowed, the preamble tells the agent that content from the w
 ## Security
 
 - **Prompt injection.** Names and values from the graph, pages and documents reach the model. A crafted value can try to steer an agent. The preamble and the server instructions state that values from the graph are data, not instructions, but the real defense is the tool scope: allow `invoke_operation` and `set_property` only to agents whose inputs you trust, and keep the default read-only tools otherwise.
-- **Web content.** With `web_search` or `web_fetch` allowed, anyone who controls a web page or search result the agent reads can try to steer it, which is a far larger group than those who can change your graph. Do not allow web tools together with `invoke_operation` or `set_property` unless you accept that risk; a read-only agent with web tools can at worst report something wrong. A web request also tells the visited site, or the search provider, what the agent looked up.
+- **Pages.** An agent that can change pages (`edit_markdown`, `write_markdown`, `create_markdown` or `invoke_operation`) can change what other agents and people read: pages are the main context of other agents, so a changed page can steer them, and a `{{ path }}` expression in a page is evaluated whenever the page is shown or read. Allow page changes only to agents whose inputs you trust, the same as `invoke_operation`.
+- **Web content.** With `web_search` or `web_fetch` allowed, anyone who controls a web page or search result the agent reads can try to steer it, which is a far larger group than those who can change your graph. Do not allow web tools together with `invoke_operation`, `set_property` or the page tools unless you accept that risk; a read-only agent with web tools can at worst report something wrong. A web request also tells the visited site, or the search provider, what the agent looked up.
 - **Secrets.** Secret configuration values cannot be state, and the tools expose only state, so an agent cannot read credentials such as API keys through its tools. The API key of an `AnthropicAgent` is stored in plain text in its JSON file, like other secrets; protect the data folder accordingly.
 - **Audit.** Every tool call with its arguments and a preview of its result is recorded in the timeline.
 - **CLI isolation.** The CLI runs without built-in tools except the allowed web tools, without user, project or local settings and without the `CLAUDE.md` files of the user, the working directory or the folders above it, in an empty working directory, and reaches HomeBlaze only through the agent route with a per-turn token. The MCP configuration file with the token is created readable only by the HomeBlaze user on Linux and macOS, and is deleted after the turn, when the token is revoked.
