@@ -550,18 +550,21 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public async Task WhenOnlyTheHiddenValuesMakeTheResultTooLarge_ThenTheMessageDoesNotTellTheSize()
+    public async Task WhenTheContentIsAtTheLimitAndTheHiddenValuesMakeTheFileLarger_ThenItIsWrittenWithThem()
     {
-        // Arrange
+        // Arrange: the limit applies to the content as the caller writes it, so it tells nothing about the hidden values.
         var page = $":: {typeof(EmbeddedSecretDevice).FullName}#gateway Password={new string('s', 1000)}\n::\n\nText.";
         var markdown = await CreatePageInGraphAsync(page);
         var view = markdown.ReadRawContent()!;
         var content = view + new string('a', MarkdownFile.MaxContentSize - Encoding.UTF8.GetByteCount(view));
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceContentAsync(content, CancellationToken.None));
-        Assert.StartsWith($"The Markdown source would be larger than the limit of {MarkdownFile.MaxContentSize} bytes.", exception.Message);
-        Assert.Equal(page, await ReadStoredPageAsync(markdown));
+        // Act
+        await markdown.ReplaceContentAsync(content, CancellationToken.None);
+
+        // Assert
+        var stored = await ReadStoredPageAsync(markdown);
+        Assert.Equal(page + new string('a', MarkdownFile.MaxContentSize - Encoding.UTF8.GetByteCount(view)), stored);
+        Assert.True(Encoding.UTF8.GetByteCount(stored) > MarkdownFile.MaxContentSize);
     }
 
     [Fact]

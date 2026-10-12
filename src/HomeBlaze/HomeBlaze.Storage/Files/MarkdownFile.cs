@@ -24,7 +24,10 @@ namespace HomeBlaze.Storage.Files;
 [FileExtension(".markdown")]
 public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter, IPathScope
 {
-    /// <summary>The largest Markdown source, in UTF-8 bytes, that the write operations accept.</summary>
+    /// <summary>
+    /// The largest Markdown source, in UTF-8 bytes, that the write operations accept, measured as the caller writes it,
+    /// with secret values hidden; the file can be larger by the hidden values.
+    /// </summary>
     public const int MaxContentSize = 64 * 1024;
 
     /// <summary>

@@ -151,14 +151,6 @@ internal static class MarkdownWriteRules
         var result = restored.Append(newContent, copied, newContent.Length - copied).ToString();
         EnsureActiveContentUnchanged(source, result, parameterName);
 
-        // The size of the content was checked before, so only the hidden values can make the result too large, and the
-        // message must not tell by how much.
-        if (Encoding.UTF8.GetByteCount(result) > MarkdownFile.MaxContentSize)
-        {
-            throw new ArgumentException(
-                $"The Markdown source would be larger than the limit of {MarkdownFile.MaxContentSize} bytes.", parameterName);
-        }
-
         return result;
     }
 
