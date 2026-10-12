@@ -683,6 +683,25 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Same(children, markdown.Children);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAPassThatNamesTheCreatedMarkdownFileFollows_ThenThePageIsKeptAndNotLoadedAgain(bool allNamed)
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        await storage.CreateMarkdownFileAsync("Notes.md", "# Notes", CancellationToken.None);
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var children = markdown.Children;
+
+        // Act: as after the event of the own write, which the recorded hash identifies.
+        await storage.ReconcileAsync(new HashSet<string>(["Notes.md"], StringComparer.Ordinal), allNamed);
+
+        // Assert
+        Assert.Same(markdown, storage.Children["Notes.md"]);
+        Assert.Same(children, markdown.Children);
+    }
+
     [Fact]
     public async Task WhenAMarkdownFileIsCreatedInAFolderThatIsAFile_ThenTheMessageSaysSo()
     {
