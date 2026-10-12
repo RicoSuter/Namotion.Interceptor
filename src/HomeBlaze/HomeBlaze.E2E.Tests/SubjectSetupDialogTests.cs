@@ -202,7 +202,9 @@ public class SubjectSetupDialogTests
         }
 
         await Assertions.Expect(Dialog(page).GetByText("Value tile", new() { Exact = true })).ToBeVisibleAsync();
-        foreach (var displayName in new[] { "Value", "Panel", "Case" })
+        // A type without a display name is listed under its class name split into words, so these are
+        // the names that the dialog would show for the excluded types.
+        foreach (var displayName in new[] { "Tab", "Value row", "Expansion panel", "Value map case" })
         {
             await Assertions.Expect(Dialog(page).GetByText(displayName, new() { Exact = true })).ToHaveCountAsync(0);
         }

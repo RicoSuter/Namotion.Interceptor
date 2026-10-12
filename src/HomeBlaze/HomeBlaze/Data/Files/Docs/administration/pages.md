@@ -176,7 +176,7 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 ### Expression Limits
 
 - **Two formats**: An expression has the formatted value and the raw value. Another unit, another number of decimals and conditions are not supported.
-- **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown with one value per line.
+- **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
 - **No braces and no `<` in a path**: The path cannot contain `{`, `}` or `<`. [Paths](paths.md) says how to write a file name that contains one of them.
 - **Single braces in text can disappear**: The markdown renderer reads single braces anywhere in the text of a page as attributes, and removes them from the text, when they are empty or when everything between them reads as attributes: a word like `{id}`, a class like `{.wide}`, an id like `{#top}` or a pair like `{key=value}`, also several of them with spaces between. `Use /api/{id}` is then shown as "Use /api/". To show such braces, put the text in inline code, or write a backslash before the opening brace, as in `/api/\{id}`. A heading that starts with `#` is the exception: such braces cut the heading off, so that everything from the opening brace to the end of the line is lost, also inside inline code and after a backslash. `## Path {id} syntax` is shown as "Path". Keep such braces out of these headings.
@@ -614,7 +614,7 @@ The footer of the card, with a value: {{ ../Conveyor/TargetSpeed }} RPM.
 ::
 ~~~~
 
-**A slot whose blocks create a subject.** Some slots do not hold content directly. Each of their blocks creates a subject of a type that the widget chose, and the block takes the arguments of that type, an optional `#name` and a `json` block, like a widget block. The content of the block goes to the default slot of that subject. The `Tab` of a `TabLayout` is such a slot: each `Tab` block creates a tab with a `Title` and an `Icon`. The `Panel` of `ExpansionPanels`, the `Value` of a `ValueList` and the `Case` of a `ValueMap` work the same way.
+**A slot whose blocks create a subject.** Some slots do not hold content directly. Each of their blocks creates a subject of a type that the widget chose, and the block takes the arguments of that type, an optional `#name` and a `json` block, like a widget block. The content of the block goes to the default slot of that subject. The `Tab` of a `TabLayout` is such a slot: each `Tab` block creates a tab with a `Title` and an `Icon`. The `Panel` of `ExpansionPanels` and the `Value` of a `ValueList` work the same way, and so does the `Case` of a `ValueMap`, which takes arguments but no content.
 
 ~~~~markdown
 :: HomeBlaze.Components.TabLayout

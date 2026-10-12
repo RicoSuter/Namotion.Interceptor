@@ -114,7 +114,7 @@ These notices are no error boxes. They come from a widget while it is shown:
 | Cannot resolve path | The `Path` of a `Widget` block leads to no subject |
 | Cannot show path | The `Path` of a `Widget` block leads to the widget itself or to a block that contains it |
 | No Widget component for | The type of the block, or of the subject that a `Widget` shows, has no widget |
-| A dash in place of a value | The `Path` of a `ValueList` row, a `ValueTile`, an `Indicator` or a `Progress` leads nowhere, or the value is not set. The path is the tooltip of the dash. A device that is offline or still starting is normal, so the widget shows no error. A `Progress` shows it also for a value that is no number |
+| A dash in place of a value | The `Path` of a `ValueList` row, a `ValueTile`, an `Indicator` or a `Progress` leads nowhere, or the value is not set. The path is the tooltip of the dash, see [Value Widgets](page-widgets.md#value-widgets). A `Progress` shows it also for a value that is no number |
 
 ---
 

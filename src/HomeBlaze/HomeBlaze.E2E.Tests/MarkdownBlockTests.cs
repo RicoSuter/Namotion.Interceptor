@@ -621,6 +621,7 @@ public class MarkdownBlockTests
         Assert.Contains("Path=scratchmotor/CurrentSpeed", lines[headLineIndex]);
         Assert.Equal("::", lines[headLineIndex + 1]);
         Assert.Contains("Text before the block", lines);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
     }
 
     private static ILocator GetTab(ILocator tabLayout, string title)

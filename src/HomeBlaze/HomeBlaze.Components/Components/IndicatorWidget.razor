@@ -26,6 +26,12 @@
             <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color" data-testid="indicator" />
         </MudTooltip>
     }
+    else if (reading.IsMissing)
+    {
+        <MudTooltip Text="@indicator.Path">
+            <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" Ripple="false" data-testid="indicator">@reading.Text</MudChip>
+        </MudTooltip>
+    }
     else
     {
         <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" Ripple="false" data-testid="indicator">@reading.Text</MudChip>

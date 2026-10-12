@@ -240,6 +240,24 @@ public class ValueWidgetTests
     }
 
     [Fact]
+    public async Task WhenIndicatorHasNoValue_ThenChipShowsADash()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var chip = page.GetByTestId("indicator").Nth(2);
+        await Assertions.Expect(chip).ToHaveTextAsync("–", new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+
+        // The map error that the page shows is that of the indicator with a map that does not exist.
+        await Assertions.Expect(page.GetByTestId("value-map-error")).ToHaveCountAsync(1);
+
+        await chip.HoverAsync();
+        await Assertions.Expect(page.Locator(".mud-tooltip").GetByText("valuemotor/Missing")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenMapOfAWidgetDoesNotExist_ThenTheWidgetShowsTheError()
     {
         // Arrange & Act
@@ -247,7 +265,7 @@ public class ValueWidgetTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("value-map-error")).ToHaveTextAsync("Cannot resolve map: nomap", new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByTestId("indicator")).ToHaveCountAsync(2);
+        await Assertions.Expect(page.GetByTestId("indicator")).ToHaveCountAsync(3);
     }
 
     [Fact]

@@ -527,13 +527,12 @@ A canvas with two nodes that show the sample motors by name. A canvas does not a
 
 ## Value Widgets
 
-`ValueList`, `ValueTile`, `Indicator` and `Progress` show the value of one property, and `ValueMap` says what text, colour and icon a value gets. The sections for them refer to the rules in this section.
+`ValueList`, `ValueTile`, `Indicator` and `Progress` show values of properties, and `ValueMap` says what text, colour and icon a value gets. The sections for them refer to the rules in this section.
 
 - **The path**: `Path` is the path of a property. It is written like the path of an [expression](pages.md#expression-paths): relative to the page, where the first segment can be the name of a block, or absolute.
-- **The formatted value**: A value is shown as an [expression](pages.md#expression-formats) shows it: with the unit of the property, scaled where the unit allows it, a boolean as `Yes` or `No`, and a date in the time zone of the viewer. A map can replace the text.
-- **A missing value**: A value that is not set and a path that leads nowhere show a dash in place of the value, with the path as tooltip. This is no error box, because a device that is offline or still starting is normal. A misspelled path shows the same dash, so check the spelling when a dash stays.
+- **The formatted value**: A value is shown in the [formatted form of an expression](pages.md#expression-formats). A map can replace the text.
+- **A missing value**: A value that is not set and a path that leads nowhere show a dash in place of the value, with the path as tooltip. This is no error box, because a device that is offline or still starting is normal. A misspelled path shows the same dash, so check the spelling when a dash stays. A `Progress` shows the dash for a value that is no number as well.
 - **Live**: A value changes on the page when the property changes.
-- **Colours and icons**: A `Color` is one of the [colours](#colours), and an `Icon` is an [icon](#icons).
 
 ## ValueMap
 
@@ -573,9 +572,9 @@ A map for the status of a motor. The cases are the values of `MotorStatus`. The 
 ::: Case Value=Error Text="Fault" Color=Error Icon=Error
 ::
 
-- **How a widget refers to a map**: With `Map=motorstate`, the name of the block, on the same page. A map on another page is reached through that page, for example `Map=/Demo/Maps.md/motorstate`. This works for a map that stands directly on that page, see [Paths on Markdown Pages](paths.md#paths-on-markdown-pages).
+- **How a widget refers to a map**: With `Map=motorstate`, the name of the block, on the same page. A map on another page is reached through that page. For a page `Shared.md` in the folder `Demo`, which you have made yourself and which has a map named `motorstate`, that is `Map=/Demo/Shared.md/motorstate`. This works for a map that stands directly on that page, see [Paths on Markdown Pages](paths.md#paths-on-markdown-pages).
 - **Which case is used**: A case matches when its `Value` equals the raw text of the value, without regard to upper and lower case. The raw text is what the format `raw` of an expression shows: `True` and `False` for a boolean, the name for an enum value, a number with a dot as the decimal separator. The first case that matches is used.
-- **No case**: A value without a case is shown as if the widget had no map. A case without `Text` keeps the formatted text of the value.
+- **No case**: A value without a case keeps the formatted text, the default colour and the icon of the widget. A case without `Text` keeps the formatted text of the value.
 - **Colour and icon**: The colour of the case is the colour of the value in a row and in a tile, and the colour of an indicator. The icon of the case replaces the icon of the row, the tile or the indicator. A `Progress` has no map.
 - **A map that cannot be resolved**: A `Map` that leads nowhere, or to a subject that is no `ValueMap`, shows `Cannot resolve map: motorstat` in a small red alert in place of the value, with the name as written. This is a mistake on the page, see [Page Errors](page-errors.md#value-widget-errors). The rest of the page renders.
 - **Cases only**: A `ValueMap` has no default slot. Content outside of a `Case` block is an error.
@@ -614,7 +613,7 @@ Rows with a label and an icon. The first two rows have an icon, so the third row
 ::: Value Path=pump/IsAtTargetSpeed Label="At target speed"
 ::
 
-Rows without a label, the last one with a map. The labels are the titles that the properties of the motor declare: "Speed", "Target" and "Status". The status is shown with the text, the colour and the icon of its case:
+Rows without a label, the last one with a map. A label is the title that the property declares, or its name when it declares none: "Speed" and "Target" are titles that the motor declares, and "Status" is the name of its property. The status is shown with the text, the colour and the icon of its case:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -631,7 +630,7 @@ Rows without a label, the last one with a map. The labels are the titles that th
 ::: Value Path=pump/Status Map=motorstate
 ::
 
-A row with content and without a path, and a row with a `Progress` as content. The content stands between the label and the value. The first row shows two values in one row. The second row has a path and a bar:
+A row with content and without a path, and a row with a `Progress` as content. The content stands between the label and the value. The first row has no path and no value of its own: its content is a text with two expressions. The second row has a path and a bar:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -651,7 +650,7 @@ A row with content and without a path, and a row with a `Progress` as content. T
 ::
 
 - **Aligned labels**: When at least one row has an icon, the rows without one are indented, so that all labels line up. An icon that comes from a case of a map counts as well.
-- **Colour and icon of a case**: The colour of a matching case colours the value text. The icon of the case replaces the icon of the row.
+- **Colour and icon of a case**: As described for a [ValueMap](#valuemap), the colour colours the value text.
 - **Content and value**: Content and a value can stand in the same row. The content comes first, and the value stays at the right.
 - **Rows only**: A `ValueList` has no default slot. Content outside of a `Value` block is an error.
 
@@ -689,7 +688,7 @@ Three tiles in a `FlowLayout`. The first has a label of its own and an icon, the
 :::: HomeBlaze.Components.ValueTile Path=pump/Status Map=motorstate
 ::
 
-- **Colour and icon of a case**: The colour of a matching case colours the value. The icon of the case replaces the icon of the tile.
+- **Colour and icon of a case**: As described for a [ValueMap](#valuemap), the colour colours the value.
 - **No distance to its surroundings**: A tile adds no distance above, below or beside itself. It is meant to stand in a layout such as `FlowLayout`, which does the spacing.
 - **As wide as its place**: A tile is as wide as the place it stands in.
 
@@ -701,7 +700,7 @@ Shows a state as a coloured chip, or as an icon alone. Type name: `HomeBlaze.Com
 |----------|---------------|---------|---------|
 | `Path` | Text | None | The [path](#value-widgets) of the property whose value the indicator shows |
 | `Map` | Text | None | The name or the path of a [ValueMap](#valuemap) |
-| `Icon` | Text | None | The [icon](#icons). The icon of a matching case replaces it |
+| `Icon` | Text | None | The [icon](#icons) |
 | `Kind` | `Chip` or `Icon` | `Chip` | `Chip` is a chip with the icon and the text. `Icon` is the icon alone, with the text as its tooltip |
 
 A chip with the map:
@@ -756,10 +755,10 @@ The pump runs at {{ pump/CurrentSpeed }} RPM.
 :::: HomeBlaze.Components.Indicator Path=pump/Status Map=motorstate
 ::
 
-- **Text, colour and icon**: They come from the matching case of the map. Without a match the text is the formatted value, the colour is `Default`, and the icon is `Icon`.
+- **Text, colour and icon**: They come from the matching case of the map, see [ValueMap](#valuemap). `Icon` is the icon that stays when no case gives one.
 - **Without a map**: A boolean that is true has the colour `Primary`, and every other value has `Default`. With a map the colour comes from the case alone.
 - **No icon**: A chip without an icon shows its text only. An indicator of the kind `Icon` without an icon shows a plain circle.
-- **A missing value**: The chip shows a dash. The icon has the default colour and the path as its tooltip.
+- **A missing value**: The chip shows a dash. The icon form shows its icon in the default colour. Both have the path as tooltip, see [Value Widgets](#value-widgets). A chip with a value has no tooltip.
 
 ## Progress
 
@@ -768,8 +767,8 @@ A bar that shows where a number stands between a minimum and a maximum. Type nam
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Path` | Text | None | The [path](#value-widgets) of the property whose value the bar shows |
-| `Min` | Number | `0` | The value at which the bar is empty |
-| `Max` | Number | `1` | The value at which the bar is full |
+| `Min` | Number with a fraction | `0` | The value at which the bar is empty |
+| `Max` | Number with a fraction | `1` | The value at which the bar is full |
 | `Color` | Colour | `Primary` | The [colour](#colours) of the bar |
 
 Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so that is the end of the range. The second bar has another colour:
@@ -860,8 +859,8 @@ With `Single=true` only one panel is open at a time. Each panel holds a value li
 ::::: Value Path=fan/Status Map=motorstate
 ::
 
-- **All panels are rendered**: The content of a closed panel is rendered and kept up to date as well. A value in a closed panel is current when the panel opens, and a subject in a closed panel keeps running.
-- **Opening and closing**: `Expanded` sets the state when the page loads. What the viewer opens and closes is not written to the page. It is kept for as long as the panel keeps its subject when the page is edited, which a panel with a name does, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps).
+- **All panels are rendered**: The content of a closed panel is rendered and kept up to date as well, so a value in a closed panel is current when the panel opens.
+- **Opening and closing**: `Expanded` sets the state when the page loads. What the viewer opens and closes is not written to the page. It is kept for as long as the panel keeps its subject when the page is edited. That holds when the `ExpansionPanels` block and the panel both keep their subjects, which a name on each of them does, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps).
 - **Panels only**: An `ExpansionPanels` has no default slot. Content outside of a `Panel` block is an error.
 
 ## Alert
@@ -909,7 +908,7 @@ The fan is {{ fan/Status }}. Check it when it stays below its target of {{ fan/T
 
 ## Colours
 
-A colour is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning` and `Error`. They are the colours of the theme, so they follow it. The `IconColor` of a card, the `Color` of a case of a map and the `Color` of a progress bar take one.
+A colour is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning` and `Error`. They are the colours of the theme, so they follow it. `MudBlazor.Color` has a few more names that are accepted, but these are the ones meant for pages. The `IconColor` of a card, the `Color` of a case of a map and the `Color` of a progress bar take one.
 
 ## Icons
 

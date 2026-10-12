@@ -65,6 +65,9 @@ Body of the plain card.
 :: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=nomap
 ::
 
+:: HomeBlaze.Components.Indicator Path=valuemotor/Missing Map=status
+::
+
 :: HomeBlaze.Components.Progress Path=valuemotor/TargetSpeed Min=0 Max=1600
 ::
 
