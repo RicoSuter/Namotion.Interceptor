@@ -1,0 +1,38 @@
+@using HomeBlaze.Components.Abstractions.TimeZones
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Indicator))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    var indicator = Subject as Indicator;
+}
+
+@if (indicator is not null)
+{
+    // Read once per render and never kept: the read is what the tracking scope records.
+    var reading = ValueReader.Read(PathResolver, indicator, indicator.Path, indicator.Map, TimeZone);
+    var color = ValueReader.GetIndicatorColor(reading, indicator.Map);
+    var iconName = reading.Icon ?? indicator.Icon;
+    var icon = string.IsNullOrEmpty(iconName) ? null : MudBlazorIconResolver.Resolve(iconName);
+
+    if (reading.MapError is not null)
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" data-testid="value-map-error">@reading.MapError</MudAlert>
+    }
+    else if (indicator.Kind == IndicatorKind.Icon)
+    {
+        <MudTooltip Text="@(reading.IsMissing ? indicator.Path : reading.Text)">
+            <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color" data-testid="indicator" />
+        </MudTooltip>
+    }
+    else
+    {
+        <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" Ripple="false" data-testid="indicator">@reading.Text</MudChip>
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

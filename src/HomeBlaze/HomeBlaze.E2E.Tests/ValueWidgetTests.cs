@@ -216,6 +216,52 @@ public class ValueWidgetTests
         Assert.True(label!.X - listBox!.X < 40);
     }
 
+    [Fact]
+    public async Task WhenIndicatorIsAChip_ThenItShowsTheTextOfTheCase()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var chip = page.GetByTestId("indicator").First;
+        await Assertions.Expect(chip).ToHaveTextAsync(new Regex("^(steht|startet|läuft|stoppt)$"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenIndicatorIsAnIcon_ThenItShowsNoText()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var icon = page.GetByTestId("indicator").Nth(1);
+        await Assertions.Expect(icon).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(icon).ToHaveTextAsync(string.Empty);
+    }
+
+    [Fact]
+    public async Task WhenMapOfAWidgetDoesNotExist_ThenTheWidgetShowsTheError()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("value-map-error")).ToHaveTextAsync("Cannot resolve map: nomap", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("indicator")).ToHaveCountAsync(2);
+    }
+
+    [Fact]
+    public async Task WhenProgressHasARange_ThenBarShowsTheShareOfTheValue()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var bar = page.GetByTestId("progress");
+        await Assertions.Expect(bar).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(bar).ToHaveAttributeAsync("data-percent", "50");
+    }
+
     // The path of an icon is what tells two icons of MudBlazor apart.
     private static Task<string?> GetIconShapeAsync(ILocator row) =>
         row.Locator(".mud-list-item-icon svg path").Last.GetAttributeAsync("d");

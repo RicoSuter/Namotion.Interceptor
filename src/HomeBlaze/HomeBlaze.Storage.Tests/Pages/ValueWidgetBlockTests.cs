@@ -2,6 +2,7 @@ using HomeBlaze.Components;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
+using MudBlazor;
 using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -68,5 +69,45 @@ public class ValueWidgetBlockTests
         Assert.Equal("Speed", tile.Label);
         Assert.Equal("Speed", tile.Icon);
         Assert.Equal("states", tile.Map);
+    }
+
+    [Fact]
+    public async Task WhenPageHasIndicatorAndProgress_ThenTheyHaveTheirOptionsAndDefaults()
+    {
+        // Arrange & Act
+        var page = await AddPageAsync("""
+            :: HomeBlaze.Components.Indicator#plain Path=/a/IsOn
+            ::
+
+            :: HomeBlaze.Components.Indicator#icon Path=/a/IsOn Map=states Icon=Lightbulb Kind=Icon
+            ::
+
+            :: HomeBlaze.Components.Progress#plainbar Path=/a/Position
+            ::
+
+            :: HomeBlaze.Components.Progress#bar Path=/a/Speed Min=10 Max=1600 Color=Success
+            ::
+            """);
+
+        // Assert
+        Assert.DoesNotContain("markdown-block-error", MarkdownPageFixture.Html(page.Children));
+
+        var plain = Assert.IsType<Indicator>(page.Children["plain"]);
+        Assert.Equal(IndicatorKind.Chip, plain.Kind);
+
+        var icon = Assert.IsType<Indicator>(page.Children["icon"]);
+        Assert.Equal(IndicatorKind.Icon, icon.Kind);
+        Assert.Equal("Lightbulb", icon.Icon);
+        Assert.Equal("states", icon.Map);
+
+        var plainBar = Assert.IsType<Progress>(page.Children["plainbar"]);
+        Assert.Equal(0, plainBar.Min);
+        Assert.Equal(1, plainBar.Max);
+        Assert.Equal(Color.Primary, plainBar.Color);
+
+        var bar = Assert.IsType<Progress>(page.Children["bar"]);
+        Assert.Equal(10, bar.Min);
+        Assert.Equal(1600, bar.Max);
+        Assert.Equal(Color.Success, bar.Color);
     }
 }

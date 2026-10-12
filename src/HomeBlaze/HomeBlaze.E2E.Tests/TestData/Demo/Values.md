@@ -55,3 +55,18 @@ Body of the plain card.
 
 :: HomeBlaze.Components.ValueTile Path=valuemotor/TargetSpeed Label="Tile Target" Icon=Speed
 ::
+
+:: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=status
+::
+
+:: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=status Kind=Icon Icon=Circle
+::
+
+:: HomeBlaze.Components.Indicator Path=valuemotor/Status Map=nomap
+::
+
+:: HomeBlaze.Components.Progress Path=valuemotor/TargetSpeed Min=0 Max=1600
+::
+
+:: HomeBlaze.Components.Progress Path=valuemotor/Name
+::

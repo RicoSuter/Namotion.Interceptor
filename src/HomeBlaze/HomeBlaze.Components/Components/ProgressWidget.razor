@@ -1,0 +1,40 @@
+@using System.Globalization
+@using HomeBlaze.Components.Abstractions.TimeZones
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Progress))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    var progress = Subject as Progress;
+}
+
+@if (progress is not null)
+{
+    // Read once per render and never kept: the read is what the tracking scope records.
+    var reading = ValueReader.Read(PathResolver, progress, progress.Path, null, TimeZone);
+    var percent = ValueReader.GetProgressPercent(reading.Value, progress.Min, progress.Max);
+
+    if (percent is null)
+    {
+        // A value that is no number has no bar, and neither has an empty range.
+        <ValueText Reading="@(reading with { Value = null, Text = ValueReader.MissingText })" Path="@progress.Path" />
+    }
+    else
+    {
+        @* A row wraps its content in elements that take the width of their content, and a percentage width of the bar has nothing to refer to there. The minimum width is what the bar gets in a row. *@
+        <MudProgressLinear Value="@percent.Value"
+                           Min="0"
+                           Max="100"
+                           Color="@progress.Color"
+                           Rounded="true"
+                           Style="min-width: 120px;"
+                           data-testid="progress"
+                           data-percent="@percent.Value.ToString("0.##", CultureInfo.InvariantCulture)" />
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}
