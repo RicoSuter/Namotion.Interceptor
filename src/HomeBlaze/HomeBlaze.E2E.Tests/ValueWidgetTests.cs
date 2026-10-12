@@ -40,6 +40,8 @@ public class ValueWidgetTests
 
     private const string MissingText = "–";
 
+    // The three tile tests rely on the last render before their act being a hit of the path cache, which the prerender fills:
+    // a miss reads the children of the root, the property the act writes, and the page would render without the event.
     private async Task<IPage> OpenQuietPageAsync(string content)
     {
         await _fixture.WriteDemoPageAsync(ScratchPage, "---\ntitle: Scratch\n---\n\n# Scratch\n\n" + content);

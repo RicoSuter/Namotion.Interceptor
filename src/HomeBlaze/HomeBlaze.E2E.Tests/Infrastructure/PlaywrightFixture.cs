@@ -148,9 +148,40 @@ public class PlaywrightFixture : IAsyncLifetime
     {
         var folder = (VirtualFolder)GetRoot().Children["Demo"];
         var file = (MarkdownFile)folder.Children[name];
+        var bytes = Encoding.UTF8.GetBytes(content);
 
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
-        await file.WriteAsync(stream, CancellationToken.None);
+        // The server reads the file again after every write and keeps it open while it parses the page, which can
+        // still be going on for the write of the test before this one. A sharing violation fails when the file is
+        // opened and writes nothing, so the write is safe to try again.
+        IOException? lastError = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    try
+                    {
+                        // The condition is synchronous. The write runs on the thread pool so that waiting for it here
+                        // cannot block a continuation that would want the synchronization context of the test.
+                        Task.Run(async () =>
+                        {
+                            using var stream = new MemoryStream(bytes);
+                            await file.WriteAsync(stream, CancellationToken.None);
+                        }).GetAwaiter().GetResult();
+                        return true;
+                    }
+                    catch (IOException exception)
+                    {
+                        lastError = exception;
+                        return false;
+                    }
+                },
+                TimeSpan.FromSeconds(60));
+        }
+        catch (TimeoutException) when (lastError is not null)
+        {
+            throw new IOException($"The page {name} could not be written before the test started", lastError);
+        }
     }
 
     private PlainConfigurableSubject CreatePlainSubject(string label)
