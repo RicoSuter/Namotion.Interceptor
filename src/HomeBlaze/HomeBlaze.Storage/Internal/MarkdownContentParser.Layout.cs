@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text.Json.Nodes;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Pages;
 
 namespace HomeBlaze.Storage.Internal;
@@ -34,36 +36,84 @@ public sealed partial class MarkdownContentParser
 
         foreach (var keyed in keyedBlocks)
         {
-            var block = keyed.Segment.Block;
-            if (!layoutBlocks.Contains(block))
+            if (layoutBlocks.Contains(keyed.Segment.Block))
+            {
+                // Code of the types runs in these checks, and a failure of it is a refusal like any other.
+                string? error;
+                try
+                {
+                    error = FindBlockError(keyed, OwnsName);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    error = Format(keyed.Segment.Block.Line, exception.Message);
+                }
+
+                if (error is not null)
+                {
+                    return error;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private string? FindBlockError(KeyedBlock keyed, Func<MarkdownBlock, bool> ownsName)
+    {
+        var block = keyed.Segment.Block;
+        if (!ownsName(block))
+        {
+            return Format(block.Line, FormatUsedTwice(block.Head!.Id!));
+        }
+
+        if (keyed.Type is not { } type)
+        {
+            return null;
+        }
+
+        var slots = SlotMap.For(type);
+        if (slots.Error is not null)
+        {
+            return Format(block.Line, slots.Error);
+        }
+
+        if (!TryBuildConfiguration(type, block, out _, out var configurationError))
+        {
+            return Format(block.Line, configurationError!);
+        }
+
+        // A parse checks the values of the json block only while it applies them, so they are checked here.
+        if (FindInvalidJsonValue(type, block) is { } valueError)
+        {
+            return Format(block.Line, valueError);
+        }
+
+        return TryArrangeContent(type, slots, keyed.Segment, ownsName, out _, out var contentError)
+            ? null
+            : Format(contentError.Line, contentError.Message);
+    }
+
+    private string? FindInvalidJsonValue(Type type, MarkdownBlock block)
+    {
+        if (block.ConfigurationJson is not { } json ||
+            JsonNode.Parse(json, documentOptions: StrictJsonOptions) is not JsonObject configuration)
+        {
+            return null;
+        }
+
+        var properties = GetConfigurationProperties(type);
+        foreach (var (key, value) in configuration)
+        {
+            if (key == TypeDiscriminator || !properties.TryGetValue(key, out var propertyType))
             {
                 continue;
             }
 
-            if (!OwnsName(block))
+            var valueJson = value?.ToJsonString() ?? "null";
+            if (!_serializer.CanDeserialize(valueJson, propertyType, ConfigurationNaming.CSharpProperty))
             {
-                return Format(block.Line, FormatUsedTwice(block.Head!.Id!));
-            }
-
-            if (keyed.Type is not { } type)
-            {
-                continue;
-            }
-
-            var slots = SlotMap.For(type);
-            if (slots.Error is not null)
-            {
-                return Format(block.Line, slots.Error);
-            }
-
-            if (!TryBuildConfiguration(type, block, out _, out var configurationError))
-            {
-                return Format(block.Line, configurationError!);
-            }
-
-            if (!TryArrangeContent(type, slots, keyed.Segment, OwnsName, out _, out var contentError))
-            {
-                return Format(contentError.Line, contentError.Message);
+                return FormatInvalidValue(valueJson, key, propertyType);
             }
         }
 
@@ -82,7 +132,7 @@ public sealed partial class MarkdownContentParser
                 continue;
             }
 
-            var contentPath = keyed.Place[..keyed.Place.LastIndexOf("/c:", StringComparison.Ordinal)] + "/" + key;
+            var contentPath = keyed.ContainerPath + "/" + key;
             if (!keys.TryAdd(contentPath, keyed.Segment.Block) &&
                 (layoutBlocks.Contains(keyed.Segment.Block) || layoutBlocks.Contains(keys[contentPath])))
             {

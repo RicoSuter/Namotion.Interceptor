@@ -16,8 +16,8 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 public sealed partial class MarkdownContentParser
 {
-    private const string HtmlKeyPrefix = "Html_";
-    private const string ExpressionKeyPrefix = "Expression_";
+    internal const string HtmlKeyPrefix = "Html_";
+    internal const string ExpressionKeyPrefix = "Expression_";
 
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;

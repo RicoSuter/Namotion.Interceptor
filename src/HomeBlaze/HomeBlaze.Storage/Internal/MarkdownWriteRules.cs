@@ -185,6 +185,7 @@ internal static partial class MarkdownWriteRules
         ActiveContentOfPage oldContent, ActiveContentOfPage newContent, MarkdownPage newPage, PageLayoutRules layout, string parameterName)
     {
         var analysis = newContent.Layout!;
+        EnsureNoNameOrKeyUsedTwice(oldContent.Layout!, parameterName);
         var oldLayoutNames = oldContent.Layout!.LayoutBlocks
             .Select(block => block.Head?.Id)
             .OfType<string>()
@@ -198,11 +199,12 @@ internal static partial class MarkdownWriteRules
         foreach (var block in analysis.LayoutBlocks)
         {
             if (block.Head?.Id is { } id &&
-                (nameCounts[id] > 1 || (!oldLayoutNames.Contains(id) && PositionalKeyShape().IsMatch(id))))
+                (nameCounts[id] > 1 || (!oldLayoutNames.Contains(id) && HasShapeOfKey(id))))
             {
                 throw new ArgumentException(
-                    $"The name '#{id}' of the block at line {block.Line} is used by another block or has the shape of the key " +
-                    "of a block without a name, such as Card_3. Give the layout block another name.", parameterName);
+                    $"The name '#{id}' of the block at line {block.Line} is used by another block or has the shape of a key " +
+                    "that the page gives blocks and other content without a name, such as Card_3 or Html_2. Give the layout " +
+                    "block another name.", parameterName);
             }
         }
 
@@ -216,6 +218,34 @@ internal static partial class MarkdownWriteRules
 
     [GeneratedRegex(@"_[0-9]+$")]
     private static partial Regex PositionalKeyShape();
+
+    // The keys of blocks without a name, and of the HTML and the expressions among the children of a page.
+    private static bool HasShapeOfKey(string id) =>
+        PositionalKeyShape().IsMatch(id) ||
+        id.StartsWith(MarkdownContentParser.HtmlKeyPrefix, StringComparison.Ordinal) ||
+        id.StartsWith(MarkdownContentParser.ExpressionKeyPrefix, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Refuses a layout edit of a page that already uses a name twice or a key twice in one content: which of those
+    /// blocks wins follows the order of the page, which a layout edit can change.
+    /// </summary>
+    /// <exception cref="ArgumentException">The page uses a name or a key twice.</exception>
+    private static void EnsureNoNameOrKeyUsedTwice(LayoutAnalysis oldLayout, string parameterName)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var keyed in oldLayout.KeyedBlocks)
+        {
+            var isNameUsedTwice = keyed.Segment.Block.Head?.Id is { } id && !names.Add(id);
+            var isKeyUsedTwice = keyed.ContentKey is { } key && !keys.Add(keyed.ContainerPath + "/" + key);
+            if (isNameUsedTwice || isKeyUsedTwice)
+            {
+                throw new ArgumentException(
+                    $"The page already uses a name or a key twice, at line {keyed.Segment.Block.Line}, so its layout cannot " +
+                    "be changed with the permission to edit page layout. Fix the page in the page editor first.", parameterName);
+            }
+        }
+    }
 
     /// <exception cref="ArgumentException">A layout block refers to a path that leads to no subject.</exception>
     private static void EnsureReferencesResolve(MarkdownPage page, PageLayoutRules layout, string parameterName)

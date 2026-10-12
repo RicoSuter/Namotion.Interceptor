@@ -312,6 +312,8 @@ public sealed partial class MarkdownContentParser
     // A block with a name takes the value that the block of that name created before, wherever it is in the slot
     // now. A block without a name takes the next value that no name created, so those are reused by position
     // among themselves, like widgets without a name in the content.
+    // The rule is described once in MarkdownSubjectKeys.GetSlotValueKey, which the write rules use to tell whether a
+    // change keeps a value; both must change together.
     private IInterceptorSubject? FindExistingSlotValue(
         IReadOnlyList<IInterceptorSubject?> existingValues, string? name, ref int unnamedPosition)
     {

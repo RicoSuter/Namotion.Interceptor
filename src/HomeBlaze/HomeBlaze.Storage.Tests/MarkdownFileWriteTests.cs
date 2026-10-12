@@ -920,7 +920,16 @@ public class MarkdownFileWriteTests : IDisposable
     // A name that another block has, or that has the shape of the key of a block without a name.
     [InlineData("End.", "End.\n\n:: HomeBlaze.Components.Card#kitchen Title=Kitchen\n::", "is used by another block")]
     [InlineData("# Plant\n", "# Plant\n\n:: HomeBlaze.Components.Card#kitchen Title=Kitchen\n::\n", "is used by another block")]
-    [InlineData("End.", "End.\n\n:: HomeBlaze.Components.Card#Motor_5 Title=Shape\n::", "has the shape of the key")]
+    [InlineData("End.", "End.\n\n:: HomeBlaze.Components.Card#Motor_5 Title=Shape\n::", "has the shape of a key")]
+    [InlineData("End.", "End.\n\n:: HomeBlaze.Components.Card#Html_note Title=Shape\n::", "has the shape of a key")]
+    [InlineData("End.", "End.\n\n:: HomeBlaze.Components.Card#Expression_note Title=Shape\n::", "has the shape of a key")]
+    // A value in a json block that does not fit its property.
+    [InlineData(":: HomeBlaze.Components.Card#card Title=Card\n", ":: HomeBlaze.Components.Card#card\n```json\n{ \"Title\": 5 }\n```\n", "would show a layout block as an error")]
+    [InlineData(":: HomeBlaze.Components.Card#card Title=Card\n", ":: HomeBlaze.Components.Card#card\n```json\n{ \"Title\": true }\n```\n", "would show a layout block as an error")]
+    [InlineData("::: Tab Title=Two\n", "::: Tab\n```json\n{ \"Title\": 5 }\n```\n", "would show a layout block as an error")]
+    [InlineData("MinWidth=240\n", "\n```json\n{ \"MinWidth\": \"abc\" }\n```\n", "would show a layout block as an error")]
+    [InlineData("MinWidth=240\n", "\n```json\n{ \"MinWidth\": null }\n```\n", "would show a layout block as an error")]
+    [InlineData("MinWidth=240\n", "\n```json\n{ \"MinWidth\": 1.5 }\n```\n", "would show a layout block as an error")]
     // A layout block around a device that would be shown as an error.
     [InlineData("MinWidth=240", "MinWidth=abc", "would show a layout block as an error")]
     [InlineData("::::\n:::\n::\n\n:: HomeBlaze.Components.Card#card", "::::\n:::\nLoose text\n::\n\n:: HomeBlaze.Components.Card#card", "would show a layout block as an error")]
@@ -947,6 +956,26 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Contains(expectedMessage, exception.Message);
         Assert.Equal(PageWithNestedDevices, ReadFile("Plant.md"));
         AssertSameSubjects(devices, GetNamedSubjects(markdown));
+    }
+
+    [Fact]
+    public async Task WhenThePageAlreadyUsesANameTwice_ThenALayoutEditIsRejectedAndTheDevicesAreKept()
+    {
+        // Arrange
+        const string content = "# Plant\n\n:: HomeBlaze.Samples.Motor#kitchen Name=First\n::\n\n:: HomeBlaze.Samples.Motor#kitchen Name=Second\n::\n\nEnd.";
+        WriteFile("Plant.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        var kitchen = ((IPathScope)markdown).TryGetNamedSubject("kitchen");
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceTextAsync(
+            "End.", "End.\n\n:: HomeBlaze.Components.Card Title=New\n::", CancellationToken.None));
+        Assert.Contains("already uses a name or a key twice", exception.Message);
+        Assert.Equal(content, ReadFile("Plant.md"));
+        Assert.NotNull(kitchen);
+        Assert.Same(kitchen, ((IPathScope)markdown).TryGetNamedSubject("kitchen"));
     }
 
     [Theory]

@@ -18,7 +18,8 @@ internal static class MarkdownSubjectKeys
 
     /// <summary>
     /// Gets the key by which the value of a slot is reused: its #name, or its position among the blocks of the slot
-    /// without a name.
+    /// without a name. This is the canonical description of that rule; the parser applies it to the existing values in
+    /// <c>MarkdownContentParser.FindExistingSlotValue</c>, and both must change together.
     /// </summary>
     public static string GetSlotValueKey(string? id, int unnamedPosition) =>
         id is not null ? "#" + id : "@" + unnamedPosition.ToString(CultureInfo.InvariantCulture);
@@ -52,7 +53,9 @@ internal static class MarkdownSubjectKeys
     /// subject: the keys from the page down to the block, each with the type and the configuration names of its block,
     /// because another type or a removed configuration value creates a subject again together with what is inside it.
     /// </summary>
-    /// <param name="pageSegments">The segments of the page, from <see cref="MarkdownSegmentBuilder.Build"/>.</param>
+    /// <param name="pageSegments">The segments of the page, from <see cref="MarkdownSegmentBuilder.Build"/>. A parse
+    /// builds them with a link rewriter, which only changes the addresses of links in the HTML and never the segments
+    /// or their order, so they can be built without it here.</param>
     /// <param name="findType">Gets the type that a widget block names with its full name, or null when there is none.</param>
     /// <param name="getConfigurationNames">Gets the names of the configuration values of a block.</param>
     public static List<KeyedBlock> Walk(
@@ -85,7 +88,7 @@ internal static class MarkdownSubjectKeys
                 ? GetContentKey(block.Head!.Id, type, index)
                 : $"?{block.Kind}_{index.ToString(CultureInfo.InvariantCulture)}";
             var place = $"{path}/c:{key}<{type?.FullName}|{FormatNames(block, getConfigurationNames)}>";
-            blocks.Add(new KeyedBlock(segment, type, place, Slot: null, ContentKey: type is null ? null : key));
+            blocks.Add(new KeyedBlock(segment, type, place, Slot: null, ContentKey: type is null ? null : key, ContainerPath: path));
             if (type is not null)
             {
                 WalkOwner(segment, type, place, findType, getConfigurationNames, blocks);
@@ -115,7 +118,7 @@ internal static class MarkdownSubjectKeys
                 var key = GetSlotValueKey(id, id is null ? unnamedPosition++ : 0);
                 var valueType = slot is { IsOpen: false } ? slot.ValueType : null;
                 var slotPlace = $"{place}/s:{group.Key}{key}<{valueType?.FullName}|{FormatNames(slotBlock.Block, getConfigurationNames)}>";
-                blocks.Add(new KeyedBlock(slotBlock, valueType, slotPlace, slot, ContentKey: null));
+                blocks.Add(new KeyedBlock(slotBlock, valueType, slotPlace, slot, ContentKey: null, ContainerPath: place));
 
                 if (slot is null)
                 {
@@ -144,5 +147,6 @@ internal static class MarkdownSubjectKeys
 /// <param name="Place">The keys from the page down to the block.</param>
 /// <param name="Slot">The slot the block fills, or null for a block in the content of a page or a fragment.</param>
 /// <param name="ContentKey">The key of a widget block among the children of its content, or null.</param>
+/// <param name="ContainerPath">The place of the content or the block that holds the block.</param>
 internal readonly record struct KeyedBlock(
-    BlockMarkdownSegment Segment, Type? Type, string Place, SlotDefinition? Slot, string? ContentKey);
+    BlockMarkdownSegment Segment, Type? Type, string Place, SlotDefinition? Slot, string? ContentKey, string ContainerPath);
