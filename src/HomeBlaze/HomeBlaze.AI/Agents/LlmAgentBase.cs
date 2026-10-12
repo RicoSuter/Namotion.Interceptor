@@ -400,14 +400,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     protected async Task<T?> ReadSessionAsync<T>(Func<string, T?> parse, CancellationToken cancellationToken)
         where T : class
     {
-        var content = await TryReadDataFileAsync(AgentStorage.SessionSuffix, cancellationToken);
+        var content = await TryReadDataFileAsync(AgentStorage.SessionSuffix, SessionReadConsequence, cancellationToken);
         try
         {
             return content is null ? null : parse(content);
         }
         catch (JsonException exception)
         {
-            _logger.LogWarning(exception, "The session file of agent {Agent} could not be read; a new session starts.", Title);
+            _logger.LogWarning(exception, "The session file of agent {Agent} could not be read; {Consequence}.", Title, SessionReadConsequence);
             return null;
         }
     }
@@ -417,7 +417,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// file may keep its previous content.
     /// </summary>
     protected Task WriteSessionAsync(string? content, CancellationToken cancellationToken) =>
-        TryWriteDataFileAsync(AgentStorage.SessionSuffix, content, cancellationToken);
+        TryWriteDataFileAsync(AgentStorage.SessionSuffix, content, "after a restart the agent may resume the previous session", cancellationToken);
 
     /// <summary>Appends a divider, for example when a backend session had to be restarted.</summary>
     protected Task AppendDividerAsync(string text) => AppendAsync(new AgentTimelineEntry
@@ -602,6 +602,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         RaiseTimelineChanged();
     }
 
+    private const string SessionReadConsequence = "a new session starts";
+    private const string StatsReadConsequence = "the run statistics are taken from the timeline";
+
     private string? GetStoragePath(string suffix) =>
         _storageDirectory is null ? null : Path.Combine(_storageDirectory, _storageName + suffix);
 
@@ -609,7 +612,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// Reads a data file of this agent, or null when the agent has no storage, the file does not exist or it cannot be
     /// read; read failures are logged.
     /// </summary>
-    private async Task<string?> TryReadDataFileAsync(string suffix, CancellationToken cancellationToken)
+    /// <param name="suffix">The suffix of the file name.</param>
+    /// <param name="consequence">What happens when the file cannot be read, for the warning.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private async Task<string?> TryReadDataFileAsync(string suffix, string consequence, CancellationToken cancellationToken)
     {
         var path = GetStoragePath(suffix);
         if (path is null)
@@ -627,7 +633,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be read.", path, Title);
+            _logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be read; {Consequence}.", path, Title, consequence);
             return null;
         }
     }
@@ -636,7 +642,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// Writes a data file of this agent atomically, or deletes it for null content; does nothing when the agent has no
     /// storage. Write failures are logged, not thrown.
     /// </summary>
-    private async Task TryWriteDataFileAsync(string suffix, string? content, CancellationToken cancellationToken)
+    /// <param name="suffix">The suffix of the file name.</param>
+    /// <param name="content">The content, or null to delete the file.</param>
+    /// <param name="consequence">What happens when the file cannot be written, for the warning.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private async Task TryWriteDataFileAsync(string suffix, string? content, string consequence, CancellationToken cancellationToken)
     {
         var path = GetStoragePath(suffix);
         if (path is null)
@@ -656,7 +666,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be written.", path, Title);
+            _logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be written; {Consequence}.", path, Title, consequence);
         }
     }
 
@@ -841,6 +851,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private Task WriteRunStatisticsAsync() => TryWriteDataFileAsync(
         AgentStorage.StatsSuffix,
         JsonSerializer.Serialize(new AgentStats(RunCount, LastActivityTime), AgentJsonContext.Default.AgentStats),
+        "after a restart the run count and the last activity may be older",
         CancellationToken.None);
 
     /// <summary>
@@ -857,14 +868,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     private async Task<AgentStats?> ReadRunStatisticsAsync(CancellationToken cancellationToken)
     {
-        var content = await TryReadDataFileAsync(AgentStorage.StatsSuffix, cancellationToken);
+        var content = await TryReadDataFileAsync(AgentStorage.StatsSuffix, StatsReadConsequence, cancellationToken);
         try
         {
             return content is null ? null : JsonSerializer.Deserialize(content, AgentJsonContext.Default.AgentStats);
         }
         catch (JsonException exception)
         {
-            _logger.LogWarning(exception, "The stats file of agent {Agent} could not be read; the run statistics are taken from the timeline.", Title);
+            _logger.LogWarning(exception, "The stats file of agent {Agent} could not be read; {Consequence}.", Title, StatsReadConsequence);
             return null;
         }
     }
