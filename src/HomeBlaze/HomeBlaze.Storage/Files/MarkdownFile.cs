@@ -121,8 +121,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
     }
 
-    [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions", Icon = "Description")]
-    public string? ReadRawContent() => Content;
+    /// <summary>
+    /// Returns the Markdown source with unevaluated {{ path }} expressions. Secret configuration values in embedded
+    /// subject blocks are replaced by "***"; the page editor reads the file itself.
+    /// </summary>
+    [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions. Secret values in embedded subjects are shown as ***", Icon = "Description")]
+    public string? ReadRawContent() => EmbeddedSubjectRedaction.Redact(Content, Children);
 
     /// <summary>
     /// Returns the content with each {{ path }} expression replaced by its current value.

@@ -166,8 +166,9 @@ public sealed partial class MarkdownContentParser
     // ExpressionRegex (raw-content rendering) so the two code paths agree on what a {{...}} is.
     private const string ExpressionPattern = @"\{\{\s*([^}]+)\s*\}\}";
 
+    /// <summary>Matches an embedded subject block: group 1 is its name, group 2 its JSON.</summary>
     [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n([\s\S]*?)```", RegexOptions.Singleline)]
-    private static partial Regex SubjectBlockRegex();
+    internal static partial Regex SubjectBlockRegex();
 
     [GeneratedRegex(@"(<!--SUBJECT:([^>]+)-->|" + ExpressionPattern + ")")]
     private static partial Regex SegmentMarkerRegex();

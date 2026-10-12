@@ -1,4 +1,5 @@
 using System.Text;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Samples;
@@ -429,6 +430,60 @@ public class MarkdownFileTests
     }
 
     [Fact]
+    public async Task WhenReadingTheRawContent_ThenSecretValuesOfEmbeddedSubjectsAreHidden()
+    {
+        // Arrange
+        var content = $$"""
+            # Gateway
+
+            ```subject(gateway)
+            {
+              "$type": "{{typeof(EmbeddedSecretDevice).FullName}}",
+              "host": "192.168.1.10",
+              "password": "s3cr3t"
+            }
+            ```
+
+            ```subject(plain)
+            {
+              "$type": "{{typeof(Motor).FullName}}",
+              "name": "Plain",
+              "targetSpeed": 1000
+            }
+            ```
+
+            ```subject(unknown)
+            {
+              "$type": "Unknown.Device",
+              "token": "also secret"
+            }
+            ```
+            """;
+        var markdown = await CreatePageInGraphAsync(content, new Motor { CurrentSpeed = 750 });
+
+        // Act
+        var result = markdown.ReadRawContent();
+
+        // Assert
+        Assert.IsType<EmbeddedSecretDevice>(markdown.Children["gateway"]);
+        Assert.DoesNotContain("s3cr3t", result);
+        Assert.DoesNotContain("also secret", result);
+        Assert.Contains("\"password\": \"***\"", result);
+        Assert.Contains("\"host\": \"192.168.1.10\"", result);
+        Assert.Contains($$"""
+            ```subject(plain)
+            {
+              "$type": "{{typeof(Motor).FullName}}",
+              "name": "Plain",
+              "targetSpeed": 1000
+            }
+            ```
+            """, result);
+        Assert.Contains("\"$type\": \"Unknown.Device\"", result);
+        Assert.Equal(content, markdown.Content);
+    }
+
+    [Fact]
     public async Task WhenPageIsReloadedWithUnrelatedChange_ThenEmbeddedSubjectIsKept()
     {
         // Arrange
@@ -520,6 +575,7 @@ public class MarkdownFileTests
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(Motor).Assembly);
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+        typeProvider.AddAssembly(typeof(EmbeddedSecretDevice).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         // The context of the application: an embedded subject is updated through the configuration
@@ -605,4 +661,16 @@ public partial class PageSecretDevice
 
     [Configuration]
     public partial string? PublicConfig { get; set; }
+}
+
+[InterceptorSubject]
+public partial class EmbeddedSecretDevice : IConfigurable
+{
+    [Configuration]
+    public partial string? Host { get; set; }
+
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
