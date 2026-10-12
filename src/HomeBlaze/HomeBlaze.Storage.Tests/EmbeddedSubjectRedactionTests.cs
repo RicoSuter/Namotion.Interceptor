@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -26,28 +27,29 @@ public class EmbeddedSubjectRedactionTests
         };
 
         var source = $$"""
-            ```subject(group)
+            :: {{typeof(NestedSecretDeviceGroup).FullName}}#group
+            ```json
             {
-              "$type": "{{typeof(NestedSecretDeviceGroup).FullName}}",
-              "primary": { "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": "primary-host", "password": "primary-secret" },
-              "gateways": { "north": { "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": "north-host", "password": "north-secret" } },
-              "backups": [ { "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": "backup-host", "password": "backup-secret" } ]
+              "Primary": { "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "Host": "primary-host", "Password": "primary-secret" },
+              "Gateways": { "north": { "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "Host": "north-host", "Password": "north-secret" } },
+              "Backups": [ { "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "Host": "backup-host", "Password": "backup-secret" } ]
             }
             ```
+            ::
             """;
 
         // Act
-        var result = EmbeddedSubjectRedaction.Redact(source, new Dictionary<string, IInterceptorSubject> { ["group"] = group });
+        var result = EmbeddedSubjectRedaction.Redact(
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = group });
 
         // Assert
-        Assert.NotNull(result);
         Assert.DoesNotContain("primary-secret", result);
         Assert.DoesNotContain("north-secret", result);
         Assert.DoesNotContain("backup-secret", result);
         Assert.Contains("primary-host", result);
         Assert.Contains("north-host", result);
         Assert.Contains("backup-host", result);
-        Assert.Equal(3, result.Split("\"password\": \"***\"").Length - 1);
+        Assert.Equal(3, result.Split("\"Password\": \"***\"").Length - 1);
     }
 }
 

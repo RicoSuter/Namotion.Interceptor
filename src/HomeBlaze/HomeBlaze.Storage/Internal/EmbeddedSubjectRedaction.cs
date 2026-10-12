@@ -2,47 +2,112 @@ using System.Collections;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Hides the values of secret configuration properties in the embedded subject blocks of a Markdown source, which
-/// the page writes with all configuration of each subject.
+/// Hides the values of secret configuration properties in the blocks of a Markdown page, which keep the configuration
+/// of the subjects they create in their head line arguments and json blocks.
 /// </summary>
 internal static class EmbeddedSubjectRedaction
 {
     private const string RedactedValue = "***";
 
-    private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions UnixIndentedOptions = new() { WriteIndented = true, NewLine = "\n" };
+    private static readonly JsonSerializerOptions WindowsIndentedOptions = new() { WriteIndented = true, NewLine = "\r\n" };
 
     /// <summary>
-    /// Returns the source with each secret value in an embedded subject block replaced by <c>***</c>,
-    /// found through the configuration metadata of the subject the block created. A block without a subject keeps only
-    /// its type, a block whose JSON cannot be read as an object becomes <c>***</c>, and a block
-    /// without secret values stays as it is.
+    /// Returns the source of the page with each secret value in the configuration of a block replaced by <c>***</c>,
+    /// found through the configuration metadata of the subject the block configures. Every argument value and the json
+    /// block of a block without a subject become <c>***</c>, as does a json block that cannot be read as an object.
+    /// A block without secret values keeps its exact text.
     /// </summary>
-    public static string? Redact(string? source, IDictionary<string, IInterceptorSubject> children)
+    /// <param name="page">The page as last parsed.</param>
+    /// <param name="blockSubjects">The subjects of the blocks of <paramref name="page"/> by <see cref="MarkdownBlock.Index"/>.</param>
+    public static string Redact(MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects)
     {
-        if (string.IsNullOrEmpty(source))
+        var source = page.Source;
+        List<(MarkdownSpan Span, string Text)>? replacements = null;
+        foreach (var block in page.AllBlocks)
+        {
+            // A block at a place where blocks are not allowed has no parsed head, but its line can still hold arguments.
+            var head = block.Head;
+            if (head is null &&
+                !MarkdownBlockHead.TryParse(source.Substring(block.HeadSpan.Start, block.HeadSpan.Length), out head, out _))
+            {
+                continue;
+            }
+
+            var subject = blockSubjects.GetValueOrDefault(block.Index);
+            if (RedactArguments(head, subject) is { } redactedHead)
+            {
+                (replacements ??= []).Add((block.HeadSpan, redactedHead.Format()));
+            }
+
+            if (block is { ConfigurationSpan: { } configurationSpan, ConfigurationJson: { } json } &&
+                RedactConfiguration(json, subject, MarkdownBlockWriter.GetLineEnding(source, configurationSpan.Start)) is { } redactedFence)
+            {
+                (replacements ??= []).Add((configurationSpan, redactedFence));
+            }
+        }
+
+        if (replacements is null)
         {
             return source;
         }
 
-        return MarkdownContentParser.SubjectBlockRegex().Replace(source, match =>
+        // From the end, so the spans of the replacements still to come stay valid.
+        var result = source;
+        foreach (var (span, text) in replacements.OrderByDescending(replacement => replacement.Span.Start))
         {
-            var name = match.Groups[1].Value;
-            var json = match.Groups[2].Value;
-            var redacted = children.TryGetValue(name, out var subject)
-                ? RedactBlock(json, subject)
-                : KeepTypeOnly(json);
-            return redacted is null ? match.Value : $"```subject({name})\n{redacted}\n```";
-        });
+            result = string.Concat(result.AsSpan(0, span.Start), text, result.AsSpan(span.End));
+        }
+
+        return result;
     }
 
-    // Returns null when the block has no secret value, so it keeps its exact text.
-    private static string? RedactBlock(string json, IInterceptorSubject subject)
+    // Returns null when no argument value is hidden, so the head line keeps its exact text.
+    private static MarkdownBlockHead? RedactArguments(MarkdownBlockHead head, IInterceptorSubject? subject)
     {
+        if (head.Arguments.Count == 0)
+        {
+            return null;
+        }
+
+        // Without the subject the secret properties are unknown, so every value is hidden.
+        var secretNames = subject?.GetConfigurationProperties()
+            .Where(property => property.GetConfigurationMetadata()?.IsSecret == true)
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var isRedacted = false;
+        var arguments = new List<MarkdownBlockArgument>(head.Arguments.Count);
+        foreach (var argument in head.Arguments)
+        {
+            if (secretNames is null || secretNames.Contains(argument.Key))
+            {
+                arguments.Add(argument with { Value = RedactedValue, IsQuoted = false });
+                isRedacted = true;
+            }
+            else
+            {
+                arguments.Add(argument);
+            }
+        }
+
+        return isRedacted ? head with { Arguments = arguments } : null;
+    }
+
+    // Returns null when the json block has no secret value, so it keeps its exact text.
+    private static string? RedactConfiguration(string json, IInterceptorSubject? subject, string lineEnding)
+    {
+        if (subject is null)
+        {
+            return FormatFence(RedactedValue, lineEnding);
+        }
+
         JsonNode? node;
         try
         {
@@ -50,16 +115,19 @@ internal static class EmbeddedSubjectRedaction
         }
         catch (JsonException)
         {
-            return RedactedValue;
+            return FormatFence(RedactedValue, lineEnding);
         }
 
         if (node is not JsonObject jsonObject)
         {
-            return RedactedValue;
+            return FormatFence(RedactedValue, lineEnding);
         }
 
-        return RedactObject(jsonObject, subject) ? jsonObject.ToJsonString(IndentedOptions) : null;
+        var options = lineEnding == "\r\n" ? WindowsIndentedOptions : UnixIndentedOptions;
+        return RedactObject(jsonObject, subject) ? FormatFence(jsonObject.ToJsonString(options), lineEnding) : null;
     }
+
+    private static string FormatFence(string json, string lineEnding) => $"```json{lineEnding}{json}{lineEnding}```";
 
     private static bool RedactObject(JsonObject jsonObject, IInterceptorSubject subject)
     {
@@ -120,24 +188,5 @@ internal static class EmbeddedSubjectRedaction
             default:
                 return false;
         }
-    }
-
-    // Without the subject the secret properties are unknown, so only the type is shown.
-    private static string KeepTypeOnly(string json)
-    {
-        try
-        {
-            if (JsonNode.Parse(json) is JsonObject jsonObject &&
-                jsonObject[ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName] is JsonValue type)
-            {
-                return new JsonObject { [ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName] = type.DeepClone() }.ToJsonString(IndentedOptions);
-            }
-        }
-        catch (JsonException)
-        {
-            // Unreadable JSON is replaced entirely.
-        }
-
-        return RedactedValue;
     }
 }

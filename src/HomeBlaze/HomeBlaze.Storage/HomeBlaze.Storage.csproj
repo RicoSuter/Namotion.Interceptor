@@ -2,7 +2,6 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="HomeBlaze.Storage.Tests" />
-        <InternalsVisibleTo Include="HomeBlaze.Storage.Blazor" />
     </ItemGroup>
 
     <ItemGroup>

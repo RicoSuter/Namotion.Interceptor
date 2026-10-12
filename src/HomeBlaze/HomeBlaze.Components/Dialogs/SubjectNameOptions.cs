@@ -14,8 +14,14 @@ public sealed record SubjectNameOptions(string Label, string Suffix, IReadOnlyCo
         SearchValues.Create(Path.GetInvalidFileNameChars());
 
     /// <summary>
-    /// Validates a name, ignoring surrounding whitespace: it must not be empty, must be usable as a file name and
-    /// must not equal an existing name, with or without the suffix, ignoring case.
+    /// A rule that a name must fit in addition, or null when there is none. It gets the name without surrounding
+    /// whitespace and returns the error message, or null when the name fits.
+    /// </summary>
+    public Func<string, string?>? Rule { get; init; }
+
+    /// <summary>
+    /// Validates a name, ignoring surrounding whitespace: it must not be empty, must fit the <see cref="Rule"/>,
+    /// must be usable as a file name and must not equal an existing name, with or without the suffix, ignoring case.
     /// </summary>
     /// <returns>The error message, or null when the name is valid.</returns>
     public string? Validate(string? name)
@@ -24,6 +30,13 @@ public sealed record SubjectNameOptions(string Label, string Suffix, IReadOnlyCo
         if (trimmedName.Length == 0)
         {
             return $"{Label} is required";
+        }
+
+        // Before the check for a file name, so that a name with a character that neither allows gets the message
+        // that says what a valid name is.
+        if (Rule?.Invoke(trimmedName) is { } ruleError)
+        {
+            return ruleError;
         }
 
         if (trimmedName.AsSpan().ContainsAny(InvalidFileNameCharacters))

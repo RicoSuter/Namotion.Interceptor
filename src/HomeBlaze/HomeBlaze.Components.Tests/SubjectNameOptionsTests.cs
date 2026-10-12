@@ -94,6 +94,54 @@ public class SubjectNameOptionsTests
         Assert.Equal(expectedTakenError, takenError);
     }
 
+    [Theory]
+    [InlineData(" two words ")]
+    [InlineData("two/words")]
+    public void WhenNameDoesNotFitTheRule_ThenTheErrorOfTheRuleIsReturnedForTheTrimmedName(string name)
+    {
+        // Arrange
+        var options = CreateOptions() with
+        {
+            Rule = trimmedName => trimmedName.All(char.IsLetter) ? null : $"'{trimmedName}' has more than letters"
+        };
+
+        // Act
+        var error = options.Validate(name);
+
+        // Assert
+        Assert.Equal($"'{name.Trim()}' has more than letters", error);
+    }
+
+    [Fact]
+    public void WhenNameFitsTheRule_ThenTheOtherChecksStillApply()
+    {
+        // Arrange
+        var options = CreateOptions("File name", "History") with { Rule = _ => null };
+
+        // Act
+        var takenError = options.Validate("history");
+        var invalidCharactersError = options.Validate("invalid/name");
+        var validError = options.Validate("Other");
+
+        // Assert
+        Assert.Equal("This file name is already used", takenError);
+        Assert.Equal("File name contains invalid characters", invalidCharactersError);
+        Assert.Null(validError);
+    }
+
+    [Fact]
+    public void WhenNameIsEmpty_ThenTheRuleIsNotAsked()
+    {
+        // Arrange
+        var options = CreateOptions() with { Rule = _ => "The rule was asked" };
+
+        // Act
+        var error = options.Validate("  ");
+
+        // Assert
+        Assert.Equal("File name is required", error);
+    }
+
     [Fact]
     public void WhenClassNameIsFree_ThenItIsSuggested()
     {

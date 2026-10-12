@@ -107,16 +107,12 @@ A group reports its coordinator's playback, track, source, play mode and sleep t
 
 ## Widgets
 
-`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, playback controls, mute and volume, with night mode and speech enhancement switches on a home theater player, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
+`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, playback controls, mute and volume, with night mode and speech enhancement switches on a home theater player, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them with a `Widget` block as described in [Page Widgets](../administration/page-widgets.md#widget), for example a room of a system stored as `Devices/Sonos.json`:
 
-<!-- The backticks are HTML entities so that this page shows the block instead of instantiating it: HomeBlaze turns every subject block of a page into a live subject, also inside code blocks. -->
-<pre><code>&#96;&#96;&#96;subject(livingRoom)
-{
-  "$type": "HomeBlaze.Components.Widget",
-  "path": "/Devices/Sonos/Players[RINCON_000E58A0B1C201400]"
-}
-&#96;&#96;&#96;
-</code></pre>
+~~~~markdown
+:: HomeBlaze.Components.Widget#livingRoom Path=/Devices/Sonos/Players[RINCON_000E58A0B1C201400]
+::
+~~~~
 
 Prefer player or system widgets over group widgets: a group widget shows "Cannot resolve path" once its coordinator changes, while a player shows what its group plays on a path that stays.
 

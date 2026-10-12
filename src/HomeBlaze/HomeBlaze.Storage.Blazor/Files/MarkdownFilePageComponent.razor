@@ -1,10 +1,6 @@
-@using System.Text
-@using System.Web
-@using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Storage.Files
-@using HomeBlaze.Storage.Internal
 @using MudBlazor
 @using Namotion.Interceptor
 @using HomeBlaze.Services
@@ -29,17 +25,7 @@
                     @(File is { } file ? TimeZone.ToZoned(new DateTimeOffset(file.LastModified, TimeSpan.Zero)).ToString("yyyy-MM-dd HH:mm:ss") : "")
                 </span>
             </div>
-            @foreach (var segment in GetRenderSegments())
-            {
-                @if (segment.Html != null)
-                {
-                    @((MarkupString)segment.Html)
-                }
-                else if (segment.Widget != null)
-                {
-                    <SubjectComponent Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
-                }
-            }
+            <MarkdownContentView Children="@File?.Children" />
         }
     </div>
 </CascadingValue>
@@ -60,6 +46,7 @@
     .markdown-content blockquote { border-left: 4px solid rgba(128,128,128,0.3); margin: 1rem 0; padding-left: 1rem; color: rgba(128,128,128,0.8); }
     .markdown-content a { color: #7e6fff; text-decoration: none; }
     .markdown-content a:hover { text-decoration: underline; }
+    .markdown-content .markdown-block-error { border: 1px solid var(--mud-palette-error); color: var(--mud-palette-error); border-radius: 4px; padding: 0.5rem 0.75rem; margin: 0.75rem 0; font-family: monospace; font-size: 0.85rem; }
 </style>
 
 @code {
@@ -84,48 +71,5 @@
     public void Dispose()
     {
         TimeZone.Changed -= OnTimeZoneChanged;
-    }
-
-    private record RenderSegment(string? Html, IInterceptorSubject? Widget);
-
-    private List<RenderSegment> GetRenderSegments()
-    {
-        var result = new List<RenderSegment>();
-        if (File?.Children is null)
-            return result;
-
-        StringBuilder? sb = null;
-
-        foreach (var child in File.Children.Values)
-        {
-            if (child is HtmlSegment html)
-            {
-                sb ??= new StringBuilder();
-                sb.Append(html.Html);
-            }
-            else if (child is RenderExpression expr)
-            {
-                sb ??= new StringBuilder();
-                sb.Append(HttpUtility.HtmlEncode(expr.Value?.ToString() ?? string.Empty));
-            }
-            else
-            {
-                // Flush accumulated HTML before widget
-                if (sb is { Length: > 0 })
-                {
-                    result.Add(new RenderSegment(sb.ToString(), null));
-                    sb.Clear();
-                }
-                result.Add(new RenderSegment(null, child));
-            }
-        }
-
-        // Flush remaining HTML
-        if (sb is { Length: > 0 })
-        {
-            result.Add(new RenderSegment(sb.ToString(), null));
-        }
-
-        return result;
     }
 }
