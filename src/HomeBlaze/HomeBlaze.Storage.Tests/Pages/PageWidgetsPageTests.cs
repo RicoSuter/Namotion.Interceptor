@@ -1,9 +1,11 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Samples;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -105,7 +107,7 @@ public class PageWidgetsPageTests
 
         // Assert
         var cards = FindSubjects(page).OfType<Card>().ToList();
-        Assert.Equal(16, cards.Count);
+        Assert.Equal(18, cards.Count);
 
         // The two samples of the card itself are the first cards of the page: one with everything, one plain.
         var fullCard = cards[0];
@@ -122,6 +124,95 @@ public class PageWidgetsPageTests
     }
 
     [Fact]
+    public async Task WhenPageIsLoaded_ThenOneCardUsesEveryNewOptionAndTheHeaderSlot()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await AddPageAsync(fixture);
+
+        // Assert
+        var card = Assert.Single(FindSubjects(page).OfType<Card>(), card => card.Subtitle is not null);
+        Assert.Equal(("Sample motor", "pages.md", MudBlazor.Color.Primary, true), (card.Subtitle, card.Href, card.IconColor, card.Outlined));
+        var headerRight = Assert.IsType<MarkdownFragment>(card.HeaderRight);
+        Assert.Contains(headerRight.Children.Values, child => child is RenderExpression { Path: "pump/Status" });
+    }
+
+    [Fact]
+    public async Task WhenPageIsLoaded_ThenTheMapHasACasePerMotorStatusAndEveryWidgetRefersToIt()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        IPathScope page = await AddPageAsync(fixture);
+
+        // Assert
+        var map = Assert.IsType<ValueMap>(page.TryGetNamedSubject("motorstate"));
+        Assert.Equal(Enum.GetNames<MotorStatus>(), map.Cases.Select(valueCase => valueCase.Value));
+        Assert.All(map.Cases, valueCase => Assert.False(string.IsNullOrEmpty(valueCase.Text)));
+
+        var subjects = FindSubjects((MarkdownFile)page);
+        var maps = subjects.OfType<ValueRow>().Select(row => row.Map)
+            .Concat(subjects.OfType<ValueTile>().Select(tile => tile.Map))
+            .Concat(subjects.OfType<Indicator>().Select(indicator => indicator.Map))
+            .Where(name => name is not null)
+            .ToList();
+        Assert.NotEmpty(maps);
+        Assert.All(maps, name => Assert.Equal("motorstate", name));
+    }
+
+    [Fact]
+    public async Task WhenPageIsLoaded_ThenEveryValueWidgetReadsAPropertyOfAMotorOfThePage()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+        var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+
+        // Act
+        var page = await AddPageAsync(fixture);
+
+        // Assert
+        var subjects = FindSubjects(page);
+        var widgetPaths = subjects.OfType<ValueRow>().Select(row => (Subject: (IInterceptorSubject)row, row.Path))
+            .Concat(subjects.OfType<ValueTile>().Select(tile => (Subject: (IInterceptorSubject)tile, tile.Path)))
+            .Concat(subjects.OfType<Indicator>().Select(indicator => (Subject: (IInterceptorSubject)indicator, indicator.Path)))
+            .Concat(subjects.OfType<Progress>().Select(progress => (Subject: (IInterceptorSubject)progress, progress.Path)))
+            .Where(widget => widget.Path is not null)
+            .ToList();
+
+        Assert.NotEmpty(widgetPaths);
+        Assert.All(widgetPaths, widget => Assert.NotNull(resolver.ResolveScopedProperty(widget.Path!, PathStyle.Canonical, widget.Subject)));
+    }
+
+    [Fact]
+    public async Task WhenPageIsLoaded_ThenEachNewWidgetTypeHasTheSamplesOfItsSection()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await AddPageAsync(fixture);
+
+        // Assert
+        var subjects = FindSubjects(page);
+        (Type Type, int Count)[] expectedCounts =
+        [
+            (typeof(ValueMap), 1), (typeof(ValueList), 5), (typeof(ValueTile), 3), (typeof(Indicator), 4),
+            (typeof(Progress), 3), (typeof(ExpansionPanels), 2), (typeof(Alert), 2)
+        ];
+        Assert.Equal(expectedCounts, expectedCounts.Select(expected => (expected.Type, subjects.Count(subject => subject.GetType() == expected.Type))));
+
+        var panels = subjects.OfType<ExpansionPanels>().ToList();
+        Assert.Equal([false, true], panels.Select(layout => layout.Single));
+        Assert.All(panels, layout => Assert.Equal([true, false], layout.Panels.Select(panel => panel.Expanded)));
+        Assert.Equal([MudBlazor.Severity.Info, MudBlazor.Severity.Warning], subjects.OfType<Alert>().Select(alert => alert.Severity));
+        Assert.Equal(MudBlazor.Variant.Outlined, subjects.OfType<Alert>().Last().Variant);
+        Assert.Equal([IndicatorKind.Chip, IndicatorKind.Icon, IndicatorKind.Icon, IndicatorKind.Chip], subjects.OfType<Indicator>().Select(indicator => indicator.Kind));
+    }
+
+    [Fact]
     public async Task WhenPageIsLoaded_ThenTheFlowLayoutsHaveTheWidthsAndTheCellsOfTheirSamples()
     {
         // Arrange
@@ -132,7 +223,7 @@ public class PageWidgetsPageTests
 
         // Assert
         var flows = FindSubjects(page).OfType<FlowLayout>().Select(flow => (flow.MinWidth, flow.Items.Length));
-        Assert.Equal([(320, 3), (120, 6), (600, 2), (320, 2)], flows);
+        Assert.Equal([(320, 3), (120, 6), (600, 2), (320, 2), (140, 3)], flows);
     }
 
     [Fact]

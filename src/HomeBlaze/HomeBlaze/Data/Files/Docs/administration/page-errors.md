@@ -80,6 +80,14 @@ An expression with a wrong format does not take a block down. The page shows the
 |---------|-------|-----|
 | `Unknown format 'rounded'` | The format after the pipe character of an expression is neither `display` nor `raw`, like `{{ motor/Speed \| rounded }}`, where the backslash is only needed inside a table. The message shows the format as written | Use `display` or `raw`, or write no format, see [Expression Formats](pages.md#expression-formats) |
 
+## Value Widget Errors
+
+A map that cannot be found does not take a block down either. The widget shows the message in a small red alert in place of its value, without a line number, and the rest of the page is shown as usual.
+
+| Message | Cause | Fix |
+|---------|-------|-----|
+| `Cannot resolve map: motorstat` | The `Map` of a `ValueList` row, a `ValueTile` or an `Indicator` leads to no subject, or to a subject that is no `ValueMap`. The message shows the map as written | Check the name or the path in `Map`. The name is that of the block of the map, and a map on another page is reached through that page, see [ValueMap](page-widgets.md#valuemap) |
+
 ## Other Messages
 
 | Message | Cause | Fix |
@@ -99,13 +107,14 @@ A head line ends the blocks before it that have as many colons or more, and a bl
 
 ## Notices That Are No Errors
 
-Three notices are no error boxes. They come from a widget while it is shown:
+These notices are no error boxes. They come from a widget while it is shown:
 
 | Notice | Cause |
 |--------|-------|
 | Cannot resolve path | The `Path` of a `Widget` block leads to no subject |
 | Cannot show path | The `Path` of a `Widget` block leads to the widget itself or to a block that contains it |
 | No Widget component for | The type of the block, or of the subject that a `Widget` shows, has no widget |
+| A dash in place of a value | The `Path` of a `ValueList` row, a `ValueTile`, an `Indicator` or a `Progress` leads nowhere, or the value is not set. The path is the tooltip of the dash. A device that is offline or still starting is normal, so the widget shows no error. A `Progress` shows it also for a value that is no number |
 
 ---
 
