@@ -40,12 +40,38 @@ public class LlmAgentBaseTests
         Assert.Equal("background-model", request.Model);
         Assert.Equal(AgentEffort.Low, request.Effort);
         Assert.Contains("Trigger: manual", request.UserMessage);
-        Assert.Contains("## /Temperature", request.UserMessage);
+        Assert.Contains("""{"path":"/Temperature","property":{"value":0,""", request.UserMessage);
         Assert.Contains("Watch the temperature.", request.SystemPrompt);
         var entry = Assert.Single(test.Agent.Timeline.Entries);
         Assert.Equal(AgentTimelineEntryKind.BackgroundRun, entry.Kind);
         Assert.True(entry.IsQuiet);
         Assert.Null(test.Agent.LastAnalysis);
+    }
+
+    [Fact]
+    public async Task WhenWatchPathsNameASubjectAPropertyAndNothing_ThenEachGetsItsStateAsAJsonLine()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.WatchPaths = ["/", "/Humidity", "/Missing"]);
+
+        // Act
+        // The watch path "/" covers the humidity, so the change also requests a run; either run sees the new value.
+        test.Root.Humidity = 55;
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount >= 1);
+
+        // Assert
+        var lines = test.Agent.Requests[0].UserMessage.Split('\n');
+        var stateLines = lines.SkipWhile(line => line != "```jsonl").Skip(1).TakeWhile(line => line != "```").ToList();
+        Assert.Equal(3, stateLines.Count);
+        var subject = JsonDocument.Parse(stateLines[0]).RootElement;
+        Assert.Equal("/", subject.GetProperty("path").GetString());
+        Assert.Contains("Humidity", subject.GetProperty("subject").GetString());
+        var property = JsonDocument.Parse(stateLines[1]).RootElement;
+        Assert.Equal("/Humidity", property.GetProperty("path").GetString());
+        Assert.Equal(55, property.GetProperty("property").GetProperty("value").GetDecimal());
+        var missing = JsonDocument.Parse(stateLines[2]).RootElement;
+        Assert.Equal("/Missing", missing.GetProperty("path").GetString());
+        Assert.Contains("not found", missing.GetProperty("error").GetString());
     }
 
     [Fact]

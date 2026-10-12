@@ -858,24 +858,60 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             return [];
         }
 
-        var browse = _services.ToolSource.CreateTools(isReadOnly: true).FirstOrDefault(tool => tool.Name == "browse");
+        var tools = _services.ToolSource.CreateTools(isReadOnly: true);
+        var browse = tools.FirstOrDefault(tool => tool.Name == "browse");
+        var getProperty = tools.FirstOrDefault(tool => tool.Name == "get_property");
         var states = new List<AgentWatchedState>(watchPaths.Length);
         foreach (var path in watchPaths)
         {
             try
             {
-                var input = JsonSerializer.SerializeToElement(new { path, depth = 2, includeProperties = true, format = "text" });
-                var result = browse is null ? "(browse tool unavailable)" : await browse.Handler(input, cancellationToken);
-                states.Add(new AgentWatchedState(path, result as string ?? JsonSerializer.Serialize(result)));
+                states.Add(await FetchWatchedStateAsync(path, browse, getProperty, cancellationToken));
             }
             catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
-                states.Add(new AgentWatchedState(path, "Error: " + exception.Message));
+                states.Add(new AgentWatchedState(path, AgentWatchedStateKind.Error, JsonSerializer.SerializeToElement("Error: " + exception.Message)));
             }
         }
 
         return states;
     }
+
+    /// <summary>
+    /// Browses the subject at a watch path, or reads the property there when no subject is, since browse only
+    /// resolves subjects.
+    /// </summary>
+    private static async Task<AgentWatchedState> FetchWatchedStateAsync(
+        string path, McpToolInfo? browse, McpToolInfo? getProperty, CancellationToken cancellationToken)
+    {
+        string? error = null;
+        if (browse is not null)
+        {
+            var input = JsonSerializer.SerializeToElement(new { path, depth = 2, includeProperties = true, format = "text" });
+            var result = await browse.Handler(input, cancellationToken);
+            if (result is string text)
+            {
+                return new AgentWatchedState(path, AgentWatchedStateKind.Subject, JsonSerializer.SerializeToElement(text));
+            }
+
+            error = TryGetError(JsonSerializer.SerializeToElement(result));
+        }
+
+        if (getProperty is not null)
+        {
+            var result = JsonSerializer.SerializeToElement(await getProperty.Handler(JsonSerializer.SerializeToElement(new { path }), cancellationToken));
+            if (TryGetError(result) is null && result.ValueKind == JsonValueKind.Object)
+            {
+                return new AgentWatchedState(path, AgentWatchedStateKind.Property, result);
+            }
+        }
+
+        return new AgentWatchedState(path, AgentWatchedStateKind.Error,
+            JsonSerializer.SerializeToElement(error ?? $"No subject or property found at {path}."));
+    }
+
+    private static string? TryGetError(JsonElement result) =>
+        result.ValueKind == JsonValueKind.Object && result.TryGetProperty("error", out var error) ? error.ToString() : null;
 
     private AgentToolSet CreateToolSet(IProgress<AgentTurnUpdate> progress)
     {
