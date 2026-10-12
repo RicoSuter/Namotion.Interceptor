@@ -16,7 +16,7 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class MarkdownBlockTests
 {
-    private static readonly Regex TemperaturePattern = new(@"temperature of -?\d+([.,]\d+)? °C");
+    private static readonly Regex TemperaturePattern = new(@"temperature of -?\d+([.,]\d+)?°C");
 
     private const int NarrowViewportWidth = 390;
 

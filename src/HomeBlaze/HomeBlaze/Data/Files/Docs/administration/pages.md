@@ -108,10 +108,10 @@ The navigation follows pages that are added, removed or changed while a browser 
 An expression is a path in double curly braces, like `{{ mymotor/CurrentSpeed }}`. The page shows the value of the property at that path and updates it when the value changes.
 
 ~~~~markdown
-The conveyor runs at {{ /Demo/Conveyor/CurrentSpeed }} RPM and has a temperature of {{ /Demo/Conveyor/Temperature }} °C.
+The conveyor runs at {{ /Demo/Conveyor/CurrentSpeed }} RPM and has a temperature of {{ /Demo/Conveyor/Temperature }}.
 ~~~~
 
-The reader sees the sentence with the two numbers in place of the expressions, and the numbers change while the page is open. The spaces inside the braces are optional.
+The reader sees the sentence with the two values in place of the expressions, and the values change while the page is open. The temperature comes with its unit, so the sentence does not write one. The spaces inside the braces are optional.
 
 - **Live**: The value updates when the property changes.
 - **HTML-safe**: The value is HTML-encoded, so a value can never add markup to the page.
@@ -131,6 +131,29 @@ The last segment of the path is the name of a property. Everything before it lea
 
 [Paths](paths.md) describes the path syntax in full. Its section "Paths on Markdown Pages" explains where a relative path starts and when a name is used.
 
+### Expression Formats
+
+An expression shows the formatted value by default. A format after a `|` at the end of the expression chooses the form:
+
+| Written | Shows | A temperature of 21.5 degrees Celsius |
+|---------|-------|---------------------------------------|
+| `{{ mymotor/Temperature }}` | The formatted value | `21.5°C` |
+| `{{ mymotor/Temperature \| display }}` | The formatted value, with the format written out | `21.5°C` |
+| `{{ mymotor/Temperature \| raw }}` | The raw value | `21.5` |
+
+Inside a markdown table the `|` of an expression is written `\|`, as in the table above, because a cell of a table ends at every other `|`.
+
+- **Formatted value**: The text that the property panel shows for the property. It has the unit of the property, scaled where the unit allows it: 1234 W shows as `1.23 kW`. A number has at most two decimals, a boolean shows `Yes` or `No`, and a date is written in the time zone of the viewer.
+- **Raw value**: The plain value with a dot as the decimal separator on every system, and a date as ISO 8601. It has no unit, no scaling and no rounding, which makes it the form for an HTML attribute and for CSS, where a unit or a `Yes` would be wrong.
+- **Missing value**: A value that is not set shows nothing in both forms.
+- **Unknown format**: A format other than `display` and `raw` shows `Unknown format 'name'` in place of the value. [Page Errors](page-errors.md#expression-errors) has the message.
+
+A `style` attribute needs the raw value. The bar below is as wide as the speed of the conveyor divided by ten, in pixels:
+
+~~~~markdown
+<div style="height: 8px; background: var(--mud-palette-primary); width: calc({{ /Demo/Conveyor/CurrentSpeed | raw }} * 0.1px)"></div>
+~~~~
+
 ### Where an Expression Works
 
 - **In text**: In running text, in a heading, in a table cell, inside bold or italic text and in the text of a link.
@@ -138,7 +161,7 @@ The last segment of the path is the name of a property. Everything before it lea
 - **Inside HTML that you write**: In the text of an element and inside an attribute. This also holds for a `<code>` and a `<pre>` element.
 
 ~~~~markdown
-<span title="Target: {{ /Demo/Conveyor/TargetSpeed }} RPM">Speed: {{ /Demo/Conveyor/CurrentSpeed }} RPM</span>
+<span title="Target: {{ /Demo/Conveyor/TargetSpeed | raw }} RPM">Speed: {{ /Demo/Conveyor/CurrentSpeed }} RPM</span>
 ~~~~
 
 The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target speed.
@@ -152,7 +175,7 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 
 ### Expression Limits
 
-- **No formatting**: An expression shows the value as it is. Units, rounding and conditions are not supported.
+- **Two formats**: An expression has the formatted value and the raw value. Another unit, another number of decimals and conditions are not supported.
 - **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list, it shows a technical type name.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
 - **No braces and no `<` in a path**: The path cannot contain `{`, `}` or `<`. [Paths](paths.md) says how to write a file name that contains one of them.
@@ -921,7 +944,7 @@ Editing a subject elsewhere in the UI, for example through the edit button of it
 
 ## Not Supported
 
-- Formatting in expressions, like units, rounding and conditions.
+- More formats for expressions than `display` and `raw`, like another unit, another number of decimals or conditions.
 - Expressions in arguments. The value of an argument is fixed text.
 - Short names for types. A block always has the full type name.
 - The cells of a `GridLayout` and the nodes of a `CanvasLayout` as blocks. They are part of the configuration and stand in the `json` block.
@@ -1011,7 +1034,7 @@ This motor belongs to the page.
 
 :: HomeBlaze.Components.TabLayout#fans
 ::: Tab#cooling Title="Cooling Fan" Icon=AcUnit
-Temperature: **{{ /Demo/CoolingFan/Temperature }}** °C
+Temperature: **{{ /Demo/CoolingFan/Temperature }}**
 
 :::: HomeBlaze.Components.Widget Path=/Demo/CoolingFan
 ::::

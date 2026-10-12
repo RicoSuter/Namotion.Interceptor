@@ -139,6 +139,26 @@ public class MarkdownExpressionFormatTests
     }
 
     [Fact]
+    public async Task WhenExpressionInATableEscapesTheSeparator_ThenTheFormatIsRead()
+    {
+        // Arrange
+        var page = await AddPageAsync("""
+            | Name | Power |
+            | --- | --- |
+            | Meter | {{ meter/Power \| raw }} |
+            """);
+
+        // Act
+        var expression = GetExpression(page);
+        var html = MarkdownPageFixture.Html(page.Children);
+
+        // Assert
+        Assert.Equal(ExpressionFormat.Raw, expression.Format);
+        Assert.Equal("meter/Power", expression.Path);
+        Assert.Contains("<table", html);
+    }
+
+    [Fact]
     public async Task WhenEvaluatedContentIsRead_ThenEachExpressionUsesItsFormat()
     {
         // Arrange

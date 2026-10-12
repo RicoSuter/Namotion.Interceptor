@@ -84,7 +84,7 @@ A block gets a name with `#name` on its head line. The name is known anywhere on
 ::: HomeBlaze.Components.Widget Path=../Conveyor
 :::
 
-The named motor has a temperature of {{ cardmotor/Temperature }} °C.
+The named motor has a temperature of {{ cardmotor/Temperature }}.
 ::
 ~~~~
 

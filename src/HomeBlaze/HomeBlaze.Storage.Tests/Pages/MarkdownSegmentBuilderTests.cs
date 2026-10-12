@@ -694,6 +694,29 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
+    public void WhenExpressionHasTheRawFormat_ThenItIsFoundWithThePathWithoutTheFormat()
+    {
+        // Act
+        var expression = Assert.Single(MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse("Value {{ a | raw }} now")));
+
+        // Assert
+        Assert.Equal("a", expression.Path);
+        Assert.Equal(ExpressionFormat.Raw, expression.Format);
+        Assert.Null(expression.Error);
+    }
+
+    [Fact]
+    public void WhenExpressionHasAnUnknownFormat_ThenItIsFoundWithAnError()
+    {
+        // Act
+        var expression = Assert.Single(MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse("Value {{ a | x }} now")));
+
+        // Assert
+        Assert.Equal("a", expression.Path);
+        Assert.Equal("Unknown format 'x'", expression.Error);
+    }
+
+    [Fact]
     public void WhenExpressionIsFoundInText_ThenItsSpanCoversTheBraces()
     {
         // Arrange

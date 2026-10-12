@@ -6,7 +6,7 @@ position: 6
 
 # Errors on Markdown Pages
 
-This page lists every message that a [markdown page](pages.md) shows in place of a block, with its cause and its fix. A block that cannot be shown is replaced by a red box with the line number of the block and a message, and the rest of the page still renders. [Errors](pages.md#errors) on that page has the general rules: what a box replaces and where it stands.
+This page lists every message that a [markdown page](pages.md) shows in place of a block or of the value of an expression, with its cause and its fix. A block that cannot be shown is replaced by a red box with the line number of the block and a message, and the rest of the page still renders. [Errors](pages.md#errors) on that page has the general rules: what a box replaces and where it stands.
 
 The names, numbers and lines in the messages below are examples.
 
@@ -71,6 +71,14 @@ The names, numbers and lines in the messages below are examples.
 | `The slot 'Footer' holds content only and takes no arguments, name or json block.` | Arguments, a `#name` or a `json` block on a slot block that only holds content | Remove them |
 | `The slot 'Content' is filled by a block and by loose content.` | The default slot has a slot block with its name, and the widget block has other content as well | Move all the content into the slot block, or remove the slot block lines |
 | `The name 'mymotor' is used twice on this page.` | Two blocks with the same `#name`. The first one keeps the name. A name can also collide with the internal key of a block without a name, which is its short type name, `_` and a number, like `Card_3` | Give one of the blocks another name |
+
+## Expression Errors
+
+An expression with a wrong format does not take a block down. The page shows the message in red in place of the value, and the rest of the page is shown as usual.
+
+| Message | Cause | Fix |
+|---------|-------|-----|
+| `Unknown format 'rounded'` | The format after the pipe character of an expression is neither `display` nor `raw`, like `{{ motor/Speed \| rounded }}`, where the backslash is only needed inside a table. The message shows the format as written | Use `display` or `raw`, or write no format, see [Expression Formats](pages.md#expression-formats) |
 
 ## Other Messages
 
