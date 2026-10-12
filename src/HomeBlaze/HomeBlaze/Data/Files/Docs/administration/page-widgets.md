@@ -40,8 +40,8 @@ A titled box around page content. Type name: `HomeBlaze.Components.Card`.
 | `Icon` | Text | None | The [icon](#icons) next to the title |
 | `IconColor` | Colour | `Default` | The [colour](#colours) of the icon |
 | `Href` | Text | None | Where the title leads to. The title is then a link, written like a link in the text of the page, see [Links in Block Options](pages.md#links-in-block-options) |
-| `Outlined` | Yes or no | `false` | A border around the card instead of a shadow |
-| `Elevation` | Whole number | `2` | The depth of the shadow. `0` is no shadow |
+| `Outlined` | Yes or no | `true` | A border around the card instead of a shadow. `false` gives a card with a shadow, see `Elevation` |
+| `Elevation` | Whole number | `2` | The depth of the shadow of a card that is not outlined. `0` is no shadow. An outlined card has no shadow, whatever the value is |
 | `Image` | Text | None | A picture between the header and the body, 200 pixels high. Written like `Href` |
 
 | Slot | Blocks | Holds |
@@ -73,7 +73,7 @@ The pump runs at {{ pump/CurrentSpeed }} RPM.
 Target speed: {{ pump/TargetSpeed }} RPM
 ::
 
-A card without arguments and without a footer:
+A card without arguments and without a footer. It has a border and no shadow, because a card is outlined unless `Outlined=false` is set:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -86,11 +86,11 @@ This card has no title, no icon and no footer. It is a plain box around its cont
 This card has no title, no icon and no footer. It is a plain box around its content.
 ::
 
-A card with a subtitle, a coloured icon, a border and a title that leads to the guide for pages. The text in the corner of the header stands in the `HeaderRight` slot:
+A card with a subtitle, a coloured icon and a title that leads to the guide for pages. It is not outlined, so it has a shadow, and `Elevation=6` makes the shadow deeper than the default. The text in the corner of the header stands in the `HeaderRight` slot:
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.Card Title="Pump" Subtitle="Sample motor" Icon=WaterDrop IconColor=Primary Href="pages.md" Outlined=true
+:: HomeBlaze.Components.Card Title="Pump" Subtitle="Sample motor" Icon=WaterDrop IconColor=Primary Href="pages.md" Outlined=false Elevation=6
 The pump runs at {{ pump/CurrentSpeed }} RPM.
 
 ::: HeaderRight
@@ -98,7 +98,7 @@ The pump runs at {{ pump/CurrentSpeed }} RPM.
 ::
 ~~~~
 
-:: HomeBlaze.Components.Card Title="Pump" Subtitle="Sample motor" Icon=WaterDrop IconColor=Primary Href="pages.md" Outlined=true
+:: HomeBlaze.Components.Card Title="Pump" Subtitle="Sample motor" Icon=WaterDrop IconColor=Primary Href="pages.md" Outlined=false Elevation=6
 The pump runs at {{ pump/CurrentSpeed }} RPM.
 
 ::: HeaderRight

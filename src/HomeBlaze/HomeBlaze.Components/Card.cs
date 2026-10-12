@@ -18,6 +18,7 @@ public partial class Card : IConfigurable, ITitleProvider
 {
     public Card()
     {
+        Outlined = true;
         Elevation = 2;
     }
 
@@ -53,13 +54,13 @@ public partial class Card : IConfigurable, ITitleProvider
     public partial string? Href { get; set; }
 
     /// <summary>
-    /// Whether the card has a border instead of a shadow.
+    /// Whether the card has a border instead of a shadow. This is the default, and <c>false</c> gives a card with a shadow, see <see cref="Elevation"/>.
     /// </summary>
     [Configuration]
     public partial bool Outlined { get; set; }
 
     /// <summary>
-    /// Depth of the shadow, from 0 for none.
+    /// Depth of the shadow of a card that is not outlined, from 0 for none. An outlined card has no shadow.
     /// </summary>
     [Configuration]
     public partial int Elevation { get; set; }

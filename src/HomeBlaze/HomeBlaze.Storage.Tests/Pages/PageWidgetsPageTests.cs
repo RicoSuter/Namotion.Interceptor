@@ -134,7 +134,7 @@ public class PageWidgetsPageTests
 
         // Assert
         var card = Assert.Single(FindSubjects(page).OfType<Card>(), card => card.Subtitle is not null);
-        Assert.Equal(("Sample motor", "pages.md", MudBlazor.Color.Primary, true), (card.Subtitle, card.Href, card.IconColor, card.Outlined));
+        Assert.Equal(("Sample motor", "pages.md", MudBlazor.Color.Primary, false, 6), (card.Subtitle, card.Href, card.IconColor, card.Outlined, card.Elevation));
         var headerRight = Assert.IsType<MarkdownFragment>(card.HeaderRight);
         Assert.Contains(headerRight.Children.Values, child => child is RenderExpression { Path: "pump/Status" });
     }

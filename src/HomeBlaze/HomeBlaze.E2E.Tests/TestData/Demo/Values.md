@@ -17,6 +17,10 @@ Corner text
 Body of the plain card.
 ::
 
+:: HomeBlaze.Components.Card Title="Raised Card" Outlined=false
+Body of the raised card.
+::
+
 :: HomeBlaze.Components.ValueMap#status
 ::: Case Value=Stopped Text="steht" Color=Error
 ::: Case Value=Starting Text="startet" Color=Warning

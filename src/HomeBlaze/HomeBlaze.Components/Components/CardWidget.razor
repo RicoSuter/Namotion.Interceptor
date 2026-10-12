@@ -20,7 +20,7 @@
         ? @<div data-testid="card-header-right"><SubjectComponent Subject="@headerRight" Type="SubjectComponentType.Widget" /></div>
         : null;
 
-    <MudCard Class="card-widget" Elevation="@card.Elevation" Outlined="@card.Outlined" data-testid="card">
+    <MudCard Class="card-widget" Elevation="@(card.Outlined ? 0 : card.Elevation)" Outlined="@card.Outlined" data-testid="card">
         @if (hasTitle || hasSubtitle || hasIcon || headerRight is not null)
         {
             <MudCardHeader CardHeaderAvatar="@avatar" CardHeaderActions="@actions">

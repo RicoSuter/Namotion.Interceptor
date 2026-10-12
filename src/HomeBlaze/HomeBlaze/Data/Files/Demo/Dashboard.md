@@ -73,7 +73,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 ::: Panel#fans Title="Fans" Icon=Air
 :::: HomeBlaze.Components.FlowLayout MinWidth=300
 ::::: Item
-:::::: HomeBlaze.Components.Card Title="Cooling Fan" Subtitle="Simulated motor" Icon=AcUnit IconColor=Info Outlined=true
+:::::: HomeBlaze.Components.Card Title="Cooling Fan" Subtitle="Simulated motor" Icon=AcUnit IconColor=Info
 ::::::: HomeBlaze.Components.ValueList
 :::::::: Value Path=/Demo/CoolingFan/CurrentSpeed Icon=Speed
 ::::::::: HomeBlaze.Components.Progress Path=/Demo/CoolingFan/CurrentSpeed Min=0 Max=3000
@@ -83,7 +83,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 ::::::: HeaderRight
 :::::::: HomeBlaze.Components.Indicator Path=/Demo/CoolingFan/Status Map=motorstate Kind=Icon
 ::::: Item
-:::::: HomeBlaze.Components.Card Title="Exhaust Fan" Subtitle="Simulated motor" Icon=Air IconColor=Info Outlined=true
+:::::: HomeBlaze.Components.Card Title="Exhaust Fan" Subtitle="Simulated motor" Icon=Air IconColor=Info
 ::::::: HomeBlaze.Components.ValueList
 :::::::: Value Path=/Demo/ExhaustFan/CurrentSpeed Icon=Speed
 ::::::::: HomeBlaze.Components.Progress Path=/Demo/ExhaustFan/CurrentSpeed Min=0 Max=3000

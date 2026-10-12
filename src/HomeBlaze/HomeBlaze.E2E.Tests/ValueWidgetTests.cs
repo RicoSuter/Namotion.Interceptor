@@ -87,6 +87,31 @@ public class ValueWidgetTests
     }
 
     [Fact]
+    public async Task WhenCardHasNoOptions_ThenItIsOutlinedWithoutAShadow()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var card = GetCard(page, "Plain Card");
+        await Assertions.Expect(card).ToHaveClassAsync(new Regex("mud-paper-outlined"), new() { Timeout = Timeout });
+        await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex(@"mud-elevation-[1-9]"));
+    }
+
+    [Fact]
+    public async Task WhenCardIsNotOutlined_ThenItHasAShadowAndNoBorder()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var card = GetCard(page, "Raised Card");
+        await Assertions.Expect(card).ToHaveClassAsync(new Regex(@"mud-elevation-[1-9]"), new() { Timeout = Timeout });
+        await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-paper-outlined"));
+        await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-elevation-0"));
+    }
+
+    [Fact]
     public async Task WhenPageRenders_ThenItShowsNoBlockErrors()
     {
         // Arrange & Act
