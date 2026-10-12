@@ -350,6 +350,22 @@ public class ClaudeCliAgentTests
     }
 
     [UnixFact]
+    public async Task WhenNoWebToolIsAllowed_ThenABuiltInToolCallInTheStreamIsNotRecorded()
+    {
+        // Arrange - the stream reports a WebSearch call although the agent allows no backend tool.
+        using var cli = FakeClaudeCli.Create("web-search.jsonl");
+        await using var test = await StartAsync(cli, agent => agent.AllowedTools = ["browse"]);
+
+        // Act
+        await test.Agent.SendMessageAsync("Which .NET SDK is the newest?", CancellationToken.None);
+
+        // Assert
+        var reply = test.Agent.Timeline.Entries[^1];
+        Assert.Equal("The latest .NET SDK is 10.0.204.", reply.Text);
+        Assert.Empty(reply.ToolCalls);
+    }
+
+    [UnixFact]
     public async Task WhenNoWebToolIsAllowed_ThenTheCliGetsNoBuiltInToolAndThePromptHasNoWebLine()
     {
         // Arrange

@@ -133,7 +133,8 @@ public partial class ClaudeCliAgent : LlmAgentBase
             BackendTools = request.BackendTools
         };
         var invocation = new ClaudeCliInvocation(CliPath, ClaudeCliArguments.Build(options), WorkingDirectory, request.UserMessage);
-        return ClaudeCliProcess.RunAsync(invocation, progress, cancellationToken, request.Tools);
+        // Built-in tool calls are recorded only when backend tools are allowed; the CLI gets no other built-in tool.
+        return ClaudeCliProcess.RunAsync(invocation, progress, cancellationToken, request.BackendTools.Count > 0 ? request.Tools : null);
     }
 
     private void DeleteConfiguration(string path)
