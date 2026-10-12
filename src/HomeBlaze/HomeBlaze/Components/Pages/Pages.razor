@@ -125,7 +125,9 @@
 
     // How long the page waits after a change of the paths before it renders. Attaches and detaches come in bursts,
     // such as the subjects of a device that connects, and every one of them inside this time ends in the same render.
-    private static readonly TimeSpan PathsChangedRenderDelay = TimeSpan.FromMilliseconds(50);
+    // Nobody waits for a device that appears, so the time is long enough to keep a graph that changes all the time
+    // from rendering every open page more than a few times per second.
+    private static readonly TimeSpan PathsChangedRenderDelay = TimeSpan.FromMilliseconds(250);
 
     private int _isPathsChangedRenderPending;
     private volatile bool _isDisposed;
@@ -163,21 +165,27 @@
     {
         await Task.Delay(PathsChangedRenderDelay).ConfigureAwait(false);
 
-        // Cleared before the render, so that a change that comes during the render causes another one.
-        Volatile.Write(ref _isPathsChangedRenderPending, 0);
-
-        if (_isDisposed)
+        try
         {
-            return;
-        }
-
-        await InvokeAsync(() =>
-        {
-            if (!_isDisposed)
+            await InvokeAsync(() =>
             {
-                StateHasChanged();
-            }
-        });
+                // Cleared on the dispatcher, as the last thing before the render. A change that comes while this callback
+                // still waits for the dispatcher is covered by the render below, so it queues nothing and at most one
+                // callback of a page waits there. A change that comes during the render finds the flag clear and causes another one.
+                Volatile.Write(ref _isPathsChangedRenderPending, 0);
+
+                if (!_isDisposed)
+                {
+                    StateHasChanged();
+                }
+            });
+        }
+        catch
+        {
+            // The dispatch can fail before the callback runs, for example when the circuit is gone. A flag that stayed set
+            // would keep the page from ever rendering for a change of the paths again.
+            Volatile.Write(ref _isPathsChangedRenderPending, 0);
+        }
     }
 
     protected override Task OnAfterRenderAsync(bool firstRender)
