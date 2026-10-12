@@ -137,35 +137,71 @@ public class CanvasLayoutTests
     }
 
     [Fact]
+    public async Task WhenCanvasIsViewed_ThenASliderInANodeCanBeDragged()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync(withControlsWidget: true);
+        var slider = GetNodes(page).First.Locator("input[type=range]");
+        var box = await GetBoxAsync(slider);
+        var y = box.Top + box.Height / 2;
+
+        // Act: the thumb is picked up in the middle and dropped at four fifths of the slider.
+        await DragAsync(page, box.Left + box.Width / 2, y, box.Left + box.Width * 0.8, y);
+
+        // Assert
+        await Assertions.Expect(GetNodes(page).First.GetByTestId("slider-value")).ToHaveTextAsync(new Regex("^Level: (7\\d|8\\d)$"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenCanvasIsViewed_ThenKeysWorkInAWidgetInANode()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync(withControlsWidget: true);
+        var node = GetNodes(page).First;
+        var textField = node.GetByRole(AriaRole.Textbox);
+        await textField.ClickAsync();
+
+        // Act: text goes into the field, Tab moves to the button and Enter presses it. The text is waited for before Tab, so that every key
+        // has arrived at the server before the focus moves.
+        await textField.PressSequentiallyAsync("abc");
+        await Assertions.Expect(node.GetByTestId("text-value")).ToHaveTextAsync("Text: abc", new() { Timeout = Timeout });
+        await page.Keyboard.PressAsync("Tab");
+        await page.Keyboard.PressAsync("Enter");
+
+        // Assert
+        await Assertions.Expect(node.GetByTestId("click-count")).ToHaveTextAsync("Clicks: 1", new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenCanvasIsViewed_ThenAWidgetInANodeThatScrollsScrollsBeforeThePage()
     {
-        // Arrange: a box with a scroll bar of its own in the first node, which a widget with a long list would have.
-        var page = await OpenCanvasPageAsync(withTextBelow: true, withOperableWidgets: true);
-        var node = GetNodes(page).First;
-        await node.EvaluateAsync(
-            """
-            node => {
-                const box = document.createElement('div');
-                box.dataset.testid = 'scroll-box';
-                box.style.cssText = 'position: absolute; left: 0; top: 0; width: 100%; height: 100px; overflow: auto; background: white';
-                box.innerHTML = '<div style="height: 1000px">Long content</div>';
-                node.appendChild(box);
-            }
-            """);
-        var scrollBox = node.GetByTestId("scroll-box");
-        var box = await GetBoxAsync(scrollBox);
+        // Arrange
+        var page = await OpenCanvasPageAsync(withTextBelow: true, withControlsWidget: true);
+        var scrollArea = GetNodes(page).First.GetByTestId("scroll-area");
+        var box = await GetBoxAsync(scrollArea);
         var scrollBefore = await GetScrollPositionAsync(page);
-        await page.Mouse.MoveAsync((float)(box.Left + 50), (float)(box.Top + 50));
+        await page.Mouse.MoveAsync((float)(box.Left + 50), (float)(box.Top + 30));
 
-        // Act
-        await page.Mouse.WheelAsync(0, 100);
+        // Act: the first wheel is more than the area can scroll.
+        await page.Mouse.WheelAsync(0, 2000);
+
+        // Assert: the area scrolls to its end and the page stays.
+        await page.WaitForFunctionAsync(
+            "element => element.scrollTop + element.clientHeight >= element.scrollHeight - 1",
+            await scrollArea.ElementHandleAsync(),
+            new() { Timeout = Timeout });
+        Assert.Equal(scrollBefore, await GetScrollPositionAsync(page));
+
+        // Act: the area cannot scroll any more.
+        await page.Mouse.WheelAsync(0, 300);
 
         // Assert
         await page.WaitForFunctionAsync(
-            "element => element.scrollTop > 0",
-            await scrollBox.ElementHandleAsync(),
+            $$"""
+            ([selector, before]) => ({{ScrollPositionScript}})(selector) > before
+            """,
+            new object[] { ".canvas-layout-container", scrollBefore },
             new() { Timeout = Timeout });
-        Assert.Equal(scrollBefore, await GetScrollPositionAsync(page));
     }
 
     [Fact]
@@ -175,10 +211,16 @@ public class CanvasLayoutTests
         var page = await OpenCanvasPageAsync(withOperableWidgets: true);
         var nodes = GetNodes(page);
         var positionsBefore = await GetNodePositionsAsync(page);
-        var box = await GetBoxAsync(nodes.Last);
+        var nodeBox = await GetBoxAsync(nodes.Last);
+        var indicatorBox = await GetBoxAsync(nodes.Last.GetByTestId("indicator"));
 
-        // Act: the drag starts on the indicator and ends on the empty canvas.
-        await DragAsync(page, box.Left + 100, box.Top + 100, box.Left + 100 - 60, box.Bottom + 60);
+        // Act: the drag starts on the indicator and ends on the empty canvas below the node.
+        await DragAsync(
+            page,
+            indicatorBox.Left + indicatorBox.Width / 2,
+            indicatorBox.Top + indicatorBox.Height / 2,
+            nodeBox.Left + 40,
+            nodeBox.Bottom + 60);
         await WaitForServerAsync(page);
 
         // Assert
@@ -461,9 +503,9 @@ public class CanvasLayoutTests
         Assert.Equal(widthBefore, (await GetBoxAsync(GetNodes(page).First)).Width);
     }
 
-    private async Task<IPage> OpenCanvasPageAsync(bool withTextBelow = false, string? editMode = null, bool withOperableWidgets = false)
+    private async Task<IPage> OpenCanvasPageAsync(bool withTextBelow = false, string? editMode = null, bool withOperableWidgets = false, bool withControlsWidget = false)
     {
-        await _fixture.WriteDemoPageAsync(ScratchPage, CreateCanvasPage(withTextBelow, withOperableWidgets));
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateCanvasPage(withTextBelow, withOperableWidgets, withControlsWidget));
 
         var page = await _fixture.CreatePageAsync(new BrowserNewContextOptions
         {
@@ -480,7 +522,8 @@ public class CanvasLayoutTests
         }
 
         // The library draws the border of a node and the area that a link starts from only after it has measured the node.
-        await Assertions.Expect(GetCanvas(page).Locator("svg rect")).ToHaveCountAsync(4, new() { Timeout = Timeout });
+        var nodeCount = withControlsWidget ? 1 : 2;
+        await Assertions.Expect(GetCanvas(page).Locator("svg rect")).ToHaveCountAsync(2 * nodeCount, new() { Timeout = Timeout });
         await GetNodes(page).First.ScrollIntoViewIfNeededAsync();
         await Assertions.Expect(GetNodes(page).First).ToBeVisibleAsync();
         return page;
@@ -657,14 +700,19 @@ public class CanvasLayoutTests
         return page.EvaluateAsync<double>($"() => ({ScrollPositionScript})('.canvas-layout-container')");
     }
 
-    private static string CreateCanvasPage(bool withTextBelow, bool withOperableWidgets)
+    private static string CreateCanvasPage(bool withTextBelow, bool withOperableWidgets, bool withControlsWidget)
     {
         var builder = new StringBuilder();
         builder.Append("---\ntitle: Scratch\n---\n\n# Scratch\n\n");
         builder.Append($":: HomeBlaze.Components.CanvasLayout#canvas MinHeight={CanvasHeight}\n");
         builder.Append("```json\n");
         builder.Append("{\n  \"Nodes\": [\n");
-        if (withOperableWidgets)
+        if (withControlsWidget)
+        {
+            // One node with a widget that has a slider, a text field, a button and an area that scrolls.
+            builder.Append("    { \"X\": 40, \"Y\": 10, \"Width\": 420, \"Height\": 380, \"Child\": { \"$type\": \"HomeBlaze.E2E.Tests.Models.ControlsTestSubject\" } }\n");
+        }
+        else if (withOperableWidgets)
         {
             // A card whose title is a link, and an icon indicator whose path does not exist, so that its tooltip is the path.
             builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Card\", \"Title\": \"Linked Card\", \"Href\": \"/pages/Demo/Blocks.md\" } },\n");

@@ -39,6 +39,10 @@ public class PlaywrightFixture : IAsyncLifetime
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
 
+        // The registry of the components and the serializer of the configuration read the types once, when the first page asks
+        // for a component or for a configuration, so the test subject and its widget are added before any page is requested.
+        _factory.ServerServices.GetRequiredService<TypeProvider>().AddTypes([typeof(ControlsTestSubject), typeof(ControlsTestWidget)]);
+
         // The root subject is loaded by a background service, so the server serves requests before the
         // object graph behind them exists. The UI waits that window out on its own, but the wait would
         // otherwise land inside the first test's own timeout instead of here.
@@ -62,7 +66,8 @@ public class PlaywrightFixture : IAsyncLifetime
         // Registered once for the whole run, so that every test sees the same types. Resolving a qualified
         // name adds the type to the registry.
         var typeRegistry = _factory.ServerServices.GetRequiredService<SubjectTypeRegistry>();
-        if (typeRegistry.ResolveType(typeof(PlainConfigurableSubject).AssemblyQualifiedName!) is null)
+        if (typeRegistry.ResolveType(typeof(PlainConfigurableSubject).AssemblyQualifiedName!) is null
+            || typeRegistry.ResolveType(typeof(ControlsTestSubject).AssemblyQualifiedName!) is null)
         {
             throw new InvalidOperationException("The test-only subject type could not be registered");
         }
