@@ -45,6 +45,12 @@ var seededFileCount = DataDirectorySeeder.SeedIfMissing(
     HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
     builder.Configuration[HomeBlazePaths.SeedDirectoryKey]);
 
+// Replaced on every start, unlike the seeded files, so the documentation always matches the running version.
+var replacedDocumentationFileCount = DataDirectorySeeder.ReplaceDirectory(
+    HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
+    builder.Configuration[HomeBlazePaths.SeedDirectoryKey],
+    DataDirectorySeeder.DocumentationDirectory);
+
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
@@ -78,6 +84,11 @@ var app = builder.Build();
 if (seededFileCount > 0)
 {
     app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
+}
+
+if (replacedDocumentationFileCount > 0)
+{
+    app.Logger.LogInformation("Replaced the documentation with {Count} files from the seed directory.", replacedDocumentationFileCount);
 }
 
 // Configure TypeProvider with application-specific assemblies
