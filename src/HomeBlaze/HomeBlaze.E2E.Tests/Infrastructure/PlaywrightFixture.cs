@@ -1,7 +1,9 @@
+using System.Text;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
@@ -95,15 +97,35 @@ public class PlaywrightFixture : IAsyncLifetime
     /// show the generated properties editor. The serializer does not know the test-only type, so it cannot be
     /// created through the create dialog, which stores it in a file.
     /// </summary>
+    /// <param name="name">The name of the subject under the root, or null for a new one.</param>
+    /// <param name="label">The label of the subject, which it has before it enters the graph.</param>
     /// <returns>The name of the subject under the root, which is its path, and the subject.</returns>
-    public (string Name, PlainConfigurableSubject Subject) AddPlainSubjectToRoot()
+    public (string Name, PlainConfigurableSubject Subject) AddPlainSubjectToRoot(string? name = null, string label = "Original label")
     {
-        var name = $"Plain{Guid.NewGuid():N}";
+        name ??= CreatePlainSubjectName();
         var root = GetRoot();
-        var subject = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
-        subject.Label = "Original label";
+        var subject = CreatePlainSubject(label);
         root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
         return (name, subject);
+    }
+
+    /// <summary>
+    /// Creates a name that no subject under the root has, for a test that opens a page before the subject exists.
+    /// </summary>
+    public static string CreatePlainSubjectName() => $"Plain{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// Puts a new subject in the place of a subject of <see cref="AddPlainSubjectToRoot"/> in one write, like a
+    /// device that connects again and gets a new subject under the name it had.
+    /// </summary>
+    /// <returns>The subject that is under the root now.</returns>
+    public PlainConfigurableSubject ReplacePlainSubjectInRoot(string name, PlainConfigurableSubject replaced, string label)
+    {
+        var root = GetRoot();
+        var subject = CreatePlainSubject(label);
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
+        ServerServices.GetRequiredService<SubjectFactory>().DiscardSubject(replaced);
+        return subject;
     }
 
     /// <summary>
@@ -116,6 +138,26 @@ public class PlaywrightFixture : IAsyncLifetime
         children.Remove(name);
         root.Children = children;
         ServerServices.GetRequiredService<SubjectFactory>().DiscardSubject(subject);
+    }
+
+    /// <summary>
+    /// Writes a page of the demo folder, given by its file name, through the page like an editor does, which also
+    /// loads the page again.
+    /// </summary>
+    public async Task WriteDemoPageAsync(string name, string content)
+    {
+        var folder = (VirtualFolder)GetRoot().Children["Demo"];
+        var file = (MarkdownFile)folder.Children[name];
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+        await file.WriteAsync(stream, CancellationToken.None);
+    }
+
+    private PlainConfigurableSubject CreatePlainSubject(string label)
+    {
+        var subject = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
+        subject.Label = label;
+        return subject;
     }
 
     private FluentStorageContainer GetRoot()

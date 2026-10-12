@@ -123,6 +123,13 @@
 
     private HotKeysContext? _hotKeysContext;
 
+    // How long the page waits after a change of the paths before it renders. Attaches and detaches come in bursts,
+    // such as the subjects of a device that connects, and every one of them inside this time ends in the same render.
+    private static readonly TimeSpan PathsChangedRenderDelay = TimeSpan.FromMilliseconds(50);
+
+    private int _isPathsChangedRenderPending;
+    private volatile bool _isDisposed;
+
     private enum PageEditMode
     {
         View, // Read-only rendered page
@@ -133,6 +140,45 @@
 
     private bool IsEditing => _editMode != PageEditMode.View;
     private bool ShowEditor => _editMode is PageEditMode.Split or PageEditMode.Source;
+
+    protected override void OnInitialized()
+    {
+        // The resolver caches an absolute path, so a widget or an expression reads no property on the way to its target
+        // and the tracking scope does not see that an entry on the way appeared, was replaced or left.
+        PathResolver.PathsChanged += OnPathsChanged;
+    }
+
+    // Runs on the thread that changes the graph, inside the lock of the lifecycle interceptor.
+    private void OnPathsChanged()
+    {
+        if (Interlocked.Exchange(ref _isPathsChangedRenderPending, 1) == 0)
+        {
+            // Not Task.Run, which would carry the execution context of the writing thread into the render: that context
+            // can hold the read recorder of the tracking scope of another page.
+            ThreadPool.UnsafeQueueUserWorkItem(static page => _ = page.RenderAfterPathsChangedAsync(), this, preferLocal: false);
+        }
+    }
+
+    private async Task RenderAfterPathsChangedAsync()
+    {
+        await Task.Delay(PathsChangedRenderDelay).ConfigureAwait(false);
+
+        // Cleared before the render, so that a change that comes during the render causes another one.
+        Volatile.Write(ref _isPathsChangedRenderPending, 0);
+
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        await InvokeAsync(() =>
+        {
+            if (!_isDisposed)
+            {
+                StateHasChanged();
+            }
+        });
+    }
 
     protected override Task OnAfterRenderAsync(bool firstRender)
     {
@@ -288,6 +334,9 @@
 
     public async ValueTask DisposeAsync()
     {
+        _isDisposed = true;
+        PathResolver.PathsChanged -= OnPathsChanged;
+
         if (_hotKeysContext != null)
         {
             await _hotKeysContext.DisposeAsync();

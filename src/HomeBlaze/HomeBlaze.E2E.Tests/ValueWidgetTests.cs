@@ -33,6 +33,38 @@ public class ValueWidgetTests
         return page;
     }
 
+    // The page that these tests overwrite. Nothing else on it changes, so that only the graph can make it render again.
+    private const string ScratchPage = "Scratch.md";
+
+    private const string MissingText = "–";
+
+    private async Task<IPage> OpenQuietPageAsync(string content)
+    {
+        await _fixture.WriteDemoPageAsync(ScratchPage, "---\ntitle: Scratch\n---\n\n# Scratch\n\n" + content);
+
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // A change of the graph before the circuit is connected would be picked up by its first render, which proves
+        // nothing about a page that is open.
+        await ExpectInteractiveAsync(page);
+        return page;
+    }
+
+    // The automatic time zone resolves through JS after interactive rendering, so its title tells that the circuit is connected.
+    private static Task ExpectInteractiveAsync(IPage page) =>
+        Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+    private static string CreateTilePage(string subjectName) =>
+        $":: HomeBlaze.Components.ValueTile Path=\"/{subjectName}/Label\" Label=\"Followed\"\n::\n";
+
+    private static string CreateExpressionPage(string subjectName) =>
+        $"Start {{{{ /{subjectName}/Label }}}} End\n";
+
+    private static ILocator GetExpressionParagraph(IPage page) =>
+        page.Locator(".markdown-content p").Filter(new() { HasText = "Start" });
+
     private static ILocator GetCard(IPage page, string title) =>
         page.GetByTestId("card").Filter(new() { HasText = title });
 
@@ -227,6 +259,132 @@ public class ValueWidgetTests
 
         // Assert
         await Assertions.Expect(GetRow(page, "Ist").GetByTestId("value-text")).ToHaveTextAsync(new Regex(@"^[1-9]\d*$"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenSubjectOfAnAbsolutePathAppears_ThenTheTileShowsItsValueWithoutAReload()
+    {
+        // Arrange
+        var name = PlaywrightFixture.CreatePlainSubjectName();
+        var page = await OpenQuietPageAsync(CreateTilePage(name));
+        var tile = page.GetByTestId("value-tile");
+        await Assertions.Expect(tile.GetByTestId("value-missing")).ToHaveTextAsync(MissingText, new() { Timeout = Timeout });
+
+        // Act
+        var (_, subject) = _fixture.AddPlainSubjectToRoot(name, "Appeared label");
+        try
+        {
+            // Assert
+            await Assertions.Expect(tile.GetByTestId("value-text")).ToHaveTextAsync("Appeared label", new() { Timeout = Timeout });
+            await Assertions.Expect(tile.GetByTestId("value-missing")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenSubjectOfAnAbsolutePathIsReplaced_ThenTheTileFollowsTheNewSubjectWithoutAReload()
+    {
+        // Arrange
+        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        try
+        {
+            var page = await OpenQuietPageAsync(CreateTilePage(name));
+            var text = page.GetByTestId("value-tile").GetByTestId("value-text");
+            await Assertions.Expect(text).ToHaveTextAsync("Original label", new() { Timeout = Timeout });
+
+            // Act
+            subject = _fixture.ReplacePlainSubjectInRoot(name, subject, "Replaced label");
+
+            // Assert
+            await Assertions.Expect(text).ToHaveTextAsync("Replaced label", new() { Timeout = Timeout });
+
+            // Act: the render that showed the new subject also has to record the read of its value.
+            subject.Label = "Changed label";
+
+            // Assert
+            await Assertions.Expect(text).ToHaveTextAsync("Changed label", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenSubjectOfAnAbsolutePathIsRemoved_ThenTheTileShowsADashWithoutAReload()
+    {
+        // Arrange
+        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        var isRemoved = false;
+        try
+        {
+            var page = await OpenQuietPageAsync(CreateTilePage(name));
+            var tile = page.GetByTestId("value-tile");
+            await Assertions.Expect(tile.GetByTestId("value-text")).ToHaveTextAsync("Original label", new() { Timeout = Timeout });
+
+            // Act
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            isRemoved = true;
+
+            // Assert
+            await Assertions.Expect(tile.GetByTestId("value-missing")).ToHaveTextAsync(MissingText, new() { Timeout = Timeout });
+            await Assertions.Expect(tile.GetByTestId("value-text")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            if (!isRemoved)
+            {
+                _fixture.RemovePlainSubjectFromRoot(name, subject);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task WhenSubjectOfAnAbsolutePathAppears_ThenTheExpressionShowsItsValueWithoutAReload()
+    {
+        // Arrange
+        var name = PlaywrightFixture.CreatePlainSubjectName();
+        var page = await OpenQuietPageAsync(CreateExpressionPage(name));
+        var paragraph = GetExpressionParagraph(page);
+        await Assertions.Expect(paragraph).ToHaveTextAsync(new Regex(@"^Start\s*End$"), new() { Timeout = Timeout });
+
+        // Act
+        var (_, subject) = _fixture.AddPlainSubjectToRoot(name, "Appeared label");
+        try
+        {
+            // Assert
+            await Assertions.Expect(paragraph).ToHaveTextAsync("Start Appeared label End", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenSubjectOfAnAbsolutePathIsReplaced_ThenTheExpressionShowsTheValueOfTheNewSubjectWithoutAReload()
+    {
+        // Arrange
+        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        try
+        {
+            var page = await OpenQuietPageAsync(CreateExpressionPage(name));
+            var paragraph = GetExpressionParagraph(page);
+            await Assertions.Expect(paragraph).ToHaveTextAsync("Start Original label End", new() { Timeout = Timeout });
+
+            // Act
+            subject = _fixture.ReplacePlainSubjectInRoot(name, subject, "Replaced label");
+
+            // Assert
+            await Assertions.Expect(paragraph).ToHaveTextAsync("Start Replaced label End", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+        }
     }
 
     [Fact]

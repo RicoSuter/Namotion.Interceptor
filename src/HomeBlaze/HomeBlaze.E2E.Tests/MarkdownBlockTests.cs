@@ -1,10 +1,5 @@
-using System.Text;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
-using HomeBlaze.Services;
-using HomeBlaze.Storage;
-using HomeBlaze.Storage.Files;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
@@ -657,16 +652,7 @@ public class MarkdownBlockTests
             ":: HomeBlaze.Components.TabLayout#tabs\n" + string.Concat(tabs) + "::\n";
     }
 
-    // Writes through the page like an editor does, which also loads the page again.
-    private async Task WriteScratchPageAsync(string content)
-    {
-        var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
-        var folder = (VirtualFolder)root.Children["Demo"];
-        var file = (MarkdownFile)folder.Children[ScratchPage];
-
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
-        await file.WriteAsync(stream, CancellationToken.None);
-    }
+    private Task WriteScratchPageAsync(string content) => _fixture.WriteDemoPageAsync(ScratchPage, content);
 
     private async Task<IPage> OpenScratchPageWithSecondOfThreeTabsSelectedAsync()
     {
