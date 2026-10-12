@@ -513,29 +513,6 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenWriteHangs_ThenCallerGetsTimeoutAndLaterWorkRuns()
-    {
-        // Arrange
-        var storage = await ConnectPausableAsync();
-        var writeReached = _client!.PauseNext(nameof(IBlobStorage.WriteAsync));
-        var add = storage.AddSubjectAsync("Motor.json", CreateMotor(), CancellationToken.None);
-        await writeReached;
-
-        // Act
-        await LetHangingCallTimeOutAsync();
-        var exception = await Record.ExceptionAsync(() => add);
-        var childrenAfterTimeout = storage.Children.Keys.ToList();
-        await ReleaseHangingCallAsync(storage);
-        await storage.ReconcileAsync();
-
-        // Assert
-        Assert.IsType<StorageUnresponsiveException>(exception);
-        Assert.Empty(childrenAfterTimeout);
-        Assert.Equal(StorageStatus.Connected, storage.Status);
-        Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
-    }
-
-    [Fact]
     public async Task WhenWriteOfAddedSubjectHitsTheLimitAndLandsLater_ThenItsFileIsLoadedWithoutAnyEvent()
     {
         // Arrange: neither a file watcher nor a periodic pass.

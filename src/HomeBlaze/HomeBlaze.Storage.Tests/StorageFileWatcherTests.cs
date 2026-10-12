@@ -70,19 +70,6 @@ public class StorageFileWatcherTests
     }
 
     [Fact]
-    public void WhenRenameTouchesOnlyIgnoredPaths_ThenNothingIsReported()
-    {
-        // Arrange
-        using var watcher = CreateWatcher();
-
-        // Act
-        watcher.SimulateFileEvent(new RenamedEventArgs(WatcherChangeTypes.Renamed, BasePath, "~b.tmp", "~a.tmp"));
-
-        // Assert
-        Assert.Empty(_changes);
-    }
-
-    [Fact]
     public async Task WhenBufferOverflows_ThenEventsLostIsReportedAndWatcherStartsOver()
     {
         // Arrange

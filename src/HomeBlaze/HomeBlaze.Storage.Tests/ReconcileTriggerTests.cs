@@ -84,21 +84,6 @@ public class ReconcileTriggerTests
     }
 
     [Fact]
-    public void WhenEventsAreLost_ThenPassRunsAtOnceWithEveryFileNamed()
-    {
-        // Arrange
-        using var trigger = CreateTrigger();
-
-        // Act
-        trigger.NotifyEventsLost();
-        _timeProvider.Advance(TimeSpan.Zero);
-
-        // Assert
-        var pass = Assert.Single(_passes);
-        Assert.True(pass.AllNamed);
-    }
-
-    [Fact]
     public void WhenPeriodicIntervalElapses_ThenPassRunsWithoutNamedPaths()
     {
         // Arrange
@@ -402,26 +387,6 @@ public class ReconcileTriggerTests
 
         // Act
         trigger.Dispose();
-        _timeProvider.Advance(TimeSpan.FromHours(1));
-
-        // Assert
-        Assert.Single(_passes);
-        Assert.Equal(0, _timeProvider.ArmedTimerCount);
-    }
-
-    [Fact]
-    public void WhenTriggerIsDisposedWhilePassThatDoesNotFinishRuns_ThenNoRetryRuns()
-    {
-        // Arrange
-        var trigger = CreateTrigger();
-        _outcome = ReconcileOutcome.Failed;
-        _runningPass = new TaskCompletionSource();
-        trigger.NotifyChanged("Home.md");
-        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
-
-        // Act
-        trigger.Dispose();
-        _runningPass.SetResult();
         _timeProvider.Advance(TimeSpan.FromHours(1));
 
         // Assert

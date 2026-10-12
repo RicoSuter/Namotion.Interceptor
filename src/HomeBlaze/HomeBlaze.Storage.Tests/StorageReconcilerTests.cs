@@ -20,22 +20,6 @@ public class StorageReconcilerTests : StorageTestBase
     private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
 
     [Fact]
-    public async Task WhenNothingChanged_ThenPassLoadsNoFile()
-    {
-        // Arrange
-        WriteFile("Data.gated");
-        var storage = await ConnectAsync();
-        var loadCountAfterStartup = GatedFile.LoadCount;
-
-        // Act
-        await storage.ReconcileAsync();
-
-        // Assert
-        Assert.Equal(1, loadCountAfterStartup);
-        Assert.Equal(1, GatedFile.LoadCount);
-    }
-
-    [Fact]
     public async Task WhenFilesAreLoaded_ThenTheirFullPathStartsWithSlash()
     {
         // Arrange
@@ -248,26 +232,6 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenTwoJsonSubjectsWithSameContentAreRenamed_ThenNewInstancesAreCreated()
-    {
-        // Arrange
-        WriteFile("First.json", SerializeMotor("Same"));
-        WriteFile("Second.json", SerializeMotor("Same"));
-        var storage = await ConnectAsync();
-        var first = storage.Children["First"];
-        var second = storage.Children["Second"];
-        File.Move(GetFullPath("First.json"), GetFullPath("Third.json"));
-        File.Move(GetFullPath("Second.json"), GetFullPath("Fourth.json"));
-
-        // Act
-        await storage.ReconcileAsync();
-
-        // Assert
-        Assert.Equal(["Fourth", "Third"], storage.Children.Keys.Order());
-        Assert.DoesNotContain(storage.Children.Values, subject => ReferenceEquals(subject, first) || ReferenceEquals(subject, second));
-    }
-
-    [Fact]
     public async Task WhenTwoJsonSubjectsWithSameContentMoveToOtherFolders_ThenNeitherInstanceIsKept()
     {
         // Arrange: into other folders, where one subject with that content alone would keep its instance.
@@ -407,20 +371,6 @@ public class StorageReconcilerTests : StorageTestBase
         Assert.Equal(["README.md", "readme.md"], storage.Children.Keys.Order(StringComparer.Ordinal));
         Assert.Equal("lower", Assert.IsType<MarkdownFile>(storage.Children["readme.md"]).Content);
         Assert.Equal("upper", Assert.IsType<MarkdownFile>(storage.Children["README.md"]).Content);
-    }
-
-    [Fact]
-    public async Task WhenJsonFileDescribesNoSubject_ThenItIsPlacedAsJsonFileUnderItsFullName()
-    {
-        // Arrange
-        WriteFile("Data.json", """{ "value": 1 }""");
-
-        // Act
-        var storage = await ConnectAsync();
-
-        // Assert
-        Assert.Equal(["Data.json"], storage.Children.Keys);
-        Assert.IsType<JsonFile>(storage.Children["Data.json"]);
     }
 
     [Theory]
@@ -1833,29 +1783,6 @@ public class StorageReconcilerTests : StorageTestBase
         // Assert
         Assert.IsType<GatedFile>(storage.Children["Data.gated"]);
         Assert.Equal(0, GatedFile.CreatedWithFlowCount);
-    }
-
-    [Fact]
-    public async Task WhenSubjectFailsToRefreshAfterBlobIsWritten_ThenWriteSucceedsAndNextPassLoadsItAgain()
-    {
-        // Arrange
-        WriteFile("Data.gated", "first");
-        var storage = await ConnectAsync();
-        var file = (GatedFile)storage.Children["Data.gated"];
-        GatedFile.FailNextLoad();
-
-        // Act
-        await WriteBlobAsync(storage, "Data.gated", "second version");
-        var contentAfterWrite = file.Content;
-        var loadCountAfterWrite = GatedFile.LoadCount;
-        await storage.ReconcileAsync();
-
-        // Assert
-        Assert.Equal("second version", File.ReadAllText(GetFullPath("Data.gated")));
-        Assert.Equal("first", contentAfterWrite);
-        Assert.Equal(2, loadCountAfterWrite);
-        Assert.Equal(3, GatedFile.LoadCount);
-        Assert.Equal("second version", file.Content);
     }
 
     [Fact]

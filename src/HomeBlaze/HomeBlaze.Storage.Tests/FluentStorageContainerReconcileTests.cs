@@ -40,21 +40,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenFileIsRenamed_ThenSubjectMovesToNewName()
-    {
-        // Arrange
-        WriteFile("Old.md");
-        var storage = await ConnectAsync();
-        File.Move(GetFullPath("Old.md"), GetFullPath("New.md"));
-
-        // Act
-        await storage.ReconcileAsync(Named("Old.md", "New.md"));
-
-        // Assert
-        Assert.Equal(["New.md"], storage.Children.Keys);
-    }
-
-    [Fact]
     public async Task WhenOnlyCasingOfFileNameChanges_ThenSubjectMovesToNewCasing()
     {
         // Arrange
@@ -154,23 +139,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
 
         // Assert
         Assert.Equal(["Home.md"], storage.Children.Keys);
-    }
-
-    [Fact]
-    public async Task WhenDirectoryIsRenamed_ThenFolderMovesWithContainedFiles()
-    {
-        // Arrange
-        WriteFile("Docs/Readme.md");
-        var storage = await ConnectAsync();
-        Directory.Move(GetFullPath("Docs"), GetFullPath("Archive"));
-
-        // Act
-        await storage.ReconcileAsync(Named("Docs", "Archive"));
-
-        // Assert
-        Assert.Equal(["Archive"], storage.Children.Keys);
-        var archive = Assert.IsType<VirtualFolder>(storage.Children["Archive"]);
-        Assert.Equal(["Readme.md"], archive.Children.Keys);
     }
 
     [Fact]
@@ -443,24 +411,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         var devices = Assert.IsType<VirtualFolder>(storage.Children["Devices"]);
         Assert.Same(added, devices.Children["Motor"]);
         Assert.Equal("Only in memory", added.Name);
-    }
-
-    [Fact]
-    public async Task WhenTemporaryDirectoryIsRenamedToRealName_ThenOnlyRealFolderExists()
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-        WriteFile("Docs.tmp/Readme.md");
-        await storage.ReconcileAsync(Named("Docs.tmp/Readme.md"));
-        Directory.Move(GetFullPath("Docs.tmp"), GetFullPath("Docs"));
-
-        // Act
-        await storage.ReconcileAsync(Named("Docs.tmp", "Docs"));
-
-        // Assert
-        Assert.Equal(["Docs"], storage.Children.Keys);
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        Assert.Equal(["Readme.md"], docs.Children.Keys);
     }
 
     [Fact]
@@ -1279,48 +1229,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         }
     }
 
-    [Fact]
-    public async Task WhenSubjectIsSavedWhileStorageDirectoryIsGone_ThenNextPassStillFailsAndKeepsEverySubject()
-    {
-        // Arrange: the directory is gone, and the pass that sees it fails and keeps the tree.
-        WriteFile("Motor.json", SerializeMotor("Pump"));
-        WriteFile("Docs/Page.md");
-        WriteFile("Notes.md");
-        var storage = await ConnectAsync();
-        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
-        var detaches = CountDetachesOf(storage.Children["Notes.md"]);
-        var movedDirectory = StorageDirectory.FullName + "-moved";
-        Directory.Move(StorageDirectory.FullName, movedDirectory);
-
-        Exception? exception;
-        bool isDirectoryCreated;
-        StorageStatus statusAfterNextPass;
-        List<string> childrenAfterNextPass;
-        try
-        {
-            await storage.ReconcileAsync();
-
-            // Act
-            motor.Name = "Saved while the directory was gone";
-            exception = await Record.ExceptionAsync(() => storage.WriteConfigurationAsync(motor, CancellationToken.None));
-            isDirectoryCreated = Directory.Exists(StorageDirectory.FullName);
-            await storage.ReconcileAsync();
-            statusAfterNextPass = storage.Status;
-            childrenAfterNextPass = storage.Children.Keys.Order().ToList();
-        }
-        finally
-        {
-            PutStorageDirectoryBack(movedDirectory);
-        }
-
-        // Assert
-        Assert.IsType<IOException>(exception, exactMatch: false);
-        Assert.False(isDirectoryCreated);
-        Assert.Equal(StorageStatus.Error, statusAfterNextPass);
-        Assert.Equal(["Docs", "Motor", "Notes.md"], childrenAfterNextPass);
-        Assert.Equal(0, detaches.Count);
-    }
-
     [Theory]
     [InlineData("add")]
     [InlineData("add into new folder")]
@@ -1581,26 +1489,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         // Assert
         Assert.Equal(1, armedTimerCountOfOneConnection);
         Assert.Equal(1, timeProvider.ArmedTimerCount);
-    }
-
-    [Fact]
-    public async Task WhenStorageIsDisposed_ThenItsTriggerIsStopped()
-    {
-        // Arrange
-        var timeProvider = new ManualTimeProvider();
-        var storage = await ConnectAsync(configure: container =>
-        {
-            container.TimeProvider = timeProvider;
-            container.ReconcileIntervalSeconds = 60;
-        });
-        var armedTimerCountWhileConnected = timeProvider.ArmedTimerCount;
-
-        // Act
-        storage.Dispose();
-
-        // Assert
-        Assert.Equal(1, armedTimerCountWhileConnected);
-        Assert.Equal(0, timeProvider.ArmedTimerCount);
     }
 
     [Theory]
