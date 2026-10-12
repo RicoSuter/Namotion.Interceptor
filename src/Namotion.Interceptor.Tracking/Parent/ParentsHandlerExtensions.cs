@@ -27,11 +27,13 @@ public static class ParentsHandlerExtensions
     public static TRoot? TryGetFirstParent<TRoot>(this IInterceptorSubject subject)
         where TRoot : class
     {
-        // Subjects with one parent each are walked without allocating. The checkpoint detects a cycle on
-        // such a chain (Brent's algorithm): it is always a subject that was checked before, so meeting it
-        // again means the walk passed every subject of the cycle.
+        // Subjects with one parent each are walked without allocating. A cycle on such a chain is detected
+        // when the walk is back at the subject or at one of two checkpoints (Brent's algorithm with the
+        // previous checkpoint kept): all three were passed before, so meeting one of them again means the
+        // walk passed every subject of the cycle.
         var current = subject;
         var checkpoint = subject;
+        var previousCheckpoint = subject;
         var stepsSinceCheckpoint = 0L;
         var stepsUntilCheckpoint = 1L;
 
@@ -55,12 +57,14 @@ public static class ParentsHandlerExtensions
             }
 
             current = parent.Property.Subject;
-            if (ReferenceEquals(current, checkpoint))
+            if (ReferenceEquals(current, subject) ||
+                ReferenceEquals(current, checkpoint) ||
+                ReferenceEquals(current, previousCheckpoint))
             {
                 return null;
             }
 
-            if (current is TRoot root && !ReferenceEquals(current, subject))
+            if (current is TRoot root)
             {
                 return root;
             }
@@ -68,6 +72,7 @@ public static class ParentsHandlerExtensions
             stepsSinceCheckpoint++;
             if (stepsSinceCheckpoint == stepsUntilCheckpoint)
             {
+                previousCheckpoint = checkpoint;
                 checkpoint = current;
                 stepsSinceCheckpoint = 0;
                 stepsUntilCheckpoint *= 2;

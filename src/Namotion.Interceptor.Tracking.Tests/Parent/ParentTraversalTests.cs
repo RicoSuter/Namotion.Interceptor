@@ -6,6 +6,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Parent;
 
 public class ParentTraversalTests
 {
+    private const int MeasuredSearches = 1000;
+
     [Fact]
     public void WhenParentIsValueEqualToChild_ThenFindsDistinctParent()
     {
@@ -260,8 +262,6 @@ public class ParentTraversalTests
         Assert.Equal(0, matches);
         Assert.Equal(0L, allocated);
     }
-
-    private const int MeasuredSearches = 1000;
 
     private static (long Allocated, int Matches) MeasureSearch(IInterceptorSubject subject)
     {
