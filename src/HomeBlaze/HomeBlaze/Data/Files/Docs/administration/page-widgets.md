@@ -649,7 +649,7 @@ A row with content and without a path, and a row with a `Progress` as content. T
 :::: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Min=0 Max=3000
 ::
 
-- **Aligned labels**: When at least one row has an icon, the rows without one keep the room of an icon, so that all labels line up. An icon that comes from a case of a map counts as well. In a card the icons of the rows stand below the icon of its header and the labels below its title.
+- **Aligned labels**: When at least one row has an icon, the rows without one keep the room of an icon, so that all labels line up. An icon that comes from a case of a map counts as well. In a card with an icon, a list in which at least one row has an icon lines up the icons of its rows with the icon of the header and its labels with the title.
 - **Colour and icon of a case**: A matching case gives the value text its colour and the row its icon, see [ValueMap](#valuemap).
 - **Content and value**: Content and a value can stand in the same row. The content takes the room between the label and the value: a `Progress` fills it, and a text stands at the right end of it, right before the value.
 - **Rows only**: A `ValueList` has no default slot. Content outside of a `Value` block is an error.
@@ -759,6 +759,7 @@ The pump runs at {{ pump/CurrentSpeed }} RPM.
 - **Without a map**: A boolean that is true has the colour `Primary`, and every other value has `Default`. With a map the colour comes from the case alone.
 - **No icon**: A chip without an icon shows its text only. An indicator of the kind `Icon` without an icon shows a plain circle.
 - **A missing value**: The chip shows a dash. The icon form shows its icon in the default colour. Both have the path as tooltip, see [Value Widgets](#value-widgets). A chip with a value has no tooltip.
+- **No distance to its surroundings**: An indicator adds no distance above, below or beside itself. Several indicators are spaced by a layout such as `FlowLayout` or by the text around them.
 
 ## Progress
 
