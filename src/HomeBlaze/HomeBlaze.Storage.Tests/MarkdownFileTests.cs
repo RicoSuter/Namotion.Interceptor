@@ -3,11 +3,13 @@ using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Tests.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
+[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownFileTests
 {
     [Fact]
@@ -140,31 +142,6 @@ public class MarkdownFileTests
         var result = FrontmatterParser.Parse<MarkdownFrontmatter>("");
 
         Assert.Null(result);
-    }
-
-    [Fact]
-    public void GetContentAfterFrontmatter_RemovesFrontmatter()
-    {
-        var content = """
-            ---
-            title: Test
-            ---
-            # Content Here
-            """;
-
-        var result = FrontmatterParser.GetContentAfterFrontmatter(content);
-
-        Assert.Equal("# Content Here", result);
-    }
-
-    [Fact]
-    public void GetContentAfterFrontmatter_WithoutFrontmatter_ReturnsOriginal()
-    {
-        var content = "# Content Here";
-
-        var result = FrontmatterParser.GetContentAfterFrontmatter(content);
-
-        Assert.Equal(content, result);
     }
 
     [Fact]
@@ -390,24 +367,27 @@ public class MarkdownFileTests
     [Fact]
     public async Task WhenPageIsReloadedWithDifferentBlockType_ThenEmbeddedSubjectIsReplaced()
     {
-        // Arrange
+        // Arrange: the block has no arguments, because a removed argument replaces the subject as well,
+        // and the type must be the only reason here.
         var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
-        await WriteFileAsync(storage, "embedded-type.md", CreatePageWithMotor("# Heading", targetSpeed: 1000));
+        var motorContent = $"""
+            # Heading
+
+            :: {typeof(Motor).FullName}#mymotor
+            ::
+            """;
+        await WriteFileAsync(storage, "embedded-type.md", motorContent);
         var markdown = CreateMarkdownFile(serviceProvider, storage, "embedded-type.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         var motor = Assert.IsType<Motor>(markdown.Children["mymotor"]);
 
         // Act
-        var content = $$"""
+        var content = $"""
             # Heading
 
-            ```subject(mymotor)
-            {
-              "$type": "{{typeof(FluentStorageContainer).FullName}}",
-              "storageType": "inmemory"
-            }
-            ```
+            :: {typeof(FluentStorageContainer).FullName}#mymotor StorageType=inmemory
+            ::
             """;
         await WriteFileAsync(storage, "embedded-type.md", content);
         await markdown.OnFileChangedAsync(CancellationToken.None);
@@ -417,16 +397,11 @@ public class MarkdownFileTests
         Assert.IsType<FluentStorageContainer>(markdown.Children["mymotor"]);
     }
 
-    private static string CreatePageWithMotor(string heading, int targetSpeed) => $$"""
-        {{heading}}
+    private static string CreatePageWithMotor(string heading, int targetSpeed) => $"""
+        {heading}
 
-        ```subject(mymotor)
-        {
-          "$type": "{{typeof(Motor).FullName}}",
-          "name": "MyMotor",
-          "targetSpeed": {{targetSpeed}}
-        }
-        ```
+        :: {typeof(Motor).FullName}#mymotor Name=MyMotor TargetSpeed={targetSpeed}
+        ::
         """;
 
     private static async Task<(FluentStorageContainer storage, IServiceProvider serviceProvider)> CreateInMemoryStorageAsync()

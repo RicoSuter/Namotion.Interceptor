@@ -42,19 +42,19 @@ public class SubjectSetupDialogTests
         return page.Locator("#scrollContainer button:has-text('Create')").First;
     }
 
-    private static ILocator Dialog(IPage page) => page.Locator("[data-testid='create-subject-dialog']");
+    internal static ILocator Dialog(IPage page) => page.Locator("[data-testid='create-subject-dialog']");
 
     private static ILocator DialogTitle(IPage page) => page.Locator("[data-testid='create-dialog-title']");
 
     private static ILocator SearchInput(IPage page) => page.GetByPlaceholder("Search types");
 
-    private static ILocator TypeRows(IPage page) => page.Locator("[data-testid^='type-row-']");
+    internal static ILocator TypeRows(IPage page) => page.Locator("[data-testid^='type-row-']");
 
     private static ILocator TypeRow(IPage page, string typeName) => page.Locator($"[data-testid='type-row-{typeName}']");
 
     private static ILocator NameInput(IPage page) => page.GetByLabel("File name");
 
-    private static ILocator CreateButton(IPage page) => page.Locator("[data-testid='create-button']");
+    internal static ILocator CreateButton(IPage page) => page.Locator("[data-testid='create-button']");
 
     private static ILocator BackButton(IPage page) => page.Locator("[data-testid='back-button']");
 
@@ -92,7 +92,7 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
-    private static async Task PickTypeAsync(IPage page, string typeName)
+    internal static async Task PickTypeAsync(IPage page, string typeName)
     {
         await TypeRow(page, typeName).ClickAsync();
         await Assertions.Expect(CreateButton(page)).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
@@ -102,7 +102,7 @@ public class SubjectSetupDialogTests
     /// Enters the motor's own name, which the motor form requires and which starts empty, so Create
     /// stays disabled for a motor until this has run.
     /// </summary>
-    private static async Task EnterMotorNameAsync(IPage page, string motorName = MotorName)
+    internal static async Task EnterMotorNameAsync(IPage page, string motorName = MotorName)
     {
         await Dialog(page).GetByLabel("Name", new() { Exact = true }).FillAsync(motorName);
     }

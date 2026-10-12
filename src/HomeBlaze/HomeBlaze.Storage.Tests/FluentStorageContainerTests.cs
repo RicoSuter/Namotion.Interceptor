@@ -1,11 +1,13 @@
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Tests.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
+[Collection(MarkdownPageFixture.StorageCollection)]
 public class FluentStorageContainerTests
 {
     private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer, IServiceProvider serviceProvider, RootManager rootManager) CreateDependencies()
