@@ -28,28 +28,43 @@ public sealed partial class MarkdownContentParser
     /// A fragment after the page stays on the link. A link that is only a fragment gets the route of the
     /// page itself, which a link names with <paramref name="pageName"/>.
     /// </summary>
-    private static string RewriteLink(string url, string basePath, string pageName)
+    private static string RewriteLink(string url, string basePath, string pageName) =>
+        IsRelativePageLink(url, out var fragmentStart) ? RewritePageLink(url, fragmentStart, basePath, pageName) : url;
+
+    /// <summary>
+    /// Whether a link is rewritten: a relative link to a markdown page or a fragment of the page itself.
+    /// Every other link stays as written. For a link that is rewritten, <paramref name="fragmentStart"/> is
+    /// where its fragment starts, or -1 without one.
+    /// </summary>
+    private static bool IsRelativePageLink(string url, out int fragmentStart)
     {
+        fragmentStart = -1;
+
         // Skip absolute URLs
         if (string.IsNullOrEmpty(url) ||
             url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
             url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
             url.StartsWith("/"))
         {
-            return url;
+            return false;
         }
 
-        // The browser resolves a link against the base address of the application and not against the
-        // address of the page, so a fragment alone would lead to the start page.
-        var fragmentStart = url.IndexOf('#');
-        var isFragmentOnly = fragmentStart == 0;
-        var pagePath = isFragmentOnly ? pageName : fragmentStart < 0 ? url : url[..fragmentStart];
+        fragmentStart = url.IndexOf('#');
+        if (fragmentStart == 0)
+        {
+            return true;
+        }
 
         // Only process .md links
-        if (!isFragmentOnly && !pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
-        {
-            return url;
-        }
+        var pagePath = fragmentStart < 0 ? url.AsSpan() : url.AsSpan(0, fragmentStart);
+        return pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string RewritePageLink(string url, int fragmentStart, string basePath, string pageName)
+    {
+        // The browser resolves a link against the base address of the application and not against the
+        // address of the page, so a fragment alone would lead to the start page.
+        var pagePath = fragmentStart == 0 ? pageName : fragmentStart < 0 ? url : url[..fragmentStart];
 
         // Resolve relative path against base path
         var resolvedPath = ResolvePath(basePath, pagePath);
@@ -108,7 +123,10 @@ public sealed partial class MarkdownContentParser
     /// Resolves a link of a block on the page the way a link in the text of the page is rewritten.
     /// </summary>
     public string ResolveLink(string link, MarkdownFile page) =>
-        RewriteLink(link, GetLinkBasePath(page), EscapeFileNameForLink(Path.GetFileName(page.FullPath)));
+        // Asked first, because a widget resolves its link on every render and most links stay as written.
+        IsRelativePageLink(link, out var fragmentStart)
+            ? RewritePageLink(link, fragmentStart, GetLinkBasePath(page), EscapeFileNameForLink(Path.GetFileName(page.FullPath)))
+            : link;
 
     /// <summary>
     /// Resolves a relative path against a base path, handling .. navigation.
