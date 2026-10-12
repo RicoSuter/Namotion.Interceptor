@@ -235,7 +235,7 @@ Markdown files in local storage (on disk) have three operations: `ReplaceText` r
 - A `ClaudeCliAgent` gets the CLI's own `WebSearch` and `WebFetch` tools. They are the only built-in CLI tools an agent can get; tools with access to the host, such as the shell or files, are never offered.
 - An `AnthropicAgent` gets the API's web search and web fetch server tools (`web_search_20260209` and `web_fetch_20260209`), which need a model that supports them.
 
-Each call is recorded in the timeline like a graph tool call, with its query or URL and a preview of the result, and counts toward `MaxToolCallsPerTurn`: once the budget is used up, further graph tool calls return an error. HomeBlaze cannot refuse a web tool call itself, since the backend runs it; an `AnthropicAgent` limits each web tool to `MaxToolCallsPerTurn` uses per model request, and a `ClaudeCliAgent` has no such limit.
+Each call is recorded in the timeline like a graph tool call, with its query or URL and a preview of the result, and counts toward `MaxToolCallsPerTurn`: once the budget is used up, further graph tool calls return an error. HomeBlaze cannot refuse a web tool call itself, since the backend runs it; an `AnthropicAgent` limits each web tool, per model request, to the calls left in the budget (at least one), and a `ClaudeCliAgent` has no such limit.
 
 When a web tool is allowed, the preamble tells the agent that content from the web is data, never instructions. A web page can still try to steer the agent, so see [Security](#security) before combining web tools with `invoke_operation` or `set_property`.
 

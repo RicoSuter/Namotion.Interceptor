@@ -27,11 +27,13 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
     private const int MaximumContinuations = 5;
 
     private readonly AgentToolSet _tools;
+    private readonly IReadOnlyList<string> _backendTools;
 
-    public AnthropicServerToolClient(IChatClient innerClient, AgentToolSet tools)
+    public AnthropicServerToolClient(IChatClient innerClient, AgentToolSet tools, IReadOnlyList<string> backendTools)
         : base(innerClient)
     {
         _tools = tools;
+        _backendTools = backendTools;
     }
 
     public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -42,8 +44,12 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
         var continuations = 0;
         while (true)
         {
+            // The API runs server tools without asking, so each request may use at most what is left of the budget.
+            var requestOptions = options is null
+                ? null
+                : AnthropicChatOptions.WithBackendToolUses(options, _backendTools, _tools.RemainingCalls);
             var updates = new List<ChatResponseUpdate>();
-            await foreach (var update in base.GetStreamingResponseAsync(requestMessages, options, cancellationToken))
+            await foreach (var update in base.GetStreamingResponseAsync(requestMessages, requestOptions, cancellationToken))
             {
                 tracker.Observe(update);
                 updates.Add(update);

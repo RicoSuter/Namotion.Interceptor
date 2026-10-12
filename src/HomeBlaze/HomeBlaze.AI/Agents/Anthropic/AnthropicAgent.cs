@@ -126,7 +126,7 @@ public partial class AnthropicAgent : LlmAgentBase
         // the reused inner client.
         var iterationLimit = (int)Math.Min((long)Math.Max(MaxToolCallsPerTurn, 0) + ExtraToolIterations, int.MaxValue);
         var client = new FunctionInvokingChatClient(
-            request.BackendTools.Count > 0 ? new AnthropicServerToolClient(innerClient, request.Tools) : innerClient)
+            request.BackendTools.Count > 0 ? new AnthropicServerToolClient(innerClient, request.Tools, request.BackendTools) : innerClient)
         {
             MaximumIterationsPerRequest = iterationLimit,
             MaximumConsecutiveErrorsPerRequest = iterationLimit

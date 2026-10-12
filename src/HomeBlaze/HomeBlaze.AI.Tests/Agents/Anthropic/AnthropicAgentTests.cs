@@ -667,6 +667,93 @@ public class AnthropicAgentTests
     }
 
     [Fact]
+    public async Task WhenToolCallsUsedPartOfTheBudget_ThenTheNextRequestLimitsTheWebToolsToTheRest()
+    {
+        // Arrange - the first response searches once and calls get_property, which leaves 5 - 2 calls.
+        var handler = new SequenceHandler(
+            Stream(
+                MessageStart("msg_1"),
+                BlockStart(0, """{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}"""),
+                InputDelta(0, """{"query":"dotnet sdk"}"""),
+                BlockStop(0),
+                BlockStart(1, """{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}"""),
+                BlockStop(1),
+                BlockStart(2, """{"type":"tool_use","id":"toolu_1","name":"get_property","input":{}}"""),
+                InputDelta(2, """{"path":"/Temperature"}"""),
+                BlockStop(2),
+                MessageDelta("tool_use"),
+                """{"type":"message_stop"}"""),
+            Stream(
+                MessageStart("msg_2"),
+                BlockStart(0, """{"type":"text","text":""}"""),
+                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done."}}""",
+                BlockStop(0),
+                MessageDelta("end_turn"),
+                """{"type":"message_stop"}"""));
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HttpHandler = handler;
+            agent.AllowedTools = ["get_property", "web_search", "web_fetch"];
+            agent.MaxToolCallsPerTurn = 5;
+        });
+
+        // Act
+        await test.Agent.SendMessageAsync("Search", CancellationToken.None);
+
+        // Assert
+        Assert.Equal([5L, 5L], GetServerToolMaxUses(handler.Bodies[0]));
+        Assert.Equal([3L, 3L], GetServerToolMaxUses(handler.Bodies[1]));
+        Assert.Equal(
+            ["get_property", "update_memory", "web_search", "web_fetch"],
+            JsonDocument.Parse(handler.Bodies[1]).RootElement.GetProperty("tools").EnumerateArray().Select(tool => tool.GetProperty("name").GetString()));
+    }
+
+    [Fact]
+    public async Task WhenTheBudgetIsUsedUp_ThenTheWebToolsKeepAUseLimitOfOne()
+    {
+        // Arrange
+        var handler = new SequenceHandler(
+            Stream(
+                MessageStart("msg_1"),
+                BlockStart(0, """{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}"""),
+                InputDelta(0, """{"query":"dotnet sdk"}"""),
+                BlockStop(0),
+                BlockStart(1, """{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}"""),
+                BlockStop(1),
+                BlockStart(2, """{"type":"tool_use","id":"toolu_1","name":"get_property","input":{}}"""),
+                InputDelta(2, """{"path":"/Temperature"}"""),
+                BlockStop(2),
+                MessageDelta("tool_use"),
+                """{"type":"message_stop"}"""),
+            Stream(
+                MessageStart("msg_2"),
+                BlockStart(0, """{"type":"text","text":""}"""),
+                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done."}}""",
+                BlockStop(0),
+                MessageDelta("end_turn"),
+                """{"type":"message_stop"}"""));
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HttpHandler = handler;
+            agent.AllowedTools = ["get_property", "web_search"];
+            agent.MaxToolCallsPerTurn = 2;
+        });
+
+        // Act
+        await test.Agent.SendMessageAsync("Search", CancellationToken.None);
+
+        // Assert
+        Assert.Equal([2L], GetServerToolMaxUses(handler.Bodies[0]));
+        Assert.Equal([1L], GetServerToolMaxUses(handler.Bodies[1]));
+    }
+
+    private static long[] GetServerToolMaxUses(string body) =>
+        JsonDocument.Parse(body).RootElement.GetProperty("tools").EnumerateArray()
+            .Where(tool => tool.TryGetProperty("max_uses", out _))
+            .Select(tool => tool.GetProperty("max_uses").GetInt64())
+            .ToArray();
+
+    [Fact]
     public async Task WhenNoWebToolIsAllowed_ThenTheRequestHasNoServerToolAndNoWebLine()
     {
         // Arrange
