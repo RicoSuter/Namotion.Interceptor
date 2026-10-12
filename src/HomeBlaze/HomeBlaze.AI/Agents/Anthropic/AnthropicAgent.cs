@@ -105,15 +105,14 @@ public partial class AnthropicAgent : LlmAgentBase
         var messages = isChat
             ? _history.BuildRequestMessages(request.SystemPrompt, request.UserMessage)
             : [new ChatMessage(ChatRole.System, request.SystemPrompt), new ChatMessage(ChatRole.User, request.UserMessage)];
-        var options = AnthropicChatOptions.Create(
-            model, maxTokens, request.Effort, request.Tools.Tools, request.BackendTools, MaxToolCallsPerTurn);
+        var options = AnthropicChatOptions.Create(model, maxTokens, request.Effort, request.Tools.Tools);
 
         var innerClient = GetChatClient(apiKey, maxTokens);
 
         // The tool set's budget governs: over it, calls get an error result. The client's own limits only stop a
         // model that ignores those errors, because its last iteration drops the tools, and a request whose tools
-        // change mid-turn invalidates the thinking blocks the API expects back. Not disposed: that would dispose
-        // the reused inner client.
+        // change mid-turn invalidates the thinking blocks the API expects back. Neither client is disposed: that
+        // would dispose the reused inner client.
         var iterationLimit = (int)Math.Min((long)Math.Max(MaxToolCallsPerTurn, 0) + ExtraToolIterations, int.MaxValue);
         var client = new FunctionInvokingChatClient(
             request.BackendTools.Count > 0 ? new AnthropicServerToolClient(innerClient, request.Tools, request.BackendTools) : innerClient)
@@ -123,7 +122,7 @@ public partial class AnthropicAgent : LlmAgentBase
         };
 
         var updates = new List<ChatResponseUpdate>();
-        var answer = new StreamedAnswer();
+        var answer = new AgentAnswerText();
         long? firstRequestInputTokens = null;
         long lastRequestInputTokens = 0;
         try
@@ -132,7 +131,7 @@ public partial class AnthropicAgent : LlmAgentBase
             {
                 updates.Add(update);
                 TrackRequestInputTokens(update, ref firstRequestInputTokens, ref lastRequestInputTokens);
-                answer.Append(update, progress);
+                AppendAnswerText(answer, update, progress);
             }
         }
         catch (Exception exception) when (Classify(exception, apiKey, cancellationToken) is { } failure)
@@ -155,7 +154,23 @@ public partial class AnthropicAgent : LlmAgentBase
                 innerClient, apiKey, model, maxTokens, firstRequestInputTokens ?? 0, lastRequestInputTokens, cancellationToken);
         }
 
-        return new AgentTurnResult(answer.Text, ToAgentUsage(response.Usage), RateLimit: null) { FinalText = finalText };
+        return new AgentTurnResult(answer.Text ?? string.Empty, ToAgentUsage(response.Usage), RateLimit: null) { FinalText = finalText };
+    }
+
+    // Text after a tool call or tool result starts a new segment of the answer.
+    private static void AppendAnswerText(AgentAnswerText answer, ChatResponseUpdate update, IProgress<AgentTurnUpdate> progress)
+    {
+        foreach (var content in update.Contents)
+        {
+            if (content is FunctionCallContent or FunctionResultContent)
+            {
+                answer.StartSegment();
+            }
+            else if (content is TextContent text)
+            {
+                answer.Append(text.Text, progress);
+            }
+        }
     }
 
     private (string ApiKey, string Model, int MaxTokens) GetValidatedConfiguration(AgentTurnRequest request)
@@ -439,43 +454,6 @@ public partial class AnthropicAgent : LlmAgentBase
     }
 
     // The SDK does not put the key into exception messages; this guards against a response that echoes it.
-    private static string Redact(string message, string? apiKey) =>
-        string.IsNullOrEmpty(apiKey) ? message : message.Replace(apiKey, "[redacted]", StringComparison.Ordinal);
-
-    /// <summary>
-    /// The whole answer of a turn as streamed: text after a tool call or tool result starts a new segment, separated
-    /// by a blank line that is streamed too, so the live text and the stored answer read the same.
-    /// </summary>
-    private sealed class StreamedAnswer
-    {
-        private const string SegmentSeparator = "\n\n";
-
-        private readonly StringBuilder _text = new();
-        private bool _isAfterTool;
-
-        public string Text => _text.ToString();
-
-        public void Append(ChatResponseUpdate update, IProgress<AgentTurnUpdate> progress)
-        {
-            foreach (var content in update.Contents)
-            {
-                if (content is FunctionCallContent or FunctionResultContent)
-                {
-                    _isAfterTool = true;
-                }
-                else if (content is TextContent { Text.Length: > 0 } text)
-                {
-                    if (_isAfterTool && _text.Length > 0)
-                    {
-                        _text.Append(SegmentSeparator);
-                        progress.Report(new AgentTextDelta(SegmentSeparator));
-                    }
-
-                    _isAfterTool = false;
-                    _text.Append(text.Text);
-                    progress.Report(new AgentTextDelta(text.Text));
-                }
-            }
-        }
-    }
+    private static string Redact(string message, string apiKey) =>
+        apiKey.Length == 0 ? message : message.Replace(apiKey, "[redacted]", StringComparison.Ordinal);
 }

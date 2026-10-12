@@ -42,11 +42,6 @@ public static class ClaudeCliFailure
             return CreateUsageLimitException(result.RateLimit);
         }
 
-        if (IsSessionMissing(result))
-        {
-            return new AgentTurnException(AgentFailureKind.SessionMissing, message);
-        }
-
         return new AgentTurnException(AgentFailureKind.Transient, message);
     }
 
@@ -106,18 +101,6 @@ public static class ClaudeCliFailure
         return false;
     }
 
-    private static DateTimeOffset? GetResetTime(AgentRateLimit? rateLimit)
-    {
-        if (rateLimit is null)
-        {
-            return null;
-        }
-
-        if (rateLimit.SevenDayUtilization >= 1)
-        {
-            return rateLimit.SevenDayResetsAt;
-        }
-
-        return rateLimit.FiveHourResetsAt;
-    }
+    private static DateTimeOffset? GetResetTime(AgentRateLimit? rateLimit) =>
+        rateLimit?.SevenDayUtilization >= 1 ? rateLimit.SevenDayResetsAt : rateLimit?.FiveHourResetsAt;
 }

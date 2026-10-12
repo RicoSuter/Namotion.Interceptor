@@ -56,7 +56,7 @@ public sealed class AnthropicHistory
     public string? Summary { get; private set; }
 
     /// <summary>Restores a persisted summary.</summary>
-    public void RestoreSummary(string? summary) => Summary = summary;
+    internal void RestoreSummary(string? summary) => Summary = summary;
 
     /// <summary>
     /// The messages of a request: system prompt, summary (as a user message), history, then the new user message.
@@ -75,11 +75,11 @@ public sealed class AnthropicHistory
     }
 
     /// <summary>
-    /// Appends a completed exchange. Reasoning is not kept: its signatures are bound to the exact request it was
-    /// produced for, which a later turn changes. Tool results are stored as the JSON text the client sends.
+    /// Appends a completed exchange without its reasoning. Tool results are stored as the JSON text the client sends.
     /// </summary>
     public void Append(ChatMessage userMessage, IEnumerable<ChatMessage> responseMessages)
     {
+        // Reasoning signatures are bound to the exact request they were produced for, which a later turn changes.
         _messages.Add(userMessage);
         foreach (var message in responseMessages)
         {

@@ -123,10 +123,7 @@ public enum AgentFailureKind
     UsageLimit,
 
     /// <summary>Missing CLI, missing login or rejected credentials; pause until the configuration changes.</summary>
-    Configuration,
-
-    /// <summary>The CLI session to resume no longer exists.</summary>
-    SessionMissing
+    Configuration
 }
 
 /// <summary>

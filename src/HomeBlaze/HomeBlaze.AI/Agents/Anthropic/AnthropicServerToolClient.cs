@@ -17,8 +17,7 @@ namespace HomeBlaze.AI.Agents.Anthropic;
 /// <remarks>
 /// The Anthropic client turns server tool blocks into contents that it drops when the messages are sent again, and its
 /// streamed server tool call keeps only a search query, not the URL of a fetch. Without the blocks, a request after a
-/// HomeBlaze tool call would lose the search results the model already used. Not disposed by its owner: disposing it
-/// would dispose the reused Anthropic client.
+/// HomeBlaze tool call would lose the search results the model already used.
 /// </remarks>
 internal sealed class AnthropicServerToolClient : DelegatingChatClient
 {

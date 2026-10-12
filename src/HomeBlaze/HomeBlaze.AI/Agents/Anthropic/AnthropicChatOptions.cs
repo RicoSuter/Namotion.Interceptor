@@ -17,27 +17,17 @@ public static class AnthropicChatOptions
     /// <param name="model">The model id.</param>
     /// <param name="maxOutputTokens">The output token limit, including thinking tokens.</param>
     /// <param name="effort">The effort, or null for the model's default.</param>
-    /// <param name="tools">The tools the model may call.</param>
-    /// <param name="backendTools">
-    /// The backend tools the model may use, <c>web_search</c> and <c>web_fetch</c>, which the API runs as server tools
-    /// with at most <paramref name="maxBackendToolUses"/> uses each per request.
+    /// <param name="tools">
+    /// The tools the model may call; the server tools of the backend tools are added per request by
+    /// <see cref="WithBackendToolUses"/>.
     /// </param>
-    /// <param name="maxBackendToolUses">The use limit of each server tool per request.</param>
-    public static ChatOptions Create(
-        string model,
-        int maxOutputTokens,
-        AgentEffort? effort,
-        IReadOnlyList<McpToolInfo> tools,
-        IReadOnlyList<string>? backendTools = null,
-        int maxBackendToolUses = 0)
+    public static ChatOptions Create(string model, int maxOutputTokens, AgentEffort? effort, IReadOnlyList<McpToolInfo> tools)
     {
-        var aiTools = new List<AITool>(tools.Count + 2);
+        var aiTools = new List<AITool>(tools.Count);
         foreach (var tool in tools)
         {
             aiTools.Add(tool.ToAIFunction());
         }
-
-        AddServerTools(aiTools, backendTools, maxBackendToolUses);
 
         // An explicit MaxOutputTokens stops the client from raising max_tokens above the configured limit to fit a thinking budget.
         var options = new ChatOptions
@@ -97,13 +87,8 @@ public static class AnthropicChatOptions
         return requestOptions;
     }
 
-    private static void AddServerTools(List<AITool> aiTools, IReadOnlyList<string>? backendTools, int maxBackendToolUses)
+    private static void AddServerTools(List<AITool> aiTools, IReadOnlyList<string> backendTools, int maxBackendToolUses)
     {
-        if (backendTools is null)
-        {
-            return;
-        }
-
         long maxUses = Math.Max(maxBackendToolUses, 1);
         if (backendTools.Contains(AgentBackendTool.WebSearch.Name))
         {

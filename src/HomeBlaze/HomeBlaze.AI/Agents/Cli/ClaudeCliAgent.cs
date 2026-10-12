@@ -22,7 +22,7 @@ public partial class ClaudeCliAgent : LlmAgentBase
     private string? _sessionId;
 
     public ClaudeCliAgent(AgentServices services, ILogger<ClaudeCliAgent> logger)
-        : base(services, logger, ClaudeCliArguments.SupportedBackendTools)
+        : base(services, logger, AgentBackendTool.WebTools)
     {
         _logger = logger;
         CliPath = "claude";
@@ -91,7 +91,7 @@ public partial class ClaudeCliAgent : LlmAgentBase
     // The result line holds only the text after the last tool call; the timeline keeps the whole answer.
     private static AgentTurnResult ToTurnResult(ClaudeCliRunResult result)
     {
-        var finalText = result.ResultText ?? result.LastStreamedSegment ?? string.Empty;
+        var finalText = result.ResultText ?? string.Empty;
         var text = string.IsNullOrEmpty(result.StreamedText) ? finalText : result.StreamedText;
         return new AgentTurnResult(text, result.Usage, result.RateLimit) { FinalText = finalText };
     }

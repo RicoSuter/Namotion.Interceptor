@@ -44,9 +44,6 @@ public static class ClaudeCliArguments
         (AgentBackendTool.WebFetch.Name, "WebFetch")
     ];
 
-    /// <summary>The backend tools a CLI agent supports.</summary>
-    public static IReadOnlyList<AgentBackendTool> SupportedBackendTools { get; } = AgentBackendTool.WebTools;
-
     /// <summary>The backend tool name of a CLI built-in tool, or null when it is not one of the mapped tools.</summary>
     public static string? GetBackendToolName(string cliToolName)
     {
@@ -64,10 +61,10 @@ public static class ClaudeCliArguments
     /// <summary>
     /// Builds the arguments. The run is isolated from the host user's setup: no built-in tools except the allowed web
     /// tools, only the HomeBlaze MCP server, no user, project or local settings, hooks, plugins or CLAUDE.md files.
-    /// <c>--bare</c> is not used because it disables OAuth login.
     /// </summary>
     public static IReadOnlyList<string> Build(ClaudeCliOptions options)
     {
+        // Not --bare, which would isolate the run too but disables the OAuth login.
         var cliTools = CliTools
             .Where(tool => options.BackendTools.Contains(tool.BackendTool))
             .Select(tool => tool.CliTool)
