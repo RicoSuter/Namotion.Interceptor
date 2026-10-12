@@ -106,6 +106,7 @@ The pump runs at {{ pump/CurrentSpeed }} RPM.
 ::
 
 - The header is shown when the card has a title, a subtitle, an icon or a `HeaderRight`.
+- The icon and the content of `HeaderRight` stand on the line of the title, also when the subtitle takes several lines.
 - The title of a card with `Href` looks like the title of any card and is underlined when the pointer is on it.
 - A card is as wide as the place it stands in. Put cards into a `FlowLayout` to place them next to each other.
 - A card has no other parts than the header, the picture, the body and the footer. It has no buttons.
