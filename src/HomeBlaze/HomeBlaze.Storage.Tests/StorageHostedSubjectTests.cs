@@ -151,15 +151,8 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     [Fact]
     public async Task WhenFileOfUnplacedDeviceChangesItsType_ThenThatDeviceIsDetachedAndStopped()
     {
-        // Arrange: the first pass creates the device and ends before it places anything.
-        WriteFile("A.json", RecordingDevice.Serialize("A"));
-        WriteFile("B.gated");
-        WriteFile("C.gated");
-        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
-        var device = Assert.Single(RecordingDevice.Created);
-        await device.WhenStartedAsync();
-        _client!.Release();
-        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+        // Arrange
+        var (storage, device) = await StartStorageWithUnplacedDeviceAsync();
 
         // Act
         WriteFile("A.json", SerializeMotor("Now a motor"));
@@ -175,15 +168,8 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     [Fact]
     public async Task WhenFileOfUnplacedDeviceIsDeleted_ThenThatDeviceIsDetachedAndStopped()
     {
-        // Arrange: the first pass creates the device and ends before it places anything.
-        WriteFile("A.json", RecordingDevice.Serialize("A"));
-        WriteFile("B.gated");
-        WriteFile("C.gated");
-        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
-        var device = Assert.Single(RecordingDevice.Created);
-        await device.WhenStartedAsync();
-        _client!.Release();
-        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+        // Arrange
+        var (storage, device) = await StartStorageWithUnplacedDeviceAsync();
 
         // Act
         File.Delete(GetFullPath("A.json"));
@@ -199,15 +185,8 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     [Fact]
     public async Task WhenStorageIsStoppedAfterPassThatEndedEarly_ThenDeviceThatPassCreatedIsDetachedAndStopped()
     {
-        // Arrange: the first pass creates the device and ends before it places anything.
-        WriteFile("A.json", RecordingDevice.Serialize("A"));
-        WriteFile("B.gated");
-        WriteFile("C.gated");
-        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
-        var device = Assert.Single(RecordingDevice.Created);
-        await device.WhenStartedAsync();
-        _client!.Release();
-        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+        // Arrange
+        var (storage, device) = await StartStorageWithUnplacedDeviceAsync();
 
         // Act: what the host does with a storage that leaves the tree, such as one whose file was deleted.
         await storage.StopAsync(CancellationToken.None);
@@ -222,16 +201,8 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     [Fact]
     public async Task WhenSubjectIsAddedAfterStopReleasedWhatPassCreated_ThenThatIsOnlyLoadedWhenStorageIsStartedAgain()
     {
-        // Arrange: the first pass creates the device, loads B.gated and ends before it places anything, and
-        // the stop releases the device.
-        WriteFile("A.json", RecordingDevice.Serialize("A"));
-        WriteFile("B.gated");
-        WriteFile("C.gated");
-        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
-        var device = Assert.Single(RecordingDevice.Created);
-        await device.WhenStartedAsync();
-        _client!.Release();
-        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+        // Arrange: the stop releases the device.
+        var (storage, device) = await StartStorageWithUnplacedDeviceAsync();
         await storage.StopAsync(CancellationToken.None);
         await device.WhenStoppedAsync();
 
@@ -356,15 +327,8 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     [Fact]
     public async Task WhenFileOfUnplacedDeviceIsDeletedThroughTheStorage_ThenThatDeviceIsDetachedAndStopped()
     {
-        // Arrange: the first pass creates the device and ends before it places anything.
-        WriteFile("A.json", RecordingDevice.Serialize("A"));
-        WriteFile("B.gated");
-        WriteFile("C.gated");
-        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
-        var device = Assert.Single(RecordingDevice.Created);
-        await device.WhenStartedAsync();
-        _client!.Release();
-        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+        // Arrange
+        var (storage, device) = await StartStorageWithUnplacedDeviceAsync();
 
         // Act
         await storage.DeleteBlobAsync("A.json", CancellationToken.None);
@@ -691,6 +655,23 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
         await Assert.ThrowsAsync<StorageUnresponsiveException>(() => storage.ExecuteTask!);
         Assert.Equal(StorageStatus.Error, storage.Status);
         return storage;
+    }
+
+    /// <summary>
+    /// A storage that answers again after its first pass created the device of A.json, loaded B.gated and was
+    /// given up at C.gated, before it placed anything.
+    /// </summary>
+    private async Task<(FluentStorageContainer Storage, RecordingDevice Device)> StartStorageWithUnplacedDeviceAsync()
+    {
+        WriteFile("A.json", RecordingDevice.Serialize("A"));
+        WriteFile("B.gated");
+        WriteFile("C.gated");
+        var storage = await StartStorageWhoseFirstPassTimesOutAsync();
+        var device = Assert.Single(RecordingDevice.Created);
+        await device.WhenStartedAsync();
+        _client!.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
+        return (storage, device);
     }
 
     /// <summary>
