@@ -326,7 +326,7 @@ public class ZoneGroupStateParserTests
     }
 
     [Fact]
-    public void WhenAPlayerNamesThousandsOfPartnersInItsChannelMap_ThenAllocationsStayInStepWithTheDocument()
+    public void WhenAPlayerNamesThousandsOfPartnersInItsChannelMap_ThenParsingStaysWithinTheAllocationLimit()
     {
         // Arrange
         const int partnerCount = 1000;
@@ -347,7 +347,7 @@ public class ZoneGroupStateParserTests
     }
 
     [Fact]
-    public void WhenAHomeTheaterPlayerHasThousandsOfSatellites_ThenAllocationsStayInStepWithTheDocument()
+    public void WhenAHomeTheaterPlayerHasThousandsOfSatellites_ThenParsingStaysWithinTheAllocationLimit()
     {
         // Arrange
         const int satelliteCount = 1000;
@@ -367,7 +367,7 @@ public class ZoneGroupStateParserTests
     }
 
     [Fact]
-    public void WhenAGroupHasThousandsOfStereoPairs_ThenAllocationsStayInStepWithTheDocument()
+    public void WhenAGroupHasThousandsOfStereoPairs_ThenParsingStaysWithinTheAllocationLimit()
     {
         // Arrange: player 0 pairs with partner 1000, player 1 with partner 1001 and so on.
         const int pairCount = 1000;

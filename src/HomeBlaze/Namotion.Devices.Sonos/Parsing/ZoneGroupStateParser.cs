@@ -161,6 +161,7 @@ internal static class ZoneGroupStateParser
     /// </summary>
     private readonly struct UuidIndex
     {
+        // Shared by every copy of the index, so what Take removes through one copy is gone for all of them.
         private readonly Dictionary<string, int> _positions;
 
         /// <remarks>Throws <see cref="FormatException"/> when an element lacks the UUID attribute.</remarks>
