@@ -8,7 +8,9 @@ public class HueBridgeIntervalTests
     [InlineData(0, HueBridge.DefaultPollingIntervalSeconds)]
     [InlineData(-10, HueBridge.DefaultPollingIntervalSeconds)]
     [InlineData(0.5, HueBridge.MinimumIntervalSeconds)]
+    [InlineData(5, HueBridge.MinimumIntervalSeconds)]
     [InlineData(60, 60)]
+    [InlineData(3600, HueBridge.MaximumIntervalSeconds)]
     [InlineData(86400, HueBridge.MaximumIntervalSeconds)]
     public void WhenAnIntervalIsConfigured_ThenItIsClampedOrFallsBackToTheDefault(double configuredSeconds, int expectedSeconds)
     {
@@ -17,6 +19,16 @@ public class HueBridgeIntervalTests
 
         // Assert
         Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), effective);
+    }
+
+    [Fact]
+    public void WhenAZeroIntervalIsConfigured_ThenItFallsBackToTheGivenDefault()
+    {
+        // Act
+        var effective = HueBridge.GetEffectiveInterval(TimeSpan.Zero, HueBridge.DefaultRetryIntervalSeconds);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(HueBridge.DefaultRetryIntervalSeconds), effective);
     }
 
     [Fact]

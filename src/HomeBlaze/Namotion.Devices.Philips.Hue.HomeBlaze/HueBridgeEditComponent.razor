@@ -16,21 +16,11 @@
                   OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
-    <MudNumericField @bind-Value="_pollingIntervalSeconds"
-                     Label="Polling Interval (seconds)"
-                     Min="HueBridge.MinimumIntervalSeconds"
-                     Max="HueBridge.MaximumIntervalSeconds"
-                     Immediate="true"
-                     OnKeyUp="OnFieldChanged"
-                     Class="mt-4" />
+    <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Polling Interval (seconds)" Min="HueBridge.MinimumIntervalSeconds" Max="HueBridge.MaximumIntervalSeconds" Class="mt-4" />
 
-    <MudNumericField @bind-Value="_retryIntervalSeconds"
-                     Label="Retry Interval (seconds)"
-                     Min="HueBridge.MinimumIntervalSeconds"
-                     Max="HueBridge.MaximumIntervalSeconds"
-                     Immediate="true"
-                     OnKeyUp="OnFieldChanged"
-                     Class="mt-4" />
+    <MudNumericField @bind-Value="_retryIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Retry Interval (seconds)" Min="HueBridge.MinimumIntervalSeconds" Max="HueBridge.MaximumIntervalSeconds" Class="mt-4" />
 
     <MudDivider Class="my-4" />
 
@@ -68,7 +58,10 @@
     private int _originalPollingIntervalSeconds = HueBridge.DefaultPollingIntervalSeconds;
     private int _originalRetryIntervalSeconds = HueBridge.DefaultRetryIntervalSeconds;
 
-    public bool IsValid => !string.IsNullOrWhiteSpace(_appKey);
+    public bool IsValid => !string.IsNullOrWhiteSpace(_appKey) &&
+                           _pollingIntervalSeconds is >= HueBridge.MinimumIntervalSeconds and <= HueBridge.MaximumIntervalSeconds &&
+                           _retryIntervalSeconds is >= HueBridge.MinimumIntervalSeconds and <= HueBridge.MaximumIntervalSeconds;
+
     public bool IsDirty => _bridgeId != _originalBridgeId ||
                            _appKey != _originalAppKey ||
                            _pollingIntervalSeconds != _originalPollingIntervalSeconds ||

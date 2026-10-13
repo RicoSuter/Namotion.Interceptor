@@ -147,7 +147,7 @@ public partial class HueBridge : BackgroundService,
         _logger = logger;
 
         // The event stream carries state changes; this poll only reconciles the device set, so it is
-        // deliberately slow. This is the interval the loop hardcoded while the setting was ignored.
+        // deliberately slow.
         PollingInterval = TimeSpan.FromSeconds(DefaultPollingIntervalSeconds);
         RetryInterval = TimeSpan.FromSeconds(DefaultRetryIntervalSeconds);
 
