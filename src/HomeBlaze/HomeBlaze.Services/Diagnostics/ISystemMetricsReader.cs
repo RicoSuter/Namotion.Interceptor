@@ -20,6 +20,16 @@ internal static class SystemMetricsReaderFactory
             return new LinuxSystemMetricsReader();
         }
 
+        if (OperatingSystem.IsWindows())
+        {
+            return new WindowsSystemMetricsReader();
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return new MacOSSystemMetricsReader();
+        }
+
         return null;
     }
 }
