@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Services;
 
@@ -21,7 +22,7 @@ public static class SubjectPathResolverScopeExtensions
         PathStyle style,
         IInterceptorSubject from)
     {
-        var scope = SubjectScopeFinder.FindNearest<IPathScope>(from);
+        var scope = from.TryGetFirstParentOrSelf<IPathScope>();
         if (scope is not IInterceptorSubject scopeSubject)
         {
             return resolver.ResolveSubject(path, style, from);
@@ -69,7 +70,7 @@ public static class SubjectPathResolverScopeExtensions
         var lastSlash = path.LastIndexOf('/');
         if (lastSlash < 0)
         {
-            var scopeSubject = SubjectScopeFinder.FindNearest<IPathScope>(from) as IInterceptorSubject ?? from;
+            var scopeSubject = from.TryGetFirstParentOrSelf<IPathScope>() as IInterceptorSubject ?? from;
             return scopeSubject.TryGetRegisteredProperty(path);
         }
 
