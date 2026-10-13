@@ -116,9 +116,10 @@ internal static partial class MarkdownWriteRules
 
     private const string LayoutMessage =
         "With the permission to edit page layout, only layout blocks can be added, changed, removed or moved: cards, tabs, " +
-        "tab and flow layouts, expansion panels, alerts, style blocks, value widgets such as ValueTile, Indicator, Progress " +
-        "and ValueList, and Widget references to existing subjects, with single values of their configuration on the head " +
-        "line or in the json block, links only to http, https, mailto or relative addresses and no picture. Every other block, and each old subject(name) code block, " +
+        "tab, flow, grid and canvas layouts, expansion panels, alerts, style blocks, value widgets such as ValueTile, " +
+        "Indicator, Progress and ValueList, and Widget references to existing subjects, with single values of their " +
+        "configuration on the head line or in the json block, where the cells of a grid and the nodes of a canvas may " +
+        "hold such layout subjects with their $type, links only to http, https, mailto or relative addresses and no picture. Every other block, and each old subject(name) code block, " +
         "must stay exactly as ReadRawContent shows it, with *** where it hides a secret value, inside the same blocks and " +
         $"at the same position among the content around it, and {MarkdownFile.ActiveContent} cannot be added or changed.";
 
@@ -248,16 +249,18 @@ internal static partial class MarkdownWriteRules
         }
     }
 
-    /// <exception cref="ArgumentException">A layout block refers to a path that leads to no subject.</exception>
+    /// <exception cref="ArgumentException">A layout block or a subject in it refers to a path that leads to no subject.</exception>
     private static void EnsureReferencesResolve(MarkdownPage page, PageLayoutRules layout, string parameterName)
     {
         foreach (var block in MarkdownPageLayout.FindLayoutBlocks(page, layout.FindType))
         {
-            if (block is { Kind: MarkdownBlockKind.Widget, Head: { } head } &&
-                layout.FindType(head.Name) is { } type &&
-                MarkdownPageLayout.GetLayoutType(type) is { ReferencePathProperty: not null })
+            if (block is not { Kind: MarkdownBlockKind.Widget, Head: { } head } || layout.FindType(head.Name) is not { } type)
             {
-                var path = MarkdownPageLayout.GetReferencePath(block, type);
+                continue;
+            }
+
+            foreach (var path in MarkdownPageLayout.GetReferencePaths(block, type, layout.FindType))
+            {
                 if (string.IsNullOrWhiteSpace(path) || !layout.ResolvesToSubject(path))
                 {
                     throw new ArgumentException(

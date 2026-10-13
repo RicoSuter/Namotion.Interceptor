@@ -12,6 +12,7 @@ namespace HomeBlaze.Components;
 [Description("Grid layout with configurable rows and columns")]
 [DisplayName("Grid layout")]
 [SubjectIcon("GridView")]
+[PageLayout]
 [InterceptorSubject]
 public partial class GridLayout : IConfigurable, ITitleProvider
 {

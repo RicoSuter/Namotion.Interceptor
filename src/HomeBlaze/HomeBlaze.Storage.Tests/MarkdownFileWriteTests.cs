@@ -811,6 +811,8 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.ExpansionPanels\n::: Panel Title=More\nDetails\n:::\n::")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Alert\nCareful.\n::")]
     [InlineData("Title=Info", "Title=Info Href=\"https://example.com/plant\"")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout Rows=1 Columns=2\n```json\n{ \"Cells\": [ { \"Row\": 0, \"Column\": 1, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"motor\" } } ] }\n```\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.CanvasLayout MinHeight=300\n```json\n{ \"Nodes\": [ { \"X\": 20, \"Y\": 20, \"Child\": { \"$type\": \"HomeBlaze.Components.Card\", \"Title\": \"Note\" } } ] }\n```\n::")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesLayoutBlocks_ThenThePageIsWritten(string oldText, string newText)
     {
         // Arrange
@@ -869,6 +871,10 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card Title=Info Password=x\n::", "With the permission to edit page layout")]
     [InlineData("Title=Info", "Title=Info Image=\"https://tracker.example.com/pixel.png\"", "With the permission to edit page layout")]
     [InlineData("Title=Info", "Title=Info Href=\"javascript:alert(1)\"", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n```json\n{ \"Cells\": [ { \"Child\": { \"$type\": \"HomeBlaze.Samples.Motor\", \"Name\": \"Other\" } } ] }\n```\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n```json\n{ \"Cells\": [ { \"Child\": { \"Path\": \"motor\" } } ] }\n```\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n```json\n{ \"Cells\": [ { \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"missing\" } } ] }\n```\n::", "leads to no existing subject")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.CanvasLayout\n```json\n{ \"Nodes\": [ { \"Child\": { \"$type\": \"HomeBlaze.Components.Card\", \"Image\": \"https://tracker.example.com/pixel.png\" } } ] }\n```\n::", "With the permission to edit page layout")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesAnythingElse_ThenItIsRejected(string oldText, string newText, string expectedMessage)
     {
         // Arrange
