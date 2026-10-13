@@ -22,6 +22,8 @@ public class HostSystemTests
         Assert.Equal(Environment.ProcessorCount, host.ProcessorCount);
         Assert.False(string.IsNullOrWhiteSpace(host.OperatingSystemName));
         Assert.False(string.IsNullOrWhiteSpace(host.Process.RuntimeVersion));
+        Assert.Equal("Process", host.Process.Title);
+        Assert.Equal("Memory", host.Process.IconName);
         Assert.Equal(ServiceStatus.Stopped, host.Status);
         Assert.Null(host.CpuUsage);
     }
