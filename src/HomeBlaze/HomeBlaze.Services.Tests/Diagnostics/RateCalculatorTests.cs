@@ -71,11 +71,11 @@ public class RateCalculatorTests
     }
 
     [Fact]
-    public void WhenElapsedTimeIsBelowMinimum_ThenTimeFractionIsNull()
+    public void WhenElapsedTimeIsZero_ThenTimeFractionIsNull()
     {
         // Act
         var fraction = RateCalculator.ComputeTimeFraction(
-            TimeSpan.Zero, TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(500));
+            TimeSpan.Zero, TimeSpan.FromMilliseconds(10), TimeSpan.Zero);
 
         // Assert
         Assert.Null(fraction);
@@ -114,10 +114,10 @@ public class RateCalculatorTests
     }
 
     [Fact]
-    public void WhenElapsedTimeIsBelowMinimum_ThenKilobytesPerSecondIsNull()
+    public void WhenElapsedTimeIsZero_ThenKilobytesPerSecondIsNull()
     {
         // Act
-        var rate = RateCalculator.ComputeKilobytesPerSecond(0, 1_000, TimeSpan.FromMilliseconds(999));
+        var rate = RateCalculator.ComputeKilobytesPerSecond(0, 1_000, TimeSpan.Zero);
 
         // Assert
         Assert.Null(rate);

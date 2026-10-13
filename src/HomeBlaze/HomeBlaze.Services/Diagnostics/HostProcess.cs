@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Runtime;
 using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions.Attributes;
@@ -20,8 +19,7 @@ public partial class HostProcess
     private readonly Action _collected;
 
     private DateTime? _startTime;
-    private bool _hasBaseline;
-    private long _baselineTimestamp;
+    private RateWindow _rateWindow;
     private TimeSpan _baselineCpuTime;
     private long _baselineAllocatedBytes;
     private TimeSpan _baselinePauseDuration;
@@ -92,14 +90,22 @@ public partial class HostProcess
     /// </summary>
     internal void ResetBaseline()
     {
-        _hasBaseline = false;
+        _rateWindow.Reset();
     }
 
     /// <summary>
-    /// Refreshes the values. Rates are only updated once at least <see cref="RateCalculator.MinimumElapsed"/> passed
-    /// since the baseline; otherwise the previous values and baseline are kept.
+    /// Returns how long from <paramref name="timestamp"/> until the next <see cref="Update"/> can compute rates.
     /// </summary>
-    internal void Update(DiagnosticsProcess process, long timestamp, int processorCount)
+    internal TimeSpan GetRemainingRateWindow(long timestamp)
+    {
+        return _rateWindow.Remaining(timestamp);
+    }
+
+    /// <summary>
+    /// Refreshes the values and returns whether the rates were computed. Rates are only computed once at least
+    /// <see cref="RateWindow.MinimumElapsed"/> passed since the baseline; otherwise the previous rates and baseline are kept.
+    /// </summary>
+    internal bool Update(DiagnosticsProcess process, long timestamp, int processorCount)
     {
         process.Refresh();
         _startTime ??= process.StartTime.ToUniversalTime();
@@ -113,23 +119,22 @@ public partial class HostProcess
         var allocatedBytes = GC.GetTotalAllocatedBytes(precise: false);
         var pauseDuration = GC.GetTotalPauseDuration();
 
-        if (_hasBaseline)
+        var hadBaseline = _rateWindow.HasBaseline;
+        var isAdvanced = _rateWindow.TryAdvance(timestamp, out var elapsed);
+        if (isAdvanced)
         {
-            var elapsed = Stopwatch.GetElapsedTime(_baselineTimestamp, timestamp);
-            if (elapsed < RateCalculator.MinimumElapsed)
-            {
-                return;
-            }
-
             CpuUsage = RateCalculator.ComputeTimeFraction(_baselineCpuTime, cpuTime, elapsed, processorCount) ?? CpuUsage;
             AllocationRate = RateCalculator.ComputeKilobytesPerSecond(_baselineAllocatedBytes, allocatedBytes, elapsed) ?? AllocationRate;
             GcPauseTime = RateCalculator.ComputeTimeFraction(_baselinePauseDuration, pauseDuration, elapsed) ?? GcPauseTime;
         }
 
-        _hasBaseline = true;
-        _baselineTimestamp = timestamp;
-        _baselineCpuTime = cpuTime;
-        _baselineAllocatedBytes = allocatedBytes;
-        _baselinePauseDuration = pauseDuration;
+        if (isAdvanced || !hadBaseline)
+        {
+            _baselineCpuTime = cpuTime;
+            _baselineAllocatedBytes = allocatedBytes;
+            _baselinePauseDuration = pauseDuration;
+        }
+
+        return isAdvanced;
     }
 }

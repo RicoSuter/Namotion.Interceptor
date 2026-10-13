@@ -25,7 +25,7 @@ The `System host` subject reports the machine HomeBlaze runs on and the HomeBlaz
 | `Process.AllocationRate` | Memory HomeBlaze allocates per second |
 | `Process.GcPauseTime` | Share of the time the garbage collector paused HomeBlaze; under 1 % is normal |
 
-The values refresh every `PollingInterval` (15 seconds by default, at least 1.1 seconds). CPU usage, allocation rate and GC pause time appear after the second reading.
+The values refresh every `PollingInterval` (15 seconds by default, at least 1 second). CPU usage, allocation rate and GC pause time appear after the second reading.
 
 Inside a container the host values describe the machine running the container, and the container limits sit beside them. `Process.CpuUsage` is measured against the processors available to HomeBlaze, which is the container CPU limit rounded up.
 

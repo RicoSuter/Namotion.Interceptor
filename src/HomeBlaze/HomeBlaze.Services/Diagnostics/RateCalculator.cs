@@ -7,11 +7,6 @@ namespace HomeBlaze.Services.Diagnostics;
 internal static class RateCalculator
 {
     /// <summary>
-    /// The shortest elapsed time a rate is computed over; shorter windows give noisy values.
-    /// </summary>
-    public static readonly TimeSpan MinimumElapsed = TimeSpan.FromSeconds(1);
-
-    /// <summary>
     /// Returns the busy share of the CPU time between two readings, rounded to 3 decimals.
     /// </summary>
     public static decimal? ComputeCpuFraction(ulong previousBusyTime, ulong previousTotalTime, ulong currentBusyTime, ulong currentTotalTime)
@@ -40,7 +35,7 @@ internal static class RateCalculator
     /// </summary>
     public static decimal? ComputeTimeFraction(TimeSpan previous, TimeSpan current, TimeSpan elapsed, int processorCount = 1)
     {
-        if (elapsed < MinimumElapsed || current < previous || processorCount <= 0)
+        if (elapsed <= TimeSpan.Zero || current < previous || processorCount <= 0)
         {
             return null;
         }
@@ -54,7 +49,7 @@ internal static class RateCalculator
     /// </summary>
     public static decimal? ComputeKilobytesPerSecond(long previousBytes, long currentBytes, TimeSpan elapsed)
     {
-        if (elapsed < MinimumElapsed || currentBytes < previousBytes)
+        if (elapsed <= TimeSpan.Zero || currentBytes < previousBytes)
         {
             return null;
         }

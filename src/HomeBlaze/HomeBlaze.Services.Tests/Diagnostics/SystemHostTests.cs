@@ -76,11 +76,13 @@ public class SystemHostTests
     [Fact]
     public async Task WhenWokenEarly_ThenKeepsPreviousCpuUsage()
     {
-        // Arrange: the third reading would give 100 % if it were used
+        // Arrange: the third reading would give 100 % if it were used. The fourth repeats the second, so the
+        // poll that follows the early one once the rate window passed computes nothing new.
         var reader = new FakeSystemMetricsReader(
             new SystemMetricsReading(0, 0, 1000, 500),
             new SystemMetricsReading(50, 100, 1000, 500),
-            new SystemMetricsReading(150, 200, 1000, 500));
+            new SystemMetricsReading(150, 200, 1000, 500),
+            new SystemMetricsReading(50, 100, 1000, 500));
         var host = new SystemHost(reader, () => { }, NullLogger.Instance) { PollingInterval = TimeSpan.FromHours(1) };
 
         await host.StartAsync(CancellationToken.None);
@@ -90,7 +92,7 @@ public class SystemHostTests
 
             // Act
             await host.ApplyConfigurationAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount == 3, message: "Early poll did not run");
+            await AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount >= 3, message: "Early poll did not run");
         }
         finally
         {
@@ -120,7 +122,7 @@ public class SystemHostTests
 
             // Act
             host.Process.CollectGarbage();
-            await AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount == 3, message: "Poll after collect did not run");
+            await AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount >= 3, message: "Poll after collect did not run");
         }
         finally
         {
@@ -223,7 +225,8 @@ public class SystemHostTests
     [Fact]
     public async Task WhenPollIsRequestedWhileStopped_ThenRestartStillComputesRates()
     {
-        // Arrange
+        // Arrange: the requested poll wakes the restarted loop inside the rate window of the third reading,
+        // and 25 % only appears when that early poll keeps the third reading as the baseline
         var reader = new FakeSystemMetricsReader(
             new SystemMetricsReading(0, 0, 1000, 500),
             new SystemMetricsReading(50, 100, 1000, 500),
@@ -255,7 +258,7 @@ public class SystemHostTests
         }
 
         // Assert
-        Assert.Equal(4, reader.ReadCount);
+        Assert.Equal(0.25m, host.CpuUsage);
     }
 
     private sealed class FakeSystemMetricsReader(params SystemMetricsReading[] readings) : ISystemMetricsReader
