@@ -20,6 +20,11 @@ internal sealed class SonosConnection
     private static readonly TimeSpan NotificationTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan NotificationCloseTimeout = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// How many pages of a hundred favorites one read asks for at most, far more than a household has.
+    /// </summary>
+    internal const int MaximumFavoritesPages = 20;
+
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
     private readonly SonosSoapClient _soapClient;
@@ -30,6 +35,9 @@ internal sealed class SonosConnection
 
     // The pages of the last favorites read, replaced as a whole.
     private FavoritesPage[] _favoritesPages = [];
+
+    // Whether the last favorites read stopped at MaximumFavoritesPages, so that is logged once, when it starts.
+    private bool _favoritesCutOff;
 
     // Read from the unit when the connection was created without it; racing readers store the same value.
     private volatile string? _uuid;
@@ -83,6 +91,10 @@ internal sealed class SonosConnection
         return response.GetString("ZoneGroupState") ?? string.Empty;
     }
 
+    /// <summary>
+    /// Reads the favorites page by page. A speaker that has not ended them after
+    /// <see cref="MaximumFavoritesPages"/> pages is logged and the favorites read so far are returned.
+    /// </summary>
     internal async Task<IReadOnlyList<SonosFavorite>> ReadFavoritesAsync(CancellationToken cancellationToken)
     {
         const int pageSize = 100;
@@ -106,12 +118,30 @@ internal sealed class SonosConnection
 
             // Counted by the items returned, not the favorites parsed, which skip shortcuts.
             startingIndex += numberReturned;
-            if (numberReturned <= 0 || startingIndex >= (response.GetInt32("TotalMatches") ?? 0))
+            var isComplete = numberReturned <= 0 || startingIndex >= (response.GetInt32("TotalMatches") ?? 0);
+
+            // The page limit ends a read that a speaker keeps going by always reporting more favorites to come,
+            // which would hold the reconciliation that waits for it.
+            if (isComplete || pages.Count == MaximumFavoritesPages)
             {
+                ReportFavoritesCutOff(!isComplete);
                 _favoritesPages = [.. pages];
                 return favorites;
             }
         }
+    }
+
+    private void ReportFavoritesCutOff(bool isCutOff)
+    {
+        if (isCutOff && !_favoritesCutOff)
+        {
+            _logger.LogWarning(
+                "The Sonos speaker {BaseUri} did not end its favorites within {Pages} pages; using the favorites read so far.",
+                BaseUri,
+                MaximumFavoritesPages);
+        }
+
+        _favoritesCutOff = isCutOff;
     }
 
     private Task<SonosSoapResponse> BrowseFavoritesAsync(int startingIndex, int count, CancellationToken cancellationToken) =>

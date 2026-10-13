@@ -233,7 +233,7 @@ Operations are disabled while the system, the target or, for coordinator operati
 `Favorites` lists the household's "My Sonos" favorites, read once per reconciliation.
 
 - Satellites answer the favorites `Browse` (`FV:2`) with HTTP 500, so the list is read through a connected room player, coordinators first, trying the next one on failure. When none answers, the previous list stays.
-- Favorites are read in pages of 100, so large lists are complete.
+- Favorites are read in pages of 100, so large lists are complete, up to 20 pages, which is far more than a household has. A speaker that still reports more to come after that is logged as a Warning once, and the favorites read so far are used.
 - Favorites of type "shortcut", such as Sonos Radio station shortcuts, carry no URI and are skipped.
 - `PlayFavorite` matches the title ignoring case; with duplicate titles the first one plays. A container favorite (playlist, album) replaces the queue and plays it; any other favorite becomes the transport URI without touching the queue. Both are sent with the favorite's DIDL metadata, which music services need and which is kept internal because it often contains account tokens.
 
@@ -315,7 +315,7 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 ## Limitations
 
 - `SetSpeechEnhancement` writes `DialogLevel` 1 or 0; the Arc Ultra levels 1 to 4 are read as on but cannot be set.
-- An answer larger than 4 MB is a failed request, an event larger than 1 MB is refused, and a document that nests more than 64 levels of elements is read as malformed. Speakers stay far below all three. The limits keep a broken or hostile device on the network from stalling HomeBlaze with an oversized or deeply nested document; a flat document within the limits that is built to be slow to read can still do so.
+- An answer larger than 4 MB is a failed request, an event larger than 1 MB is refused, a document that nests more than 64 levels of elements is read as malformed, and favorites past 20 pages are not read, see [Favorites](#favorites). Speakers stay far below all four. The limits keep a broken or hostile device on the network from stalling HomeBlaze with an oversized, deeply nested or endless answer, and a document within them is read in time that grows in step with its size.
 - A speaker that changes role (becomes a surround or stereo partner, or a subwoofer moves rooms) keeps its old subject as an offline entry until restart.
 - SSDP discovery and callback address detection use IPv4 only.
 - The household is not identified by its household id, so two systems seeded in the same household show the same rooms twice.
