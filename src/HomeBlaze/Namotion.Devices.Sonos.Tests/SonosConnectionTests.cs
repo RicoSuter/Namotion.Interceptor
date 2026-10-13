@@ -428,4 +428,83 @@ public class SonosConnectionTests
         // Act & Assert
         await Assert.ThrowsAsync<HttpRequestException>(() => connection.SetVolumeAsync(50, CancellationToken.None));
     }
+
+    [Theory]
+    [InlineData("PLAYING", "Pause")]
+    [InlineData("TRANSITIONING", "Pause")]
+    [InlineData("PAUSED_PLAYBACK", "Play")]
+    [InlineData("STOPPED", "Play")]
+    public async Task WhenTogglingPlayback_ThenAPlayingOrStartingPlayerIsPausedAndAnyOtherPlays(string state, string expectedAction)
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.Respond("GetTransportInfo", ("CurrentTransportState", state));
+        using var httpClient = new HttpClient();
+        var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.TogglePlaybackAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["GetTransportInfo", expectedAction], speaker.Calls.Select(call => call.Action));
+    }
+
+    [Fact]
+    public async Task WhenTogglingPlaybackOfAPlayerThatReportsNoState_ThenNothingIsSent()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.TogglePlaybackAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["GetTransportInfo"], speaker.Calls.Select(call => call.Action));
+    }
+
+    [Fact]
+    public async Task WhenTheIdOfTheUnitIsUnknown_ThenItIsReadOnceFromTheZoneInfoAndBuiltFromMacAddressAndPort()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.Respond("GetZoneInfo", ("MACAddress", "00:11:22:AA:BB:CC"));
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(speaker.BaseUri, null, httpClient);
+        var expectedUuid = $"RINCON_001122AABBCC0{speaker.BaseUri.Port}";
+
+        // Act
+        await connection.SwitchToTvAsync(CancellationToken.None);
+        await connection.SwitchToLineInAsync(CancellationToken.None);
+
+        // Assert
+        var calls = speaker.Calls.ToArray();
+        Assert.Equal(["GetZoneInfo", "SetAVTransportURI", "SetAVTransportURI"], calls.Select(call => call.Action));
+        Assert.Equal($"x-sonos-htastream:{expectedUuid}:spdif", calls[1].GetArgument("CurrentURI"));
+        Assert.Equal($"x-rincon-stream:{expectedUuid}", calls[2].GetArgument("CurrentURI"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheIdOfTheUnitIsUnknownAndTheSpeakerReportsNoMacAddress_ThenTheCommandThrowsAndSendsNothingElse(bool isEmpty)
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        if (isEmpty)
+        {
+            speaker.Respond("GetZoneInfo", ("MACAddress", string.Empty));
+        }
+
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(speaker.BaseUri, null, httpClient);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => connection.SwitchToTvAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Contains("MAC address", exception.Message);
+        Assert.Equal(["GetZoneInfo"], speaker.Calls.Select(call => call.Action));
+    }
 }

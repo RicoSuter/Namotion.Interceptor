@@ -69,12 +69,14 @@ public class SonosSoapClientTests
     public async Task WhenInvokingAnAction_ThenThePostNamesTheActionAndCarriesTheEnvelopeWithoutAByteOrderMark()
     {
         // Arrange
+        string? method = null;
         string? path = null;
         string? soapAction = null;
         string? contentType = null;
         byte[] body = [];
         await using var speaker = new LoopbackHttpServer(async context =>
         {
+            method = context.Request.HttpMethod;
             path = context.Request.Url!.AbsolutePath;
             soapAction = context.Request.Headers["SOAPACTION"];
             contentType = context.Request.ContentType;
@@ -90,6 +92,7 @@ public class SonosSoapClientTests
         await client.InvokeAsync(SonosService.AvTransport, "Pause", [("InstanceID", "0")], CancellationToken.None);
 
         // Assert
+        Assert.Equal("POST", method);
         Assert.Equal("/MediaRenderer/AVTransport/Control", path);
         Assert.Equal("urn:schemas-upnp-org:service:AVTransport:1#Pause", soapAction);
         Assert.Equal("text/xml; charset=\"utf-8\"", contentType);
@@ -109,12 +112,13 @@ public class SonosSoapClientTests
             "<u:GetThingsResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">" +
             "<Name>K&amp;uuml;che &lt;1&gt;</Name><Empty></Empty><Volume>44</Volume><Negative>-3</Negative><NotANumber>loud</NotANumber>" +
             "<One>1</One><Zero>0</Zero><True>true</True><False>false</False><Maybe>maybe</Maybe>" +
+            "<PaddedNumber> 7 </PaddedNumber><PaddedTrue> 1 </PaddedTrue><Nested><Inner>5</Inner></Nested>" +
             "</u:GetThingsResponse>" + EnvelopeEnd);
         using var httpClient = new HttpClient();
         var client = new SonosSoapClient(httpClient, speaker.BaseUri);
 
         // Act
-        var response = await client.InvokeAsync(SonosService.RenderingControl, "GetThings", [], CancellationToken.None);
+        var response = await client.QueryAsync(SonosService.RenderingControl, "GetThings", [], CancellationToken.None);
 
         // Assert
         Assert.Equal("K&uuml;che <1>", response.GetString("Name"));
@@ -131,6 +135,47 @@ public class SonosSoapClientTests
         Assert.False(response.GetBoolean("False"));
         Assert.Null(response.GetBoolean("Maybe"));
         Assert.Null(response.GetBoolean("Missing"));
+        Assert.Equal(7, response.GetInt32("PaddedNumber"));
+        Assert.True(response.GetBoolean("PaddedTrue"));
+        Assert.Null(response.GetString("Nested"));
+    }
+
+    [Fact]
+    public async Task WhenTheCharsetOfTheAnswerHeaderIsWrong_ThenTheTextIsStillReadFromTheDocument()
+    {
+        // Arrange
+        await using var speaker = new LoopbackHttpServer(context => WriteAsync(
+            context.Response,
+            HttpStatusCode.OK,
+            AnswerStart + "<u:GetNameResponse xmlns:u=\"urn:schemas-upnp-org:service:DeviceProperties:1\"><Name>Küche</Name></u:GetNameResponse>" + EnvelopeEnd,
+            "text/xml; charset=iso-8859-1"));
+        using var httpClient = new HttpClient();
+        var client = new SonosSoapClient(httpClient, speaker.BaseUri);
+
+        // Act
+        var response = await client.QueryAsync(SonosService.DeviceProperties, "GetName", [], CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Küche", response.GetString("Name"));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK, "")]
+    [InlineData(HttpStatusCode.NoContent, "")]
+    [InlineData(HttpStatusCode.OK, "done")]
+    public async Task WhenACommandIsAnsweredWithoutAnEnvelope_ThenItStillSucceeds(HttpStatusCode status, string body)
+    {
+        // Arrange
+        await using var speaker = Answer(status, body);
+        using var httpClient = new HttpClient();
+        var client = new SonosSoapClient(httpClient, speaker.BaseUri);
+
+        // Act
+        var exception = await Record.ExceptionAsync(
+            () => client.InvokeAsync(SonosService.AvTransport, "Next", [("InstanceID", "0")], CancellationToken.None));
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Fact]
@@ -154,6 +199,28 @@ public class SonosSoapClientTests
         Assert.Equal("Next", exception.Action);
         Assert.Equal(701, exception.UpnpErrorCode);
         Assert.Equal("The Sonos speaker refused Next: not available for the current source or state (UPnP error 701).", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenAnotherServiceAnswersWithATransportErrorCode_ThenTheMessageDoesNotDescribeIt()
+    {
+        // Arrange
+        await using var speaker = Answer(
+            HttpStatusCode.InternalServerError,
+            AnswerStart +
+            "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
+            "<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>701</errorCode></UPnPError></detail></s:Fault>" +
+            EnvelopeEnd);
+        using var httpClient = new HttpClient();
+        var client = new SonosSoapClient(httpClient, speaker.BaseUri);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SonosFaultException>(
+            () => client.InvokeAsync(SonosService.GroupRenderingControl, "SetGroupVolume", [], CancellationToken.None));
+
+        // Assert
+        Assert.Equal(701, exception.UpnpErrorCode);
+        Assert.Equal("The Sonos speaker refused SetGroupVolume (UPnP error 701).", exception.Message);
     }
 
     [Fact]
@@ -198,8 +265,8 @@ public class SonosSoapClientTests
     [Theory]
     [InlineData("not xml")]
     [InlineData("<Envelope><Body /></Envelope>")]
-    [InlineData("<!DOCTYPE s [<!ENTITY e \"x\">]><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body><r>&e;</r></s:Body></s:Envelope>")]
-    public async Task WhenTheAnswerIsNoSoapEnvelope_ThenInvokingThrowsXmlException(string body)
+    [InlineData("<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body /></s:Envelope>")]
+    public async Task WhenTheAnswerIsNoSoapEnvelopeWithABody_ThenQueryingThrowsXmlException(string body)
     {
         // Arrange
         await using var speaker = Answer(HttpStatusCode.OK, body);
@@ -208,7 +275,41 @@ public class SonosSoapClientTests
 
         // Act & Assert
         await Assert.ThrowsAsync<XmlException>(
-            () => client.InvokeAsync(SonosService.AvTransport, "GetTransportInfo", [], CancellationToken.None));
+            () => client.QueryAsync(SonosService.AvTransport, "GetTransportInfo", [], CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenTheAnswerDeclaresADocumentType_ThenQueryingThrowsXmlExceptionInsteadOfExpandingIt()
+    {
+        // Arrange
+        await using var speaker = Answer(
+            HttpStatusCode.OK,
+            "<!DOCTYPE s [<!ENTITY e \"x\">]><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body><r><v>&e;</v></r></s:Body></s:Envelope>");
+        using var httpClient = new HttpClient();
+        var client = new SonosSoapClient(httpClient, speaker.BaseUri);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<XmlException>(
+            () => client.QueryAsync(SonosService.AvTransport, "GetTransportInfo", [], CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenAValueOfTheAnswerIsNestedVeryDeeply_ThenItIsUnknownInsteadOfOverflowingTheStack()
+    {
+        // Arrange
+        const int depth = 100_000;
+        var nested = string.Concat(Enumerable.Repeat("<a>", depth)) + string.Concat(Enumerable.Repeat("</a>", depth));
+        await using var speaker = Answer(
+            HttpStatusCode.OK,
+            AnswerStart + "<u:GetNameResponse xmlns:u=\"urn:schemas-upnp-org:service:DeviceProperties:1\"><Name>" + nested + "</Name></u:GetNameResponse>" + EnvelopeEnd);
+        using var httpClient = new HttpClient();
+        var client = new SonosSoapClient(httpClient, speaker.BaseUri);
+
+        // Act
+        var response = await client.QueryAsync(SonosService.DeviceProperties, "GetName", [], CancellationToken.None);
+
+        // Assert
+        Assert.Null(response.GetString("Name"));
     }
 
     [Fact]
@@ -234,11 +335,12 @@ public class SonosSoapClientTests
     private static LoopbackHttpServer Answer(HttpStatusCode status, string body) =>
         new(context => WriteAsync(context.Response, status, body));
 
-    private static async Task WriteAsync(HttpListenerResponse response, HttpStatusCode status, string body)
+    private static async Task WriteAsync(
+        HttpListenerResponse response, HttpStatusCode status, string body, string contentType = "text/xml; charset=\"utf-8\"")
     {
         var bytes = Encoding.UTF8.GetBytes(body);
         response.StatusCode = (int)status;
-        response.ContentType = "text/xml; charset=\"utf-8\"";
+        response.ContentType = contentType;
         response.ContentLength64 = bytes.Length;
         await response.OutputStream.WriteAsync(bytes);
     }

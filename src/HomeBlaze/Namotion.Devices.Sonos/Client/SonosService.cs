@@ -1,7 +1,7 @@
 namespace Namotion.Devices.Sonos.Client;
 
 /// <summary>
-/// A UPnP service of a Sonos unit: its name and the path its actions are posted to.
+/// A UPnP service of a Sonos unit: the namespace of its actions and the path they are posted to.
 /// </summary>
 internal sealed class SonosService
 {
@@ -14,12 +14,9 @@ internal sealed class SonosService
 
     private SonosService(string name, string controlPath)
     {
-        Name = name;
         ControlPath = controlPath;
         Namespace = $"urn:schemas-upnp-org:service:{name}:1";
     }
-
-    internal string Name { get; }
 
     internal string ControlPath { get; }
 

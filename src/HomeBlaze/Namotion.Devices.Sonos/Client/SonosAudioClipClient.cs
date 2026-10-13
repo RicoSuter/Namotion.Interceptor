@@ -20,7 +20,8 @@ internal static class SonosAudioClipClient
     /// Queues a clip on a connection of its own, so a connection that failed or that the speaker closed never fails a
     /// later clip. The speaker's answer is not read, so a rejected clip is not reported. The connection is closed
     /// gracefully within <paramref name="closeTimeout"/>, which lets the speaker take the clip first. Throws
-    /// <see cref="WebSocketException"/> when the speaker cannot be reached on the websocket port.
+    /// <see cref="WebSocketException"/> when the speaker cannot be reached on the websocket port and
+    /// <see cref="OperationCanceledException"/> when the token is cancelled before the clip is sent.
     /// </summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S4830", Justification = "The speakers present a certificate that no public authority issued and that does not name their address, so it cannot be validated.")]
     internal static async Task QueueAsync(
@@ -60,8 +61,8 @@ internal static class SonosAudioClipClient
             writer.WriteEndObject();
 
             writer.WriteStartObject();
-            writer.WriteString("name", "HomeBlaze");
-            writer.WriteString("appId", "com.namotion.homeblaze");
+            writer.WriteString("name", "Namotion.Devices.Sonos");
+            writer.WriteString("appId", "com.namotion.devices.sonos");
             writer.WriteString("streamUrl", soundUri.AbsoluteUri);
             writer.WriteNumber("volume", volume);
             writer.WriteEndObject();

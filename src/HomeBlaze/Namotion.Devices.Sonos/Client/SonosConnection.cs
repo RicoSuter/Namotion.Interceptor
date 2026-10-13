@@ -79,7 +79,7 @@ internal sealed class SonosConnection
     /// </summary>
     internal async Task<string> ReadZoneGroupStateAsync(CancellationToken cancellationToken)
     {
-        var response = await _soapClient.InvokeAsync(SonosService.ZoneGroupTopology, "GetZoneGroupState", [], cancellationToken);
+        var response = await _soapClient.QueryAsync(SonosService.ZoneGroupTopology, "GetZoneGroupState", [], cancellationToken);
         return response.GetString("ZoneGroupState") ?? string.Empty;
     }
 
@@ -115,7 +115,7 @@ internal sealed class SonosConnection
     }
 
     private Task<SonosSoapResponse> BrowseFavoritesAsync(int startingIndex, int count, CancellationToken cancellationToken) =>
-        _soapClient.InvokeAsync(
+        _soapClient.QueryAsync(
             SonosService.ContentDirectory,
             "Browse",
             [
@@ -153,8 +153,8 @@ internal sealed class SonosConnection
         bool? speechEnhancement = null;
         if (isHomeTheater)
         {
-            nightMode = await GetEqualizerAsync("NightMode", newFaults, cancellationToken);
-            speechEnhancement = await GetEqualizerAsync("DialogLevel", newFaults, cancellationToken);
+            nightMode = await GetEqualizerAsync("NightMode", "GetEQ NightMode", newFaults, cancellationToken);
+            speechEnhancement = await GetEqualizerAsync("DialogLevel", "GetEQ DialogLevel", newFaults, cancellationToken);
         }
 
         return new SonosPlayerReading(
@@ -194,11 +194,11 @@ internal sealed class SonosConnection
         return new GroupRenderingControlChange(volume?.GetInt32("CurrentVolume"), mute?.GetBoolean("CurrentMute"));
     }
 
-    private async Task<bool?> GetEqualizerAsync(string type, List<SonosReadFault> newFaults, CancellationToken cancellationToken)
+    private async Task<bool?> GetEqualizerAsync(string type, string read, List<SonosReadFault> newFaults, CancellationToken cancellationToken)
     {
         var response = await ReadOrDefaultAsync(
-            $"GetEQ {type}",
-            _soapClient.InvokeAsync(SonosService.RenderingControl, "GetEQ", [Instance, ("EQType", type)], cancellationToken),
+            read,
+            _soapClient.QueryAsync(SonosService.RenderingControl, "GetEQ", [Instance, ("EQType", type)], cancellationToken),
             newFaults);
         return response?.GetInt32("CurrentValue") is { } level ? SonosValues.IsLevelOn(level) : null;
     }
@@ -209,7 +209,7 @@ internal sealed class SonosConnection
         ReadOnlySpan<(string Name, string Value)> arguments,
         List<SonosReadFault> newFaults,
         CancellationToken cancellationToken) =>
-        ReadOrDefaultAsync(action, _soapClient.InvokeAsync(service, action, arguments, cancellationToken), newFaults);
+        ReadOrDefaultAsync(action, _soapClient.QueryAsync(service, action, arguments, cancellationToken), newFaults);
 
     // A UPnP fault means the speaker answered but cannot report this value now, for example an action a model or a
     // grouped member does not support; the other reads still count.
@@ -248,7 +248,7 @@ internal sealed class SonosConnection
     /// </summary>
     internal async Task TogglePlaybackAsync(CancellationToken cancellationToken)
     {
-        var transport = await _soapClient.InvokeAsync(SonosService.AvTransport, "GetTransportInfo", [Instance], cancellationToken);
+        var transport = await _soapClient.QueryAsync(SonosService.AvTransport, "GetTransportInfo", [Instance], cancellationToken);
         var state = transport.GetString("CurrentTransportState");
         if (string.IsNullOrEmpty(state))
         {
@@ -321,8 +321,8 @@ internal sealed class SonosConnection
     }
 
     /// <summary>
-    /// Queues an audio clip over the speaker's websocket. The speaker's answer is not read, so a rejected clip is
-    /// not reported.
+    /// Queues an audio clip on the speaker, as <see cref="SonosAudioClipClient.QueueAsync"/> describes, within
+    /// <see cref="NotificationTimeout"/>.
     /// </summary>
     internal async Task PlayNotificationAsync(Uri soundUri, int volume, CancellationToken cancellationToken)
     {
@@ -415,9 +415,12 @@ internal sealed class SonosConnection
             return uuid;
         }
 
-        var zoneInfo = await _soapClient.InvokeAsync(SonosService.DeviceProperties, "GetZoneInfo", [], cancellationToken);
-        var macAddress = zoneInfo.GetString("MACAddress")
-            ?? throw new InvalidOperationException($"The Sonos speaker {BaseUri} did not report its MAC address.");
+        var zoneInfo = await _soapClient.QueryAsync(SonosService.DeviceProperties, "GetZoneInfo", [], cancellationToken);
+        var macAddress = zoneInfo.GetString("MACAddress");
+        if (string.IsNullOrEmpty(macAddress))
+        {
+            throw new InvalidOperationException($"The Sonos speaker {BaseUri} did not report its MAC address.");
+        }
 
         // A RINCON id is the MAC address followed by a zero and the device port.
         uuid = $"{UuidPrefix}_{macAddress.Replace(":", string.Empty, StringComparison.Ordinal)}0{BaseUri.Port.ToString(CultureInfo.InvariantCulture)}";

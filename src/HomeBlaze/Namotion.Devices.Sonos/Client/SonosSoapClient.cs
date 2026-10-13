@@ -31,13 +31,21 @@ internal sealed class SonosSoapClient
     }
 
     /// <summary>
-    /// Invokes an action. Throws <see cref="SonosFaultException"/> when the speaker answers with a UPnP fault,
-    /// <see cref="HttpRequestException"/> for any other failed request and <see cref="XmlException"/> for an answer
-    /// that is not a SOAP envelope.
+    /// Invokes an action without reading its answer. Throws <see cref="SonosFaultException"/> when the speaker
+    /// answers with a UPnP fault and <see cref="HttpRequestException"/> for any other failed request.
     /// </summary>
-    internal Task<SonosSoapResponse> InvokeAsync(
+    internal Task InvokeAsync(
         SonosService service, string action, ReadOnlySpan<(string Name, string Value)> arguments, CancellationToken cancellationToken) =>
-        SendAsync(service, action, CreateEnvelope(service, action, arguments), cancellationToken);
+        InvokeAsync(service, action, CreateEnvelope(service, action, arguments), cancellationToken);
+
+    /// <summary>
+    /// Invokes an action and returns the values of its answer. Throws <see cref="SonosFaultException"/> and
+    /// <see cref="HttpRequestException"/> as a command does, and <see cref="XmlException"/> for an answer that is not
+    /// a SOAP envelope.
+    /// </summary>
+    internal Task<SonosSoapResponse> QueryAsync(
+        SonosService service, string action, ReadOnlySpan<(string Name, string Value)> arguments, CancellationToken cancellationToken) =>
+        QueryAsync(service, action, CreateEnvelope(service, action, arguments), cancellationToken);
 
     internal static string CreateEnvelope(SonosService service, string action, ReadOnlySpan<(string Name, string Value)> arguments)
     {
@@ -97,7 +105,25 @@ internal sealed class SonosSoapClient
         }
     }
 
-    private async Task<SonosSoapResponse> SendAsync(SonosService service, string action, string envelope, CancellationToken cancellationToken)
+    private async Task InvokeAsync(SonosService service, string action, string envelope, CancellationToken cancellationToken)
+    {
+        // The answer of a command carries nothing to read, so only its status counts.
+        using var response = await PostAsync(service, action, envelope, cancellationToken);
+    }
+
+    private async Task<SonosSoapResponse> QueryAsync(SonosService service, string action, string envelope, CancellationToken cancellationToken)
+    {
+        using var response = await PostAsync(service, action, envelope, cancellationToken);
+
+        // Parsed from the bytes, so the encoding comes from the document and not from the charset of the header.
+        await using var content = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var result = SonosXml.Parse(content).Root?.Element(EnvelopeNamespace + "Body")?.Elements().FirstOrDefault()
+            ?? throw new XmlException($"The answer to {action} is not a SOAP envelope with a body.");
+        return new SonosSoapResponse(result);
+    }
+
+    /// <returns>The successful response, which the caller disposes.</returns>
+    private async Task<HttpResponseMessage> PostAsync(SonosService service, string action, string envelope, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_baseUri, service.ControlPath));
         request.Content = new ByteArrayContent(Encoding.UTF8.GetBytes(envelope));
@@ -106,32 +132,32 @@ internal sealed class SonosSoapClient
         request.Content.Headers.TryAddWithoutValidation("Content-Type", "text/xml; charset=\"utf-8\"");
         request.Headers.TryAddWithoutValidation("soapaction", $"{service.Namespace}#{action}");
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var content = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.IsSuccessStatusCode)
         {
-            throw CreateFailure(action, response, content);
+            return response;
         }
 
-        var result = SonosXml.Parse(content).Root?.Element(EnvelopeNamespace + "Body")?.Elements().FirstOrDefault()
-            ?? throw new XmlException($"The answer to {action} is not a SOAP envelope with a body.");
-        return new SonosSoapResponse(result);
+        using (response)
+        {
+            throw await CreateFailureAsync(service, action, response, cancellationToken);
+        }
     }
 
     // A speaker answers a refused action with HTTP 500 and a fault; anything else, such as the bare HTTP 500 of a
     // satellite, is a failed request.
-    private static Exception CreateFailure(string action, HttpResponseMessage response, string content)
+    private static async Task<Exception> CreateFailureAsync(
+        SonosService service, string action, HttpResponseMessage response, CancellationToken cancellationToken)
     {
         XElement? fault = null;
         try
         {
-            fault = content.Length == 0
-                ? null
-                : SonosXml.Parse(content).Root?.Element(EnvelopeNamespace + "Body")?.Element(EnvelopeNamespace + "Fault");
+            await using var content = await response.Content.ReadAsStreamAsync(cancellationToken);
+            fault = SonosXml.Parse(content).Root?.Element(EnvelopeNamespace + "Body")?.Element(EnvelopeNamespace + "Fault");
         }
         catch (XmlException)
         {
-            // Not XML, so not a fault.
+            // Empty or not XML, so not a fault.
         }
 
         if (fault is null)
@@ -140,11 +166,12 @@ internal sealed class SonosSoapClient
                 $"The Sonos speaker answered {action} with HTTP {(int)response.StatusCode}.", null, response.StatusCode);
         }
 
-        var errorCode = fault.Descendants(ControlNamespace + "errorCode").FirstOrDefault()?.Value;
+        var errorCode = SonosXml.GetText(fault.Descendants(ControlNamespace + "errorCode").FirstOrDefault());
         return new SonosFaultException(
+            service,
             action,
             int.TryParse(errorCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var code) ? code : null,
-            fault.Element("faultstring")?.Value);
+            SonosXml.GetText(fault.Element("faultstring")));
     }
 }
 
@@ -160,14 +187,14 @@ internal sealed class SonosSoapResponse
         _element = element;
     }
 
-    /// <returns>The value, empty for an empty element and null when the speaker did not return it.</returns>
+    /// <returns>The value, empty for an empty element and null when the speaker did not return it as text.</returns>
     internal string? GetString(string name)
     {
         foreach (var element in _element.Elements())
         {
             if (element.Name.LocalName == name)
             {
-                return element.Value;
+                return SonosXml.GetText(element);
             }
         }
 
