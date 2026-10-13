@@ -149,10 +149,23 @@ internal static class LinuxProcParser
     {
         bytes = 0;
 
-        var index = content.IndexOf(key);
-        if (index < 0 || (index > 0 && content[index - 1] != (byte)'\n'))
+        var searchOffset = 0;
+        int index;
+        while (true)
         {
-            return false;
+            var relativeIndex = content[searchOffset..].IndexOf(key);
+            if (relativeIndex < 0)
+            {
+                return false;
+            }
+
+            index = searchOffset + relativeIndex;
+            if (index == 0 || content[index - 1] == (byte)'\n')
+            {
+                break;
+            }
+
+            searchOffset = index + 1;
         }
 
         var value = content[(index + key.Length)..].TrimStart((byte)' ');

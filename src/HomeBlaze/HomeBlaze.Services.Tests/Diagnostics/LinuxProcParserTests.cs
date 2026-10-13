@@ -89,6 +89,21 @@ public class LinuxProcParserTests
         Assert.False(success);
     }
 
+    [Fact]
+    public void WhenMemInfoKeyAppearsMidLineFirst_ThenFindsTheLineStartKey()
+    {
+        // Arrange
+        var content = "SomeMemTotal:  1 kB\nMemTotal:       16000000 kB\nMemAvailable:    8000000 kB\n"u8;
+
+        // Act
+        var success = LinuxProcParser.TryParseMemInfo(content, out var totalBytes, out var availableBytes);
+
+        // Assert
+        Assert.True(success);
+        Assert.Equal(16_000_000L * 1024, totalBytes);
+        Assert.Equal(8_000_000L * 1024, availableBytes);
+    }
+
     [Theory]
     [InlineData("NAME=\"Debian GNU/Linux\"\nPRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\n", "Debian GNU/Linux 12 (bookworm)")]
     [InlineData("PRETTY_NAME='Alpine Linux v3.20'\n", "Alpine Linux v3.20")]
