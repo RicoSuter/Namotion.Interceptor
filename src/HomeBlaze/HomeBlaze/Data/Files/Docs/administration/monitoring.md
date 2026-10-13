@@ -9,9 +9,9 @@ HomeBlaze reports its health over HTTP and exports logs, metrics and traces with
 
 See [Observability Design](../architecture/design/observability.md) for the architectural design.
 
-## System host
+## Host system
 
-The `System host` subject reports the machine HomeBlaze runs on and the HomeBlaze process. A new installation has one in `Servers/SystemHost.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
+The `Host system` subject reports the machine HomeBlaze runs on and the HomeBlaze process. A new installation has one in `Servers/HostSystem.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
 
 | Property | Description |
 |----------|-------------|

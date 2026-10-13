@@ -4,7 +4,7 @@ using System.Globalization;
 namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
-/// Parses the Linux files the system host reads. Polled files are parsed from bytes so a poll allocates no strings.
+/// Parses the Linux files the host system reads. Polled files are parsed from bytes so a poll allocates no strings.
 /// </summary>
 internal static class LinuxProcParser
 {

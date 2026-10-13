@@ -3,12 +3,12 @@
 @using HomeBlaze.Services.Diagnostics
 @using HomeBlaze.Services.Display
 
-@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SystemHost))]
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HostSystem))]
 @implements ISubjectComponent
 
-@if (Subject is SystemHost host)
+@if (Subject is HostSystem host)
 {
-    <MudPaper Class="pa-4" data-testid="system-host-widget">
+    <MudPaper Class="pa-4" data-testid="host-system-widget">
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center">
                 <MudIcon Icon="@Icons.Material.Filled.Computer" Class="mr-2" />

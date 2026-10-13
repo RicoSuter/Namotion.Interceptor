@@ -6,13 +6,13 @@ using Xunit;
 
 namespace HomeBlaze.Services.Tests.Diagnostics;
 
-public class SystemHostTests
+public class HostSystemTests
 {
     [Fact]
     public void WhenCreated_ThenHasDefaultsAndStaticValues()
     {
         // Act
-        var host = new SystemHost(NullLogger<SystemHost>.Instance);
+        var host = new HostSystem(NullLogger<HostSystem>.Instance);
 
         // Assert
         Assert.Equal(string.Empty, host.Name);
@@ -30,7 +30,7 @@ public class SystemHostTests
     public void WhenNameIsSet_ThenTitleUsesName()
     {
         // Arrange
-        var host = new SystemHost(NullLogger<SystemHost>.Instance);
+        var host = new HostSystem(NullLogger<HostSystem>.Instance);
 
         // Act
         host.Name = "Server";
@@ -43,7 +43,7 @@ public class SystemHostTests
     public async Task WhenRunningOnTheCurrentPlatform_ThenRatesAppearInRange()
     {
         // Arrange
-        var host = new SystemHost(NullLogger<SystemHost>.Instance);
+        var host = new HostSystem(NullLogger<HostSystem>.Instance);
         var supported = OperatingSystem.IsLinux() || OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
 
         // Act
@@ -190,15 +190,15 @@ public class SystemHostTests
         Assert.Equal(0.25m, host.CpuUsage);
     }
 
-    private static SystemHost CreateHost(FakeSystemMetricsReader reader, Action? collectGarbage = null)
+    private static HostSystem CreateHost(FakeSystemMetricsReader reader, Action? collectGarbage = null)
     {
-        return new SystemHost(reader, collectGarbage ?? (() => { }), NullLogger.Instance)
+        return new HostSystem(reader, collectGarbage ?? (() => { }), NullLogger.Instance)
         {
             PollingInterval = TimeSpan.FromHours(1)
         };
     }
 
-    private static async Task RunAsync(SystemHost host, Func<Task> whileRunning)
+    private static async Task RunAsync(HostSystem host, Func<Task> whileRunning)
     {
         await host.StartAsync(CancellationToken.None);
         try

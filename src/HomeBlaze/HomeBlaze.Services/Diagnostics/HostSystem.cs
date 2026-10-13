@@ -16,11 +16,11 @@ namespace HomeBlaze.Services.Diagnostics;
 /// </summary>
 [Category("System")]
 [Description("Reports CPU, memory and uptime of the machine and the process HomeBlaze runs in")]
-[DisplayName("System host")]
+[DisplayName("Host system")]
 [SubjectIcon("Computer")]
 [SingleInstance]
 [InterceptorSubject]
-public partial class SystemHost : BackgroundService,
+public partial class HostSystem : BackgroundService,
     IConfigurable,
     IMonitoredService,
     ITitleProvider,
@@ -117,12 +117,12 @@ public partial class SystemHost : BackgroundService,
     [Derived]
     public string? IconColor => Status == ServiceStatus.Error ? "Error" : null;
 
-    public SystemHost(ILogger<SystemHost> logger)
+    public HostSystem(ILogger<HostSystem> logger)
         : this(SystemMetricsReaderFactory.CreateForCurrentPlatform(), HostProcess.CollectAllGarbage, logger)
     {
     }
 
-    internal SystemHost(ISystemMetricsReader? reader, Action collectGarbage, ILogger logger)
+    internal HostSystem(ISystemMetricsReader? reader, Action collectGarbage, ILogger logger)
     {
         _reader = reader;
         _logger = logger;
@@ -235,7 +235,7 @@ public partial class SystemHost : BackgroundService,
 
         if (Status != ServiceStatus.Error)
         {
-            _logger.LogWarning(error, "Reading the system host metrics failed");
+            _logger.LogWarning(error, "Reading the host system metrics failed");
         }
 
         // The message is written first so an observer that sees Error also sees its message.

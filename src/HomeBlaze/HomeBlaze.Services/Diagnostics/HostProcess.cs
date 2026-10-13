@@ -8,7 +8,7 @@ using DiagnosticsProcess = System.Diagnostics.Process;
 namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
-/// The process HomeBlaze runs in. Only the polling loop of the owning <see cref="SystemHost"/> writes its values.
+/// The process HomeBlaze runs in. Only the polling loop of the owning <see cref="HostSystem"/> writes its values.
 /// </summary>
 [DisplayName("Process")]
 [Description("Reports CPU, memory and garbage collection values of the current process")]

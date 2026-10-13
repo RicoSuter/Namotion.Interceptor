@@ -101,7 +101,7 @@ catch (Exception exception) when (exception is IOException or UnauthorizedAccess
 // This must happen before any service that depends on TypeProvider is used
 var typeProvider = app.Services.GetRequiredService<TypeProvider>();
 typeProvider
-    .AddAssembly(typeof(SystemHost).Assembly)                  // HomeBlaze.Services
+    .AddAssembly(typeof(HostSystem).Assembly)                  // HomeBlaze.Services
     .AddAssembly(typeof(FluentStorageContainer).Assembly)      // HomeBlaze.Storage
     .AddAssembly(typeof(MarkdownFilePageComponent).Assembly)   // HomeBlaze.Storage.Blazor
     .AddAssembly(typeof(Widget).Assembly)                      // HomeBlaze.Components
