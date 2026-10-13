@@ -22,12 +22,10 @@ internal sealed record SoapBody(string? Name, List<(string Name, string? Value)>
     /// Reads the body of an envelope. Throws <see cref="XmlException"/> when the document is empty, malformed or
     /// declares a document type.
     /// </summary>
-    /// <remarks>
-    /// Reads forward with a reader instead of building a document: the time stays linear and the stack flat however
-    /// deeply a hostile document nests.
-    /// </remarks>
     internal static SoapBody Read(Stream stream)
     {
+        // Read forward instead of built into a document: the time stays linear and the stack flat however deeply a
+        // hostile document nests.
         using var reader = SonosXml.CreateReader(stream);
         if (reader.MoveToContent() != XmlNodeType.Element || !IsEnvelopeElement(reader, "Envelope") || !MoveToFirstChild(reader))
         {

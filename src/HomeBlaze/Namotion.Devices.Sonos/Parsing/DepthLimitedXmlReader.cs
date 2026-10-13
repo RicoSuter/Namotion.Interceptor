@@ -6,12 +6,10 @@ namespace Namotion.Devices.Sonos.Parsing;
 /// Passes a reader through and throws <see cref="XmlException"/> at the first element that nests deeper than a
 /// number of levels. Owns the reader and disposes it.
 /// </summary>
-/// <remarks>
-/// A reader sets no limit of its own, and loading a document takes time quadratic in its depth, while reading the
-/// text of an element recurses once per level. A limit on the depth bounds both.
-/// </remarks>
 internal sealed class DepthLimitedXmlReader : XmlReader
 {
+    // A reader sets no limit of its own. Loading a document takes time quadratic in its depth, and reading the text
+    // of an element recurses once per level, so the limit bounds both.
     private readonly XmlReader _reader;
     private readonly int _maximumLevels;
 

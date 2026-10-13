@@ -10,6 +10,7 @@ namespace HomeBlaze.E2E.Tests;
 /// What the tests rely on from the fixture itself.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
+[Trait("Category", "Integration")]
 public class PlaywrightFixtureTests
 {
     private readonly PlaywrightFixture _fixture;

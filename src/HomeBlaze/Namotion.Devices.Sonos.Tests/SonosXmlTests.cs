@@ -24,13 +24,14 @@ public class SonosXmlTests
     };
 
     [Fact]
-    public void WhenADocumentNestsAsManyLevelsAsAllowed_ThenItParses()
+    public void WhenADocumentNestsAsManyLevelsAsAllowed_ThenItParsesWithTheTextOfItsInnermostElement()
     {
         // Act
-        var document = SonosXml.Parse(Nest(SonosXml.MaximumLevels));
+        var document = SonosXml.Parse(Nest(SonosXml.MaximumLevels, "text"));
 
         // Assert
         Assert.Equal(SonosXml.MaximumLevels, document.Descendants().Count());
+        Assert.Equal("text", document.Root!.Value);
     }
 
     [Fact]
@@ -44,10 +45,16 @@ public class SonosXmlTests
     }
 
     [Fact]
-    public void WhenADocumentNestsFarDeeperThanAllowed_ThenParsingStopsAtTheLimitInsteadOfLoadingIt()
+    public void WhenADocumentNestsFarDeeperThanAllowed_ThenParsingStopsAtTheLimitInsteadOfReadingOn()
     {
-        // Act & Assert: without the limit this loads for seconds, and reading its text overflows the stack.
-        Assert.Throws<XmlException>(() => SonosXml.Parse(Nest(50_000)));
+        // Arrange: never closed, so a parse that read to the end would report the end of the file instead.
+        var unclosed = string.Concat(Enumerable.Repeat("<a>", 50_000));
+
+        // Act
+        var exception = Assert.Throws<XmlException>(() => SonosXml.Parse(unclosed));
+
+        // Assert
+        Assert.Contains("deeper", exception.Message);
     }
 
     [Fact]
@@ -105,6 +112,6 @@ public class SonosXmlTests
         Assert.InRange(deepest, 1, SonosXml.MaximumLevels / 4);
     }
 
-    private static string Nest(int levels) =>
-        string.Concat(Enumerable.Repeat("<a>", levels)) + string.Concat(Enumerable.Repeat("</a>", levels));
+    private static string Nest(int levels, string text = "") =>
+        string.Concat(Enumerable.Repeat("<a>", levels)) + text + string.Concat(Enumerable.Repeat("</a>", levels));
 }
