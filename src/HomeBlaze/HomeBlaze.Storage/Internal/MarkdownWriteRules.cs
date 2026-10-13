@@ -32,16 +32,17 @@ internal static partial class MarkdownWriteRules
         _ => false
     };
 
-    /// <exception cref="InvalidOperationException">The storage is not local.</exception>
+    /// <exception cref="ArgumentException">The storage is not local.</exception>
     public static void EnsureLocal(IStorageContainer storage)
     {
+        // An argument error, so that its message reaches the caller of the operation, like the other rules of a write.
         if (!IsLocal(storage))
         {
             throw CreateNotLocalException();
         }
     }
 
-    public static InvalidOperationException CreateNotLocalException() =>
+    public static ArgumentException CreateNotLocalException() =>
         new("Only Markdown files in local storage (on disk or in memory) can be written; this storage is not local.");
 
     /// <summary>
@@ -58,7 +59,6 @@ internal static partial class MarkdownWriteRules
     /// <exception cref="ArgumentException">The path is in the documentation folder.</exception>
     public static void EnsureNotInDocumentationFolder(IStorageContainer storage, string path)
     {
-        // An argument error, so that its message reaches the caller of the operation, like the other rules of a write.
         if (IsInDocumentationFolder(storage, path))
         {
             throw new ArgumentException(MarkdownFile.DocumentationFolderMessage);

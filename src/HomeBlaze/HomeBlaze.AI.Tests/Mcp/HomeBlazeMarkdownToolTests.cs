@@ -21,6 +21,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
 {
     private const string NotesPath = "/Storage/Notes.md";
     private const string DocsPath = "/Storage/Docs";
+    private const string NotLocalMessage = "Only Markdown files in local storage (on disk or in memory) can be written; this storage is not local.";
 
     // The storage is the Files folder of a data directory, so its Docs folder is the documentation folder once the
     // data directory is known to the storage.
@@ -111,7 +112,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         var result = await CallAsync(tools["create_markdown"], new { folder_path = NotesPath, name = "New.md", content = "# New" });
 
         // Assert
-        Assert.Equal($"'{NotesPath}' is not a local storage folder.", result.GetProperty("error").GetString());
+        Assert.Equal($"'{NotesPath}' is not a storage folder.", result.GetProperty("error").GetString());
         Assert.False(File.Exists(Path.Combine(_directory.FullName, "New.md")));
     }
 
@@ -128,8 +129,8 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         var create = await CallAsync(tools["create_markdown"], new { folder_path = DocsPath, name = "New.md", content = "# New" });
 
         // Assert
-        Assert.Equal($"'{NotesPath}' is not in local storage; only local Markdown files can be changed.", edit.GetProperty("error").GetString());
-        Assert.Equal($"'{DocsPath}' is not a local storage folder.", create.GetProperty("error").GetString());
+        Assert.Equal(NotLocalMessage, edit.GetProperty("error").GetString());
+        Assert.Equal(NotLocalMessage, create.GetProperty("error").GetString());
         Assert.Equal("# Notes\n\nThe freezer is cold.", ReadFile("Notes.md"));
     }
 

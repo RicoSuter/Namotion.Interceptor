@@ -239,8 +239,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <see cref="ActiveContent"/> may only appear as far as the file already has it.
     /// </summary>
     /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes, adds, changes,
-    /// removes or moves a block, or adds such content, or the file is in the documentation folder.</exception>
-    /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
+    /// removes or moves a block, or adds such content, or the file is in the documentation folder or not in local
+    /// storage.</exception>
     [Operation(Title = "Replace Content", Description = "Replaces the whole markdown source of this file.", Icon = "EditNote")]
     public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
     {
@@ -269,8 +269,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// </summary>
     /// <exception cref="ArgumentException">The text is empty, not found, found more than once, the result is larger than
     /// <see cref="MaxContentSize"/> bytes, or it adds, changes, removes or moves a block or adds such content, or the file
-    /// is in the documentation folder.</exception>
-    /// <exception cref="InvalidOperationException">The file is not in local storage.</exception>
+    /// is in the documentation folder or not in local storage.</exception>
     [Operation(Title = "Replace Text", Description = "Replaces one exact, unique passage of the markdown source.", Icon = "FindReplace")]
     public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)
     {

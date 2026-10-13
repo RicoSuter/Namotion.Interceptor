@@ -24,18 +24,16 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
-    /// <param name="additionalToolProviders">Providers passed directly by the caller, added after the registered ones.</param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
         Func<IInterceptorSubject> rootSubjectProvider,
-        bool isReadOnly,
-        IEnumerable<Func<McpToolProviderContext, IMcpToolProvider>>? additionalToolProviders = null)
+        bool isReadOnly)
     {
-        return Create(serviceProvider, rootSubjectProvider, isReadOnly, additionalToolProviders, propertyWriteFilter: null, operationFilter: null);
+        return Create(serviceProvider, rootSubjectProvider, isReadOnly, propertyWriteFilter: null, operationFilter: null);
     }
 
     /// <summary>
-    /// Creates the configuration of the built-in agents' tools: the same as <see cref="Create(IServiceProvider, Func{IInterceptorSubject}, bool, IEnumerable{Func{McpToolProviderContext, IMcpToolProvider}}?)"/>,
+    /// Creates the configuration of the built-in agents' tools: the same as <see cref="Create(IServiceProvider, Func{IInterceptorSubject}, bool)"/>,
     /// except that set_property refuses every property marked with <see cref="ConfigurationAttribute"/> and
     /// invoke_operation and the Markdown tools refuse every operation of an agent (<see cref="LlmAgentBase"/>).
     /// </summary>
@@ -47,7 +45,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         Func<IInterceptorSubject> rootSubjectProvider,
         bool isReadOnly)
     {
-        return Create(serviceProvider, rootSubjectProvider, isReadOnly, additionalToolProviders: null, RefuseConfigurationWrite, RefuseAgentOperation);
+        return Create(serviceProvider, rootSubjectProvider, isReadOnly, RefuseConfigurationWrite, RefuseAgentOperation);
     }
 
     private static string? RefuseAgentOperation(RegisteredSubject subject, MethodMetadata method) =>
@@ -62,7 +60,6 @@ internal static class HomeBlazeMcpConfigurationFactory
         IServiceProvider serviceProvider,
         Func<IInterceptorSubject> rootSubjectProvider,
         bool isReadOnly,
-        IEnumerable<Func<McpToolProviderContext, IMcpToolProvider>>? additionalToolProviders,
         Func<RegisteredSubjectProperty, string, string?>? propertyWriteFilter,
         Func<RegisteredSubject, MethodMetadata, string?>? operationFilter)
     {
@@ -112,12 +109,9 @@ internal static class HomeBlazeMcpConfigurationFactory
         };
 
         var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, pathProvider, isReadOnly);
-        var creators = serviceProvider.GetServices<McpToolProviderRegistration>()
-            .Select(registration => registration.Create)
-            .Concat(additionalToolProviders ?? []);
-        foreach (var create in creators)
+        foreach (var registration in serviceProvider.GetServices<McpToolProviderRegistration>())
         {
-            configuration.ToolProviders.Add(create(context));
+            configuration.ToolProviders.Add(registration.Create(context));
         }
 
         return configuration;

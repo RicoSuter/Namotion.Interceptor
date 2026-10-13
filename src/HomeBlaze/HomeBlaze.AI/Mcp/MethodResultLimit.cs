@@ -1,7 +1,8 @@
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// Caps the size of the results the method tools return, so one large result cannot fill a model's context.
+/// Caps the length of the string results the method tools return, so one large string cannot fill a model's context.
+/// Results of any other type, such as objects and collections, are not limited.
 /// </summary>
 internal static class MethodResultLimit
 {

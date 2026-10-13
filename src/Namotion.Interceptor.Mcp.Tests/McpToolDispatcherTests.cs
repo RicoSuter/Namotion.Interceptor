@@ -73,6 +73,22 @@ public class McpToolDispatcherTests
     }
 
     [Fact]
+    public async Task WhenAnObjectResultHasNonAsciiAndHtmlCharacters_ThenTheyAreNotEscaped()
+    {
+        // Arrange
+        var tools = new[] { CreateTool("get", _ => new { value = "Gerät <ä> & 'x'" }) };
+        var parameters = new CallToolRequestParams { Name = "get" };
+
+        // Act
+        var result = await McpToolDispatcher.CallToolAsync(tools, parameters, logger: null, CancellationToken.None);
+
+        // Assert
+        var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+        Assert.Contains("\"Gerät <ä> & 'x'\"", text);
+        Assert.DoesNotContain("\\u", text);
+    }
+
+    [Fact]
     public async Task WhenCallingAToolReturningAString_ThenTheStringIsReturnedUnchanged()
     {
         // Arrange

@@ -173,21 +173,13 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
         return _invoker.InvokeAsync(subject, tool.MethodName, MethodKind.Operation, JsonSerializer.SerializeToElement(arguments), cancellationToken);
     }
 
-    private static string? GetMarkdownFileError(IInterceptorSubject subject, string path) => subject switch
-    {
-        MarkdownFile { IsLocal: true, IsInDocumentationFolder: true } => MarkdownFile.DocumentationFolderMessage,
-        MarkdownFile { IsLocal: true } => null,
-        MarkdownFile => $"'{path}' is not in local storage; only local Markdown files can be changed.",
-        _ => $"'{path}' is not a Markdown file."
-    };
+    // Only the type is checked here; the operations refuse a file or folder outside local storage or in the
+    // documentation folder themselves, with a message that reaches the caller.
+    private static string? GetMarkdownFileError(IInterceptorSubject subject, string path) =>
+        subject is MarkdownFile ? null : $"'{path}' is not a Markdown file.";
 
-    private static string? GetFolderError(IInterceptorSubject subject, string path) => subject switch
-    {
-        VirtualFolder { IsLocal: true, IsInDocumentationFolder: true } => MarkdownFile.DocumentationFolderMessage,
-        FluentStorageContainer { IsLocal: true, IsInDocumentationFolder: true } => MarkdownFile.DocumentationFolderMessage,
-        VirtualFolder { IsLocal: true } or FluentStorageContainer { IsLocal: true } => null,
-        _ => $"'{path}' is not a local storage folder."
-    };
+    private static string? GetFolderError(IInterceptorSubject subject, string path) =>
+        subject is VirtualFolder or FluentStorageContainer ? null : $"'{path}' is not a storage folder.";
 
     private static JsonElement CreateSchema(params (string Name, string Description)[] properties) =>
         JsonSerializer.SerializeToElement(new

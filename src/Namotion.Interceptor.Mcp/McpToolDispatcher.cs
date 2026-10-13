@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -80,8 +81,10 @@ public static class McpToolDispatcher
 
     private static JsonSerializerOptions CreateSerializerOptions()
     {
+        // The text is read by a model, not embedded in HTML, so non-ASCII characters and <>&' stay unescaped.
         var options = new JsonSerializerOptions
         {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             WriteIndented = true,
             Converters = { new JsonStringEnumConverter() }
         };

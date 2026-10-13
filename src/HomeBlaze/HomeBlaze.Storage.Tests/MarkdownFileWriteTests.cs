@@ -590,9 +590,9 @@ public class MarkdownFileWriteTests : IDisposable
         var markdown = new MarkdownFile(storage.Object, "Notes.md", parser, serializer);
 
         // Act & Assert
-        var replaceContent = await Assert.ThrowsAsync<InvalidOperationException>(
+        var replaceContent = await Assert.ThrowsAsync<ArgumentException>(
             () => markdown.ReplaceContentAsync("# New", CancellationToken.None));
-        var replaceText = await Assert.ThrowsAsync<InvalidOperationException>(
+        var replaceText = await Assert.ThrowsAsync<ArgumentException>(
             () => markdown.ReplaceTextAsync("# Old", "# New", CancellationToken.None));
         Assert.Contains("local", replaceContent.Message);
         Assert.Contains("local", replaceText.Message);
@@ -610,9 +610,9 @@ public class MarkdownFileWriteTests : IDisposable
         storage.StorageType = "azure-blob";
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<ArgumentException>(
             () => storage.CreateMarkdownFileAsync("Notes.md", "# Notes", CancellationToken.None));
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<ArgumentException>(
             () => folder.CreateMarkdownFileAsync("Notes.md", "# Notes", CancellationToken.None));
         Assert.False(storage.IsLocal);
         Assert.False(folder.IsLocal);
@@ -627,7 +627,7 @@ public class MarkdownFileWriteTests : IDisposable
         var folder = new VirtualFolder(Mock.Of<IStorageContainer>(), "Docs/");
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<ArgumentException>(
             () => folder.CreateMarkdownFileAsync("Notes.md", "# Notes", CancellationToken.None));
         Assert.False(folder.IsLocal);
     }
