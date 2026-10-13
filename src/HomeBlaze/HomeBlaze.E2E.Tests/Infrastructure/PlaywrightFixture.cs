@@ -33,15 +33,11 @@ public class PlaywrightFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Start the test server with Kestrel
-        _factory = new WebTestingHostFactory<App>();
+        // Start the test server with Kestrel. It learns the test subject and its widget before it loads anything.
+        _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget)]);
         // Force server to start by accessing ServerAddress which calls EnsureServer
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
-
-        // The registry of the components and the serializer of the configuration read the types once, when the first page asks
-        // for a component or for a configuration, so the test subject and its widget are added before any page is requested.
-        _factory.ServerServices.GetRequiredService<TypeProvider>().AddTypes([typeof(ControlsTestSubject), typeof(ControlsTestWidget)]);
 
         // The root subject is loaded by a background service, so the server serves requests before the
         // object graph behind them exists. The UI waits that window out on its own, but the wait would

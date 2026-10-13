@@ -1,3 +1,4 @@
+using HomeBlaze.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -16,8 +17,16 @@ namespace HomeBlaze.E2E.Tests.Infrastructure;
 public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     where TProgram : class
 {
+    private readonly IReadOnlyCollection<Type> _testTypes;
+
     private IHost? _kestrelHost;
     private string? _serverAddress;
+
+    /// <param name="testTypes">Subject and component types of the tests that the server has to know.</param>
+    public WebTestingHostFactory(IReadOnlyCollection<Type> testTypes)
+    {
+        _testTypes = testTypes;
+    }
 
     public string ServerAddress
     {
@@ -52,6 +61,23 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 
         // Point to test-specific plugin configuration
         builder.UseSetting("PluginConfigurationPath", Path.Combine(AppContext.BaseDirectory, "TestData", "Plugins.json"));
+
+        // The serializer of the configuration reads the types once, the first time it reads a configuration, which the
+        // hosted service that loads the root does. So the types of the tests are added by a hosted service that starts
+        // before every other one: added after the start of the server, they are missed whenever the root loads first.
+        builder.ConfigureServices(services => services.Insert(0, ServiceDescriptor.Singleton<IHostedService>(
+            provider => new TestTypeRegistration(provider.GetRequiredService<TypeProvider>(), _testTypes))));
+    }
+
+    private sealed class TestTypeRegistration(TypeProvider typeProvider, IReadOnlyCollection<Type> types) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            typeProvider.AddTypes(types);
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private void EnsureServer()
