@@ -46,6 +46,26 @@ public partial class HueBridge : BackgroundService,
 
     private const int MaxConsecutivePollFailures = 3;
 
+    /// <summary>
+    /// The default <see cref="PollingInterval"/>, in seconds.
+    /// </summary>
+    public const int DefaultPollingIntervalSeconds = 60;
+
+    /// <summary>
+    /// The default <see cref="RetryInterval"/>, in seconds.
+    /// </summary>
+    public const int DefaultRetryIntervalSeconds = 30;
+
+    /// <summary>
+    /// The shortest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a shorter one is raised to it.
+    /// </summary>
+    public const int MinimumIntervalSeconds = 5;
+
+    /// <summary>
+    /// The longest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a longer one is lowered to it.
+    /// </summary>
+    public const int MaximumIntervalSeconds = 3600;
+
     private readonly ILogger<HueBridge> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
     private readonly Lock _clientLock = new();
@@ -128,8 +148,8 @@ public partial class HueBridge : BackgroundService,
 
         // The event stream carries state changes; this poll only reconciles the device set, so it is
         // deliberately slow. This is the interval the loop hardcoded while the setting was ignored.
-        PollingInterval = TimeSpan.FromSeconds(60);
-        RetryInterval = TimeSpan.FromSeconds(30);
+        PollingInterval = TimeSpan.FromSeconds(DefaultPollingIntervalSeconds);
+        RetryInterval = TimeSpan.FromSeconds(DefaultRetryIntervalSeconds);
 
         Lights = new();
         MotionSensors = new();
@@ -288,7 +308,7 @@ public partial class HueBridge : BackgroundService,
                     StatusMessage = "Bridge not found on network";
                     try
                     {
-                        await Task.Delay(RetryInterval, stoppingToken);
+                        await Task.Delay(EffectiveRetryInterval, stoppingToken);
                     }
                     catch (OperationCanceledException)
                     {
@@ -337,7 +357,7 @@ public partial class HueBridge : BackgroundService,
 
                 try
                 {
-                    await Task.Delay(RetryInterval, stoppingToken);
+                    await Task.Delay(EffectiveRetryInterval, stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -421,10 +441,25 @@ public partial class HueBridge : BackgroundService,
         }
     }
 
-    // A zero interval would spin the loop and a negative one is rejected outright, so fall back to the
-    // default rather than trusting a hand-edited configuration file.
-    private TimeSpan EffectivePollingInterval =>
-        PollingInterval > TimeSpan.Zero ? PollingInterval : TimeSpan.FromSeconds(60);
+    private TimeSpan EffectivePollingInterval => GetEffectiveInterval(PollingInterval, DefaultPollingIntervalSeconds);
+
+    private TimeSpan EffectiveRetryInterval => GetEffectiveInterval(RetryInterval, DefaultRetryIntervalSeconds);
+
+    /// <summary>
+    /// Returns the configured interval clamped to <see cref="MinimumIntervalSeconds"/> through
+    /// <see cref="MaximumIntervalSeconds"/>, or the default when it is zero or negative.
+    /// </summary>
+    internal static TimeSpan GetEffectiveInterval(TimeSpan configured, int defaultSeconds)
+    {
+        if (configured <= TimeSpan.Zero)
+        {
+            return TimeSpan.FromSeconds(defaultSeconds);
+        }
+
+        var minimum = TimeSpan.FromSeconds(MinimumIntervalSeconds);
+        var maximum = TimeSpan.FromSeconds(MaximumIntervalSeconds);
+        return configured < minimum ? minimum : configured > maximum ? maximum : configured;
+    }
 
     private async Task RunPollingLoopAsync(LocalHueApi client, CancellationToken cancellationToken)
     {
