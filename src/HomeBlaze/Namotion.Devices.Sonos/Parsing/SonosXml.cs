@@ -22,12 +22,18 @@ internal static class SonosXml
     };
 
     /// <summary>
-    /// Parses a document. Throws <see cref="XmlException"/> when it is malformed or declares a document type.
+    /// How many elements may nest in a document, the root included. The documents of a speaker nest fewer than ten.
+    /// </summary>
+    internal const int MaximumLevels = 64;
+
+    /// <summary>
+    /// Parses a document. Throws <see cref="XmlException"/> when it is malformed, declares a document type or nests
+    /// its elements deeper than <see cref="MaximumLevels"/>.
     /// </summary>
     internal static XDocument Parse(string xml)
     {
         using var stringReader = new StringReader(xml);
-        using var xmlReader = XmlReader.Create(stringReader, ReaderSettings);
+        using var xmlReader = new DepthLimitedXmlReader(XmlReader.Create(stringReader, ReaderSettings), MaximumLevels);
         return XDocument.Load(xmlReader);
     }
 

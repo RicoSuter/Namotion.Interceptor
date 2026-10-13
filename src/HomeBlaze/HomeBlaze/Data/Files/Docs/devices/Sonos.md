@@ -315,6 +315,7 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 ## Limitations
 
 - `SetSpeechEnhancement` writes `DialogLevel` 1 or 0; the Arc Ultra levels 1 to 4 are read as on but cannot be set.
+- An answer larger than 4 MB is a failed request, and a document that nests more than 64 levels of elements is read as malformed. Speakers stay far below both; the limits keep a broken or hostile device on the network from stalling HomeBlaze.
 - A speaker that changes role (becomes a surround or stereo partner, or a subwoofer moves rooms) keeps its old subject as an offline entry until restart.
 - SSDP discovery and callback address detection use IPv4 only.
 - The household is not identified by its household id, so two systems seeded in the same household show the same rooms twice.

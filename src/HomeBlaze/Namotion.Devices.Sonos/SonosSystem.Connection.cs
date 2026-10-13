@@ -17,6 +17,9 @@ public partial class SonosSystem
     private const string FavoritesFailureKey = "Favorites";
     private const string EventDeliveryFailureKey = "EventDelivery";
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
+
+    // The largest answers, a page of favorites and the topology of a large household, stay far below it.
+    internal const int MaximumResponseBytes = 4 * 1024 * 1024;
     private static readonly TimeSpan TeardownTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SeedProbeTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan MinimumLoopWait = TimeSpan.FromSeconds(1);
@@ -137,6 +140,7 @@ public partial class SonosSystem
         ResetConnectionTopology();
         var httpClient = HttpClientFactory.CreateClient(nameof(SonosSystem));
         httpClient.Timeout = RequestTimeout;
+        httpClient.MaxResponseContentBufferSize = MaximumResponseBytes;
 
         lock (_connectionsLock)
         {
