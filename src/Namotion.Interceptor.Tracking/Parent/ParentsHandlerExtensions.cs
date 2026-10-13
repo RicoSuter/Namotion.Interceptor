@@ -5,7 +5,6 @@ namespace Namotion.Interceptor.Tracking.Parent;
 
 public static class ParentsHandlerExtensions
 {
-    // Short deliberately: hashed on every read of the parents, and string hash codes are not cached.
     private const string ParentsKey = "ni.parents";
 
     internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
