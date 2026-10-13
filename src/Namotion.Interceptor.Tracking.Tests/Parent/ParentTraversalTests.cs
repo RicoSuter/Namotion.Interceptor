@@ -144,6 +144,71 @@ public class ParentTraversalTests
         Assert.Same(match, result);
     }
 
+    [Theory]
+    [InlineData(15)]
+    [InlineData(16)]
+    [InlineData(17)]
+    [InlineData(30)]
+    public void WhenSubjectHasManyParents_ThenFindsMatchAboveTheLast(int parentCount)
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        IInterceptorSubject lastParent = subject;
+        for (var i = 0; i < parentCount; i++)
+        {
+            lastParent = new TraversalNode();
+            ParentTraversalGraph.Link(subject, lastParent);
+        }
+
+        var match = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(lastParent, match);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(match, result);
+    }
+
+    [Fact]
+    public void WhenParentEntryIsDefault_ThenItIsSkipped()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        subject.AddParent(default, null);
+        var match = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(subject, match);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(match, result);
+    }
+
+    [Fact]
+    public void WhenParentEntryIsDefaultAfterSeventeenParents_ThenItIsSkipped()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        for (var i = 0; i < 17; i++)
+        {
+            ParentTraversalGraph.Link(subject, new TraversalNode());
+        }
+
+        subject.AddParent(default, null);
+        var parentBelowMatch = new TraversalNode();
+        ParentTraversalGraph.Link(subject, parentBelowMatch);
+        var match = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(parentBelowMatch, match);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(match, result);
+    }
+
     [Fact]
     public async Task WhenSubjectIsItsOwnOnlyParent_ThenReturnsNull()
     {

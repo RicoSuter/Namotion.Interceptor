@@ -86,7 +86,7 @@ public static class ParentsHandlerExtensions
         ReadOnlySpan<IInterceptorSubject?> found, int next, ImmutableArray<SubjectParent> parents, int parentIndex)
         where TRoot : class
     {
-        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
+        var visited = new HashSet<IInterceptorSubject>(FoundSubjects.Capacity + 1, ReferenceEqualityComparer.Instance);
         var queue = new Queue<IInterceptorSubject>();
         for (var i = 0; i < found.Length; i++)
         {
