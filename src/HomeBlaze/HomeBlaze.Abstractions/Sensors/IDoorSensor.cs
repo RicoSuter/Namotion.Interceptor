@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Abstractions.Sensors;
 
@@ -19,6 +20,7 @@ public interface IDoorSensor
     /// <summary>
     /// Whether the door is closed.
     /// </summary>
+    [Derived]
     [State(Position = 231)]
     bool? IsClosed => State switch
     {

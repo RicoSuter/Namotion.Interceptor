@@ -1,6 +1,7 @@
 using System.ComponentModel;
 
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Locks;
 
@@ -20,6 +21,7 @@ public interface IDoorLockState
     /// <summary>
     /// Whether the lock is locked.
     /// </summary>
+    [Derived]
     [State(Position = 131)]
     bool? IsLocked => LockState switch
     {

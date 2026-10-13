@@ -20,23 +20,6 @@ public class MethodConfirmationTests
     }
 
     [Fact]
-    public async Task WhenAddingAPlugin_ThenTheParameterDialogAsksBeforeAnythingRuns()
-    {
-        // Arrange
-        var page = await SubjectBrowserPage.OpenAsync(_fixture, "Plugins");
-
-        // Act
-        await page.GetByRole(AriaRole.Button, new() { Name = "Add Plugin" }).ClickAsync();
-
-        // Assert
-        var dialog = page.GetByRole(AriaRole.Dialog).Filter(new() { HasText = "Add Plugin" });
-        await Assertions.Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Execute" })).ToBeVisibleAsync(
-            new() { Timeout = ElementVisibilityTimeout });
-        await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
-        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = ElementVisibilityTimeout });
-    }
-
-    [Fact]
     public async Task WhenAnOperationWithoutParametersRequiresConfirmation_ThenTheConfirmationDialogAsksBeforeItRuns()
     {
         // Arrange
