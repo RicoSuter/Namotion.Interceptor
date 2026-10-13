@@ -54,8 +54,7 @@
     public bool IsValid => !string.IsNullOrWhiteSpace(_path);
     public bool IsDirty => _path != _originalPath;
 
-    // A widget that is being created is not in the graph yet, so a relative path cannot be resolved for it
-    // and neither result is shown.
+    // A widget that is being created is not in the graph yet, where only an absolute path resolves.
     private bool CanResolvePath => !IsCreating || _path.StartsWith('/');
 
     public event Action<bool>? IsValidChanged;

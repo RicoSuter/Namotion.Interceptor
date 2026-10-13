@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -24,24 +25,31 @@ public partial class ShellyCover :
     internal int Index { get; }
 
     [State(Unit = StateUnit.Watt)]
+    [Category("Energy")]
     public partial decimal? MeasuredPower { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
+    [Category("Energy")]
     public partial decimal? TotalImportedEnergy { get; internal set; }
 
     [Derived]
+    [Category("Energy")]
     public decimal? TotalExportedEnergy => null;
 
     [State(Unit = StateUnit.Volt)]
+    [Category("Energy")]
     public partial decimal? ElectricalVoltage { get; internal set; }
 
     [State(Unit = StateUnit.Ampere)]
+    [Category("Energy")]
     public partial decimal? ElectricalCurrent { get; internal set; }
 
     [State(Unit = StateUnit.Hertz)]
+    [Category("Energy")]
     public partial decimal? ElectricalFrequency { get; internal set; }
 
     [State(Position = 350)]
+    [Category("Energy")]
     public partial decimal? PowerFactor { get; internal set; }
 
     [State(Unit = StateUnit.DegreeCelsius)]

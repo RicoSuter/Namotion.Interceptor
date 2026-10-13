@@ -166,7 +166,7 @@ public class SubjectPathSelectionTests
     [Fact]
     public void WhenPathLeadsToASubjectAndThePropertyIsNoReference_ThenThePropertyCannotBeSelected()
     {
-        // Arrange - the collection holds a subject of the type that is asked for.
+        // Arrange
         var map = new ValueMap(_context) { Cases = [new ValueMapCase(_context)] };
         var card = new Card(_context) { Title = "Pump" };
         var collection = GetProperty(map, nameof(ValueMap.Cases));
@@ -195,7 +195,7 @@ public class SubjectPathSelectionTests
         // Arrange
         var widget = (IInterceptorSubject)Activator.CreateInstance(widgetType, _context)!;
 
-        // Act - the generated editor finds the attribute on the registered property, not on the type.
+        // Act
         var attribute = GetProperty(widget, propertyName).ReflectionAttributes.OfType<SubjectPathAttribute>().SingleOrDefault();
 
         // Assert

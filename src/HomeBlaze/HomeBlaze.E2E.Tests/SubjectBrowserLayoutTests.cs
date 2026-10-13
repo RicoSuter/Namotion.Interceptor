@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -120,6 +121,17 @@ public class SubjectBrowserLayoutTests
 
     private static ILocator Child(IPage page, string title) =>
         page.Locator("#scrollContainer .mud-list-item").GetByText(title, new() { Exact = true });
+
+    private static ILocator LastPane(IPage page) =>
+        page.Locator("#scrollContainer [data-testid='subject-pane']").Last;
+
+    // Matches the whole text, since a filter by plain text would also find a category whose name only contains it.
+    private static ILocator CategoryTitle(IPage page, string name) =>
+        page.Locator("[data-testid='subject-pane-category-title']")
+            .Filter(new() { HasTextRegex = new Regex($"^{Regex.Escape(name)}$") });
+
+    private static ILocator Method(ILocator scope, string title) =>
+        scope.GetByRole(AriaRole.Button, new() { Name = title, Exact = true });
 
     [Fact]
     public async Task WhenADeepPathIsOpened_ThenItsPaneIsInViewAndNoPaneIsCutOff()
@@ -278,20 +290,69 @@ public class SubjectBrowserLayoutTests
     }
 
     [Fact]
-    public async Task WhenASubjectHasChildrenAndMethods_ThenTheMethodsFollowTheChildren()
+    public async Task WhenASubjectHasChildrenAndMethods_ThenTheMethodsPrecedeTheChildren()
     {
         // Act
         var page = await OpenAsync("browser", 1280, 720, paneCount: 1);
 
         // Assert
-        var methodsFollowChildren = await page.EvaluateAsync<bool>("""
+        var methodsPrecedeChildren = await page.EvaluateAsync<bool>("""
             () => {
                 const pane = document.querySelector("#scrollContainer [data-testid='subject-pane']");
-                const lastChild = [...pane.querySelectorAll('.mud-list-item')].at(-1);
+                const firstChild = pane.querySelector('.mud-list-item');
                 const method = [...pane.querySelectorAll('button')].find(button => button.textContent.includes('Create'));
-                return (lastChild.compareDocumentPosition(method) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+                return (method.compareDocumentPosition(firstChild) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
             }
             """);
-        Assert.True(methodsFollowChildren);
+        Assert.True(methodsPrecedeChildren);
+    }
+
+    [Fact]
+    public async Task WhenAMethodHasACategory_ThenItsButtonIsInsideTheCategory()
+    {
+        // Act
+        var page = await OpenAsync(MotorPath, 1280, 720, paneCount: 3);
+
+        // Assert
+        var pane = LastPane(page);
+        var category = pane.Locator("[data-testid='subject-pane-category']").Filter(new() { Has = CategoryTitle(page, "Speed") });
+        await Assertions.Expect(Method(category, "Set Speed")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(Method(pane, "Set Speed")).ToHaveCountAsync(1);
+    }
+
+    [Fact]
+    public async Task WhenAMethodHasNoCategory_ThenItsButtonPrecedesTheCategories()
+    {
+        // Act
+        var page = await OpenAsync(MotorPath, 1280, 720, paneCount: 3);
+
+        // Assert
+        var pane = LastPane(page);
+        var title = pane.Locator(CategoryTitle(page, "Speed"));
+        await Assertions.Expect(title).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+
+        var methodPrecedesCategory = await Method(pane, "Emergency Stop").EvaluateAsync<bool>(
+            "(method, title) => (method.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0",
+            await title.ElementHandleAsync());
+        Assert.True(methodPrecedesCategory, "The button without a category should come before the heading of the category.");
+    }
+
+    [Fact]
+    public async Task WhenAValueIsNull_ThenItIsListedInTheNoValueLineAndHasNoRow()
+    {
+        // Arrange
+        var page = await OpenAsync("browser/Plugins", 1280, 720, paneCount: 2);
+
+        // Act
+        await Child(page, "MyCompany.SamplePlugin1.HomeBlaze v1.0.0").ClickAsync();
+
+        // Assert
+        await WaitUntilSettledAsync(page, paneCount: 3);
+
+        // A plugin that was loaded has no status message.
+        var pane = LastPane(page);
+        var emptyValues = pane.Locator("[data-testid='subject-pane-empty-values']").Filter(new() { HasText = "StatusMessage" });
+        await Assertions.Expect(emptyValues).ToContainTextAsync("No value:", new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(pane.GetByText("StatusMessage:")).ToHaveCountAsync(0);
     }
 }

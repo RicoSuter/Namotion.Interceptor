@@ -48,21 +48,26 @@ public partial class HostSystem : BackgroundService,
     public partial TimeSpan PollingInterval { get; set; }
 
     [State(Position = 400)]
+    [Category("System")]
     public partial string MachineName { get; internal set; }
 
     [State(Position = 401)]
+    [Category("System")]
     public partial string OperatingSystemName { get; internal set; }
 
     [State(Position = 402)]
+    [Category("System")]
     public partial string Architecture { get; internal set; }
 
     /// <summary>
     /// Processors available to the process, honouring a container CPU quota and affinity.
     /// </summary>
     [State(Position = 403)]
+    [Category("System")]
     public partial int ProcessorCount { get; internal set; }
 
     [State(IsDiscrete = true, Position = 404)]
+    [Category("System")]
     public partial bool IsContainer { get; internal set; }
 
     /// <summary>
@@ -88,15 +93,18 @@ public partial class HostSystem : BackgroundService,
     /// Time since boot. Excludes suspended time on Linux and macOS and includes it on Windows.
     /// </summary>
     [State(Position = 414)]
+    [Category("System")]
     public partial TimeSpan? Uptime { get; internal set; }
 
     [State(Unit = StateUnit.Byte, Position = 420)]
+    [Category("System")]
     public partial long? ContainerMemoryLimit { get; internal set; }
 
     /// <summary>
     /// Container CPU limit in cores.
     /// </summary>
     [State(Position = 421)]
+    [Category("System")]
     public partial decimal? ContainerCpuLimit { get; internal set; }
 
     [State(Position = 430)]

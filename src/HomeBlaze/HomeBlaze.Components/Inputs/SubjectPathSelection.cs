@@ -10,9 +10,8 @@ namespace HomeBlaze.Components.Inputs;
 public static class SubjectPathSelection
 {
     /// <summary>
-    /// Gets whether the path of the property can be selected. For the path of a property
-    /// (<paramref name="subjectType"/> is null) that is a property that holds a value and no subjects. For the
-    /// path of a subject it is a reference that currently leads to an instance of <paramref name="subjectType"/>.
+    /// Gets whether the path of the property can be selected: without a <paramref name="subjectType"/> a property
+    /// that holds no subjects, otherwise a reference that currently leads to an instance of the type.
     /// </summary>
     public static bool CanSelectProperty(RegisteredSubjectProperty property, Type? subjectType)
     {
@@ -31,9 +30,8 @@ public static class SubjectPathSelection
     }
 
     /// <summary>
-    /// Gets whether the path of the subject can be selected, which holds for an instance of
-    /// <paramref name="subjectType"/>. No subject can be selected for the path of a property
-    /// (<paramref name="subjectType"/> is null).
+    /// Gets whether the path of the subject can be selected: an instance of <paramref name="subjectType"/>, and no
+    /// subject without a type.
     /// </summary>
     public static bool CanSelectSubject(IInterceptorSubject subject, Type? subjectType)
     {

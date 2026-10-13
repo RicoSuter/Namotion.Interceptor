@@ -116,7 +116,7 @@ else
     [Parameter]
     public bool IsSecret { get; set; }
 
-    // What the path picker lets the user select for a property marked with [SubjectPath], and null for every other property.
+    // Set only for a property marked with [SubjectPath], which is then edited with the path picker.
     private Func<RegisteredSubjectProperty, bool>? _canSelectProperty;
     private Func<IInterceptorSubject, bool>? _canSelectSubject;
     private RegisteredSubjectProperty? _examinedProperty;

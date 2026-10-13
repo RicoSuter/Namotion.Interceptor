@@ -52,12 +52,10 @@ public partial class Widget : ITitleProvider, IConfigurable
     }
 
     /// <summary>
-    /// Resolves the subject that <see cref="ResolvedSubject"/> would be if <see cref="Path"/> were
-    /// <paramref name="path"/>. Null if the path is empty or invalid, or no subject is found.
+    /// Resolves the subject that <see cref="ResolvedSubject"/> would be for the given path, or null.
     /// </summary>
     /// <remarks>
-    /// While the widget is not in the graph, only an absolute path resolves: a relative path starts at
-    /// the page that contains the widget, or at the widget itself.
+    /// While the widget is not in the graph, only an absolute path resolves.
     /// </remarks>
     public IInterceptorSubject? ResolveSubject(string path)
     {

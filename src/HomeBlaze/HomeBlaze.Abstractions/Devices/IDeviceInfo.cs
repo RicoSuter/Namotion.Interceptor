@@ -12,17 +12,22 @@ namespace HomeBlaze.Abstractions.Devices;
 public interface IDeviceInfo
 {
     [State(Position = 800)]
+    [Category("Device")]
     string? Manufacturer { get; }
 
     [State(Position = 801)]
+    [Category("Device")]
     string? Model { get; }
 
     [State(Position = 802)]
+    [Category("Device")]
     string? ProductCode { get; }
 
     [State(Position = 803)]
+    [Category("Device")]
     string? SerialNumber { get; }
 
     [State(Position = 804)]
+    [Category("Device")]
     string? HardwareRevision { get; }
 }

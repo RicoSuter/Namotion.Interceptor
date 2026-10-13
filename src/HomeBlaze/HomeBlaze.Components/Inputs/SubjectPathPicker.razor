@@ -21,50 +21,43 @@
 
     <MudDivider Class="my-2" />
 
-    @* An item that cannot be selected is ReadOnly, so that the tree never selects it. Rejecting it in
-       OnSelectedValueChangedAsync is too late: the tree has selected it by then and keeps it selected, because
-       assigning the previous item back passes the value that the tree was given last. *@
-    <div class="subject-path-picker-tree">
-        <MudTreeView T="PathTreeItem"
-                     Items="@_treeItems"
-                     SelectionMode="SelectionMode.SingleSelection"
-                     @bind-SelectedValue="_selectedItem"
-                     @bind-SelectedValue:after="OnSelectedValueChangedAsync"
-                     Hover="true"
-                     Dense="true">
-            <ItemTemplate>
-                <MudTreeViewItem T="PathTreeItem"
-                                 Value="@context.Value"
-                                 Items="@GetChildItems(context)"
-                                 Text="@context.Value?.DisplayName"
-                                 Icon="@context.Value?.Icon"
-                                 Expanded="@context.Expanded"
-                                 ExpandedChanged="@(expanded => OnExpandedChanged((TreeItemData<PathTreeItem>)context, expanded))"
-                                 ReadOnly="@(context.Value?.CanSelect == false)"
-                                 OnClick="@(() => OnItemClicked((TreeItemData<PathTreeItem>)context))"
-                                 Class="@GetItemClass(context.Value)" />
-            </ItemTemplate>
-        </MudTreeView>
-    </div>
+    @* An item that cannot be selected is ReadOnly: rejecting it in OnSelectedValueChangedAsync is too late, as the
+       tree has selected it by then and keeps it selected. *@
+    <MudTreeView T="PathTreeItem"
+                 Items="@_treeItems"
+                 SelectionMode="SelectionMode.SingleSelection"
+                 @bind-SelectedValue="_selectedItem"
+                 @bind-SelectedValue:after="OnSelectedValueChangedAsync"
+                 Hover="true"
+                 Dense="true"
+                 Height="300px">
+        <ItemTemplate>
+            <MudTreeViewItem T="PathTreeItem"
+                             Value="@context.Value"
+                             Items="@GetChildItems(context)"
+                             Text="@context.Value?.DisplayName"
+                             Icon="@context.Value?.Icon"
+                             Expanded="@context.Expanded"
+                             ExpandedChanged="@(expanded => OnExpandedChanged((TreeItemData<PathTreeItem>)context, expanded))"
+                             ReadOnly="@(context.Value?.CanSelect == false)"
+                             OnClick="@(() => OnItemClicked((TreeItemData<PathTreeItem>)context))"
+                             Class="@GetItemClass(context.Value)" />
+        </ItemTemplate>
+    </MudTreeView>
 </div>
 
-@* The row of an item is dimmed and not the item, which contains its children: a subject that only leads to
-   what can be selected would dim everything below it, once more per level. *@
+@* MudBlazor puts the class of an item on the element that also contains its children, so the rules select the row
+   of the item: on the element, the opacity would dim everything below it, once more per level. *@
 <style>
-    .subject-path-picker-tree {
-        height: 300px;
-        overflow-y: auto;
-    }
-
-    .subject-path-picker-tree .subject-path-picker-disabled > .mud-treeview-item-content {
+    .subject-path-picker .subject-path-picker-disabled > .mud-treeview-item-content {
         opacity: 0.5;
     }
 
-    .subject-path-picker-tree .subject-path-picker-not-selectable > .mud-treeview-item-content {
+    .subject-path-picker .subject-path-picker-not-selectable > .mud-treeview-item-content {
         opacity: 0.6;
     }
 
-    .subject-path-picker-tree .subject-path-picker-expands-on-click > .mud-treeview-item-content {
+    .subject-path-picker .subject-path-picker-expands-on-click > .mud-treeview-item-content {
         cursor: pointer;
     }
 </style>
@@ -92,8 +85,7 @@
     public Func<RegisteredSubjectProperty, bool>? CanSelectProperty { get; set; }
 
     /// <summary>
-    /// Decides whether a subject can be selected. Without it every subject can be selected.
-    /// A subject that cannot be selected still leads to what is below it.
+    /// Decides whether a subject can be selected, every subject when null. One that cannot still expands.
     /// </summary>
     [Parameter]
     public Func<IInterceptorSubject, bool>? CanSelectSubject { get; set; }
@@ -466,8 +458,7 @@
         };
     }
 
-    // Binding the text field to Value would only set the parameter here and never raise ValueChanged, so
-    // typed or pasted text would not reach the parent.
+    // Binding the text field to Value would set the parameter here without raising ValueChanged to the parent.
     private async Task OnPathTypedAsync(string? value)
     {
         Value = value;

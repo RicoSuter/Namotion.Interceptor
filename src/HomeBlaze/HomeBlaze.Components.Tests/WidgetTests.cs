@@ -203,7 +203,7 @@ public class WidgetTests
     [Fact]
     public void WhenWidgetIsNotInTheGraph_ThenOnlyAnAbsolutePathIsResolved()
     {
-        // Arrange: a widget that is being created has no parent yet.
+        // Arrange
         var content = new Card(_context);
         var root = new Card(_context) { Content = content };
         var widget = new Widget(new SubjectPathResolver(() => root));

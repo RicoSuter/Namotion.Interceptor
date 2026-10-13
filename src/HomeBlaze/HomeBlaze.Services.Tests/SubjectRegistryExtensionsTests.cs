@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
@@ -319,6 +320,128 @@ public class SubjectRegistryExtensionsTests
         Assert.Equal(StateUnit.Watt, metadata.Unit);
         Assert.Equal(5, metadata.Position);
     }
+
+    [Fact]
+    public void WhenAPropertyHasACategory_ThenGetCategoryReturnsIt()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Bass))!;
+
+        // Act
+        var category = property.GetCategory();
+
+        // Assert
+        Assert.Equal("Sound", category);
+    }
+
+    [Fact]
+    public void WhenAPropertyHasNoCategory_ThenGetCategoryReturnsNull()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Status))!;
+
+        // Act
+        var category = property.GetCategory();
+
+        // Assert
+        Assert.Null(category);
+    }
+
+    [Fact]
+    public void WhenOnlyTheInterfacePropertyHasACategory_ThenGetCategoryReturnsIt()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Volume))!;
+
+        // Act
+        var category = property.GetCategory();
+
+        // Assert
+        Assert.Equal("Volume", category);
+    }
+
+    [Fact]
+    public void WhenTheClassAndTheInterfacePropertyHaveACategory_ThenGetCategoryReturnsTheOneOfTheClass()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.IsMuted))!;
+
+        // Act
+        var category = property.GetCategory();
+
+        // Assert
+        Assert.Equal("Sound", category);
+    }
+
+    [Fact]
+    public void WhenTheClassPropertyHasAnEmptyCategory_ThenGetCategoryReturnsNullInsteadOfTheOneOfTheInterfaceProperty()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Balance))!;
+
+        // Act
+        var category = property.GetCategory();
+
+        // Assert
+        Assert.Null(category);
+    }
+
+    [Fact]
+    public void WhenACategoryHasSurroundingWhitespace_ThenGetCategoryReturnsTheTrimmedName()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Treble))!;
+
+        // Act
+        var category = property.GetCategory();
+
+        // Assert
+        Assert.Equal("Sound", category);
+    }
+}
+
+public interface ICategorizedTestInterface
+{
+    [State]
+    [Category("Volume")]
+    decimal? Volume { get; }
+
+    [State]
+    [Category("Volume")]
+    bool? IsMuted { get; }
+
+    [State]
+    [Category("Volume")]
+    decimal? Balance { get; }
+}
+
+[InterceptorSubject]
+public partial class CategorizedTestSubject : ICategorizedTestInterface
+{
+    [State]
+    public partial string? Status { get; set; }
+
+    [State]
+    [Category("Sound")]
+    public partial int? Bass { get; set; }
+
+    public partial decimal? Volume { get; set; }
+
+    [Category("Sound")]
+    public partial bool? IsMuted { get; set; }
+
+    [Category("")]
+    public partial decimal? Balance { get; set; }
+
+    [State]
+    [Category(" Sound ")]
+    public partial int? Treble { get; set; }
 }
 
 [InterceptorSubject]

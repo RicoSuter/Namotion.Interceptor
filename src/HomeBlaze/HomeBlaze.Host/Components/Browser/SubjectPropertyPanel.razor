@@ -30,8 +30,7 @@
                     }
 
                     @* Stays an h1: the page focuses the first h1 after navigation. *@
-                    <MudText Typo="Typo.h6" HtmlTag="h1" Class="flex-grow-1"
-                             Style="min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    <MudText Typo="Typo.h6" HtmlTag="h1" Class="flex-grow-1 mud-typography-nowrap">
                         <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Color="@GetSubjectIconColor(Subject)" Class="mr-2" Style="vertical-align: middle;" />
                         @GetSubjectTitle()
                     </MudText>
@@ -64,41 +63,70 @@
                             <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                         }
 
-                        @* The padding keeps the larger icon within the height of the title line. *@
-                        <MudTooltip Text="Close">
+                        @* The padding keeps the larger icon within the height of the title line. No Color is the primary
+                           text colour, and its class on the button would lose to the colour of an icon button, so the
+                           button inherits it from the root of the tooltip. *@
+                        <MudTooltip Text="Close" RootClass="mud-text-primary">
                             <MudIconButton OnClick="@(() => OnClose.InvokeAsync())"
                                            Icon="@Icons.Material.Filled.Close"
                                            Variant="Variant.Text"
+                                           Color="Color.Inherit"
                                            Size="Size.Medium"
-                                           Style="padding: 4px; color: var(--mud-palette-text-primary);"
+                                           Class="pa-1"
                                            aria-label="Close"
                                            data-testid="close-pane-button" />
                         </MudTooltip>
                     }
                 </MudListSubheader>
 
+                @* No block of the content has outer spacing of its own. Each gets the gap above it from GetGapClass, by
+                   what precedes it, so the block that was rendered last is kept in previousBlock. *@
                 <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
-                    @* Primitive Properties *@
+                    @* Primitive properties and methods (operations and queries) without a category *@
                     @{
-                        var primitiveProperties = GetPrimitiveProperties().ToList();
-                        if (primitiveProperties.Count > 0)
-                        {
-                            <MudListSubheader Style="word-break: break-word;">
-                                @foreach (var prop in primitiveProperties)
-                                {
-                                    @RenderProperty(prop, 0)
-                                }
-                            </MudListSubheader>
-                        }
+                        var members = GetMemberGroups();
+                        var previousBlock = PaneBlock.None;
+                    }
+                    @if (members.UncategorizedValues.Count > 0)
+                    {
+                        @RenderValues(members.UncategorizedValues, GetGapClass(previousBlock, PaneBlock.Values))
+                        previousBlock = PaneBlock.Values;
+                    }
+                    @if (members.UncategorizedMethods.Count > 0)
+                    {
+                        @RenderMethods(members.UncategorizedMethods, GetGapClass(previousBlock, PaneBlock.Methods))
+                        previousBlock = PaneBlock.Methods;
+                    }
+
+                    @* Categories: the values of a category and its methods below them *@
+                    @foreach (var category in members.Categories)
+                    {
+                        <div class="@GetGapClass(previousBlock, PaneBlock.Category)" data-testid="subject-pane-category">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Primary" HtmlTag="h2" Class="px-4"
+                                     data-testid="subject-pane-category-title">@category.Name</MudText>
+                            @if (category.Values.Count > 0)
+                            {
+                                @RenderValues(category.Values, GetGapClass(PaneBlock.CategoryTitle, PaneBlock.Values))
+                            }
+                            @if (category.Methods.Count > 0)
+                            {
+                                @RenderMethods(category.Methods, GetGapClass(
+                                    category.Values.Count > 0 ? PaneBlock.Values : PaneBlock.CategoryTitle, PaneBlock.Methods))
+                            }
+                        </div>
+                        previousBlock = PaneBlock.Category;
                     }
 
                     @* Child Collections *@
                     @foreach (var section in GetChildSections())
                     {
+                        var sectionGapClass = GetGapClass(previousBlock, PaneBlock.Section);
+                        previousBlock = PaneBlock.Section;
+
                         @if (section.CollectionProperty is null)
                         {
                             @* Consecutive single child references share one list *@
-                            <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true" Class="pt-2" Style="padding-bottom: 0">
+                            <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true" Class="@sectionGapClass">
                                 @foreach (var (property, child) in section.SingleChildren)
                                 {
                                     var isSelected = child.Subject == SelectedChild;
@@ -129,9 +157,8 @@
                         {
                             var property = section.CollectionProperty;
                             var children = section.CollectionChildren;
-                            @* MudBlazor gives an expanded panel a margin of 16px, but not as the first or the last child. The
-                               fixed margin keeps the distance to the block above the same in every case. *@
-                            <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="mt-2 mb-0" HeaderClass="px-4 subject-pane-section-header">
+                            @* mb-0, as MudBlazor gives an expanded panel a margin of 16px above and below. *@
+                            <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="@($"{sectionGapClass} mb-0")" HeaderClass="px-4 subject-pane-section-header">
                                 <TitleContent>
                                     @GetPropertyDisplayName(property)
                                     <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="my-0">@children.Length</MudChip>
@@ -168,39 +195,8 @@
                         }
                     }
 
-                    @* Methods Section (Operations & Queries) *@
-                    @{
-                        var methods = GetMethods();
-                        if (methods.Count > 0)
-                        {
-                            <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="2" Class="px-4 pt-2">
-                                @foreach (var method in methods)
-                                {
-                                    var isQuery = method.Kind == MethodKind.Query;
-                                    var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                                    var methodProperty = _registeredSubject?.TryGetProperty(method.PropertyName);
-                                    var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
-                                    var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
-                                    <MudButton Variant="Variant.Filled"
-                                               Color="@(isQuery ? Color.Info : Color.Primary)"
-                                               Size="Size.Small"
-                                               Class="subject-pane-method"
-                                               StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
-                                               Disabled="@(_executingMethod == method || !isEnabled)"
-                                               OnClick="@(() => ExecuteMethodAsync(method))">
-                                        @if (_executingMethod == method)
-                                        {
-                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                        }
-                                        @method.Title
-                                    </MudButton>
-                                }
-                            </MudStack>
-                        }
-                    }
-
                     @* Details Accordion *@
-                    <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Class="mt-2" Style="overflow: hidden;">
+                    <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Class="@GetGapClass(previousBlock, PaneBlock.Section)" Style="overflow: hidden;">
                         <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4" HeaderClass="subject-pane-section-header">
                             <TitleContent>
                                 Details
@@ -223,19 +219,22 @@
 
 <style>
     /* The line of a dense row is 20px, but the count chip and the chevron of the selected child are 24px high. Without
-       this, rows with a chip are higher than rows without one and the chevron hangs below the name. */
+       this, rows with a chip are higher than rows without one and the chevron hangs below the name. MudBlazor has no
+       parameter or class for a line height. */
     .subject-pane-child-name {
         line-height: 24px;
     }
 
-    /* MudBlazor has no parameter for the height of a panel header and sets it with two classes, so this takes three. */
+    /* MudBlazor has no parameter or class for the 48px minimum height of a panel header, and its spacing classes have
+       no 6px. It sets both with two classes, so this takes three. */
     .mud-expand-panel .mud-expand-panel-header.subject-pane-section-header {
         min-height: 36px;
         padding-top: 6px;
         padding-bottom: 6px;
     }
 
-    /* A title too long for the pane wraps inside its button, which would otherwise be wider than the pane. */
+    /* A title too long for the pane wraps inside its button, which would otherwise be wider than the pane. MudBlazor
+       has no class for a maximum width or for where a word breaks. */
     .subject-pane-method {
         max-width: 100%;
         overflow-wrap: anywhere;
@@ -243,6 +242,11 @@
 </style>
 
 @code {
+    // Strings and not markup, in which the space at the end would be removed. The separator starts with a no-break
+    // space, so no line of the wrapped list starts with a dot.
+    private const string EmptyValuesLabel = "No value: ";
+    private const string EmptyValuesSeparator = "\xA0· ";
+
     private readonly HashSet<string> _expandedProperties = [];
 
     private RegisteredSubject? _registeredSubject;
@@ -397,14 +401,11 @@
             _expandedProperties.Add(propertyName);
     }
 
-    private RenderFragment RenderProperty(RegisteredSubjectProperty prop, int depth) => __builder =>
+    // Takes the value, which the caller has read while rendering: the read is what the tracking scope records to render
+    // the pane again when the value changes.
+    private RenderFragment RenderProperty(RegisteredSubjectProperty prop, object? value, int depth) => __builder =>
     {
-        // Property reads are automatically recorded via the context-based ReadPropertyRecorder
-        var value = prop.GetValue();
-        var attributes = prop.Attributes
-            .Where(a => a.AttributeMetadata.AttributeName != KnownAttributes.State &&
-                        a.AttributeMetadata.AttributeName != KnownAttributes.Configuration)
-            .ToArray();
+        var attributes = prop.Attributes.Where(IsDetail).ToArray();
         var hasAttributes = attributes.Length > 0;
         var isExpanded = _expandedProperties.Contains(prop.Name);
         var marginLeft = depth * 24;
@@ -455,10 +456,17 @@
         {
             foreach (var attr in attributes)
             {
-                @RenderProperty(attr, depth + 1)
+                @RenderProperty(attr, attr.GetValue(), depth + 1)
             }
         }
     };
+
+    // An attribute that the row of its property shows when expanded, which gives the row its arrow.
+    private static bool IsDetail(RegisteredSubjectProperty attribute) =>
+        attribute.AttributeMetadata.AttributeName is not (KnownAttributes.State or KnownAttributes.Configuration);
+
+    private static bool HasDetails(RegisteredSubjectProperty property) =>
+        Array.Exists(property.Attributes, IsDetail);
 
     private string GetPropertyDisplayName(RegisteredSubjectProperty property)
     {
@@ -534,6 +542,129 @@
 
     private IReadOnlyList<MethodMetadata> GetMethods() =>
         _registeredSubject?.GetAllMethods() ?? [];
+
+    private SubjectMemberGroups<RegisteredSubjectProperty, MethodMetadata> GetMemberGroups() =>
+        SubjectMemberGrouping.Group(
+            GetPrimitiveProperties().ToList(),
+            static property => property.GetCategory(),
+            static property => property.GetDisplayPosition(),
+            GetMethods(),
+            static method => method.Category,
+            static method => method.Position);
+
+    // The kinds of block in the content of the pane, by which the gap between two of them is chosen. A section is a
+    // list of children, a collection or the details.
+    private enum PaneBlock
+    {
+        None,
+        Values,
+        Methods,
+        Category,
+        CategoryTitle,
+        Section
+    }
+
+    // The gap above a block as a spacing class of MudBlazor, which is 4px per step: 16px around a category, 12px around
+    // a row of method buttons and 8px otherwise, which with the bottom padding of the header is also the distance to
+    // the header. The category comes before the methods: a category after a row of buttons is 16px away, not 12px.
+    private static string GetGapClass(PaneBlock previousBlock, PaneBlock block) => (previousBlock, block) switch
+    {
+        (PaneBlock.None, _) => "mt-2",
+        (PaneBlock.CategoryTitle, PaneBlock.Values) => "mt-1",
+        (PaneBlock.CategoryTitle, _) => "mt-2",
+        (PaneBlock.Category, _) or (_, PaneBlock.Category) => "mt-4",
+        (PaneBlock.Methods, _) or (_, PaneBlock.Methods) => "mt-3",
+        _ => "mt-2"
+    };
+
+    private RenderFragment RenderValues(IReadOnlyList<RegisteredSubjectProperty> values, string gapClass) => __builder =>
+    {
+        // py-0, as MudBlazor pads a list subheader by 8px above and 20px below.
+        <MudListSubheader Class="@($"{gapClass} py-0")" Style="word-break: break-word;">
+            @{
+                // Created for the first value without a value: most blocks have none.
+                List<RegisteredSubjectProperty>? emptyValues = null;
+                var hasRows = false;
+            }
+            @foreach (var property in values)
+            {
+                // Read also for a value that gets no row: the tracking scope records the read, so the pane is rendered
+                // again and the value gets its row once it is set.
+                var value = property.GetValue();
+                if (value is null && !HasDetails(property))
+                {
+                    emptyValues ??= [];
+                    emptyValues.Add(property);
+                }
+                else
+                {
+                    hasRows = true;
+                    @RenderProperty(property, value, 0)
+                }
+            }
+            @if (emptyValues is not null)
+            {
+                @RenderEmptyValues(emptyValues, hasRows)
+            }
+        </MudListSubheader>
+    };
+
+    // One line for the values that are null and have no details to expand, in place of a dimmed row for each.
+    private RenderFragment RenderEmptyValues(List<RegisteredSubjectProperty> emptyValues, bool hasRows) => __builder =>
+    {
+        // A div, as the span of a caption takes no margin above it.
+        <MudText Typo="Typo.caption" HtmlTag="div" Class="@(hasRows ? "mud-text-secondary mt-1" : "mud-text-secondary")"
+                 data-testid="subject-pane-empty-values">
+            @EmptyValuesLabel
+            @{ var isFirst = true; }
+            @foreach (var property in emptyValues)
+            {
+                if (!isFirst)
+                {
+                    @EmptyValuesSeparator
+                }
+
+                isFirst = false;
+                var displayName = GetPropertyDisplayName(property);
+                if (CanShowHistory(property))
+                {
+                    <MudLink Color="Color.Inherit" Underline="Underline.Hover" title="Show history"
+                             OnClick="@(() => OpenPropertyHistoryDialogAsync(property))">@displayName</MudLink>
+                }
+                else
+                {
+                    @displayName
+                }
+            }
+        </MudText>
+    };
+
+    private RenderFragment RenderMethods(IReadOnlyList<MethodMetadata> methods, string gapClass) => __builder =>
+    {
+        <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="2" Class="@($"{gapClass} px-4")">
+            @foreach (var method in methods)
+            {
+                var isQuery = method.Kind == MethodKind.Query;
+                var defaultIcon = isQuery ? "Search" : "PlayArrow";
+                var methodProperty = _registeredSubject?.TryGetProperty(method.PropertyName);
+                var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
+                var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
+                <MudButton Variant="Variant.Filled"
+                           Color="@(isQuery ? Color.Info : Color.Primary)"
+                           Size="Size.Small"
+                           Class="subject-pane-method"
+                           StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
+                           Disabled="@(_executingMethod == method || !isEnabled)"
+                           OnClick="@(() => ExecuteMethodAsync(method))">
+                    @if (_executingMethod == method)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    @method.Title
+                </MudButton>
+            }
+        </MudStack>
+    };
 
     private async Task ExecuteMethodAsync(MethodMetadata method)
     {

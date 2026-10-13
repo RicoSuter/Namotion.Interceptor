@@ -11,9 +11,7 @@ public sealed class SubjectPathAttribute : Attribute
     {
     }
 
-    /// <param name="subjectType">
-    /// The type that the subject at the path is an instance of. <c>typeof(IInterceptorSubject)</c> stands for any subject.
-    /// </param>
+    /// <param name="subjectType">The type that the subject at the path is an instance of.</param>
     public SubjectPathAttribute(Type subjectType)
     {
         SubjectType = subjectType;

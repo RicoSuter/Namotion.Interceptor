@@ -51,7 +51,7 @@
     public Func<RegisteredSubjectProperty, bool>? CanSelectProperty { get; set; }
 
     /// <summary>
-    /// Decides whether the picker lets the user select a subject. Without it every subject can be selected.
+    /// Decides whether the picker lets the user select a subject, every subject when null.
     /// </summary>
     [Parameter]
     public Func<IInterceptorSubject, bool>? CanSelectSubject { get; set; }
@@ -84,8 +84,7 @@
         }
     }
 
-    // Also the handler of the text field. Binding the text field to Value would only set the parameter here
-    // and never raise ValueChanged, so typed text would not reach the parent.
+    // Binding the text field to Value would set the parameter here without raising ValueChanged to the parent.
     private async Task SetValueAsync(string? value)
     {
         Value = value;

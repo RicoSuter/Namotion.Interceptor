@@ -70,6 +70,11 @@ public class MethodMetadata
     public int Position { get; init; }
 
     /// <summary>
+    /// The category the UI groups the method under, or null when it has none.
+    /// </summary>
+    public string? Category { get; init; }
+
+    /// <summary>
     /// Whether the UI should show a confirmation dialog before invoking this method.
     /// </summary>
     public bool RequiresConfirmation { get; init; }
