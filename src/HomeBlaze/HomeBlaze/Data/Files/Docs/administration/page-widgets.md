@@ -377,7 +377,7 @@ Both motors are shown by name, so they are the same motors as in the samples abo
 Both motors are shown by name, so they are the same motors as in the samples above.
 ::
 
-The tab bar at the left of the content. In a window that is narrower than 600 pixels it is at the top instead:
+The tab bar at the left of the content:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -396,7 +396,7 @@ The tab bar at the left of the content. In a window that is narrower than 600 pi
 :::: HomeBlaze.Components.Widget Path=fan
 ::
 
-- **Tabs at a side need a wide window**: With `Position=Left` or `Position=Right` the tab bar is at the top while the browser window is narrower than 600 pixels, because the content would have too little room beside it. The width of the window counts, not that of the place the layout stands in.
+- **Tabs at a side need a wide window**: With `Position=Left` or `Position=Right` the tab bar is at the top while the browser window is narrower than 600 pixels, because the content would have too little room beside it. The width of the window counts, not that of the place the layout stands in. Content that cannot get as narrow as the room beside the tab bar, like a wide table, scrolls inside the tab.
 - **All tabs are rendered**: Every tab is rendered and kept up to date, also the hidden ones. A subject in a hidden tab keeps running, and a hidden tab costs as much as a visible one.
 - **The first tab is selected**: When the page opens, the first tab is shown. The selection is not saved and there is no argument for it.
 - **Names keep the selection**: When the page text changes while the page is open, a tab with a name stays selected, also when tabs are added, removed or moved. A tab without a name is known by its position only, so the selection stays at the position. When the selected tab is gone, the first tab is selected.

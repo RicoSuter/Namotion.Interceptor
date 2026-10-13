@@ -405,6 +405,14 @@ public class MarkdownBlockTests
         var bar = (await GetBoxesAsync(tabs.Locator(".mud-tabs-tabbar"))).Single();
         var widePanel = (await GetBoxesAsync(tabs.GetByTestId("tab-panel").First)).Single();
         var buttons = await GetBoxesAsync(tabs.GetByRole(AriaRole.Tab));
+        var titleStarts = await tabs.GetByRole(AriaRole.Tab).EvaluateAllAsync<double[]>(
+            """
+            elements => elements.map(element => {
+                const range = document.createRange();
+                range.selectNodeContents(element);
+                return range.getBoundingClientRect().left;
+            })
+            """);
         var scrollsSideways = await HasHorizontalScrollingAsync(page);
 
         await GetTab(tabs, "Beta").ClickAsync();
@@ -413,6 +421,11 @@ public class MarkdownBlockTests
 
         // Assert: the tabs stand below each other at a side and next to each other above or below the content.
         Assert.True(isAtASide ? buttons[1].Top >= buttons[0].Bottom : buttons[1].Left >= buttons[0].Right, $"{buttons[0]} {buttons[1]}");
+        if (isAtASide)
+        {
+            // Titles of different lengths start at the same place, which centred titles do not.
+            Assert.All(titleStarts, start => Assert.Equal(titleStarts[0], start, 0.5));
+        }
         Assert.True(position switch
         {
             "Left" => bar.Right <= widePanel.Left,
@@ -425,6 +438,41 @@ public class MarkdownBlockTests
         var expectedWidth = layout.Right - layout.Left - (isAtASide ? bar.Right - bar.Left : 0);
         Assert.Equal(expectedWidth, widePanel.Right - widePanel.Left, 1.0);
         Assert.Equal(expectedWidth, narrowPanel.Right - narrowPanel.Left, 1.0);
+        Assert.False(scrollsSideways);
+    }
+
+    [Theory]
+    [InlineData("Left")]
+    [InlineData("Right")]
+    public async Task WhenContentBesideTheTabBarCannotGetNarrowEnough_ThenItScrollsInsideItsPanelAndLeavesTheTabsFree(string position)
+    {
+        // Arrange: a word without a place to break, far wider than the window.
+        await WriteScratchPageAsync(
+            "---\ntitle: Scratch\n---\n\n# Scratch\n\n" +
+            $":: HomeBlaze.Components.TabLayout#tabs Position={position}\n" +
+            CreateTab("alpha", "Alpha", new string('x', 800)) + CreateTab("beta", "Beta") + "::\n");
+        var page = await OpenPageAsync(ScratchPage);
+        await page.SetViewportSizeAsync(1280, 800);
+        var tabs = page.GetByTestId("tab-layout");
+        await Assertions.Expect(tabs.GetByTestId("tab-panel").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await WaitForLayoutAsync(page, "tab-layout", width => width > 800);
+        await WaitForTabBarAsync(page, Beside);
+
+        // Act
+        var panelScrolls = await tabs.GetByTestId("tab-panel").First.EvaluateAsync<bool>("panel => panel.scrollWidth > panel.clientWidth");
+        var tabIsOnTop = await GetTab(tabs, "Beta").EvaluateAsync<bool>(
+            """
+            tab => {
+                const box = tab.getBoundingClientRect();
+                const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+                return tab.contains(top);
+            }
+            """);
+        var scrollsSideways = await HasHorizontalScrollingAsync(page);
+
+        // Assert
+        Assert.True(panelScrolls);
+        Assert.True(tabIsOnTop);
         Assert.False(scrollsSideways);
     }
 
@@ -502,8 +550,6 @@ public class MarkdownBlockTests
         await Assertions.Expect(liveText).ToContainTextAsync("°C", new() { Timeout = 30000 });
         await WaitForTabBarAsync(page, position is null ? Above : Beside);
 
-        // The first renders of the layout are over once the page has rendered again.
-        await WaitForOtherTextAsync(liveText);
         await page.EvaluateAsync(
             """
             () => {
@@ -517,6 +563,20 @@ public class MarkdownBlockTests
                 };
             }
             """);
+
+        // The layout measures its tabs after its first renders. They are over when a render of the page adds no
+        // measurement. A layout that measures on every render never gets there, and fails below.
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var measuredBefore = await page.EvaluateAsync<int>("() => window.measuredElements");
+            await WaitForOtherTextAsync(liveText);
+            if (await page.EvaluateAsync<int>("() => window.measuredElements") == measuredBefore)
+            {
+                break;
+            }
+        }
+
+        await page.EvaluateAsync("() => { window.measuredElements = 0; }");
 
         // Act
         await WaitForOtherTextAsync(liveText);
