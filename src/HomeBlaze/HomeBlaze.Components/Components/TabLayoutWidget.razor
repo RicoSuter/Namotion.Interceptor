@@ -1,5 +1,4 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(TabLayout))]
-@using Microsoft.JSInterop
 @using MudBlazor.Services
 @implements ISubjectComponent
 @implements IBrowserViewportObserver
@@ -19,7 +18,7 @@
              Elevation="1"
              Rounded="true"
              KeepPanelsAlive="true"
-             Position="@position"
+             @attributes="GetChangedPosition(position)"
              ActivePanelIndex="@GetActivePanelIndex(tabs)"
              ActivePanelIndexChanged="@OnActivePanelIndexChanged">
         @* Not keyed: MudTabs lists its panels in the order they were created, so a panel that moved with
@@ -39,10 +38,20 @@
 
 <style>
     /* Beside the tab bar the panels are the items of a row. A panel takes the room that the tab bar leaves,
-       also when its content is narrower, and wide content shrinks to that room instead of widening the page. */
+       also when its content is narrower. */
     .tab-layout-panel {
         flex: 1 1 0;
         min-width: 0;
+    }
+
+    /* Without this, content that cannot wrap, like a long line of code, widens the row and with it the page. */
+    .tab-layout .mud-tabs-panels.mud-tabs-vertical {
+        min-width: 0;
+    }
+
+    /* Tabs below each other start at the same place, so that their icons stand in one line. */
+    .tab-layout .mud-tabs-tabbar.mud-tabs-vertical .mud-tab {
+        justify-content: flex-start;
     }
 </style>
 
@@ -52,17 +61,21 @@
     // Only ever compared with the tabs of the current render, never used on its own.
     private Tab? _selectedTab;
 
+    // The position that MudTabs has, which starts as its default.
+    private MudBlazor.Position _shownPosition = MudBlazor.Position.Top;
+
+    private bool _isNarrow;
+    private bool _isSubscribed;
+    private bool _isDisposed;
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
     private TabLayout? Layout => Subject as TabLayout;
 
-    private bool _isSubscribed;
-    private bool _isNarrow;
-
     Guid IBrowserViewportObserver.Id { get; } = Guid.NewGuid();
 
-    ResizeOptions IBrowserViewportObserver.ResizeOptions { get; } = new() { NotifyOnBreakpointOnly = true };
+    ResizeOptions? IBrowserViewportObserver.ResizeOptions => null;
 
     // A tab bar at a side leaves too little room for the content of a narrow window, so it is at the top there.
     private MudBlazor.Position GetPosition() => Layout?.Position switch
@@ -72,6 +85,19 @@
         TabPosition.Bottom => MudBlazor.Position.Bottom,
         _ => MudBlazor.Position.Top
     };
+
+    // MudTabs measures its tabs in the browser and renders a second time whenever it is handed a position, also
+    // an unchanged one. It keeps the last position it was handed, so it gets one only when the position changes.
+    private Dictionary<string, object>? GetChangedPosition(MudBlazor.Position position)
+    {
+        if (position == _shownPosition)
+        {
+            return null;
+        }
+
+        _shownPosition = position;
+        return new Dictionary<string, object> { [nameof(MudTabs.Position)] = position };
+    }
 
     // The space between the tab bar and the content.
     private static string GetPanelSpacing(MudBlazor.Position position) => position switch
@@ -92,13 +118,12 @@
         }
 
         _isSubscribed = true;
-        try
+        await BrowserViewportService.SubscribeAsync(this, fireImmediately: true);
+
+        // The service adds the observer when the browser has answered, which can be after the page was left.
+        if (_isDisposed)
         {
-            await BrowserViewportService.SubscribeAsync(this, fireImmediately: true);
-        }
-        catch (JSDisconnectedException)
-        {
-            // The circuit is gone, so there is no window to watch.
+            await BrowserViewportService.UnsubscribeAsync(this);
         }
     }
 
@@ -116,18 +141,10 @@
 
     public async ValueTask DisposeAsync()
     {
-        if (!_isSubscribed)
-        {
-            return;
-        }
-
-        try
+        _isDisposed = true;
+        if (_isSubscribed)
         {
             await BrowserViewportService.UnsubscribeAsync(this);
-        }
-        catch (JSDisconnectedException)
-        {
-            // The circuit is gone, and its listener with it.
         }
     }
 

@@ -227,7 +227,7 @@ public class PageWidgetsPageTests
     }
 
     [Fact]
-    public async Task WhenPageIsLoaded_ThenTheTabLayoutsHaveTheTabsOfTheirSamples()
+    public async Task WhenPageIsLoaded_ThenTheTabLayoutsHaveTheTabsAndThePositionsOfTheirSamples()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();

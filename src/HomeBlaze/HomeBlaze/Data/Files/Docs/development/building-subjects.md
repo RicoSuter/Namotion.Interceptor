@@ -1135,7 +1135,7 @@ The second value of `Items`.
 ::
 ~~~~
 
-**A list of typed values.** When the type of the slot is a subject class of your own, the page creates one instance of that class per block. The arguments of the block set the `[Configuration]` properties of the instance, the block can have a `#name`, and the content of the block goes to the default slot of the instance. `TabLayout` gets its tabs this way, and `Tab` is the class of one tab:
+**A list of typed values.** When the type of the slot is a subject class of your own, the page creates one instance of that class per block. The arguments of the block set the `[Configuration]` properties of the instance, the block can have a `#name`, and the content of the block goes to the default slot of the instance. `TabLayout` gets its tabs this way, and `Tab` is the class of one tab (both shortened):
 
 ```csharp
 [InterceptorSubject]
@@ -1320,7 +1320,7 @@ Rules for rendering:
 
 What a widget author must know about the life of a subject that a page creates. It holds for the subject of a widget block and for a typed slot value alike.
 
-- **`IConfigurable` is required**: A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `TabLayout`. For a type without it, the page shows an error that says the type cannot be used as a block.
+- **`IConfigurable` is required**: A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `ValueList`. For a type without it, the page shows an error that says the type cannot be used as a block.
 - **Names of the configuration**: A page names a `[Configuration]` property by its property name, for example `TargetSpeed=1200` on the head line and `"TargetSpeed"` in the `json` block, also for the properties of nested objects and subjects. Configuration files keep camelCase, and a page uses the property names. An explicit JSON name on a property, such as `[JsonPropertyName]`, applies to configuration files only.
 - **Creation**: The page creates the subject through the service provider, so constructor injection works, then sets the `[Configuration]` properties that the block names and then fills the slots. It does not call `ApplyConfigurationAsync` for a new subject.
 - **Kept across reloads**: The page is read again with every change of its text. While the block stays, the page keeps the instance and updates it in place: it sets every `[Configuration]` property that the block names again, also when the value did not change, calls `ApplyConfigurationAsync`, and assigns the slots again. Expect all of this to run often.
