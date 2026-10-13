@@ -29,6 +29,9 @@ public partial class HostSystem : BackgroundService,
 {
     private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(1);
 
+    // SemaphoreSlim.WaitAsync(TimeSpan) throws above int.MaxValue milliseconds (about 24.8 days).
+    private static readonly TimeSpan MaximumPollingDelay = TimeSpan.FromMilliseconds(int.MaxValue);
+
     private readonly ISystemMetricsReader? _reader;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _pollSignal = new(0, 1);
@@ -278,7 +281,12 @@ public partial class HostSystem : BackgroundService,
 
     private TimeSpan GetPollingDelay()
     {
-        return PollingInterval < MinimumPollingInterval ? MinimumPollingInterval : PollingInterval;
+        if (PollingInterval < MinimumPollingInterval)
+        {
+            return MinimumPollingInterval;
+        }
+
+        return PollingInterval > MaximumPollingDelay ? MaximumPollingDelay : PollingInterval;
     }
 
     private TimeSpan GetRateWindowDelay()

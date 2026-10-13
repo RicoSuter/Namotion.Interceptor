@@ -190,6 +190,35 @@ public class HostSystemTests
         Assert.Equal(0.25m, host.CpuUsage);
     }
 
+    [Fact]
+    public async Task WhenPollingIntervalIsHuge_ThenLoopKeepsRunning()
+    {
+        // Arrange: int.MaxValue milliseconds is about 24.8 days, and SemaphoreSlim.WaitAsync(TimeSpan) throws
+        // above that, so an unclamped delay would fault the loop as soon as it polls a second time.
+        var reader = new FakeSystemMetricsReader(
+            new SystemMetricsReading(0, 0, 1000, 500),
+            new SystemMetricsReading(50, 100, 1000, 500),
+            new SystemMetricsReading(100, 200, 1000, 500));
+        var host = CreateHost(reader);
+        host.PollingInterval = TimeSpan.FromDays(100);
+        var statusWhileRunning = ServiceStatus.Stopped;
+
+        // Act
+        await RunAsync(host, async () =>
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => host.CpuUsage is not null, message: "CPU usage did not appear");
+            statusWhileRunning = host.Status;
+
+            // Wakes the loop while it should be waiting out the huge polling delay; it only responds if that wait did not fault.
+            await host.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount >= 3, message: "Loop did not survive the huge polling delay");
+        });
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, statusWhileRunning);
+        Assert.Equal(ServiceStatus.Stopped, host.Status);
+    }
+
     private static HostSystem CreateHost(FakeSystemMetricsReader reader, Action? collectGarbage = null)
     {
         return new HostSystem(reader, collectGarbage ?? (() => { }), NullLogger.Instance)
