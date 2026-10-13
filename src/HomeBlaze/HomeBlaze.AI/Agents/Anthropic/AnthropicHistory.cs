@@ -50,13 +50,10 @@ internal sealed class AnthropicHistory
     private readonly List<ChatMessage> _messages = [];
 
     /// <summary>Messages since the last compaction, oldest first.</summary>
-    public IReadOnlyList<ChatMessage> Messages => _messages;
+    internal IReadOnlyList<ChatMessage> Messages => _messages;
 
     /// <summary>A summary of the compacted conversation, or null.</summary>
     public string? Summary { get; private set; }
-
-    /// <summary>Restores a persisted summary.</summary>
-    internal void RestoreSummary(string? summary) => Summary = summary;
 
     /// <summary>
     /// The messages of a request: system prompt, summary (as a user message), history, then the new user message.

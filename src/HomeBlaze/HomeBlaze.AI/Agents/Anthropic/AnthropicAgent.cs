@@ -43,9 +43,10 @@ public partial class AnthropicAgent : LlmAgentBase
     private AnthropicHistory _history = new();
     private IChatClient? _chatClient;
     private string? _chatClientApiKey;
-    private int _chatClientMaxTokens;
     private bool _isMeasuringCompaction;
     private long _compactionFloor;
+    private PendingCompaction? _pendingCompaction;
+    private AgentUsage? _unreportedUsage;
 
     public AnthropicAgent(AgentServices services, ILogger<AnthropicAgent> logger)
         : base(services, logger, AgentBackendTool.WebTools)
@@ -73,15 +74,13 @@ public partial class AnthropicAgent : LlmAgentBase
     protected virtual HttpClient HttpClient => SharedHttpClient;
 
     /// <summary>
-    /// Creates the chat client for an API key and output token limit. The agent reuses it while both stay the same
-    /// and never disposes it.
+    /// Creates the chat client for an API key. The agent reuses it while the key stays the same and never disposes it.
+    /// Every request sets its model and output token limit in its options.
     /// </summary>
     /// <param name="apiKey">The API key, never empty.</param>
-    /// <param name="maxOutputTokens">The default output token limit of a request.</param>
-    protected virtual IChatClient CreateChatClient(string apiKey, int maxOutputTokens) =>
+    protected virtual IChatClient CreateChatClient(string apiKey) =>
         // An explicit null auth token keeps the SDK from picking up a token from the environment.
-        new AnthropicClient { ApiKey = apiKey, AuthToken = null, HttpClient = HttpClient }
-            .AsIChatClient(defaultModelId: null, defaultMaxOutputTokens: maxOutputTokens);
+        new AnthropicClient { ApiKey = apiKey, AuthToken = null, HttpClient = HttpClient }.AsIChatClient();
 
     protected override async Task OnStartingAsync(CancellationToken cancellationToken)
     {
@@ -99,6 +98,8 @@ public partial class AnthropicAgent : LlmAgentBase
     protected override async Task<AgentTurnResult> ExecuteTurnAsync(
         AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
+        // Set again only by a chat turn that succeeds, so a later turn never compacts with stale token counts.
+        _pendingCompaction = null;
         var (apiKey, model, maxTokens) = GetValidatedConfiguration(request);
         var isChat = request.Kind == AgentTurnKind.Chat;
         var messages = isChat
@@ -106,7 +107,7 @@ public partial class AnthropicAgent : LlmAgentBase
             : [new ChatMessage(ChatRole.System, request.SystemPrompt), new ChatMessage(ChatRole.User, request.UserMessage)];
         var options = AnthropicChatOptions.Create(model, maxTokens, request.Effort, request.Tools.Tools);
 
-        var innerClient = GetChatClient(apiKey, maxTokens);
+        var innerClient = GetChatClient(apiKey);
 
         // The tool set's budget governs: over it, calls get an error result. The client's own limits only stop a
         // model that ignores those errors, because its last iteration drops the tools, and a request whose tools
@@ -114,7 +115,9 @@ public partial class AnthropicAgent : LlmAgentBase
         // would dispose the reused inner client.
         var iterationLimit = GetModelRoundLimit();
         var client = new FunctionInvokingChatClient(
-            request.BackendTools.Count > 0 ? new AnthropicServerToolClient(innerClient, request.Tools, request.BackendTools) : innerClient)
+            request.BackendTools.Count > 0
+                ? new AnthropicServerToolClient(innerClient, request.Tools, request.BackendTools, MaxToolCallsPerTurn)
+                : innerClient)
         {
             MaximumIterationsPerRequest = iterationLimit,
             MaximumConsecutiveErrorsPerRequest = iterationLimit
@@ -149,19 +152,31 @@ public partial class AnthropicAgent : LlmAgentBase
         {
             _history.Append(new ChatMessage(ChatRole.User, request.UserMessage), response.Messages);
             await SaveHistoryAsync();
-            await CompactHistoryIfNeededAsync(
-                innerClient, apiKey, model, maxTokens, firstRequestInputTokens ?? 0, lastRequestInputTokens, cancellationToken);
+            _pendingCompaction = new PendingCompaction(model, maxTokens, firstRequestInputTokens ?? 0, lastRequestInputTokens);
         }
 
-        return new AgentTurnResult(answer.Text ?? string.Empty, ToAgentUsage(response.Usage), RateLimit: null) { FinalText = finalText };
+        // A summary runs after its turn is recorded, so its usage is reported with the next turn.
+        var usage = Add(ToAgentUsage(response.Usage), _unreportedUsage);
+        _unreportedUsage = null;
+        return new AgentTurnResult(answer.Text ?? string.Empty, usage, RateLimit: null) { FinalText = finalText };
     }
 
-    // Text after a tool call or tool result starts a new segment of the answer.
+    protected override async Task OnChatTurnCompletedAsync(CancellationToken cancellationToken)
+    {
+        // The cached client and key are still the ones of the turn that set the pending compaction.
+        if (_pendingCompaction is { } pending && _chatClient is { } client && _chatClientApiKey is { } apiKey)
+        {
+            _pendingCompaction = null;
+            await CompactHistoryIfNeededAsync(client, apiKey, pending, cancellationToken);
+        }
+    }
+
+    // Text after a tool call or tool result, of a graph tool or a server tool, starts a new segment of the answer.
     private static void AppendAnswerText(AgentAnswerText answer, ChatResponseUpdate update, IProgress<AgentTurnUpdate> progress)
     {
         foreach (var content in update.Contents)
         {
-            if (content is FunctionCallContent or FunctionResultContent)
+            if (content is ToolCallContent or ToolResultContent)
             {
                 answer.StartSegment();
             }
@@ -223,41 +238,48 @@ public partial class AnthropicAgent : LlmAgentBase
         }
     }
 
-    private IChatClient GetChatClient(string apiKey, int maxTokens)
+    private IChatClient GetChatClient(string apiKey)
     {
-        if (_chatClient is null || _chatClientApiKey != apiKey || _chatClientMaxTokens != maxTokens)
+        if (_chatClient is null || _chatClientApiKey != apiKey)
         {
-            _chatClient = CreateChatClient(apiKey, maxTokens);
+            _chatClient = CreateChatClient(apiKey);
             _chatClientApiKey = apiKey;
-            _chatClientMaxTokens = maxTokens;
         }
 
         return _chatClient;
     }
 
     /// <summary>
-    /// The answer of a turn: the assistant text after the last tool results. Text written before a tool call is
-    /// streamed but is not the answer, which must start with the quiet marker of a background run, for example.
+    /// The answer of a turn: the assistant text after the last tool call or result, of a graph tool or a server tool.
+    /// Text written before a tool call is streamed but is not the answer, which must start with the quiet marker of a
+    /// background run, for example.
     /// </summary>
     private static string GetFinalText(ChatResponse response)
     {
-        var messages = response.Messages;
-        var start = 0;
-        for (var index = messages.Count - 1; index >= 0; index--)
-        {
-            if (messages[index].Role == ChatRole.Tool)
-            {
-                start = index + 1;
-                break;
-            }
-        }
-
         var text = new StringBuilder();
-        for (var index = start; index < messages.Count; index++)
+        foreach (var message in response.Messages)
         {
-            if (messages[index].Role == ChatRole.Assistant)
+            if (message.Role == ChatRole.Tool)
             {
-                text.Append(messages[index].Text);
+                text.Clear();
+                continue;
+            }
+
+            if (message.Role != ChatRole.Assistant)
+            {
+                continue;
+            }
+
+            foreach (var content in message.Contents)
+            {
+                if (content is ToolCallContent or ToolResultContent)
+                {
+                    text.Clear();
+                }
+                else if (content is TextContent textContent)
+                {
+                    text.Append(textContent.Text);
+                }
             }
         }
 
@@ -266,9 +288,9 @@ public partial class AnthropicAgent : LlmAgentBase
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S6667", Justification = "The cancellation is an expected stop, and the failure is logged with its redacted message only because the exception text can echo the API key.")]
     private async Task CompactHistoryIfNeededAsync(
-        IChatClient client, string apiKey, string model, int maxTokens, long firstRequestInputTokens, long lastRequestInputTokens,
-        CancellationToken cancellationToken)
+        IChatClient client, string apiKey, PendingCompaction pending, CancellationToken cancellationToken)
     {
+        var (model, maxTokens, firstRequestInputTokens, lastRequestInputTokens) = pending;
         long budget = HistoryTokenBudget;
         if (budget <= 0)
         {
@@ -289,10 +311,11 @@ public partial class AnthropicAgent : LlmAgentBase
         }
 
         AnthropicCompactionOutcome outcome;
+        var summaryClient = new UsageRecordingChatClient(client);
         try
         {
             outcome = await _history.CompactAsync(
-                client,
+                summaryClient,
                 // Low effort rather than no thinking, which some models reject.
                 new ChatOptions
                 {
@@ -306,7 +329,7 @@ public partial class AnthropicAgent : LlmAgentBase
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // The answer is saved and must reach the timeline; the history is summarized after a later turn.
+            // The answer is already in the timeline; the history is summarized after a later turn.
             _logger.LogInformation("Summarizing the chat history of agent {Agent} was cancelled.", Title);
             return;
         }
@@ -317,6 +340,10 @@ public partial class AnthropicAgent : LlmAgentBase
                 "The chat history of agent {Agent} could not be summarized: {Message}",
                 Title, Redact(exception.Message, apiKey));
             outcome = AnthropicCompactionOutcome.SummaryIncomplete;
+        }
+        finally
+        {
+            _unreportedUsage = Add(_unreportedUsage, ToAgentUsage(summaryClient.Usage));
         }
 
         switch (outcome)
@@ -337,6 +364,7 @@ public partial class AnthropicAgent : LlmAgentBase
     {
         _isMeasuringCompaction = false;
         _compactionFloor = 0;
+        _pendingCompaction = null;
     }
 
     private async Task SaveHistoryAsync()
@@ -368,6 +396,20 @@ public partial class AnthropicAgent : LlmAgentBase
         var cacheCreation = details.AdditionalCounts?.TryGetValue("CacheCreationInputTokens", out var count) == true ? count : 0;
         var input = Math.Max((details.InputTokenCount ?? 0) - cacheRead - cacheCreation, 0);
         return new AgentUsage(input, details.OutputTokenCount ?? 0, cacheRead, cacheCreation);
+    }
+
+    private static AgentUsage? Add(AgentUsage? first, AgentUsage? second)
+    {
+        if (first is null || second is null)
+        {
+            return first ?? second;
+        }
+
+        return new AgentUsage(
+            first.InputTokens + second.InputTokens,
+            first.OutputTokens + second.OutputTokens,
+            first.CacheReadInputTokens + second.CacheReadInputTokens,
+            first.CacheCreationInputTokens + second.CacheCreationInputTokens);
     }
 
     private static AgentTurnException? Classify(Exception exception, string apiKey, CancellationToken cancellationToken)
@@ -450,6 +492,22 @@ public partial class AnthropicAgent : LlmAgentBase
         }
 
         return null;
+    }
+
+    private readonly record struct PendingCompaction(string Model, int MaxTokens, long FirstRequestInputTokens, long LastRequestInputTokens);
+
+    /// <summary>Keeps the usage of the last response, the summarizing call's.</summary>
+    private sealed class UsageRecordingChatClient(IChatClient innerClient) : DelegatingChatClient(innerClient)
+    {
+        public UsageDetails? Usage { get; private set; }
+
+        public override async Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            var response = await base.GetResponseAsync(messages, options, cancellationToken);
+            Usage = response.Usage;
+            return response;
+        }
     }
 
     // The SDK does not put the key into exception messages; this guards against a response that echoes it.

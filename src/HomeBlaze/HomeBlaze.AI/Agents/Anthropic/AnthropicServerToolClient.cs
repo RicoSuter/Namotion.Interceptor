@@ -27,12 +27,18 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
 
     private readonly AgentToolSet _tools;
     private readonly IReadOnlyList<string> _backendTools;
+    private readonly int _maxBackendToolUses;
 
-    public AnthropicServerToolClient(IChatClient innerClient, AgentToolSet tools, IReadOnlyList<string> backendTools)
+    /// <param name="innerClient">The Anthropic client.</param>
+    /// <param name="tools">The tool set of the turn, which records the server tool calls against its budget.</param>
+    /// <param name="backendTools">The backend tools of the turn.</param>
+    /// <param name="maxBackendToolUses">The use limit of each server tool per request.</param>
+    public AnthropicServerToolClient(IChatClient innerClient, AgentToolSet tools, IReadOnlyList<string> backendTools, int maxBackendToolUses)
         : base(innerClient)
     {
         _tools = tools;
         _backendTools = backendTools;
+        _maxBackendToolUses = maxBackendToolUses;
     }
 
     public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -41,12 +47,14 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
         var tracker = new ServerToolTracker(_tools);
         var requestMessages = messages;
         var continuations = 0;
+
+        // The tools lead the cached prompt prefix, so the use limit stays the same across the requests of a turn and
+        // across turns instead of following the remaining budget.
+        var requestOptions = options is null
+            ? null
+            : AnthropicChatOptions.WithBackendToolUses(options, _backendTools, _maxBackendToolUses);
         while (true)
         {
-            // The API runs server tools without asking, so each request may use at most what is left of the budget.
-            var requestOptions = options is null
-                ? null
-                : AnthropicChatOptions.WithBackendToolUses(options, _backendTools, _tools.RemainingCalls);
             var updates = new List<ChatResponseUpdate>();
             await foreach (var update in base.GetStreamingResponseAsync(requestMessages, requestOptions, cancellationToken))
             {
@@ -58,9 +66,16 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
             // The caller sends these contents back only after the stream ended, so they are complete in time.
             tracker.CompletePendingCalls();
             var finishReason = updates.LastOrDefault(update => update.FinishReason is not null)?.FinishReason;
-            if (finishReason?.Value != PauseTurnReason || continuations++ >= MaximumContinuations)
+            if (finishReason?.Value != PauseTurnReason)
             {
                 yield break;
+            }
+
+            if (continuations++ >= MaximumContinuations)
+            {
+                throw new AgentTurnException(
+                    AgentFailureKind.Transient,
+                    $"The model paused the turn too often: it was still not done after {MaximumContinuations} continuations.");
             }
 
             requestMessages = [.. requestMessages, .. updates.ToChatResponse().Messages];

@@ -71,12 +71,12 @@ internal static class AnthropicChatOptions
     }
 
     /// <summary>
-    /// Copies the options of a turn for one model request with the use limit of each server tool set to
+    /// Copies the options of a turn with the server tools of the backend tools added, each with the use limit
     /// <paramref name="maxBackendToolUses"/>, at least 1.
     /// </summary>
     /// <param name="options">The options of the turn, created by <see cref="Create"/>.</param>
     /// <param name="backendTools">The backend tools of the turn.</param>
-    /// <param name="maxBackendToolUses">The use limit of each server tool for this request.</param>
+    /// <param name="maxBackendToolUses">The use limit of each server tool per request.</param>
     public static ChatOptions WithBackendToolUses(ChatOptions options, IReadOnlyList<string> backendTools, int maxBackendToolUses)
     {
         var requestOptions = options.Clone();

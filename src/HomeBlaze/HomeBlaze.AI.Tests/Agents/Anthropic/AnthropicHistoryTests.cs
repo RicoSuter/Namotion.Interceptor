@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Anthropic;
 using HomeBlaze.AI.Agents.Anthropic;
 using Microsoft.Extensions.AI;
@@ -27,12 +28,19 @@ public class AnthropicHistoryTests
         return history;
     }
 
+    // A summary only enters a history through compaction or a restored session.
+    private static AnthropicHistory WithSummary(AnthropicHistory history, string summary)
+    {
+        var json = JsonNode.Parse(history.Serialize())!;
+        json["summary"] = summary;
+        return AnthropicHistory.Deserialize(json.ToJsonString());
+    }
+
     [Fact]
     public void WhenBuildingRequestMessages_ThenSystemSummaryHistoryAndNewMessageAreInOrder()
     {
         // Arrange
-        var history = CreateHistory(1);
-        history.RestoreSummary("earlier things");
+        var history = WithSummary(CreateHistory(1), "earlier things");
 
         // Act
         var messages = history.BuildRequestMessages("SYSTEM", "new question");
@@ -93,7 +101,6 @@ public class AnthropicHistoryTests
             ]),
             new ChatMessage(ChatRole.Assistant, "It is 21.5 °C.")
         ]);
-        history.RestoreSummary("earlier");
 
         // Act
         var restored = AnthropicHistory.Deserialize(history.Serialize());
@@ -186,8 +193,7 @@ public class AnthropicHistoryTests
     public async Task WhenCompactingAgain_ThenTheEarlierSummaryIsPartOfTheTranscript()
     {
         // Arrange
-        var history = CreateHistory(4);
-        history.RestoreSummary("the very first things");
+        var history = WithSummary(CreateHistory(4), "the very first things");
         var summarizer = new SummarizingClient("new summary");
 
         // Act
@@ -223,8 +229,7 @@ public class AnthropicHistoryTests
     public async Task WhenTheSummarizerThrows_ThenTheHistoryIsKept()
     {
         // Arrange
-        var history = CreateHistory(4);
-        history.RestoreSummary("earlier");
+        var history = WithSummary(CreateHistory(4), "earlier");
         var summarizer = new SummarizingClient("unused") { Exception = new HttpRequestException("unavailable") };
 
         // Act & Assert
@@ -254,8 +259,7 @@ public class AnthropicHistoryTests
     public void WhenSerialized_ThenToolCallsAndSummaryRoundTrip()
     {
         // Arrange
-        var history = CreateHistory(1);
-        history.RestoreSummary("earlier");
+        var history = WithSummary(CreateHistory(1), "earlier");
 
         // Act
         var restored = AnthropicHistory.Deserialize(history.Serialize());

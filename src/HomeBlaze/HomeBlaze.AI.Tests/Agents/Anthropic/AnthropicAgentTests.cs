@@ -28,10 +28,10 @@ public class TestableAnthropicAgent : AnthropicAgent
     protected override HttpClient HttpClient =>
         HttpHandler is { } handler ? new HttpClient(handler, disposeHandler: false) : base.HttpClient;
 
-    protected override IChatClient CreateChatClient(string apiKey, int maxOutputTokens)
+    protected override IChatClient CreateChatClient(string apiKey)
     {
         CreatedClientCount++;
-        return HttpHandler is null ? Client : base.CreateChatClient(apiKey, maxOutputTokens);
+        return HttpHandler is null ? Client : base.CreateChatClient(apiKey);
     }
 }
 
@@ -46,12 +46,14 @@ public sealed class ScriptedChatClient : IChatClient
 
     public Func<string> Summarize { get; set; } = () => "summary";
 
+    public UsageDetails? SummaryUsage { get; set; }
+
     public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         SummaryOptions.Add(options);
         var summary = Summarize();
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, summary)));
+        return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, summary)) { Usage = SummaryUsage });
     }
 
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -241,6 +243,43 @@ public class AnthropicAgentTests
     }
 
     [Fact]
+    public async Task WhenTextPrecedesAWebSearchInABackgroundRun_ThenTheTextAfterTheSearchDecidesQuiet()
+    {
+        // Arrange
+        var handler = new SequenceHandler(
+            Stream(
+                MessageStart("msg_1"),
+                BlockStart(0, """{"type":"text","text":""}"""),
+                TextDelta(0, "Let me search."),
+                BlockStop(0),
+                BlockStart(1, """{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}"""),
+                InputDelta(1, """{"query":"weather alerts"}"""),
+                BlockStop(1),
+                BlockStart(2, """{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}"""),
+                BlockStop(2),
+                BlockStart(3, """{"type":"text","text":""}"""),
+                TextDelta(3, "[quiet] nothing new"),
+                BlockStop(3),
+                MessageDelta("end_turn"),
+                """{"type":"message_stop"}"""));
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HttpHandler = handler;
+            agent.AllowedTools = ["web_search"];
+        });
+
+        // Act
+        await test.RunNowAndWaitAsync();
+
+        // Assert
+        var run = test.Agent.Timeline.Entries.Single(entry => entry.Kind == AgentTimelineEntryKind.BackgroundRun);
+        Assert.True(run.IsQuiet);
+        Assert.Equal("Let me search.\n\n[quiet] nothing new", run.Text);
+        Assert.Equal("[quiet] nothing new", run.FinalText);
+        Assert.Null(test.Agent.LastAnalysis);
+    }
+
+    [Fact]
     public async Task WhenNoApiKeyIsSet_ThenTheAgentIsUnavailable()
     {
         // Arrange
@@ -296,6 +335,83 @@ public class AnthropicAgentTests
         Assert.DoesNotContain("\"first\"", session);
         Assert.Equal("Hello again", test.Agent.Timeline.Entries[^1].Text);
         Assert.Equal(5000, test.Agent.Timeline.Entries[^1].Usage!.InputTokens);
+    }
+
+    [Fact]
+    public async Task WhenTheHistoryIsSummarized_ThenTheAnswerIsAlreadyInTheTimelineAndTheAgentIsNotBusy()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.HistoryTokenBudget = 1000);
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        test.Agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello again"), Usage(5000)];
+        string? lastEntryWhileSummarizing = null;
+        bool? isBusyWhileSummarizing = null;
+        test.Agent.Client.Summarize = () =>
+        {
+            lastEntryWhileSummarizing = test.Agent.Timeline.Entries[^1].Text;
+            isBusyWhileSummarizing = test.Agent.IsBusy;
+            return "summary";
+        };
+
+        // Act
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Hello again", lastEntryWhileSummarizing);
+        Assert.False(isBusyWhileSummarizing);
+        Assert.Contains("\"summary\":\"summary\"", await File.ReadAllTextAsync(SessionPath(test)));
+    }
+
+    [Fact]
+    public async Task WhenSummarizingTakesLongerThanTheTurnTimeout_ThenTheSummaryIsStillSaved()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        await using var test = await AgentTestContext<TestableAnthropicAgent>.StartAsync(
+            services => new TestableAnthropicAgent(services),
+            agent =>
+            {
+                agent.ApiKey = ApiKey;
+                agent.Model = "claude-sonnet-5";
+                agent.HistoryTokenBudget = 1000;
+                agent.TurnTimeout = TimeSpan.FromMinutes(5);
+            },
+            timeProvider: time);
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        test.Agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello again"), Usage(5000)];
+        test.Agent.Client.Summarize = () =>
+        {
+            time.Advance(TimeSpan.FromMinutes(10));
+            return "summary";
+        };
+
+        // Act
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Hello again", test.Agent.Timeline.Entries[^1].Text);
+        Assert.Contains("\"summary\":\"summary\"", await File.ReadAllTextAsync(SessionPath(test)));
+    }
+
+    [Fact]
+    public async Task WhenTheHistoryWasSummarized_ThenTheNextTurnReportsTheUsageOfTheSummary()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.HistoryTokenBudget = 1000);
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        test.Agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello again"), Usage(5000)];
+        test.Agent.Client.SummaryUsage = new UsageDetails { InputTokenCount = 300, OutputTokenCount = 40 };
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+
+        // Act
+        await test.Agent.SendMessageAsync("third", CancellationToken.None);
+
+        // Assert
+        Assert.Single(test.Agent.Client.SummaryOptions);
+        var entries = test.Agent.Timeline.Entries.Where(entry => entry.Kind == AgentTimelineEntryKind.Assistant).ToList();
+        Assert.Equal(5000, entries[^2].Usage!.InputTokens);
+        Assert.Equal(5300, entries[^1].Usage!.InputTokens);
+        Assert.Equal(50, entries[^1].Usage!.OutputTokens);
     }
 
     [Fact]
@@ -429,6 +545,29 @@ public class AnthropicAgentTests
         // Assert
         Assert.Equal(2, test.Agent.CreatedClientCount);
         Assert.Equal([ApiKey, ApiKey, "sk-ant-other-key"], handler.Requests.Select(request => request.ApiKeyHeader));
+    }
+
+    [Fact]
+    public async Task WhenTheOutputTokenLimitChanges_ThenTheSameClientSendsTheNewLimit()
+    {
+        // Arrange
+        var handler = new AnthropicStubHandler(HttpStatusCode.InternalServerError, AnthropicStubHandler.ErrorBody("api_error", "failed"));
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HttpHandler = handler;
+            agent.MaxTokens = 3000;
+        });
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+
+        // Act
+        test.Agent.MaxTokens = 5000;
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, test.Agent.CreatedClientCount);
+        Assert.Equal(
+            [3000, 5000],
+            handler.Requests.Select(request => JsonDocument.Parse(request.Body).RootElement.GetProperty("max_tokens").GetInt32()));
     }
 
     [Fact]
@@ -569,6 +708,37 @@ public class AnthropicAgentTests
     }
 
     [Fact]
+    public async Task WhenTheApiKeepsPausingTheTurn_ThenTheTurnFailsAfterTheContinuations()
+    {
+        // Arrange - every response pauses again.
+        var handler = new SequenceHandler(
+            Stream(
+                MessageStart("msg_1"),
+                BlockStart(0, """{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}"""),
+                InputDelta(0, """{"query":"dotnet sdk"}"""),
+                BlockStop(0),
+                BlockStart(1, """{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}"""),
+                BlockStop(1),
+                MessageDelta("pause_turn"),
+                """{"type":"message_stop"}"""));
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HttpHandler = handler;
+            agent.AllowedTools = ["web_search"];
+        });
+
+        // Act
+        await test.Agent.SendMessageAsync("Which SDK?", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(6, handler.Bodies.Count);
+        var entry = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(AgentTimelineEntryKind.Error, entry.Kind);
+        Assert.Contains("paused the turn too often", entry.Text);
+        Assert.Equal(ServiceStatus.Error, test.Agent.Status);
+    }
+
+    [Fact]
     public async Task WhenAWebFetchFailsBeforeAGraphTool_ThenTheFetchIsSentBackWithItsUrl()
     {
         // Arrange - the failed fetch result carries no URL; only the streamed input of the call does.
@@ -611,9 +781,9 @@ public class AnthropicAgentTests
     }
 
     [Fact]
-    public async Task WhenToolCallsUsedPartOfTheBudget_ThenTheNextRequestLimitsTheWebToolsToTheRest()
+    public async Task WhenToolCallsUsedPartOfTheBudget_ThenTheNextRequestKeepsTheSameToolsForThePromptCache()
     {
-        // Arrange - the first response searches once and calls get_property, which leaves 5 - 2 calls.
+        // Arrange - the first response searches once and calls get_property.
         var handler = CreateSearchThenGetPropertyHandler();
         await using var test = await StartAsync(agent =>
         {
@@ -627,14 +797,11 @@ public class AnthropicAgentTests
 
         // Assert
         Assert.Equal([5L, 5L], GetServerToolMaxUses(handler.Bodies[0]));
-        Assert.Equal([3L, 3L], GetServerToolMaxUses(handler.Bodies[1]));
-        Assert.Equal(
-            ["get_property", "update_memory", "web_search", "web_fetch"],
-            JsonDocument.Parse(handler.Bodies[1]).RootElement.GetProperty("tools").EnumerateArray().Select(tool => tool.GetProperty("name").GetString()));
+        Assert.Equal(GetTools(handler.Bodies[0]), GetTools(handler.Bodies[1]));
     }
 
     [Fact]
-    public async Task WhenTheBudgetIsUsedUp_ThenTheWebToolsKeepAUseLimitOfOne()
+    public async Task WhenAWebToolCallUsedUpTheBudget_ThenTheGraphToolCallIsRefused()
     {
         // Arrange
         var handler = CreateSearchThenGetPropertyHandler();
@@ -642,16 +809,40 @@ public class AnthropicAgentTests
         {
             agent.HttpHandler = handler;
             agent.AllowedTools = ["get_property", "web_search"];
-            agent.MaxToolCallsPerTurn = 2;
+            agent.MaxToolCallsPerTurn = 1;
         });
 
         // Act
         await test.Agent.SendMessageAsync("Search", CancellationToken.None);
 
         // Assert
-        Assert.Equal([2L], GetServerToolMaxUses(handler.Bodies[0]));
         Assert.Equal([1L], GetServerToolMaxUses(handler.Bodies[1]));
+        var reply = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(["web_search", "get_property"], reply.ToolCalls.Select(call => call.Name));
+        Assert.True(reply.ToolCalls[1].IsError);
+        Assert.Contains("budget", reply.ToolCalls[1].ResultPreview);
     }
+
+    [Fact]
+    public async Task WhenTheBudgetIsZero_ThenTheWebToolsKeepAUseLimitOfOne()
+    {
+        // Arrange
+        var handler = new SequenceHandler(TextAnswerStream("msg_1", "Hi."));
+        await using var test = await StartAsync(agent =>
+        {
+            agent.HttpHandler = handler;
+            agent.AllowedTools = ["web_search"];
+            agent.MaxToolCallsPerTurn = 0;
+        });
+
+        // Act
+        await test.Agent.SendMessageAsync("Search", CancellationToken.None);
+
+        // Assert
+        Assert.Equal([1L], GetServerToolMaxUses(Assert.Single(handler.Bodies)));
+    }
+
+    private static string GetTools(string body) => JsonDocument.Parse(body).RootElement.GetProperty("tools").GetRawText();
 
     private static long[] GetServerToolMaxUses(string body) =>
         JsonDocument.Parse(body).RootElement.GetProperty("tools").EnumerateArray()
@@ -695,7 +886,7 @@ public class AnthropicAgentTests
     private static string TextAnswerStream(string id, string text) => Stream(
         MessageStart(id),
         BlockStart(0, """{"type":"text","text":""}"""),
-        $$$"""{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":{{{JsonSerializer.Serialize(text)}}}}}""",
+        TextDelta(0, text),
         BlockStop(0),
         MessageDelta("end_turn"),
         """{"type":"message_stop"}""");
@@ -709,6 +900,9 @@ public class AnthropicAgentTests
 
     private static string BlockStart(int index, string block) =>
         $$"""{"type":"content_block_start","index":{{index}},"content_block":{{block}}}""";
+
+    private static string TextDelta(int index, string text) =>
+        $$$"""{"type":"content_block_delta","index":{{{index}}},"delta":{"type":"text_delta","text":{{{JsonSerializer.Serialize(text)}}}}}""";
 
     private static string InputDelta(int index, string json) =>
         $$$"""{"type":"content_block_delta","index":{{{index}}},"delta":{"type":"input_json_delta","partial_json":{{{JsonSerializer.Serialize(json)}}}}}""";

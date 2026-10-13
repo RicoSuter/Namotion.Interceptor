@@ -312,6 +312,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             }
 
             var isIdle = false;
+            var isAnswered = false;
             try
             {
                 var started = BeginTurn(AnsweringStatusMessage);
@@ -338,6 +339,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 }
 
                 isIdle = true;
+                isAnswered = true;
             }
             catch (OperationCanceledException) when (turnToken.IsCancellationRequested)
             {
@@ -352,7 +354,17 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             finally
             {
                 EndTurn(isIdle);
-                _turnGate.Release();
+                try
+                {
+                    if (isAnswered)
+                    {
+                        await RunAfterChatTurnAsync(turnToken);
+                    }
+                }
+                finally
+                {
+                    _turnGate.Release();
+                }
             }
         }
     }
@@ -396,6 +408,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     /// <summary>Called once storage is available, before the first turn; loads backend session state.</summary>
     protected virtual Task OnStartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Called after the answer of a chat turn is in the timeline and the agent is no longer busy, before the next turn
+    /// can start and outside the turn timeout; for backend upkeep such as summarizing the chat session.
+    /// </summary>
+    /// <param name="cancellationToken">Cancelled when the agent stops or the chat message is cancelled.</param>
+    /// <remarks>An exception is logged as a warning, so it must not carry secrets, and does not change the recorded turn.</remarks>
+    protected virtual Task OnChatTurnCompletedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
     /// Reads the backend's session file and parses it with <paramref name="parse"/>, which may throw
@@ -841,6 +861,22 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         {
             EndTurn(isIdle);
             _turnGate.Release();
+        }
+    }
+
+    private async Task RunAfterChatTurnAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await OnChatTurnCompletedAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The answer is already recorded; the upkeep is left to a later turn.
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "The work after a chat turn of agent {Agent} failed.", Title);
         }
     }
 
