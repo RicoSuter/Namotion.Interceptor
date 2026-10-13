@@ -22,12 +22,11 @@ internal sealed partial class MacOSSystemMetricsReader : ISystemMetricsReader
 
     private nuint? _pageSize;
     private long? _totalMemory;
-    private bool _hasPreviousTicks;
+
+    // Starts at zero, so the first read accumulates the ticks since boot.
     private MacOSHostCpuLoadInfo _previousTicks;
-    private ulong _userTicks;
-    private ulong _systemTicks;
+    private ulong _busyTicks;
     private ulong _idleTicks;
-    private ulong _niceTicks;
 
     public SystemMetricsReading Read()
     {
@@ -37,22 +36,10 @@ internal sealed partial class MacOSSystemMetricsReader : ISystemMetricsReader
         var ticksCount = MacOSHostCpuLoadInfo.Count;
         ThrowOnFailure(HostStatistics(host, HostCpuLoadInfoFlavor, ref ticks, ref ticksCount), "host_statistics");
 
-        if (_hasPreviousTicks)
-        {
-            _userTicks = RateCalculator.AccumulateTicks(_userTicks, _previousTicks.User, ticks.User);
-            _systemTicks = RateCalculator.AccumulateTicks(_systemTicks, _previousTicks.System, ticks.System);
-            _idleTicks = RateCalculator.AccumulateTicks(_idleTicks, _previousTicks.Idle, ticks.Idle);
-            _niceTicks = RateCalculator.AccumulateTicks(_niceTicks, _previousTicks.Nice, ticks.Nice);
-        }
-        else
-        {
-            _userTicks = ticks.User;
-            _systemTicks = ticks.System;
-            _idleTicks = ticks.Idle;
-            _niceTicks = ticks.Nice;
-            _hasPreviousTicks = true;
-        }
-
+        _busyTicks = RateCalculator.AccumulateTicks(_busyTicks, _previousTicks.User, ticks.User);
+        _busyTicks = RateCalculator.AccumulateTicks(_busyTicks, _previousTicks.System, ticks.System);
+        _busyTicks = RateCalculator.AccumulateTicks(_busyTicks, _previousTicks.Nice, ticks.Nice);
+        _idleTicks = RateCalculator.AccumulateTicks(_idleTicks, _previousTicks.Idle, ticks.Idle);
         _previousTicks = ticks;
 
         var statistics = default(MacOSVmStatistics64);
@@ -62,9 +49,8 @@ internal sealed partial class MacOSSystemMetricsReader : ISystemMetricsReader
         var totalMemory = _totalMemory ??= ReadTotalMemory();
         var pageSize = _pageSize ??= ReadPageSize(host);
         var availableMemory = ((long)statistics.FreeCount + statistics.InactiveCount + statistics.SpeculativeCount) * (long)pageSize;
-        var totalTicks = _userTicks + _systemTicks + _idleTicks + _niceTicks;
 
-        return new SystemMetricsReading(totalTicks - _idleTicks, totalTicks, totalMemory, Math.Min(availableMemory, totalMemory));
+        return new SystemMetricsReading(_busyTicks, _busyTicks + _idleTicks, totalMemory, Math.Min(availableMemory, totalMemory));
     }
 
     private static nuint ReadPageSize(uint host)

@@ -66,8 +66,8 @@ internal static class LinuxProcParser
     public static bool TryParseMemInfo(ReadOnlySpan<byte> content, out long totalBytes, out long availableBytes)
     {
         availableBytes = 0;
-        return TryReadMemInfoValue(content, "MemTotal:"u8, out totalBytes) &
-               TryReadMemInfoValue(content, "MemAvailable:"u8, out availableBytes);
+        return TryReadMemInfoValue(content, "\nMemTotal:"u8, out totalBytes) &
+               TryReadMemInfoValue(content, "\nMemAvailable:"u8, out availableBytes);
     }
 
     /// <summary>
@@ -145,30 +145,31 @@ internal static class LinuxProcParser
         return Math.Round((decimal)quotaValue / periodValue, 2);
     }
 
-    private static bool TryReadMemInfoValue(ReadOnlySpan<byte> content, ReadOnlySpan<byte> key, out long bytes)
+    /// <summary>
+    /// Reads the value of the line that starts with the key. The key is passed with a leading newline so a match
+    /// mid-line is skipped; the first line, which has no newline before it, is checked without it.
+    /// </summary>
+    private static bool TryReadMemInfoValue(ReadOnlySpan<byte> content, ReadOnlySpan<byte> newlineAndKey, out long bytes)
     {
         bytes = 0;
 
-        var searchOffset = 0;
-        int index;
-        while (true)
+        int valueStart;
+        if (content.StartsWith(newlineAndKey[1..]))
         {
-            var relativeIndex = content[searchOffset..].IndexOf(key);
-            if (relativeIndex < 0)
+            valueStart = newlineAndKey.Length - 1;
+        }
+        else
+        {
+            var index = content.IndexOf(newlineAndKey);
+            if (index < 0)
             {
                 return false;
             }
 
-            index = searchOffset + relativeIndex;
-            if (index == 0 || content[index - 1] == (byte)'\n')
-            {
-                break;
-            }
-
-            searchOffset = index + 1;
+            valueStart = index + newlineAndKey.Length;
         }
 
-        var value = content[(index + key.Length)..].TrimStart((byte)' ');
+        var value = content[valueStart..].TrimStart((byte)' ');
         if (!Utf8Parser.TryParse(value, out long kibibytes, out _))
         {
             return false;
