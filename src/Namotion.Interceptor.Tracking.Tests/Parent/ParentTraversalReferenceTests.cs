@@ -3,10 +3,10 @@ using Namotion.Interceptor.Tracking.Parent;
 namespace Namotion.Interceptor.Tracking.Tests.Parent;
 
 /// <summary>
-/// Compares <see cref="ParentsHandlerExtensions.TryGetFirstParent{TRoot}"/> with the plain breadth first
-/// search it replaced, which is kept here as the reference.
+/// Compares <see cref="ParentsHandlerExtensions.TryGetFirstParent{TRoot}"/> on generated graphs with a
+/// reference that is the contract written as the simplest search that fulfils it.
 /// </summary>
-public class ParentTraversalEquivalenceTests
+public class ParentTraversalReferenceTests
 {
     private static readonly TimeSpan RunTimeout = TimeSpan.FromSeconds(120);
 
@@ -176,6 +176,11 @@ public class ParentTraversalEquivalenceTests
         }
     }
 
+    /// <summary>
+    /// The contract of <see cref="ParentsHandlerExtensions.TryGetFirstParent{TRoot}"/>: breadth first over
+    /// all parents in their order, every subject once, never the subject itself. Kept plain on purpose,
+    /// so that it stays obviously correct while the real search is optimized.
+    /// </summary>
     private static TRoot? FindFirstParentBreadthFirstReference<TRoot>(IInterceptorSubject subject)
         where TRoot : class
     {

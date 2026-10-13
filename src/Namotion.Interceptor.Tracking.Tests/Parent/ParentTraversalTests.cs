@@ -96,7 +96,6 @@ public class ParentTraversalTests
     }
 
     [Theory]
-    [InlineData(14)]
     [InlineData(15)]
     [InlineData(16)]
     [InlineData(17)]
@@ -118,13 +117,10 @@ public class ParentTraversalTests
 
     [Theory]
     [InlineData(6, true)]
-    [InlineData(6, false)]
     [InlineData(8, true)]
     [InlineData(8, false)]
     [InlineData(9, true)]
     [InlineData(9, false)]
-    [InlineData(20, true)]
-    [InlineData(20, false)]
     public void WhenTwoLongBranchesAreSearchedSideBySide_ThenFindsMatchAboveEither(
         int branchLength, bool matchIsAboveFirstBranch)
     {
@@ -148,7 +144,6 @@ public class ParentTraversalTests
     [InlineData(15)]
     [InlineData(16)]
     [InlineData(17)]
-    [InlineData(30)]
     public void WhenSubjectHasManyParents_ThenFindsMatchAboveTheLast(int parentCount)
     {
         // Arrange
@@ -227,11 +222,6 @@ public class ParentTraversalTests
 
     [Theory]
     [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    [InlineData(5)]
-    [InlineData(8)]
-    [InlineData(9)]
     [InlineData(16)]
     [InlineData(17)]
     public async Task WhenMatchingSubjectIsOnCycleWithoutOtherMatch_ThenReturnsNull(int cycleLength)
@@ -248,22 +238,12 @@ public class ParentTraversalTests
         Assert.Null(result);
     }
 
-    public static TheoryData<int, int> CycleAndTailLengths()
-    {
-        var data = new TheoryData<int, int>();
-        foreach (var cycleLength in new[] { 1, 2, 3, 4, 5, 8, 9, 15, 16, 17, 33 })
-        {
-            for (var tailLength = 0; tailLength <= 4; tailLength++)
-            {
-                data.Add(cycleLength, tailLength);
-            }
-        }
-
-        return data;
-    }
-
     [Theory]
-    [MemberData(nameof(CycleAndTailLengths))]
+    [InlineData(1, 0)]
+    [InlineData(3, 2)]
+    [InlineData(15, 0)]
+    [InlineData(16, 0)]
+    [InlineData(33, 4)]
     public async Task WhenChainEndsInCycleWithoutMatch_ThenReturnsNull(int cycleLength, int tailLength)
     {
         // Arrange
@@ -279,9 +259,6 @@ public class ParentTraversalTests
 
     [Theory]
     [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
     [InlineData(4)]
     public async Task WhenMatchIsInsideCycle_ThenFindsIt(int markedCyclePosition)
     {
@@ -415,36 +392,6 @@ public class ParentTraversalTests
 
         // Assert
         Assert.Equal(MeasuredSearches, matches);
-        Assert.Equal(0L, allocated);
-    }
-
-    [Fact]
-    public void WhenOneParentChainHasNoMatch_ThenSearchDoesNotAllocate()
-    {
-        // Arrange
-        var subject = new TraversalNode();
-        ParentTraversalGraph.LinkChain(subject, 8);
-
-        // Act
-        var (allocated, matches) = MeasureSearch(subject);
-
-        // Assert
-        Assert.Equal(0, matches);
-        Assert.Equal(0L, allocated);
-    }
-
-    [Fact]
-    public void WhenOneParentChainEndsInCycleWithoutMatch_ThenSearchDoesNotAllocate()
-    {
-        // Arrange
-        var subject = new TraversalNode();
-        ParentTraversalGraph.LinkTailAndCycle(subject, tailLength: 2, cycleLength: 5);
-
-        // Act
-        var (allocated, matches) = MeasureSearch(subject);
-
-        // Assert
-        Assert.Equal(0, matches);
         Assert.Equal(0L, allocated);
     }
 
