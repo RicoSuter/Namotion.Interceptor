@@ -124,12 +124,19 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
             .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
 
-        // Every pane of the path has an edit button, and the last pane shows the subject at the path.
+        // Every pane of the path has an edit button, and the last pane shows the subject at the path. A path that
+        // does not resolve ends at an earlier pane, whose edit button would open the dialog of another subject.
+        var paneCount = subjectPath.Split('/', StringSplitOptions.RemoveEmptyEntries).Length + 1;
+        await Assertions.Expect(page.Locator("#scrollContainer [data-testid='subject-pane']"))
+            .ToHaveCountAsync(paneCount, new() { Timeout = PageLoadTimeout });
+
         var editButton = page.Locator("#scrollContainer [data-testid='edit-subject-button']").Last;
         await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         await editButton.ClickAsync();
 
-        return page.GetByRole(AriaRole.Dialog);
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        return dialog;
     }
 
     private static bool FileContains(string filePath, string text)
@@ -774,7 +781,7 @@ public class SubjectSetupDialogTests
     public async Task WhenAValueCannotBeAppliedInTheEditDialog_ThenNothingIsAppliedAndTheDialogStaysOpen()
     {
         // Arrange
-        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
         try
         {
             var page = await _fixture.CreatePageAsync();
@@ -816,7 +823,7 @@ public class SubjectSetupDialogTests
     public async Task WhenANumberFieldOfTheEditDialogHoldsTextThatIsNotANumber_ThenSaveIsDisabledUntilItIsCorrected()
     {
         // Arrange
-        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
         try
         {
             var page = await _fixture.CreatePageAsync();
@@ -937,7 +944,7 @@ public class SubjectSetupDialogTests
     {
         // Arrange
         const string externalChangeWarning = "Configuration was changed externally";
-        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
         try
         {
             var page = await _fixture.CreatePageAsync();
