@@ -237,6 +237,7 @@ public class ParentTraversalTests
     [InlineData(15, 0)]
     [InlineData(16, 0)]
     [InlineData(33, 4)]
+    [InlineData(5, 20)]
     public async Task WhenChainEndsInCycleWithoutMatch_ThenReturnsNull(int cycleLength, int tailLength)
     {
         // Arrange

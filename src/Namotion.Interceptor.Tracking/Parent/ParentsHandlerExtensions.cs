@@ -41,8 +41,8 @@ public static class ParentsHandlerExtensions
             var parents = found[next].GetParents();
             for (var i = 0; i < parents.Length; i++)
             {
-                // An entry without a subject does not come from tracking. It is skipped, so that the search
-                // never throws.
+                // An entry without a subject does not come from tracking. It is skipped instead of ending
+                // the search in an exception.
                 var parent = parents[i].Property.Subject;
                 if (parent is null || Contains(found[..count], parent))
                 {
@@ -93,6 +93,8 @@ public static class ParentsHandlerExtensions
     /// Continues the search of <see cref="TryGetFirstParent{TRoot}"/> when its buffer is full: at the parent
     /// <paramref name="parentIndex"/> of the subject <paramref name="next"/> in <paramref name="found"/>.
     /// </summary>
+    // Kept out of line: inlined into a hot caller, it made searches past the buffer about 10 % slower.
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static TRoot? FindFirstParentOnHeap<TRoot>(
         ReadOnlySpan<IInterceptorSubject> found, int next, ImmutableArray<SubjectParent> parents, int parentIndex)
         where TRoot : class
