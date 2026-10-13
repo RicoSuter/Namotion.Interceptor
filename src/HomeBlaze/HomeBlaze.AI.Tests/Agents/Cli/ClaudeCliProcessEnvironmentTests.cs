@@ -20,7 +20,10 @@ public class ClaudeCliProcessEnvironmentTests
         "CLAUDE_CODE_USE_ANTHROPIC_AWS",
         "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
         "CLAUDE_CODE_USE_MANTLE",
-        "CLAUDE_CODE_USE_GATEWAY"
+        "CLAUDE_CODE_USE_GATEWAY",
+        "CLAUDE_CODE_API_BASE_URL",
+        "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"
     ];
 
     private const string KeptVariable = "CLAUDE_CODE_OAUTH_TOKEN";
@@ -67,6 +70,12 @@ public class ClaudeCliProcessEnvironmentTests
     [InlineData("ANTHROPIC_API_KEY", StringComparison.Ordinal, true)]
     [InlineData("ANTHROPIC_SOME_FUTURE_PROVIDER", StringComparison.Ordinal, true)]
     [InlineData("CLAUDE_CODE_USE_GATEWAY", StringComparison.Ordinal, true)]
+    [InlineData("CLAUDE_CODE_API_BASE_URL", StringComparison.Ordinal, true)]
+    [InlineData("CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", StringComparison.Ordinal, true)]
+    [InlineData("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", StringComparison.Ordinal, true)]
+    [InlineData("CLAUDE_CODE_API_BASE_URL_SUFFIX", StringComparison.Ordinal, false)]
+    [InlineData("claude_code_api_base_url", StringComparison.Ordinal, false)]
+    [InlineData("claude_code_api_base_url", StringComparison.OrdinalIgnoreCase, true)]
     [InlineData("CLAUDE_CODE_OAUTH_TOKEN", StringComparison.Ordinal, false)]
     [InlineData("PATH", StringComparison.Ordinal, false)]
     [InlineData("anthropic_api_key", StringComparison.Ordinal, false)]

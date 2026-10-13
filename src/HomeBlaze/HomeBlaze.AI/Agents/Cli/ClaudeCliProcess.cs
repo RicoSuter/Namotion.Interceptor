@@ -64,6 +64,10 @@ internal static class ClaudeCliProcess
     // so it would bill the API instead of the subscription. CLAUDE_CODE_OAUTH_TOKEN is a subscription token and is kept.
     private static readonly string[] RemovedEnvironmentVariablePrefixes = ["ANTHROPIC_", "CLAUDE_CODE_USE_"];
 
+    // These reroute requests or hand the credentials and billing to a host, like the prefixes above.
+    private static readonly string[] RemovedEnvironmentVariableNames =
+        ["CLAUDE_CODE_API_BASE_URL", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"];
+
     // Windows matches variable names case-insensitively, so the CLI would read anthropic_api_key there too.
     private static readonly StringComparison EnvironmentVariableComparison =
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
@@ -208,7 +212,7 @@ internal static class ClaudeCliProcess
         }
     }
 
-    /// <summary>Whether the variable is removed from the CLI environment because it would switch billing away from the subscription.</summary>
+    /// <summary>Whether the variable is removed from the CLI environment because it would reroute requests or switch billing away from the subscription.</summary>
     /// <param name="name">The variable name.</param>
     /// <param name="comparison">How names compare: case-insensitive on Windows, ordinal elsewhere.</param>
     internal static bool IsRemovedEnvironmentVariable(string name, StringComparison comparison)
@@ -216,6 +220,14 @@ internal static class ClaudeCliProcess
         foreach (var prefix in RemovedEnvironmentVariablePrefixes)
         {
             if (name.StartsWith(prefix, comparison))
+            {
+                return true;
+            }
+        }
+
+        foreach (var removedName in RemovedEnvironmentVariableNames)
+        {
+            if (name.Equals(removedName, comparison))
             {
                 return true;
             }
