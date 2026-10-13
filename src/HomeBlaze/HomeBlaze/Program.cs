@@ -9,6 +9,7 @@ using HomeBlaze.OpcUa;
 using HomeBlaze.OpcUa.Blazor;
 using HomeBlaze.Plugins;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Diagnostics;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor;
 using HomeBlaze.Storage.Blazor.Files;
@@ -41,9 +42,9 @@ builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 
 // Seeding must run before AddHomeBlazePlugins, which reads the plugin configuration during registration.
-var seededFileCount = DataDirectorySeeder.SeedIfMissing(
-    HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
-    builder.Configuration[HomeBlazePaths.SeedDirectoryKey]);
+var rootConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(builder.Configuration);
+var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
+var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
 
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
@@ -80,10 +81,27 @@ if (seededFileCount > 0)
     app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
 }
 
+// Replaced on every start, unlike the seeded files, so the documentation always matches the running version.
+// It must stay before app.Run, which starts the storage file watcher. Outdated documentation must not keep
+// the application down, so a failure is only logged.
+try
+{
+    var replacedFileCount = DataDirectorySeeder.ReplaceDocumentation(rootConfigurationPath, seedDirectory);
+    if (replacedFileCount > 0)
+    {
+        app.Logger.LogInformation("Replaced the documentation with {Count} files from the seed directory.", replacedFileCount);
+    }
+}
+catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+{
+    app.Logger.LogWarning(exception, "Could not replace the documentation from the seed directory. It may be outdated or incomplete until the next start.");
+}
+
 // Configure TypeProvider with application-specific assemblies
 // This must happen before any service that depends on TypeProvider is used
 var typeProvider = app.Services.GetRequiredService<TypeProvider>();
 typeProvider
+    .AddAssembly(typeof(HostSystem).Assembly)                  // HomeBlaze.Services
     .AddAssembly(typeof(FluentStorageContainer).Assembly)      // HomeBlaze.Storage
     .AddAssembly(typeof(MarkdownFilePageComponent).Assembly)   // HomeBlaze.Storage.Blazor
     .AddAssembly(typeof(Widget).Assembly)                      // HomeBlaze.Components

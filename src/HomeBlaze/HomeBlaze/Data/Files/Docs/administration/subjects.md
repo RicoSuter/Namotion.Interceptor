@@ -15,21 +15,21 @@ This guide covers managing subjects (the objects in the HomeBlaze graph) and how
 Subjects can be managed in two ways, and both produce the same result:
 
 **Via the Blazor UI:**
-- **Create subjects**: The subject browser lets you create new subjects by selecting a type from the registry and filling in configuration properties via an auto-generated editor
+- **Create subjects**: "Create" in the subject browser opens a dialog that lists the available types by group, with a search box. Picking a type shows its configuration form together with the file name of the new subject, "Back" returns to the list, and "Create" adds the subject
 - **Edit subjects**: Select any subject to view and edit its `[Configuration]` properties in the property panel. Changes are saved back to the JSON file automatically
 - **Create and edit files**: New JSON and Markdown files can be created from the UI. Markdown files open in an integrated Monaco editor with live preview
 - **Manage folders**: Create, rename, and delete folders in the storage tree
 
 **Via files directly:**
 - Edit JSON and Markdown files in the `Files/` folder of the [data folder](configuration.md#data-folder) with any editor
-- Changes are picked up automatically via file system watching
+- Changes are picked up automatically via file system watching, usually within a few seconds
 - This is useful for bulk setup, version control, or scripting
 
 Both approaches work on the same underlying files. The UI is a management layer on top of the file-based storage, not a separate system.
 
 ---
 
-## Storage & `Root.json` {#rootjson}
+## Storage and the Root File
 
 `Root.json` at the top of the [data folder](configuration.md#data-folder) defines the storage location. It is `Data/Root.json` when running from source and `/data/Root.json` in the container.
 
@@ -45,12 +45,16 @@ Both approaches work on the same underlying files. The UI is a management layer 
 |----------|-------------|
 | `storageType` | `disk` for local files, `inmemory` for testing |
 | `connectionString` | Folder with your subjects, relative to the data folder |
+| `enableFileWatching` | `true` (default) to follow edits of files on disk through file system events, `false` to switch the events off |
+| `reconcileIntervalSeconds` | Seconds between the periodic checks of the folder, which catch changes that no event reported. Default 300, 0 switches the periodic check off |
+
+Changing one of these properties connects the storage again, which recreates every subject in it.
 
 For the design rationale (pluggable backends, recovery behavior), see [Storage Design](../architecture/design/storage.md).
 
 ---
 
-## File Types {#file-types}
+## File Types
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
@@ -132,7 +136,7 @@ Use the `Widget` subject to embed another subject's widget by path:
 
 The widget looks up the subject at the specified path and renders its registered component.
 
-For embedding widgets inline within markdown pages, see [Markdown Pages: Embedded Subjects](pages.md#embedded-subjects).
+For putting widgets on markdown pages with blocks, see [Markdown Pages: Blocks](pages.md#blocks).
 
 ---
 
@@ -155,7 +159,7 @@ The demo includes pre-configured motors in the `demo/` folder:
 1. **Organize by function**: Group related subjects in folders
 2. **Use descriptive names**: `conveyor-motor.json` is clearer than `m1.json`
 3. **Keep paths short**: Deep nesting makes paths harder to maintain
-4. **Use inline subjects for page-specific data**: Don't pollute the global graph
+4. **Use blocks for page-specific subjects**: A subject that only one page needs is created by a block on that page. Don't pollute the global graph
 5. **Leverage live updates**: Properties update automatically, no refresh needed
 
 ---

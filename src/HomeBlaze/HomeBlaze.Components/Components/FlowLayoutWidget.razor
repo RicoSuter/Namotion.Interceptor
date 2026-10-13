@@ -1,0 +1,28 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FlowLayout))]
+@implements ISubjectComponent
+
+@* min(..., 100%) keeps a column from being wider than the layout when MinWidth is larger than the screen. *@
+<div class="flow-layout"
+     data-testid="flow-layout"
+     style="display: grid; grid-template-columns: repeat(auto-fill, minmax(min(@(ColumnWidth)px, 100%), 1fr)); gap: 16px; margin: 1rem 0;">
+    @foreach (var item in Flow?.Items ?? [])
+    {
+        <div class="flow-layout-item layout-cell" data-testid="flow-item" style="min-width: 0;">
+            <SubjectComponent Subject="@item" Type="SubjectComponentType.Widget" />
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private const int DefaultColumnWidth = 320;
+
+    // A width of zero or less is not a valid track size, and the grid would lose its columns.
+    private const int SmallestColumnWidth = 50;
+
+    private FlowLayout? Flow => Subject as FlowLayout;
+
+    private int ColumnWidth => Math.Max(Flow?.MinWidth ?? DefaultColumnWidth, SmallestColumnWidth);
+}

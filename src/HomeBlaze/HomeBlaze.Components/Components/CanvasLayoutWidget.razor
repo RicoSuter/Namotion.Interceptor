@@ -7,11 +7,13 @@
 @inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
+@inject ISnackbar Snackbar
 
-<div class="canvas-layout-container"
+<div class="canvas-layout-container @(IsEditing ? "editing" : "")"
      style="position: relative; width: 100%; min-height: @(Canvas?.MinHeight ?? 400)px;"
-     @onclick="OnCanvasClick"
-     @onclick:stopPropagation="true">
+     @onmousedown="MouseDownCallback"
+     @onclick="ClickCallback"
+     @onclick:stopPropagation="@IsEditing">
 
     @* Layout edit button - top right of container *@
     @if (IsEditing)
@@ -24,7 +26,8 @@
                        OnClick="EditLayout" />
     }
 
-    <Diagram @ref="_diagram" style="@($"width: 100%; height: {Canvas?.MinHeight ?? 400}px;")">
+    <Diagram @ref="_diagram" class="canvas-diagram" style="@($"width: 100%; height: {Canvas?.MinHeight ?? 400}px;")">
+        <NavigationSettings DisableZooming="@(!IsEditing)" DisablePanning="@(!IsEditing)" OriginChanged="@(_ => _ignoreNextClick = true)" />
         <Links />
         <Nodes OnModified="OnNodeModified">
             @if (Canvas?.Nodes != null)
@@ -39,7 +42,12 @@
                           XChanged="@(x => OnNodePositionChanged(node, x, node.Y))"
                           YChanged="@(y => OnNodePositionChanged(node, node.X, y))"
                           ContentStyle="@($"width: {node.Width}px; height: {node.Height}px;")">
-                        <div class="canvas-node @(IsEditing ? "editing" : "")">
+                        <div class="canvas-node @(IsEditing ? "editing" : "")"
+                             @onwheel:stopPropagation="@(!IsEditing)"
+                             @onmousedown:stopPropagation="@(!IsEditing)"
+                             @onmouseup:stopPropagation="@(!IsEditing)"
+                             @onmousemove:stopPropagation="@(!IsEditing)"
+                             @onkeydown:stopPropagation="@(!IsEditing)">
                             <div class="canvas-node-content">
                                 <SubjectComponent Subject="@node.Child"
                                                   Type="SubjectComponentType.Widget">
@@ -65,7 +73,37 @@
 </div>
 
 <style>
-    .canvas-layout-container {
+    /*
+     * Both modes: no link can be drawn, because a link of the canvas is never stored. A link starts from the
+     * strip along the border of a node, which the library draws as a rect in a group with an inline style that
+     * sets pointer-events. This depends on the markup of Excubo.Blazor.Diagrams (checked for 4.1.136), which has
+     * no setting for it. The border strip is not what moves a node: that is the rect in the first svg, which
+     * then also covers the strip.
+     */
+    .canvas-diagram svg g[style*="pointer-events"] {
+        pointer-events: none !important;
+    }
+
+    /*
+     * View mode: the diagram itself takes no mouse input, only the content of the nodes does. The library calls
+     * preventDefault for every wheel event that reaches its handler, whether zooming is enabled or not, so the wheel
+     * can only scroll the page when the event does not reach the diagram. The rects are the areas of the nodes,
+     * which would catch it. The content of a node takes the pointer again, and the node stops the events that
+     * Blazor would pass on to the handlers of the diagram (see the markup), so that the wheel over a widget
+     * scrolls what the widget scrolls and then the page. In edit mode the pointer events of the content are
+     * off, so that a node can be moved.
+     */
+    .canvas-layout-container:not(.editing) .canvas-diagram,
+    .canvas-layout-container:not(.editing) .canvas-diagram svg rect {
+        pointer-events: none !important;
+    }
+
+    .canvas-layout-container:not(.editing) .canvas-node {
+        pointer-events: auto;
+    }
+
+    /* The outline shows the area of the layout, so it is drawn in edit mode only. */
+    .canvas-layout-container.editing {
         background: rgba(0,0,0,0.02);
         border: 1px dashed rgba(128,128,128,0.3);
     }
@@ -106,7 +144,10 @@
 
 @code {
     private Diagram? _diagram;
-    private bool _suppressNextClick;
+    // The release of a node move or of a pan is a click on the canvas, which is not meant to add a node. The diagram reports
+    // both before the click: OnModified at the release of a node, and OriginChanged with every move of a pan. A mouse down
+    // clears the flag, so that a move that ended without a click on the container does not swallow a later click.
+    private bool _ignoreNextClick;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -140,16 +181,16 @@
 
     private void OnNodeModified(NodeBase modifiedNode)
     {
-        if (Canvas == null) return;
+        var canvas = Canvas;
+        if (canvas == null) return;
 
-        _suppressNextClick = true;
+        _ignoreNextClick = true;
 
         _ = InvokeAsync(async () =>
         {
             try
             {
-                var configurationWriter = RootManager.GetConfigurationWriter(Canvas);
-                await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
+                await RootManager.WriteConfigurationOrWarnAsync(canvas, Snackbar, CancellationToken.None);
             }
             catch (Exception exception)
             {
@@ -158,15 +199,26 @@
         });
     }
 
+    // Only an edited canvas has these handlers. A viewed one has none, so that a click or a mouse down in a widget of a node
+    // renders nothing and is not hidden from the handlers above the canvas.
+    private EventCallback<MouseEventArgs> MouseDownCallback
+        => IsEditing ? EventCallback.Factory.Create<MouseEventArgs>(this, OnCanvasMouseDown) : default;
+
+    private EventCallback<MouseEventArgs> ClickCallback
+        => IsEditing ? EventCallback.Factory.Create<MouseEventArgs>(this, OnCanvasClick) : default;
+
+    private void OnCanvasMouseDown(MouseEventArgs e)
+    {
+        _ignoreNextClick = false;
+    }
+
     private async Task OnCanvasClick(MouseEventArgs e)
     {
-        if (_suppressNextClick)
+        if (_ignoreNextClick)
         {
-            _suppressNextClick = false;
+            _ignoreNextClick = false;
             return;
         }
-
-        if (!IsEditing) return;
 
         // Add node at click position
         await AddNodeAtPosition((int)e.OffsetX, (int)e.OffsetY);
@@ -177,17 +229,20 @@
         x = SnapToGrid(x);
         y = SnapToGrid(y);
 
-        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            if (Canvas == null) return;
+            BeforeSave = subject =>
+            {
+                if (Canvas == null) return;
 
-            var node = SubjectFactory.CreateSubject<CanvasNode>();
-            node.X = x;
-            node.Y = y;
-            node.Child = subject;
+                var node = SubjectFactory.CreateSubject<CanvasNode>();
+                node.X = x;
+                node.Y = y;
+                node.Child = subject;
 
-            // Replace list to trigger property setter and parent tracking
-            Canvas.Nodes = [.. Canvas.Nodes, node];
+                // Replace list to trigger property setter and parent tracking
+                Canvas.Nodes = [.. Canvas.Nodes, node];
+            }
         });
     }
 
@@ -217,9 +272,7 @@
             // Replace list to trigger property setter and parent tracking
             Canvas.Nodes = Canvas.Nodes.Where(n => n != node).ToList();
 
-            // Persist the change
-            var configurationWriter = RootManager.GetConfigurationWriter(Canvas);
-            await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
+            await RootManager.WriteConfigurationOrWarnAsync(Canvas, Snackbar, CancellationToken.None);
         }
     }
 }

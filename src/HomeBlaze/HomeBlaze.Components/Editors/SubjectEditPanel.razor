@@ -11,77 +11,186 @@
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
     @if (Subject != null)
     {
-        @if (IsCreating && ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Setup))
-        {
-            <SubjectComponent Subject="@Subject"
-                              Type="SubjectComponentType.Setup"
-                              AdditionalParameters="@(new Dictionary<string, object?> { ["IsCreating"] = IsCreating })"
-                              @bind-ComponentInstance="_subjectComponent" />
-        }
-        else if (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit))
-        {
-            <SubjectComponent Subject="@Subject"
-                              Type="SubjectComponentType.Edit"
-                              AdditionalParameters="@(new Dictionary<string, object?> { ["IsCreating"] = IsCreating })"
-                              @bind-ComponentInstance="_subjectComponent" />
-        }
-        else
-        {
-            <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
-        }
+        @* A hosted form may change its validity without raising IsValidChanged, so the panel reads it again after
+           interaction. Blazor does not bubble change, so a control that only changes on change is picked up by
+           the next focus change. *@
+        <div @oninput="_refreshIsValid"
+             @onclick="_refreshIsValid"
+             @onkeyup="_refreshIsValid"
+             @onfocusin="_refreshIsValid"
+             @onfocusout="_refreshIsValid">
+            @if (HostedComponentType is { } hostedComponentType)
+            {
+                <SubjectComponent @key="Subject"
+                                  Subject="@Subject"
+                                  Type="hostedComponentType"
+                                  AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
+                                  ComponentInstance="_subjectComponent"
+                                  ComponentInstanceChanged="OnSubjectComponentRendered" />
+            }
+            else
+            {
+                <ConfigurationPropertiesEditor @key="Subject"
+                                               @ref="_propertiesEditor"
+                                               Subject="@Subject"
+                                               IsValidChanged="OnPropertiesEditorIsValidChanged" />
+            }
+        </div>
     }
 </TrackingScope>
 
 @code {
+    // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance.
+    private static readonly Dictionary<string, object?> CreatingParameters = new() { ["IsCreating"] = true };
+    private static readonly Dictionary<string, object?> EditingParameters = new() { ["IsCreating"] = false };
+
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
     [Parameter] public bool IsCreating { get; set; }
 
-    private ISubjectComponent? _subjectComponent;
-    private ISubjectEditComponent? _editComponent;
-    private ConfigurationPropertiesEditor? _propertiesEditor;
+    /// <summary>
+    /// Raised with the current validity once the hosted editor is ready, and again whenever the validity changes.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is raised before the hosted editor is ready, so a host that enables its confirm button from this
+    /// event keeps it disabled until the first value arrives. A hosted editor that changes its validity without
+    /// raising its own event is only picked up at the next interaction in the panel or by
+    /// <see cref="RefreshIsValidAsync"/>.
+    /// </remarks>
+    [Parameter] public EventCallback<bool> IsValidChanged { get; set; }
 
-    public bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
+    private IInterceptorSubject? _editedSubject;
+    private ISubjectComponent? _subjectComponent;
+    private bool _isSubjectComponentRendered;
+    private ISubjectEditComponent? _subscribedEditComponent;
+    private ConfigurationPropertiesEditor? _propertiesEditor;
+    private bool? _reportedIsValid;
+    private Func<Task> _refreshIsValid = () => Task.CompletedTask;
+
+    private SubjectComponentType? HostedComponentType
+    {
+        get
+        {
+            if (Subject is null)
+            {
+                return null;
+            }
+
+            var subjectType = Subject.GetType();
+            if (IsCreating && ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Setup))
+            {
+                return SubjectComponentType.Setup;
+            }
+
+            return ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Edit) ? SubjectComponentType.Edit : null;
+        }
+    }
+
+    // A null instance cannot stand for "not reported yet": a registered component that is not an
+    // ISubjectComponent is reported as null and has nothing to apply.
+    private bool IsSubjectComponentPending => !_isSubjectComponentRendered && HostedComponentType is not null;
+
+    /// <summary>
+    /// Gets whether the hosted editor is valid. Also true while a registered component has not rendered yet,
+    /// during which <see cref="ApplyChangesAsync"/> still returns false.
+    /// </summary>
+    public bool IsValid => (_subjectComponent as ISubjectEditComponent)?.IsValid ?? _propertiesEditor?.IsValid ?? true;
+
+    protected override void OnInitialized()
+    {
+        // These events fire on every keystroke in the hosted form, and a normal handler would re-render the
+        // panel, and with it the form, each time.
+        _refreshIsValid = new NonRenderingEventReceiver(ReportIsValidAsync).HandleAsync;
+    }
 
     protected override void OnParametersSet()
     {
-        base.OnParametersSet();
-
-        // TODO: Extract event subscription/unsubscription to helper method - logic duplicated in OnParametersSet, OnAfterRender, and DisposeAsync
-        // Unsubscribe from previous edit component
-        if (_editComponent != null)
+        if (!ReferenceEquals(Subject, _editedSubject))
         {
-            _editComponent.IsValidChanged -= OnIsValidChanged;
-            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
-            _editComponent = null;
+            _editedSubject = Subject;
+
+            // The editor of the previous subject is replaced with the next render, and must not answer for the new one until then.
+            SubscribeTo(null);
+            _subjectComponent = null;
+            _isSubjectComponentRendered = false;
+            _propertiesEditor = null;
+            _reportedIsValid = null;
         }
     }
 
-    protected override void OnAfterRender(bool firstRender)
+    private void OnSubjectComponentRendered(ISubjectComponent? subjectComponent)
     {
-        base.OnAfterRender(firstRender);
+        _subjectComponent = subjectComponent;
+        _isSubjectComponentRendered = true;
+        SubscribeTo(subjectComponent as ISubjectEditComponent);
+    }
 
-        // Subscribe to new edit component if available
-        if (_subjectComponent is ISubjectEditComponent editComponent && _editComponent != editComponent)
+    protected override Task OnAfterRenderAsync(bool firstRender) => ReportIsValidAsync();
+
+    private void SubscribeTo(ISubjectEditComponent? editComponent)
+    {
+        if (ReferenceEquals(_subscribedEditComponent, editComponent))
         {
-            if (_editComponent != null)
-            {
-                _editComponent.IsValidChanged -= OnIsValidChanged;
-                _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
-            }
+            return;
+        }
 
-            _editComponent = editComponent;
-            _editComponent.IsValidChanged += OnIsValidChanged;
-            _editComponent.IsDirtyChanged += OnIsDirtyChanged;
-            StateHasChanged();
+        if (_subscribedEditComponent is not null)
+        {
+            _subscribedEditComponent.IsValidChanged -= OnIsValidChanged;
+            _subscribedEditComponent.IsDirtyChanged -= OnIsDirtyChanged;
+        }
+
+        _subscribedEditComponent = editComponent;
+
+        if (editComponent is not null)
+        {
+            editComponent.IsValidChanged += OnIsValidChanged;
+            editComponent.IsDirtyChanged += OnIsDirtyChanged;
         }
     }
 
-    private void OnIsValidChanged(bool isValid) => InvokeAsync(StateHasChanged);
+    private void OnIsValidChanged(bool isValid) => InvokeAsync(async () =>
+    {
+        StateHasChanged();
+        await ReportIsValidAsync();
+    });
+
+    private Task OnPropertiesEditorIsValidChanged(bool isValid) => ReportIsValidAsync();
+
+    /// <summary>
+    /// Reads the validity of the hosted editor again and raises <see cref="IsValidChanged"/> when it differs
+    /// from the last value that was raised.
+    /// </summary>
+    public Task RefreshIsValidAsync() => ReportIsValidAsync();
+
+    private async Task ReportIsValidAsync()
+    {
+        // While the hosted component is pending, IsValid falls back to true. Reporting that would briefly
+        // enable the parent's confirm button for an invalid form.
+        if (!IsValidChanged.HasDelegate || IsSubjectComponentPending)
+        {
+            return;
+        }
+
+        var isValid = IsValid;
+        if (_reportedIsValid != isValid)
+        {
+            _reportedIsValid = isValid;
+            await IsValidChanged.InvokeAsync(isValid);
+        }
+    }
 
     private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
 
-    public async Task SaveAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Applies the buffered edits to the subject and persists them.
+    /// </summary>
+    /// <returns>
+    /// True when the edits were applied and <see cref="PersistAsync"/> ran, which reports a failure of its own to
+    /// the user. False when the edits were not applied, which is reported to the user, and nothing was persisted:
+    /// either <see cref="ApplyChangesAsync"/> returned false, or the edit component failed while saving.
+    /// </returns>
+    public async Task<bool> SaveAsync(CancellationToken cancellationToken)
     {
         bool isApplied;
         try
@@ -91,49 +200,49 @@
         catch (Exception ex)
         {
             Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
-            return;
+            return false;
         }
 
-        if (isApplied)
+        if (!isApplied)
         {
-            await PersistAsync(cancellationToken);
+            Snackbar.Add("The values could not be applied", Severity.Error);
+            return false;
         }
+
+        await PersistAsync(cancellationToken);
+        return true;
     }
 
     /// <summary>
     /// Applies the buffered edits to the subject without persisting them.
     /// </summary>
-    /// <returns>False when there is no subject or the edits are invalid, in which case nothing was applied.</returns>
+    /// <returns>
+    /// False when there is no subject, the editor is not ready yet or not valid, or the generated properties
+    /// editor could not convert or set one of its values. The subject is unchanged then, except for a value that
+    /// could not be set back after a setter rejected a later one, see <see cref="EditedPropertyValues.Apply"/>.
+    /// </returns>
     public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
     {
-        if (Subject == null) return false;
+        if (Subject == null || IsSubjectComponentPending || !IsValid) return false;
 
-        if (_editComponent != null)
+        if (_subjectComponent is ISubjectEditComponent editComponent)
         {
-            if (!_editComponent.IsValid)
-            {
-                return false;
-            }
-
-            await _editComponent.SaveAsync(cancellationToken);
+            await editComponent.SaveAsync(cancellationToken);
         }
-        else
+        else if (_propertiesEditor is { } propertiesEditor)
         {
-            if (_propertiesEditor?.HasErrors == true)
-            {
-                return false;
-            }
-
-            _propertiesEditor?.ApplyChanges();
+            propertiesEditor.ApplyChanges();
+            return !propertiesEditor.HasErrors;
         }
 
         return true;
     }
 
     /// <summary>
-    /// Writes the configuration that contains the subject through the nearest IConfigurationWriter among its
-    /// parents, else the root manager, and applies it. Nothing is written for a subject that is part of no
-    /// configuration, such as a file, which its edit component has saved.
+    /// Writes the configuration that contains the subject through its configuration writer, see
+    /// <see cref="RootManagerExtensions.GetConfigurationWriter"/>, and applies it. Nothing is written for a subject that is part of no
+    /// configuration, such as a file, which its edit component has saved. Warns when the writer wrote nothing,
+    /// in which case the edits are applied but not saved.
     /// </summary>
     public async Task PersistAsync(CancellationToken cancellationToken)
     {
@@ -144,15 +253,23 @@
         {
             // The first configurable parent would be wrong here: for a file that is its storage, whose
             // configuration does not contain the file.
+            var isWritten = true;
             var configurationOwner = subject.TryGetConfigurationOwner();
             if (configurationOwner is IConfigurable configurable)
             {
                 var configurationWriter = RootManager.GetConfigurationWriter(configurationOwner);
-                await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
+                isWritten = await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
                 await configurable.ApplyConfigurationAsync(cancellationToken);
             }
 
-            Snackbar.Add("Configuration saved.", Severity.Info);
+            if (isWritten)
+            {
+                Snackbar.Add("Configuration saved.", Severity.Info);
+            }
+            else
+            {
+                Snackbar.AddConfigurationNotSavedWarning();
+            }
         }
         catch (Exception ex)
         {
@@ -162,12 +279,7 @@
 
     public ValueTask DisposeAsync()
     {
-        if (_editComponent != null)
-        {
-            _editComponent.IsValidChanged -= OnIsValidChanged;
-            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
-        }
-
+        SubscribeTo(null);
         return ValueTask.CompletedTask;
     }
 

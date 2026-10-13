@@ -14,7 +14,8 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class PageSaveTests
 {
-    private const string PagePath = "Demo/Editable.md";
+    private const string EditablePageName = "Editable.md";
+    private const string PagePath = "Demo/" + EditablePageName;
 
     // Far enough in the past that any write of the file moves it, whatever the resolution of the file system.
     private static readonly DateTime UntouchedTime = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -32,7 +33,7 @@ public class PageSaveTests
         // Arrange
         var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
         var pageFilePath = GetPageFilePath(rootManager);
-        var originalContent = await File.ReadAllTextAsync(pageFilePath);
+        var originalContent = await _fixture.ReadFileAsync(pageFilePath);
         var originalConfigurationTime = File.GetLastWriteTimeUtc(rootManager.ConfigurationPath);
         var pageSubject = GetPageSubject(rootManager);
         var marker = $"Saved {Guid.NewGuid():N}";
@@ -63,7 +64,7 @@ public class PageSaveTests
             // Assert: the notification is the last step of the save, so everything it writes is written by now.
             await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
 
-            var savedContent = await File.ReadAllTextAsync(pageFilePath);
+            var savedContent = await _fixture.ReadFileAsync(pageFilePath);
             Assert.Multiple(
                 () => Assert.Contains(marker, savedContent),
                 () => Assert.Equal(UntouchedTime, File.GetLastWriteTimeUtc(rootManager.ConfigurationPath)),
@@ -81,7 +82,7 @@ public class PageSaveTests
         // Arrange
         var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
         var pageFilePath = GetPageFilePath(rootManager);
-        var originalContent = await File.ReadAllTextAsync(pageFilePath);
+        var originalContent = await _fixture.ReadFileAsync(pageFilePath);
         var originalConfigurationTime = File.GetLastWriteTimeUtc(rootManager.ConfigurationPath);
         var pageSubject = GetPageSubject(rootManager);
         var motorName = $"Motor{Guid.NewGuid():N}";
@@ -114,9 +115,9 @@ public class PageSaveTests
             // Assert: the notification is the last step of the save, so everything it writes is written by now.
             await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
 
-            var savedContent = await File.ReadAllTextAsync(pageFilePath);
+            var savedContent = await _fixture.ReadFileAsync(pageFilePath);
             Assert.Multiple(
-                () => Assert.Contains($"\"name\": \"{motorName}\"", savedContent),
+                () => Assert.Contains($":: HomeBlaze.Samples.Motor#editablemotor Name={motorName} TargetSpeed=3000", savedContent),
                 () => Assert.Equal(UntouchedTime, File.GetLastWriteTimeUtc(rootManager.ConfigurationPath)),
                 () => Assert.Same(pageSubject, GetPageSubject(rootManager)));
         }
@@ -133,14 +134,13 @@ public class PageSaveTests
     {
         var root = (FluentStorageContainer)rootManager.Root!;
         var folder = (VirtualFolder)root.Children["Demo"];
-        return (MarkdownFile)folder.Children["Editable.md"];
+        return (MarkdownFile)folder.Children[EditablePageName];
     }
 
-    private static async Task RestoreAsync(RootManager rootManager, string originalContent, DateTime originalConfigurationTime)
+    private async Task RestoreAsync(RootManager rootManager, string originalContent, DateTime originalConfigurationTime)
     {
         // Written through the subject, so that the page the server holds is restored along with the file.
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(originalContent));
-        await GetPageSubject(rootManager).WriteAsync(stream, CancellationToken.None);
+        await _fixture.WriteDemoPageAsync(EditablePageName, originalContent);
 
         File.SetLastWriteTimeUtc(rootManager.ConfigurationPath, originalConfigurationTime);
     }

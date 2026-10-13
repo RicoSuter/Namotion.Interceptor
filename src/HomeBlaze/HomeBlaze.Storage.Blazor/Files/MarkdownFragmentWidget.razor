@@ -1,0 +1,14 @@
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Storage.Pages
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(MarkdownFragment))]
+@implements ISubjectComponent
+
+<MarkdownContentView Children="@((Subject as MarkdownFragment)?.Children)" />
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

@@ -1,0 +1,77 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueList))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    // Read once per render and never kept in a field: the read is what the tracking scope records.
+    // The readings come first because a row without an icon needs to know whether another row has one.
+    // Every option of a row is read once, because each read is intercepted and recorded.
+    var rows = (Subject as ValueList)?.Values ?? [];
+    var items = new (string? Path, ValueReading? Reading, string? Icon)[rows.Length];
+    var anyIcon = false;
+    for (var index = 0; index < rows.Length; index++)
+    {
+        var row = rows[index];
+        var path = row.Path;
+        var reading = string.IsNullOrEmpty(path) ? null : ValueReader.Read(PathResolver, row, path, row.Map, TimeZone);
+        var icon = MudBlazorIconResolver.ResolveOrNull(reading?.Icon ?? row.Icon);
+        items[index] = (path, reading, icon);
+        anyIcon |= icon is not null;
+    }
+}
+
+<MudList T="string" Dense="true" ReadOnly="true" Padding="false" data-testid="value-list">
+    @for (var index = 0; index < rows.Length; index++)
+    {
+        var row = rows[index];
+        var (path, reading, icon) = items[index];
+        var content = row.Content;
+
+        @* No gutters, so that the rows start and end where the text around the list does. Inside a card that is where the icon and the title of its header start and where the content of its header ends. *@
+        <MudListItem T="string"
+                     @key="row"
+                     Class="value-list-item"
+                     Gutters="false"
+                     data-testid="value-row">
+            <div class="d-flex align-center gap-2">
+                @* The icon is not the Icon of the list item, whose column is wider than the avatar of a card header. Its 8 pixels and the gap add up to the 16 that MudCardHeader leaves between avatar and title, so that labels line up with titles. *@
+                @if (icon is not null)
+                {
+                    <MudIcon Icon="@icon" Class="flex-shrink-0 me-2" Style="color: var(--mud-palette-action-default);" data-testid="value-icon" />
+                }
+                else if (anyIcon)
+                {
+                    <MudIcon Class="flex-shrink-0 me-2" aria-hidden="true" data-testid="value-icon-space" />
+                }
+
+                @* The label takes the free room, and with content it is the content that does. *@
+                <MudText Typo="Typo.body2" Class="@(content is null ? "flex-grow-1 ma-0" : "ma-0")" data-testid="value-label">@ValueReader.GetLabel(reading, row.Label)</MudText>
+                @if (content is not null)
+                {
+                    @* MudBlazor 9.2 has no text alignment utility other than this class of MudText. A flex layout is no alternative, because the bar of a Progress has to fill the room. *@
+                    <div class="flex-grow-1 mud-typography-align-right" data-testid="value-content">
+                        <SubjectComponent Subject="@content" Type="SubjectComponentType.Widget" />
+                    </div>
+                }
+
+                @if (reading is not null)
+                {
+                    <ValueText Reading="@reading" Path="@path" Typo="Typo.subtitle2" />
+                }
+            </div>
+        </MudListItem>
+    }
+</MudList>
+
+<style>
+    /* A page gives every paragraph a distance above and below. A utility class cannot reach the paragraph that MudListItem wraps its content in or the paragraphs of the content of a row, and this rule removes the distance of both. Content with several paragraphs loses the distance between them. */
+    .mud-list-item.value-list-item p {
+        margin: 0;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

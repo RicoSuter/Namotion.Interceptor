@@ -529,7 +529,12 @@ var tire = new Tire(context);
 car.Tires = [tire];
 
 var parents = tire.GetParents(); // Returns ImmutableArray with [(car, "Tires", 0)]
+
+var owner = tire.TryGetFirstParent<Car>();      // The nearest parent that is a Car, or null
+var same = car.TryGetFirstParentOrSelf<Car>();  // The car itself, because it is a Car
 ```
+
+Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
 
 Every parent carries an `Index`: `null` for a subject reference, the position for a collection and the key for a dictionary.
 

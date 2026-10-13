@@ -35,9 +35,11 @@ namespace HomeBlaze.History.Sqlite
         public void Sweep() { }
         public bool TryRecord(string propertyPath, System.DateTimeOffset timestamp, object? value, System.Type propertyType) { }
     }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("History")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("History")]
     [System.ComponentModel.Description("Persists [State] history to partitioned SQLite files (priority 50).")]
+    [System.ComponentModel.DisplayName("SQLite history")]
     public class SqliteHistoryStoreSubject : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
     {
         public SqliteHistoryStoreSubject(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject> logger) { }

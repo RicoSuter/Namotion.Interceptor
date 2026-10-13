@@ -10,8 +10,9 @@ namespace HomeBlaze.Storage.Blazor.Models;
 /// <param name="EndLine">1-based end line number.</param>
 /// <param name="EndColumn">1-based end column number.</param>
 /// <param name="Type">The type of decoration (SubjectBlock or Expression).</param>
-/// <param name="Name">The name to display (e.g., "mymotor" for subject, "mymotor.Temperature" for expression).</param>
+/// <param name="Name">The name to display: the name or the type name of a subject block, or the path of an expression (e.g., "mymotor/Temperature").</param>
 /// <param name="Subject">The resolved subject instance (for subject blocks only).</param>
+/// <param name="BlockIndex">For subject blocks, the index of the block on the page.</param>
 public record DecorationRegion(
     int StartLine,
     int StartColumn,
@@ -19,7 +20,8 @@ public record DecorationRegion(
     int EndColumn,
     DecorationRegionType Type,
     string Name,
-    IInterceptorSubject? Subject = null)
+    IInterceptorSubject? Subject = null,
+    int? BlockIndex = null)
 {
     /// <summary>
     /// Checks if the given cursor position is inside this decoration region.

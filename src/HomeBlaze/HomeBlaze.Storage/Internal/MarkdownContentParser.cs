@@ -1,78 +1,73 @@
 using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
-using Markdig;
-using Markdig.Renderers;
+using HomeBlaze.Storage.Pages;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Parses markdown content for embedded subjects and expressions.
-/// Extracted from MarkdownFile to maintain single responsibility.
+/// Turns the blocks and expressions of a markdown page into the child subjects of its <see cref="MarkdownFile"/>.
 /// </summary>
 public sealed partial class MarkdownContentParser
 {
-    // Constants for key prefixes
     private const string HtmlKeyPrefix = "Html_";
     private const string ExpressionKeyPrefix = "Expression_";
-    private const string SubjectMarkerPrefix = "<!--SUBJECT:";
-    private const string SubjectMarkerSuffix = "-->";
 
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
-
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .Build();
-
-    /// <summary>
-    /// Converts markdown to HTML with relative link rewriting.
-    /// </summary>
-    private static string ToHtml(string markdown, string basePath)
-    {
-        var document = Markdown.Parse(markdown, Pipeline);
-
-        using var writer = new StringWriter();
-        var renderer = new HtmlRenderer(writer)
-        {
-            LinkRewriter = url => RewriteLink(url, basePath)
-        };
-        Pipeline.Setup(renderer);
-        renderer.Render(document);
-        writer.Flush();
-
-        return writer.ToString();
-    }
+    private readonly TypeProvider _typeProvider;
+    private readonly ILogger<MarkdownContentParser>? _logger;
 
     /// <summary>
     /// Rewrites relative .md links to /pages/... route format with Children segments.
+    /// A fragment after the page stays on the link. A link that is only a fragment gets the route of the
+    /// page itself, which a link names with <paramref name="pageName"/>.
     /// </summary>
-    private static string RewriteLink(string url, string basePath)
+    private static string RewriteLink(string url, string basePath, string pageName) =>
+        IsRelativePageLink(url, out var fragmentStart) ? RewritePageLink(url, fragmentStart, basePath, pageName) : url;
+
+    /// <summary>
+    /// Whether a link is rewritten: a relative link to a markdown page or a fragment of the page itself.
+    /// Every other link stays as written. For a link that is rewritten, <paramref name="fragmentStart"/> is
+    /// where its fragment starts, or -1 without one.
+    /// </summary>
+    private static bool IsRelativePageLink(string url, out int fragmentStart)
     {
-        // Skip absolute URLs and anchors
+        fragmentStart = -1;
+
+        // Skip absolute URLs
         if (string.IsNullOrEmpty(url) ||
             url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
             url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-            url.StartsWith("#") ||
             url.StartsWith("/"))
         {
-            return url;
+            return false;
+        }
+
+        fragmentStart = url.IndexOf('#');
+        if (fragmentStart == 0)
+        {
+            return true;
         }
 
         // Only process .md links
-        if (!url.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
-        {
-            return url;
-        }
+        var pagePath = fragmentStart < 0 ? url.AsSpan() : url.AsSpan(0, fragmentStart);
+        return pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string RewritePageLink(string url, int fragmentStart, string basePath, string pageName)
+    {
+        // The browser resolves a link against the base address of the application and not against the
+        // address of the page, so a fragment alone would lead to the start page.
+        var pagePath = fragmentStart == 0 ? pageName : fragmentStart < 0 ? url : url[..fragmentStart];
 
         // Resolve relative path against base path
-        var resolvedPath = ResolvePath(basePath, url);
+        var resolvedPath = ResolvePath(basePath, pagePath);
 
         // Convert to /pages/... format with Children segments
         // e.g., "foo/bar/baz.md" => "/pages/foo/bar/baz.md"
@@ -85,14 +80,27 @@ public sealed partial class MarkdownContentParser
             result.Append(segment);
         }
 
+        if (fragmentStart >= 0)
+        {
+            result.Append(url, fragmentStart, url.Length - fragmentStart);
+        }
+
         return result.ToString();
     }
 
     /// <summary>
+    /// Gets a file name as a link has to write it: with the characters escaped that end the path of a URL
+    /// or start an escape. Spaces and other characters are escaped when the link is rendered, as for a
+    /// link that is written on the page.
+    /// </summary>
+    private static string EscapeFileNameForLink(string fileName) =>
+        fileName.Replace("%", "%25").Replace("#", "%23").Replace("?", "%3F");
+
+    /// <summary>
     /// Computes the base path used to resolve relative links in markdown.
-    /// During initial scan, markdown files are parsed BEFORE being placed in their parent's Children,
-    /// so their own graph path isn't available yet. Use the storage container's graph path (which IS
-    /// attached by the time ScanAsync runs) combined with the file's storage-local directory.
+    /// A markdown file is parsed before it is placed in the tree, so its own graph path is not available yet.
+    /// The graph path of its storage container is, and is combined with the directory of the file within the
+    /// storage.
     /// </summary>
     private string GetLinkBasePath(MarkdownFile parent)
     {
@@ -110,6 +118,15 @@ public sealed partial class MarkdownContentParser
             ? trimmedStorage
             : $"{trimmedStorage}/{trimmedDirectory}";
     }
+
+    /// <summary>
+    /// Resolves a link of a block on the page the way a link in the text of the page is rewritten.
+    /// </summary>
+    public string ResolveLink(string link, MarkdownFile page) =>
+        // Asked first, because a widget resolves its link on every render and most links stay as written.
+        IsRelativePageLink(link, out var fragmentStart)
+            ? RewritePageLink(link, fragmentStart, GetLinkBasePath(page), EscapeFileNameForLink(Path.GetFileName(page.FullPath)))
+            : link;
 
     /// <summary>
     /// Resolves a relative path against a base path, handling .. navigation.
@@ -151,55 +168,63 @@ public sealed partial class MarkdownContentParser
 
     public MarkdownContentParser(
         ConfigurableSubjectSerializer serializer,
-        SubjectPathResolver pathResolver)
+        SubjectPathResolver pathResolver,
+        TypeProvider typeProvider,
+        ILogger<MarkdownContentParser>? logger = null)
     {
         _serializer = serializer;
         _pathResolver = pathResolver;
+        _typeProvider = typeProvider;
+        _logger = logger;
     }
 
-    // Source-generated regexes for performance.
-    // ExpressionPattern is shared between SegmentMarkerRegex (HTML post-processing) and
-    // ExpressionRegex (raw-content rendering) so the two code paths agree on what a {{...}} is.
-    private const string ExpressionPattern = @"\{\{\s*([^}]+)\s*\}\}";
-
-    [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n([\s\S]*?)```", RegexOptions.Singleline)]
-    private static partial Regex SubjectBlockRegex();
-
-    [GeneratedRegex(@"(<!--SUBJECT:([^>]+)-->|" + ExpressionPattern + ")")]
-    private static partial Regex SegmentMarkerRegex();
-
-    [GeneratedRegex(ExpressionPattern)]
-    private static partial Regex ExpressionRegex();
-
     /// <summary>
-    /// Renders markdown content by replacing {{ path }} expressions with their resolved values.
-    /// Embedded subject blocks are kept as-is. Frontmatter is preserved.
-    /// Uses the same resolution semantics as <see cref="RenderExpression"/> (relative to the markdown file).
+    /// Renders markdown content by replacing {{ path }} expressions with their resolved values in the format
+    /// each one asks for. An expression with an unknown format stays as written.
+    /// Everything else stays as written, including the lines of the blocks and the front matter. An expression inside markdown code is kept as written.
+    /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
     public string? RenderContent(string? content, MarkdownFile parent)
     {
         if (string.IsNullOrEmpty(content))
             return content;
 
-        return ExpressionRegex().Replace(content, match =>
+        StringBuilder? rendered = null;
+        var copiedLength = 0;
+        foreach (var expression in MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse(content)))
         {
-            var path = match.Groups[1].Value;
-            try
+            rendered ??= new StringBuilder(content.Length);
+            rendered.Append(content, copiedLength, expression.Span.Start - copiedLength);
+            if (expression.Error is not null)
             {
-                var value = _pathResolver.ResolveValue(path, PathStyle.Canonical, relativeTo: parent);
-                return value?.ToString() ?? string.Empty;
+                rendered.Append(content, expression.Span.Start, expression.Span.Length);
             }
-            catch
+            else
             {
-                return match.Value;
+                try
+                {
+                    // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
+                    var property = _pathResolver.ResolveScopedProperty(expression.Path, PathStyle.Canonical, parent);
+                    rendered.Append(RenderExpression.GetText(property, expression.Format, timeZone: null));
+                }
+                catch
+                {
+                    rendered.Append(content, expression.Span.Start, expression.Span.Length);
+                }
             }
-        });
+
+            copiedLength = expression.Span.End;
+        }
+
+        return rendered is null
+            ? content
+            : rendered.Append(content, copiedLength, content.Length - copiedLength).ToString();
     }
 
     /// <summary>
-    /// Parses markdown content and reconciles with existing children.
+    /// Parses page content and reconciles it with the existing children.
     /// </summary>
-    public async Task<IDictionary<string, IInterceptorSubject>> ParseAsync(
+    public async Task<MarkdownParseResult> ParseAsync(
         string? content,
         MarkdownFile parent,
         IDictionary<string, IInterceptorSubject> existingChildren,
@@ -207,144 +232,255 @@ public sealed partial class MarkdownContentParser
     {
         if (string.IsNullOrEmpty(content))
         {
-            return new Dictionary<string, IInterceptorSubject>();
+            return MarkdownParseResult.Empty;
         }
 
-        var contentWithoutFrontmatter = FrontmatterParser.GetContentAfterFrontmatter(content);
-        var (markdownWithMarkers, subjectBlocks) = ExtractSubjectBlocks(contentWithoutFrontmatter);
-
+        var page = MarkdownPageParser.Parse(content);
         var basePath = GetLinkBasePath(parent);
-        var html = ToHtml(markdownWithMarkers, basePath);
-        var segments = ParseHtmlSegments(html, subjectBlocks);
-        return await ReconcileChildrenAsync(segments, parent, existingChildren, cancellationToken);
-    }
+        var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
+        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName));
 
-    private static (string markdown, Dictionary<string, string> subjectBlocks) ExtractSubjectBlocks(string markdown)
-    {
-        var subjectBlocks = new Dictionary<string, string>();
-
-        var result = SubjectBlockRegex().Replace(markdown, match =>
+        var state = new ParseState(parent, page.AllBlocks);
+        try
         {
-            var name = match.Groups[1].Value;
-            var json = match.Groups[2].Value.Trim();
-            subjectBlocks[name] = json;
-            return $"{SubjectMarkerPrefix}{name}{SubjectMarkerSuffix}";
-        });
-
-        return (result, subjectBlocks);
-    }
-
-    private static List<ParsedSegment> ParseHtmlSegments(string html, Dictionary<string, string> subjectBlocks)
-    {
-        var segments = new List<ParsedSegment>();
-        var lastIndex = 0;
-
-        foreach (Match match in SegmentMarkerRegex().Matches(html))
-        {
-            // Add HTML before this match
-            if (match.Index > lastIndex)
-            {
-                var htmlSegment = html.Substring(lastIndex, match.Index - lastIndex);
-                segments.Add(new HtmlParsedSegment(htmlSegment));
-            }
-
-            if (match.Groups[2].Success)
-            {
-                // Subject marker
-                var name = match.Groups[2].Value;
-                if (subjectBlocks.TryGetValue(name, out var json))
-                {
-                    segments.Add(new SubjectParsedSegment(name, json));
-                }
-            }
-            else if (match.Groups[3].Success)
-            {
-                // Expression
-                var path = match.Groups[3].Value.Trim();
-                segments.Add(new ExpressionParsedSegment(path));
-            }
-
-            lastIndex = match.Index + match.Length;
+            var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
+            return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects);
         }
-
-        // Add remaining HTML
-        if (lastIndex < html.Length)
+        catch
         {
-            segments.Add(new HtmlParsedSegment(html.Substring(lastIndex)));
+            // Nothing of this parse is published, so nothing would ever detach the subjects it created.
+            ReleaseCreatedSince(state, 0);
+            throw;
         }
-
-        return segments;
     }
 
-    private async Task<IDictionary<string, IInterceptorSubject>> ReconcileChildrenAsync(
-        List<ParsedSegment> segments,
-        MarkdownFile parent,
-        IDictionary<string, IInterceptorSubject> oldChildren,
+    private async Task<IDictionary<string, IInterceptorSubject>> BuildChildrenAsync(
+        IReadOnlyList<MarkdownSegment> segments,
+        IDictionary<string, IInterceptorSubject> existingChildren,
+        ParseState state,
         CancellationToken cancellationToken)
     {
-        var newChildren = new Dictionary<string, IInterceptorSubject>();
-        var segmentIndex = 0;
+        var children = new Dictionary<string, IInterceptorSubject>();
 
-        foreach (var segment in segments)
+        for (var index = 0; index < segments.Count; index++)
         {
-            switch (segment)
+            switch (segments[index])
             {
-                case HtmlParsedSegment html:
-                    // Include index in key to handle duplicate HTML segments (e.g., "</td><td>" between cells)
-                    var htmlKey = $"{HtmlKeyPrefix}{segmentIndex}_{ComputeHash(html.Html)}";
-                    if (oldChildren.TryGetValue(htmlKey, out var existingHtml) && existingHtml is HtmlSegment)
-                    {
-                        newChildren[htmlKey] = existingHtml;
-                    }
-                    else
-                    {
-                        newChildren[htmlKey] = new HtmlSegment(html.Html);
-                    }
+                case HtmlMarkdownSegment html:
+                    AddHtml(children, existingChildren, index, html.Html);
                     break;
 
-                case ExpressionParsedSegment expr:
-                    // Include index in key to handle duplicate expressions
-                    var exprKey = $"{ExpressionKeyPrefix}{segmentIndex}_{ComputeHash(expr.Path)}";
-                    if (oldChildren.TryGetValue(exprKey, out var existingExpr) && existingExpr is RenderExpression)
-                    {
-                        newChildren[exprKey] = existingExpr;
-                    }
-                    else
-                    {
-                        newChildren[exprKey] = new RenderExpression(expr.Path, parent, _pathResolver);
-                    }
+                case ExpressionMarkdownSegment expression:
+                    // The format and the error are part of the key, so that a changed format replaces the subject.
+                    var expressionKey =
+                        $"{ExpressionKeyPrefix}{index}_{ComputeHash($"{expression.Path}|{expression.Format}|{expression.Error}")}";
+                    children[expressionKey] =
+                        existingChildren.TryGetValue(expressionKey, out var existingExpression) && existingExpression is RenderExpression
+                            ? existingExpression
+                            : new RenderExpression(expression.Path, expression.Format, expression.Error, state.Page, _pathResolver);
                     break;
 
-                case SubjectParsedSegment subj:
-                    var typeName = ExtractTypeName(subj.Json);
-                    if (oldChildren.TryGetValue(subj.Name, out var existing) &&
-                        existing.GetType().FullName == typeName)
+                case BlockMarkdownSegment block:
+                    var (key, subject, error) = await CreateWidgetAsync(block, children, existingChildren, index, state, cancellationToken);
+                    if (subject is null)
                     {
-                        // Same key + same type: update and apply config
-                        _serializer.UpdateConfiguration(existing, subj.Json);
-                        if (existing is IConfigurable configurable)
-                        {
-                            await configurable.ApplyConfigurationAsync(cancellationToken);
-                        }
-                        newChildren[subj.Name] = existing;
+                        AddHtml(children, existingChildren, index, error!.Render());
                     }
                     else
                     {
-                        // Create new subject
-                        var newSubject = _serializer.Deserialize(subj.Json);
-                        if (newSubject != null)
-                        {
-                            // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
-                            newChildren[subj.Name] = (IInterceptorSubject)newSubject;
-                        }
+                        children[key!] = subject;
                     }
+
                     break;
             }
-
-            segmentIndex++;
         }
 
-        return newChildren;
+        return children;
+    }
+
+    private static void AddHtml(
+        Dictionary<string, IInterceptorSubject> children,
+        IDictionary<string, IInterceptorSubject> existingChildren,
+        int index,
+        string html)
+    {
+        // The index is part of the key because the same HTML can occur several times.
+        var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}";
+        children[key] = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment
+            ? existing
+            : new HtmlSegment(html);
+    }
+
+    private async Task<(string? Key, IInterceptorSubject? Subject, BlockError? Error)> CreateWidgetAsync(
+        BlockMarkdownSegment segment,
+        Dictionary<string, IInterceptorSubject> children,
+        IDictionary<string, IInterceptorSubject> existingChildren,
+        int index,
+        ParseState state,
+        CancellationToken cancellationToken)
+    {
+        var block = segment.Block;
+        var head = block.Head!;
+
+        if (head.Id is not null && !state.OwnsName(block))
+        {
+            return (null, null, new BlockError(block.Line, FormatUsedTwice(head.Id)));
+        }
+
+        if (block.Kind == MarkdownBlockKind.Slot)
+        {
+            return (null, null, new BlockError(
+                block.Line,
+                $"'{head.Name}' is not a slot at this position. A slot block must be directly inside the widget that declares it."));
+        }
+
+        var type = _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == head.Name);
+        if (type is null)
+        {
+            return (null, null, new BlockError(
+                block.Line, $"Unknown type '{head.Name}'. Use the full type name including the namespace."));
+        }
+
+        if (!typeof(IConfigurable).IsAssignableFrom(type))
+        {
+            return (null, null, new BlockError(
+                block.Line,
+                $"The type '{head.Name}' cannot be used as a block because it does not implement {nameof(IConfigurable)}."));
+        }
+
+        if (type.IsAbstract || type.IsInterface || type.ContainsGenericParameters)
+        {
+            return (null, null, new BlockError(
+                block.Line,
+                $"The type '{head.Name}' cannot be created because it is abstract, an interface or an open generic type."));
+        }
+
+        // An id can equal the positional key of another block, for example #Card_3.
+        var key = head.Id ?? $"{type.Name}_{index}";
+        if (children.ContainsKey(key))
+        {
+            return (null, null, new BlockError(block.Line, FormatUsedTwice(key)));
+        }
+
+        existingChildren.TryGetValue(key, out var existing);
+        var (subject, error) = await CreateBlockSubjectAsync(
+            type, $"The type '{head.Name}'", segment, existing, state, cancellationToken);
+
+        return (subject is null ? null : key, subject, error);
+    }
+
+    private static string FormatUsedTwice(string name) => $"The name '{name}' is used twice on this page.";
+
+    /// <summary>
+    /// Creates the subject of a widget block or of a slot block with a concrete type, or updates
+    /// <paramref name="existing"/> in place, and fills its slots from the content of the block.
+    /// <paramref name="typeDescription"/> is how an error message names the type, for example "The type 'X'".
+    /// </summary>
+    private async Task<(IInterceptorSubject? Subject, BlockError? Error)> CreateBlockSubjectAsync(
+        Type type,
+        string typeDescription,
+        BlockMarkdownSegment segment,
+        IInterceptorSubject? existing,
+        ParseState state,
+        CancellationToken cancellationToken)
+    {
+        var block = segment.Block;
+        var registrationCount = state.RegistrationCount;
+        var createdCount = state.CreatedCount;
+
+        BlockError? error;
+        try
+        {
+            // Everything that can be checked without an instance is checked before one is created or updated,
+            // so that a block which can never be filled runs no constructor and changes no subject on the page.
+            var slots = SlotMap.For(type);
+            if (slots.Error is not null)
+            {
+                return (null, new BlockError(block.Line, slots.Error));
+            }
+
+            if (!TryBuildConfiguration(type, block, out var configuration, out var configurationError))
+            {
+                return (null, new BlockError(block.Line, configurationError!));
+            }
+
+            if (!TryArrangeContent(type, slots, segment, state, out var content, out var contentError))
+            {
+                return (null, contentError);
+            }
+
+            var (subject, valueError) = await CreateOrUpdateAsync(type, existing, configuration, state, cancellationToken);
+            if (valueError is not null)
+            {
+                error = new BlockError(block.Line, valueError);
+            }
+            else if (subject is null)
+            {
+                return (null, new BlockError(
+                    block.Line, $"{typeDescription} could not be created. It must be a registered configurable subject type."));
+            }
+            else
+            {
+                error = await ApplyContentAsync(subject, slots, content, state, cancellationToken);
+                if (error is null)
+                {
+                    state.Register(block, block.Head!.Id, subject);
+                    return (subject, null);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // Constructors, ApplyConfigurationAsync and property setters run foreign code. One failing block must not
+            // take the page down. A cancellation that the caller did not request is such a failure too, for example a
+            // timeout inside the subject. The page shows the message only, so the log is where the stack trace is.
+            _logger?.LogWarning(
+                exception,
+                "The block at line {Line} of the page {Path} could not be created or updated.",
+                block.Line,
+                state.Page.FullPath);
+
+            error = new BlockError(block.Line, $"{typeDescription} could not be created or updated: {exception.Message}");
+        }
+
+        // The block ends as an error box, so the subjects that blocks nested in it registered are not on the page.
+        state.RemoveRegistrationsSince(registrationCount);
+        ReleaseCreatedSince(state, createdCount);
+        return (null, error);
+    }
+
+    /// <summary>
+    /// Releases the subjects that were created after <see cref="ParseState.CreatedCount"/> had the given value,
+    /// because they do not get onto the page.
+    /// </summary>
+    private void ReleaseCreatedSince(ParseState state, int createdCount)
+    {
+        // In the order of creation: a block subject is created before the subjects in its content, and
+        // releasing it detaches those with it. A subject that still has a reference afterwards was put into
+        // a subject that this parse reused. That one is on the page, so the release leaves its content alone.
+        foreach (var subject in state.TakeCreatedSince(createdCount))
+        {
+            try
+            {
+                // Detaching runs lifecycle handlers as attaching does. Without the execution flow, see
+                // CreateOrUpdateAsync.
+                using (ExecutionContext.SuppressFlow())
+                {
+                    _serializer.Release(subject);
+                }
+            }
+            catch (Exception exception)
+            {
+                // Detaching runs the lifecycle handlers of the context and of the subject. A failure there must
+                // not keep the other subjects from being released, turn a failed block into a failed page, or
+                // replace the exception that ended the parse.
+                _logger?.LogWarning(
+                    exception,
+                    "A subject of the type {Type} that the page {Path} created and did not use could not be released.",
+                    subject.GetType().FullName,
+                    state.Page.FullPath);
+            }
+        }
     }
 
     private static string ComputeHash(string content)
@@ -364,26 +500,108 @@ public sealed partial class MarkdownContentParser
         }
     }
 
-    private static string? ExtractTypeName(string json)
+    /// <summary>What an error box shows: the line of the block to fix and the message.</summary>
+    private sealed record BlockError(int Line, string Message)
     {
-        try
+        /// <summary>The box after this one, when several boxes replace a block.</summary>
+        public BlockError? Next { get; init; }
+
+        public string Render()
         {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty(ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName, out var typeElement))
-            {
-                return typeElement.GetString();
-            }
+            var box = MarkdownErrorBox.Render(Line, Message);
+            return Next is null ? box : box + Next.Render();
         }
-        catch
-        {
-            // Invalid JSON - return null
-        }
-        return null;
     }
 
-    // Parsed segment types - internal for testing
-    internal abstract record ParsedSegment;
-    internal sealed record HtmlParsedSegment(string Html) : ParsedSegment;
-    internal sealed record ExpressionParsedSegment(string Path) : ParsedSegment;
-    internal sealed record SubjectParsedSegment(string Name, string Json) : ParsedSegment;
+    private sealed class ParseState
+    {
+        private readonly List<(int BlockIndex, string? Id)> _registrations = [];
+        private readonly List<IInterceptorSubject> _created = [];
+        private readonly Dictionary<string, int> _nameOwners = new();
+
+        public ParseState(MarkdownFile page, IReadOnlyList<MarkdownBlock> blocksInDocumentOrder)
+        {
+            Page = page;
+
+            // Decided before anything is built: slot blocks are built before the loose content around them, and
+            // the blocks inside a block that ends as an error box are not built at all.
+            foreach (var block in blocksInDocumentOrder)
+            {
+                if (block.Head?.Id is { } id)
+                {
+                    _nameOwners.TryAdd(id, block.Index);
+                }
+            }
+        }
+
+        public MarkdownFile Page { get; }
+
+        public Dictionary<int, IInterceptorSubject> BlockSubjects { get; } = new();
+
+        public Dictionary<string, IInterceptorSubject> NamedSubjects { get; } = new();
+
+        public int RegistrationCount => _registrations.Count;
+
+        /// <summary>How many subjects this parse created so far and did not release.</summary>
+        public int CreatedCount => _created.Count;
+
+        /// <summary>
+        /// Records a subject that this parse created with the context. Until it is in the published result,
+        /// it is detached only when it is released.
+        /// </summary>
+        public void AddCreated(IInterceptorSubject subject) => _created.Add(subject);
+
+        /// <summary>
+        /// Removes and returns the subjects created after <see cref="CreatedCount"/> had the given value,
+        /// in the order they were created.
+        /// </summary>
+        public IReadOnlyList<IInterceptorSubject> TakeCreatedSince(int createdCount)
+        {
+            if (createdCount == _created.Count)
+            {
+                return [];
+            }
+
+            var created = _created.GetRange(createdCount, _created.Count - createdCount);
+            _created.RemoveRange(createdCount, created.Count);
+            return created;
+        }
+
+        /// <summary>
+        /// Whether the block is the first one in the document with its name. Every other block
+        /// with that name is an error, whatever becomes of the first one.
+        /// </summary>
+        public bool OwnsName(MarkdownBlock block) =>
+            block.Head?.Id is not { } id || _nameOwners[id] == block.Index;
+
+        public void Register(MarkdownBlock block, string? id, IInterceptorSubject subject)
+        {
+            BlockSubjects[block.Index] = subject;
+            if (id is not null)
+            {
+                NamedSubjects[id] = subject;
+            }
+
+            _registrations.Add((block.Index, id));
+        }
+
+        /// <summary>
+        /// Removes the subjects registered after <see cref="RegistrationCount"/> had the given value.
+        /// Their blocks still own their names.
+        /// </summary>
+        public void RemoveRegistrationsSince(int registrationCount)
+        {
+            for (var index = _registrations.Count - 1; index >= registrationCount; index--)
+            {
+                var (blockIndex, id) = _registrations[index];
+                BlockSubjects.Remove(blockIndex);
+                if (id is not null)
+                {
+                    NamedSubjects.Remove(id);
+                }
+            }
+
+            _registrations.RemoveRange(registrationCount, _registrations.Count - registrationCount);
+        }
+    }
 }

@@ -48,7 +48,7 @@ Restricts which `Host` header values the server will accept. `*` allows any host
 
 ---
 
-## Data folder {#data-folder}
+## Data folder
 
 HomeBlaze keeps everything it stores in one data folder: the folder that contains the root configuration file `Root.json`. Relative paths in the configuration resolve against this folder.
 
@@ -89,6 +89,8 @@ The container image sets it to `/data/Root.json`.
 ## HomeBlaze:SeedDirectory
 
 Folder that is copied into the data folder on the first start, when the root configuration file does not exist. Existing files are never overwritten, and the root configuration file is copied last, so an interrupted copy is completed on the next start.
+
+Its `Files/Docs` folder is the exception: it replaces `Files/Docs` in the data folder on every start. See [Installation](installation.md#data-folder).
 
 | Setting | Default |
 |---------|---------|

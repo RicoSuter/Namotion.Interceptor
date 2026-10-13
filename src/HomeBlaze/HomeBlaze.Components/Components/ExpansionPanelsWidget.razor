@@ -1,0 +1,53 @@
+@using System.Runtime.CompilerServices
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ExpansionPanels))]
+@implements ISubjectComponent
+
+@{
+    // Read once per render and never kept: a reload assigns a new array.
+    var layout = Subject as ExpansionPanels;
+    var panels = layout?.Panels ?? [];
+}
+
+<MudExpansionPanels MultiExpansion="@(layout?.Single != true)" Class="my-4" data-testid="expansion-panels">
+    @foreach (var panel in panels)
+    {
+        @* The content of a closed panel stays rendered, so that it is read in the render of the tracking
+           scope and not only in the render that a click on the panel causes, which the scope does not record. *@
+        <MudExpansionPanel @key="panel"
+                           Expanded="@IsExpanded(panel)"
+                           ExpandedChanged="@(expanded => SetExpanded(panel, expanded))"
+                           KeepContentAlive="true"
+                           data-testid="expansion-panel">
+            <TitleContent>
+                <div class="d-flex align-center gap-2">
+                    @if (!string.IsNullOrEmpty(panel.Icon))
+                    {
+                        <MudIcon Icon="@MudBlazorIconResolver.Resolve(panel.Icon)" />
+                    }
+
+                    <MudText Class="ma-0">@panel.Title</MudText>
+                </div>
+            </TitleContent>
+            <ChildContent>
+                <div class="layout-cell" data-testid="expansion-panel-content">
+                    <SubjectComponent Subject="@panel.Content" Type="SubjectComponentType.Widget" />
+                </div>
+            </ChildContent>
+        </MudExpansionPanel>
+    }
+</MudExpansionPanels>
+
+@code {
+    // What the viewer opened and closed, by panel instance, so that a reload which keeps a panel keeps its
+    // state. Weak, because a reload can replace a panel and nothing tells this component.
+    private readonly ConditionalWeakTable<ExpansionPanel, StrongBox<bool>> _expanded = new();
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private bool IsExpanded(ExpansionPanel panel) =>
+        _expanded.TryGetValue(panel, out var expanded) ? expanded.Value : panel.Expanded;
+
+    private void SetExpanded(ExpansionPanel panel, bool expanded) =>
+        _expanded.AddOrUpdate(panel, new StrongBox<bool>(expanded));
+}

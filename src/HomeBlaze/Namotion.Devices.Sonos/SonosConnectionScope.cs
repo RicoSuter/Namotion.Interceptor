@@ -39,7 +39,7 @@ internal sealed class SonosConnectionScope : IAsyncDisposable
     internal SonosConnection? Seed { get; set; }
 
     /// <summary>
-    /// Disposes the event listener, which waits for its running handlers, then the connections and the HttpClient.
+    /// Disposes the event listener, which waits for its running handlers, then the HttpClient the connections borrow.
     /// Unsubscribing the events is up to the caller, before.
     /// </summary>
     public async ValueTask DisposeAsync()
@@ -47,13 +47,6 @@ internal sealed class SonosConnectionScope : IAsyncDisposable
         // Sources linked to it before only unregister from it when they are disposed.
         Cancellation.Dispose();
         await EventListener.DisposeAsync();
-
-        foreach (var connection in Connections.Values)
-        {
-            connection.Dispose();
-        }
-
-        Seed?.Dispose();
         HttpClient.Dispose();
     }
 }

@@ -17,7 +17,7 @@ Controls a Sonos household over the speakers' local UPnP API on port 1400, witho
 
 ## Configuration
 
-Create a `SonosSystem` in the UI (category "Devices") or as a JSON file such as `Devices/Sonos.json`. The type alone is enough on a flat home network:
+Create a `SonosSystem` in the UI (group "Media") or as a JSON file such as `Devices/Sonos.json`. The type alone is enough on a flat home network:
 
 ```json
 {
@@ -102,21 +102,17 @@ A group reports its coordinator's playback, track, source, play mode and sleep t
 - A player that leaves the topology keeps its subject and last state with `IsConnected = false` until it returns; only a restart removes it. A topology that misses players is applied only when the next one misses them too, since a rebooting seed can report part of the household. The topology reads a grouping command waits with are skipped while they miss players and do not count toward the two.
 - While a player is not connected, its `PlaybackState` and `IsPlaying` are empty (unknown), so an unplugged speaker never keeps reporting that it plays, and its going offline does not read as playback that stopped. The same holds for a grouped member while its coordinator is not connected, and a group follows its coordinator. Everything else keeps its last value, including the track, source, volume and settings, and `IsConnected` tells that it may be stale. The playback state returns with the next successful poll that reads it; the one from before the outage is forgotten.
 - A new player is offline until its first poll succeeds. One found through a topology event is polled at the next reconciliation.
-- A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state.
+- A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state. So does a single value that an answer leaves out or holds in a form that cannot be read.
 - When the connection is torn down, every unit reports "The Sonos system is disconnected."
 
 ## Widgets
 
-`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, playback controls, mute and volume, with night mode and speech enhancement switches on a home theater player, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
+`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, playback controls, mute and volume, with night mode and speech enhancement switches on a home theater player, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them with a `Widget` block as described in [Page Widgets](../administration/page-widgets.md#widget), for example a room of a system stored as `Devices/Sonos.json`:
 
-<!-- The backticks are HTML entities so that this page shows the block instead of instantiating it: HomeBlaze turns every subject block of a page into a live subject, also inside code blocks. -->
-<pre><code>&#96;&#96;&#96;subject(livingRoom)
-{
-  "$type": "HomeBlaze.Components.Widget",
-  "path": "/Devices/Sonos/Players[RINCON_000E58A0B1C201400]"
-}
-&#96;&#96;&#96;
-</code></pre>
+~~~~markdown
+:: HomeBlaze.Components.Widget#livingRoom Path=/Devices/Sonos/Players[RINCON_000E58A0B1C201400]
+::
+~~~~
 
 Prefer player or system widgets over group widgets: a group widget shows "Cannot resolve path" once its coordinator changes, while a player shows what its group plays on a path that stays.
 
@@ -237,7 +233,7 @@ Operations are disabled while the system, the target or, for coordinator operati
 `Favorites` lists the household's "My Sonos" favorites, read once per reconciliation.
 
 - Satellites answer the favorites `Browse` (`FV:2`) with HTTP 500, so the list is read through a connected room player, coordinators first, trying the next one on failure. When none answers, the previous list stays.
-- Favorites are read in pages of 100, so large lists are complete.
+- Favorites are read in pages of 100, so large lists are complete, up to 20 pages, which is far more than a household has. A speaker that still reports more to come after that is logged as a Warning once, and the favorites read so far are used.
 - Favorites of type "shortcut", such as Sonos Radio station shortcuts, carry no URI and are skipped.
 - `PlayFavorite` matches the title ignoring case; with duplicate titles the first one plays. A container favorite (playlist, album) replaces the queue and plays it; any other favorite becomes the transport URI without touching the queue. Both are sent with the favorite's DIDL metadata, which music services need and which is kept internal because it often contains account tokens.
 
@@ -292,7 +288,7 @@ Subscriptions request a 30 minute lifetime and are renewed at half the lifetime 
 | HomeBlaze to speakers | TCP 1400 | Control, polling, device descriptions, `SUBSCRIBE` and `UNSUBSCRIBE`; always needed |
 | Speakers to HomeBlaze | TCP `EventPort` (6329) | Event delivery; without it the system polls only |
 | HomeBlaze to `239.255.255.250` | UDP 1900, unicast answers | SSDP discovery; only when neither `SeedHost` nor a known speaker answers |
-| HomeBlaze to speakers | TCP 1443 | `PlayNotification` |
+| HomeBlaze to speakers | TCP 1443 | `PlayNotification`, over TLS; the certificate of the speaker is not validated, since no public authority issues it |
 | Browser to speakers | TCP 1400 | Album art in the widgets |
 
 The local Sonos API has no authentication: anything that reaches port 1400 can control the speakers.
@@ -318,8 +314,8 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 
 ## Limitations
 
-- `Sonos.Base`, used for SOAP, parses with `XmlSerializer`, so the library is not yet free of runtime reflection for Native AOT.
 - `SetSpeechEnhancement` writes `DialogLevel` 1 or 0; the Arc Ultra levels 1 to 4 are read as on but cannot be set.
+- An answer larger than 4 MB is a failed request, an event larger than 1 MB is refused, a document that nests more than 64 levels of elements is read as malformed, and favorites past 20 pages are not read, see [Favorites](#favorites). Speakers stay far below all four. The limits keep a broken or hostile device on the network from stalling HomeBlaze with an oversized, deeply nested or endless answer, and a document within them is read in time that grows in step with its size.
 - A speaker that changes role (becomes a surround or stereo partner, or a subwoofer moves rooms) keeps its old subject as an offline entry until restart.
 - SSDP discovery and callback address detection use IPv4 only.
 - The household is not identified by its household id, so two systems seeded in the same household show the same rooms twice.
@@ -339,10 +335,9 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - Fixed output (`OutputFixed`) to disable volume operations on Port, Connect and Amp.
 - A `HouseholdId` setting that pins the system to one household (`GetHouseholdID` or `MuseHouseholdId`), so discovery cannot attach to another one.
 - Spotify tracks by id, as v1's `PlaySpotifyTrack` did; today Spotify content plays through favorites.
-- An own audio clip client that reports rejected clips.
+- Reporting a clip that the speaker rejects, by reading its answer on the audio clip websocket.
 - Album art served through HomeBlaze for HTTPS pages, or the favorite's HTTPS `ImageUri` for radio.
 - A Windows event listener that needs no URL reservation.
-- An own, AOT-clean SOAP client replacing `Sonos.Base`.
 - `AvailableSoftwareUpdate` from the topology event or `CheckForUpdate`.
 - LED state, button lock, and home theater TV power state.
 - A widget for `SonosSatellite`.
@@ -362,11 +357,10 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - Offline players for the topology's `VanishedDevices`, so a sleeping portable has its subject after a restart, and a `Forget` operation that removes a missing player or satellite.
 - Serialized play mode writes, so parallel `SetShuffle` and `SetRepeat` calls cannot undo each other.
 - A pure track presentation resolver that holds the track title, album art and source title rules outside `SonosPlayer`.
-- Upstream contributions to `Sonos.Base` (satellites in the topology model, `resMD` in DIDL).
 
 ## References
 
 - [Sonos UPnP API documentation](https://sonos.svrooij.io/) (unofficial, community maintained)
-- [Sonos.Base (sonos-net)](https://github.com/svrooij/sonos-net), the SOAP client, and [Rssdp](https://github.com/Yortw/RSSDP), the SSDP client
+- [Rssdp](https://github.com/Yortw/RSSDP), the SSDP client
 - [MCP server](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/mcp.md) for controlling the household from AI agents
 - [Source of the library](https://github.com/RicoSuter/Namotion.Interceptor/tree/master/src/HomeBlaze/Namotion.Devices.Sonos) and of its [widgets](https://github.com/RicoSuter/Namotion.Interceptor/tree/master/src/HomeBlaze/Namotion.Devices.Sonos.HomeBlaze)

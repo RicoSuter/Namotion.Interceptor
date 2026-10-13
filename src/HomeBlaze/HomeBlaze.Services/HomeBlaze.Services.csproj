@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <PropertyGroup>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
     <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.Components.Tests" />
         <InternalsVisibleTo Include="HomeBlaze.Services.Tests" />
     </ItemGroup>
 

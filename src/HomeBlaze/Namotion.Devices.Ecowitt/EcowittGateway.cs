@@ -14,8 +14,10 @@ using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Devices.Ecowitt;
 
-[Category("Devices")]
+[Category("Climate")]
 [Description("Ecowitt weather station gateway with dynamic sensor discovery")]
+[DisplayName("Ecowitt gateway")]
+[SubjectIcon("Cloud")]
 [InterceptorSubject]
 public partial class EcowittGateway : BackgroundService,
     IConfigurable,
@@ -37,6 +39,10 @@ public partial class EcowittGateway : BackgroundService,
     private EcowittNetworkInfo? _networkInfo;
     private EcowittDeviceInfo? _deviceInfo;
     private EcowittSensorInfo[]? _sensorsInfo;
+
+    // The rain totals change with every poll while it rains, so of the writes in a row that wrote nothing
+    // only the first is logged.
+    private bool _isConfigurationUnsaved;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -286,9 +292,7 @@ public partial class EcowittGateway : BackgroundService,
 
                 if (configChanged)
                 {
-                    var configWriter = this.TryGetFirstParent<IConfigurationWriter>();
-                    if (configWriter != null)
-                        await configWriter.WriteConfigurationAsync(this, stoppingToken);
+                    await SaveConfigurationAsync(stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -329,6 +333,22 @@ public partial class EcowittGateway : BackgroundService,
                 break;
             }
         }
+    }
+
+    internal async Task SaveConfigurationAsync(CancellationToken cancellationToken)
+    {
+        var configurationWriter = this.TryGetFirstParent<IConfigurationWriter>();
+        if (configurationWriter == null)
+            return;
+
+        var isWritten = await configurationWriter.WriteConfigurationAsync(this, cancellationToken);
+        if (!isWritten && !_isConfigurationUnsaved)
+        {
+            _logger.LogWarning(
+                "Ecowitt gateway {HostAddress} rain totals were not saved and will be lost on restart", HostAddress);
+        }
+
+        _isConfigurationUnsaved = !isWritten;
     }
 
     internal bool UpdateFromLiveData(EcowittLiveData data)

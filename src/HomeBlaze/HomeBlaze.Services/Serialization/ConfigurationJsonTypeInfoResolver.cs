@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 
@@ -14,14 +15,30 @@ namespace HomeBlaze.Services.Serialization;
 /// - Sets up polymorphism for IConfigurable with $type discriminator
 /// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
+/// - Creates IConfigurable types that have no parameterless constructor through the service provider
+/// - Names every property by its declared name when the naming is <see cref="ConfigurationNaming.CSharpProperty"/>
 /// </summary>
 public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 {
     private readonly TypeProvider _typeProvider;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ConfigurationNaming _naming;
 
-    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider)
+    /// <param name="typeProvider">The types that a <c>$type</c> discriminator can name.</param>
+    /// <param name="serviceProvider">Creates the configurable types that have no parameterless constructor.</param>
+    /// <param name="naming">
+    /// With <see cref="ConfigurationNaming.CSharpProperty"/> every property gets its declared name, whatever the
+    /// naming policy of the options is. With <see cref="ConfigurationNaming.JsonProperty"/> the names are left
+    /// to the options.
+    /// </param>
+    public ConfigurationJsonTypeInfoResolver(
+        TypeProvider typeProvider,
+        IServiceProvider serviceProvider,
+        ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
     {
         _typeProvider = typeProvider;
+        _serviceProvider = serviceProvider;
+        _naming = naming;
     }
 
     public override JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
@@ -48,12 +65,29 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
             }
         }
 
+        // CreateObject is null for a type without a parameterless constructor. The serializer then binds the
+        // constructor parameters to JSON properties and throws on a parameter that is a dependency, so a
+        // subject nested in the configuration of another one is created the way the root of a configuration is.
+        if (typeInfo is { Kind: JsonTypeInfoKind.Object, CreateObject: null } &&
+            type is { IsAbstract: false, IsInterface: false } &&
+            typeof(IConfigurable).IsAssignableFrom(type))
+        {
+            typeInfo.CreateObject = () => ActivatorUtilities.CreateInstance(_serviceProvider, type);
+        }
+
         // Filter [Configuration] properties for all object types
         if (typeInfo.Kind == JsonTypeInfoKind.Object)
         {
             foreach (var property in typeInfo.Properties)
             {
                 var propertyName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
+
+                // Also replaces an explicit JSON name, which options without a naming policy would keep.
+                if (_naming == ConfigurationNaming.CSharpProperty)
+                {
+                    property.Name = propertyName;
+                }
+
                 var ignoreNulls = options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull;
                 property.ShouldSerialize = (parent, value) =>
                 {

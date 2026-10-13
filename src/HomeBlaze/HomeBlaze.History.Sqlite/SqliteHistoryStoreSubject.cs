@@ -23,6 +23,8 @@ namespace HomeBlaze.History.Sqlite;
 /// </summary>
 [Category("History")]
 [Description("Persists [State] history to partitioned SQLite files (priority 50).")]
+[DisplayName("SQLite history")]
+[SubjectIcon("History")]
 [InterceptorSubject]
 public partial class SqliteHistoryStoreSubject :
     BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler

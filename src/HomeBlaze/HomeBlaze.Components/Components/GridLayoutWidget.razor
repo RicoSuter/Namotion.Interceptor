@@ -7,6 +7,7 @@
 @inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
+@inject ISnackbar Snackbar
 
 <div class="grid-layout-container"
      style="display: grid;
@@ -71,12 +72,6 @@
 </div>
 
 <style>
-    .grid-layout-container {
-        background: rgba(0,0,0,0.02);
-        border: 1px dashed rgba(128,128,128,0.3);
-        padding: 8px;
-    }
-
     .layout-edit-button {
         position: absolute;
         top: -36px;
@@ -181,17 +176,20 @@
 
     private async Task AddCellAt(int row, int column)
     {
-        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            if (Grid == null) return;
+            BeforeSave = subject =>
+            {
+                if (Grid == null) return;
 
-            var cell = SubjectFactory.CreateSubject<GridCell>();
-            cell.Row = row;
-            cell.Column = column;
-            cell.Child = subject;
+                var cell = SubjectFactory.CreateSubject<GridCell>();
+                cell.Row = row;
+                cell.Column = column;
+                cell.Child = subject;
 
-            // Replace list to trigger property setter and parent tracking
-            Grid.Cells = [.. Grid.Cells, cell];
+                // Replace list to trigger property setter and parent tracking
+                Grid.Cells = [.. Grid.Cells, cell];
+            }
         });
     }
 
@@ -221,9 +219,7 @@
             // Replace list to trigger property setter and parent tracking
             Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
 
-            // Persist the change
-            var configurationWriter = RootManager.GetConfigurationWriter(Grid);
-            await configurationWriter.WriteConfigurationAsync(Grid, CancellationToken.None);
+            await RootManager.WriteConfigurationOrWarnAsync(Grid, Snackbar, CancellationToken.None);
         }
     }
 }
