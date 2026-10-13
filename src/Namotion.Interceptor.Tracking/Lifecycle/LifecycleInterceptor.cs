@@ -422,12 +422,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             // Refresh child index metadata for retained subjects whose positions may have shifted.
             // A subject kept between two single references has no index that could change, which
-            // spares the most common write the overlap check.
+            // spares the most common write the overlap check. The refresh uses newTouchedSubjects
+            // up, so nothing may read the set after it.
             if ((lastProcessed is IEnumerable || newValue is IEnumerable) &&
                 oldTouchedSubjects.Overlaps(newTouchedSubjects))
             {
                 RefreshRetainedSubjects(context.Property, newValue,
-                    oldCollectedSubjects, newCollectedSubjects, oldTouchedSubjects.Count, newTouchedSubjects.Count);
+                    oldCollectedSubjects, newCollectedSubjects, oldTouchedSubjects.Count, newTouchedSubjects);
             }
         }
         finally
@@ -442,12 +443,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private static void RefreshRetainedSubjects(PropertyReference property, object? newValue,
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> oldCollectedSubjects,
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> newCollectedSubjects,
-        int oldSubjectCount, int newSubjectCount)
+        int oldSubjectCount, HashSet<IInterceptorSubject> newSubjects)
     {
         var subjectContext = property.Subject.Context;
 
         ChildIndexRefresher.RefreshMovedChildren(
-            subjectContext, oldCollectedSubjects, newCollectedSubjects, oldSubjectCount, newSubjectCount);
+            subjectContext, oldCollectedSubjects, newCollectedSubjects, oldSubjectCount, newSubjects);
 
         // Not for a collection that gave way to a single reference: these handlers are handed a collection.
         if (newValue is IEnumerable)

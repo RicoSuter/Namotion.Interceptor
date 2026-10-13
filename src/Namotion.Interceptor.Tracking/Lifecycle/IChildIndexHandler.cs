@@ -7,13 +7,15 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 internal interface IChildIndexHandler
 {
     /// <summary>
-    /// Called for a subject that a structural write kept in the property or added to it, and
-    /// that may sit under another key or position than before, while the lifecycle interceptor
-    /// holds its lock. A subject the property holds more than once is refreshed once per key or
-    /// position, last with the first of them, which is the one it was attached with.
+    /// Called after a structural write that kept at least one subject in the property, while the
+    /// lifecycle interceptor holds its lock: once for every subject of the new value that may sit
+    /// under another key or position than before, and for no subject twice.
     /// </summary>
     /// <param name="child">The subject the property holds.</param>
     /// <param name="property">The property that was written.</param>
-    /// <param name="index">The key or position of the subject in the new value.</param>
+    /// <param name="index">
+    /// The key or position of the subject in the new value: the first one where the value holds the
+    /// subject more than once, and <c>null</c> where the value is the subject itself.
+    /// </param>
     void RefreshChildIndex(IInterceptorSubject child, PropertyReference property, object? index);
 }

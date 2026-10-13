@@ -349,6 +349,92 @@ public class ParentIndexTests
     }
 
     [Fact]
+    public void WhenDictionaryIsReplacedByItsOnlyEntry_ThenParentIndexIsNull()
+    {
+        // Arrange
+        var car = new Car();
+        var holder = new BroadlyDeclaredHolder(CreateContext())
+        {
+            BroadCars = new Dictionary<string, Car> { ["Motor"] = car }
+        };
+
+        // Act
+        holder.BroadCars = car;
+
+        // Assert
+        Assert.Equal(Parent(holder, nameof(BroadlyDeclaredHolder.BroadCars), null), Assert.Single(car.GetParents()));
+    }
+
+    [Fact]
+    public void WhenSubjectHeldTwiceLosesOnePositionAndOthersMove_ThenEveryParentIndexIsCurrent()
+    {
+        // Arrange
+        var car = new Car();
+        var other = new Car();
+        var garage = new Garage(CreateContext()) { Cars = [car, car, other] };
+
+        // Act
+        garage.Cars = [other, car];
+
+        // Assert
+        Assert.Equal(Parent(garage, nameof(Garage.Cars), 1), Assert.Single(car.GetParents()));
+        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(other.GetParents()));
+    }
+
+    [Fact]
+    public void WhenValueTypeKeyChanges_ThenParentIndexIsTheNewKey()
+    {
+        // Arrange
+        var kept = new Car();
+        var reKeyed = new Car();
+        var holder = new BroadlyDeclaredHolder(CreateContext())
+        {
+            BroadCars = new Dictionary<int, Car> { [1] = kept, [2] = reKeyed }
+        };
+
+        // Act
+        holder.BroadCars = new Dictionary<int, Car> { [1] = kept, [3] = reKeyed };
+
+        // Assert
+        Assert.Equal(Parent(holder, nameof(BroadlyDeclaredHolder.BroadCars), 1), Assert.Single(kept.GetParents()));
+        Assert.Equal(Parent(holder, nameof(BroadlyDeclaredHolder.BroadCars), 3), Assert.Single(reKeyed.GetParents()));
+    }
+
+    [Fact]
+    public void WhenSubjectLeavesOneOfTwoPropertiesOfItsParent_ThenTheOtherParentStays()
+    {
+        // Arrange
+        var car = new Car();
+        var garage = new Garage(CreateContext())
+        {
+            Cars = [car],
+            CarsByName = new Dictionary<string, Car> { ["Motor"] = car }
+        };
+
+        // Act
+        garage.Cars = [];
+
+        // Assert
+        Assert.Equal(Parent(garage, nameof(Garage.CarsByName), "Motor"), Assert.Single(car.GetParents()));
+    }
+
+    [Fact]
+    public void WhenStructuralWriteKeepsSubjectHeldTwice_ThenParentsSnapshotIsReused()
+    {
+        // Arrange
+        var car = new Car();
+        var other = new Car();
+        var garage = new Garage(CreateContext()) { Cars = [car, other, car] };
+        var parentsOfCar = car.GetParents();
+
+        // Act
+        garage.Cars = [car, other, car];
+
+        // Assert: equal means the same underlying array, so the unchanged index cost no new snapshot.
+        Assert.True(parentsOfCar == car.GetParents());
+    }
+
+    [Fact]
     public void WhenStructuralWriteKeepsEveryIndex_ThenParentsSnapshotIsReused()
     {
         // Arrange
