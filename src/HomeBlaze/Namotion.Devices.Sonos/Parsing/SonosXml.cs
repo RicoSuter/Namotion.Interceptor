@@ -32,22 +32,8 @@ internal static class SonosXml
     }
 
     /// <summary>
-    /// Parses a document from its bytes, taking the encoding from the document. Throws <see cref="XmlException"/>
-    /// when it is empty, malformed or declares a document type.
+    /// Creates a reader over the bytes of a document, which takes the encoding from the document and throws
+    /// <see cref="XmlException"/> while reading when it is malformed or declares a document type.
     /// </summary>
-    internal static XDocument Parse(Stream stream)
-    {
-        using var xmlReader = XmlReader.Create(stream, ReaderSettings);
-        return XDocument.Load(xmlReader);
-    }
-
-    /// <summary>
-    /// Returns the text of an element that holds no elements, and null for any other or for none.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="XElement.Value"/> recurses once per nesting level, so reading it from a deeply nested document
-    /// overflows the stack.
-    /// </remarks>
-    internal static string? GetText(XElement? element) =>
-        element is { HasElements: false } ? element.Value : null;
+    internal static XmlReader CreateReader(Stream stream) => XmlReader.Create(stream, ReaderSettings);
 }

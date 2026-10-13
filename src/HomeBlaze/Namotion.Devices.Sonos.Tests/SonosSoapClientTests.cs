@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text;
-using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
 using Namotion.Devices.Sonos.Client;
@@ -113,6 +112,7 @@ public class SonosSoapClientTests
             "<Name>K&amp;uuml;che &lt;1&gt;</Name><Empty></Empty><Volume>44</Volume><Negative>-3</Negative><NotANumber>loud</NotANumber>" +
             "<One>1</One><Zero>0</Zero><True>true</True><False>false</False><Maybe>maybe</Maybe>" +
             "<PaddedNumber> 7 </PaddedNumber><PaddedTrue> 1 </PaddedTrue><Nested><Inner>5</Inner></Nested>" +
+            "<Split>a<!-- c -->b</Split><Section><![CDATA[<x>]]></Section><u:Prefixed>p</u:Prefixed><Last>z</Last>" +
             "</u:GetThingsResponse>" + EnvelopeEnd);
         using var httpClient = new HttpClient();
         var client = new SonosSoapClient(httpClient, speaker.BaseUri);
@@ -138,6 +138,10 @@ public class SonosSoapClientTests
         Assert.Equal(7, response.GetInt32("PaddedNumber"));
         Assert.True(response.GetBoolean("PaddedTrue"));
         Assert.Null(response.GetString("Nested"));
+        Assert.Equal("ab", response.GetString("Split"));
+        Assert.Equal("<x>", response.GetString("Section"));
+        Assert.Equal("p", response.GetString("Prefixed"));
+        Assert.Equal("z", response.GetString("Last"));
     }
 
     [Fact]
@@ -264,9 +268,10 @@ public class SonosSoapClientTests
 
     [Theory]
     [InlineData("not xml")]
-    [InlineData("<Envelope><Body /></Envelope>")]
+    [InlineData("<Envelope><Body><GetTransportInfoResponse><CurrentTransportState>PLAYING</CurrentTransportState></GetTransportInfoResponse></Body></Envelope>")]
     [InlineData("<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body /></s:Envelope>")]
-    public async Task WhenTheAnswerIsNoSoapEnvelopeWithABody_ThenQueryingThrowsXmlException(string body)
+    [InlineData("<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body><u:GetMediaInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"><CurrentURI>x</CurrentURI></u:GetMediaInfoResponse></s:Body></s:Envelope>")]
+    public async Task WhenTheAnswerIsNotTheSoapAnswerToTheAction_ThenQueryingThrowsXmlException(string body)
     {
         // Arrange
         await using var speaker = Answer(HttpStatusCode.OK, body);
@@ -279,12 +284,14 @@ public class SonosSoapClientTests
     }
 
     [Fact]
-    public async Task WhenTheAnswerDeclaresADocumentType_ThenQueryingThrowsXmlExceptionInsteadOfExpandingIt()
+    public async Task WhenTheAnswerDeclaresADocumentType_ThenQueryingThrowsXmlException()
     {
         // Arrange
         await using var speaker = Answer(
             HttpStatusCode.OK,
-            "<!DOCTYPE s [<!ENTITY e \"x\">]><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body><r><v>&e;</v></r></s:Body></s:Envelope>");
+            "<!DOCTYPE s [<!ENTITY e \"x\">]>" + AnswerStart +
+            "<u:GetTransportInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"><CurrentTransportState>PLAYING</CurrentTransportState></u:GetTransportInfoResponse>" +
+            EnvelopeEnd);
         using var httpClient = new HttpClient();
         var client = new SonosSoapClient(httpClient, speaker.BaseUri);
 
@@ -294,14 +301,14 @@ public class SonosSoapClientTests
     }
 
     [Fact]
-    public async Task WhenAValueOfTheAnswerIsNestedVeryDeeply_ThenItIsUnknownInsteadOfOverflowingTheStack()
+    public async Task WhenAValueOfTheAnswerIsNestedVeryDeeply_ThenItIsUnknownAndTheValueAfterItIsRead()
     {
         // Arrange
         const int depth = 100_000;
         var nested = string.Concat(Enumerable.Repeat("<a>", depth)) + string.Concat(Enumerable.Repeat("</a>", depth));
         await using var speaker = Answer(
             HttpStatusCode.OK,
-            AnswerStart + "<u:GetNameResponse xmlns:u=\"urn:schemas-upnp-org:service:DeviceProperties:1\"><Name>" + nested + "</Name></u:GetNameResponse>" + EnvelopeEnd);
+            AnswerStart + "<u:GetNameResponse xmlns:u=\"urn:schemas-upnp-org:service:DeviceProperties:1\"><Name>" + nested + "</Name><Room>Küche</Room></u:GetNameResponse>" + EnvelopeEnd);
         using var httpClient = new HttpClient();
         var client = new SonosSoapClient(httpClient, speaker.BaseUri);
 
@@ -310,26 +317,28 @@ public class SonosSoapClientTests
 
         // Assert
         Assert.Null(response.GetString("Name"));
+        Assert.Equal("Küche", response.GetString("Room"));
     }
 
     [Fact]
-    public void WhenCreatingAnAudioClipCommand_ThenItNamesThePlayerTheSoundAndTheVolume()
+    public async Task WhenAReadIsAnsweredWithAFaultAndASuccessStatus_ThenQueryingThrowsTheFault()
     {
+        // Arrange
+        await using var speaker = Answer(
+            HttpStatusCode.OK,
+            AnswerStart +
+            "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
+            "<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>402</errorCode></UPnPError></detail></s:Fault>" +
+            EnvelopeEnd);
+        using var httpClient = new HttpClient();
+        var client = new SonosSoapClient(httpClient, speaker.BaseUri);
+
         // Act
-        var command = SonosAudioClipClient.CreateCommand("RINCON_1", new Uri("http://host/a b.mp3?x=1&y=2"), 30);
+        var exception = await Assert.ThrowsAsync<SonosFaultException>(
+            () => client.QueryAsync(SonosService.RenderingControl, "GetVolume", [], CancellationToken.None));
 
         // Assert
-        using var document = JsonDocument.Parse(command);
-        var header = document.RootElement[0];
-        var clip = document.RootElement[1];
-        Assert.Equal(2, document.RootElement.GetArrayLength());
-        Assert.Equal("audioClip:1", header.GetProperty("namespace").GetString());
-        Assert.Equal("loadAudioClip", header.GetProperty("command").GetString());
-        Assert.Equal("RINCON_1", header.GetProperty("playerId").GetString());
-        Assert.Equal("http://host/a%20b.mp3?x=1&y=2", clip.GetProperty("streamUrl").GetString());
-        Assert.Equal(30, clip.GetProperty("volume").GetInt32());
-        Assert.False(string.IsNullOrEmpty(clip.GetProperty("name").GetString()));
-        Assert.False(string.IsNullOrEmpty(clip.GetProperty("appId").GetString()));
+        Assert.Equal(402, exception.UpnpErrorCode);
     }
 
     private static LoopbackHttpServer Answer(HttpStatusCode status, string body) =>

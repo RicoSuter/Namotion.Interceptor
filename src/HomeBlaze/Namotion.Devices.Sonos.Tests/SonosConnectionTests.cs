@@ -507,4 +507,18 @@ public class SonosConnectionTests
         Assert.Contains("MAC address", exception.Message);
         Assert.Equal(["GetZoneInfo"], speaker.Calls.Select(call => call.Action));
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(101)]
+    public async Task WhenTheNotificationVolumeIsNotOneToHundred_ThenPlayNotificationThrowsBeforeConnecting(int volume)
+    {
+        // Arrange
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(new Uri("http://127.0.0.1:1400/"), Uuid, httpClient);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => connection.PlayNotificationAsync(new Uri("http://127.0.0.1/sound.mp3"), volume, CancellationToken.None));
+    }
 }

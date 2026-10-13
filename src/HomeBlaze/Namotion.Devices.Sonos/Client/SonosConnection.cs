@@ -332,7 +332,8 @@ internal sealed class SonosConnection
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(NotificationTimeout);
         var uuid = await GetUuidAsync(timeout.Token);
-        await SonosAudioClipClient.QueueAsync(BaseUri.Host, uuid, soundUri, volume, NotificationCloseTimeout, _logger, timeout.Token);
+        await SonosAudioClipClient.QueueAsync(
+            SonosAudioClipClient.GetEndpoint(BaseUri.Host), uuid, soundUri, volume, NotificationCloseTimeout, _logger, timeout.Token);
     }
 
     internal async Task SwitchToTvAsync(CancellationToken cancellationToken) =>

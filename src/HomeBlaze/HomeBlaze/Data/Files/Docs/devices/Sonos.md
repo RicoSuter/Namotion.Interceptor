@@ -102,7 +102,7 @@ A group reports its coordinator's playback, track, source, play mode and sleep t
 - A player that leaves the topology keeps its subject and last state with `IsConnected = false` until it returns; only a restart removes it. A topology that misses players is applied only when the next one misses them too, since a rebooting seed can report part of the household. The topology reads a grouping command waits with are skipped while they miss players and do not count toward the two.
 - While a player is not connected, its `PlaybackState` and `IsPlaying` are empty (unknown), so an unplugged speaker never keeps reporting that it plays, and its going offline does not read as playback that stopped. The same holds for a grouped member while its coordinator is not connected, and a group follows its coordinator. Everything else keeps its last value, including the track, source, volume and settings, and `IsConnected` tells that it may be stale. The playback state returns with the next successful poll that reads it; the one from before the outage is forgotten.
 - A new player is offline until its first poll succeeds. One found through a topology event is polled at the next reconciliation.
-- A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state.
+- A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state. So does a single value that an answer leaves out or holds in a form that cannot be read.
 - When the connection is torn down, every unit reports "The Sonos system is disconnected."
 
 ## Widgets
@@ -288,7 +288,7 @@ Subscriptions request a 30 minute lifetime and are renewed at half the lifetime 
 | HomeBlaze to speakers | TCP 1400 | Control, polling, device descriptions, `SUBSCRIBE` and `UNSUBSCRIBE`; always needed |
 | Speakers to HomeBlaze | TCP `EventPort` (6329) | Event delivery; without it the system polls only |
 | HomeBlaze to `239.255.255.250` | UDP 1900, unicast answers | SSDP discovery; only when neither `SeedHost` nor a known speaker answers |
-| HomeBlaze to speakers | TCP 1443 | `PlayNotification` |
+| HomeBlaze to speakers | TCP 1443 | `PlayNotification`, over TLS; the certificate of the speaker is not validated, since no public authority issues it |
 | Browser to speakers | TCP 1400 | Album art in the widgets |
 
 The local Sonos API has no authentication: anything that reaches port 1400 can control the speakers.
