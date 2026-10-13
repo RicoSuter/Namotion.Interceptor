@@ -86,7 +86,7 @@ internal static class ZoneGroupStateParser
         {
             foreach (var (position, _, role) in named)
             {
-                satellites.Add(CreateSatellite(index.Elements[position], role));
+                satellites.Add(CreateSatellite(index.Take(position), role));
             }
         }
 
@@ -177,6 +177,18 @@ internal static class ZoneGroupStateParser
         }
 
         internal List<XElement> Elements { get; }
+
+        /// <summary>
+        /// Returns the element at the position and removes its UUID, so no later channel map names it.
+        /// </summary>
+        internal XElement Take(int position)
+        {
+            // A real invisible member belongs to one room. Left in, a member that every player of a group names
+            // would be read once per player.
+            var element = Elements[position];
+            _positions.Remove(GetRequiredAttribute(element, "UUID"));
+            return element;
+        }
 
         /// <summary>
         /// Returns the position of the element that stands for the UUID of <paramref name="element"/>.

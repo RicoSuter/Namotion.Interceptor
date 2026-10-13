@@ -290,6 +290,27 @@ public class ZoneGroupStateParserTests
     }
 
     [Fact]
+    public void WhenSeveralPlayersNameOneInvisibleMember_ThenOnlyTheFirstOfThemGetsItAsPartner()
+    {
+        // Arrange: a real member belongs to one room. A partner for every player that names it would read the member
+        // once per player and let a document of n members yield n times n satellites.
+        var attributes = $"ChannelMapSet=\"{CreateUuid(9)}:RF,RF\"";
+        var xml = CreateGroup(
+            CreateMember(0, attributes) +
+            CreateMember(1, attributes) +
+            CreateMember(9, "Invisible=\"1\"") +
+            CreateMember(2, attributes));
+
+        // Act
+        var players = Assert.Single(ZoneGroupStateParser.Parse(xml).Groups).Players;
+
+        // Assert
+        Assert.Equal(CreateUuid(9), Assert.Single(players[0].Satellites).Uuid);
+        Assert.Empty(players[1].Satellites);
+        Assert.Empty(players[2].Satellites);
+    }
+
+    [Fact]
     public void WhenAnInvisibleMemberHasNoUuid_ThenParseThrowsOnlyForAGroupWithAPlayer()
     {
         // Arrange
@@ -297,15 +318,15 @@ public class ZoneGroupStateParserTests
 
         // Act
         var withoutPlayer = ZoneGroupStateParser.Parse(CreateGroup(anonymous));
-        var exception = Assert.Throws<FormatException>(() => ZoneGroupStateParser.Parse(CreateGroup(CreateMember(0, string.Empty) + anonymous)));
+        var exception = Record.Exception(() => ZoneGroupStateParser.Parse(CreateGroup(CreateMember(0, string.Empty) + anonymous)));
 
         // Assert
         Assert.Empty(withoutPlayer.Groups);
-        Assert.Contains("UUID", exception.Message);
+        Assert.Contains("UUID", Assert.IsType<FormatException>(exception).Message);
     }
 
     [Fact]
-    public void WhenAPlayerNamesThousandsOfPartnersInItsChannelMap_ThenTheMapIsNotSplitForEveryPartner()
+    public void WhenAPlayerNamesThousandsOfPartnersInItsChannelMap_ThenAllocationsStayInStepWithTheDocument()
     {
         // Arrange
         const int partnerCount = 1000;
@@ -326,7 +347,7 @@ public class ZoneGroupStateParserTests
     }
 
     [Fact]
-    public void WhenAHomeTheaterPlayerHasThousandsOfSatellites_ThenTheMapIsNotSplitForEverySatellite()
+    public void WhenAHomeTheaterPlayerHasThousandsOfSatellites_ThenAllocationsStayInStepWithTheDocument()
     {
         // Arrange
         const int satelliteCount = 1000;
@@ -346,7 +367,7 @@ public class ZoneGroupStateParserTests
     }
 
     [Fact]
-    public void WhenAGroupHasThousandsOfStereoPairs_ThenThePlayersDoNotEachSearchAllInvisibleMembers()
+    public void WhenAGroupHasThousandsOfStereoPairs_ThenAllocationsStayInStepWithTheDocument()
     {
         // Arrange: player 0 pairs with partner 1000, player 1 with partner 1001 and so on.
         const int pairCount = 1000;
@@ -374,11 +395,12 @@ public class ZoneGroupStateParserTests
         Assert.ThrowsAny<System.Xml.XmlException>(() => ZoneGroupStateParser.Parse("<ZoneGroups><ZoneGroup>"));
     }
 
-    // What parsing one of the large documents may allocate. One walk of each channel map takes 1 to 3 MB; a walk per
-    // satellite or a search of all invisible members per player takes 90 to 200 MB.
+    // What parsing one of the large documents may allocate. One walk of each channel map takes 1 to 3 MB; splitting
+    // the map for every satellite, or for every invisible member and player, takes 90 to 200 MB.
     private const long MaximumAllocatedBytes = 16 * 1024 * 1024;
 
-    // Allocations are counted instead of time, which a slow machine stretches.
+    // Allocations are counted instead of time, which a slow machine stretches. They catch work that allocates per
+    // step, as the split of a channel map does, and not a loop that only costs time.
     private static (SonosTopology Topology, long AllocatedBytes) ParseAndMeasure(string xml)
     {
         var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
