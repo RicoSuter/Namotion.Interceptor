@@ -4,7 +4,6 @@
 @using HomeBlaze.History
 @using HomeBlaze.History.Blazor
 @using HomeBlaze.Host.Components.Dialogs
-@using HomeBlaze.Services
 @using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
 
@@ -24,47 +23,59 @@
     <div style="display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); height: 100%;">
         <TrackingScope Context="Subject.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
             <div style="display: flex; flex-direction: column; height: 100%;">
-                <MudListSubheader Style="flex-shrink: 0;">
-                    @if (CanClose)
-                    {
-                        <MudFab OnClick="@(() => OnClose.InvokeAsync())"
-                                data-testid="close-pane-button"
-                                Color="Color.Primary"
-                                StartIcon="@Icons.Material.Filled.Close"
-                                Size="Size.Small"
-                                Style="float: right" />
+                <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
+                    @{
+                        var canEdit = CanEdit();
+                        var canDelete = Subject is IStorageFile or IConfigurable;
                     }
 
-                    <h1 style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0;">
+                    @* Stays an h1: the page focuses the first h1 after navigation. *@
+                    <MudText Typo="Typo.h6" HtmlTag="h1" Class="flex-grow-1"
+                             Style="min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                         <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Color="@GetSubjectIconColor(Subject)" Class="mr-2" Style="vertical-align: middle;" />
                         @GetSubjectTitle()
-                    </h1>
-                </MudListSubheader>
-                @if (CanEdit() || Subject is IStorageFile or IConfigurable)
-                {
-                    <MudListSubheader Style="word-break: break-word;">
-                        @* Action Buttons *@
-                        @if (CanEdit())
-                        {
+                    </MudText>
+
+                    @if (canEdit)
+                    {
+                        <MudTooltip Text="Edit">
                             <MudIconButton OnClick="@OpenEditDialog"
                                            Icon="@Icons.Material.Filled.Edit"
-                                           Variant="Variant.Filled"
-                                           Color="Color.Primary"
+                                           Variant="Variant.Text"
                                            Size="Size.Small"
-                                           Class="mr-2"
+                                           aria-label="Edit"
                                            data-testid="edit-subject-button" />
-                        }
-                        @if (Subject is IStorageFile or IConfigurable)
-                        {
+                        </MudTooltip>
+                    }
+                    @if (canDelete)
+                    {
+                        <MudTooltip Text="Delete">
                             <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
                                            Icon="@Icons.Material.Filled.Delete"
-                                           Variant="Variant.Filled"
-                                           Color="Color.Error"
+                                           Variant="Variant.Text"
                                            Size="Size.Small"
-                                           Class="mr-2" />
+                                           aria-label="Delete" />
+                        </MudTooltip>
+                    }
+                    @if (CanClose)
+                    {
+                        @if (canEdit || canDelete)
+                        {
+                            <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                         }
-                    </MudListSubheader>
-                }
+
+                        @* The padding keeps the larger icon within the height of the title line. *@
+                        <MudTooltip Text="Close">
+                            <MudIconButton OnClick="@(() => OnClose.InvokeAsync())"
+                                           Icon="@Icons.Material.Filled.Close"
+                                           Variant="Variant.Text"
+                                           Size="Size.Medium"
+                                           Style="padding: 4px; color: var(--mud-palette-text-primary);"
+                                           aria-label="Close"
+                                           data-testid="close-pane-button" />
+                        </MudTooltip>
+                    }
+                </MudListSubheader>
 
                 <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
                     @* Primitive Properties *@
@@ -87,7 +98,7 @@
                         @if (section.CollectionProperty is null)
                         {
                             @* Consecutive single child references share one list *@
-                            <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Class="pt-4" Style="padding-bottom: 0">
+                            <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true" Class="pt-2" Style="padding-bottom: 0">
                                 @foreach (var (property, child) in section.SingleChildren)
                                 {
                                     var isSelected = child.Subject == SelectedChild;
@@ -104,7 +115,7 @@
                                                 <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                             </div>
                                         }
-                                        <span style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+                                        <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
                                         @if (childCount > 0)
                                         {
                                             <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
@@ -118,13 +129,15 @@
                         {
                             var property = section.CollectionProperty;
                             var children = section.CollectionChildren;
-                            <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" HeaderClass="px-4">
+                            @* MudBlazor gives an expanded panel a margin of 16px, but not as the first or the last child. The
+                               fixed margin keeps the distance to the block above the same in every case. *@
+                            <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="mt-2 mb-0" HeaderClass="px-4 subject-pane-section-header">
                                 <TitleContent>
                                     @GetPropertyDisplayName(property)
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Dark">@children.Length</MudChip>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="my-0">@children.Length</MudChip>
                                 </TitleContent>
                                 <ChildContent>
-                                    <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary">
+                                    <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true">
                                         @foreach (var child in children)
                                         {
                                             var isSelected = child.Subject == SelectedChild;
@@ -141,7 +154,7 @@
                                                         <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                                     </div>
                                                 }
-                                                <span style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+                                                <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
                                                 @if (childCount > 0)
                                                 {
                                                     <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
@@ -160,7 +173,7 @@
                         var methods = GetMethods();
                         if (methods.Count > 0)
                         {
-                            <MudStack Class="px-4 pt-4">
+                            <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="2" Class="px-4 pt-2">
                                 @foreach (var method in methods)
                                 {
                                     var isQuery = method.Kind == MethodKind.Query;
@@ -171,7 +184,7 @@
                                     <MudButton Variant="Variant.Filled"
                                                Color="@(isQuery ? Color.Info : Color.Primary)"
                                                Size="Size.Small"
-                                               FullWidth="true"
+                                               Class="subject-pane-method"
                                                StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
                                                Disabled="@(_executingMethod == method || !isEnabled)"
                                                OnClick="@(() => ExecuteMethodAsync(method))">
@@ -187,8 +200,8 @@
                     }
 
                     @* Details Accordion *@
-                    <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Style="overflow: hidden;">
-                        <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4">
+                    <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Class="mt-2" Style="overflow: hidden;">
+                        <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4" HeaderClass="subject-pane-section-header">
                             <TitleContent>
                                 Details
                             </TitleContent>
@@ -207,6 +220,27 @@
         </TrackingScope>
     </div>
 }
+
+<style>
+    /* The line of a dense row is 20px, but the count chip and the chevron of the selected child are 24px high. Without
+       this, rows with a chip are higher than rows without one and the chevron hangs below the name. */
+    .subject-pane-child-name {
+        line-height: 24px;
+    }
+
+    /* MudBlazor has no parameter for the height of a panel header and sets it with two classes, so this takes three. */
+    .mud-expand-panel .mud-expand-panel-header.subject-pane-section-header {
+        min-height: 36px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
+
+    /* A title too long for the pane wraps inside its button, which would otherwise be wider than the pane. */
+    .subject-pane-method {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+    }
+</style>
 
 @code {
     private readonly HashSet<string> _expandedProperties = [];
@@ -301,8 +335,10 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => p.GetStateMetadata() != null && !p.IsAttribute && !p.CanContainSubjects
-                     && p.GetConfigurationMetadata()?.IsSecret != true)
+            .Where(p => 
+                p.GetStateMetadata() != null 
+                && p is { IsAttribute: false, CanContainSubjects: false }
+                && p.GetConfigurationMetadata()?.IsSecret != true)
             .OrderBy(p => p.GetDisplayPosition());
     }
 

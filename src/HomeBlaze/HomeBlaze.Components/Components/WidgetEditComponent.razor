@@ -16,15 +16,20 @@
                       Variant="Variant.Outlined"
                       CanSelectProperty="@_canSelectSubjectOnly" />
 
-    @if (WidgetSubject?.ResolvedSubject != null)
+    @{
+        // The path in the field and not Widget.ResolvedSubject, which stays at the saved path until the form is saved.
+        var resolvedSubject = CanResolvePath ? WidgetSubject?.ResolveSubject(_path) : null;
+    }
+
+    @if (resolvedSubject != null)
     {
         <MudAlert Severity="Severity.Success" Class="mt-4">
             <MudText Typo="Typo.body2">
-                <strong>Resolved:</strong> @WidgetSubject.ResolvedSubject.GetType().Name
+                <strong>Resolved:</strong> @resolvedSubject.GetType().Name
             </MudText>
         </MudAlert>
     }
-    else if (!string.IsNullOrEmpty(_path))
+    else if (CanResolvePath && !string.IsNullOrEmpty(_path))
     {
         <MudAlert Severity="Severity.Warning" Class="mt-4">
             Subject not found at this path
@@ -48,7 +53,11 @@
 
     public bool IsValid => !string.IsNullOrWhiteSpace(_path);
     public bool IsDirty => _path != _originalPath;
-    
+
+    // A widget that is being created is not in the graph yet, so a relative path cannot be resolved for it
+    // and neither result is shown.
+    private bool CanResolvePath => !IsCreating || _path.StartsWith('/');
+
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
 

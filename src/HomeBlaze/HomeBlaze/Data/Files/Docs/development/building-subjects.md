@@ -789,6 +789,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
+| `[Configuration] + [SubjectPath]` | A path that can be picked in the edit form | Yes | No (unless also `[State]`) |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
 | `[Slot]` | Content that a markdown page fills in | No | Rendered by the widget |
@@ -818,7 +819,7 @@ Core platform interfaces and attributes:
 
 | Area | Contents |
 |------|----------|
-| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
+| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `[SubjectPath]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
 | Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
@@ -938,6 +939,7 @@ For subject path configuration properties, use the `SubjectPathField` component 
 - Tree shows all subjects with lazy loading
 - State properties and child properties are displayed
 - Disabled properties shown grayed but still selectable
+- Subjects and properties that cannot be selected are dimmed, and a click opens or closes them instead of selecting them
 - Preview shows resolved value
 
 **Parameters:**
@@ -951,7 +953,7 @@ For subject path configuration properties, use the `SubjectPathField` component 
 | `Required` | `bool` | `false` | Whether a surrounding `MudForm` reports the field as invalid while it is empty |
 | `LocalSubjects` | `IDictionary<string, IInterceptorSubject>?` | `null` | Additional local subjects to show in picker |
 | `Class` | `string?` | `null` | CSS class for styling |
-| `IsPropertyVisible` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties the picker shows. Without it all of them |
+| `IsPropertyVisible` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Hides properties in the picker, which shows those with `[State]` and those that lead to subjects, except names that start with `_`. Without it none of these is hidden |
 | `CanSelectProperty` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties can be selected in the picker. Without it all of them |
 | `CanSelectSubject` | `Func<IInterceptorSubject, bool>?` | `null` | Which subjects can be selected in the picker. Without it all of them. A subject that cannot be selected still opens to what is below it |
 
@@ -973,6 +975,8 @@ public partial string? Map { get; set; }
 
 - **`[SubjectPath]`**: The path of a property. The picker lets the user select a property that holds a value. Subjects and properties that hold subjects only lead to the properties below them.
 - **`[SubjectPath(typeof(ValueMap))]`**: The path of a subject of that type. The picker lets the user select a subject that is an instance of the type, and a property that refers to such a subject. Everything else only leads to what is below it.
+
+A relative path or the name of a block on the page that is typed into the field is kept as typed, but the picker does not resolve it from where the subject is, so it does not find it in the tree and does not preview its value, and picking replaces it with an absolute path.
 
 The attribute has no effect on a property that is a secret, and it only changes how the property is edited: resolving the path stays the task of the subject, see [Referencing Other Subjects](#referencing-other-subjects).
 

@@ -38,7 +38,7 @@ public partial class Widget : ITitleProvider, IConfigurable
     /// The resolved subject from the path. Null if path is invalid or subject not found.
     /// </summary>
     [Derived]
-    public IInterceptorSubject? ResolvedSubject => ResolveSubject();
+    public IInterceptorSubject? ResolvedSubject => ResolveSubject(Path);
 
     public Widget(SubjectPathResolver pathResolver)
     {
@@ -49,6 +49,29 @@ public partial class Widget : ITitleProvider, IConfigurable
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Resolves the subject that <see cref="ResolvedSubject"/> would be if <see cref="Path"/> were
+    /// <paramref name="path"/>. Null if the path is empty or invalid, or no subject is found.
+    /// </summary>
+    /// <remarks>
+    /// While the widget is not in the graph, only an absolute path resolves: a relative path starts at
+    /// the page that contains the widget, or at the widget itself.
+    /// </remarks>
+    public IInterceptorSubject? ResolveSubject(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return null;
+
+        try
+        {
+            return _pathResolver.ResolveScopedSubject(path, PathStyle.Canonical, this);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -113,20 +136,5 @@ public partial class Widget : ITitleProvider, IConfigurable
         }
 
         return false;
-    }
-
-    private IInterceptorSubject? ResolveSubject()
-    {
-        if (string.IsNullOrEmpty(Path))
-            return null;
-
-        try
-        {
-            return _pathResolver.ResolveScopedSubject(Path, PathStyle.Canonical, this);
-        }
-        catch
-        {
-            return null;
-        }
     }
 }

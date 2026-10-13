@@ -1,7 +1,7 @@
 namespace HomeBlaze.Abstractions.Attributes;
 
 /// <summary>
-/// Marks a string property as a path, so that an editor lets the user pick the path instead of typing it.
+/// Marks a string property as a path, so that an editor lets the user pick the path as well as type it.
 /// Without a type the path leads to a property, and with a type to a subject of that type.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property)]
@@ -11,7 +11,9 @@ public sealed class SubjectPathAttribute : Attribute
     {
     }
 
-    /// <param name="subjectType">The type that the subject at the path is an instance of.</param>
+    /// <param name="subjectType">
+    /// The type that the subject at the path is an instance of. <c>typeof(IInterceptorSubject)</c> stands for any subject.
+    /// </param>
     public SubjectPathAttribute(Type subjectType)
     {
         SubjectType = subjectType;

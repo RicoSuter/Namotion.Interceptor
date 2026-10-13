@@ -1,19 +1,16 @@
-@using HomeBlaze.Abstractions
-@using HomeBlaze.Services
-@using Microsoft.AspNetCore.Components.Web
-@using Namotion.Interceptor.Registry.Abstractions
 @using Namotion.Interceptor.Registry.Attributes
 
 @inject RootManager RootManager
 @inject SubjectPathResolver PathResolver
 
 <div class="subject-path-picker" data-testid="subject-path-picker">
-    <MudTextField @bind-Value="Value"
+    <MudTextField T="string"
+                  Value="@Value"
+                  ValueChanged="OnPathTypedAsync"
                   Label="@Label"
                   Placeholder="@Placeholder"
                   Variant="Variant.Outlined"
-                  Immediate="true"
-                  OnKeyUp="OnPathKeyUp" />
+                  Immediate="true" />
 
     @if (_previewValue != null || _isValidPath)
     {
@@ -24,6 +21,9 @@
 
     <MudDivider Class="my-2" />
 
+    @* An item that cannot be selected is ReadOnly, so that the tree never selects it. Rejecting it in
+       OnSelectedValueChangedAsync is too late: the tree has selected it by then and keeps it selected, because
+       assigning the previous item back passes the value that the tree was given last. *@
     <div class="subject-path-picker-tree">
         <MudTreeView T="PathTreeItem"
                      Items="@_treeItems"
@@ -40,6 +40,8 @@
                                  Icon="@context.Value?.Icon"
                                  Expanded="@context.Expanded"
                                  ExpandedChanged="@(expanded => OnExpandedChanged((TreeItemData<PathTreeItem>)context, expanded))"
+                                 ReadOnly="@(context.Value?.CanSelect == false)"
+                                 OnClick="@(() => OnItemClicked((TreeItemData<PathTreeItem>)context))"
                                  Class="@GetItemClass(context.Value)" />
             </ItemTemplate>
         </MudTreeView>
@@ -60,6 +62,10 @@
 
     .subject-path-picker-tree .subject-path-picker-not-selectable > .mud-treeview-item-content {
         opacity: 0.6;
+    }
+
+    .subject-path-picker-tree .subject-path-picker-expands-on-click > .mud-treeview-item-content {
+        cursor: pointer;
     }
 </style>
 
@@ -192,6 +198,14 @@
         }
 
         StateHasChanged();
+    }
+
+    private void OnItemClicked(TreeItemData<PathTreeItem> treeItem)
+    {
+        if (treeItem.Value is { CanSelect: false, IsExpandable: true })
+        {
+            OnExpandedChanged(treeItem, !treeItem.Expanded);
+        }
     }
 
     private List<TreeItemData<PathTreeItem>> LoadChildren(PathTreeItem parent)
@@ -347,7 +361,8 @@
             // Check if target path matches this item's path
             if (targetPath.Equals(itemPath, StringComparison.OrdinalIgnoreCase))
             {
-                _selectedItem = item.Value;
+                // ReadOnly only stops a click: the tree highlights any item that it is given as selected.
+                _selectedItem = item.Value.CanSelect ? item.Value : null;
                 return true;
             }
 
@@ -380,12 +395,6 @@
     {
         if (_selectedItem != null)
         {
-            // Prevent selection of non-selectable items
-            if (!_selectedItem.CanSelect)
-            {
-                return;
-            }
-
             // Use shortest canonical path when a subject is selected
             if (_selectedItem.Subject != null)
             {
@@ -446,18 +455,23 @@
         if (item == null)
             return null;
 
-        return (item.IsEnabled, item.CanSelect) switch
+        return (item.IsEnabled, item.CanSelect, item.IsExpandable) switch
         {
-            (false, false) => "subject-path-picker-disabled subject-path-picker-not-selectable",
-            (false, true) => "subject-path-picker-disabled",
-            (true, false) => "subject-path-picker-not-selectable",
+            (false, false, true) => "subject-path-picker-disabled subject-path-picker-not-selectable subject-path-picker-expands-on-click",
+            (false, false, false) => "subject-path-picker-disabled subject-path-picker-not-selectable",
+            (true, false, true) => "subject-path-picker-not-selectable subject-path-picker-expands-on-click",
+            (true, false, false) => "subject-path-picker-not-selectable",
+            (false, true, _) => "subject-path-picker-disabled",
             _ => null
         };
     }
 
-    private async Task OnPathKeyUp(KeyboardEventArgs e)
+    // Binding the text field to Value would only set the parameter here and never raise ValueChanged, so
+    // typed or pasted text would not reach the parent.
+    private async Task OnPathTypedAsync(string? value)
     {
-        await ValueChanged.InvokeAsync(Value);
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
         UpdatePreview();
         ExpandToSelectedPath();
     }
