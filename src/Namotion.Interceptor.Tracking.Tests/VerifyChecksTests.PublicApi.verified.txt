@@ -217,6 +217,8 @@ namespace Namotion.Interceptor.Tracking.Parent
         public static System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent> GetParents(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static TRoot? TryGetFirstParent<TRoot>(this Namotion.Interceptor.IInterceptorSubject subject)
             where TRoot :  class { }
+        public static TRoot? TryGetFirstParentOrSelf<TRoot>(this Namotion.Interceptor.IInterceptorSubject subject)
+            where TRoot :  class { }
     }
     public struct SubjectParent : System.IEquatable<Namotion.Interceptor.Tracking.Parent.SubjectParent>
     {

@@ -65,6 +65,16 @@ public static class ParentsHandlerExtensions
         return null;
     }
 
+    /// <summary>
+    /// Returns the subject itself when it is of the specified type, otherwise its nearest parent of that
+    /// type. Returns null if not found instead of throwing.
+    /// </summary>
+    public static TRoot? TryGetFirstParentOrSelf<TRoot>(this IInterceptorSubject subject)
+        where TRoot : class
+    {
+        return subject as TRoot ?? subject.TryGetFirstParent<TRoot>();
+    }
+
     private static bool Contains(ReadOnlySpan<IInterceptorSubject?> found, IInterceptorSubject subject)
     {
         foreach (var foundSubject in found)

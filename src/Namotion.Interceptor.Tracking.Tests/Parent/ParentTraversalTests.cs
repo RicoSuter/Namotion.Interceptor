@@ -357,6 +357,52 @@ public class ParentTraversalTests
     }
 
     [Fact]
+    public void WhenSubjectIsOfTheType_ThenFirstParentOrSelfIsTheSubject()
+    {
+        // Arrange
+        var subject = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(subject, new MarkedTraversalNode());
+
+        // Act
+        var result = subject.TryGetFirstParentOrSelf<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(subject, result);
+    }
+
+    [Fact]
+    public void WhenSubjectIsNotOfTheType_ThenFirstParentOrSelfIsTheNearestParent()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var between = new TraversalNode();
+        var nearer = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(subject, between);
+        ParentTraversalGraph.Link(between, nearer);
+        ParentTraversalGraph.Link(nearer, new MarkedTraversalNode());
+
+        // Act
+        var result = subject.TryGetFirstParentOrSelf<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(nearer, result);
+    }
+
+    [Fact]
+    public void WhenNeitherSubjectNorParentsAreOfTheType_ThenFirstParentOrSelfIsNull()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        ParentTraversalGraph.LinkChain(subject, 3);
+
+        // Act
+        var result = subject.TryGetFirstParentOrSelf<ITraversalMarker>();
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
     public void WhenMatchIsOnOneParentChain_ThenSearchDoesNotAllocate()
     {
         // Arrange
