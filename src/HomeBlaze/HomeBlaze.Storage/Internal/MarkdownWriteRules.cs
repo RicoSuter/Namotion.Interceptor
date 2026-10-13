@@ -91,6 +91,14 @@ internal static partial class MarkdownWriteRules
     /// <exception cref="ArgumentException">The content is null or larger than <see cref="MarkdownFile.MaxContentSize"/> bytes.</exception>
     public static byte[] GetContentBytes(string content, string parameterName)
     {
+        EnsureContentSize(content, parameterName);
+        return Encoding.UTF8.GetBytes(content);
+    }
+
+    /// <exception cref="ArgumentException">The content is null or larger than <see cref="MarkdownFile.MaxContentSize"/> bytes
+    /// as UTF-8.</exception>
+    public static void EnsureContentSize(string content, string parameterName)
+    {
         ArgumentNullException.ThrowIfNull(content, parameterName);
 
         var size = Encoding.UTF8.GetByteCount(content);
@@ -99,8 +107,6 @@ internal static partial class MarkdownWriteRules
             throw new ArgumentException(
                 $"The Markdown source would be {size} bytes, more than the limit of {MarkdownFile.MaxContentSize} bytes.", parameterName);
         }
-
-        return Encoding.UTF8.GetBytes(content);
     }
 
     private const string ActiveContentMessage =
@@ -137,14 +143,21 @@ internal static partial class MarkdownWriteRules
     /// <see cref="MarkdownFile.ActiveContent"/> that the old source does not already contain. A new page passes an empty
     /// old source. With <paramref name="layout"/>, layout blocks (<see cref="MarkdownPageLayout"/>) may change, every
     /// other block must stay as it is, inside the same blocks and at the same position, and each reference path of a
-    /// layout block must lead to a subject.
+    /// layout block that is new or changed must lead to a subject.
     /// </summary>
     /// <exception cref="ArgumentException">The new source adds, changes, removes or moves a block, or adds such content.</exception>
     public static void EnsureActiveContentUnchanged(string oldSource, string newSource, string parameterName, PageLayoutRules? layout = null)
     {
-        var oldContent = GetActiveContent(MarkdownPageParser.Parse(oldSource), layout);
+        var oldPage = MarkdownPageParser.Parse(oldSource);
+        EnsureActiveContentUnchanged(oldPage, layout is null ? null : AnalyzeLayout(oldPage, layout), newSource, parameterName, layout);
+    }
+
+    private static void EnsureActiveContentUnchanged(
+        MarkdownPage oldPage, LayoutAnalysis? oldAnalysis, string newSource, string parameterName, PageLayoutRules? layout)
+    {
+        var oldContent = GetActiveContent(oldPage, layout, oldAnalysis);
         var newPage = MarkdownPageParser.Parse(newSource);
-        var newContent = GetActiveContent(newPage, layout);
+        var newContent = GetActiveContent(newPage, layout, layout is null ? null : AnalyzeLayout(newPage, layout));
 
         if (layout is not null)
         {
@@ -156,7 +169,7 @@ internal static partial class MarkdownWriteRules
             }
 
             EnsureLayoutBuilds(oldContent, newContent, newPage, layout, parameterName);
-            EnsureReferencesResolve(newPage, layout, parameterName);
+            EnsureReferencesResolve(oldPage, oldContent.Layout!, newPage, newContent.Layout!, layout, parameterName);
             return;
         }
 
@@ -249,13 +262,37 @@ internal static partial class MarkdownWriteRules
         }
     }
 
+    /// <summary>
+    /// Ensures that the reference paths of each layout block of the new page that the old page does not have with the
+    /// same text lead to subjects, so that a dangling reference the page already has does not block every layout edit.
+    /// </summary>
     /// <exception cref="ArgumentException">A layout block or a subject in it refers to a path that leads to no subject.</exception>
-    private static void EnsureReferencesResolve(MarkdownPage page, PageLayoutRules layout, string parameterName)
+    private static void EnsureReferencesResolve(
+        MarkdownPage oldPage, LayoutAnalysis oldLayout, MarkdownPage newPage, LayoutAnalysis newLayout, PageLayoutRules layout, string parameterName)
     {
-        foreach (var block in MarkdownPageLayout.FindLayoutBlocks(page, layout.FindType))
+        Dictionary<string, int>? oldBlockTexts = null;
+        List<int>? newLineEnds = null;
+        foreach (var block in newLayout.LayoutBlocks)
         {
             if (block is not { Kind: MarkdownBlockKind.Widget, Head: { } head } || layout.FindType(head.Name) is not { } type)
             {
+                continue;
+            }
+
+            if (oldBlockTexts is null)
+            {
+                var oldLineEnds = GetLineEnds(oldPage.Source);
+                oldBlockTexts = oldLayout.LayoutBlocks
+                    .CountBy(oldBlock => GetBlockText(oldBlock, oldPage.Source, oldLineEnds), StringComparer.Ordinal)
+                    .ToDictionary(StringComparer.Ordinal);
+                newLineEnds = GetLineEnds(newPage.Source);
+            }
+
+            // Each block of the old page vouches for one block of the new page with its text.
+            var text = GetBlockText(block, newPage.Source, newLineEnds!);
+            if (oldBlockTexts.TryGetValue(text, out var count) && count > 0)
+            {
+                oldBlockTexts[text] = count - 1;
                 continue;
             }
 
@@ -279,7 +316,7 @@ internal static partial class MarkdownWriteRules
     /// its text from the source back, so a hidden value is kept and a guessed one is not accepted.
     /// </summary>
     /// <exception cref="ArgumentException">The new content changes such a unit of the view or breaks another rule of
-    /// <see cref="EnsureActiveContentUnchanged"/>.</exception>
+    /// <see cref="EnsureActiveContentUnchanged(string, string, string, PageLayoutRules?)"/>.</exception>
     public static string RestoreBlocks(
         string source,
         string redactedSource,
@@ -293,7 +330,8 @@ internal static partial class MarkdownWriteRules
         // Every redaction is inside a unit, so a unit of the source maps to the view by the redactions before its end.
         var page = MarkdownPageParser.Parse(source);
         var newPage = MarkdownPageParser.Parse(newContent);
-        var units = GetUnits(page, layout is null ? null : AnalyzeLayout(page, layout));
+        var analysis = layout is null ? null : AnalyzeLayout(page, layout);
+        var units = GetUnits(page, analysis);
         var newUnits = GetUnits(newPage, layout is null ? null : AnalyzeLayout(newPage, layout));
         if (units.Count != newUnits.Count)
         {
@@ -365,7 +403,7 @@ internal static partial class MarkdownWriteRules
         }
 
         var result = restored.Append(newContent, copied, newContent.Length - copied).ToString();
-        EnsureActiveContentUnchanged(source, result, parameterName, layout);
+        EnsureActiveContentUnchanged(page, analysis, result, parameterName, layout);
 
         return result;
     }
@@ -391,7 +429,7 @@ internal static partial class MarkdownWriteRules
     /// the way the page parses it: the blocks, each with its kind and its whole text, the positions of the blocks without
     /// a #name directly on the page, and the <see cref="MarkdownFile.ActiveContent"/>.
     /// </summary>
-    private static ActiveContentOfPage GetActiveContent(MarkdownPage page, PageLayoutRules? layout)
+    private static ActiveContentOfPage GetActiveContent(MarkdownPage page, PageLayoutRules? layout, LayoutAnalysis? analysis)
     {
         var activeMarkup = new List<string>();
         foreach (var node in page.Document.Descendants())
@@ -441,7 +479,6 @@ internal static partial class MarkdownWriteRules
             activeMarkup.AddRange(abbreviations.Values.Select(abbreviation => "abbreviation:" + abbreviation.Label + "=" + abbreviation.Text));
         }
 
-        var analysis = layout is null ? null : AnalyzeLayout(page, layout);
         return new ActiveContentOfPage(GetUnits(page, analysis), layout is null ? GetUnnamedBlockPositions(page) : [], activeMarkup, analysis);
     }
 
@@ -543,9 +580,22 @@ internal static partial class MarkdownWriteRules
 
     private static UnitText CreateBlockUnit(MarkdownBlock block, string source, List<int> lineEnds, string identity)
     {
+        var span = GetBlockSpan(block, lineEnds);
+        return new UnitText(block.Kind.ToString(), block.Kind + ":" + NormalizeLineEndings(source.Substring(span.Start, span.Length)), span, identity);
+    }
+
+    // The text of a block from its head line to its last line, with line feeds as line endings.
+    private static string GetBlockText(MarkdownBlock block, string source, List<int> lineEnds)
+    {
+        var span = GetBlockSpan(block, lineEnds);
+        return NormalizeLineEndings(source.Substring(span.Start, span.Length));
+    }
+
+    private static MarkdownSpan GetBlockSpan(MarkdownBlock block, List<int> lineEnds)
+    {
         var end = lineEnds[Math.Clamp(block.EndLine, 1, lineEnds.Count) - 1];
         var start = Math.Min(block.HeadSpan.Start, end);
-        return new UnitText(block.Kind.ToString(), block.Kind + ":" + NormalizeLineEndings(source[start..end]), new MarkdownSpan(start, end - start), identity);
+        return new MarkdownSpan(start, end - start);
     }
 
     /// <summary>

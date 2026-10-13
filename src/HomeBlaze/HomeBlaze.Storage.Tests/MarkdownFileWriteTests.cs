@@ -1038,6 +1038,99 @@ public class MarkdownFileWriteTests : IDisposable
         return Assert.Single(Assert.IsType<MarkdownFragment>(card.Content).Children.Values.OfType<Samples.Motor>());
     }
 
+    [Theory]
+    // A block of a type that is not installed, and a block whose value does not fit its property, have no subject, so
+    // the view hides their whole json block.
+    [InlineData("HomeBlaze.Missing.Device", "{ \"Host\": \"x\" }")]
+    [InlineData("HomeBlaze.Samples.Motor", "{ \"TargetSpeed\": \"abc\" }")]
+    public async Task WhenAPageHasABlockWhoseJsonIsHiddenAsAWhole_ThenALayoutEditIsWrittenAndKeepsTheBlock(string type, string json)
+    {
+        // Arrange
+        var content = $"# P\n\n:: {type}#dev\n```json\n{json}\n```\n::\n\n:: HomeBlaze.Components.Card#c Title=A\n::";
+        WriteFile("Plant.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        Assert.Contains("```json\n***\n```", markdown.ReadRawContent()!);
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
+
+        // Act
+        await markdown.ReplaceTextAsync("Title=A", "Title=B", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(content.Replace("Title=A", "Title=B"), ReadFile("Plant.md"));
+    }
+
+    [Theory]
+    [InlineData("{ \"Host\": \"y\" }")]
+    [InlineData("{ \"Other\": \"x\" }")]
+    [InlineData("{ }")]
+    public async Task WhenALayoutEditChangesABlockWhoseJsonIsHiddenAsAWhole_ThenItIsRejected(string newJson)
+    {
+        // Arrange
+        const string content = "# P\n\n:: HomeBlaze.Missing.Device#dev\n```json\n{ \"Host\": \"x\" }\n```\n::\n\n:: HomeBlaze.Components.Card#c Title=A\n::";
+        WriteFile("Plant.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        var view = markdown.ReadRawContent()!;
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceContentAsync(
+            view.Replace("***", newJson).Replace("Title=A", "Title=B"), CancellationToken.None));
+        Assert.Contains("With the permission to edit page layout", exception.Message);
+        Assert.Equal(content, ReadFile("Plant.md"));
+    }
+
+    private const string PageWithDanglingReferences = """
+        # Plant
+
+        :: HomeBlaze.Components.Widget Path=gone
+        ::
+
+        :: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
+        ```json
+        { "Cells": [ { "Row": 0, "Column": 1, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "gone" } } ] }
+        ```
+        ::
+
+        :: HomeBlaze.Components.Card#info Title=Info
+        ::
+        """;
+
+    [Fact]
+    public async Task WhenThePageAlreadyHasDanglingReferences_ThenALayoutEditThatKeepsThemIsWritten()
+    {
+        // Arrange
+        WriteFile("Plant.md", PageWithDanglingReferences);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
+
+        // Act
+        await markdown.ReplaceTextAsync("Title=Info", "Title=Details", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(PageWithDanglingReferences.Replace("Title=Info", "Title=Details"), ReadFile("Plant.md"));
+    }
+
+    [Theory]
+    [InlineData("Path=gone\n", "Path=missing\n")]
+    [InlineData("Rows=1 Columns=2", "Rows=1 Columns=3")]
+    [InlineData("# Plant\n", "# Plant\n\n:: HomeBlaze.Components.Widget Path=gone\n::\n")]
+    public async Task WhenALayoutEditAddsOrChangesADanglingReference_ThenItIsRejected(string oldText, string newText)
+    {
+        // Arrange
+        WriteFile("Plant.md", PageWithDanglingReferences);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
+        Assert.Contains("leads to no existing subject", exception.Message);
+        Assert.Equal(PageWithDanglingReferences, ReadFile("Plant.md"));
+    }
+
     [Fact]
     public async Task WhenAnAgentMayEditPageLayoutAndAddsTextBeforeAnUnnamedDevice_ThenItIsRejected()
     {

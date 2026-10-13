@@ -247,7 +247,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         MarkdownWriteRules.EnsureLocal(Storage);
         MarkdownWriteRules.EnsureNotInDocumentationFolder(Storage, FullPath);
         MarkdownWriteRules.EnsureNotWithinStorageWork(Storage);
-        MarkdownWriteRules.GetContentBytes(content, nameof(content));
+        MarkdownWriteRules.EnsureContentSize(content, nameof(content));
 
         await _writeLock.WaitAsync(cancellationToken);
         try
@@ -292,7 +292,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             var index = FindUniquePassage(redactedSource, redactions, oldText);
 
             var updated = string.Concat(redactedSource.AsSpan(0, index), newText, redactedSource.AsSpan(index + oldText.Length));
-            MarkdownWriteRules.GetContentBytes(updated, nameof(newText));
+            MarkdownWriteRules.EnsureContentSize(updated, nameof(newText));
             await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, updated, nameof(newText), GetPageLayoutRules()));
         }
         finally

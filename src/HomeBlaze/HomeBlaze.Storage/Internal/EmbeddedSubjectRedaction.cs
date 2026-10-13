@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Pages;
 using Markdig.Syntax;
@@ -341,8 +342,9 @@ internal static class EmbeddedSubjectRedaction
     }
 
     /// <summary>
-    /// Hides the values of a plain object, which is no subject and has no secret properties, whose key is no public
-    /// property of its runtime type, then the values below the other properties.
+    /// Hides the values of a plain object, which is no subject, whose key is no public property of its runtime type or
+    /// whose property is marked as a secret with <see cref="ConfigurationAttribute.IsSecret"/>, then the values below
+    /// the other properties.
     /// </summary>
     private static bool RedactPlainObject(JsonObject jsonObject, object value)
     {
@@ -357,7 +359,7 @@ internal static class EmbeddedSubjectRedaction
 
             var property = Array.Find(properties, candidate =>
                 candidate.GetIndexParameters().Length == 0 && candidate.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
-            if (property is null)
+            if (property is null || property.GetCustomAttribute<ConfigurationAttribute>(true) is { IsSecret: true })
             {
                 jsonObject[key] = RedactedValue;
                 isRedacted = true;
