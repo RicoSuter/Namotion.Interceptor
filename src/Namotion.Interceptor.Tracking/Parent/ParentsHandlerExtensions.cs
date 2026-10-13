@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
@@ -27,101 +28,124 @@ public static class ParentsHandlerExtensions
     public static TRoot? TryGetFirstParent<TRoot>(this IInterceptorSubject subject)
         where TRoot : class
     {
-        // Subjects with one parent each are walked without allocating. A cycle on such a chain is detected
-        // when the walk is back at the subject or at one of two checkpoints (Brent's algorithm with the
-        // previous checkpoint kept): all three were passed before, so meeting one of them again means the
-        // walk passed every subject of the cycle.
-        var current = subject;
-        var checkpoint = subject;
-        var previousCheckpoint = subject;
-        var stepsSinceCheckpoint = 0L;
-        var stepsUntilCheckpoint = 1L;
+        // The subjects found so far, in the order they were found: the queue of the breadth first search
+        // and its visited set in one. It lives on the stack, and a search that finds more subjects than
+        // it holds continues on the heap.
+        var buffer = new FoundSubjects();
+        Span<IInterceptorSubject?> found = buffer;
+        found[0] = subject;
+        var count = 1;
 
-        while (true)
+        for (var next = 0; next < count; next++)
         {
-            var parents = current.GetParents();
-            if (parents.Length == 0)
+            var parents = found[next]!.GetParents();
+            for (var i = 0; i < parents.Length; i++)
             {
-                return null;
+                var parent = parents[i];
+                if (parent.Equals(default) || Contains(found[..count], parent.Property.Subject))
+                {
+                    continue;
+                }
+
+                if (parent.Property.Subject is TRoot root)
+                {
+                    return root;
+                }
+
+                if (count == FoundSubjects.Capacity)
+                {
+                    return FindFirstParentOnHeap<TRoot>(found, next, parents, i);
+                }
+
+                found[count++] = parent.Property.Subject;
             }
-
-            if (parents.Length > 1)
-            {
-                return FindFirstParentBreadthFirst<TRoot>(subject, current, parents);
-            }
-
-            var parent = parents[0];
-            if (parent.Equals(default))
-            {
-                return null;
-            }
-
-            current = parent.Property.Subject;
-            if (ReferenceEquals(current, subject) ||
-                ReferenceEquals(current, checkpoint) ||
-                ReferenceEquals(current, previousCheckpoint))
-            {
-                return null;
-            }
-
-            if (current is TRoot root)
-            {
-                return root;
-            }
-
-            stepsSinceCheckpoint++;
-            if (stepsSinceCheckpoint == stepsUntilCheckpoint)
-            {
-                previousCheckpoint = checkpoint;
-                checkpoint = current;
-                stepsSinceCheckpoint = 0;
-                stepsUntilCheckpoint *= 2;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Searches breadth first above <paramref name="start"/>, whose parents are <paramref name="parentsOfStart"/>.
-    /// <paramref name="start"/> is no match: it is <paramref name="subject"/> itself or was checked on the way from it.
-    /// </summary>
-    private static TRoot? FindFirstParentBreadthFirst<TRoot>(
-        IInterceptorSubject subject, IInterceptorSubject start, ImmutableArray<SubjectParent> parentsOfStart)
-        where TRoot : class
-    {
-        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { start };
-        var queue = new Queue<IInterceptorSubject>();
-        EnqueueParents(queue, parentsOfStart);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-
-            if (!visited.Add(current))
-            {
-                continue;
-            }
-
-            if (current is TRoot root && !ReferenceEquals(current, subject))
-            {
-                return root;
-            }
-
-            EnqueueParents(queue, current.GetParents());
         }
 
         return null;
     }
 
-    private static void EnqueueParents(Queue<IInterceptorSubject> queue, ImmutableArray<SubjectParent> parents)
+    private static bool Contains(ReadOnlySpan<IInterceptorSubject?> found, IInterceptorSubject subject)
     {
-        foreach (var parent in parents)
+        foreach (var foundSubject in found)
         {
-            if (!parent.Equals(default))
+            if (ReferenceEquals(foundSubject, subject))
             {
-                queue.Enqueue(parent.Property.Subject);
+                return true;
             }
         }
+
+        return false;
     }
+
+    /// <summary>
+    /// Continues the search of <see cref="TryGetFirstParent{TRoot}"/> when its buffer is full: at the parent
+    /// <paramref name="parentIndex"/> of the subject <paramref name="next"/> in <paramref name="found"/>.
+    /// </summary>
+    private static TRoot? FindFirstParentOnHeap<TRoot>(
+        ReadOnlySpan<IInterceptorSubject?> found, int next, ImmutableArray<SubjectParent> parents, int parentIndex)
+        where TRoot : class
+    {
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
+        var queue = new Queue<IInterceptorSubject>();
+        for (var i = 0; i < found.Length; i++)
+        {
+            visited.Add(found[i]!);
+            if (i > next)
+            {
+                queue.Enqueue(found[i]!);
+            }
+        }
+
+        while (true)
+        {
+            if (EnqueueNewParents<TRoot>(parents, parentIndex, visited, queue) is { } match)
+            {
+                return match;
+            }
+
+            if (!queue.TryDequeue(out var current))
+            {
+                return null;
+            }
+
+            parents = current.GetParents();
+            parentIndex = 0;
+        }
+    }
+
+    private static TRoot? EnqueueNewParents<TRoot>(
+        ImmutableArray<SubjectParent> parents, int start, HashSet<IInterceptorSubject> visited, Queue<IInterceptorSubject> queue)
+        where TRoot : class
+    {
+        for (var i = start; i < parents.Length; i++)
+        {
+            var parent = parents[i];
+            if (parent.Equals(default) || !visited.Add(parent.Property.Subject))
+            {
+                continue;
+            }
+
+            if (parent.Property.Subject is TRoot root)
+            {
+                return root;
+            }
+
+            queue.Enqueue(parent.Property.Subject);
+        }
+
+        return null;
+    }
+
+    // S1144 reports the single field of an inline array as unused. The runtime reaches the elements through it.
+#pragma warning disable S1144
+    [InlineArray(Capacity)]
+    private struct FoundSubjects
+    {
+        public const int Capacity = 16;
+
+        private IInterceptorSubject? _first;
+    }
+#pragma warning restore S1144
 
     /// <summary>
     /// Gets the parents of the subject as an immutable array.

@@ -150,7 +150,6 @@ public class ParentTraversalBenchmark
 
     /// <summary>
     /// Sixty-four subjects with one parent each below a subject that is its own parent, without a match.
-    /// A long chain into a short cycle is the shape in which the search reads the most parents twice.
     /// </summary>
     [Benchmark(OperationsPerInvoke = Operations)]
     public int MissBelowChainIntoCycle() => CountMatches(_leafBelowChainIntoCycle);

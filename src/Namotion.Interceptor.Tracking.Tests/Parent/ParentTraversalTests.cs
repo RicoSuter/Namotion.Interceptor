@@ -95,6 +95,55 @@ public class ParentTraversalTests
         Assert.Same(root, result);
     }
 
+    [Theory]
+    [InlineData(14)]
+    [InlineData(15)]
+    [InlineData(16)]
+    [InlineData(17)]
+    [InlineData(18)]
+    public void WhenMatchIsAboutSixteenLevelsUp_ThenFindsIt(int levels)
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var topOfChain = ParentTraversalGraph.LinkChain(subject, levels - 1);
+        var root = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(topOfChain, root);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(root, result);
+    }
+
+    [Theory]
+    [InlineData(6, true)]
+    [InlineData(6, false)]
+    [InlineData(8, true)]
+    [InlineData(8, false)]
+    [InlineData(9, true)]
+    [InlineData(9, false)]
+    [InlineData(20, true)]
+    [InlineData(20, false)]
+    public void WhenTwoLongBranchesAreSearchedSideBySide_ThenFindsMatchAboveEither(
+        int branchLength, bool matchIsAboveFirstBranch)
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var topOfFirstBranch = ParentTraversalGraph.LinkChain(subject, branchLength);
+        var firstOfSecondBranch = new TraversalNode();
+        ParentTraversalGraph.Link(subject, firstOfSecondBranch);
+        var topOfSecondBranch = ParentTraversalGraph.LinkChain(firstOfSecondBranch, branchLength - 1);
+        var match = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(matchIsAboveFirstBranch ? topOfFirstBranch : topOfSecondBranch, match);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Same(match, result);
+    }
+
     [Fact]
     public async Task WhenSubjectIsItsOwnOnlyParent_ThenReturnsNull()
     {
@@ -116,6 +165,7 @@ public class ParentTraversalTests
     [InlineData(5)]
     [InlineData(8)]
     [InlineData(9)]
+    [InlineData(16)]
     [InlineData(17)]
     public async Task WhenMatchingSubjectIsOnCycleWithoutOtherMatch_ThenReturnsNull(int cycleLength)
     {
@@ -134,7 +184,7 @@ public class ParentTraversalTests
     public static TheoryData<int, int> CycleAndTailLengths()
     {
         var data = new TheoryData<int, int>();
-        foreach (var cycleLength in new[] { 1, 2, 3, 4, 5, 8, 9 })
+        foreach (var cycleLength in new[] { 1, 2, 3, 4, 5, 8, 9, 15, 16, 17, 33 })
         {
             for (var tailLength = 0; tailLength <= 4; tailLength++)
             {
@@ -276,6 +326,42 @@ public class ParentTraversalTests
         // Arrange
         var subject = new TraversalNode();
         ParentTraversalGraph.LinkTailAndCycle(subject, tailLength: 2, cycleLength: 5);
+
+        // Act
+        var (allocated, matches) = MeasureSearch(subject);
+
+        // Assert
+        Assert.Equal(0, matches);
+        Assert.Equal(0L, allocated);
+    }
+
+    [Fact]
+    public void WhenSubjectHasTwoParents_ThenSearchDoesNotAllocate()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        var first = new TraversalNode();
+        var second = new TraversalNode();
+        ParentTraversalGraph.Link(subject, first);
+        ParentTraversalGraph.Link(subject, second);
+        var match = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(first, match);
+        ParentTraversalGraph.Link(second, match);
+
+        // Act
+        var (allocated, matches) = MeasureSearch(subject);
+
+        // Assert
+        Assert.Equal(MeasuredSearches, matches);
+        Assert.Equal(0L, allocated);
+    }
+
+    [Fact]
+    public void WhenSearchFindsSixteenSubjects_ThenItDoesNotAllocate()
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        ParentTraversalGraph.LinkChain(subject, 15);
 
         // Act
         var (allocated, matches) = MeasureSearch(subject);
