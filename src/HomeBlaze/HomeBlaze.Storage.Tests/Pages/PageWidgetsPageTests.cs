@@ -243,7 +243,8 @@ public class PageWidgetsPageTests
             "Motors (Settings), About (Info)",
             "Pump (WaterDrop), Fan (Air)",
             "Cards (Dashboard), Text (Notes)",
-            "Pump (), Fan ()"
+            "Pump (), Fan ()",
+            "Pump (WaterDrop), Fan (Air)"
         ];
         Assert.Equal(expectedTitles, layouts.Select(layout => string.Join(", ", layout.Tabs.Select(tab => $"{tab.Title} ({tab.Icon})"))));
 
@@ -259,6 +260,11 @@ public class PageWidgetsPageTests
         Assert.Contains(layouts[4], Assert.IsType<MarkdownFragment>(card.Content).Children.Values);
         Assert.NotNull(card.Footer);
 
+        // Only the last layout has its tab bar at a side.
+        Assert.Equal(
+            [TabPosition.Top, TabPosition.Top, TabPosition.Top, TabPosition.Top, TabPosition.Top, TabPosition.Left],
+            layouts.Select(layout => layout.Position));
+
         // A tab with plain content.
         var notes = Assert.IsType<MarkdownFragment>(layouts[0].Tabs[2].Content);
         Assert.NotEmpty(notes.Children);
@@ -266,7 +272,7 @@ public class PageWidgetsPageTests
 
         // Every other tab has a name, which keeps it selected while the page is edited.
         IPathScope scope = page;
-        string[] tabNames = ["pumptab", "fantab", "motorstab", "abouttab", "innerpump", "innerfan", "cardstab", "texttab", "cardpump", "cardfan"];
+        string[] tabNames = ["pumptab", "fantab", "motorstab", "abouttab", "innerpump", "innerfan", "cardstab", "texttab", "cardpump", "cardfan", "sidepump", "sidefan"];
         IEnumerable<IInterceptorSubject?> namedTabs = layouts.SelectMany(layout => layout.Tabs).Where(tab => tab.Title != "Notes");
         Assert.Equal(namedTabs, tabNames.Select(scope.TryGetNamedSubject));
     }

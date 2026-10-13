@@ -382,6 +382,79 @@ public class MarkdownBlockTests
         await Assertions.Expect(tabs.GetByText("Content of beta")).ToHaveCountAsync(0);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Top")]
+    [InlineData("Left")]
+    [InlineData("Right")]
+    [InlineData("Bottom")]
+    public async Task WhenTabLayoutHasAPosition_ThenTheTabBarIsOnThatSideOfTheContent(string? position)
+    {
+        // Arrange
+        await WriteScratchPageAsync(CreatePositionedTabsPage(position));
+        var page = await OpenPageAsync(ScratchPage);
+        await page.SetViewportSizeAsync(1280, 800);
+        var tabs = page.GetByTestId("tab-layout");
+        await Assertions.Expect(tabs.GetByText("Content of alpha")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await WaitForLayoutAsync(page, "tab-layout", width => width > 800);
+
+        // Act
+        var layout = (await GetBoxesAsync(tabs)).Single();
+        var bar = (await GetBoxesAsync(tabs.Locator(".mud-tabs-tabbar"))).Single();
+        var panel = (await GetBoxesAsync(tabs.GetByTestId("tab-panel").First)).Single();
+        var buttons = await GetBoxesAsync(tabs.GetByRole(AriaRole.Tab));
+
+        // Assert: the tabs stand below each other at a side and next to each other above or below the content.
+        var isAtASide = position is "Left" or "Right";
+        Assert.True(isAtASide ? buttons[1].Top >= buttons[0].Bottom : buttons[1].Left >= buttons[0].Right, $"{buttons[0]} {buttons[1]}");
+        Assert.True(position switch
+        {
+            "Left" => bar.Right <= panel.Left,
+            "Right" => bar.Left >= panel.Right,
+            "Bottom" => bar.Top >= panel.Bottom,
+            _ => bar.Bottom <= panel.Top
+        }, $"bar {bar}, panel {panel}");
+
+        // The content takes the room that the tab bar leaves, and no more.
+        var panelWidth = panel.Right - panel.Left;
+        var expectedWidth = layout.Right - layout.Left - (isAtASide ? bar.Right - bar.Left : 0);
+        Assert.Equal(expectedWidth, panelWidth, 1.0);
+        Assert.False(await HasHorizontalScrollingAsync(page));
+
+        // The same holds for a tab with content that is narrower than that room.
+        await GetTab(tabs, "Beta").ClickAsync();
+        await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
+        var shortPanel = (await GetBoxesAsync(tabs.GetByTestId("tab-panel").Nth(1))).Single();
+        Assert.Equal(expectedWidth, shortPanel.Right - shortPanel.Left, 1.0);
+    }
+
+    [Theory]
+    [InlineData("Left")]
+    [InlineData("Right")]
+    public async Task WhenTabsAreAtASideAndTheViewportGetsNarrow_ThenTheTabBarMovesToTheTopAndBackWhenItIsWideAgain(string position)
+    {
+        // Arrange
+        await WriteScratchPageAsync(CreatePositionedTabsPage(position));
+        var page = await OpenPageAsync(ScratchPage);
+        await page.SetViewportSizeAsync(1280, 800);
+        var tabs = page.GetByTestId("tab-layout");
+        await Assertions.Expect(tabs.GetByText("Content of alpha")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await WaitForTabBarAsync(page, beside: true);
+        await GetTab(tabs, "Beta").ClickAsync();
+        await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
+
+        // Act & Assert: the selected tab stays selected through both changes.
+        await page.SetViewportSizeAsync(NarrowViewportWidth, 844);
+        await WaitForTabBarAsync(page, beside: false);
+        await Assertions.Expect(GetSelectedTab(tabs)).ToHaveTextAsync("Beta");
+        Assert.False(await HasHorizontalScrollingAsync(page));
+
+        await page.SetViewportSizeAsync(1280, 800);
+        await WaitForTabBarAsync(page, beside: true);
+        await Assertions.Expect(GetSelectedTab(tabs)).ToHaveTextAsync("Beta");
+        await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
+    }
+
     [Fact]
     public async Task WhenAWidgetInACardIsEditedInInlineMode_ThenOnlyItsHeadLineChangesInThePageSource()
     {
@@ -653,6 +726,37 @@ public class MarkdownBlockTests
     {
         return "---\ntitle: Scratch\n---\n\n# Scratch\n\n" + contentBefore +
             ":: HomeBlaze.Components.TabLayout#tabs\n" + string.Concat(tabs) + "::\n";
+    }
+
+    // Three tabs, the first with a paragraph that is longer than a line.
+    private static string CreatePositionedTabsPage(string? position)
+    {
+        var argument = position is null ? string.Empty : $" Position={position}";
+        var longText = string.Join(" ", Enumerable.Repeat("Content of alpha", 60));
+        return "---\ntitle: Scratch\n---\n\n# Scratch\n\n" +
+            $":: HomeBlaze.Components.TabLayout#tabs{argument}\n" +
+            CreateTab("alpha", "Alpha", longText) + CreateTab("beta", "Beta") + CreateTab("gamma", "Gamma") + "::\n";
+    }
+
+    // Waits until the tab bar of the only tab layout stands beside the shown panel, or above it.
+    private static Task WaitForTabBarAsync(IPage page, bool beside)
+    {
+        return page.WaitForFunctionAsync(
+            """
+            beside => {
+                const layout = document.querySelector('[data-testid=tab-layout]');
+                const bar = layout.querySelector('.mud-tabs-tabbar').getBoundingClientRect();
+                const panel = [...layout.querySelectorAll('[data-testid=tab-panel]')]
+                    .map(element => element.getBoundingClientRect())
+                    .find(rectangle => rectangle.width > 0);
+                if (!panel) {
+                    return false;
+                }
+                return beside ? bar.right <= panel.left || bar.left >= panel.right : bar.bottom <= panel.top;
+            }
+            """,
+            beside,
+            new() { Timeout = 30000 });
     }
 
     private Task WriteScratchPageAsync(string content) => _fixture.WriteDemoPageAsync(ScratchPage, content);

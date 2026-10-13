@@ -1,9 +1,15 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(TabLayout))]
+@using Microsoft.JSInterop
+@using MudBlazor.Services
 @implements ISubjectComponent
+@implements IBrowserViewportObserver
+@implements IAsyncDisposable
+@inject IBrowserViewportService BrowserViewportService
 
 @{
     // Read once per render and never kept: a reload assigns a new array.
     var tabs = Layout?.Tabs ?? [];
+    var position = GetPosition();
 }
 
 <div class="tab-layout" data-testid="tab-layout" style="margin: 1rem 0;">
@@ -13,6 +19,7 @@
              Elevation="1"
              Rounded="true"
              KeepPanelsAlive="true"
+             Position="@position"
              ActivePanelIndex="@GetActivePanelIndex(tabs)"
              ActivePanelIndexChanged="@OnActivePanelIndexChanged">
         @* Not keyed: MudTabs lists its panels in the order they were created, so a panel that moved with
@@ -22,13 +29,22 @@
             <MudTabPanel Tag="@tab"
                          Text="@tab.Title"
                          Icon="@MudBlazorIconResolver.ResolveOrNull(tab.Icon)">
-                <div class="tab-layout-panel layout-cell pt-4" data-testid="tab-panel">
+                <div class="tab-layout-panel layout-cell @GetPanelSpacing(position)" data-testid="tab-panel">
                     <SubjectComponent @key="tab" Subject="@tab.Content" Type="SubjectComponentType.Widget" />
                 </div>
             </MudTabPanel>
         }
     </MudTabs>
 </div>
+
+<style>
+    /* Beside the tab bar the panels are the items of a row. A panel takes the room that the tab bar leaves,
+       also when its content is narrower, and wide content shrinks to that room instead of widening the page. */
+    .tab-layout-panel {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+</style>
 
 @code {
     private MudTabs? _tabs;
@@ -40,6 +56,80 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private TabLayout? Layout => Subject as TabLayout;
+
+    private bool _isSubscribed;
+    private bool _isNarrow;
+
+    Guid IBrowserViewportObserver.Id { get; } = Guid.NewGuid();
+
+    ResizeOptions IBrowserViewportObserver.ResizeOptions { get; } = new() { NotifyOnBreakpointOnly = true };
+
+    // A tab bar at a side leaves too little room for the content of a narrow window, so it is at the top there.
+    private MudBlazor.Position GetPosition() => Layout?.Position switch
+    {
+        TabPosition.Left when !_isNarrow => MudBlazor.Position.Left,
+        TabPosition.Right when !_isNarrow => MudBlazor.Position.Right,
+        TabPosition.Bottom => MudBlazor.Position.Bottom,
+        _ => MudBlazor.Position.Top
+    };
+
+    // The space between the tab bar and the content.
+    private static string GetPanelSpacing(MudBlazor.Position position) => position switch
+    {
+        MudBlazor.Position.Left => "pl-4",
+        MudBlazor.Position.Right => "pr-4",
+        MudBlazor.Position.Bottom => "pb-4",
+        _ => "pt-4"
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Only a layout with its tabs at a side has to know the width of the window. It keeps listening once it
+        // did, because a reload of the page can move the tabs away from the side and back.
+        if (_isSubscribed || Layout?.Position is not (TabPosition.Left or TabPosition.Right))
+        {
+            return;
+        }
+
+        _isSubscribed = true;
+        try
+        {
+            await BrowserViewportService.SubscribeAsync(this, fireImmediately: true);
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone, so there is no window to watch.
+        }
+    }
+
+    Task IBrowserViewportObserver.NotifyBrowserViewportChangeAsync(BrowserViewportEventArgs browserViewportEventArgs)
+    {
+        var isNarrow = browserViewportEventArgs.Breakpoint == Breakpoint.Xs;
+        if (isNarrow == _isNarrow)
+        {
+            return Task.CompletedTask;
+        }
+
+        _isNarrow = isNarrow;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!_isSubscribed)
+        {
+            return;
+        }
+
+        try
+        {
+            await BrowserViewportService.UnsubscribeAsync(this);
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone, and its listener with it.
+        }
+    }
 
     private int GetActivePanelIndex(Tab[] tabs)
     {
