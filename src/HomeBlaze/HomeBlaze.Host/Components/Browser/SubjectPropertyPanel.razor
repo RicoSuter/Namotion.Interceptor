@@ -63,9 +63,7 @@
                             <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                         }
 
-                        @* The padding keeps the larger icon within the height of the title line. No Color is the primary
-                           text colour, and its class on the button would lose to the colour of an icon button, so the
-                           button inherits it from the root of the tooltip. *@
+                        @* The colour comes from the root of the tooltip: its class on the button loses to that of an icon button. *@
                         <MudTooltip Text="Close" RootClass="mud-text-primary">
                             <MudIconButton OnClick="@(() => OnClose.InvokeAsync())"
                                            Icon="@Icons.Material.Filled.Close"
@@ -79,8 +77,7 @@
                     }
                 </MudListSubheader>
 
-                @* No block of the content has outer spacing of its own. Each gets the gap above it from GetGapClass, by
-                   what precedes it, so the block that was rendered last is kept in previousBlock. *@
+                @* Each block gets the gap above it from GetGapClass, by the block before it. *@
                 <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
                     @* Primitive properties and methods (operations and queries) without a category *@
                     @{
@@ -218,32 +215,61 @@
 }
 
 <style>
-    /* The line of a dense row is 20px, but the count chip and the chevron of the selected child are 24px high. Without
-       this, rows with a chip are higher than rows without one and the chevron hangs below the name. MudBlazor has no
-       parameter or class for a line height. */
+    /* MudBlazor has no parameter or class for the rules below. */
+
+    /* The height of the count chip and of the chevron of the selected child, so that all rows are equally high. */
     .subject-pane-child-name {
         line-height: 24px;
     }
 
-    /* MudBlazor has no parameter or class for the 48px minimum height of a panel header, and its spacing classes have
-       no 6px. It sets both with two classes, so this takes three. */
+    /* Three classes, as MudBlazor sets the height of a panel header with two. */
     .mud-expand-panel .mud-expand-panel-header.subject-pane-section-header {
         min-height: 36px;
         padding-top: 6px;
         padding-bottom: 6px;
     }
 
-    /* A title too long for the pane wraps inside its button, which would otherwise be wider than the pane. MudBlazor
-       has no class for a maximum width or for where a word breaks. */
+    /* A title too long for the pane wraps inside its button. */
     .subject-pane-method {
         max-width: 100%;
         overflow-wrap: anywhere;
     }
+
+    /* The values of a pane start at the same place. A longer name pushes its value to the right. */
+    .subject-pane-value-name {
+        min-width: 10rem;
+    }
+
+    /* The arrow and its margin take 24px. */
+    .subject-pane-value-name-after-arrow {
+        min-width: calc(10rem - 24px);
+    }
+
+    .subject-pane-value-text {
+        font-weight: 500;
+    }
+
+    /* Stacked: a name as wide as the line puts its value below it. A Typo cannot follow a media query, so the caption is set here. */
+    .subject-pane-rows-stacked .subject-pane-value-name {
+        flex-basis: 100%;
+        font-size: var(--mud-typography-caption-size);
+        line-height: var(--mud-typography-caption-lineheight);
+        letter-spacing: var(--mud-typography-caption-letterspacing);
+    }
+
+    /* The same rule below the sm breakpoint of MudBlazor: a selector cannot join a class and a media query. */
+    @@media (max-width: 599.98px) {
+        .subject-pane-rows-automatic .subject-pane-value-name {
+            flex-basis: 100%;
+            font-size: var(--mud-typography-caption-size);
+            line-height: var(--mud-typography-caption-lineheight);
+            letter-spacing: var(--mud-typography-caption-letterspacing);
+        }
+    }
 </style>
 
 @code {
-    // Strings and not markup, in which the space at the end would be removed. The separator starts with a no-break
-    // space, so no line of the wrapped list starts with a dot.
+    // Strings, as markup drops the space at the end. The no-break space keeps a line from starting with the dot.
     private const string EmptyValuesLabel = "No value: ";
     private const string EmptyValuesSeparator = "\xA0· ";
 
@@ -401,33 +427,31 @@
             _expandedProperties.Add(propertyName);
     }
 
-    // Takes the value, which the caller has read while rendering: the read is what the tracking scope records to render
-    // the pane again when the value changes.
+    // No flex-shrink-0 on the name: a name longer than the line would be cut off at the edge of the pane.
+    private const string NameAndValueClass = "d-flex flex-wrap align-baseline gap-x-4 flex-grow-1";
+
     private RenderFragment RenderProperty(RegisteredSubjectProperty prop, object? value, int depth) => __builder =>
     {
         var attributes = prop.Attributes.Where(IsDetail).ToArray();
         var hasAttributes = attributes.Length > 0;
         var isExpanded = _expandedProperties.Contains(prop.Name);
-        var marginLeft = depth * 24;
         var displayName = prop.IsAttribute ? prop.AttributeMetadata.AttributeName : GetPropertyDisplayName(prop);
+        var displayValue = prop.GetPropertyDisplayValue(value, TimeZone);
 
-        <MudText Style="@($"margin-left: {marginLeft}px; {(value is null ? "opacity: 0.5" : "")}")">
-            @if (hasAttributes)
-            {
-                <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ArrowDropDown : Icons.Material.Filled.ArrowRight)"
-                               Size="Size.Small"
-                               Class="mr-1"
-                               Style="padding: 0; width: 20px; height: 20px;"
-                               OnClick="@(() => TogglePropertyExpanded(prop.Name))" />
-            }
-            else if (depth > 0)
-            {
-                <span style="display: inline-block; width: 24px;"></span>
-            }
-            @{ var displayValue = prop.GetPropertyDisplayValue(value, TimeZone); }
-            @{
-                RenderFragment nameAndValue =
-                    @<text><strong>@displayName: </strong>@if (displayValue.Contains('\n'))
+        // A row without a value is dimmed by the colour of disabled text, as MudBlazor has no class for an opacity.
+        var nameClass = value is null
+            ? (hasAttributes ? "subject-pane-value-name subject-pane-value-name-after-arrow mud-text-disabled" : "subject-pane-value-name mud-text-disabled")
+            : (hasAttributes ? "subject-pane-value-name subject-pane-value-name-after-arrow mud-text-secondary" : "subject-pane-value-name mud-text-secondary");
+        var valueClass = value is null ? "subject-pane-value-text mud-text-disabled" : "subject-pane-value-text mud-text-primary";
+
+        // A detail without an arrow starts where the name of one with an arrow starts.
+        var rowClass = depth > 0 && !hasAttributes ? "d-flex align-start py-1 pl-6" : "d-flex align-start py-1";
+
+        RenderFragment nameAndValue =
+            @<text>
+                <MudText Typo="Typo.body1" HtmlTag="span" Class="@nameClass" data-testid="subject-pane-value-name">@displayName</MudText>
+                <MudText Typo="Typo.body1" HtmlTag="span" Class="@valueClass" data-testid="subject-pane-value-text">
+                    @if (displayValue.Contains('\n'))
                     {
                         @foreach (var line in displayValue.Split('\n'))
                         {
@@ -439,25 +463,40 @@
                     else
                     {
                         @displayValue
-                    }</text>;
+                    }
+                </MudText>
+            </text>;
+
+        <div class="@rowClass" data-testid="subject-pane-value">
+            @* Outside the link, so that a click on the arrow does not open the history. *@
+            @if (hasAttributes)
+            {
+                <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ArrowDropDown : Icons.Material.Filled.ArrowRight)"
+                               Size="Size.Small"
+                               Class="pa-0 mr-1"
+                               OnClick="@(() => TogglePropertyExpanded(prop.Name))" />
             }
             @if (CanShowHistory(prop))
             {
-                <MudLink Color="Color.Inherit" Underline="Underline.Hover" Style="cursor: pointer;"
+                <MudLink Color="Color.Inherit" Underline="Underline.Hover" Class="@NameAndValueClass"
                          title="Show history" OnClick="@(() => OpenPropertyHistoryDialogAsync(prop))">@nameAndValue</MudLink>
             }
             else
             {
-                @nameAndValue
+                <div class="@NameAndValueClass">@nameAndValue</div>
             }
-        </MudText>
+        </div>
 
-        @if (isExpanded)
+        @if (isExpanded && hasAttributes)
         {
-            foreach (var attr in attributes)
-            {
-                @RenderProperty(attr, attr.GetValue(), depth + 1)
-            }
+            @* Indented by the width of the arrow and its margin. *@
+            <div class="ml-6">
+                @foreach (var attribute in attributes)
+                {
+                    <MudDivider />
+                    @RenderProperty(attribute, attribute.GetValue(), depth + 1)
+                }
+            </div>
         }
     };
 
@@ -540,20 +579,16 @@
             metadata?.IsDiscrete ?? false);
     }
 
-    private IReadOnlyList<MethodMetadata> GetMethods() =>
-        _registeredSubject?.GetAllMethods() ?? [];
-
     private SubjectMemberGroups<RegisteredSubjectProperty, MethodMetadata> GetMemberGroups() =>
         SubjectMemberGrouping.Group(
             GetPrimitiveProperties().ToList(),
             static property => property.GetCategory(),
             static property => property.GetDisplayPosition(),
-            GetMethods(),
+            _registeredSubject?.GetAllMethods() ?? [],
             static method => method.Category,
             static method => method.Position);
 
-    // The kinds of block in the content of the pane, by which the gap between two of them is chosen. A section is a
-    // list of children, a collection or the details.
+    // A section is a list of children, a collection or the details.
     private enum PaneBlock
     {
         None,
@@ -564,9 +599,8 @@
         Section
     }
 
-    // The gap above a block as a spacing class of MudBlazor, which is 4px per step: 16px around a category, 12px around
-    // a row of method buttons and 8px otherwise, which with the bottom padding of the header is also the distance to
-    // the header. The category comes before the methods: a category after a row of buttons is 16px away, not 12px.
+    // 16px around a category, 12px around a row of method buttons, 8px otherwise. The category arm comes first: a
+    // category after a row of buttons is 16px away.
     private static string GetGapClass(PaneBlock previousBlock, PaneBlock block) => (previousBlock, block) switch
     {
         (PaneBlock.None, _) => "mt-2",
@@ -579,17 +613,16 @@
 
     private RenderFragment RenderValues(IReadOnlyList<RegisteredSubjectProperty> values, string gapClass) => __builder =>
     {
-        // py-0, as MudBlazor pads a list subheader by 8px above and 20px below.
+        // The word break lets a name or a value without a space wrap, for which MudBlazor has no class.
         <MudListSubheader Class="@($"{gapClass} py-0")" Style="word-break: break-word;">
             @{
-                // Created for the first value without a value: most blocks have none.
                 List<RegisteredSubjectProperty>? emptyValues = null;
                 var hasRows = false;
             }
             @foreach (var property in values)
             {
-                // Read also for a value that gets no row: the tracking scope records the read, so the pane is rendered
-                // again and the value gets its row once it is set.
+                // Read here also for a value that gets no row: the tracking scope records the read, so the pane is
+                // rendered again once the value is set.
                 var value = property.GetValue();
                 if (value is null && !HasDetails(property))
                 {
@@ -598,6 +631,11 @@
                 }
                 else
                 {
+                    if (hasRows)
+                    {
+                        <MudDivider />
+                    }
+
                     hasRows = true;
                     @RenderProperty(property, value, 0)
                 }
@@ -609,7 +647,6 @@
         </MudListSubheader>
     };
 
-    // One line for the values that are null and have no details to expand, in place of a dimmed row for each.
     private RenderFragment RenderEmptyValues(List<RegisteredSubjectProperty> emptyValues, bool hasRows) => __builder =>
     {
         // A div, as the span of a caption takes no margin above it.

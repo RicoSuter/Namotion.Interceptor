@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Host.Components.Browser;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
@@ -85,6 +86,22 @@ public class SubjectBrowserLayoutTests
         }
         """;
 
+    // Resolves once the value of a row lies below its name, or to its right on the same line when not stacked.
+    private const string RowIsLaidOut = """
+        ([row, isStacked]) => {
+            // A row that left the page has empty boxes, which would pass for a stacked one.
+            if (!row.isConnected) {
+                return false;
+            }
+
+            const name = row.querySelector("[data-testid='subject-pane-value-name']").getBoundingClientRect();
+            const value = row.querySelector("[data-testid='subject-pane-value-text']").getBoundingClientRect();
+            return isStacked
+                ? value.top >= name.bottom - 1 && Math.abs(value.left - name.left) <= 1
+                : value.left >= name.right - 1 && value.top < name.bottom - 1;
+        }
+        """;
+
     private readonly PlaywrightFixture _fixture;
 
     public SubjectBrowserLayoutTests(PlaywrightFixture fixture)
@@ -132,6 +149,31 @@ public class SubjectBrowserLayoutTests
 
     private static ILocator Method(ILocator scope, string title) =>
         scope.GetByRole(AriaRole.Button, new() { Name = title, Exact = true });
+
+    // The row of a value, by the whole name the pane shows for it.
+    private static ILocator ValueRow(ILocator pane, string name) =>
+        pane.Locator("[data-testid='subject-pane-value']").Filter(new()
+        {
+            Has = pane.Page.Locator("[data-testid='subject-pane-value-name']")
+                .Filter(new() { HasTextRegex = new Regex($"^{Regex.Escape(name)}$") })
+        });
+
+    // The status of the motor always has a value, and one short enough to fit beside its name in a pane of a phone.
+    private static async Task WaitForRowLayoutAsync(IPage page, bool isStacked)
+    {
+        var row = await ValueRow(LastPane(page), "Status").ElementHandleAsync(new() { Timeout = PageLoadTimeout });
+        await page.WaitForFunctionAsync(RowIsLaidOut, new object[] { row, isStacked }, new() { Timeout = PageLoadTimeout });
+    }
+
+    // The menu passes its test id to its root, in which its button is the only one.
+    private static ILocator RowLayoutMenuButton(IPage page) =>
+        page.Locator("[data-testid='row-layout-menu']").GetByRole(AriaRole.Button);
+
+    private static async Task ChooseRowLayoutAsync(IPage page, string item)
+    {
+        await RowLayoutMenuButton(page).ClickAsync();
+        await page.Locator($"[data-testid='{item}']").ClickAsync();
+    }
 
     [Fact]
     public async Task WhenADeepPathIsOpened_ThenItsPaneIsInViewAndNoPaneIsCutOff()
@@ -353,6 +395,94 @@ public class SubjectBrowserLayoutTests
         var pane = LastPane(page);
         var emptyValues = pane.Locator("[data-testid='subject-pane-empty-values']").Filter(new() { HasText = "StatusMessage" });
         await Assertions.Expect(emptyValues).ToContainTextAsync("No value:", new() { Timeout = PageLoadTimeout });
-        await Assertions.Expect(pane.GetByText("StatusMessage:")).ToHaveCountAsync(0);
+
+        // The status has a value and therefore a row, which shows that a row is found by its name.
+        await Assertions.Expect(ValueRow(pane, "Status")).ToHaveCountAsync(1);
+        await Assertions.Expect(ValueRow(pane, "StatusMessage")).ToHaveCountAsync(0);
+    }
+
+    [Theory]
+    [InlineData(1280, 720, false)]
+    [InlineData(390, 844, true)] // A phone: narrower than the sm breakpoint of MudBlazor.
+    public async Task WhenTheRowLayoutIsAutomatic_ThenAValueIsBelowItsNameOnlyOnAPhone(int width, int height, bool isStacked)
+    {
+        // Act
+        var page = await OpenAsync(MotorPath, width, height, paneCount: 3);
+
+        // Assert
+        await WaitForRowLayoutAsync(page, isStacked);
+    }
+
+    [Theory]
+    [InlineData(1280, 390)]
+    [InlineData(390, 1280)]
+    public async Task WhenTheViewIsResizedAcrossThePhoneWidth_ThenTheRowLayoutFollowsWithoutAReload(int widthBefore, int widthAfter)
+    {
+        // Arrange
+        var page = await OpenAsync(MotorPath, widthBefore, 844, paneCount: 3);
+        await WaitForRowLayoutAsync(page, isStacked: widthBefore < 600);
+
+        // Act
+        await page.SetViewportSizeAsync(widthAfter, 844);
+
+        // Assert
+        await WaitForRowLayoutAsync(page, isStacked: widthAfter < 600);
+    }
+
+    [Theory]
+    [InlineData(1280, 720, "row-layout-stacked", true)]
+    [InlineData(390, 844, "row-layout-side-by-side", false)]
+    public async Task WhenARowLayoutIsChosen_ThenItOverridesTheWidthOfTheView(int width, int height, string item, bool isStacked)
+    {
+        // Arrange
+        var page = await OpenAsync(MotorPath, width, height, paneCount: 3);
+        await WaitForRowLayoutAsync(page, !isStacked);
+
+        // Act
+        await ChooseRowLayoutAsync(page, item);
+
+        // Assert
+        await WaitForRowLayoutAsync(page, isStacked);
+    }
+
+    [Theory]
+    [InlineData(1280, 720, "row-layout-stacked", true)]
+    [InlineData(390, 844, "row-layout-side-by-side", false)]
+    public async Task WhenThePageIsReloaded_ThenTheChosenRowLayoutIsKept(int width, int height, string item, bool isStacked)
+    {
+        // Arrange
+        var page = await OpenAsync(MotorPath, width, height, paneCount: 3);
+        await ChooseRowLayoutAsync(page, item);
+        await WaitForRowLayoutAsync(page, isStacked);
+        await page.WaitForFunctionAsync(
+            "name => document.cookie.includes(`${name}=`)",
+            PropertyRowLayoutInitializer.CookieName,
+            new() { Timeout = PageLoadTimeout });
+
+        // Act
+        await page.ReloadAsync();
+
+        // Assert
+        await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await WaitUntilSettledAsync(page, paneCount: 3);
+        await WaitForRowLayoutAsync(page, isStacked);
+    }
+
+    [Fact]
+    public async Task WhenARowLayoutIsChosen_ThenTheMenuMarksIt()
+    {
+        // Arrange
+        var page = await OpenAsync(MotorPath, 1280, 720, paneCount: 3);
+        await ChooseRowLayoutAsync(page, "row-layout-stacked");
+        await WaitForRowLayoutAsync(page, isStacked: true);
+
+        // Act
+        await RowLayoutMenuButton(page).ClickAsync();
+
+        // Assert
+        await Assertions.Expect(page.Locator("[data-testid='row-layout-stacked']"))
+            .ToHaveAttributeAsync("aria-checked", "true", new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(page.Locator("[data-testid='row-layout-automatic']")).ToHaveAttributeAsync("aria-checked", "false");
+        await Assertions.Expect(page.Locator("[data-testid='row-layout-side-by-side']")).ToHaveAttributeAsync("aria-checked", "false");
     }
 }

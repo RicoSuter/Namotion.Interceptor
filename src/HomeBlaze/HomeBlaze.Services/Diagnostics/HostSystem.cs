@@ -85,7 +85,7 @@ public partial class HostSystem : BackgroundService,
     [Derived]
     [State(Unit = StateUnit.Percent, Position = 413)]
     public decimal? MemoryUsage =>
-        TotalMemory is { } total && total > 0 && AvailableMemory is { } available
+        TotalMemory is { } total and > 0 && AvailableMemory is { } available
             ? Math.Round((decimal)(total - available) / total, 3)
             : null;
 

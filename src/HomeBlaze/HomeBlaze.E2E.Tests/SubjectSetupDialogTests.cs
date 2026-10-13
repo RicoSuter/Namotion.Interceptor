@@ -1236,7 +1236,18 @@ public class SubjectSetupDialogTests
             await page.GotoAsync($"{_fixture.ServerAddress}browser/Demo/Grid.md/grid/Cells/{cellIndex}/Child");
             await Assertions.Expect(page.GetByText("In-Memory History").First)
                 .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(page.GetByText("Status: Disabled"))
+
+            // By name and value: the storage in the first pane of the path has a status of its own.
+            var disabledStatus = page.GetByTestId("subject-pane-value")
+                .Filter(new()
+                {
+                    Has = page.GetByTestId("subject-pane-value-name").Filter(new() { HasTextRegex = new Regex("^Status$") })
+                })
+                .Filter(new()
+                {
+                    Has = page.GetByTestId("subject-pane-value-text").Filter(new() { HasTextRegex = new Regex("^Disabled$") })
+                });
+            await Assertions.Expect(disabledStatus)
                 .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
             isCompleted = true;
         }
