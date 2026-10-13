@@ -987,11 +987,12 @@ public partial class Widget : ITitleProvider, IConfigurable
 
 Name the properties that hold a link with `LinkProperties`, so only safe addresses are allowed, and those that load content from an address, such as a picture, with `MediaProperties`, so a block that sets one is no layout block. Mark only types whose configuration is plain values and that do nothing but show content.
 
-### Excluding Properties from Page Expressions
+### Properties Shown on Pages
 
-A `{{ path }}` expression on a page shows the value of a property it reaches when the property is a partial (intercepted) property or a `[Derived]` property. It shows nothing for:
+A `{{ path }}` expression on a page and a [value widget](../administration/page-widgets.md#value-widgets) show the value of a property they reach only when the property is displayable: a partial (intercepted) property or a `[Derived]` property. An expression shows nothing and a value widget shows a dash for:
 
 - A plain public property, which is registered too but is no tracked value of the subject and can hold internal data, such as the text an agent is still writing. Mark a computed value that pages should show with `[Derived]`.
+- A default property of an interface, such as `bool? IsClosed => State switch { ... }`, unless it is marked with `[Derived]`, as every default `[State]` property of the HomeBlaze abstractions is. It is no partial property of the class, so it counts as a plain property otherwise.
 - A secret configuration property (`[Configuration(IsSecret = true)]`).
 - A property marked with `[ExcludeFromExpressions]`, for a value that can hold secrets in another form, such as the raw source of a file.
 

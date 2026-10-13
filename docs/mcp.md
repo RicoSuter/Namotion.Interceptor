@@ -346,7 +346,7 @@ handlers.CallToolHandler = (request, cancellationToken) =>
     McpToolDispatcher.CallToolAsync(tools, request.Params!, logger, cancellationToken);
 ```
 
-`ListTools` maps the annotations of each tool. `CallToolAsync` returns a string result as text and any other result as indented JSON, and turns an unknown tool or a throwing handler into an error result.
+`ListTools` maps the annotations of each tool. `CallToolAsync` returns a string result as text and any other result as indented JSON that keeps non-ASCII characters and `<>&'` unescaped, and turns an unknown tool or a throwing handler into an error result.
 
 To change one member of a tool, for example to wrap its handler with a budget or logging, copy it with the copy constructor, which keeps all other members including the annotations:
 

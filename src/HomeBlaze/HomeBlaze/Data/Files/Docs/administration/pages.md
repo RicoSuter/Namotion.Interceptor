@@ -116,8 +116,7 @@ The reader sees the sentence with the two values in place of the expressions, an
 - **Live**: The value updates when the property changes.
 - **HTML-safe**: The value is HTML-encoded, so a value can never add markup to the page.
 - **Empty**: A value that is not set shows nothing.
-- **Secrets**: A secret configuration value, such as a password or an API key, is never shown. Its expression shows nothing, like a value that is not set. The same holds for the raw source of a page, the `Content` property of a markdown file, which holds the configuration of its blocks.
-- **Tracked values only**: An expression shows the partial and the derived properties of a subject. A plain property of a subject class shows nothing. [Building Subjects](../development/building-subjects.md#excluding-properties-from-page-expressions) lists the rules.
+- **Secrets and plain properties**: A secret configuration value, such as a password or an API key, the raw source of a page (the `Content` property of a markdown file) and a plain property of a subject class are never shown; their expression shows nothing, like a value that is not set. [Properties Shown on Pages](../development/building-subjects.md#properties-shown-on-pages) lists the rules.
 
 ### Expression Paths
 

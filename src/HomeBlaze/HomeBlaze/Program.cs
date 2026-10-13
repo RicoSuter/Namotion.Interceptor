@@ -160,7 +160,7 @@ if (!app.Environment.IsDevelopment())
 
 if (!app.Environment.IsDevelopment())
 {
-    // The CLI agent calls back over loopback HTTP; a redirect would drop its bearer token.
+    // The CLI agent calls back over HTTP on the same host; a redirect would drop its bearer token.
     app.UseWhen(
         context => !context.Request.Path.StartsWithSegments(AgentMcpEndpoint.Route),
         branch => branch.UseHttpsRedirection());
@@ -168,7 +168,7 @@ if (!app.Environment.IsDevelopment())
 
 app.UseAntiforgery();
 
-// The agent route is always mapped; it only accepts loopback requests carrying a running turn's token.
+// The agent route is always mapped; it only accepts same-host requests carrying a running turn's token.
 app.MapHomeBlazeAgentMcp();
 
 // Map the external MCP server endpoint if enabled
