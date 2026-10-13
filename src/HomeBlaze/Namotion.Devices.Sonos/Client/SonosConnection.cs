@@ -1,22 +1,20 @@
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Sonos.Parsing;
-using Sonos.Base;
-using Sonos.Base.Services;
-
-// Our own SonosDevice subject lives in an enclosing namespace and would win over the using directive.
-using SonosBaseDevice = Sonos.Base.SonosDevice;
 
 namespace Namotion.Devices.Sonos.Client;
 
 /// <summary>
-/// The SOAP connection to one Sonos unit. Reads return our records; commands throw on a SOAP fault.
+/// The connection to one Sonos unit. Reads return our records; commands throw on a UPnP fault.
 /// </summary>
-[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Wraps Sonos.Base, where every UPnP request and response is its own type.")]
-internal sealed class SonosConnection : IDisposable
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Holds every action of one unit; splitting it by service would move the coupling, not remove it.")]
+internal sealed class SonosConnection
 {
-    private const int InstanceId = 0;
-    private const string MasterChannel = "Master";
+    private const string UuidPrefix = "RINCON";
+
+    private static readonly (string Name, string Value) Instance = ("InstanceID", "0");
+    private static readonly (string Name, string Value) MasterChannel = ("Channel", "Master");
 
     // The audio clip websocket is not covered by the HttpClient timeout.
     private static readonly TimeSpan NotificationTimeout = TimeSpan.FromSeconds(10);
@@ -24,8 +22,7 @@ internal sealed class SonosConnection : IDisposable
 
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
-    private readonly SonosDeviceOptions _deviceOptions;
-    private readonly SonosBaseDevice _device;
+    private readonly SonosSoapClient _soapClient;
 
     // The reads that answer with a UPnP fault, so each is reported once when it starts faulting. Concurrent because
     // a command refresh can poll the same player as the reconciliation.
@@ -33,6 +30,9 @@ internal sealed class SonosConnection : IDisposable
 
     // The pages of the last favorites read, replaced as a whole.
     private FavoritesPage[] _favoritesPages = [];
+
+    // Read from the unit when the connection was created without it; racing readers store the same value.
+    private volatile string? _uuid;
 
     /// <param name="baseUri">The base URI of the unit.</param>
     /// <param name="uuid">The RINCON id of the unit, null while unknown.</param>
@@ -43,17 +43,11 @@ internal sealed class SonosConnection : IDisposable
         BaseUri = baseUri;
         _httpClient = httpClient;
         _logger = logger ?? NullLogger.Instance;
-        _deviceOptions = new SonosDeviceOptions(baseUri, new SonosClientProvider(httpClient), uuid);
-        _device = new SonosBaseDevice(_deviceOptions);
+        _soapClient = new SonosSoapClient(httpClient, baseUri);
+        _uuid = uuid;
     }
 
     internal Uri BaseUri { get; }
-
-    private AVTransportService AvTransport => _device.AVTransportService;
-
-    private RenderingControlService RenderingControl => _device.RenderingControlService;
-
-    private GroupRenderingControlService GroupRenderingControl => _device.GroupRenderingControlService;
 
     internal async Task<SonosDeviceDescription> ReadDescriptionAsync(CancellationToken cancellationToken)
     {
@@ -67,10 +61,14 @@ internal sealed class SonosConnection : IDisposable
     /// </summary>
     internal async Task<SonosZoneInfo?> ReadZoneInfoAsync(List<SonosReadFault> newFaults, CancellationToken cancellationToken)
     {
-        var zoneInfo = await ReadOrDefaultAsync("GetZoneInfo", () => _device.DevicePropertiesService.GetZoneInfo(cancellationToken), newFaults);
+        var zoneInfo = await ReadOrDefaultAsync(SonosService.DeviceProperties, "GetZoneInfo", [], newFaults, cancellationToken);
         return zoneInfo is null
             ? null
-            : new SonosZoneInfo(zoneInfo.SerialNumber, zoneInfo.MACAddress, zoneInfo.HardwareVersion, zoneInfo.DisplaySoftwareVersion);
+            : new SonosZoneInfo(
+                zoneInfo.GetString("SerialNumber"),
+                zoneInfo.GetString("MACAddress"),
+                zoneInfo.GetString("HardwareVersion"),
+                zoneInfo.GetString("DisplaySoftwareVersion"));
     }
 
     internal async Task<SonosTopology> ReadTopologyAsync(CancellationToken cancellationToken) =>
@@ -81,8 +79,8 @@ internal sealed class SonosConnection : IDisposable
     /// </summary>
     internal async Task<string> ReadZoneGroupStateAsync(CancellationToken cancellationToken)
     {
-        var response = await _device.ZoneGroupTopologyService.GetZoneGroupState(cancellationToken);
-        return response.ZoneGroupState;
+        var response = await _soapClient.QueryAsync(SonosService.ZoneGroupTopology, "GetZoneGroupState", [], cancellationToken);
+        return response.GetString("ZoneGroupState") ?? string.Empty;
     }
 
     internal async Task<IReadOnlyList<SonosFavorite>> ReadFavoritesAsync(CancellationToken cancellationToken)
@@ -94,25 +92,41 @@ internal sealed class SonosConnection : IDisposable
         var startingIndex = 0;
         while (true)
         {
-            var response = await _device.ContentDirectoryService.Browse("FV:2", StartingIndex: startingIndex, Count: pageSize, cancellationToken: cancellationToken);
+            var response = await BrowseFavoritesAsync(startingIndex, pageSize, cancellationToken);
+            var result = response.GetString("Result");
+            var numberReturned = response.GetInt32("NumberReturned") ?? 0;
 
             // Favorites rarely change, so a page with the same result as last time reuses its records.
             var pageIndex = pages.Count;
-            var page = pageIndex < previousPages.Length && previousPages[pageIndex].Result == response.Result
+            var page = pageIndex < previousPages.Length && previousPages[pageIndex].Result == result
                 ? previousPages[pageIndex]
-                : new FavoritesPage(response.Result, FavoritesParser.Parse(response.Result, BaseUri));
+                : new FavoritesPage(result, FavoritesParser.Parse(result, BaseUri));
             pages.Add(page);
             favorites.AddRange(page.Favorites);
 
             // Counted by the items returned, not the favorites parsed, which skip shortcuts.
-            startingIndex += response.NumberReturned;
-            if (response.NumberReturned <= 0 || startingIndex >= response.TotalMatches)
+            startingIndex += numberReturned;
+            if (numberReturned <= 0 || startingIndex >= (response.GetInt32("TotalMatches") ?? 0))
             {
                 _favoritesPages = [.. pages];
                 return favorites;
             }
         }
     }
+
+    private Task<SonosSoapResponse> BrowseFavoritesAsync(int startingIndex, int count, CancellationToken cancellationToken) =>
+        _soapClient.QueryAsync(
+            SonosService.ContentDirectory,
+            "Browse",
+            [
+                ("ObjectID", "FV:2"),
+                ("BrowseFlag", "BrowseDirectChildren"),
+                ("Filter", "*"),
+                ("StartingIndex", Format(startingIndex)),
+                ("RequestedCount", Format(count)),
+                ("SortCriteria", string.Empty)
+            ],
+            cancellationToken);
 
     private sealed record FavoritesPage(string? Result, IReadOnlyList<SonosFavorite> Favorites);
 
@@ -123,17 +137,17 @@ internal sealed class SonosConnection : IDisposable
     /// </summary>
     internal async Task<SonosPlayerReading> ReadPlayerAsync(bool isHomeTheater, List<SonosReadFault> newFaults, CancellationToken cancellationToken)
     {
-        var transport = await ReadOrDefaultAsync("GetTransportInfo", () => AvTransport.GetTransportInfo(cancellationToken), newFaults);
-        var settings = await ReadOrDefaultAsync("GetTransportSettings", () => AvTransport.GetTransportSettings(cancellationToken), newFaults);
-        var media = await ReadOrDefaultAsync("GetMediaInfo", () => AvTransport.GetMediaInfo(cancellationToken), newFaults);
-        var position = await ReadOrDefaultAsync("GetPositionInfo", () => AvTransport.GetPositionInfo(cancellationToken), newFaults);
-        var sleepTimer = await ReadOrDefaultAsync("GetRemainingSleepTimerDuration", () => AvTransport.GetRemainingSleepTimerDuration(cancellationToken), newFaults);
+        var transport = await ReadOrDefaultAsync(SonosService.AvTransport, "GetTransportInfo", [Instance], newFaults, cancellationToken);
+        var settings = await ReadOrDefaultAsync(SonosService.AvTransport, "GetTransportSettings", [Instance], newFaults, cancellationToken);
+        var media = await ReadOrDefaultAsync(SonosService.AvTransport, "GetMediaInfo", [Instance], newFaults, cancellationToken);
+        var position = await ReadOrDefaultAsync(SonosService.AvTransport, "GetPositionInfo", [Instance], newFaults, cancellationToken);
+        var sleepTimer = await ReadOrDefaultAsync(SonosService.AvTransport, "GetRemainingSleepTimerDuration", [Instance], newFaults, cancellationToken);
 
-        var volume = await ReadOrDefaultAsync("GetVolume", () => RenderingControl.GetVolume(new RenderingControlService.GetVolumeRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), newFaults);
-        var mute = await ReadOrDefaultAsync("GetMute", () => RenderingControl.GetMute(new RenderingControlService.GetMuteRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), newFaults);
-        var bass = await ReadOrDefaultAsync("GetBass", () => RenderingControl.GetBass(cancellationToken), newFaults);
-        var treble = await ReadOrDefaultAsync("GetTreble", () => RenderingControl.GetTreble(cancellationToken), newFaults);
-        var loudness = await ReadOrDefaultAsync("GetLoudness", () => RenderingControl.GetLoudness(new RenderingControlService.GetLoudnessRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), newFaults);
+        var volume = await ReadOrDefaultAsync(SonosService.RenderingControl, "GetVolume", [Instance, MasterChannel], newFaults, cancellationToken);
+        var mute = await ReadOrDefaultAsync(SonosService.RenderingControl, "GetMute", [Instance, MasterChannel], newFaults, cancellationToken);
+        var bass = await ReadOrDefaultAsync(SonosService.RenderingControl, "GetBass", [Instance], newFaults, cancellationToken);
+        var treble = await ReadOrDefaultAsync(SonosService.RenderingControl, "GetTreble", [Instance], newFaults, cancellationToken);
+        var loudness = await ReadOrDefaultAsync(SonosService.RenderingControl, "GetLoudness", [Instance, MasterChannel], newFaults, cancellationToken);
 
         bool? nightMode = null;
         bool? speechEnhancement = null;
@@ -145,14 +159,14 @@ internal sealed class SonosConnection : IDisposable
 
         return new SonosPlayerReading(
             CreateAvTransportChange(transport, settings, media, position),
-            SonosValues.ParseDuration(position?.RelTime),
-            SonosValues.ParseDuration(sleepTimer?.RemainingSleepTimerDuration),
+            SonosValues.ParseDuration(position?.GetString("RelTime")),
+            SonosValues.ParseDuration(sleepTimer?.GetString("RemainingSleepTimerDuration")),
             new RenderingControlChange(
-                volume?.CurrentVolume,
-                mute?.CurrentMute,
-                bass?.CurrentBass,
-                treble?.CurrentTreble,
-                loudness?.CurrentLoudness,
+                volume?.GetInt32("CurrentVolume"),
+                mute?.GetBoolean("CurrentMute"),
+                bass?.GetInt32("CurrentBass"),
+                treble?.GetInt32("CurrentTreble"),
+                loudness?.GetBoolean("CurrentLoudness"),
                 nightMode,
                 speechEnhancement),
             HasPosition: position is not null,
@@ -160,156 +174,176 @@ internal sealed class SonosConnection : IDisposable
     }
 
     private static AvTransportChange CreateAvTransportChange(
-        AVTransportService.GetTransportInfoResponse? transport,
-        AVTransportService.GetTransportSettingsResponse? settings,
-        AVTransportService.GetMediaInfoResponse? media,
-        AVTransportService.GetPositionInfoResponse? position) =>
+        SonosSoapResponse? transport, SonosSoapResponse? settings, SonosSoapResponse? media, SonosSoapResponse? position) =>
         new(
-            transport?.CurrentTransportState,
-            settings?.PlayMode,
-            media?.CurrentURI,
-            position?.TrackURI,
-            position?.TrackDuration,
-            position?.TrackMetaData,
-            media?.CurrentURIMetaData);
+            transport?.GetString("CurrentTransportState"),
+            settings?.GetString("PlayMode"),
+            media?.GetString("CurrentURI"),
+            position?.GetString("TrackURI"),
+            position?.GetString("TrackDuration"),
+            position?.GetString("TrackMetaData"),
+            media?.GetString("CurrentURIMetaData"));
 
     /// <summary>
     /// Reads the group volume and mute from a coordinator, with the same fault handling as <see cref="ReadPlayerAsync"/>.
     /// </summary>
     internal async Task<GroupRenderingControlChange> ReadGroupAsync(List<SonosReadFault> newFaults, CancellationToken cancellationToken)
     {
-        var volume = await ReadOrDefaultAsync("GetGroupVolume", () => GroupRenderingControl.GetGroupVolume(cancellationToken), newFaults);
-        var mute = await ReadOrDefaultAsync("GetGroupMute", () => GroupRenderingControl.GetGroupMute(cancellationToken), newFaults);
-        return new GroupRenderingControlChange(volume?.CurrentVolume, mute?.CurrentMute);
+        var volume = await ReadOrDefaultAsync(SonosService.GroupRenderingControl, "GetGroupVolume", [Instance], newFaults, cancellationToken);
+        var mute = await ReadOrDefaultAsync(SonosService.GroupRenderingControl, "GetGroupMute", [Instance], newFaults, cancellationToken);
+        return new GroupRenderingControlChange(volume?.GetInt32("CurrentVolume"), mute?.GetBoolean("CurrentMute"));
     }
+
+    private async Task<bool?> GetEqualizerAsync(string type, string read, List<SonosReadFault> newFaults, CancellationToken cancellationToken)
+    {
+        var response = await ReadOrDefaultAsync(
+            read,
+            _soapClient.QueryAsync(SonosService.RenderingControl, "GetEQ", [Instance, ("EQType", type)], cancellationToken),
+            newFaults);
+        return response?.GetInt32("CurrentValue") is { } level ? SonosValues.IsLevelOn(level) : null;
+    }
+
+    private Task<SonosSoapResponse?> ReadOrDefaultAsync(
+        SonosService service,
+        string action,
+        ReadOnlySpan<(string Name, string Value)> arguments,
+        List<SonosReadFault> newFaults,
+        CancellationToken cancellationToken) =>
+        ReadOrDefaultAsync(action, _soapClient.QueryAsync(service, action, arguments, cancellationToken), newFaults);
 
     // A UPnP fault means the speaker answered but cannot report this value now, for example an action a model or a
     // grouped member does not support; the other reads still count.
-    private async Task<T?> ReadOrDefaultAsync<T>(string action, Func<Task<T>> read, List<SonosReadFault> newFaults)
-        where T : class
+    private async Task<SonosSoapResponse?> ReadOrDefaultAsync(string read, Task<SonosSoapResponse> response, List<SonosReadFault> newFaults)
     {
         try
         {
-            var result = await read();
-            _faultingReads.ReportSuccess(action);
+            var result = await response;
+            _faultingReads.ReportSuccess(read);
             return result;
         }
-        catch (SonosServiceException exception)
+        catch (SonosFaultException exception)
         {
-            if (_faultingReads.ReportFailure(action))
+            if (_faultingReads.ReportFailure(read))
             {
-                newFaults.Add(new SonosReadFault(action, exception));
+                newFaults.Add(new SonosReadFault(read, exception));
             }
 
             return null;
         }
     }
 
-    internal Task PlayAsync(CancellationToken cancellationToken) => _device.Play(cancellationToken);
+    internal Task PlayAsync(CancellationToken cancellationToken) =>
+        _soapClient.InvokeAsync(SonosService.AvTransport, "Play", [Instance, ("Speed", "1")], cancellationToken);
 
-    internal Task PauseAsync(CancellationToken cancellationToken) => _device.Pause(cancellationToken);
+    internal Task PauseAsync(CancellationToken cancellationToken) => InvokeTransportAsync("Pause", cancellationToken);
 
-    internal Task StopAsync(CancellationToken cancellationToken) => _device.Stop(cancellationToken);
+    internal Task StopAsync(CancellationToken cancellationToken) => InvokeTransportAsync("Stop", cancellationToken);
 
-    internal Task NextAsync(CancellationToken cancellationToken) => _device.Next(cancellationToken);
+    internal Task NextAsync(CancellationToken cancellationToken) => InvokeTransportAsync("Next", cancellationToken);
 
-    internal Task PreviousAsync(CancellationToken cancellationToken) => _device.Previous(cancellationToken);
+    internal Task PreviousAsync(CancellationToken cancellationToken) => InvokeTransportAsync("Previous", cancellationToken);
 
-    internal Task TogglePlaybackAsync(CancellationToken cancellationToken) => _device.TogglePlayback(cancellationToken);
+    /// <summary>
+    /// Pauses a playing or starting player and plays any other; does nothing when the speaker reports no state.
+    /// </summary>
+    internal async Task TogglePlaybackAsync(CancellationToken cancellationToken)
+    {
+        var transport = await _soapClient.QueryAsync(SonosService.AvTransport, "GetTransportInfo", [Instance], cancellationToken);
+        var state = transport.GetString("CurrentTransportState");
+        if (string.IsNullOrEmpty(state))
+        {
+            return;
+        }
+
+        if (state is "PLAYING" or "TRANSITIONING")
+        {
+            await PauseAsync(cancellationToken);
+        }
+        else
+        {
+            await PlayAsync(cancellationToken);
+        }
+    }
 
     internal Task SeekAsync(TimeSpan position, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(position, TimeSpan.Zero);
-        return AvTransport.Seek(new AVTransportService.SeekRequest { InstanceID = InstanceId, Unit = "REL_TIME", Target = SonosValues.FormatDuration(position) }, cancellationToken);
+        return _soapClient.InvokeAsync(
+            SonosService.AvTransport, "Seek", [Instance, ("Unit", "REL_TIME"), ("Target", SonosValues.FormatDuration(position))], cancellationToken);
     }
 
     internal Task SetVolumeAsync(int volume, CancellationToken cancellationToken) =>
-        RenderingControl.SetVolume(new RenderingControlService.SetVolumeRequest { InstanceID = InstanceId, Channel = MasterChannel, DesiredVolume = volume }, cancellationToken);
+        _soapClient.InvokeAsync(
+            SonosService.RenderingControl, "SetVolume", [Instance, MasterChannel, ("DesiredVolume", Format(volume))], cancellationToken);
 
     internal Task ChangeVolumeAsync(int adjustment, CancellationToken cancellationToken) =>
-        RenderingControl.SetRelativeVolume(new RenderingControlService.SetRelativeVolumeRequest { InstanceID = InstanceId, Channel = MasterChannel, Adjustment = adjustment }, cancellationToken);
+        _soapClient.InvokeAsync(
+            SonosService.RenderingControl, "SetRelativeVolume", [Instance, MasterChannel, ("Adjustment", Format(adjustment))], cancellationToken);
 
     internal Task RampVolumeAsync(int volume, CancellationToken cancellationToken) =>
-        RenderingControl.RampToVolume(new RenderingControlService.RampToVolumeRequest
-        {
-            InstanceID = InstanceId,
-            Channel = MasterChannel,
-            RampType = "SLEEP_TIMER_RAMP_TYPE",
-            DesiredVolume = volume,
-            ResetVolumeAfter = false,
-            ProgramURI = string.Empty
-        }, cancellationToken);
+        _soapClient.InvokeAsync(
+            SonosService.RenderingControl,
+            "RampToVolume",
+            [
+                Instance,
+                MasterChannel,
+                ("RampType", "SLEEP_TIMER_RAMP_TYPE"),
+                ("DesiredVolume", Format(volume)),
+                ("ResetVolumeAfter", Format(false)),
+                ("ProgramURI", string.Empty)
+            ],
+            cancellationToken);
 
     internal Task SetMuteAsync(bool mute, CancellationToken cancellationToken) =>
-        RenderingControl.SetMute(new RenderingControlService.SetMuteRequest { InstanceID = InstanceId, Channel = MasterChannel, DesiredMute = mute }, cancellationToken);
+        _soapClient.InvokeAsync(
+            SonosService.RenderingControl, "SetMute", [Instance, MasterChannel, ("DesiredMute", Format(mute))], cancellationToken);
 
     internal Task SetTransportUriAsync(string uri, string metadata, CancellationToken cancellationToken) =>
-        AvTransport.SetAVTransportURI(new AVTransportService.SetAVTransportURIRequest { InstanceID = InstanceId, CurrentURI = uri, CurrentURIMetaData = EscapeMetadataAmpersands(metadata) }, cancellationToken);
+        _soapClient.InvokeAsync(
+            SonosService.AvTransport, "SetAVTransportURI", [Instance, ("CurrentURI", uri), ("CurrentURIMetaData", metadata)], cancellationToken);
 
     internal async Task PlayFromQueueAsync(string uri, string metadata, CancellationToken cancellationToken)
     {
-        await AvTransport.RemoveAllTracksFromQueue(cancellationToken);
-        await AvTransport.AddURIToQueue(new AVTransportService.AddURIToQueueRequest
-        {
-            InstanceID = InstanceId,
-            EnqueuedURI = uri,
-            EnqueuedURIMetaData = EscapeMetadataAmpersands(metadata),
-            DesiredFirstTrackNumberEnqueued = 0,
-            EnqueueAsNext = false
-        }, cancellationToken);
-        await _device.SwitchToQueue(cancellationToken);
-        await _device.Play(cancellationToken);
+        await InvokeTransportAsync("RemoveAllTracksFromQueue", cancellationToken);
+        await _soapClient.InvokeAsync(
+            SonosService.AvTransport,
+            "AddURIToQueue",
+            [
+                Instance,
+                ("EnqueuedURI", uri),
+                ("EnqueuedURIMetaData", metadata),
+                ("DesiredFirstTrackNumberEnqueued", "0"),
+                ("EnqueueAsNext", Format(false))
+            ],
+            cancellationToken);
+        await SetTransportUriAsync($"x-rincon-queue:{await GetUuidAsync(cancellationToken)}#0", string.Empty, cancellationToken);
+        await PlayAsync(cancellationToken);
     }
 
     /// <summary>
-    /// Queues an audio clip over the speaker's websocket. Each call uses a Sonos.Base device of its own: Sonos.Base
-    /// keeps one websocket per device and cannot start it again once it failed or the speaker closed it, so a shared
-    /// one would fail every later notification. The speaker's answer is not read, so a rejected clip is not reported.
+    /// Queues an audio clip on the speaker, as <see cref="SonosAudioClipClient.QueueAsync"/> describes, within
+    /// <see cref="NotificationTimeout"/>.
     /// </summary>
     internal async Task PlayNotificationAsync(Uri soundUri, int volume, CancellationToken cancellationToken)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(volume, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(volume, 100);
+
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(NotificationTimeout);
-        var device = new SonosBaseDevice(_deviceOptions);
-        try
-        {
-            await device.QueueNotification(new NotificationOptions(soundUri, volume), timeout.Token);
-        }
-        finally
-        {
-            await CloseNotificationDeviceAsync(device);
-        }
+        var uuid = await GetUuidAsync(timeout.Token);
+        await SonosAudioClipClient.QueueAsync(
+            SonosAudioClipClient.GetEndpoint(BaseUri.Host), uuid, soundUri, volume, NotificationCloseTimeout, _logger, timeout.Token);
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S6966", Justification = "Sonos.Base's DisposeAsync does not release a socket that never opened or that timed out, so the synchronous Dispose must follow it.")]
-    private async Task CloseNotificationDeviceAsync(SonosBaseDevice device)
-    {
-        // Closing gracefully lets the speaker take the clip before the connection goes; Sonos.Base waits for the
-        // close without a token, so it gets a budget.
-        var closing = device.DisposeAsync().AsTask();
-        try
-        {
-            await closing.WaitAsync(NotificationCloseTimeout);
-        }
-        catch (Exception exception)
-        {
-            // Observed here or in the continuation below, whichever way the close ends.
-            _ = closing.ContinueWith(static task => task.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-            _logger.LogDebug(exception, "Closing the Sonos notification websocket of {Uri} failed.", BaseUri);
-        }
-        finally
-        {
-            // Releases a socket that never opened or did not close in time; Sonos.Base's DisposeAsync skips both.
-            device.Dispose();
-        }
-    }
+    internal async Task SwitchToTvAsync(CancellationToken cancellationToken) =>
+        await SetTransportUriAsync($"x-sonos-htastream:{await GetUuidAsync(cancellationToken)}:spdif", string.Empty, cancellationToken);
 
-    internal Task SwitchToTvAsync(CancellationToken cancellationToken) => _device.SwitchToSpdif(cancellationToken);
-
-    internal Task SwitchToLineInAsync(CancellationToken cancellationToken) => _device.SwitchToLineIn(cancellationToken);
+    internal async Task SwitchToLineInAsync(CancellationToken cancellationToken) =>
+        await SetTransportUriAsync($"x-rincon-stream:{await GetUuidAsync(cancellationToken)}", string.Empty, cancellationToken);
 
     internal Task SetPlayModeAsync(string playMode, CancellationToken cancellationToken) =>
-        AvTransport.SetPlayMode(new AVTransportService.SetPlayModeRequest { InstanceID = InstanceId, NewPlayMode = playMode }, cancellationToken);
+        _soapClient.InvokeAsync(SonosService.AvTransport, "SetPlayMode", [Instance, ("NewPlayMode", playMode)], cancellationToken);
 
     /// <summary>
     /// Sets the sleep timer, at most <see cref="SonosValues.MaximumSleepTimer"/>; zero cancels it.
@@ -318,60 +352,84 @@ internal sealed class SonosConnection : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(duration, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(duration, SonosValues.MaximumSleepTimer);
-        return AvTransport.ConfigureSleepTimer(new AVTransportService.ConfigureSleepTimerRequest
-        {
-            InstanceID = InstanceId,
-            NewSleepTimerDuration = duration == TimeSpan.Zero ? string.Empty : SonosValues.FormatDuration(duration)
-        }, cancellationToken);
+        return _soapClient.InvokeAsync(
+            SonosService.AvTransport,
+            "ConfigureSleepTimer",
+            [Instance, ("NewSleepTimerDuration", duration == TimeSpan.Zero ? string.Empty : SonosValues.FormatDuration(duration))],
+            cancellationToken);
     }
 
     internal Task SetBassAsync(int bass, CancellationToken cancellationToken) =>
-        RenderingControl.SetBass(new RenderingControlService.SetBassRequest { InstanceID = InstanceId, DesiredBass = bass }, cancellationToken);
+        _soapClient.InvokeAsync(SonosService.RenderingControl, "SetBass", [Instance, ("DesiredBass", Format(bass))], cancellationToken);
 
     internal Task SetTrebleAsync(int treble, CancellationToken cancellationToken) =>
-        RenderingControl.SetTreble(new RenderingControlService.SetTrebleRequest { InstanceID = InstanceId, DesiredTreble = treble }, cancellationToken);
+        _soapClient.InvokeAsync(SonosService.RenderingControl, "SetTreble", [Instance, ("DesiredTreble", Format(treble))], cancellationToken);
 
     internal Task SetLoudnessAsync(bool loudness, CancellationToken cancellationToken) =>
-        RenderingControl.SetLoudness(new RenderingControlService.SetLoudnessRequest { InstanceID = InstanceId, Channel = MasterChannel, DesiredLoudness = loudness }, cancellationToken);
+        _soapClient.InvokeAsync(
+            SonosService.RenderingControl, "SetLoudness", [Instance, MasterChannel, ("DesiredLoudness", Format(loudness))], cancellationToken);
 
     internal Task SetEqualizerAsync(string type, bool enabled, CancellationToken cancellationToken) =>
-        RenderingControl.SetEQ(new RenderingControlService.SetEQRequest { InstanceID = InstanceId, EQType = type, DesiredValue = enabled ? 1 : 0 }, cancellationToken);
+        _soapClient.InvokeAsync(
+            SonosService.RenderingControl, "SetEQ", [Instance, ("EQType", type), ("DesiredValue", enabled ? "1" : "0")], cancellationToken);
 
     internal Task JoinAsync(string coordinatorUuid, CancellationToken cancellationToken) =>
         SetTransportUriAsync($"x-rincon:{coordinatorUuid}", string.Empty, cancellationToken);
 
     internal Task LeaveGroupAsync(CancellationToken cancellationToken) =>
-        AvTransport.BecomeCoordinatorOfStandaloneGroup(cancellationToken);
+        InvokeTransportAsync("BecomeCoordinatorOfStandaloneGroup", cancellationToken);
 
     // Both group volume commands scale the members from the last snapshot, so a fresh one keeps the current volume
     // ratio between them; without it, a member changed in the Sonos app since would jump back.
 
     internal async Task SetGroupVolumeAsync(int volume, CancellationToken cancellationToken)
     {
-        await GroupRenderingControl.SnapshotGroupVolume(cancellationToken);
-        await GroupRenderingControl.SetGroupVolume(new GroupRenderingControlService.SetGroupVolumeRequest { InstanceID = InstanceId, DesiredVolume = volume }, cancellationToken);
+        await SnapshotGroupVolumeAsync(cancellationToken);
+        await _soapClient.InvokeAsync(
+            SonosService.GroupRenderingControl, "SetGroupVolume", [Instance, ("DesiredVolume", Format(volume))], cancellationToken);
     }
 
     internal async Task ChangeGroupVolumeAsync(int adjustment, CancellationToken cancellationToken)
     {
-        await GroupRenderingControl.SnapshotGroupVolume(cancellationToken);
-        await GroupRenderingControl.SetRelativeGroupVolume(new GroupRenderingControlService.SetRelativeGroupVolumeRequest { InstanceID = InstanceId, Adjustment = adjustment }, cancellationToken);
+        await SnapshotGroupVolumeAsync(cancellationToken);
+        await _soapClient.InvokeAsync(
+            SonosService.GroupRenderingControl, "SetRelativeGroupVolume", [Instance, ("Adjustment", Format(adjustment))], cancellationToken);
     }
 
     internal Task SetGroupMuteAsync(bool mute, CancellationToken cancellationToken) =>
-        GroupRenderingControl.SetGroupMute(new GroupRenderingControlService.SetGroupMuteRequest { InstanceID = InstanceId, DesiredMute = mute }, cancellationToken);
+        _soapClient.InvokeAsync(
+            SonosService.GroupRenderingControl, "SetGroupMute", [Instance, ("DesiredMute", Format(mute))], cancellationToken);
 
-    // Sonos.Base writes an argument containing '<' raw, escaping only quotes and angle brackets, so an ampersand
-    // in DIDL metadata would reach the speaker unescaped and break its DIDL parse.
-    private static string EscapeMetadataAmpersands(string metadata) =>
-        metadata.Contains('<') ? metadata.Replace("&", "&amp;", StringComparison.Ordinal) : metadata;
+    private Task SnapshotGroupVolumeAsync(CancellationToken cancellationToken) =>
+        _soapClient.InvokeAsync(SonosService.GroupRenderingControl, "SnapshotGroupVolume", [Instance], cancellationToken);
 
-    private async Task<bool?> GetEqualizerAsync(string type, string action, List<SonosReadFault> faults, CancellationToken cancellationToken)
+    private Task InvokeTransportAsync(string action, CancellationToken cancellationToken) =>
+        _soapClient.InvokeAsync(SonosService.AvTransport, action, [Instance], cancellationToken);
+
+    /// <summary>
+    /// Returns the RINCON id of the unit, read from its zone info when the connection was created without one.
+    /// </summary>
+    private async ValueTask<string> GetUuidAsync(CancellationToken cancellationToken)
     {
-        var response = await ReadOrDefaultAsync(action,
-            () => RenderingControl.GetEQ(new RenderingControlService.GetEQRequest { InstanceID = InstanceId, EQType = type }, cancellationToken), faults);
-        return response is null ? null : SonosValues.IsLevelOn(response.CurrentValue);
+        if (_uuid is { } uuid && uuid.StartsWith(UuidPrefix, StringComparison.Ordinal))
+        {
+            return uuid;
+        }
+
+        var zoneInfo = await _soapClient.QueryAsync(SonosService.DeviceProperties, "GetZoneInfo", [], cancellationToken);
+        var macAddress = zoneInfo.GetString("MACAddress");
+        if (string.IsNullOrEmpty(macAddress))
+        {
+            throw new InvalidOperationException($"The Sonos speaker {BaseUri} did not report its MAC address.");
+        }
+
+        // A RINCON id is the MAC address followed by a zero and the device port.
+        uuid = $"{UuidPrefix}_{macAddress.Replace(":", string.Empty, StringComparison.Ordinal)}0{BaseUri.Port.ToString(CultureInfo.InvariantCulture)}";
+        _uuid = uuid;
+        return uuid;
     }
 
-    public void Dispose() => _device.Dispose();
+    private static string Format(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    private static string Format(bool value) => value ? "true" : "false";
 }

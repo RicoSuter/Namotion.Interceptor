@@ -102,7 +102,7 @@ A group reports its coordinator's playback, track, source, play mode and sleep t
 - A player that leaves the topology keeps its subject and last state with `IsConnected = false` until it returns; only a restart removes it. A topology that misses players is applied only when the next one misses them too, since a rebooting seed can report part of the household. The topology reads a grouping command waits with are skipped while they miss players and do not count toward the two.
 - While a player is not connected, its `PlaybackState` and `IsPlaying` are empty (unknown), so an unplugged speaker never keeps reporting that it plays, and its going offline does not read as playback that stopped. The same holds for a grouped member while its coordinator is not connected, and a group follows its coordinator. Everything else keeps its last value, including the track, source, volume and settings, and `IsConnected` tells that it may be stale. The playback state returns with the next successful poll that reads it; the one from before the outage is forgotten.
 - A new player is offline until its first poll succeeds. One found through a topology event is polled at the next reconciliation.
-- A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state.
+- A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state. So does a single value that an answer leaves out or holds in a form that cannot be read.
 - When the connection is torn down, every unit reports "The Sonos system is disconnected."
 
 ## Widgets
@@ -288,7 +288,7 @@ Subscriptions request a 30 minute lifetime and are renewed at half the lifetime 
 | HomeBlaze to speakers | TCP 1400 | Control, polling, device descriptions, `SUBSCRIBE` and `UNSUBSCRIBE`; always needed |
 | Speakers to HomeBlaze | TCP `EventPort` (6329) | Event delivery; without it the system polls only |
 | HomeBlaze to `239.255.255.250` | UDP 1900, unicast answers | SSDP discovery; only when neither `SeedHost` nor a known speaker answers |
-| HomeBlaze to speakers | TCP 1443 | `PlayNotification` |
+| HomeBlaze to speakers | TCP 1443 | `PlayNotification`, over TLS; the certificate of the speaker is not validated, since no public authority issues it |
 | Browser to speakers | TCP 1400 | Album art in the widgets |
 
 The local Sonos API has no authentication: anything that reaches port 1400 can control the speakers.
@@ -314,8 +314,8 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 
 ## Limitations
 
-- `Sonos.Base`, used for SOAP, parses with `XmlSerializer`, so the library is not yet free of runtime reflection for Native AOT.
 - `SetSpeechEnhancement` writes `DialogLevel` 1 or 0; the Arc Ultra levels 1 to 4 are read as on but cannot be set.
+- An answer larger than 4 MB is a failed request, an event larger than 1 MB is refused, and a document that nests more than 64 levels of elements is read as malformed. Speakers stay far below all three. The limits keep a broken or hostile device on the network from stalling HomeBlaze with an oversized or deeply nested document; a flat document within the limits that is built to be slow to read can still do so.
 - A speaker that changes role (becomes a surround or stereo partner, or a subwoofer moves rooms) keeps its old subject as an offline entry until restart.
 - SSDP discovery and callback address detection use IPv4 only.
 - The household is not identified by its household id, so two systems seeded in the same household show the same rooms twice.
@@ -335,10 +335,9 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - Fixed output (`OutputFixed`) to disable volume operations on Port, Connect and Amp.
 - A `HouseholdId` setting that pins the system to one household (`GetHouseholdID` or `MuseHouseholdId`), so discovery cannot attach to another one.
 - Spotify tracks by id, as v1's `PlaySpotifyTrack` did; today Spotify content plays through favorites.
-- An own audio clip client that reports rejected clips.
+- Reporting a clip that the speaker rejects, by reading its answer on the audio clip websocket.
 - Album art served through HomeBlaze for HTTPS pages, or the favorite's HTTPS `ImageUri` for radio.
 - A Windows event listener that needs no URL reservation.
-- An own, AOT-clean SOAP client replacing `Sonos.Base`.
 - `AvailableSoftwareUpdate` from the topology event or `CheckForUpdate`.
 - LED state, button lock, and home theater TV power state.
 - A widget for `SonosSatellite`.
@@ -358,11 +357,10 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - Offline players for the topology's `VanishedDevices`, so a sleeping portable has its subject after a restart, and a `Forget` operation that removes a missing player or satellite.
 - Serialized play mode writes, so parallel `SetShuffle` and `SetRepeat` calls cannot undo each other.
 - A pure track presentation resolver that holds the track title, album art and source title rules outside `SonosPlayer`.
-- Upstream contributions to `Sonos.Base` (satellites in the topology model, `resMD` in DIDL).
 
 ## References
 
 - [Sonos UPnP API documentation](https://sonos.svrooij.io/) (unofficial, community maintained)
-- [Sonos.Base (sonos-net)](https://github.com/svrooij/sonos-net), the SOAP client, and [Rssdp](https://github.com/Yortw/RSSDP), the SSDP client
+- [Rssdp](https://github.com/Yortw/RSSDP), the SSDP client
 - [MCP server](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/mcp.md) for controlling the household from AI agents
 - [Source of the library](https://github.com/RicoSuter/Namotion.Interceptor/tree/master/src/HomeBlaze/Namotion.Devices.Sonos) and of its [widgets](https://github.com/RicoSuter/Namotion.Interceptor/tree/master/src/HomeBlaze/Namotion.Devices.Sonos.HomeBlaze)

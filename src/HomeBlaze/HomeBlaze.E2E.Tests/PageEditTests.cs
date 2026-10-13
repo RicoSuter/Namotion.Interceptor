@@ -129,7 +129,7 @@ public class PageEditTests
     {
         // Arrange - the subject has no page component, but the page editor shows the generated properties
         // editor for it all the same.
-        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
         try
         {
             var page = await _fixture.CreatePageAsync();

@@ -1,6 +1,5 @@
 using Namotion.Devices.Sonos.Tests.Testing;
 using Namotion.Interceptor.Testing;
-using Sonos.Base.Services;
 using Xunit;
 using static Namotion.Devices.Sonos.Tests.Testing.TestFixtures;
 
@@ -768,7 +767,7 @@ public class SonosPlayerOperationTests
         speaker.RespondWithFault("Play", 701);
 
         // Act
-        var exception = await Assert.ThrowsAsync<SonosServiceException>(() => connected.Player.PlayFavoriteAsync("radio fm1", CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SonosFaultException>(() => connected.Player.PlayFavoriteAsync("radio fm1", CancellationToken.None));
 
         // Assert
         Assert.Equal(701, exception.UpnpErrorCode);

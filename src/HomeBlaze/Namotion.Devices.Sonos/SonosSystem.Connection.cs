@@ -21,6 +21,9 @@ public partial class SonosSystem
     private static readonly TimeSpan SeedProbeTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan MinimumLoopWait = TimeSpan.FromSeconds(1);
 
+    // The largest answers, a page of favorites and the topology of a large household, stay far below it.
+    internal const int MaximumResponseBytes = 4 * 1024 * 1024;
+
     // Never disposed, like _reconcileLock: neither exposes a wait handle, so there is nothing to release, and
     // disposing them while the loop is still unwinding from a Dispose without StopAsync made its last waits throw or
     // hang.
@@ -137,6 +140,7 @@ public partial class SonosSystem
         ResetConnectionTopology();
         var httpClient = HttpClientFactory.CreateClient(nameof(SonosSystem));
         httpClient.Timeout = RequestTimeout;
+        httpClient.MaxResponseContentBufferSize = MaximumResponseBytes;
 
         lock (_connectionsLock)
         {
@@ -328,7 +332,7 @@ public partial class SonosSystem
     {
         using var probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         probeCancellation.CancelAfter(timeout);
-        using var connection = new SonosConnection(seedUri, null, httpClient);
+        var connection = new SonosConnection(seedUri, null, httpClient);
         try
         {
             await connection.ReadTopologyAsync(probeCancellation.Token);
@@ -487,7 +491,6 @@ public partial class SonosSystem
                 return;
             }
 
-            scope.Seed?.Dispose();
             scope.Seed = new SonosConnection(seedUri, null, scope.HttpClient);
         }
     }
@@ -541,14 +544,9 @@ public partial class SonosSystem
             return;
         }
 
-        if (scope.Connections.TryGetValue(device.Uuid, out var existing))
+        if (scope.Connections.TryGetValue(device.Uuid, out var existing) && existing.BaseUri == baseUri)
         {
-            if (existing.BaseUri == baseUri)
-            {
-                return;
-            }
-
-            existing.Dispose();
+            return;
         }
 
         scope.Connections[device.Uuid] = new SonosConnection(baseUri, device.Uuid, scope.HttpClient, _logger);
