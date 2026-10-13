@@ -1,3 +1,4 @@
+using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Blazor;
 using Xunit;
 
@@ -65,7 +66,7 @@ public class AgentTimeSpanInputTests
 
         // Assert
         Assert.True(isValid);
-        Assert.True(value <= AgentTimeSpanInput.MaximumTurnTimeout);
+        Assert.True(value <= LlmAgentBase.MaximumTurnTimeout);
     }
 
     [Theory]

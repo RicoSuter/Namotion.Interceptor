@@ -65,7 +65,8 @@
             _stableLength = 0;
         }
 
-        var stableLength = AgentStreamingMarkdown.FindStableLength(text);
+        // The previous boundary is a line start outside a fenced block, so the scan can resume there.
+        var stableLength = _stableLength + AgentStreamingMarkdown.FindStableLength(text.AsSpan(_stableLength));
         if (stableLength > _stableLength)
         {
             var segment = text[_stableLength..stableLength];

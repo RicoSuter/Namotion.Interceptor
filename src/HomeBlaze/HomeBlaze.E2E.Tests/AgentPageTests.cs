@@ -220,12 +220,15 @@ public class AgentPageTests
             await Assertions.Expect(page.GetByTestId("agent-reply").Last).ToContainTextAsync("done", new() { Timeout = ReplyTimeout });
 
             // Sending scrolls a reader who scrolled up back to the bottom; the reply is long enough to scroll, and the
-            // script runs through on the second turn because its signals exist.
+            // script runs through on the second turn because its signals exist. The count is relative, because the
+            // shared test agent keeps the replies of other tests in its timeline.
+            var replies = page.GetByTestId("agent-reply");
+            var replyCount = await replies.CountAsync();
             await page.Mouse.WheelAsync(0, -300);
             await WaitForDistanceToBottomAsync(page, timeline, "> 200");
             await page.GetByTestId("agent-chat-input").Locator("textarea").FillAsync("Again?");
             await page.GetByTestId("agent-chat-send").ClickAsync();
-            await Assertions.Expect(page.GetByTestId("agent-reply")).ToHaveCountAsync(2, new() { Timeout = ReplyTimeout });
+            await Assertions.Expect(replies).ToHaveCountAsync(replyCount + 1, new() { Timeout = ReplyTimeout });
             await WaitForDistanceToBottomAsync(page, timeline, "<= 32");
         });
     }
@@ -473,10 +476,6 @@ public class AgentPageTests
         return scriptPath;
     }
 
-    /// <summary>
-    /// Opens the page of an agent that a test seeds with timeline entries, once the agent has loaded its storage, which
-    /// would replace entries appended before.
-    /// </summary>
     [Fact]
     public async Task WhenTypingIntoTheChatInput_ThenTheTimelineStaysStill()
     {
@@ -542,6 +541,10 @@ public class AgentPageTests
             "window.__typingRow.getBoundingClientRect().top - timeline.getBoundingClientRect().top))))",
             timeline);
 
+    /// <summary>
+    /// Opens the page of an agent that a test seeds with timeline entries, once the agent has loaded its storage, which
+    /// would replace entries appended before.
+    /// </summary>
     private async Task<(IPage Page, SubjectPathResolver Resolver, ClaudeCliAgent Agent)> OpenSeededAgentPageAsync(string agentPath)
     {
         var page = await _fixture.CreatePageAsync();
