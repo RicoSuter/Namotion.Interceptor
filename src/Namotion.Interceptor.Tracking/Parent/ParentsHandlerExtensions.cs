@@ -224,14 +224,16 @@ public static class ParentsHandlerExtensions
         public ImmutableArray<SubjectParent> ToImmutableArray()
         {
             var cached = _cache;
-            if (cached is not null)
-            {
-                return cached[0];
-            }
+            return cached is not null ? cached[0] : CreateSnapshot();
+        }
 
+        // Kept out of the method above: the enumerator here made every cached read zero stack.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private ImmutableArray<SubjectParent> CreateSnapshot()
+        {
             lock (_lock)
             {
-                cached = _cache;
+                var cached = _cache;
                 if (cached is not null)
                 {
                     return cached[0];
