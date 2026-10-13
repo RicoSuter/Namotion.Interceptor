@@ -30,17 +30,19 @@ public class ParentTraversalBenchmark
     private const int Operations = 256;
     private const int ChainLength = 8;
     private const int ChainLengthBelowBranch = 4;
-    private const int CycleLengthAboveSubject = 9;
     private const int LongChainLength = 64;
+    private const int ChainLengthPastBuffer = 16;
+    private const int ManyParents = 20;
 
     private ParentTraversalNode _leafBelowMatch;
     private ParentTraversalNode _leafWithoutMatch;
     private ParentTraversalNode _nodeOnCycle;
     private ParentTraversalNode _leafBelowBranch;
     private ParentTraversalNode _nodeWithTwoParents;
-    private ParentTraversalNode _nodeBelowCycle;
     private ParentTraversalNode _leafBelowChainIntoCycle;
     private ParentTraversalNode _leafBelowBranchWithoutMatch;
+    private ParentTraversalNode _leafOfChainPastBuffer;
+    private ParentTraversalNode _nodeWithManyParents;
 
     [GlobalSetup]
     public void Setup()
@@ -74,12 +76,6 @@ public class ParentTraversalBenchmark
         _nodeWithTwoParents = shared;
         _leafBelowBranch = AppendChain(shared, ChainLengthBelowBranch);
 
-        var cycleAboveSubjectStart = new ParentTraversalNode(context);
-        var cycleAboveSubjectEnd = AppendChain(cycleAboveSubjectStart, CycleLengthAboveSubject - 1);
-        cycleAboveSubjectEnd.Child = cycleAboveSubjectStart;
-        _nodeBelowCycle = new ParentTraversalNode();
-        cycleAboveSubjectStart.OtherChild = _nodeBelowCycle;
-
         var ownParent = new ParentTraversalNode(context);
         ownParent.Child = ownParent;
         var firstBelowOwnParent = new ParentTraversalNode();
@@ -96,6 +92,20 @@ public class ParentTraversalBenchmark
         plainRight.Child = plainShared;
         _leafBelowBranchWithoutMatch = AppendChain(plainShared, ChainLengthBelowBranch);
 
+        var plainRootPastBuffer = new ParentTraversalNode(context);
+        _leafOfChainPastBuffer = AppendChain(plainRootPastBuffer, ChainLengthPastBuffer);
+
+        _nodeWithManyParents = new ParentTraversalNode();
+        var lastOfManyParents = new ParentTraversalNode(context);
+        for (var i = 0; i < ManyParents; i++)
+        {
+            lastOfManyParents = new ParentTraversalNode(context);
+            lastOfManyParents.Child = _nodeWithManyParents;
+        }
+
+        var rootAboveLastParent = new ParentTraversalMarkedNode(context);
+        rootAboveLastParent.Child = lastOfManyParents;
+
         Ensure(CountOneParentSteps(_leafBelowMatch) == ChainLength, nameof(FindOnChain));
         Ensure(ReferenceEquals(_leafBelowMatch.TryGetFirstParent<ParentTraversalMarkedNode>(), markedRoot), nameof(FindOnChain));
 
@@ -111,10 +121,6 @@ public class ParentTraversalBenchmark
         Ensure(_nodeWithTwoParents.GetParents().Length == 2, nameof(FindWithBranchAtSubject));
         Ensure(ReferenceEquals(_nodeWithTwoParents.TryGetFirstParent<ParentTraversalMarkedNode>(), branchRoot), nameof(FindWithBranchAtSubject));
 
-        Ensure(ReferenceEquals(StepUp(_nodeBelowCycle, 1), cycleAboveSubjectStart), nameof(MissBelowCycle));
-        Ensure(ReferenceEquals(StepUp(cycleAboveSubjectStart, CycleLengthAboveSubject), cycleAboveSubjectStart), nameof(MissBelowCycle));
-        Ensure(_nodeBelowCycle.TryGetFirstParent<ParentTraversalMarkedNode>() is null, nameof(MissBelowCycle));
-
         Ensure(ReferenceEquals(StepUp(_leafBelowChainIntoCycle, LongChainLength), ownParent), nameof(MissBelowChainIntoCycle));
         Ensure(ReferenceEquals(StepUp(ownParent, 1), ownParent), nameof(MissBelowChainIntoCycle));
         Ensure(_leafBelowChainIntoCycle.TryGetFirstParent<ParentTraversalMarkedNode>() is null, nameof(MissBelowChainIntoCycle));
@@ -122,6 +128,13 @@ public class ParentTraversalBenchmark
         Ensure(CountOneParentSteps(_leafBelowBranchWithoutMatch) == ChainLengthBelowBranch, nameof(MissAboveBranch));
         Ensure(plainShared.GetParents().Length == 2, nameof(MissAboveBranch));
         Ensure(_leafBelowBranchWithoutMatch.TryGetFirstParent<ParentTraversalMarkedNode>() is null, nameof(MissAboveBranch));
+
+        Ensure(CountOneParentSteps(_leafOfChainPastBuffer) == ChainLengthPastBuffer, nameof(MissOnChainPastBuffer));
+        Ensure(_leafOfChainPastBuffer.TryGetFirstParent<ParentTraversalMarkedNode>() is null, nameof(MissOnChainPastBuffer));
+
+        Ensure(_nodeWithManyParents.GetParents().Length == ManyParents, nameof(FindAboveManyParents));
+        Ensure(ReferenceEquals(_nodeWithManyParents.GetParents()[ManyParents - 1].Property.Subject, lastOfManyParents), nameof(FindAboveManyParents));
+        Ensure(ReferenceEquals(_nodeWithManyParents.TryGetFirstParent<ParentTraversalMarkedNode>(), rootAboveLastParent), nameof(FindAboveManyParents));
     }
 
     /// <summary>
@@ -137,16 +150,17 @@ public class ParentTraversalBenchmark
     public int MissOnChain() => CountMatches(_leafWithoutMatch);
 
     /// <summary>
+    /// Sixteen subjects with one parent each above the subject, without a match: one subject more than
+    /// the search keeps on the stack.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = Operations)]
+    public int MissOnChainPastBuffer() => CountMatches(_leafOfChainPastBuffer);
+
+    /// <summary>
     /// Eight subjects with one parent each that form a cycle through the subject, without a match.
     /// </summary>
     [Benchmark(OperationsPerInvoke = Operations)]
     public int MissOnCycle() => CountMatches(_nodeOnCycle);
-
-    /// <summary>
-    /// The subject hangs below a cycle of nine subjects with one parent each, without a match.
-    /// </summary>
-    [Benchmark(OperationsPerInvoke = Operations)]
-    public int MissBelowCycle() => CountMatches(_nodeBelowCycle);
 
     /// <summary>
     /// Sixty-four subjects with one parent each below a subject that is its own parent, without a match.
@@ -171,6 +185,12 @@ public class ParentTraversalBenchmark
     /// </summary>
     [Benchmark(OperationsPerInvoke = Operations)]
     public int FindWithBranchAtSubject() => CountMatches(_nodeWithTwoParents);
+
+    /// <summary>
+    /// The subject has twenty parents, with the match above the last of them.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = Operations)]
+    public int FindAboveManyParents() => CountMatches(_nodeWithManyParents);
 
     private static int CountMatches(ParentTraversalNode subject)
     {
