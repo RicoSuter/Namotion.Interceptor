@@ -47,17 +47,9 @@ public class SystemHostTests
         var supported = OperatingSystem.IsLinux() || OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
 
         // Act
-        await host.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => host.Process.CpuUsage is not null && (!supported || host.CpuUsage is not null),
-                message: "Rates did not appear");
-        }
-        finally
-        {
-            await host.StopAsync(CancellationToken.None);
-        }
+        await RunAsync(host, () => AsyncTestHelpers.WaitUntilAsync(
+            () => host.Process.CpuUsage is not null && (!supported || host.CpuUsage is not null),
+            message: "Rates did not appear"));
 
         // Assert
         Assert.InRange(host.Process.CpuUsage!.Value, 0m, 1m);
@@ -83,21 +75,16 @@ public class SystemHostTests
             new SystemMetricsReading(50, 100, 1000, 500),
             new SystemMetricsReading(150, 200, 1000, 500),
             new SystemMetricsReading(50, 100, 1000, 500));
-        var host = new SystemHost(reader, () => { }, NullLogger.Instance) { PollingInterval = TimeSpan.FromHours(1) };
+        var host = CreateHost(reader);
 
-        await host.StartAsync(CancellationToken.None);
-        try
+        await RunAsync(host, async () =>
         {
             await AsyncTestHelpers.WaitUntilAsync(() => host.CpuUsage is not null, message: "CPU usage did not appear");
 
             // Act
             await host.ApplyConfigurationAsync(CancellationToken.None);
             await AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount >= 3, message: "Early poll did not run");
-        }
-        finally
-        {
-            await host.StopAsync(CancellationToken.None);
-        }
+        });
 
         // Assert
         Assert.Equal(0.5m, host.CpuUsage);
@@ -110,24 +97,16 @@ public class SystemHostTests
         // Arrange
         var reader = new FakeSystemMetricsReader(new SystemMetricsReading(0, 100, 1000, 500));
         var collectCount = 0;
-        var host = new SystemHost(reader, () => Interlocked.Increment(ref collectCount), NullLogger.Instance)
-        {
-            PollingInterval = TimeSpan.FromHours(1)
-        };
+        var host = CreateHost(reader, () => Interlocked.Increment(ref collectCount));
 
-        await host.StartAsync(CancellationToken.None);
-        try
+        await RunAsync(host, async () =>
         {
             await AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount == 2, message: "Initial polls did not run");
 
             // Act
             host.Process.CollectGarbage();
             await AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount >= 3, message: "Poll after collect did not run");
-        }
-        finally
-        {
-            await host.StopAsync(CancellationToken.None);
-        }
+        });
 
         // Assert
         Assert.Equal(1, collectCount);
@@ -137,25 +116,19 @@ public class SystemHostTests
     public async Task WhenReaderFails_ThenStatusIsError()
     {
         // Arrange
-        var reader = new FakeSystemMetricsReader();
-        var host = new SystemHost(reader, () => { }, NullLogger.Instance) { PollingInterval = TimeSpan.FromHours(1) };
+        var host = CreateHost(new FakeSystemMetricsReader());
+        string? statusMessage = null;
+        string? iconColor = null;
 
         // Act
-        string? statusMessage;
-        string? iconColor;
-        await host.StartAsync(CancellationToken.None);
-        try
+        await RunAsync(host, async () =>
         {
             await AsyncTestHelpers.WaitUntilAsync(() => host.Status == ServiceStatus.Error, message: "Status did not become Error");
 
             // Stopping resets the status, so the values are captured while the loop runs.
             statusMessage = host.StatusMessage;
             iconColor = host.IconColor;
-        }
-        finally
-        {
-            await host.StopAsync(CancellationToken.None);
-        }
+        });
 
         // Assert
         Assert.Equal("No reading", statusMessage);
@@ -166,21 +139,12 @@ public class SystemHostTests
     public async Task WhenReaderFails_ThenProcessValuesStillUpdate()
     {
         // Arrange
-        var reader = new FakeSystemMetricsReader();
-        var host = new SystemHost(reader, () => { }, NullLogger.Instance) { PollingInterval = TimeSpan.FromHours(1) };
+        var host = CreateHost(new FakeSystemMetricsReader());
 
         // Act
-        await host.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => host.Status == ServiceStatus.Error && host.Process.WorkingSet is not null && host.LastUpdated is not null,
-                message: "Process values did not update while the reader failed");
-        }
-        finally
-        {
-            await host.StopAsync(CancellationToken.None);
-        }
+        await RunAsync(host, () => AsyncTestHelpers.WaitUntilAsync(
+            () => host.Status == ServiceStatus.Error && host.Process.WorkingSet is not null && host.LastUpdated is not null,
+            message: "Process values did not update while the reader failed"));
 
         // Assert
         Assert.True(host.Process.WorkingSet > 0);
@@ -195,28 +159,11 @@ public class SystemHostTests
             new SystemMetricsReading(0, 0, 1000, 500),
             new SystemMetricsReading(50, 100, 1000, 500),
             new SystemMetricsReading(150, 200, 1000, 500));
-        var host = new SystemHost(reader, () => { }, NullLogger.Instance) { PollingInterval = TimeSpan.FromHours(1) };
-
-        await host.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => host.CpuUsage is not null, message: "CPU usage did not appear");
-        }
-        finally
-        {
-            await host.StopAsync(CancellationToken.None);
-        }
+        var host = CreateHost(reader);
+        await RunAsync(host, () => AsyncTestHelpers.WaitUntilAsync(() => host.CpuUsage is not null, message: "CPU usage did not appear"));
 
         // Act
-        await host.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount == 4, message: "Polls after restart did not run");
-        }
-        finally
-        {
-            await host.StopAsync(CancellationToken.None);
-        }
+        await RunAsync(host, () => AsyncTestHelpers.WaitUntilAsync(() => reader.ReadCount == 4, message: "Polls after restart did not run"));
 
         // Assert
         Assert.Equal(0.5m, host.CpuUsage);
@@ -232,33 +179,36 @@ public class SystemHostTests
             new SystemMetricsReading(50, 100, 1000, 500),
             new SystemMetricsReading(150, 200, 1000, 500),
             new SystemMetricsReading(175, 300, 1000, 500));
-        var host = new SystemHost(reader, () => { }, NullLogger.Instance) { PollingInterval = TimeSpan.FromHours(1) };
-
-        await host.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => host.CpuUsage is not null, message: "CPU usage did not appear");
-        }
-        finally
-        {
-            await host.StopAsync(CancellationToken.None);
-        }
-
+        var host = CreateHost(reader);
+        await RunAsync(host, () => AsyncTestHelpers.WaitUntilAsync(() => host.CpuUsage is not null, message: "CPU usage did not appear"));
         await host.ApplyConfigurationAsync(CancellationToken.None);
 
         // Act
+        await RunAsync(host, () => AsyncTestHelpers.WaitUntilAsync(() => host.CpuUsage == 0.25m, message: "CPU usage was not computed after restart"));
+
+        // Assert
+        Assert.Equal(0.25m, host.CpuUsage);
+    }
+
+    private static SystemHost CreateHost(FakeSystemMetricsReader reader, Action? collectGarbage = null)
+    {
+        return new SystemHost(reader, collectGarbage ?? (() => { }), NullLogger.Instance)
+        {
+            PollingInterval = TimeSpan.FromHours(1)
+        };
+    }
+
+    private static async Task RunAsync(SystemHost host, Func<Task> whileRunning)
+    {
         await host.StartAsync(CancellationToken.None);
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => host.CpuUsage == 0.25m, message: "CPU usage was not computed after restart");
+            await whileRunning();
         }
         finally
         {
             await host.StopAsync(CancellationToken.None);
         }
-
-        // Assert
-        Assert.Equal(0.25m, host.CpuUsage);
     }
 
     private sealed class FakeSystemMetricsReader(params SystemMetricsReading[] readings) : ISystemMetricsReader

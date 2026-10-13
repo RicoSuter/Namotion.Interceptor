@@ -17,33 +17,15 @@ public class RateCalculatorTests
         Assert.Equal(0.3m, fraction);
     }
 
-    [Fact]
-    public void WhenCpuTotalDoesNotAdvance_ThenReturnsNull()
+    [Theory]
+    [InlineData(100UL, 1000UL, 100UL, 1000UL)] // total does not advance
+    [InlineData(100UL, 1000UL, 50UL, 900UL)] // total goes backwards
+    [InlineData(100UL, 1000UL, 350UL, 1200UL)] // idle goes from 900 to 850 although the total grows
+    [InlineData(100UL, 1000UL, 2100UL, 2000UL)] // busy exceeds the total
+    public void WhenCpuTicksAreInvalid_ThenReturnsNull(ulong previousBusyTime, ulong previousTotalTime, ulong currentBusyTime, ulong currentTotalTime)
     {
         // Act
-        var fraction = RateCalculator.ComputeCpuFraction(100, 1000, 100, 1000);
-
-        // Assert
-        Assert.Null(fraction);
-    }
-
-    [Fact]
-    public void WhenCpuTotalGoesBackwards_ThenReturnsNull()
-    {
-        // Act
-        var fraction = RateCalculator.ComputeCpuFraction(100, 1000, 50, 900);
-
-        // Assert
-        Assert.Null(fraction);
-    }
-
-    [Fact]
-    public void WhenCpuIdleGoesBackwards_ThenReturnsNull()
-    {
-        // Arrange: idle goes from 900 to 850 although the total grows
-
-        // Act
-        var fraction = RateCalculator.ComputeCpuFraction(100, 1000, 350, 1200);
+        var fraction = RateCalculator.ComputeCpuFraction(previousBusyTime, previousTotalTime, currentBusyTime, currentTotalTime);
 
         // Assert
         Assert.Null(fraction);

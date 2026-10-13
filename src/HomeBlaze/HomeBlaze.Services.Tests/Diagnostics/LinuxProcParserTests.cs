@@ -1,3 +1,4 @@
+using System.Text;
 using HomeBlaze.Services.Diagnostics;
 using Xunit;
 
@@ -35,27 +36,14 @@ public class LinuxProcParserTests
         Assert.Equal(20UL, busyTime);
     }
 
-    [Fact]
-    public void WhenProcStatDoesNotStartWithCpu_ThenFails()
+    [Theory]
+    [InlineData("intr 1 2 3\n")]
+    [InlineData("cpu 10 20\n")]
+    [InlineData("cpu 10 x 20 30\n")]
+    public void WhenProcStatIsInvalid_ThenFails(string content)
     {
-        // Arrange
-        var content = "intr 1 2 3\n"u8;
-
         // Act
-        var success = LinuxProcParser.TryParseProcStat(content, out _, out _);
-
-        // Assert
-        Assert.False(success);
-    }
-
-    [Fact]
-    public void WhenProcStatHasTooFewFields_ThenFails()
-    {
-        // Arrange
-        var content = "cpu 10 20\n"u8;
-
-        // Act
-        var success = LinuxProcParser.TryParseProcStat(content, out _, out _);
+        var success = LinuxProcParser.TryParseProcStat(Encoding.UTF8.GetBytes(content), out _, out _);
 
         // Assert
         Assert.False(success);
