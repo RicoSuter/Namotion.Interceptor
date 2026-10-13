@@ -27,11 +27,9 @@ public partial class SystemHost : BackgroundService,
     IIconProvider,
     ILastUpdatedProvider
 {
-    private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(1);
-
     // Timers run on a coarse clock and can fire a few milliseconds before the Stopwatch measures
-    // RateCalculator.MinimumElapsed, which would skip the first rates until a full polling interval passed.
-    private static readonly TimeSpan FirstRateDelay = RateCalculator.MinimumElapsed + TimeSpan.FromMilliseconds(100);
+    // RateCalculator.MinimumElapsed, which would skip the rates of that poll.
+    private static readonly TimeSpan MinimumPollingDelay = RateCalculator.MinimumElapsed + TimeSpan.FromMilliseconds(100);
 
     private readonly ISystemMetricsReader? _reader;
     private readonly ILogger _logger;
@@ -166,10 +164,15 @@ public partial class SystemHost : BackgroundService,
         // Detaching a subject only stops it and never disposes it, so the process handle lives in this method.
         using var currentProcess = DiagnosticsProcess.GetCurrentProcess();
 
+        // A poll requested while stopped must not wake the loop before the rate window of the new baseline.
+        _pollSignal.Wait(0);
+        _hasCpuBaseline = false;
+        Process.ResetBaseline();
+
         Poll(currentProcess);
 
         // The second poll follows shortly after the minimum rate window so rates appear without waiting a full interval.
-        var delay = FirstRateDelay;
+        var delay = MinimumPollingDelay;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -182,7 +185,7 @@ public partial class SystemHost : BackgroundService,
             }
 
             Poll(currentProcess);
-            delay = PollingInterval < MinimumPollingInterval ? MinimumPollingInterval : PollingInterval;
+            delay = PollingInterval < MinimumPollingDelay ? MinimumPollingDelay : PollingInterval;
         }
 
         Status = ServiceStatus.Stopped;
@@ -191,35 +194,59 @@ public partial class SystemHost : BackgroundService,
 
     private void Poll(DiagnosticsProcess currentProcess)
     {
-        try
+        var timestamp = Stopwatch.GetTimestamp();
+        Exception? error = null;
+        var hasUpdated = false;
+
+        if (_reader is not null)
         {
-            var timestamp = Stopwatch.GetTimestamp();
-            if (_reader is not null)
+            try
             {
                 UpdateHost(_reader.Read(), timestamp);
+                hasUpdated = true;
             }
+            catch (Exception exception)
+            {
+                error = exception;
+            }
+        }
 
-            Uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
+        Uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
+
+        try
+        {
             Process.Update(currentProcess, timestamp, ProcessorCount);
-            LastUpdated = DateTimeOffset.UtcNow;
+            hasUpdated = true;
+        }
+        catch (Exception exception)
+        {
+            error ??= exception;
+        }
 
+        if (hasUpdated)
+        {
+            LastUpdated = DateTimeOffset.UtcNow;
+        }
+
+        if (error is null)
+        {
             if (Status != ServiceStatus.Running)
             {
                 StatusMessage = null;
                 Status = ServiceStatus.Running;
             }
-        }
-        catch (Exception exception)
-        {
-            if (Status != ServiceStatus.Error)
-            {
-                _logger.LogWarning(exception, "Reading the system host metrics failed");
-            }
 
-            // The message is written first so an observer that sees Error also sees its message.
-            StatusMessage = exception.Message;
-            Status = ServiceStatus.Error;
+            return;
         }
+
+        if (Status != ServiceStatus.Error)
+        {
+            _logger.LogWarning(error, "Reading the system host metrics failed");
+        }
+
+        // The message is written first so an observer that sees Error also sees its message.
+        StatusMessage = error.Message;
+        Status = ServiceStatus.Error;
     }
 
     private void UpdateHost(SystemMetricsReading reading, long timestamp)

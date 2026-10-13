@@ -88,6 +88,14 @@ public partial class HostProcess
     }
 
     /// <summary>
+    /// Makes the next <see cref="Update"/> take a new baseline instead of computing rates.
+    /// </summary>
+    internal void ResetBaseline()
+    {
+        _hasBaseline = false;
+    }
+
+    /// <summary>
     /// Refreshes the values. Rates are only updated once at least <see cref="RateCalculator.MinimumElapsed"/> passed
     /// since the baseline; otherwise the previous values and baseline are kept.
     /// </summary>
