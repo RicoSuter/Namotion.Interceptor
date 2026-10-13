@@ -321,6 +321,34 @@ public class ParentIndexTests
     }
 
     [Fact]
+    public void WhenCollectionIsReplacedByItsOnlyItem_ThenParentIndexIsNull()
+    {
+        // Arrange
+        var car = new Car();
+        var holder = new BroadlyDeclaredHolder(CreateContext()) { BroadCars = new[] { car } };
+
+        // Act
+        holder.BroadCars = car;
+
+        // Assert
+        Assert.Equal(Parent(holder, nameof(BroadlyDeclaredHolder.BroadCars), null), Assert.Single(car.GetParents()));
+    }
+
+    [Fact]
+    public void WhenSubjectIsReplacedByCollectionHoldingIt_ThenParentIndexIsThePosition()
+    {
+        // Arrange
+        var car = new Car();
+        var holder = new BroadlyDeclaredHolder(CreateContext()) { BroadCars = car };
+
+        // Act
+        holder.BroadCars = new[] { new Car(), car };
+
+        // Assert
+        Assert.Equal(Parent(holder, nameof(BroadlyDeclaredHolder.BroadCars), 1), Assert.Single(car.GetParents()));
+    }
+
+    [Fact]
     public void WhenStructuralWriteKeepsEveryIndex_ThenParentsSnapshotIsReused()
     {
         // Arrange

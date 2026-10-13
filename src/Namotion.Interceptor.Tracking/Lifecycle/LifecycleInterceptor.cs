@@ -420,20 +420,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            // Refresh child index metadata for retained subjects whose
-            // positions may have shifted in the new collection.
-            if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
+            // Refresh child index metadata for retained subjects whose positions may have shifted.
+            // A subject kept between two single references has no index that could change, which
+            // spares the most common write the overlap check.
+            if ((lastProcessed is IEnumerable || newValue is IEnumerable) &&
+                oldTouchedSubjects.Overlaps(newTouchedSubjects))
             {
-                var subjectContext = context.Property.Subject.Context;
-
-                ChildIndexRefresher.RefreshMovedChildren(
-                    subjectContext, oldCollectedSubjects, newCollectedSubjects, oldTouchedSubjects.Count, newTouchedSubjects.Count);
-
-                var handlers = subjectContext.GetServices<IPropertyLifecycleHandler>();
-                for (var i = 0; i < handlers.Length; i++)
-                {
-                    handlers[i].RefreshCollectionProperty(context.Property, newValue);
-                }
+                RefreshRetainedSubjects(context.Property, newValue,
+                    oldCollectedSubjects, newCollectedSubjects, oldTouchedSubjects.Count, newTouchedSubjects.Count);
             }
         }
         finally
@@ -442,6 +436,27 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             ReturnList(newCollectedSubjects);
             ReturnSubjectHashSet(oldTouchedSubjects);
             ReturnSubjectHashSet(newTouchedSubjects);
+        }
+    }
+
+    private static void RefreshRetainedSubjects(PropertyReference property, object? newValue,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> oldCollectedSubjects,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> newCollectedSubjects,
+        int oldSubjectCount, int newSubjectCount)
+    {
+        var subjectContext = property.Subject.Context;
+
+        ChildIndexRefresher.RefreshMovedChildren(
+            subjectContext, oldCollectedSubjects, newCollectedSubjects, oldSubjectCount, newSubjectCount);
+
+        // Not for a collection that gave way to a single reference: these handlers are handed a collection.
+        if (newValue is IEnumerable)
+        {
+            var handlers = subjectContext.GetServices<IPropertyLifecycleHandler>();
+            for (var i = 0; i < handlers.Length; i++)
+            {
+                handlers[i].RefreshCollectionProperty(property, newValue);
+            }
         }
     }
 
