@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.WebSockets;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Tests.Testing;
@@ -12,6 +13,34 @@ public class SonosConnectionTests
 
     private static SonosConnection CreateConnection(FakeSonosSpeaker speaker, HttpClient httpClient) =>
         new(speaker.BaseUri, Uuid, httpClient);
+
+    private const string ExtraFavorite =
+        "<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">" +
+        "<item id=\"FV:2/5\" parentID=\"FV:2\" restricted=\"false\"><dc:title>Radio Extra</dc:title><res>x-rincon-mp3radio://radio.example/stream</res></item></DIDL-Lite>";
+
+    /// <summary>
+    /// Answers every page of favorites with one favorite and far more to come.
+    /// </summary>
+    private static void RespondWithEndlessFavorites(FakeSonosSpeaker speaker) =>
+        speaker.Respond("Browse", ("Result", ExtraFavorite), ("NumberReturned", "1"), ("TotalMatches", "2147483647"));
+
+    /// <summary>
+    /// Returns a source that is cancelled by the first page of favorites asked for past the expected number, so a
+    /// read that does not stop at the maximum fails its test instead of running forever.
+    /// </summary>
+    private static CancellationTokenSource CancelPastTheExpectedPages(FakeSonosSpeaker speaker, int expectedPages)
+    {
+        var runaway = new CancellationTokenSource();
+        var pages = 0;
+        speaker.CallReceived = call =>
+        {
+            if (call.Action == "Browse" && Interlocked.Increment(ref pages) > expectedPages)
+            {
+                runaway.Cancel();
+            }
+        };
+        return runaway;
+    }
 
     [Fact]
     public async Task WhenReadingPlayer_ThenSoapResponsesAreMapped()
@@ -101,6 +130,55 @@ public class SonosConnectionTests
         Assert.Equal(first.Count, unchanged.Count);
         Assert.All(first.Zip(unchanged), pair => Assert.Same(pair.First, pair.Second));
         Assert.Equal(["Radio Extra"], changed.Select(favorite => favorite.Title));
+    }
+
+    [Fact]
+    public async Task WhenTheSpeakerNeverEndsItsFavorites_ThenTheReadStopsAtTheMaximumNumberOfPagesAndWarns()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        RespondWithEndlessFavorites(speaker);
+        using var runaway = CancelPastTheExpectedPages(speaker, SonosConnection.MaximumFavoritesPages);
+        var logger = new RecordingLogger();
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(speaker.BaseUri, Uuid, httpClient, logger);
+
+        // Act
+        var favorites = await connection.ReadFavoritesAsync(runaway.Token);
+
+        // Assert
+        Assert.Equal(
+            Enumerable.Range(0, SonosConnection.MaximumFavoritesPages).Select(page => page.ToString(CultureInfo.InvariantCulture)),
+            speaker.Calls.Where(call => call.Action == "Browse").Select(call => call.GetArgument("StartingIndex")));
+        Assert.Equal(SonosConnection.MaximumFavoritesPages, favorites.Count);
+        Assert.All(favorites, favorite => Assert.Equal("Radio Extra", favorite.Title));
+        Assert.Contains("did not end its favorites", Assert.Single(logger.Warnings));
+    }
+
+    [Fact]
+    public async Task WhenTheSpeakerStillDoesNotEndItsFavorites_ThenTheWarningIsNotRepeatedUntilAReadEnded()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        RespondWithEndlessFavorites(speaker);
+        using var runaway = CancelPastTheExpectedPages(speaker, (3 * SonosConnection.MaximumFavoritesPages) + 1);
+        var logger = new RecordingLogger();
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(speaker.BaseUri, Uuid, httpClient, logger);
+        await connection.ReadFavoritesAsync(runaway.Token);
+
+        // Act
+        await connection.ReadFavoritesAsync(runaway.Token);
+        var warningsWhileEndless = logger.Warnings.Count;
+        speaker.Respond("Browse", ("Result", ExtraFavorite), ("NumberReturned", "1"), ("TotalMatches", "1"));
+        var ended = await connection.ReadFavoritesAsync(runaway.Token);
+        RespondWithEndlessFavorites(speaker);
+        await connection.ReadFavoritesAsync(runaway.Token);
+
+        // Assert
+        Assert.Equal(1, warningsWhileEndless);
+        Assert.Single(ended);
+        Assert.Equal(2, logger.Warnings.Count);
     }
 
     [Fact]
