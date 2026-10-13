@@ -9,6 +9,6 @@ public static class HueServiceCollectionExtensions
     public static IServiceCollection AddPhilipsHue(
         this IServiceCollection services,
         Action<HueBridge>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
-        => services.AddHostedSubject(configure, contextResolver);
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
+        => services.AddSubject(configure, contextResolver);
 }

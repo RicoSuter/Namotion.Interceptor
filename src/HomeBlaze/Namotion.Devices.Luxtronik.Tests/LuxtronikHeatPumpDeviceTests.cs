@@ -1,9 +1,12 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Sensors;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Luxtronik.Tests.Testing;
 using Namotion.Interceptor.Modbus.Client;
+using Namotion.Interceptor.Registry;
 
 namespace Namotion.Devices.Luxtronik.Tests;
 
@@ -119,5 +122,30 @@ public class LuxtronikHeatPumpDeviceTests
         Assert.Equal(ServiceStatus.Starting, heatPump.Status);
         Assert.Equal("Connecting...", heatPump.StatusMessage);
         Assert.Equal(lastUpdated, heatPump.LastUpdated);
+    }
+
+    [Fact]
+    public async Task WhenAddedWithoutAContextResolver_ThenTheHeatPumpIsRegisteredInItsOwnContext()
+    {
+        // Arrange
+        var services = new ServiceCollection()
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
+            .AddLuxtronikHeatPump();
+        await using var provider = services.BuildServiceProvider();
+        var activation = Assert.Single(provider.GetServices<IHostedService>());
+
+        // Act
+        await activation.StartAsync(CancellationToken.None);
+
+        try
+        {
+            // Assert
+            var heatPump = provider.GetRequiredService<LuxtronikHeatPump>();
+            Assert.NotNull(heatPump.TryGetRegisteredSubject());
+        }
+        finally
+        {
+            await activation.StopAsync(CancellationToken.None);
+        }
     }
 }
