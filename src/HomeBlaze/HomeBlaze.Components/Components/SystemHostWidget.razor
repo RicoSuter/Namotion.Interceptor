@@ -30,10 +30,10 @@
             <MudDivider />
 
             <MudText Typo="Typo.caption">CPU @FormatPercent(host.CpuUsage)</MudText>
-            <MudProgressLinear Value="@ToProgress(host.CpuUsage)" Min="0" Max="100" Rounded="true" />
+            <MudProgressLinear Value="@(ValueReader.GetProgressPercent(host.CpuUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
 
             <MudText Typo="Typo.caption">Memory @FormatMemory(host.TotalMemory, host.AvailableMemory, host.MemoryUsage)</MudText>
-            <MudProgressLinear Value="@ToProgress(host.MemoryUsage)" Min="0" Max="100" Rounded="true" />
+            <MudProgressLinear Value="@(ValueReader.GetProgressPercent(host.MemoryUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
 
             <MudText Typo="Typo.caption">Uptime @FormatUptime(host.Uptime)</MudText>
             <MudText Typo="Typo.caption">
@@ -49,22 +49,20 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
-    private static double ToProgress(decimal? fraction) => fraction is { } value ? (double)(value * 100m) : 0;
-
     private static string FormatPercent(decimal? fraction) =>
-        fraction is { } value ? $"{Math.Round(value * 100m, 1).ToString("0.#", CultureInfo.InvariantCulture)}%" : "—";
+        fraction is { } value ? StateUnitExtensions.FormatPercent(value) : ValueReader.MissingText;
 
     private static string FormatBytes(long? bytes) =>
-        bytes is { } value ? StateUnitExtensions.FormatWithUnit(value, StateUnit.Byte) : "—";
+        bytes is { } value ? StateUnitExtensions.FormatWithUnit(value, StateUnit.Byte) : ValueReader.MissingText;
 
     private static string FormatRate(decimal? kilobytesPerSecond) =>
-        kilobytesPerSecond is { } value ? StateUnitExtensions.FormatWithUnit(value, StateUnit.KilobytePerSecond) : "—";
+        kilobytesPerSecond is { } value ? StateUnitExtensions.FormatWithUnit(value, StateUnit.KilobytePerSecond) : ValueReader.MissingText;
 
     private static string FormatMemory(long? total, long? available, decimal? usage) =>
         total is { } totalValue && available is { } availableValue
             ? $"{FormatBytes(totalValue - availableValue)} of {FormatBytes(totalValue)} ({FormatPercent(usage)})"
-            : "—";
+            : ValueReader.MissingText;
 
     private static string FormatUptime(TimeSpan? uptime) =>
-        uptime is { } value ? $"{(int)value.TotalDays}d {value.Hours}h {value.Minutes}m" : "—";
+        uptime is { } value ? $"{(int)value.TotalDays}d {value.Hours}h {value.Minutes}m" : ValueReader.MissingText;
 }
