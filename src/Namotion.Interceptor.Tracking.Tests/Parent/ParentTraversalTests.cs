@@ -151,12 +151,14 @@ public class ParentTraversalTests
         Assert.Same(match, result);
     }
 
-    [Fact]
-    public void WhenParentEntryIsDefault_ThenItIsSkipped()
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1)]
+    public void WhenParentEntryHasNoSubject_ThenItIsSkipped(object? index)
     {
         // Arrange
         var subject = new TraversalNode();
-        subject.AddParent(default, null);
+        subject.AddParent(default, index);
         var parentBelowMatch = new TraversalNode();
         ParentTraversalGraph.Link(subject, parentBelowMatch);
         var match = new MarkedTraversalNode();
@@ -169,8 +171,10 @@ public class ParentTraversalTests
         Assert.Same(match, result);
     }
 
-    [Fact]
-    public void WhenParentEntryIsDefaultAfterSeventeenParents_ThenItIsSkipped()
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1)]
+    public void WhenParentEntryHasNoSubjectAfterSeventeenParents_ThenItIsSkipped(object? index)
     {
         // Arrange
         var subject = new TraversalNode();
@@ -179,7 +183,7 @@ public class ParentTraversalTests
             ParentTraversalGraph.Link(subject, new TraversalNode());
         }
 
-        subject.AddParent(default, null);
+        subject.AddParent(default, index);
         var parentBelowMatch = new TraversalNode();
         ParentTraversalGraph.Link(subject, parentBelowMatch);
         var match = new MarkedTraversalNode();
@@ -190,6 +194,22 @@ public class ParentTraversalTests
 
         // Assert
         Assert.Same(match, result);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1)]
+    public void WhenOnlyParentEntryHasNoSubject_ThenReturnsNull(object? index)
+    {
+        // Arrange
+        var subject = new TraversalNode();
+        subject.AddParent(default, index);
+
+        // Act
+        var result = subject.TryGetFirstParent<ITraversalMarker>();
+
+        // Assert
+        Assert.Null(result);
     }
 
     [Theory]

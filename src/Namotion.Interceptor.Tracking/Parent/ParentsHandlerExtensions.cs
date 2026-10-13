@@ -41,13 +41,15 @@ public static class ParentsHandlerExtensions
             var parents = found[next].GetParents();
             for (var i = 0; i < parents.Length; i++)
             {
-                var parent = parents[i];
-                if (parent.Equals(default) || Contains(found[..count], parent.Property.Subject))
+                // An entry without a subject does not come from tracking. It is skipped, so that the search
+                // never throws.
+                var parent = parents[i].Property.Subject;
+                if (parent is null || Contains(found[..count], parent))
                 {
                     continue;
                 }
 
-                if (parent.Property.Subject is TRoot root)
+                if (parent is TRoot root)
                 {
                     return root;
                 }
@@ -57,7 +59,7 @@ public static class ParentsHandlerExtensions
                     return FindFirstParentOnHeap<TRoot>(found, next, parents, i);
                 }
 
-                found[count++] = parent.Property.Subject;
+                found[count++] = parent;
             }
         }
 
@@ -129,18 +131,18 @@ public static class ParentsHandlerExtensions
     {
         for (var i = start; i < parents.Length; i++)
         {
-            var parent = parents[i];
-            if (parent.Equals(default) || !visited.Add(parent.Property.Subject))
+            var parent = parents[i].Property.Subject;
+            if (parent is null || !visited.Add(parent))
             {
                 continue;
             }
 
-            if (parent.Property.Subject is TRoot root)
+            if (parent is TRoot root)
             {
                 return root;
             }
 
-            queue.Enqueue(parent.Property.Subject);
+            queue.Enqueue(parent);
         }
 
         return null;

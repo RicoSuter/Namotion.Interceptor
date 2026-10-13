@@ -178,8 +178,9 @@ public class ParentTraversalReferenceTests
 
     /// <summary>
     /// The contract of <see cref="ParentsHandlerExtensions.TryGetFirstParent{TRoot}"/>: breadth first over
-    /// all parents in their order, every subject once, never the subject itself. Kept plain on purpose,
-    /// so that it stays obviously correct while the real search is optimized.
+    /// all parents in their order, every subject once, never the subject itself, entries without a
+    /// subject skipped. Kept plain on purpose, so that it stays obviously correct while the real search
+    /// is optimized.
     /// </summary>
     private static TRoot? FindFirstParentBreadthFirstReference<TRoot>(IInterceptorSubject subject)
         where TRoot : class
@@ -204,7 +205,7 @@ public class ParentTraversalReferenceTests
 
             foreach (var parent in current.GetParents())
             {
-                if (!parent.Equals(default))
+                if (parent.Property.Subject is not null)
                 {
                     queue.Enqueue(parent.Property.Subject);
                 }
