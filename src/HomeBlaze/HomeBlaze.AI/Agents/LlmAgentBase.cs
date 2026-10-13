@@ -33,8 +33,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <summary>The status message while a background run runs.</summary>
     public const string BackgroundRunStatusMessage = "Running";
 
-    /// <summary>The status message while a chat message waits for a background run to end.</summary>
-    public const string WaitingStatusMessage = "Waiting for the background run";
+    /// <summary>The status message while a chat message waits for a background run or the previous chat turn to end.</summary>
+    public const string WaitingStatusMessage = "Waiting for the previous turn to finish";
 
     /// <summary>The message of the exception thrown when a chat message is sent while the agent is not running.</summary>
     public const string NotRunningText = "The agent is not running.";
@@ -1172,7 +1172,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     }
 
     /// <summary>
-    /// Enters the turn gate for a chat turn, showing a waiting message while a background run holds it. Returns
+    /// Enters the turn gate for a chat turn, showing a waiting message while another turn holds it. Returns
     /// false, with the waiting message removed again, when <paramref name="cancellationToken"/> is cancelled first.
     /// </summary>
     private async Task<bool> TryEnterGateForChatAsync(CancellationToken cancellationToken)

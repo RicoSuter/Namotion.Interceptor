@@ -511,7 +511,7 @@ public class LlmAgentBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
         using var cancellation = new CancellationTokenSource();
         var chat = test.Agent.SendMessageAsync("Hello", cancellation.Token);
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.StatusMessage == "Waiting for the background run");
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.StatusMessage == LlmAgentBase.WaitingStatusMessage);
 
         // Act
         await cancellation.CancelAsync();
