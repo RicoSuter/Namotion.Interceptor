@@ -176,8 +176,10 @@ public class ParentTraversalTests
         // Arrange
         var subject = new TraversalNode();
         subject.AddParent(default, null);
+        var parentBelowMatch = new TraversalNode();
+        ParentTraversalGraph.Link(subject, parentBelowMatch);
         var match = new MarkedTraversalNode();
-        ParentTraversalGraph.Link(subject, match);
+        ParentTraversalGraph.Link(parentBelowMatch, match);
 
         // Act
         var result = subject.TryGetFirstParent<ITraversalMarker>();
