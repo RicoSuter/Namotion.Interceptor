@@ -29,7 +29,8 @@ public partial class MyStromSwitch : BackgroundService,
     IPowerRelay,
     IPowerMeter,
     ITemperatureSensor,
-    INetworkAdapter
+    INetworkAdapter,
+    IUptimeState
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MyStromSwitch> _logger;

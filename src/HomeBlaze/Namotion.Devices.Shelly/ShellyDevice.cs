@@ -28,7 +28,8 @@ public partial class ShellyDevice : BackgroundService,
     IConnectionState,
     INetworkAdapter,
     ISoftwareState,
-    IDeviceInfo
+    IDeviceInfo,
+    IUptimeState
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ShellyDevice> _logger;

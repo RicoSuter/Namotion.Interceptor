@@ -25,7 +25,8 @@ public partial class HostSystem : BackgroundService,
     IMonitoredService,
     ITitleProvider,
     IIconProvider,
-    ILastUpdatedProvider
+    ILastUpdatedProvider,
+    IUptimeState
 {
     private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(1);
 

@@ -119,7 +119,7 @@ The energy meter has no temperature of its own. On the Pro 3EM, the temperature 
 
 | Subject | Interfaces |
 |---------|------------|
-| Device | `IConfigurable`, `IMonitoredService`, `IConnectionState`, `INetworkAdapter`, `ISoftwareState`, `IDeviceInfo` |
+| Device | `IConfigurable`, `IMonitoredService`, `IConnectionState`, `INetworkAdapter`, `ISoftwareState`, `IDeviceInfo`, `IUptimeState` |
 | Switch | `IPowerRelay`, `IPowerMeter`, `IElectricalVoltageSensor`, `IElectricalCurrentSensor`, `ITemperatureSensor`, `IObservable<SwitchEvent>` |
 | Cover | `IRollerShutter`, `IPowerMeter`, `IElectricalVoltageSensor`, `IElectricalCurrentSensor`, `IElectricalFrequencySensor`, `ITemperatureSensor` |
 | Energy meter | `IPowerMeter` |

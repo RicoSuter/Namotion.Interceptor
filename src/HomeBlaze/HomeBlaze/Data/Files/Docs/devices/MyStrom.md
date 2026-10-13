@@ -47,6 +47,7 @@ The myStrom WiFi Switch is a smart plug with built-in power metering, temperatur
 - `IConnectionState` - connection tracking
 - `INetworkAdapter` - network information
 - `IMonitoredService` - service status
+- `IUptimeState` - device uptime
 
 ## JSON Configuration Example
 
