@@ -88,8 +88,7 @@ public static class StateUnitExtensions
                 var decimalValue = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
                 if (unit == StateUnit.Percent)
                 {
-                    var percent = Math.Round(decimalValue * 100m, 1);
-                    return $"{percent.ToString("0.##", CultureInfo.InvariantCulture)}%";
+                    return FormatPercent(decimalValue);
                 }
 
                 return FormatWithUnit(decimalValue, unit);
@@ -129,6 +128,16 @@ public static class StateUnitExtensions
     // renders one "[key, value]" line per entry.
     private static string JoinElements(IEnumerable elements) =>
         string.Join('\n', elements.Cast<object?>().Select(element => element is null ? "null" : element.ToString() ?? ""));
+
+    /// <summary>
+    /// Formats a fraction as a percentage rounded to one decimal place, for example 0.756 as "75.6%".
+    /// </summary>
+    /// <exception cref="OverflowException">The fraction times 100 exceeds the range of <see cref="decimal"/>.</exception>
+    public static string FormatPercent(decimal fraction)
+    {
+        var percent = Math.Round(fraction * 100m, 1);
+        return $"{percent.ToString("0.##", CultureInfo.InvariantCulture)}%";
+    }
 
     /// <summary>
     /// Formats a decimal value with auto-scaling within its unit family.

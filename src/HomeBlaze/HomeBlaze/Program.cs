@@ -9,6 +9,7 @@ using HomeBlaze.OpcUa;
 using HomeBlaze.OpcUa.Blazor;
 using HomeBlaze.Plugins;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Diagnostics;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor;
 using HomeBlaze.Storage.Blazor.Files;
@@ -100,6 +101,7 @@ catch (Exception exception) when (exception is IOException or UnauthorizedAccess
 // This must happen before any service that depends on TypeProvider is used
 var typeProvider = app.Services.GetRequiredService<TypeProvider>();
 typeProvider
+    .AddAssembly(typeof(HostSystem).Assembly)                  // HomeBlaze.Services
     .AddAssembly(typeof(FluentStorageContainer).Assembly)      // HomeBlaze.Storage
     .AddAssembly(typeof(MarkdownFilePageComponent).Assembly)   // HomeBlaze.Storage.Blazor
     .AddAssembly(typeof(Widget).Assembly)                      // HomeBlaze.Components
