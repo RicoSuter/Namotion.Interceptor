@@ -57,6 +57,9 @@ public class FakeAgent : LlmAgentBase
 
     public int ResetCount { get; private set; }
 
+    /// <summary>Runs as the upkeep after an answered chat turn.</summary>
+    public Func<CancellationToken, Task>? ChatTurnCompletedHandler { get; set; }
+
     protected override Task<AgentTurnResult> ExecuteTurnAsync(AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
         lock (Requests)
@@ -69,6 +72,9 @@ public class FakeAgent : LlmAgentBase
 
     protected override Task OnStartingAsync(CancellationToken cancellationToken) =>
         StartingHandler?.Invoke(cancellationToken) ?? Task.CompletedTask;
+
+    protected override Task OnChatTurnCompletedAsync(CancellationToken cancellationToken) =>
+        ChatTurnCompletedHandler?.Invoke(cancellationToken) ?? Task.CompletedTask;
 
     protected override Task ResetSessionAsync(CancellationToken cancellationToken)
     {

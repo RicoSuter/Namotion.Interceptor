@@ -63,9 +63,6 @@ public sealed class AgentToolSet
     /// <summary>The calls made so far, in completion order.</summary>
     public IReadOnlyList<AgentToolCall> Calls => Volatile.Read(ref _calls);
 
-    /// <summary>The calls left in the turn's budget, never negative.</summary>
-    public int RemainingCalls => Math.Max(_maxToolCalls - Volatile.Read(ref _callCount), 0);
-
     /// <summary>
     /// Whether the allowed names grant the permission to edit page layout: <see cref="EditPageLayoutPermission"/> together
     /// with at least one Markdown tool.

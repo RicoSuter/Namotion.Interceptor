@@ -51,6 +51,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     // Never disposed: its wait handle is never created, and a chat that unwinds after the agent was disposed still
     // releases it.
     private readonly SemaphoreSlim _turnGate = new(1, 1);
+    private Task _chatTurnUpkeep = Task.CompletedTask;
     private readonly Lock _streamingLock = new();
     private readonly StringBuilder _streamingText = new();
 
@@ -273,17 +274,21 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// the timeline instead of thrown. A message cancelled through <paramref name="cancellationToken"/> or by the
     /// agent stopping is recorded as an error entry with <see cref="CancelledText"/>, so background findings
     /// stay pending for the next message; only cancellation through <paramref name="cancellationToken"/> throws.
+    /// Returns once the reply is recorded; <see cref="OnChatTurnCompletedAsync"/> may still run, and the next turn
+    /// waits for it.
     /// </summary>
     /// <exception cref="InvalidOperationException">The agent is not running; the message is not recorded.</exception>
     public async Task SendMessageAsync(string text, CancellationToken cancellationToken)
     {
         CancellationTokenSource? turnCancellation = null;
+        var lifetimeToken = CancellationToken.None;
         lock (_stateLock)
         {
             if (_lifetime is not null)
             {
                 // Linked under the lock: ExecuteAsync disposes the lifetime source only after clearing it here.
-                turnCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+                lifetimeToken = _lifetime.Token;
+                turnCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetimeToken);
             }
         }
 
@@ -354,14 +359,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             finally
             {
                 EndTurn(isIdle);
-                try
+                if (isAnswered)
                 {
-                    if (isAnswered)
-                    {
-                        await RunAfterChatTurnAsync(turnToken);
-                    }
+                    // Takes over the gate, so the next turn waits for the upkeep but this sender does not.
+                    Volatile.Write(ref _chatTurnUpkeep, Task.Run(() => RunChatTurnUpkeepAsync(lifetimeToken), CancellationToken.None));
                 }
-                finally
+                else
                 {
                     _turnGate.Release();
                 }
@@ -410,10 +413,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     protected virtual Task OnStartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
-    /// Called after the answer of a chat turn is in the timeline and the agent is no longer busy, before the next turn
-    /// can start and outside the turn timeout; for backend upkeep such as summarizing the chat session.
+    /// Called after the answer of a chat turn is in the timeline and the agent is no longer busy, after
+    /// <see cref="SendMessageAsync"/> returned, before the next turn can start and outside the turn timeout; for backend
+    /// upkeep such as summarizing the chat session. A stop of the agent waits for it to end.
     /// </summary>
-    /// <param name="cancellationToken">Cancelled when the agent stops or the chat message is cancelled.</param>
+    /// <param name="cancellationToken">Cancelled when the agent stops.</param>
     /// <remarks>An exception is logged as a warning, so it must not carry secrets, and does not change the recorded turn.</remarks>
     protected virtual Task OnChatTurnCompletedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -486,6 +490,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
 
         await lifetime.CancelAsync();
+
+        // Cancelled with the lifetime above; waited for, so that no upkeep writes the session after the agent stopped.
+        await ChatTurnUpkeep;
         lock (_stateLock)
         {
             // A run that outlived its stop, after a restart already began a newer one, must not clear or
@@ -864,7 +871,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
     }
 
-    private async Task RunAfterChatTurnAsync(CancellationToken cancellationToken)
+    /// <summary>The upkeep after the last answered chat turn; it never faults.</summary>
+    internal Task ChatTurnUpkeep => Volatile.Read(ref _chatTurnUpkeep);
+
+    // Runs while the caller holds the turn gate for it, and releases it.
+    private async Task RunChatTurnUpkeepAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -877,6 +888,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "The work after a chat turn of agent {Agent} failed.", Title);
+        }
+        finally
+        {
+            _turnGate.Release();
         }
     }
 

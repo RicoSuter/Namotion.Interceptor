@@ -324,6 +324,7 @@ public class AnthropicAgentTests
 
         // Act
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
+        await test.Agent.ChatTurnUpkeep;
 
         // Assert
         var options = Assert.Single(test.Agent.Client.SummaryOptions);
@@ -355,6 +356,7 @@ public class AnthropicAgentTests
 
         // Act
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
+        await test.Agent.ChatTurnUpkeep;
 
         // Assert
         Assert.Equal("Hello again", lastEntryWhileSummarizing);
@@ -387,6 +389,7 @@ public class AnthropicAgentTests
 
         // Act
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
+        await test.Agent.ChatTurnUpkeep;
 
         // Assert
         Assert.Equal("Hello again", test.Agent.Timeline.Entries[^1].Text);
@@ -405,6 +408,7 @@ public class AnthropicAgentTests
 
         // Act
         await test.Agent.SendMessageAsync("third", CancellationToken.None);
+        await test.Agent.ChatTurnUpkeep;
 
         // Assert
         Assert.Single(test.Agent.Client.SummaryOptions);
@@ -428,6 +432,7 @@ public class AnthropicAgentTests
 
         // Act
         await test.Agent.SendMessageAsync("third", CancellationToken.None);
+        await test.Agent.ChatTurnUpkeep;
 
         // Assert
         Assert.Single(test.Agent.Client.SummaryOptions);
@@ -435,7 +440,7 @@ public class AnthropicAgentTests
     }
 
     [Fact]
-    public async Task WhenTheTurnIsCancelledWhileSummarizing_ThenTheAnswerReachesTheTimeline()
+    public async Task WhenTheMessageIsCancelledAfterItsAnswer_ThenTheSummaryIsStillSaved()
     {
         // Arrange
         await using var test = await StartAsync(agent => agent.HistoryTokenBudget = 1000);
@@ -450,12 +455,42 @@ public class AnthropicAgentTests
 
         // Act
         await test.Agent.SendMessageAsync("second", cancellation.Token);
+        await test.Agent.ChatTurnUpkeep;
 
         // Assert
         Assert.Single(test.Agent.Client.SummaryOptions);
-        Assert.Equal(AgentTimelineEntryKind.Assistant, test.Agent.Timeline.Entries[^1].Kind);
         Assert.Equal("Hello again", test.Agent.Timeline.Entries[^1].Text);
-        Assert.Contains("\"second\"", await File.ReadAllTextAsync(SessionPath(test)));
+        Assert.Contains("\"summary\":\"summary\"", await File.ReadAllTextAsync(SessionPath(test)));
+    }
+
+    [Fact]
+    public async Task WhenTheAgentStopsWhileSummarizing_ThenTheAnswerReachesTheTimelineAndTheHistoryIsKept()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.HistoryTokenBudget = 1000);
+        await test.Agent.SendMessageAsync("first", CancellationToken.None);
+        using var summarizing = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        test.Agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello again"), Usage(5000)];
+        test.Agent.Client.Summarize = () =>
+        {
+            summarizing.Set();
+            release.Wait();
+            return "summary";
+        };
+        await test.Agent.SendMessageAsync("second", CancellationToken.None);
+        Assert.True(summarizing.Wait(TimeSpan.FromSeconds(30)));
+
+        // Act
+        var stop = test.StopAgentAsync();
+        release.Set();
+        await stop;
+
+        // Assert
+        Assert.Equal("Hello again", test.Agent.Timeline.Entries[^1].Text);
+        var session = await File.ReadAllTextAsync(SessionPath(test));
+        Assert.DoesNotContain("\"summary\":\"summary\"", session);
+        Assert.Contains("\"second\"", session);
     }
 
     [Fact]
@@ -470,6 +505,7 @@ public class AnthropicAgentTests
         // Act
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
         await test.Agent.SendMessageAsync("third", CancellationToken.None);
+        await test.Agent.ChatTurnUpkeep;
 
         // Assert
         Assert.Single(test.Agent.Client.SummaryOptions);

@@ -529,6 +529,94 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
+    public async Task WhenTheUpkeepAfterAChatTurnRuns_ThenTheSenderReturnsAndTheNextMessageWaitsForIt()
+    {
+        // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var upkeepCount = 0;
+        await using var test = await StartAsync(agent =>
+        {
+            agent.Handler = (_, _, _) => Task.FromResult(new AgentTurnResult("Answer", null, null));
+            agent.ChatTurnCompletedHandler = async _ =>
+            {
+                if (Interlocked.Increment(ref upkeepCount) == 1)
+                {
+                    await release.Task;
+                }
+            };
+        });
+
+        // Act
+        await test.Agent.SendMessageAsync("First", CancellationToken.None);
+        var second = test.Agent.SendMessageAsync("Second", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.StatusMessage == LlmAgentBase.WaitingStatusMessage);
+
+        // Assert
+        Assert.Equal("Answer", test.Agent.Timeline.Entries[1].Text);
+        Assert.False(test.Agent.IsBusy);
+        Assert.Single(test.Agent.Requests);
+        release.SetResult();
+        await second;
+        Assert.Equal(2, test.Agent.Requests.Count);
+        await test.Agent.ChatTurnUpkeep;
+        Assert.Equal(2, upkeepCount);
+    }
+
+    [Fact]
+    public async Task WhenTheUpkeepAfterAChatTurnFails_ThenTheNextMessageIsAnswered()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent =>
+        {
+            agent.Handler = (_, _, _) => Task.FromResult(new AgentTurnResult("Answer", null, null));
+            agent.ChatTurnCompletedHandler = _ => throw new InvalidOperationException("upkeep failed");
+        });
+        await test.Agent.SendMessageAsync("First", CancellationToken.None);
+
+        // Act
+        await test.Agent.SendMessageAsync("Second", CancellationToken.None);
+
+        // Assert
+        await test.Agent.ChatTurnUpkeep;
+        Assert.Equal(2, test.Agent.Requests.Count);
+        Assert.Equal(
+            [AgentTimelineEntryKind.User, AgentTimelineEntryKind.Assistant, AgentTimelineEntryKind.User, AgentTimelineEntryKind.Assistant],
+            test.Agent.Timeline.Entries.Select(entry => entry.Kind));
+    }
+
+    [Fact]
+    public async Task WhenTheAgentStopsDuringTheUpkeepAfterAChatTurn_ThenTheUpkeepIsCancelledAndTheStopWaitsForIt()
+    {
+        // Arrange
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var wasCancelled = false;
+        await using var test = await StartAsync(agent =>
+        {
+            agent.Handler = (_, _, _) => Task.FromResult(new AgentTurnResult("Answer", null, null));
+            agent.ChatTurnCompletedHandler = async cancellationToken =>
+            {
+                started.SetResult();
+                await release.Task;
+                wasCancelled = cancellationToken.IsCancellationRequested;
+            };
+        });
+        await test.Agent.SendMessageAsync("First", CancellationToken.None);
+        await started.Task;
+
+        // Act
+        var stop = test.StopAgentAsync();
+
+        // Assert
+        Assert.False(stop.IsCompleted);
+        release.SetResult();
+        await stop;
+        Assert.True(wasCancelled);
+        Assert.True(test.Agent.ChatTurnUpkeep.IsCompletedSuccessfully);
+        Assert.Equal(ServiceStatus.Stopped, test.Agent.Status);
+    }
+
+    [Fact]
     public async Task WhenTheAgentStopsDuringAChat_ThenTheChatIsCancelledAndTheAgentStaysStopped()
     {
         // Arrange
