@@ -25,7 +25,6 @@ namespace HomeBlaze.AI.Agents.Anthropic;
 public partial class AnthropicAgent : LlmAgentBase
 {
     private const int SummaryMaxOutputTokens = 4096;
-    private const int ExtraToolIterations = 10;
 
     // One connection pool for every agent and turn: the API key travels per request, not per client. The SDK applies
     // its own request timeout, which the default HttpClient timeout of 100 seconds would otherwise cut short.
@@ -113,7 +112,7 @@ public partial class AnthropicAgent : LlmAgentBase
         // model that ignores those errors, because its last iteration drops the tools, and a request whose tools
         // change mid-turn invalidates the thinking blocks the API expects back. Neither client is disposed: that
         // would dispose the reused inner client.
-        var iterationLimit = (int)Math.Min((long)Math.Max(MaxToolCallsPerTurn, 0) + ExtraToolIterations, int.MaxValue);
+        var iterationLimit = GetModelRoundLimit();
         var client = new FunctionInvokingChatClient(
             request.BackendTools.Count > 0 ? new AnthropicServerToolClient(innerClient, request.Tools, request.BackendTools) : innerClient)
         {

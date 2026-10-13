@@ -43,6 +43,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     public static readonly TimeSpan MaximumTurnTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
 
     private const int RecentResultCount = 5;
+    private const int ExtraModelRounds = 10;
     private static readonly TimeSpan ChangeBufferTime = TimeSpan.FromMilliseconds(100);
 
     private readonly AgentServices _services;
@@ -209,6 +210,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     /// <summary>The services shared by agents.</summary>
     protected AgentServices Services => _services;
+
+    /// <summary>
+    /// The model rounds a turn may take: <see cref="MaxToolCallsPerTurn"/> plus a fixed margin, so a turn whose tool
+    /// budget ran out still has rounds to read the rejected calls and answer.
+    /// </summary>
+    protected int GetModelRoundLimit() => (int)Math.Min((long)Math.Max(MaxToolCallsPerTurn, 0) + ExtraModelRounds, int.MaxValue);
 
     /// <summary>The turn timeout that applies, or null for no limit.</summary>
     public TimeSpan? GetEffectiveTurnTimeout()

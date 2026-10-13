@@ -19,7 +19,10 @@ internal sealed record ClaudeBlockStartEvent : ClaudeStreamEvent
 }
 
 /// <summary>Subscription utilization.</summary>
-internal sealed record ClaudeRateLimitEvent(AgentRateLimit RateLimit) : ClaudeStreamEvent;
+/// <param name="RateLimit">The status and the utilization of the five-hour and seven-day windows.</param>
+/// <param name="LimitResetsAt">The reset time of the limit the line names at its top level, which rejected the run on a rejected status.</param>
+/// <param name="LimitType">The type of that limit, for example <c>seven_day_opus</c>.</param>
+internal sealed record ClaudeRateLimitEvent(AgentRateLimit RateLimit, DateTimeOffset? LimitResetsAt = null, string? LimitType = null) : ClaudeStreamEvent;
 
 /// <summary>An assistant message the CLI marked with an error code, for example <c>authentication_failed</c>.</summary>
 internal sealed record ClaudeAssistantErrorEvent(string Code) : ClaudeStreamEvent;
@@ -221,12 +224,15 @@ internal static class ClaudeStreamJsonParser
         info.TryGetProperty("unifiedWindows"u8, out var windows);
         var (fiveHourUtilization, fiveHourResetsAt) = ParseWindow(windows, "five_hour"u8);
         var (sevenDayUtilization, sevenDayResetsAt) = ParseWindow(windows, "seven_day"u8);
-        return new ClaudeRateLimitEvent(new AgentRateLimit(
-            GetString(info, "status"u8) ?? "unknown",
-            fiveHourUtilization,
-            fiveHourResetsAt,
-            sevenDayUtilization,
-            sevenDayResetsAt));
+        return new ClaudeRateLimitEvent(
+            new AgentRateLimit(
+                GetString(info, "status"u8) ?? "unknown",
+                fiveHourUtilization,
+                fiveHourResetsAt,
+                sevenDayUtilization,
+                sevenDayResetsAt),
+            GetResetsAt(info),
+            GetString(info, "rateLimitType"u8));
     }
 
     private static (double? Utilization, DateTimeOffset? ResetsAt) ParseWindow(JsonElement windows, ReadOnlySpan<byte> name)
@@ -242,12 +248,13 @@ internal static class ClaudeStreamJsonParser
             value.TryGetDouble(out var fraction) && double.IsFinite(fraction)
             ? Math.Clamp(fraction, 0, 1)
             : null;
-        DateTimeOffset? resetsAt = TryGetNumber(window, "resetsAt"u8, out var reset) &&
-            reset.TryGetInt64(out var seconds) && IsInUnixSecondsRange(seconds)
+        return (utilization, GetResetsAt(window));
+    }
+
+    private static DateTimeOffset? GetResetsAt(JsonElement element) =>
+        TryGetNumber(element, "resetsAt"u8, out var reset) && reset.TryGetInt64(out var seconds) && IsInUnixSecondsRange(seconds)
             ? DateTimeOffset.FromUnixTimeSeconds(seconds)
             : null;
-        return (utilization, resetsAt);
-    }
 
     private static bool IsInUnixSecondsRange(long seconds) => seconds >= MinimumUnixSeconds && seconds <= MaximumUnixSeconds;
 

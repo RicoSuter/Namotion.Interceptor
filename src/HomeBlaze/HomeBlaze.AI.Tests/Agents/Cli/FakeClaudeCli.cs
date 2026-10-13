@@ -2,7 +2,7 @@ namespace HomeBlaze.AI.Tests.Agents.Cli;
 
 /// <summary>
 /// Writes a shell script that stands in for the Claude CLI: it records each invocation's arguments, environment,
-/// standard input and MCP configuration, then replays a fixture. Disposing deletes its temporary directory.
+/// standard input, system prompt and MCP configuration, then replays a fixture. Disposing deletes its temporary directory.
 /// </summary>
 internal sealed class FakeClaudeCli : IDisposable
 {
@@ -45,6 +45,12 @@ internal sealed class FakeClaudeCli : IDisposable
 
     /// <summary>The octal permission bits of the last MCP configuration file, for example <c>600</c>.</summary>
     public string LastMcpConfigurationMode => File.ReadAllText(Path.Combine(Directory, "mcp-mode.txt")).Trim();
+
+    /// <summary>The content of the last system prompt file.</summary>
+    public string LastSystemPrompt => File.ReadAllText(Path.Combine(Directory, "system-prompt.txt"));
+
+    /// <summary>The octal permission bits of the last system prompt file, for example <c>600</c>.</summary>
+    public string LastSystemPromptMode => File.ReadAllText(Path.Combine(Directory, "system-prompt-mode.txt")).Trim();
 
     public int? LastProcessId
     {
@@ -130,6 +136,10 @@ internal sealed class FakeClaudeCli : IDisposable
               if [ "$previous" = '--mcp-config' ]; then
                 cp "$argument" '{directory}/mcp.json'
                 stat -c %a "$argument" > '{directory}/mcp-mode.txt' 2>/dev/null || stat -f %Lp "$argument" > '{directory}/mcp-mode.txt'
+              fi
+              if [ "$previous" = '--system-prompt-file' ]; then
+                cp "$argument" '{directory}/system-prompt.txt'
+                stat -c %a "$argument" > '{directory}/system-prompt-mode.txt' 2>/dev/null || stat -f %Lp "$argument" > '{directory}/system-prompt-mode.txt'
               fi
               previous="$argument"
             done

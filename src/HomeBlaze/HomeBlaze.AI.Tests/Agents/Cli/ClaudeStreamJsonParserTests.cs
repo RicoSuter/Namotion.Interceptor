@@ -135,4 +135,31 @@ public class ClaudeStreamJsonParserTests
         Assert.True(result.IsError);
         Assert.Equal("Fetch failed", result.Content);
     }
+
+    [Fact]
+    public void WhenAPerModelLimitRejects_ThenItsResetTimeAndTypeAreParsedBesideTheWindows()
+    {
+        // Act
+        var events = ParseFixture("usage-limit-opus.jsonl");
+
+        // Assert
+        var limit = Assert.Single(events.OfType<ClaudeRateLimitEvent>());
+        Assert.Equal("rejected", limit.RateLimit.Status);
+        Assert.Equal(0.64, limit.RateLimit.SevenDayUtilization);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1792000800), limit.LimitResetsAt);
+        Assert.Equal("seven_day_opus", limit.LimitType);
+    }
+
+    [Fact]
+    public void WhenTheRunStopsAtTheTurnLimit_ThenTheResultSubtypeIsErrorMaxTurns()
+    {
+        // Act
+        var events = ParseFixture("max-turns.jsonl");
+
+        // Assert
+        var result = Assert.Single(events.OfType<ClaudeResultEvent>());
+        Assert.Equal("error_max_turns", result.Subtype);
+        Assert.True(result.IsError);
+        Assert.Null(result.Text);
+    }
 }

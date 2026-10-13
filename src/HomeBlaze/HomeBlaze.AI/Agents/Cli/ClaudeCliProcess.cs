@@ -16,7 +16,9 @@ internal sealed record ClaudeCliInvocation(string FileName, IReadOnlyList<string
 /// <param name="SessionId">Session id from the result, or from the init line when no result was written.</param>
 /// <param name="ResultText">Text of the result line.</param>
 /// <param name="IsError">Whether the result line is marked as an error.</param>
-/// <param name="ResultSubtype">Subtype of the result line, for example <c>success</c> or <c>error_during_execution</c>.</param>
+/// <param name="ResultSubtype">
+/// Subtype of the result line, for example <c>success</c>, <c>error_during_execution</c> or <c>error_max_turns</c>.
+/// </param>
 /// <param name="ErrorCode">Error code of the last assistant line that carried one, for example <c>authentication_failed</c>.</param>
 /// <param name="Usage">Token usage of the result line.</param>
 /// <param name="RateLimit">The last reported subscription utilization.</param>
@@ -35,7 +37,19 @@ internal sealed record ClaudeCliRunResult(
     AgentUsage? Usage,
     AgentRateLimit? RateLimit,
     string StandardError,
-    string? StreamedText = null);
+    string? StreamedText = null)
+{
+    /// <summary>
+    /// The reset time of the limit the last rate limit line names at its top level; on a rejected status, the limit
+    /// that rejected the run.
+    /// </summary>
+    public DateTimeOffset? LimitResetsAt { get; init; }
+
+    /// <summary>
+    /// The type of the limit the last rate limit line names, for example <c>five_hour</c> or <c>seven_day_opus</c>.
+    /// </summary>
+    public string? LimitType { get; init; }
+}
 
 /// <summary>
 /// Runs the Claude CLI, streams its text deltas and collects its result. Cancellation kills the whole process tree.
@@ -46,20 +60,13 @@ internal static class ClaudeCliProcess
 
     private static readonly TimeSpan KilledProcessExitTimeout = TimeSpan.FromSeconds(5);
 
-    // In -p mode the CLI always uses an API key or provider from the environment over the subscription login, so it
-    // would bill the API instead of the subscription. CLAUDE_CODE_OAUTH_TOKEN is a subscription token and is kept.
-    private static readonly string[] RemovedEnvironmentVariables =
-    [
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN",
-        "ANTHROPIC_BASE_URL",
-        "CLAUDE_CODE_USE_BEDROCK",
-        "CLAUDE_CODE_USE_VERTEX",
-        "CLAUDE_CODE_USE_FOUNDRY",
-        "ANTHROPIC_PROFILE",
-        "ANTHROPIC_FEDERATION_RULE_ID",
-        "ANTHROPIC_ORGANIZATION_ID"
-    ];
+    // In -p mode the CLI always uses an API key, provider or gateway from the environment over the subscription login,
+    // so it would bill the API instead of the subscription. CLAUDE_CODE_OAUTH_TOKEN is a subscription token and is kept.
+    private static readonly string[] RemovedEnvironmentVariablePrefixes = ["ANTHROPIC_", "CLAUDE_CODE_USE_"];
+
+    // Windows matches variable names case-insensitively, so the CLI would read anthropic_api_key there too.
+    private static readonly StringComparison EnvironmentVariableComparison =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     /// <summary>
     /// Runs the invocation to completion.
@@ -145,6 +152,13 @@ internal static class ClaudeCliProcess
             throw new AgentTurnException(AgentFailureKind.Configuration, "The Claude CLI path is not set.");
         }
 
+        if (IsBatchFile(invocation.FileName))
+        {
+            throw new AgentTurnException(
+                AgentFailureKind.Configuration,
+                $"The Claude CLI path '{invocation.FileName}' is a batch file, which cannot receive the arguments safely. Set CliPath to the claude executable (claude.exe) instead of the npm shim.");
+        }
+
         if (!Directory.Exists(invocation.WorkingDirectory))
         {
             throw new AgentTurnException(
@@ -168,7 +182,7 @@ internal static class ClaudeCliProcess
             startInfo.ArgumentList.Add(argument);
         }
 
-        foreach (var name in RemovedEnvironmentVariables)
+        foreach (var name in startInfo.Environment.Keys.Where(name => IsRemovedEnvironmentVariable(name, EnvironmentVariableComparison)).ToList())
         {
             startInfo.Environment.Remove(name);
         }
@@ -192,6 +206,30 @@ internal static class ClaudeCliProcess
                 $"The Claude CLI '{invocation.FileName}' could not be started ({exception.Message}). Install Claude Code for the HomeBlaze user and log in, or set the CLI path.",
                 innerException: exception);
         }
+    }
+
+    /// <summary>Whether the variable is removed from the CLI environment because it would switch billing away from the subscription.</summary>
+    /// <param name="name">The variable name.</param>
+    /// <param name="comparison">How names compare: case-insensitive on Windows, ordinal elsewhere.</param>
+    internal static bool IsRemovedEnvironmentVariable(string name, StringComparison comparison)
+    {
+        foreach (var prefix in RemovedEnvironmentVariablePrefixes)
+        {
+            if (name.StartsWith(prefix, comparison))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Windows starts a batch file through cmd.exe, which parses the arguments again by rules no quoting can satisfy.
+    // Windows also drops trailing dots and spaces from a file name, so "claude.cmd." still runs the batch file.
+    private static bool IsBatchFile(string fileName)
+    {
+        var extension = Path.GetExtension(fileName.AsSpan().TrimEnd(" ."));
+        return extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void DisposeIgnoringBrokenPipe(IDisposable stream)
@@ -287,6 +325,8 @@ internal static class ClaudeCliProcess
         private string? _sessionId;
         private string? _errorCode;
         private AgentRateLimit? _rateLimit;
+        private DateTimeOffset? _limitResetsAt;
+        private string? _limitType;
         private ClaudeResultEvent? _result;
 
         public void Apply(ClaudeStreamEvent? streamEvent, IProgress<AgentTurnUpdate> progress)
@@ -310,6 +350,8 @@ internal static class ClaudeCliProcess
                     break;
                 case ClaudeRateLimitEvent limit:
                     _rateLimit = limit.RateLimit;
+                    _limitResetsAt = limit.LimitResetsAt;
+                    _limitType = limit.LimitType;
                     break;
                 case ClaudeAssistantErrorEvent error:
                     _errorCode = error.Code;
@@ -330,7 +372,11 @@ internal static class ClaudeCliProcess
             _result?.Usage,
             _rateLimit,
             standardError,
-            _answer.Text);
+            _answer.Text)
+        {
+            LimitResetsAt = _limitResetsAt,
+            LimitType = _limitType
+        };
 
         private void RememberBuiltInToolUses(IReadOnlyList<ClaudeToolUse> toolUses)
         {

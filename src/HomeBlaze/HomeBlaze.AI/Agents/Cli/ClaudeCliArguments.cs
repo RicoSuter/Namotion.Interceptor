@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -7,7 +8,7 @@ namespace HomeBlaze.AI.Agents.Cli;
 /// <summary>
 /// The settings of one CLI invocation.
 /// </summary>
-/// <param name="SystemPrompt">Replaces Claude Code's own system prompt.</param>
+/// <param name="SystemPromptPath">File with the system prompt, which replaces Claude Code's own.</param>
 /// <param name="McpConfigurationPath">File with the HomeBlaze MCP server and the turn token.</param>
 /// <param name="Model">Model alias or id, null for the CLI default.</param>
 /// <param name="Effort">Effort, null for the model default.</param>
@@ -15,7 +16,7 @@ namespace HomeBlaze.AI.Agents.Cli;
 /// <param name="ResumeSessionId">Chat session to continue.</param>
 /// <param name="PersistSession">False for background runs, which leave no session behind.</param>
 internal sealed record ClaudeCliOptions(
-    string SystemPrompt,
+    string SystemPromptPath,
     string McpConfigurationPath,
     string? Model,
     AgentEffort? Effort,
@@ -27,6 +28,9 @@ internal sealed record ClaudeCliOptions(
     /// The backend tools the turn may use, such as <c>web_search</c>; names without a CLI tool are ignored.
     /// </summary>
     public IReadOnlyList<string> BackendTools { get; init; } = [];
+
+    /// <summary>The model rounds the run may take before the CLI stops it, null for no limit.</summary>
+    public int? MaxTurns { get; init; }
 }
 
 /// <summary>
@@ -78,7 +82,9 @@ internal static class ClaudeCliArguments
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",
-            "--system-prompt", options.SystemPrompt,
+            // A file rather than --system-prompt keeps the prompt off the command line, where it would be visible to
+            // other local users and where Windows limits its length.
+            "--system-prompt-file", options.SystemPromptPath,
             // The default snapshots the prompt per session, which would hide later memory edits from a resumed chat.
             "--system-prompt-snapshot", "off",
             // Comma-separated in one value each: the built-in tools, and the tools that run without a permission prompt.
@@ -108,6 +114,11 @@ internal static class ClaudeCliArguments
         if (!string.IsNullOrWhiteSpace(options.ResumeSessionId))
         {
             arguments.AddRange(["--resume", options.ResumeSessionId]);
+        }
+
+        if (options.MaxTurns is { } maxTurns)
+        {
+            arguments.AddRange(["--max-turns", maxTurns.ToString(CultureInfo.InvariantCulture)]);
         }
 
         if (!options.PersistSession)

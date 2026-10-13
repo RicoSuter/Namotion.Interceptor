@@ -102,6 +102,41 @@ public class ClaudeCliProcessTests
         Assert.Equal("The Claude CLI path is not set.", exception.Message);
     }
 
+    [Theory]
+    [InlineData(@"C:\Users\home\AppData\Roaming\npm\claude.cmd")]
+    [InlineData("claude.CMD")]
+    [InlineData("claude.bat")]
+    [InlineData("claude.cmd. ")]
+    public async Task WhenTheCliPathIsABatchFile_ThenAConfigurationErrorPointsToTheExecutable(string cliPath)
+    {
+        // Arrange
+        var invocation = new ClaudeCliInvocation(cliPath, ["-p"], Path.GetTempPath(), "hi");
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
+            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+        Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
+        Assert.Contains("claude.exe", exception.Message);
+    }
+
+    [UnixFact]
+    public async Task WhenAPerModelLimitRejectsTheRun_ThenItsResetTimeAndTypeAreReturned()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("usage-limit-opus.jsonl", exitCode: 1);
+        var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
+
+        // Act
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
+
+        // Assert
+        Assert.Equal("rejected", result.RateLimit!.Status);
+        Assert.Equal(0.64, result.RateLimit.SevenDayUtilization);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1792000800), result.LimitResetsAt);
+        Assert.Equal("seven_day_opus", result.LimitType);
+        Assert.Equal("rate_limit", result.ErrorCode);
+    }
+
     [UnixFact]
     public async Task WhenTheWorkingDirectoryDoesNotExist_ThenAConfigurationErrorNamesTheDirectory()
     {
