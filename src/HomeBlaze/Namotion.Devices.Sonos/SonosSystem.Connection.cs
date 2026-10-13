@@ -328,7 +328,7 @@ public partial class SonosSystem
     {
         using var probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         probeCancellation.CancelAfter(timeout);
-        using var connection = new SonosConnection(seedUri, null, httpClient);
+        var connection = new SonosConnection(seedUri, null, httpClient);
         try
         {
             await connection.ReadTopologyAsync(probeCancellation.Token);
@@ -487,7 +487,6 @@ public partial class SonosSystem
                 return;
             }
 
-            scope.Seed?.Dispose();
             scope.Seed = new SonosConnection(seedUri, null, scope.HttpClient);
         }
     }
@@ -541,14 +540,9 @@ public partial class SonosSystem
             return;
         }
 
-        if (scope.Connections.TryGetValue(device.Uuid, out var existing))
+        if (scope.Connections.TryGetValue(device.Uuid, out var existing) && existing.BaseUri == baseUri)
         {
-            if (existing.BaseUri == baseUri)
-            {
-                return;
-            }
-
-            existing.Dispose();
+            return;
         }
 
         scope.Connections[device.Uuid] = new SonosConnection(baseUri, device.Uuid, scope.HttpClient, _logger);

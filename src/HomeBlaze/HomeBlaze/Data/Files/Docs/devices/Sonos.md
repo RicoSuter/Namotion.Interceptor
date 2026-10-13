@@ -314,7 +314,6 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 
 ## Limitations
 
-- `Sonos.Base`, used for SOAP, parses with `XmlSerializer`, so the library is not yet free of runtime reflection for Native AOT.
 - `SetSpeechEnhancement` writes `DialogLevel` 1 or 0; the Arc Ultra levels 1 to 4 are read as on but cannot be set.
 - A speaker that changes role (becomes a surround or stereo partner, or a subwoofer moves rooms) keeps its old subject as an offline entry until restart.
 - SSDP discovery and callback address detection use IPv4 only.
@@ -335,10 +334,9 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - Fixed output (`OutputFixed`) to disable volume operations on Port, Connect and Amp.
 - A `HouseholdId` setting that pins the system to one household (`GetHouseholdID` or `MuseHouseholdId`), so discovery cannot attach to another one.
 - Spotify tracks by id, as v1's `PlaySpotifyTrack` did; today Spotify content plays through favorites.
-- An own audio clip client that reports rejected clips.
+- Reporting a clip that the speaker rejects, by reading its answer on the audio clip websocket.
 - Album art served through HomeBlaze for HTTPS pages, or the favorite's HTTPS `ImageUri` for radio.
 - A Windows event listener that needs no URL reservation.
-- An own, AOT-clean SOAP client replacing `Sonos.Base`.
 - `AvailableSoftwareUpdate` from the topology event or `CheckForUpdate`.
 - LED state, button lock, and home theater TV power state.
 - A widget for `SonosSatellite`.
@@ -358,11 +356,10 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - Offline players for the topology's `VanishedDevices`, so a sleeping portable has its subject after a restart, and a `Forget` operation that removes a missing player or satellite.
 - Serialized play mode writes, so parallel `SetShuffle` and `SetRepeat` calls cannot undo each other.
 - A pure track presentation resolver that holds the track title, album art and source title rules outside `SonosPlayer`.
-- Upstream contributions to `Sonos.Base` (satellites in the topology model, `resMD` in DIDL).
 
 ## References
 
 - [Sonos UPnP API documentation](https://sonos.svrooij.io/) (unofficial, community maintained)
-- [Sonos.Base (sonos-net)](https://github.com/svrooij/sonos-net), the SOAP client, and [Rssdp](https://github.com/Yortw/RSSDP), the SSDP client
+- [Rssdp](https://github.com/Yortw/RSSDP), the SSDP client
 - [MCP server](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/mcp.md) for controlling the household from AI agents
 - [Source of the library](https://github.com/RicoSuter/Namotion.Interceptor/tree/master/src/HomeBlaze/Namotion.Devices.Sonos) and of its [widgets](https://github.com/RicoSuter/Namotion.Interceptor/tree/master/src/HomeBlaze/Namotion.Devices.Sonos.HomeBlaze)

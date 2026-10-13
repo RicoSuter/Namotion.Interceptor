@@ -2,7 +2,6 @@ using System.Net.WebSockets;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Namotion.Interceptor.Testing;
-using Sonos.Base.Services;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -21,7 +20,7 @@ public class SonosConnectionTests
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondAsIdlePlayer(Uuid, "Küche");
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var reading = await connection.ReadPlayerAsync(isHomeTheater: true, [], CancellationToken.None);
@@ -50,7 +49,7 @@ public class SonosConnectionTests
         speaker.RespondAsIdlePlayer(Uuid, "Küche");
         speaker.RespondToEqualizer("DialogLevel", "3");
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var reading = await connection.ReadPlayerAsync(isHomeTheater: true, [], CancellationToken.None);
@@ -70,7 +69,7 @@ public class SonosConnectionTests
             "<item id=\"FV:2/5\" parentID=\"FV:2\" restricted=\"false\"><dc:title>Radio Extra</dc:title><res>x-rincon-mp3radio://radio.example/stream</res></item></DIDL-Lite>",
             numberReturned: 1, totalMatches: 5);
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var favorites = await connection.ReadFavoritesAsync(CancellationToken.None);
@@ -87,7 +86,7 @@ public class SonosConnectionTests
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondToBrowsePage(0, TestFixtures.Read("favorites.xml"), numberReturned: 4, totalMatches: 4);
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
         var first = await connection.ReadFavoritesAsync(CancellationToken.None);
 
         // Act
@@ -113,7 +112,7 @@ public class SonosConnectionTests
         speaker.RespondWithFault("GetRemainingSleepTimerDuration", 701);
         speaker.RespondWithFault("GetVolume", 701);
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
         List<SonosReadFault> firstFaults = [];
         List<SonosReadFault> secondFaults = [];
 
@@ -138,7 +137,7 @@ public class SonosConnectionTests
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondAsIdlePlayer(Uuid, "Küche");
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var reading = await connection.ReadPlayerAsync(isHomeTheater: false, [], CancellationToken.None);
@@ -155,7 +154,7 @@ public class SonosConnectionTests
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondAsIdlePlayer(Uuid, "Küche");
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var topology = await connection.ReadTopologyAsync(CancellationToken.None);
@@ -178,7 +177,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetVolumeAsync(50, CancellationToken.None);
@@ -193,16 +192,16 @@ public class SonosConnectionTests
     }
 
     [Fact]
-    public async Task WhenSpeakerAnswersWithFault_ThenCommandThrowsServiceException()
+    public async Task WhenSpeakerAnswersWithFault_ThenCommandThrowsFaultException()
     {
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondWithFault("SetVolume", 402);
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<SonosServiceException>(() => connection.SetVolumeAsync(50, CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SonosFaultException>(() => connection.SetVolumeAsync(50, CancellationToken.None));
         Assert.Equal(402, exception.UpnpErrorCode);
     }
 
@@ -212,7 +211,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SeekAsync(new TimeSpan(1, 2, 3), CancellationToken.None);
@@ -231,7 +230,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetSleepTimerAsync(TimeSpan.FromMinutes(90), CancellationToken.None);
@@ -248,7 +247,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetSleepTimerAsync(TimeSpan.Zero, CancellationToken.None);
@@ -265,7 +264,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => connection.SeekAsync(TimeSpan.FromSeconds(-1), CancellationToken.None));
@@ -279,7 +278,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => connection.SetSleepTimerAsync(TimeSpan.FromHours(24), CancellationToken.None));
@@ -292,7 +291,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.JoinAsync(TestFixtures.LivingRoomUuid, CancellationToken.None);
@@ -312,7 +311,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetEqualizerAsync(type, enabled, CancellationToken.None);
@@ -331,7 +330,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.PlayFromQueueAsync("x-rincon-cpcontainer:playlist", "<DIDL-Lite />", CancellationToken.None);
@@ -352,7 +351,7 @@ public class SonosConnectionTests
         const string metadata = "<DIDL-Lite><dc:title>Rock &amp; Roll</dc:title></DIDL-Lite>";
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetTransportUriAsync("x-rincon-mp3radio://stream.example.com/live.mp3", metadata, CancellationToken.None);
@@ -370,7 +369,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetGroupVolumeAsync(30, CancellationToken.None);
@@ -388,7 +387,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.ChangeGroupVolumeAsync(-5, CancellationToken.None);
@@ -405,7 +404,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
         var soundUri = new Uri("http://127.0.0.1/sound.mp3");
 
         // Act
@@ -423,7 +422,7 @@ public class SonosConnectionTests
     {
         // Arrange
         using var httpClient = new HttpClient();
-        using var connection = new SonosConnection(
+        var connection = new SonosConnection(
             new Uri($"http://127.0.0.1:{LoopbackPorts.GetFreePort()}/"), Uuid, httpClient);
 
         // Act & Assert

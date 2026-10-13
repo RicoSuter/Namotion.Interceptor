@@ -1,5 +1,4 @@
 using Namotion.Devices.Sonos.Tests.Testing;
-using Sonos.Base.Services;
 using Xunit;
 using static Namotion.Devices.Sonos.Tests.Testing.TestFixtures;
 
@@ -105,7 +104,7 @@ public class SonosSystemOperationTests
         var reads = household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
 
         // Act
-        var exception = await Assert.ThrowsAsync<SonosServiceException>(() => household.System.GroupAllAsync("Küche", CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SonosFaultException>(() => household.System.GroupAllAsync("Küche", CancellationToken.None));
 
         // Assert
         Assert.Equal(800, exception.UpnpErrorCode);
