@@ -947,9 +947,34 @@ For subject path configuration properties, use the `SubjectPathField` component 
 | `Value` | `string?` | `null` | The path value (two-way bindable) |
 | `Label` | `string` | `"Path"` | Input label |
 | `Placeholder` | `string` | `"Enter path or click to browse"` | Placeholder text |
-| `Variant` | `Variant` | `Variant.Outlined` | MudBlazor input variant |
+| `Variant` | `Variant` | `Variant.Text` | MudBlazor input variant |
+| `Required` | `bool` | `false` | Whether a surrounding `MudForm` reports the field as invalid while it is empty |
 | `LocalSubjects` | `IDictionary<string, IInterceptorSubject>?` | `null` | Additional local subjects to show in picker |
 | `Class` | `string?` | `null` | CSS class for styling |
+| `IsPropertyVisible` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties the picker shows. Without it all of them |
+| `CanSelectProperty` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties can be selected in the picker. Without it all of them |
+| `CanSelectSubject` | `Func<IInterceptorSubject, bool>?` | `null` | Which subjects can be selected in the picker. Without it all of them. A subject that cannot be selected still opens to what is below it |
+
+Text that is typed into the field is not checked against these rules, because a path can lead to something that the picker does not offer, such as the name of a block on a markdown page.
+
+**In the generated editor:**
+
+A subject without an edit component of its own is edited in a form that is generated from its `[Configuration]` properties. That form shows a `SubjectPathField` instead of a plain text field for a string property that is marked with `[SubjectPath]`:
+
+```csharp
+[Configuration]
+[SubjectPath]
+public partial string? Path { get; set; }
+
+[Configuration]
+[SubjectPath(typeof(ValueMap))]
+public partial string? Map { get; set; }
+```
+
+- **`[SubjectPath]`**: The path of a property. The picker lets the user select a property that holds a value. Subjects and properties that hold subjects only lead to the properties below them.
+- **`[SubjectPath(typeof(ValueMap))]`**: The path of a subject of that type. The picker lets the user select a subject that is an instance of the type, and a property that refers to such a subject. Everything else only leads to what is below it.
+
+The attribute has no effect on a property that is a secret, and it only changes how the property is edited: resolving the path stays the task of the subject, see [Referencing Other Subjects](#referencing-other-subjects).
 
 ---
 

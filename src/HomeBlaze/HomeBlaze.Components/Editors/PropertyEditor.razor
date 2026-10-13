@@ -1,14 +1,28 @@
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Components.Inputs
+
 @{
     var underlyingType = Nullable.GetUnderlyingType(Property.Type) ?? Property.Type;
     var isRequired = EditedPropertyValues.IsRequired(Property.Type);
 }
 
-@if (underlyingType == typeof(string))
+@if (underlyingType == typeof(string) && _canSelectProperty is not null && !IsSecret)
+{
+    <SubjectPathField Label="@Property.GetDisplayName()"
+                      Value="@((string?)Value)"
+                      ValueChanged="@(OnValueChanged)"
+                      CanSelectProperty="_canSelectProperty"
+                      CanSelectSubject="_canSelectSubject"
+                      Required="@isRequired"
+                      Variant="Variant.Outlined"
+                      Class="mb-3" />
+}
+else if (underlyingType == typeof(string))
 {
     <MudTextField T="string"
                   Label="@Property.GetDisplayName()"
                   Value="@((string?)Value)"
-                  ValueChanged="@(v => OnValueChanged(v))"
+                  ValueChanged="@(OnValueChanged)"
                   InputType="@(IsSecret ? InputType.Password : InputType.Text)"
                   Required="@isRequired"
                   Variant="Variant.Outlined"
@@ -84,7 +98,7 @@ else
     <MudTextField T="string"
                   Label="@($"{Property.GetDisplayName()} ({Property.Type.Name})")"
                   Value="@(Value?.ToString() ?? "")"
-                  ValueChanged="@((string v) => OnStringFallbackChanged(v))"
+                  ValueChanged="@(OnStringFallbackChanged)"
                   Variant="Variant.Outlined"
                   Class="mb-3" />
 }
@@ -101,6 +115,30 @@ else
 
     [Parameter]
     public bool IsSecret { get; set; }
+
+    // What the path picker lets the user select for a property marked with [SubjectPath], and null for every other property.
+    private Func<RegisteredSubjectProperty, bool>? _canSelectProperty;
+    private Func<IInterceptorSubject, bool>? _canSelectSubject;
+    private RegisteredSubjectProperty? _examinedProperty;
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(_examinedProperty, Property))
+        {
+            return;
+        }
+
+        _examinedProperty = Property;
+        _canSelectProperty = null;
+        _canSelectSubject = null;
+
+        if (Property.ReflectionAttributes.OfType<SubjectPathAttribute>().FirstOrDefault() is { } subjectPath)
+        {
+            var subjectType = subjectPath.SubjectType;
+            _canSelectProperty = property => SubjectPathSelection.CanSelectProperty(property, subjectType);
+            _canSelectSubject = subject => SubjectPathSelection.CanSelectSubject(subject, subjectType);
+        }
+    }
 
     private async Task OnValueChanged(object? newValue)
     {

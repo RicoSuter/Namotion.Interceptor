@@ -2,10 +2,13 @@
 
 @inject IDialogService DialogService
 
-<MudTextField @bind-Value="Value"
+<MudTextField T="string"
+              Value="@Value"
+              ValueChanged="SetValueAsync"
               Label="@Label"
               Placeholder="@Placeholder"
               Variant="@Variant"
+              Required="@Required"
               Immediate="true"
               Adornment="Adornment.End"
               AdornmentIcon="@Icons.Material.Filled.Search"
@@ -29,6 +32,12 @@
     [Parameter]
     public Variant Variant { get; set; } = Variant.Text;
 
+    /// <summary>
+    /// Whether a surrounding form reports the field as invalid while it is empty.
+    /// </summary>
+    [Parameter]
+    public bool Required { get; set; }
+
     [Parameter]
     public IDictionary<string, IInterceptorSubject>? LocalSubjects { get; set; }
 
@@ -41,6 +50,12 @@
     [Parameter]
     public Func<RegisteredSubjectProperty, bool>? CanSelectProperty { get; set; }
 
+    /// <summary>
+    /// Decides whether the picker lets the user select a subject. Without it every subject can be selected.
+    /// </summary>
+    [Parameter]
+    public Func<IInterceptorSubject, bool>? CanSelectSubject { get; set; }
+
     private async Task OpenPickerDialogAsync()
     {
         var parameters = new DialogParameters<SubjectPathPickerDialog>
@@ -50,7 +65,8 @@
             { x => x.Label, Label },
             { x => x.Placeholder, Placeholder },
             { x => x.IsPropertyVisible, IsPropertyVisible },
-            { x => x.CanSelectProperty, CanSelectProperty }
+            { x => x.CanSelectProperty, CanSelectProperty },
+            { x => x.CanSelectSubject, CanSelectSubject }
         };
 
         var options = new DialogOptions
@@ -64,8 +80,15 @@
 
         if (result is { Canceled: false, Data: string selectedPath })
         {
-            Value = selectedPath;
-            await ValueChanged.InvokeAsync(Value);
+            await SetValueAsync(selectedPath);
         }
+    }
+
+    // Also the handler of the text field. Binding the text field to Value would only set the parameter here
+    // and never raise ValueChanged, so typed text would not reach the parent.
+    private async Task SetValueAsync(string? value)
+    {
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
     }
 }
