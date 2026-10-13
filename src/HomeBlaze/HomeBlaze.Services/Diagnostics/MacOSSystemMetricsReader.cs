@@ -4,8 +4,9 @@ using System.Runtime.Versioning;
 namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
-/// Reads CPU ticks and memory through Mach host statistics. Available memory is free plus inactive pages,
-/// which approximates Activity Monitor.
+/// Reads CPU ticks and memory through Mach host statistics. Available memory is free, inactive and speculative
+/// pages (speculative pages are reclaimable and already excluded from free_count by the kernel), which
+/// approximates Activity Monitor.
 /// </summary>
 [SupportedOSPlatform("macos")]
 internal sealed partial class MacOSSystemMetricsReader : ISystemMetricsReader
@@ -15,9 +16,11 @@ internal sealed partial class MacOSSystemMetricsReader : ISystemMetricsReader
     private const int HostVmInfo64Flavor = 4;
     private const int KernSuccess = 0;
 
-    // Each mach_host_self call allocates a port right, so the port is taken once and reused.
-    private readonly uint _host = MachHostSelf();
+    // mach_host_self allocates a port right; obtained lazily on the first Read so the call runs inside the
+    // polling loop's error handling rather than the constructor, and cached because only that loop calls Read.
+    private uint? _host;
 
+    private nuint? _pageSize;
     private long? _totalMemory;
     private bool _hasPreviousTicks;
     private MacOSHostCpuLoadInfo _previousTicks;
@@ -28,9 +31,11 @@ internal sealed partial class MacOSSystemMetricsReader : ISystemMetricsReader
 
     public SystemMetricsReading Read()
     {
+        var host = _host ??= MachHostSelf();
+
         var ticks = default(MacOSHostCpuLoadInfo);
         var ticksCount = MacOSHostCpuLoadInfo.Count;
-        ThrowOnFailure(HostStatistics(_host, HostCpuLoadInfoFlavor, ref ticks, ref ticksCount), "host_statistics");
+        ThrowOnFailure(HostStatistics(host, HostCpuLoadInfoFlavor, ref ticks, ref ticksCount), "host_statistics");
 
         if (_hasPreviousTicks)
         {
@@ -52,19 +57,32 @@ internal sealed partial class MacOSSystemMetricsReader : ISystemMetricsReader
 
         var statistics = default(MacOSVmStatistics64);
         var statisticsCount = MacOSVmStatistics64.Count;
-        ThrowOnFailure(HostStatistics64(_host, HostVmInfo64Flavor, ref statistics, ref statisticsCount), "host_statistics64");
+        ThrowOnFailure(HostStatistics64(host, HostVmInfo64Flavor, ref statistics, ref statisticsCount), "host_statistics64");
 
         var totalMemory = _totalMemory ??= ReadTotalMemory();
-        var availableMemory = ((long)statistics.FreeCount + statistics.InactiveCount) * Environment.SystemPageSize;
+        var pageSize = _pageSize ??= ReadPageSize(host);
+        var availableMemory = ((long)statistics.FreeCount + statistics.InactiveCount + statistics.SpeculativeCount) * (long)pageSize;
         var totalTicks = _userTicks + _systemTicks + _idleTicks + _niceTicks;
 
         return new SystemMetricsReading(totalTicks - _idleTicks, totalTicks, totalMemory, Math.Min(availableMemory, totalMemory));
     }
 
+    private static nuint ReadPageSize(uint host)
+    {
+        ThrowOnFailure(HostPageSize(host, out var pageSize), "host_page_size");
+        return pageSize;
+    }
+
     private static long ReadTotalMemory()
     {
         var size = (nuint)sizeof(ulong);
-        ThrowOnFailure(SysctlByName("hw.memsize", out var memorySize, ref size, 0, 0), "sysctlbyname(hw.memsize)");
+        var result = SysctlByName("hw.memsize", out var memorySize, ref size, 0, 0);
+        if (result != 0)
+        {
+            // sysctlbyname is a POSIX call: it returns -1 and sets errno, not a kern_return_t.
+            throw new InvalidOperationException($"sysctlbyname(hw.memsize) failed with errno {Marshal.GetLastPInvokeError()}.");
+        }
+
         return (long)memorySize;
     }
 
@@ -85,6 +103,9 @@ internal sealed partial class MacOSSystemMetricsReader : ISystemMetricsReader
     [LibraryImport(LibSystem, EntryPoint = "host_statistics64")]
     private static partial int HostStatistics64(uint host, int flavor, ref MacOSVmStatistics64 info, ref uint count);
 
-    [LibraryImport(LibSystem, EntryPoint = "sysctlbyname", StringMarshalling = StringMarshalling.Utf8)]
+    [LibraryImport(LibSystem, EntryPoint = "host_page_size")]
+    private static partial int HostPageSize(uint host, out nuint pageSize);
+
+    [LibraryImport(LibSystem, EntryPoint = "sysctlbyname", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static partial int SysctlByName(string name, out ulong value, ref nuint size, nint newValue, nuint newSize);
 }
