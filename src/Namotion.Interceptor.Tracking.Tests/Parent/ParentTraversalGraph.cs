@@ -53,31 +53,6 @@ internal static class ParentTraversalGraph
     }
 
     /// <summary>
-    /// Puts a chain of <paramref name="tailLength"/> unmarked subjects above <paramref name="subject"/> and
-    /// a cycle of <paramref name="cycleLength"/> subjects above that. Returns the subjects of the cycle in
-    /// the order the search meets them.
-    /// </summary>
-    public static IInterceptorSubject[] LinkTailAndCycle(
-        IInterceptorSubject subject, int tailLength, int cycleLength, int markedCyclePosition = -1)
-    {
-        var endOfTail = LinkChain(subject, tailLength);
-
-        var cycle = new IInterceptorSubject[cycleLength];
-        for (var i = 0; i < cycleLength; i++)
-        {
-            cycle[i] = CreateNode(i == markedCyclePosition);
-        }
-
-        Link(endOfTail, cycle[0]);
-        for (var i = 0; i < cycleLength; i++)
-        {
-            Link(cycle[i], cycle[(i + 1) % cycleLength]);
-        }
-
-        return cycle;
-    }
-
-    /// <summary>
     /// Runs the search off the test thread, so that a search that never ends fails the test instead of
     /// blocking the run.
     /// </summary>

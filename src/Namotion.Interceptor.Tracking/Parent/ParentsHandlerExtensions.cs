@@ -32,14 +32,14 @@ public static class ParentsHandlerExtensions
         // The subjects found so far, in the order they were found: the queue of the breadth first search
         // and its visited set in one. It lives on the stack, and a search that finds more subjects than
         // it holds continues on the heap.
-        var buffer = new FoundSubjects();
-        Span<IInterceptorSubject?> found = buffer;
+        var buffer = new InlineArray16<IInterceptorSubject>();
+        Span<IInterceptorSubject> found = buffer;
         found[0] = subject;
         var count = 1;
 
         for (var next = 0; next < count; next++)
         {
-            var parents = found[next]!.GetParents();
+            var parents = found[next].GetParents();
             for (var i = 0; i < parents.Length; i++)
             {
                 var parent = parents[i];
@@ -53,7 +53,7 @@ public static class ParentsHandlerExtensions
                     return root;
                 }
 
-                if (count == FoundSubjects.Capacity)
+                if (count == found.Length)
                 {
                     return FindFirstParentOnHeap<TRoot>(found, next, parents, i);
                 }
@@ -75,7 +75,7 @@ public static class ParentsHandlerExtensions
         return subject as TRoot ?? subject.TryGetFirstParent<TRoot>();
     }
 
-    private static bool Contains(ReadOnlySpan<IInterceptorSubject?> found, IInterceptorSubject subject)
+    private static bool Contains(ReadOnlySpan<IInterceptorSubject> found, IInterceptorSubject subject)
     {
         foreach (var foundSubject in found)
         {
@@ -93,17 +93,17 @@ public static class ParentsHandlerExtensions
     /// <paramref name="parentIndex"/> of the subject <paramref name="next"/> in <paramref name="found"/>.
     /// </summary>
     private static TRoot? FindFirstParentOnHeap<TRoot>(
-        ReadOnlySpan<IInterceptorSubject?> found, int next, ImmutableArray<SubjectParent> parents, int parentIndex)
+        ReadOnlySpan<IInterceptorSubject> found, int next, ImmutableArray<SubjectParent> parents, int parentIndex)
         where TRoot : class
     {
-        var visited = new HashSet<IInterceptorSubject>(FoundSubjects.Capacity + 1, ReferenceEqualityComparer.Instance);
+        var visited = new HashSet<IInterceptorSubject>(found.Length + 1, ReferenceEqualityComparer.Instance);
         var queue = new Queue<IInterceptorSubject>();
         for (var i = 0; i < found.Length; i++)
         {
-            visited.Add(found[i]!);
+            visited.Add(found[i]);
             if (i > next)
             {
-                queue.Enqueue(found[i]!);
+                queue.Enqueue(found[i]);
             }
         }
 
@@ -146,17 +146,6 @@ public static class ParentsHandlerExtensions
 
         return null;
     }
-
-    // S1144 reports the single field of an inline array as unused. The runtime reaches the elements through it.
-#pragma warning disable S1144
-    [InlineArray(Capacity)]
-    private struct FoundSubjects
-    {
-        public const int Capacity = 16;
-
-        private IInterceptorSubject? _first;
-    }
-#pragma warning restore S1144
 
     /// <summary>
     /// Gets the parents of the subject as an immutable array.
