@@ -96,7 +96,8 @@ public sealed record AgentRateLimit(
     DateTimeOffset? SevenDayResetsAt);
 
 /// <summary>
-/// A tool call made during a turn, recorded for the timeline and audit.
+/// A tool call made during a turn, recorded for the timeline and audit. <see cref="Arguments"/> and
+/// <see cref="ResultPreview"/> are truncated to a preview length, so long arguments may not be valid JSON.
 /// </summary>
 public sealed record AgentToolCall(string Name, string Arguments, string ResultPreview, bool IsError);
 

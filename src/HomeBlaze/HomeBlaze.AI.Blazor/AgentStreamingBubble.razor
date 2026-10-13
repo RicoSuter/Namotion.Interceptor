@@ -32,15 +32,15 @@
         {
             if (_subscribed is not null)
             {
-                _subscribed.TimelineChanged -= OnTimelineChanged;
+                _subscribed.StateChanged -= OnStateChanged;
             }
 
             _subscribed = Agent;
-            _subscribed.TimelineChanged += OnTimelineChanged;
+            _subscribed.StateChanged += OnStateChanged;
         }
     }
 
-    private void OnTimelineChanged()
+    private void OnStateChanged()
     {
         // Text deltas arrive faster than the browser can render; coalesce them into one pending render.
         if (Interlocked.Exchange(ref _isRenderPending, 1) == 0)
@@ -101,7 +101,7 @@
     {
         if (_subscribed is not null)
         {
-            _subscribed.TimelineChanged -= OnTimelineChanged;
+            _subscribed.StateChanged -= OnStateChanged;
             _subscribed = null;
         }
     }

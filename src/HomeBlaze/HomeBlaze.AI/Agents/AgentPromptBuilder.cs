@@ -204,20 +204,30 @@ internal static class AgentPromptBuilder
     }
 
     /// <summary>
-    /// Whether a line of a background reply starts with <see cref="QuietMarker"/>, ignoring case and leading
-    /// whitespace; models sometimes write a sentence before the marker line.
+    /// Whether a background reply is the single line the background mode asks for when nothing is noteworthy: its
+    /// only non-blank line starts with <see cref="QuietMarker"/>, ignoring case and surrounding whitespace.
     /// </summary>
     public static bool IsQuiet(string text)
     {
+        var isQuiet = false;
         foreach (var line in text.AsSpan().EnumerateLines())
         {
-            if (line.TrimStart().StartsWith(QuietMarker, StringComparison.OrdinalIgnoreCase))
+            var trimmed = line.Trim();
+            if (trimmed.IsEmpty)
             {
-                return true;
+                continue;
             }
+
+            // A second non-blank line, before or after the marker line, may carry a finding.
+            if (isQuiet || !trimmed.StartsWith(QuietMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            isQuiet = true;
         }
 
-        return false;
+        return isQuiet;
     }
 
     /// <summary>Appends a fenced block with one JSON object per item, written by <paramref name="writeProperties"/>.</summary>

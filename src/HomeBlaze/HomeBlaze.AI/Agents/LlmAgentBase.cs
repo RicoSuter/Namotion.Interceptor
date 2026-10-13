@@ -45,9 +45,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private const int RecentResultCount = 5;
     private static readonly TimeSpan ChangeBufferTime = TimeSpan.FromMilliseconds(100);
 
-    // The agent whose turn the current async flow belongs to, so re-entering the turn gate fails fast.
-    private static readonly AsyncLocal<LlmAgentBase?> CurrentTurnAgent = new();
-
     private readonly AgentServices _services;
     private readonly ILogger _logger;
     // Never disposed: its wait handle is never created, and a chat that unwinds after the agent was disposed still
@@ -81,6 +78,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         SupportedBackendTools = supportedBackendTools ?? [];
         Timeline = new AgentTimeline(filePath: null);
         Memory = new AgentMemory(filePath: null, services.TimeProvider);
+        Memory.Changed += RaiseStateChanged;
         WatchPaths = [];
         AllowedTools = [.. AgentToolSet.DefaultAllowedTools];
         MinRunInterval = TimeSpan.FromMinutes(1);
@@ -200,10 +198,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     }
 
     /// <summary>
-    /// Raised when the timeline or the streaming state of the running turn changes, on the changing thread.
-    /// Exceptions thrown by handlers are logged and swallowed.
+    /// Raised on the changing thread when the timeline, the memory, <see cref="Status"/>, <see cref="StatusMessage"/>,
+    /// <see cref="IsBusy"/> or the streamed text of the running turn changes. Handlers may run while the agent holds
+    /// its state lock, so they must not block. Exceptions thrown by handlers are logged and swallowed.
     /// </summary>
-    public event Action? TimelineChanged;
+    public event Action? StateChanged;
 
     /// <summary>The working directory for external processes of this agent.</summary>
     protected string WorkingDirectory { get; private set; } = Path.Combine(Path.GetTempPath(), "homeblaze-agent-" + Guid.NewGuid().ToString("N"));
@@ -230,6 +229,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     partial void OnAllowedToolsChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
 
+    partial void OnStatusChanged(ServiceStatus newValue) => RaiseStateChanged();
+
+    partial void OnStatusMessageChanged(string? newValue) => RaiseStateChanged();
+
+    partial void OnIsBusyChanged(bool newValue) => RaiseStateChanged();
+
     /// <summary>Starts a background run now, also while automatic runs are paused.</summary>
     [Operation(Title = "Run Now", Icon = "PlayArrow", Position = 1)]
     public void RunNow()
@@ -240,19 +245,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
     }
 
-    /// <summary>Discards the chat session; memory and timeline stay.</summary>
-    /// <remarks>
-    /// Throws <see cref="InvalidOperationException"/> when called from within a turn of this agent, for example
-    /// through a tool call, because the turn holds the gate this method waits for.
-    /// </remarks>
+    /// <summary>Discards the chat session once no turn runs; memory and timeline stay.</summary>
     [Operation(Title = "New Conversation", Icon = "RestartAlt", Position = 2, RequiresConfirmation = true)]
     public async Task NewConversationAsync(CancellationToken cancellationToken)
     {
-        if (CurrentTurnAgent.Value == this)
-        {
-            throw new InvalidOperationException("A new conversation cannot be started from within a turn of the same agent.");
-        }
-
         await _turnGate.WaitAsync(cancellationToken);
         try
         {
@@ -317,6 +313,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 var tools = CreateToolSet(progress);
                 var message = AgentPromptBuilder.BuildChatMessage(text, Timeline.GetFindingsSinceLastReply());
                 var result = await RunTurnAsync(AgentTurnKind.Chat, message, tools, progress, turnToken);
+                ClearStreamingText();
                 await AppendAsync(new AgentTimelineEntry
                 {
                     Kind = AgentTimelineEntryKind.Assistant,
@@ -368,13 +365,13 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             }
 
             var hadConfigurationError = _configurationError is not null;
-            var wasPaused = scheduler.PauseReason is not null;
+            var previousPauseReason = scheduler.PauseReason;
             if (!TryApplyIntervals(scheduler))
             {
                 Status = ServiceStatus.Error;
                 StatusMessage = _configurationError;
             }
-            else if ((hadConfigurationError || (wasPaused && scheduler.PauseReason is null)) && !IsBusy)
+            else if ((hadConfigurationError || !string.Equals(previousPauseReason, scheduler.PauseReason, StringComparison.Ordinal)) && !IsBusy)
             {
                 SetIdle();
             }
@@ -434,6 +431,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         lock (_stateLock)
         {
             generation = ++_runGeneration;
+            // A run that outlived its stop may still have published its cancelled lifetime and scheduler; until this
+            // run publishes its own, the agent is not started, so chat, manual runs and idle reports are refused.
+            _scheduler = null;
+            _lifetime = null;
             Status = ServiceStatus.Starting;
             StatusMessage = null;
         }
@@ -596,11 +597,17 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             ? Memory
             : new AgentMemory(memoryPath, _services.TimeProvider, _logger, legacyFilePath: GetStoragePath(AgentStorage.LegacyMemorySuffix));
         await memory.LoadAsync(cancellationToken);
-        Memory = memory;
+        if (!ReferenceEquals(memory, Memory))
+        {
+            Memory.Changed -= RaiseStateChanged;
+            memory.Changed += RaiseStateChanged;
+            Memory = memory;
+        }
+
         await RestoreRunStatisticsAsync(cancellationToken);
         LastAnalysis = Timeline.GetRecentBackgroundResults(1) is [var newestResult] ? newestResult.ResultText : null;
         _isStorageLoaded = true;
-        RaiseTimelineChanged();
+        RaiseStateChanged();
     }
 
     private const string SessionReadConsequence = "a new session starts";
@@ -765,6 +772,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
             var result = await RunTurnAsync(AgentTurnKind.Background, message, tools, progress, cancellationToken);
             var isQuiet = AgentPromptBuilder.IsQuiet(result.FinalText);
+            ClearStreamingText();
             await AppendAsync(new AgentTimelineEntry
             {
                 Kind = AgentTimelineEntryKind.BackgroundRun,
@@ -884,10 +892,33 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private async Task<AgentTurnResult> RunTurnAsync(
         AgentTurnKind kind, string message, AgentToolSet tools, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
+        var request = CreateTurnRequest(kind, message, tools);
+        var turnTimeout = GetEffectiveTurnTimeout();
+        using var timeout = turnTimeout is { } limit ? new CancellationTokenSource(limit, _services.TimeProvider) : null;
+        using var turnCancellation = timeout is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        try
+        {
+            var result = await ExecuteTurnAsync(request, progress, turnCancellation?.Token ?? cancellationToken);
+            if (result.RateLimit is { } rateLimit)
+            {
+                FiveHourUsage = rateLimit.FiveHourUtilization;
+                SevenDayUsage = rateLimit.SevenDayUtilization;
+            }
+
+            return result;
+        }
+        catch (OperationCanceledException) when (timeout is { IsCancellationRequested: true } && !cancellationToken.IsCancellationRequested)
+        {
+            throw new AgentTurnException(AgentFailureKind.Transient, $"The turn did not finish within {turnTimeout}.");
+        }
+    }
+
+    private AgentTurnRequest CreateTurnRequest(AgentTurnKind kind, string message, AgentToolSet tools)
+    {
         var isBackground = kind == AgentTurnKind.Background;
         var allowedTools = AllowedTools;
         var backendTools = SupportedBackendTools.Where(tool => allowedTools.Contains(tool.Name)).ToList();
-        var request = new AgentTurnRequest(
+        return new AgentTurnRequest(
             kind,
             AgentPromptBuilder.BuildSystemPrompt(
                 kind, Instructions, Memory.GetSnapshot(), backendTools.Exists(tool => tool.LoadsWebContent), AgentToolSet.CanEditPageLayout(allowedTools)),
@@ -898,31 +929,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         {
             BackendTools = backendTools.ConvertAll(tool => tool.Name)
         };
-
-        var turnTimeout = GetEffectiveTurnTimeout();
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (turnTimeout is { } limit)
-        {
-            timeout.CancelAfter(limit);
-        }
-
-        try
-        {
-            // Flows into tool calls made in-process; tool calls arriving on another flow are marked by CreateToolSet.
-            CurrentTurnAgent.Value = this;
-            var result = await ExecuteTurnAsync(request, progress, timeout.Token);
-            if (result.RateLimit is { } rateLimit)
-            {
-                FiveHourUsage = rateLimit.FiveHourUtilization;
-                SevenDayUsage = rateLimit.SevenDayUtilization;
-            }
-
-            return result;
-        }
-        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-        {
-            throw new AgentTurnException(AgentFailureKind.Transient, $"The turn did not finish within {turnTimeout}.");
-        }
     }
 
     private async Task<IReadOnlyList<AgentWatchedState>> FetchWatchedStateAsync(CancellationToken cancellationToken)
@@ -996,20 +1002,17 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         var allowedTools = AllowedTools;
         var canEditPageLayout = AgentToolSet.CanEditPageLayout(allowedTools);
         var available = _services.ToolSource.CreateTools(AgentToolSet.IsReadOnly(allowedTools))
-            .Where(tool => allowedTools.Contains(tool.Name))
-            .Select(tool => MarkAsTurnTool(tool, grantsPageLayout: canEditPageLayout && AgentToolSet.WritesPages(tool.Name)))
+            .Select(tool => WithPageLayoutPermission(tool, grantsPageLayout: canEditPageLayout && AgentToolSet.WritesPages(tool.Name)))
             .ToList();
         return AgentToolSet.Create(available, allowedTools, Memory.CreateUpdateTool(), MaxToolCallsPerTurn, progress);
     }
 
     // A backend may call tools on a flow that does not descend from RunTurnAsync, such as an HTTP request of
-    // the MCP route, so each call marks its own flow as part of this agent's turn. The permission to edit page layout
-    // is set the same way, granted or not, on the flow of the call only.
-    private McpToolInfo MarkAsTurnTool(McpToolInfo tool, bool grantsPageLayout) => new(tool)
+    // the MCP route, so each call sets the permission to edit page layout, granted or not, on its own flow only.
+    private static McpToolInfo WithPageLayoutPermission(McpToolInfo tool, bool grantsPageLayout) => new(tool)
     {
         Handler = async (input, cancellationToken) =>
         {
-            CurrentTurnAgent.Value = this;
             using (MarkdownPageLayoutPermission.Enter(grantsPageLayout))
             {
                 return await tool.Handler(input, cancellationToken);
@@ -1027,16 +1030,22 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             }
         }
 
-        RaiseTimelineChanged();
+        RaiseStateChanged();
     });
 
-    private DateTimeOffset BeginTurn(string statusMessage)
+    // Also cleared before the final entry of a turn is appended, so its text never shows twice: as the entry and
+    // as streamed text.
+    private void ClearStreamingText()
     {
         lock (_streamingLock)
         {
             _streamingText.Clear();
         }
+    }
 
+    private DateTimeOffset BeginTurn(string statusMessage)
+    {
+        ClearStreamingText();
         IsBusy = true;
         SetStatusIfStarted(ServiceStatus.Running, statusMessage);
         var started = _services.TimeProvider.GetUtcNow();
@@ -1047,10 +1056,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <summary>Ends a turn; <paramref name="isIdle"/> reports the idle status once the agent is no longer busy.</summary>
     private void EndTurn(bool isIdle)
     {
-        lock (_streamingLock)
-        {
-            _streamingText.Clear();
-        }
+        ClearStreamingText();
 
         // Cleared before the idle status, so a configuration change that skipped SetIdle while busy is picked up.
         IsBusy = false;
@@ -1058,8 +1064,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         {
             SetIdle();
         }
-
-        RaiseTimelineChanged();
     }
 
     private void OnPauseLifted()
@@ -1200,18 +1204,18 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             _logger.LogWarning(exception, "The timeline of agent {Agent} could not be written.", Title);
         }
 
-        RaiseTimelineChanged();
+        RaiseStateChanged();
     }
 
-    private void RaiseTimelineChanged()
+    private void RaiseStateChanged()
     {
         try
         {
-            TimelineChanged?.Invoke();
+            StateChanged?.Invoke();
         }
         catch (Exception exception)
         {
-            _logger.LogWarning(exception, "A timeline subscriber of agent {Agent} failed.", Title);
+            _logger.LogWarning(exception, "A state subscriber of agent {Agent} failed.", Title);
         }
     }
 }

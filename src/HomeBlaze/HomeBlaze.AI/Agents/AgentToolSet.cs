@@ -115,7 +115,7 @@ public sealed class AgentToolSet
     {
         Handler = async (input, cancellationToken) =>
         {
-            var arguments = input.GetRawText();
+            var arguments = Truncate(input.GetRawText());
             if (countsAgainstBudget && Interlocked.Increment(ref _callCount) > _maxToolCalls)
             {
                 var message = $"The tool call budget of {_maxToolCalls} calls for this turn is exhausted. Answer with what you have.";
@@ -148,13 +148,13 @@ public sealed class AgentToolSet
     /// cannot be refused.
     /// </summary>
     /// <param name="name">The backend tool name, such as <c>web_search</c>.</param>
-    /// <param name="arguments">The arguments as JSON.</param>
+    /// <param name="arguments">The arguments as JSON, truncated for the preview.</param>
     /// <param name="result">The result, truncated for the preview.</param>
     /// <param name="isError">Whether the call failed.</param>
     public void RecordBackendCall(string name, string arguments, string result, bool isError)
     {
         Interlocked.Increment(ref _callCount);
-        Record(new AgentToolCall(name, arguments, Truncate(result), isError));
+        Record(new AgentToolCall(name, Truncate(arguments), Truncate(result), isError));
     }
 
     private void Record(AgentToolCall call)

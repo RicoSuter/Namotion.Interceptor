@@ -222,7 +222,7 @@ public class AnthropicAgentTests
         // Arrange
         await using var test = await StartAsync(agent => RespondWithTextToolCallAndText(agent, "Checking the sensors.", "Both logged."));
         var streamed = string.Empty;
-        test.Agent.TimelineChanged += () =>
+        test.Agent.StateChanged += () =>
         {
             if (test.Agent.StreamingText is { Length: > 0 } text)
             {

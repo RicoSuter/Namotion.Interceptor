@@ -18,6 +18,7 @@ internal sealed class AgentTriggerPolicy
     private int _consecutiveFailures;
     private DateTimeOffset? _backoffUntil;
     private DateTimeOffset? _pausedUntil;
+    private string? _usageLimitMessage;
     private bool _isPausedUntilReconfigured;
 
     public AgentTriggerPolicy(TimeSpan? pollInterval, TimeSpan minRunInterval, DateTimeOffset now)
@@ -32,7 +33,8 @@ internal sealed class AgentTriggerPolicy
     public bool IsRunPending => _pendingReason is not null;
 
     /// <summary>
-    /// Applies new intervals, restarts the poll period and lifts a pause caused by a configuration error.
+    /// Applies new intervals, restarts the poll period and lifts a pause caused by a configuration error; a
+    /// usage-limit pause that has not ended yet then becomes the pause reason again.
     /// </summary>
     public void Reconfigure(TimeSpan? pollInterval, TimeSpan minRunInterval, DateTimeOffset now)
     {
@@ -52,7 +54,8 @@ internal sealed class AgentTriggerPolicy
         if (_isPausedUntilReconfigured)
         {
             _isPausedUntilReconfigured = false;
-            PauseReason = null;
+            PauseReason = _pausedUntil is null ? null : _usageLimitMessage;
+            ExpireUsageLimitPauseIfDue(now);
         }
     }
 
@@ -122,6 +125,7 @@ internal sealed class AgentTriggerPolicy
         _consecutiveFailures = 0;
         _backoffUntil = null;
         _pausedUntil = null;
+        _usageLimitMessage = null;
         _isPausedUntilReconfigured = false;
         PauseReason = null;
     }
@@ -139,6 +143,7 @@ internal sealed class AgentTriggerPolicy
                 break;
             case AgentFailureKind.UsageLimit:
                 _pausedUntil = retryAfter ?? now + backoff;
+                _usageLimitMessage = message;
                 if (!_isPausedUntilReconfigured)
                 {
                     PauseReason = message;
@@ -170,6 +175,7 @@ internal sealed class AgentTriggerPolicy
         if (!_isPausedUntilReconfigured && _pausedUntil is { } pausedUntil && now >= pausedUntil)
         {
             _pausedUntil = null;
+            _usageLimitMessage = null;
             PauseReason = null;
         }
     }

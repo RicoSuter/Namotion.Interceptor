@@ -411,10 +411,9 @@ public class LlmAgentBaseTests
 
         // Act
         time.Advance(TimeSpan.FromMinutes(10));
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Running);
 
-        // Assert
-        Assert.Equal("Idle", test.Agent.StatusMessage);
+        // Assert - the status and its message are two writes, so both are awaited.
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent is { Status: ServiceStatus.Running, StatusMessage: "Idle" });
         Assert.Single(test.Agent.Requests);
     }
 
@@ -457,11 +456,11 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
-    public async Task WhenATimelineSubscriberThrows_ThenTheBackgroundLoopKeepsRunning()
+    public async Task WhenAStateSubscriberThrows_ThenTheBackgroundLoopKeepsRunning()
     {
         // Arrange
         await using var test = await StartAsync();
-        test.Agent.TimelineChanged += () => throw new InvalidOperationException("subscriber broke");
+        test.Agent.StateChanged += () => throw new InvalidOperationException("subscriber broke");
 
         // Act
         await test.RunNowAndWaitAsync();
@@ -670,14 +669,20 @@ public class LlmAgentBaseTests
     public async Task WhenATurnExceedsTheTurnTimeout_ThenTheRunFailsWithATimeoutError()
     {
         // Arrange
-        await using var test = await StartAsync(agent =>
-        {
-            agent.TurnTimeout = TimeSpan.FromMilliseconds(100);
-            agent.Handler = WaitForCancellationAsync;
-        });
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services),
+            agent =>
+            {
+                agent.TurnTimeout = TimeSpan.FromMinutes(5);
+                agent.Handler = WaitForCancellationAsync;
+            },
+            timeProvider: time);
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Requests.Count == 1 && time.PendingTimerCount == 1);
 
         // Act
-        test.Agent.RunNow();
+        time.Advance(TimeSpan.FromMinutes(5));
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
 
         // Assert
@@ -685,31 +690,6 @@ public class LlmAgentBaseTests
         var entry = Assert.Single(test.Agent.Timeline.Entries);
         Assert.Equal(AgentTimelineEntryKind.Error, entry.Kind);
         Assert.Contains("did not finish", entry.Text);
-    }
-
-    [Fact]
-    public async Task WhenATurnStartsANewConversationOfItsOwnAgent_ThenItFailsFastInsteadOfDeadlocking()
-    {
-        // Arrange
-        await using var test = await StartAsync(agent => agent.Handler = async (_, _, cancellationToken) =>
-        {
-            try
-            {
-                await agent.NewConversationAsync(cancellationToken);
-                return new AgentTurnResult("reset", null, null);
-            }
-            catch (InvalidOperationException exception)
-            {
-                return new AgentTurnResult(exception.Message, null, null);
-            }
-        });
-
-        // Act
-        await test.RunNowAndWaitAsync();
-
-        // Assert
-        Assert.Contains("within a turn", Assert.Single(test.Agent.Timeline.Entries).Text);
-        Assert.Equal(0, test.Agent.ResetCount);
     }
 
     [Fact]
@@ -754,6 +734,159 @@ public class LlmAgentBaseTests
         });
         Assert.Equal(ServiceStatus.Running, test.Agent.Status);
         Assert.Equal("Idle", test.Agent.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenAStaleRunEndsWhileARestartIsStarting_ThenItNeitherReportsIdleNorTakesChat()
+    {
+        // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishStarting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var test = await StartAsync(agent => agent.Handler = async (_, _, _) =>
+        {
+            // Ignores cancellation, so the run outlives its stop.
+            await release.Task;
+            return new AgentTurnResult("[quiet] ok", null, null);
+        });
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
+        var staleRun = test.Agent.ExecuteTask!;
+        using var expired = new CancellationTokenSource();
+        await expired.CancelAsync();
+        try
+        {
+            await ((IHostedService)test.Agent).StopAsync(expired.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The stop gave up waiting for the run, which is the situation under test.
+        }
+
+        test.Agent.StartingHandler = _ => finishStarting.Task;
+
+        // Act
+        await ((IHostedService)test.Agent).StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Starting);
+        var chat = await Assert.ThrowsAsync<InvalidOperationException>(() => test.Agent.SendMessageAsync("hello", CancellationToken.None));
+        test.Agent.RunNow();
+        release.SetResult();
+        await staleRun;
+
+        // Assert
+        Assert.Equal(LlmAgentBase.NotRunningText, chat.Message);
+        Assert.Equal(ServiceStatus.Starting, test.Agent.Status);
+        Assert.DoesNotContain(test.Agent.Timeline.Entries, entry => entry.Kind == AgentTimelineEntryKind.User);
+        finishStarting.SetResult();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent is { Status: ServiceStatus.Running, StatusMessage: "Idle" });
+    }
+
+    [Fact]
+    public async Task WhenReconfiguringLiftsAConfigurationPauseDuringAUsageLimitPause_ThenTheAgentShowsTheUsageLimit()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services),
+            agent => agent.Handler = (_, _, _) => throw (agent.Requests.Count == 1
+                ? new AgentTurnException(AgentFailureKind.UsageLimit, "Usage limit reached", retryAfter: time.GetUtcNow().AddHours(1))
+                : new AgentTurnException(AgentFailureKind.Configuration, "Claude CLI not logged in")),
+            timeProvider: time);
+        await test.RunNowAndWaitAsync();
+        await test.RunNowAndWaitAsync();
+        Assert.Equal("Claude CLI not logged in", test.Agent.StatusMessage);
+
+        // Act
+        test.Agent.PollInterval = TimeSpan.FromMinutes(5);
+        await test.Agent.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Unavailable, test.Agent.Status);
+        Assert.Equal("Usage limit reached", test.Agent.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenAUsageLimitPauseEnds_ThenStateChangedIsRaisedWithTheIdleStatus()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services),
+            agent => agent.Handler = (_, _, _) => throw new AgentTurnException(
+                AgentFailureKind.UsageLimit, "Usage limit reached", retryAfter: time.GetUtcNow().AddMinutes(10)),
+            timeProvider: time);
+        await test.RunNowAndWaitAsync();
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
+        using var raisedWhileIdle = new ManualResetEventSlim();
+        test.Agent.StateChanged += () =>
+        {
+            if (test.Agent is { Status: ServiceStatus.Running, StatusMessage: "Idle" })
+            {
+                raisedWhileIdle.Set();
+            }
+        };
+
+        // Act
+        time.Advance(TimeSpan.FromMinutes(10));
+
+        // Assert
+        Assert.True(raisedWhileIdle.Wait(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
+    public async Task WhenTheMemoryIsEditedOutsideATurn_ThenStateChangedIsRaised()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        var isRaisedWithTheEntry = false;
+        test.Agent.StateChanged += () =>
+        {
+            if (test.Agent.Memory.GetSnapshot().TryGetEntry("notes/a") is not null)
+            {
+                Volatile.Write(ref isRaisedWithTheEntry, true);
+            }
+        };
+
+        // Act
+        await test.Agent.Memory.UpdateAsync([AgentMemoryChange.Set("notes/a", "b")], CancellationToken.None);
+
+        // Assert
+        Assert.True(Volatile.Read(ref isRaisedWithTheEntry));
+    }
+
+    [Theory]
+    [InlineData(AgentTurnKind.Background)]
+    [InlineData(AgentTurnKind.Chat)]
+    public async Task WhenATurnAppendsItsAnswer_ThenTheStreamedTextIsAlreadyCleared(AgentTurnKind kind)
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = (_, progress, _) =>
+        {
+            progress.Report(new AgentTextDelta("It is too warm."));
+            return Task.FromResult(new AgentTurnResult("It is too warm.", null, null));
+        });
+        var answerKind = kind == AgentTurnKind.Background ? AgentTimelineEntryKind.BackgroundRun : AgentTimelineEntryKind.Assistant;
+        var streamedWithAnswer = new ConcurrentBag<string>();
+        test.Agent.StateChanged += () =>
+        {
+            if (test.Agent.Timeline.Entries.Any(entry => entry.Kind == answerKind))
+            {
+                streamedWithAnswer.Add(test.Agent.StreamingText);
+            }
+        };
+
+        // Act
+        if (kind == AgentTurnKind.Background)
+        {
+            await test.RunNowAndWaitAsync();
+        }
+        else
+        {
+            await test.Agent.SendMessageAsync("How is the freezer?", CancellationToken.None);
+        }
+
+        // Assert
+        Assert.NotEmpty(streamedWithAnswer);
+        Assert.All(streamedWithAnswer, Assert.Empty);
     }
 
     [Fact]

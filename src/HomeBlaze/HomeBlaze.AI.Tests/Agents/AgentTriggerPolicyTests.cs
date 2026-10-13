@@ -289,6 +289,50 @@ public class AgentTriggerPolicyTests
         Assert.Equal("Claude CLI not logged in", policy.PauseReason);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenReconfiguringLiftsAConfigurationPauseDuringAUsageLimitPause_ThenTheUsageLimitPauseStays(bool isUsageLimitFirst)
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+        if (isUsageLimitFirst)
+        {
+            policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, Start.AddHours(2), "Usage limit reached");
+            policy.OnRunFailed(Start, AgentFailureKind.Configuration, retryAfter: null, "Claude CLI not logged in");
+        }
+        else
+        {
+            policy.OnRunFailed(Start, AgentFailureKind.Configuration, retryAfter: null, "Claude CLI not logged in");
+            policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, Start.AddHours(2), "Usage limit reached");
+        }
+
+        policy.RequestRun(AgentTriggers.Change);
+
+        // Act
+        policy.Reconfigure(pollInterval: null, OneMinute, Start.AddHours(1));
+
+        // Assert
+        Assert.Equal("Usage limit reached", policy.PauseReason);
+        Assert.False(policy.TryTakeDueRun(Start.AddHours(1), out _));
+        Assert.Equal(Start.AddHours(2), policy.GetNextWakeTime(Start.AddHours(1)));
+    }
+
+    [Fact]
+    public void WhenReconfiguringLiftsAConfigurationPauseAfterAUsageLimitPauseEnded_ThenNothingIsPaused()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+        policy.OnRunFailed(Start, AgentFailureKind.Configuration, retryAfter: null, "Claude CLI not logged in");
+        policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, Start.AddHours(2), "Usage limit reached");
+
+        // Act
+        policy.Reconfigure(pollInterval: null, OneMinute, Start.AddHours(3));
+
+        // Assert
+        Assert.Null(policy.PauseReason);
+    }
+
     [Fact]
     public void WhenThePollIntervalExceedsTheSaneUpperBound_ThenConstructingThrows()
     {

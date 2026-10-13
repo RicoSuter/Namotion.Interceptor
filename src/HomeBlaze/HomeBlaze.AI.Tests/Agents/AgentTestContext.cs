@@ -52,6 +52,9 @@ public class FakeAgent : LlmAgentBase
 
     public List<AgentTurnRequest> Requests { get; } = [];
 
+    /// <summary>Runs while the agent starts, after its storage is loaded and before it is published as started.</summary>
+    public Func<CancellationToken, Task>? StartingHandler { get; set; }
+
     public int ResetCount { get; private set; }
 
     protected override Task<AgentTurnResult> ExecuteTurnAsync(AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
@@ -63,6 +66,9 @@ public class FakeAgent : LlmAgentBase
 
         return Handler(request, progress, cancellationToken);
     }
+
+    protected override Task OnStartingAsync(CancellationToken cancellationToken) =>
+        StartingHandler?.Invoke(cancellationToken) ?? Task.CompletedTask;
 
     protected override Task ResetSessionAsync(CancellationToken cancellationToken)
     {

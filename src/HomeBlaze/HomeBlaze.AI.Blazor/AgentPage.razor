@@ -74,6 +74,8 @@
     private IReadOnlyList<AgentTimelineEntry>? _renderedEntries;
     private AgentMemorySnapshot? _renderedMemory;
     private volatile bool _renderedIsBusy;
+    private volatile ServiceStatus _renderedStatus;
+    private string? _renderedStatusMessage;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -91,7 +93,7 @@
         {
             if (_subscribed is not null)
             {
-                _subscribed.TimelineChanged -= OnTimelineChanged;
+                _subscribed.StateChanged -= OnStateChanged;
             }
 
             _subscribed = Agent;
@@ -100,17 +102,19 @@
             {
                 _memoryEditor = new AgentMemoryEditor(() => agent.IsStorageLoaded ? agent.Memory : null);
                 CaptureRenderedState(agent);
-                agent.TimelineChanged += OnTimelineChanged;
+                agent.StateChanged += OnStateChanged;
             }
         }
     }
 
-    private void OnTimelineChanged()
+    private void OnStateChanged()
     {
         if (_subscribed is { } agent &&
             (!ReferenceEquals(Volatile.Read(ref _renderedEntries), agent.Timeline.Entries) ||
              !ReferenceEquals(Volatile.Read(ref _renderedMemory), agent.Memory.GetSnapshot()) ||
-             _renderedIsBusy != agent.IsBusy))
+             _renderedIsBusy != agent.IsBusy ||
+             _renderedStatus != agent.Status ||
+             !string.Equals(Volatile.Read(ref _renderedStatusMessage), agent.StatusMessage, StringComparison.Ordinal)))
         {
             RequestRender();
         }
@@ -151,6 +155,8 @@
         Volatile.Write(ref _renderedEntries, agent.Timeline.Entries);
         Volatile.Write(ref _renderedMemory, agent.Memory.GetSnapshot());
         _renderedIsBusy = agent.IsBusy;
+        _renderedStatus = agent.Status;
+        Volatile.Write(ref _renderedStatusMessage, agent.StatusMessage);
     }
 
     private async Task NewConversationAsync()
@@ -192,7 +198,7 @@
         TimeZone.Changed -= OnTimeZoneChanged;
         if (_subscribed is not null)
         {
-            _subscribed.TimelineChanged -= OnTimelineChanged;
+            _subscribed.StateChanged -= OnStateChanged;
             _subscribed = null;
         }
     }

@@ -113,6 +113,12 @@ public sealed class AgentMemory
     public AgentMemorySnapshot GetSnapshot() => _snapshot;
 
     /// <summary>
+    /// Raised on the writing thread after a load or an update changed the snapshot. Exceptions thrown by handlers are
+    /// logged and swallowed.
+    /// </summary>
+    public event Action? Changed;
+
+    /// <summary>
     /// Validates a key and normalizes it: trimmed, without leading or trailing slashes.
     /// </summary>
     /// <returns>Why the key is invalid, or null when it is valid.</returns>
@@ -158,6 +164,7 @@ public sealed class AgentMemory
     public async Task LoadAsync(CancellationToken cancellationToken)
     {
         await _writeLock.WaitAsync(cancellationToken);
+        var previous = _snapshot;
         try
         {
             await LoadLockedAsync(cancellationToken);
@@ -166,6 +173,8 @@ public sealed class AgentMemory
         {
             _writeLock.Release();
         }
+
+        RaiseChangedIfReplaced(previous);
     }
 
     /// <summary>
@@ -188,6 +197,7 @@ public sealed class AgentMemory
         }
 
         await _writeLock.WaitAsync(cancellationToken);
+        var previous = _snapshot;
         try
         {
             if (!_isLoaded)
@@ -222,6 +232,24 @@ public sealed class AgentMemory
         finally
         {
             _writeLock.Release();
+            RaiseChangedIfReplaced(previous);
+        }
+    }
+
+    private void RaiseChangedIfReplaced(AgentMemorySnapshot previous)
+    {
+        if (ReferenceEquals(previous, _snapshot))
+        {
+            return;
+        }
+
+        try
+        {
+            Changed?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(exception, "A subscriber of the agent memory {Path} failed.", FilePath);
         }
     }
 

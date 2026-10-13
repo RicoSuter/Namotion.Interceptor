@@ -127,6 +127,24 @@ public class AgentToolSetTests
     }
 
     [Fact]
+    public async Task WhenToolArgumentsAreLong_ThenTheRecordedArgumentsAreTruncatedLikeResults()
+    {
+        // Arrange
+        var toolSet = AgentToolSet.Create([Tool("browse")], ["browse"], MemoryTool, maxToolCalls: 5, progress: null);
+        var longArguments = JsonSerializer.SerializeToElement(new { path = new string('x', 3000) });
+
+        // Act
+        await toolSet.Tools[0].Handler(longArguments, CancellationToken.None);
+        toolSet.RecordBackendCall("web_fetch", new string('y', 3000), "ok", isError: false);
+
+        // Assert
+        Assert.Equal(2003, toolSet.Calls[0].Arguments.Length);
+        Assert.StartsWith("""{"path":"xxx""", toolSet.Calls[0].Arguments);
+        Assert.EndsWith("...", toolSet.Calls[0].Arguments);
+        Assert.Equal(2003, toolSet.Calls[1].Arguments.Length);
+    }
+
+    [Fact]
     public async Task WhenABackendToolCallIsRecorded_ThenItShowsAsACallAndCountsAgainstTheBudget()
     {
         // Arrange

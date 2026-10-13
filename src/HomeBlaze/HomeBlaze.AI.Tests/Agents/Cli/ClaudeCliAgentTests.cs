@@ -58,7 +58,7 @@ public class ClaudeCliAgentTests
         using var cli = FakeClaudeCli.Create("text-tool-text.jsonl");
         await using var test = await StartAsync(cli);
         var streamed = string.Empty;
-        test.Agent.TimelineChanged += () =>
+        test.Agent.StateChanged += () =>
         {
             if (test.Agent.StreamingText is { Length: > 0 } text)
             {
