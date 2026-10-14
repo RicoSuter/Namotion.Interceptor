@@ -59,6 +59,7 @@
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <PackageVersion Include="System.Device.Gpio" Version="3.2.0" />
     <PackageVersion Include="System.Reactive" Version="6.1.0" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <PackageVersion Include="Toolbelt.Blazor.HotKeys2" Version="6.0.1" />
     <PackageVersion Include="Verify.Xunit" Version="31.3.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
