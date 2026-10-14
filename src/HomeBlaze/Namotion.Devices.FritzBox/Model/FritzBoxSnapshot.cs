@@ -4,7 +4,8 @@ namespace Namotion.Devices.FritzBox.Model;
 
 /// <summary>
 /// Everything one poll read from the router. A part is null when the router did not answer it, except
-/// <see cref="Wlans"/> and <see cref="Hosts"/>, which are empty rather than null when unanswered.
+/// <see cref="Wlans"/>, which is empty rather than null when unanswered, and <see cref="Hosts"/>, which is
+/// required: the poll fails without it.
 /// </summary>
 internal sealed record FritzBoxSnapshot(
     RouterInfo? Router,
