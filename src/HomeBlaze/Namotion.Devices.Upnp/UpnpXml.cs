@@ -45,10 +45,10 @@ public static class UpnpXml
 
     /// <summary>
     /// Creates a reader over the bytes of a document, which takes the encoding from the document and throws
-    /// <see cref="XmlException"/> while reading when it is malformed or declares a document type. It sets no depth
-    /// limit: wrap it in a <see cref="DepthLimitedXmlReader"/> unless the caller skips what it does not read.
+    /// <see cref="XmlException"/> while reading when it is malformed, declares a document type, or nests elements
+    /// deeper than <see cref="MaximumLevels"/>.
     /// </summary>
-    public static XmlReader CreateReader(Stream stream) => XmlReader.Create(stream, ReaderSettings);
+    public static XmlReader CreateReader(Stream stream) => new DepthLimitedXmlReader(XmlReader.Create(stream, ReaderSettings), MaximumLevels);
 
     /// <summary>
     /// Creates a reader over the bytes of a document like <see cref="CreateReader"/>, except that it reports a

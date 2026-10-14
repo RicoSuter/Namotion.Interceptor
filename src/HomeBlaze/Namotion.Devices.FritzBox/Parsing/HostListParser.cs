@@ -16,7 +16,7 @@ internal static class HostListParser
     internal static List<HostEntry> Parse(Stream stream)
     {
         var hosts = new List<HostEntry>();
-        using var reader = new DepthLimitedXmlReader(UpnpXml.CreateReader(stream), UpnpXml.MaximumLevels);
+        using var reader = UpnpXml.CreateReader(stream);
         while (reader.Read())
         {
             if (reader.NodeType == XmlNodeType.Element && reader.Depth == 1 && reader.LocalName == "Item")

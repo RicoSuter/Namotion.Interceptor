@@ -61,26 +61,6 @@ public class UpnpXmlTests
         Assert.Throws<XmlException>(() => UpnpXml.Parse("<!DOCTYPE a [<!ENTITY e \"x\">]><a>&e;</a>"));
     }
 
-    [Fact]
-    public void WhenTheReaderIsNull_ThenConstructingTheDepthLimitedReaderThrowsArgumentNullException()
-    {
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new DepthLimitedXmlReader(null!, 1));
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void WhenMaximumLevelsIsNotPositive_ThenConstructingTheDepthLimitedReaderThrowsArgumentOutOfRangeException(int maximumLevels)
-    {
-        // Arrange
-        using var stringReader = new StringReader("<a />");
-        using var xmlReader = XmlReader.Create(stringReader);
-
-        // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => new DepthLimitedXmlReader(xmlReader, maximumLevels));
-    }
-
     private static string Nest(int levels, string text = "") =>
         string.Concat(Enumerable.Repeat("<a>", levels)) + text + string.Concat(Enumerable.Repeat("</a>", levels));
 }

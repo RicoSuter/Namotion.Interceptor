@@ -6,7 +6,7 @@ namespace Namotion.Devices.Upnp;
 /// Passes a reader through and throws <see cref="XmlException"/> at the first element that nests deeper than a
 /// number of levels. Owns the reader and disposes it.
 /// </summary>
-public sealed class DepthLimitedXmlReader : XmlReader
+internal sealed class DepthLimitedXmlReader : XmlReader
 {
     // A reader sets no limit of its own. Loading a document takes time quadratic in its depth, and reading the text
     // of an element recurses once per level, so the limit bounds both.
@@ -18,11 +18,8 @@ public sealed class DepthLimitedXmlReader : XmlReader
     /// </summary>
     /// <param name="reader">The reader to pass through.</param>
     /// <param name="maximumLevels">How many elements may nest, the root included.</param>
-    public DepthLimitedXmlReader(XmlReader reader, int maximumLevels)
+    internal DepthLimitedXmlReader(XmlReader reader, int maximumLevels)
     {
-        ArgumentNullException.ThrowIfNull(reader);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumLevels);
-
         _reader = reader;
         _maximumLevels = maximumLevels;
     }

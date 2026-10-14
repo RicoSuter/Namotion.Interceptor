@@ -17,6 +17,8 @@ public class UpnpSoapClientTests
     private const string AnswerStart =
         "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body>";
 
+    private static readonly Uri BaseUri = new("http://localhost/");
+
     private static readonly UpnpService AvTransport = new("urn:schemas-upnp-org:service:AVTransport:1", "/MediaRenderer/AVTransport/Control");
     private static readonly UpnpService RenderingControl = new("urn:schemas-upnp-org:service:RenderingControl:1", "/MediaRenderer/RenderingControl/Control");
     private static readonly UpnpService DeviceProperties = new("urn:schemas-upnp-org:service:DeviceProperties:1", "/DeviceProperties/Control");
@@ -70,31 +72,31 @@ public class UpnpSoapClientTests
     [Fact]
     public async Task WhenInvokingAnAction_ThenThePostNamesTheQuotedActionAndCarriesTheEnvelopeWithoutAByteOrderMark()
     {
-        // Arrange
-        string? method = null;
+        // Arrange: the request's own content is disposed once the client has sent it, so everything needed from
+        // it is captured here instead of being read back from the request after the call returns.
+        HttpMethod? method = null;
         string? path = null;
         string? soapAction = null;
         string? contentType = null;
-        byte[] body = [];
-        await using var device = new LoopbackHttpServer(async context =>
+        var body = Array.Empty<byte>();
+        using var httpClient = new HttpClient(new StubHttpMessageHandler(async request =>
         {
-            method = context.Request.HttpMethod;
-            path = context.Request.Url!.AbsolutePath;
-            soapAction = context.Request.Headers["SOAPACTION"];
-            contentType = context.Request.ContentType;
-            using var buffer = new MemoryStream();
-            await context.Request.InputStream.CopyToAsync(buffer);
-            body = buffer.ToArray();
-            await WriteAsync(context.Response, HttpStatusCode.OK, AnswerStart + "<u:PauseResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\" />" + EnvelopeEnd);
-        });
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+            method = request.Method;
+            path = request.RequestUri!.AbsolutePath;
+            soapAction = request.Headers.GetValues("SOAPACTION").Single();
+            contentType = request.Content!.Headers.GetValues("Content-Type").Single();
+            body = await request.Content.ReadAsByteArrayAsync();
+            return CreateAnswer(
+                HttpStatusCode.OK,
+                AnswerStart + "<u:PauseResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\" />" + EnvelopeEnd);
+        }));
+        var client = CreateClient(httpClient);
 
         // Act
         await client.InvokeAsync(AvTransport, "Pause", [("InstanceID", "0")], CancellationToken.None);
 
         // Assert
-        Assert.Equal("POST", method);
+        Assert.Equal(HttpMethod.Post, method);
         Assert.Equal("/MediaRenderer/AVTransport/Control", path);
         Assert.Equal("\"urn:schemas-upnp-org:service:AVTransport:1#Pause\"", soapAction);
         Assert.Equal("text/xml; charset=\"utf-8\"", contentType);
@@ -108,7 +110,7 @@ public class UpnpSoapClientTests
     public async Task WhenTheDeviceAnswers_ThenValuesAreReadByNameAndAMissingOrUnreadableOneIsNull()
     {
         // Arrange
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.OK,
             AnswerStart +
             "<u:GetThingsResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">" +
@@ -119,8 +121,7 @@ public class UpnpSoapClientTests
             "<PaddedNumber> 7 </PaddedNumber><PaddedTrue> 1 </PaddedTrue><Nested><Inner>5</Inner></Nested>" +
             "<Split>a<!-- c -->b</Split><Section><![CDATA[<x>]]></Section><u:Prefixed>p</u:Prefixed><Last>z</Last>" +
             "</u:GetThingsResponse>" + EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act
         var response = await client.QueryAsync(RenderingControl, "GetThings", [], CancellationToken.None);
@@ -159,14 +160,13 @@ public class UpnpSoapClientTests
     public async Task WhenAValueIsWhitespaceOrHasSurroundingSpaces_ThenItIsReturnedAsSent()
     {
         // Arrange
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.OK,
             AnswerStart +
             "<u:GetNamesResponse xmlns:u=\"urn:schemas-upnp-org:service:DeviceProperties:1\">" +
             "<Blank> </Blank><Padded> x </Padded>" +
             "</u:GetNamesResponse>" + EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act
         var response = await client.QueryAsync(DeviceProperties, "GetNames", [], CancellationToken.None);
@@ -180,7 +180,7 @@ public class UpnpSoapClientTests
     public async Task WhenTheAnswerIsIndentedWithAHeaderBeforeTheBody_ThenQueryingReadsItsValues()
     {
         // Arrange: the kind of multi-line, indented SOAP with a header a real device sends.
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.OK,
             "<?xml version=\"1.0\"?>\n" +
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\n" +
@@ -193,8 +193,7 @@ public class UpnpSoapClientTests
             "    </u:GetVolumeResponse>\n" +
             "  </s:Body>\n" +
             "</s:Envelope>\n");
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act
         var response = await client.QueryAsync(RenderingControl, "GetVolume", [], CancellationToken.None);
@@ -206,14 +205,12 @@ public class UpnpSoapClientTests
     [Fact]
     public async Task WhenTheCharsetOfTheAnswerHeaderIsWrong_ThenTheTextIsStillReadFromTheDocument()
     {
-        // Arrange
-        await using var device = new LoopbackHttpServer(context => WriteAsync(
-            context.Response,
+        // Arrange: a device that sends UTF-8 bytes but names the wrong charset in its header.
+        using var httpClient = Answer(
             HttpStatusCode.OK,
             AnswerStart + "<u:GetNameResponse xmlns:u=\"urn:schemas-upnp-org:service:DeviceProperties:1\"><Name>Küche</Name></u:GetNameResponse>" + EnvelopeEnd,
-            "text/xml; charset=iso-8859-1"));
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+            "text/xml; charset=iso-8859-1");
+        var client = CreateClient(httpClient);
 
         // Act
         var response = await client.QueryAsync(DeviceProperties, "GetName", [], CancellationToken.None);
@@ -229,9 +226,8 @@ public class UpnpSoapClientTests
     public async Task WhenACommandIsAnsweredWithoutAnEnvelope_ThenItStillSucceeds(HttpStatusCode status, string body)
     {
         // Arrange
-        await using var device = Answer(status, body);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        using var httpClient = Answer(status, body);
+        var client = CreateClient(httpClient);
 
         // Act
         var exception = await Record.ExceptionAsync(
@@ -245,14 +241,13 @@ public class UpnpSoapClientTests
     public async Task WhenTheDeviceAnswersWithAFault_ThenTheExceptionNamesTheServiceTheActionAndTheErrorCode()
     {
         // Arrange
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.InternalServerError,
             AnswerStart +
             "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
             "<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>701</errorCode></UPnPError></detail></s:Fault>" +
             EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act
         var exception = await Assert.ThrowsAsync<UpnpFaultException>(
@@ -270,7 +265,7 @@ public class UpnpSoapClientTests
     public async Task WhenAFaultCarriesSeveralErrorCodeElements_ThenTheFirstOneIsUsed()
     {
         // Arrange: a second errorCode must not stall the reader once the first one has already been parsed.
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.InternalServerError,
             AnswerStart +
             "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
@@ -278,8 +273,7 @@ public class UpnpSoapClientTests
             "<errorCode>401</errorCode><errorCode>402</errorCode>" +
             "</UPnPError></detail></s:Fault>" +
             EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act
         var exception = await Assert.ThrowsAsync<UpnpFaultException>(
@@ -291,31 +285,10 @@ public class UpnpSoapClientTests
     }
 
     [Fact]
-    public async Task WhenACommandIsAnsweredWithAFaultAndASuccessStatus_ThenInvokingThrowsTheFault()
-    {
-        // Arrange
-        await using var device = Answer(
-            HttpStatusCode.OK,
-            AnswerStart +
-            "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
-            "<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>402</errorCode></UPnPError></detail></s:Fault>" +
-            EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<UpnpFaultException>(
-            () => client.InvokeAsync(AvTransport, "Next", [("InstanceID", "0")], CancellationToken.None));
-
-        // Assert
-        Assert.Equal(402, exception.ErrorCode);
-    }
-
-    [Fact]
     public async Task WhenTheAnswerIsIndentedWithAHeaderAndCarriesAFaultWithASuccessStatus_ThenInvokingThrowsTheFault()
     {
         // Arrange: the kind of multi-line, indented SOAP with a header a real device sends.
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.OK,
             "<?xml version=\"1.0\"?>\n" +
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\n" +
@@ -334,8 +307,7 @@ public class UpnpSoapClientTests
             "    </s:Fault>\n" +
             "  </s:Body>\n" +
             "</s:Envelope>\n");
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act
         var exception = await Assert.ThrowsAsync<UpnpFaultException>(
@@ -356,21 +328,10 @@ public class UpnpSoapClientTests
     [InlineData(604, "human intervention required")]
     [InlineData(605, "string argument too long")]
     [InlineData(606, "action not authorized")]
-    public async Task WhenTheFaultCodeIsStandard_ThenTheMessageDescribesIt(int code, string description)
+    public void WhenTheFaultCodeIsStandard_ThenTheMessageDescribesIt(int code, string description)
     {
-        // Arrange
-        await using var device = Answer(
-            HttpStatusCode.InternalServerError,
-            AnswerStart +
-            "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
-            $"<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>{code}</errorCode></UPnPError></detail></s:Fault>" +
-            EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
-
         // Act
-        var exception = await Assert.ThrowsAsync<UpnpFaultException>(
-            () => client.InvokeAsync(AvTransport, "Play", [], CancellationToken.None));
+        var exception = new UpnpFaultException("urn:x", "Play", code, "UPnPError");
 
         // Assert
         Assert.Equal($"The device refused Play: {description} (UPnP error {code}).", exception.Message);
@@ -380,11 +341,10 @@ public class UpnpSoapClientTests
     public async Task WhenAFaultCarriesNoErrorCode_ThenTheExceptionHoldsTheFaultText()
     {
         // Arrange
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.InternalServerError,
             AnswerStart + "<s:Fault><faultcode>s:Client</faultcode><faultstring>Busy</faultstring></s:Fault>" + EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act
         var exception = await Assert.ThrowsAsync<UpnpFaultException>(
@@ -402,9 +362,8 @@ public class UpnpSoapClientTests
     public async Task WhenTheDeviceAnswersAnErrorThatIsNoFault_ThenTheRequestFailsWithItsStatus(string body)
     {
         // Arrange
-        await using var device = Answer(HttpStatusCode.InternalServerError, body);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        using var httpClient = Answer(HttpStatusCode.InternalServerError, body);
+        var client = CreateClient(httpClient);
 
         // Act
         var exception = await Assert.ThrowsAsync<HttpRequestException>(
@@ -423,9 +382,8 @@ public class UpnpSoapClientTests
     public async Task WhenTheAnswerIsNotTheSoapAnswerToTheAction_ThenQueryingThrowsXmlException(string body)
     {
         // Arrange
-        await using var device = Answer(HttpStatusCode.OK, body);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        using var httpClient = Answer(HttpStatusCode.OK, body);
+        var client = CreateClient(httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<XmlException>(
@@ -436,13 +394,12 @@ public class UpnpSoapClientTests
     public async Task WhenTheAnswerDeclaresADocumentType_ThenQueryingThrowsXmlException()
     {
         // Arrange
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.OK,
             "<!DOCTYPE s [<!ENTITY e \"x\">]>" + AnswerStart +
             "<u:GetTransportInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"><CurrentTransportState>PLAYING</CurrentTransportState></u:GetTransportInfoResponse>" +
             EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<XmlException>(
@@ -455,11 +412,10 @@ public class UpnpSoapClientTests
         // Arrange
         const int depth = 100_000;
         var nested = string.Concat(Enumerable.Repeat("<a>", depth)) + string.Concat(Enumerable.Repeat("</a>", depth));
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.OK,
             AnswerStart + "<u:GetNameResponse xmlns:u=\"urn:schemas-upnp-org:service:DeviceProperties:1\"><Name>" + nested + "</Name><Room>Küche</Room></u:GetNameResponse>" + EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act
         var response = await client.QueryAsync(DeviceProperties, "GetName", [], CancellationToken.None);
@@ -473,14 +429,13 @@ public class UpnpSoapClientTests
     public async Task WhenAReadIsAnsweredWithAFaultAndASuccessStatus_ThenQueryingThrowsTheFault()
     {
         // Arrange
-        await using var device = Answer(
+        using var httpClient = Answer(
             HttpStatusCode.OK,
             AnswerStart +
             "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
             "<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>402</errorCode></UPnPError></detail></s:Fault>" +
             EnvelopeEnd);
-        using var httpClient = new HttpClient();
-        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+        var client = CreateClient(httpClient);
 
         // Act
         var exception = await Assert.ThrowsAsync<UpnpFaultException>(
@@ -490,61 +445,39 @@ public class UpnpSoapClientTests
         Assert.Equal(402, exception.ErrorCode);
     }
 
-    [Fact]
-    public void WhenTheHttpClientIsNull_ThenConstructingTheClientThrowsArgumentNullException()
+    public static TheoryData<string, Action> ConstructorNullArguments => new()
+    {
+        { "UpnpSoapClient without an http client", () => new UpnpSoapClient(null!, BaseUri) },
+        { "UpnpSoapClient without a base URI", () => new UpnpSoapClient(new HttpClient(), null!) },
+        { "UpnpService without a service type", () => new UpnpService(null!, "/path") },
+        { "UpnpService without a control path", () => new UpnpService("urn:schemas-upnp-org:service:AVTransport:1", null!) },
+        { "UpnpFaultException without a service type", () => new UpnpFaultException(null!, "Play", null, null) },
+        { "UpnpFaultException without an action", () => new UpnpFaultException("urn:schemas-upnp-org:service:AVTransport:1", null!, null, null) },
+    };
+
+    [Theory]
+    [MemberData(nameof(ConstructorNullArguments))]
+    public void WhenARequiredConstructorArgumentIsNull_ThenConstructingThrowsArgumentNullException(string _, Action construct)
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new UpnpSoapClient(null!, new Uri("http://localhost/")));
+        Assert.Throws<ArgumentNullException>(construct);
     }
 
-    [Fact]
-    public void WhenTheBaseUriIsNull_ThenConstructingTheClientThrowsArgumentNullException()
+    private static UpnpSoapClient CreateClient(HttpClient httpClient) => new(httpClient, BaseUri);
+
+    private static HttpClient Answer(HttpStatusCode status, string body, string contentType = "text/xml; charset=\"utf-8\"") =>
+        CreateHttpClient(_ => CreateAnswer(status, body, contentType));
+
+    private static HttpClient CreateHttpClient(Func<HttpRequestMessage, HttpResponseMessage> respond) =>
+        new(new StubHttpMessageHandler(request => Task.FromResult(respond(request))));
+
+    private static HttpResponseMessage CreateAnswer(HttpStatusCode status, string body, string contentType = "text/xml; charset=\"utf-8\"")
     {
-        // Arrange
-        using var httpClient = new HttpClient();
-
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new UpnpSoapClient(httpClient, null!));
-    }
-
-    [Fact]
-    public void WhenTheServiceTypeIsNull_ThenConstructingTheServiceThrowsArgumentNullException()
-    {
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new UpnpService(null!, "/path"));
-    }
-
-    [Fact]
-    public void WhenTheControlPathIsNull_ThenConstructingTheServiceThrowsArgumentNullException()
-    {
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new UpnpService("urn:schemas-upnp-org:service:AVTransport:1", null!));
-    }
-
-    [Fact]
-    public void WhenTheFaultServiceTypeIsNull_ThenConstructingTheExceptionThrowsArgumentNullException()
-    {
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new UpnpFaultException(null!, "Play", null, null));
-    }
-
-    [Fact]
-    public void WhenTheFaultActionIsNull_ThenConstructingTheExceptionThrowsArgumentNullException()
-    {
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new UpnpFaultException("urn:schemas-upnp-org:service:AVTransport:1", null!, null, null));
-    }
-
-    private static LoopbackHttpServer Answer(HttpStatusCode status, string body) =>
-        new(context => WriteAsync(context.Response, status, body));
-
-    private static async Task WriteAsync(
-        HttpListenerResponse response, HttpStatusCode status, string body, string contentType = "text/xml; charset=\"utf-8\"")
-    {
-        var bytes = Encoding.UTF8.GetBytes(body);
-        response.StatusCode = (int)status;
-        response.ContentType = contentType;
-        response.ContentLength64 = bytes.Length;
-        await response.OutputStream.WriteAsync(bytes);
+        var response = new HttpResponseMessage(status)
+        {
+            Content = new ByteArrayContent(Encoding.UTF8.GetBytes(body))
+        };
+        response.Content.Headers.TryAddWithoutValidation("Content-Type", contentType);
+        return response;
     }
 }

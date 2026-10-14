@@ -54,12 +54,7 @@ public sealed class UpnpFaultException : Exception
     /// </summary>
     public string? FaultText { get; }
 
-    /// <summary>
-    /// Describes a UPnP error code every service shares; a code from 700 on is defined by each service instead.
-    /// </summary>
-    /// <param name="errorCode">The UPnP error code to describe.</param>
-    /// <returns>The description of the code, or null when it is not one every UPnP service shares.</returns>
-    public static string? GetStandardDescription(int errorCode) => StandardDescriptions.GetValueOrDefault(errorCode);
+    private static string? GetStandardDescription(int errorCode) => StandardDescriptions.GetValueOrDefault(errorCode);
 
     private static string CreateMessage(string action, int? errorCode, string? faultText)
     {
