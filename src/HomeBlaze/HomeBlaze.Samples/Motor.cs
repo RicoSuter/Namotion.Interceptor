@@ -46,10 +46,10 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     [Category("Speed")]
     public partial int TargetSpeed { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Minimum)]
     public partial int TargetSpeed_Minimum { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Maximum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Maximum)]
     public partial int TargetSpeed_Maximum { get; set; }
 
     /// <summary>

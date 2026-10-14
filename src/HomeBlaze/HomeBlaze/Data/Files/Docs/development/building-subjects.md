@@ -593,15 +593,19 @@ public partial class Motor
     [State("Target")]
     public partial int TargetSpeed { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Minimum)]
     public partial int TargetSpeed_Minimum { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Maximum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Maximum)]
     public partial int TargetSpeed_Maximum { get; set; }
 }
 ```
 
-This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for `TargetSpeed`, enabling UI features like range sliders.
+This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for `TargetSpeed`.
+
+### Range Attributes
+
+`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range. A widget that shows or sets a number within a range uses its own `Minimum` and `Maximum` arguments first, then these attributes when their value is a number, and the range 0 to 1 for a property with `StateUnit.Percent`. Unlike the other names of `KnownAttributes`, they have no `HB:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
 
 ## Complete Example: Motor
 
@@ -632,10 +636,10 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     [Category("Speed")]
     public partial int TargetSpeed { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Minimum)]
     public partial int TargetSpeed_Minimum { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Maximum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Maximum)]
     public partial int TargetSpeed_Maximum { get; set; }
 
     [Configuration]
