@@ -446,6 +446,74 @@ public class MarkdownBlockWriterTests
             "intro\r\n\r\n:: Demo.Board#board Columns=2\r\n::: Tile Position=2\r\ntwo\r\n:::\r\n::\r\n\r\noutro\r\n", result);
     }
 
+    [Theory]
+    [InlineData("> ::: {.note}\n> styled")]
+    [InlineData("- first\n- second")]
+    [InlineData("a paragraph")]
+    public void WhenRemovalWouldJoinTheTextBeforeAndAfterTheBlock_ThenAnEmptyLineStaysInItsPlace(string textBefore)
+    {
+        // Arrange
+        var source = $":: Demo.Panel\n{textBefore}\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
+        var tile = OwnerOf(source).Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Assert
+        var removedLine = textBefore.Count(character => character == '\n') + 3;
+        Assert.Equal($":: Demo.Panel\n{textBefore}\n\ntext of the panel\n::\n", result);
+        Assert.Equal(new MarkdownLineEdit(removedLine, 3, 1), edit);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Panel\n::: Tile\ntwo\n:::\ntext of the panel\n::\n", ":: Demo.Panel\ntext of the panel\n::\n")]
+    [InlineData(":: Demo.Panel\ntext before\n::: Tile\ntwo\n:::\n::\n", ":: Demo.Panel\ntext before\n::\n")]
+    [InlineData(":: Demo.Panel\ntext before\n\n::: Tile\ntwo\n:::\ntext after\n::\n", ":: Demo.Panel\ntext before\n\ntext after\n::\n")]
+    [InlineData(":: Demo.Panel\ntext before\n::: Tile\ntwo\n:::\n\ntext after\n::\n", ":: Demo.Panel\ntext before\n\ntext after\n::\n")]
+    [InlineData(":: Demo.Panel\ntext before\n::: Tile\ntwo\n:::\n  \ntext after\n::\n", ":: Demo.Panel\ntext before\n  \ntext after\n::\n")]
+    public void WhenRemovalJoinsNoTwoTexts_ThenNoEmptyLineIsLeft(string source, string expected)
+    {
+        // Arrange
+        var tile = OwnerOf(source).Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Assert
+        Assert.Equal(expected, result);
+        Assert.Equal(0, edit.InsertedLineCount);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Leaf\n::\ntext after\n", "text after\n")]
+    [InlineData("text before\n:: Demo.Leaf", "text before\n")]
+    public void WhenRemovedBlockStartsOrEndsTheText_ThenNoEmptyLineIsLeft(string source, string expected)
+    {
+        // Arrange
+        var leaf = OwnerOf(source);
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, leaf, out var edit);
+
+        // Assert
+        Assert.Equal(expected, result);
+        Assert.Equal(0, edit.InsertedLineCount);
+    }
+
+    [Fact]
+    public void WhenRemovalLeavesAnEmptyLineInTextWithWindowsLineEndings_ThenItHasThatLineEnding()
+    {
+        // Arrange
+        const string source = ":: Demo.Panel\r\na paragraph\r\n::: Tile\r\n:::\r\ntext of the panel\r\n::\r\n";
+        var tile = OwnerOf(source).Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out _);
+
+        // Assert
+        Assert.Equal(":: Demo.Panel\r\na paragraph\r\n\r\ntext of the panel\r\n::\r\n", result);
+    }
+
     [Fact]
     public void WhenSiblingHasClosingLine_ThenPlacementIsAfterItWithClosingLine()
     {

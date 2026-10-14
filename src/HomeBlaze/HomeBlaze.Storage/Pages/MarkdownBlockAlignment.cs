@@ -13,7 +13,7 @@ internal static class MarkdownBlockAlignment
     /// <param name="before">The page before the change.</param>
     /// <param name="after">The page after the change.</param>
     /// <param name="edit">What the change did to the lines.</param>
-    /// <param name="expectedInsertedBlockCount">How many blocks the inserted lines must hold.</param>
+    /// <param name="expectedInsertedBlockCount">How many blocks of every kind the inserted lines must hold.</param>
     /// <param name="owner">The block of <paramref name="before"/> that the lines were inserted into, or null for a removal.</param>
     /// <returns>
     /// Null when the change did more than insert or remove its blocks. Every other block, of every kind, must
@@ -172,13 +172,18 @@ internal static class MarkdownBlockAlignment
     private static HashSet<MarkdownBlock> FindBlocksAround(
         List<(MarkdownBlock Block, MarkdownBlock? Parent)> blocks, MarkdownBlock? target)
     {
+        var result = new HashSet<MarkdownBlock>(ReferenceEqualityComparer.Instance);
+        if (target is null)
+        {
+            return result;
+        }
+
         var parents = new Dictionary<MarkdownBlock, MarkdownBlock?>(ReferenceEqualityComparer.Instance);
         foreach (var (block, parent) in blocks)
         {
             parents[block] = parent;
         }
 
-        var result = new HashSet<MarkdownBlock>(ReferenceEqualityComparer.Instance);
         for (var current = target; current is not null; current = parents.GetValueOrDefault(current))
         {
             result.Add(current);

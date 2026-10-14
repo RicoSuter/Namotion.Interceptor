@@ -193,12 +193,36 @@ public static class MarkdownBlockWriter
     /// Removes the block with everything in it: the lines from its head line to its last line, which is its
     /// closing line or, without one, the last line of its content that is not empty.
     /// </summary>
+    /// <remarks>
+    /// One empty line stays in place of the block when the line before it and the line after it are both text.
+    /// As neighbours they would be joined: the text after the block would continue the paragraph, the list item
+    /// or the quote before it.
+    /// </remarks>
     public static string RemoveBlock(string source, MarkdownBlock block, out MarkdownLineEdit edit)
     {
         var start = GetLineStart(source, block.Line);
         var end = GetLineStart(source, block.EndLine + 1);
-        edit = new MarkdownLineEdit(block.Line, block.EndLine - block.Line + 1, 0);
+        var removedLineCount = block.EndLine - block.Line + 1;
+
+        if (IsTextLine(source, GetLineStart(source, block.Line - 1), start) && IsTextLine(source, end, GetLineStart(source, block.EndLine + 2)))
+        {
+            edit = new MarkdownLineEdit(block.Line, removedLineCount, 1);
+            return source.Remove(start, end - start).Insert(start, GetLineEnding(source, block.HeadSpan.End));
+        }
+
+        edit = new MarkdownLineEdit(block.Line, removedLineCount, 0);
         return source.Remove(start, end - start);
+    }
+
+    // Whether the line between the two offsets has text that is no head line and no closing line of a block.
+    // Next to such a fence line, and next to an empty line, nothing is joined.
+    private static bool IsTextLine(string source, int lineStart, int nextLineStart)
+    {
+        var line = source.AsSpan(lineStart, nextLineStart - lineStart).Trim();
+        return line.Length > 0 &&
+               !(line.Length >= MarkdownBlockFence.MinimumLength &&
+                 line[0] == MarkdownBlockFence.Character &&
+                 line[1] == MarkdownBlockFence.Character);
     }
 
     /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/>.</summary>

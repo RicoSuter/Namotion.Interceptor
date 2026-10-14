@@ -1,4 +1,5 @@
 using HomeBlaze.Storage.Pages;
+using Markdig.Syntax;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -218,6 +219,45 @@ public class MarkdownBlockStructureTests
         Assert.Equal(new[] { 0 }, map);
     }
 
+    [Theory]
+    [InlineData("> ::: {.note}\n> styled")]
+    [InlineData("- first\n- second")]
+    [InlineData("a paragraph")]
+    public void WhenBlockBetweenTwoTextsIsRemoved_ThenTheTextAfterItStaysAParagraphOfItsOwn(string textBefore)
+    {
+        // Arrange
+        var source = $":: Demo.Panel\n{textBefore}\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+        var after = MarkdownPageParser.Parse(result);
+        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+
+        // Assert: the paragraph of the text starts on the line of the text, so it continues nothing before it.
+        Assert.NotNull(map);
+        var textLine = result.Split('\n').ToList().IndexOf("text of the panel");
+        Assert.Contains(
+            after.Document.Descendants<ParagraphBlock>(),
+            paragraph => paragraph.Line == textLine && paragraph.Parent is MarkdownBlockContainer);
+    }
+
+    [Fact]
+    public void WhenLinesAreInsertedBeforeTheJsonBlockOfTheOwner_ThenAlignmentFails()
+    {
+        // Arrange: the json block is the configuration of the board only while it is the first thing in it.
+        const string source = ":: Demo.Board\n```json\n{ \"Tags\": [1] }\n```\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var result = MarkdownBlockWriter.InsertLines(source, 2, "::: Tile\n:::", "\n", out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, before.Blocks[0]);
+
+        // Assert
+        Assert.Null(map);
+    }
+
     [Fact]
     public void WhenRandomBlocksAreInsertedAndRemoved_ThenNothingElseChangesAndTheCheckAgreesWithTheBlocks()
     {
@@ -249,7 +289,8 @@ public class MarkdownBlockStructureTests
 
                     // Assert: the check says yes exactly when every other block has its text and its place.
                     AssertOnlyTheEditedLinesChanged(source, result, edit, context);
-                    var isClean = Describe(before, edit.Line, edit.RemovedLineCount).SequenceEqual(Describe(after, 0, 0));
+                    AssertRemovalLeavesNothingButOneEmptyLine(result, edit, lineEnding, context);
+                    var isClean = Describe(before, edit.Line, edit.RemovedLineCount).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount));
                     Assert.True(isClean == (map is not null), context);
                     if (map is null)
                     {
@@ -279,6 +320,7 @@ public class MarkdownBlockStructureTests
                     // Assert: an insert at the placement never touches another block.
                     AssertOnlyTheEditedLinesChanged(source, result, edit, context);
                     AssertInsertedLinesEndLikeThePage(result, edit, placement.LineEnding, context);
+                    AssertAppendGivesTheLastLineTheLineEndingOfThePage(source, result, edit, placement.LineEnding, context);
                     Assert.True(Describe(before, 0, 0).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount)), context);
                     Assert.True(map is not null, context);
                     AssertMapKeepsHeadLines(before, after, map!, context);
@@ -378,6 +420,24 @@ public class MarkdownBlockStructureTests
         }
     }
 
+    // The empty line that a removal leaves is not compared by Describe, so it is checked here.
+    private static void AssertRemovalLeavesNothingButOneEmptyLine(string after, MarkdownLineEdit edit, string lineEnding, string context)
+    {
+        Assert.True(edit.InsertedLineCount is 0 or 1, context);
+        Assert.True(
+            edit.InsertedLineCount == 0 || SplitKeepingLineEndings(after)[edit.Line - 1] == lineEnding,
+            $"Line {edit.Line} is not an empty line.\n{context}");
+    }
+
+    private static void AssertAppendGivesTheLastLineTheLineEndingOfThePage(
+        string before, string after, MarkdownLineEdit edit, string lineEnding, string context)
+    {
+        var isAppendAfterLineWithoutLineEnding = !before.EndsWith('\n') && edit.Line == before.Count(character => character == '\n') + 2;
+        Assert.True(
+            !isAppendAfterLineWithoutLineEnding || after.StartsWith(before + lineEnding, StringComparison.Ordinal),
+            $"The line that was the last one has another line ending.\n{context}");
+    }
+
     private static bool HasLineEnding(string line, string lineEnding) =>
         line.EndsWith(lineEnding) && (lineEnding == "\r\n" || !line.EndsWith("\r\n"));
 
@@ -396,70 +456,18 @@ public class MarkdownBlockStructureTests
         return lines;
     }
 
-    // Boards with tiles, in three styles: every block with a closing line, none, or each one by chance. Tiles have
-    // one or two fence characters more than their board, a board can be indented, and style blocks and text
-    // stand between the tiles.
+    // Boards with tiles, in three styles: every block with a closing line, none, or each one by chance. Each tile
+    // has one or two fence characters more than its board, so a tile can stand inside the tile before it. A board
+    // can be indented, can stand inside an open block, can start with a line of text and can end with a widget
+    // block after its tiles. Style blocks and text stand between the tiles. An indented board after a board that
+    // ends with a list item stands inside that item, where it is an invalid block and no owner.
     private static string CreateRandomPage(Random random, int closingLineChance, string lineEnding)
     {
         var lines = new List<string> { "intro", string.Empty };
         var boardCount = random.Next(1, 4);
         for (var board = 0; board < boardCount; board++)
         {
-            var indentation = random.Next(5) == 0 ? "  " : string.Empty;
-            var tileFence = new string(':', random.Next(3) == 0 ? 4 : 3);
-
-            void Add(string line) => lines.Add(indentation + line);
-            bool HasClosingLine() => random.Next(100) < closingLineChance;
-
-            Add($":: Demo.Board#board{board} Columns=2");
-            var tileCount = random.Next(0, 4);
-            for (var tile = 0; tile < tileCount; tile++)
-            {
-                Add($"{tileFence} Tile Position={tile}");
-                if (random.Next(2) == 0)
-                {
-                    Add($"text {tile} with {{{{ /a/b }}}}");
-                }
-
-                if (random.Next(3) == 0)
-                {
-                    Add($"{tileFence}: Demo.Leaf Count=1");
-                    if (HasClosingLine())
-                    {
-                        Add($"{tileFence}:");
-                    }
-                }
-
-                if (HasClosingLine())
-                {
-                    Add(tileFence);
-                }
-
-                if (random.Next(4) == 0)
-                {
-                    Add("::: {.note}");
-                    Add("styled");
-                    if (HasClosingLine())
-                    {
-                        Add(":::");
-                    }
-                }
-
-                if (random.Next(4) == 0)
-                {
-                    Add("text after a tile");
-                }
-            }
-
-            if (HasClosingLine())
-            {
-                Add("::");
-            }
-
-            if (random.Next(2) == 0)
-            {
-                lines.Add(string.Empty);
-            }
+            AddRandomBoard(lines, random, board, closingLineChance, extraDepth: random.Next(6) == 0 ? 1 : 0);
         }
 
         if (random.Next(2) == 0)
@@ -469,5 +477,94 @@ public class MarkdownBlockStructureTests
 
         var text = string.Join(lineEnding, lines);
         return random.Next(3) == 0 ? text : text + lineEnding;
+    }
+
+    // With an extra depth the board stands inside an open block, and every fence line of the board and of
+    // everything in it has that many fence characters more.
+    private static void AddRandomBoard(List<string> lines, Random random, int board, int closingLineChance, int extraDepth)
+    {
+        var indentation = random.Next(5) == 0 ? "  " : string.Empty;
+
+        void Add(string line) => lines.Add(indentation + line);
+        string Fence(int length) => new(':', length + extraDepth);
+        bool HasClosingLine() => random.Next(100) < closingLineChance;
+
+        if (extraDepth > 0)
+        {
+            Add(":: Demo.Card");
+        }
+
+        Add($"{Fence(2)} Demo.Board#board{board} Columns=2");
+        if (random.Next(6) == 0)
+        {
+            Add(random.Next(3) switch
+            {
+                0 => "text before the tiles",
+                1 => "> a quote",
+                _ => "- an item"
+            });
+        }
+
+        var lastTileFence = Fence(3);
+        var tileCount = random.Next(0, 4);
+        for (var tile = 0; tile < tileCount; tile++)
+        {
+            var tileFence = Fence(random.Next(3) == 0 ? 4 : 3);
+            lastTileFence = tileFence;
+
+            Add($"{tileFence} Tile Position={tile}");
+            if (random.Next(2) == 0)
+            {
+                Add($"text {tile} with {{{{ /a/b }}}}");
+            }
+
+            if (random.Next(3) == 0)
+            {
+                Add($"{tileFence}: Demo.Leaf Count=1");
+                if (HasClosingLine())
+                {
+                    Add($"{tileFence}:");
+                }
+            }
+
+            if (HasClosingLine())
+            {
+                Add(tileFence);
+            }
+
+            if (random.Next(4) == 0)
+            {
+                Add($"{Fence(3)} {{.note}}");
+                Add("styled");
+                if (HasClosingLine())
+                {
+                    Add(Fence(3));
+                }
+            }
+
+            if (random.Next(4) == 0)
+            {
+                Add("text after a tile");
+            }
+        }
+
+        if (random.Next(4) == 0)
+        {
+            Add($"{lastTileFence} Demo.Leaf Count=2");
+            if (HasClosingLine())
+            {
+                Add(lastTileFence);
+            }
+        }
+
+        if (HasClosingLine())
+        {
+            Add(Fence(2));
+        }
+
+        if (random.Next(2) == 0)
+        {
+            lines.Add(string.Empty);
+        }
     }
 }
