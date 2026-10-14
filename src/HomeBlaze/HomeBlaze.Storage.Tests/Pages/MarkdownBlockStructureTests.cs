@@ -21,7 +21,7 @@ public class MarkdownBlockStructureTests
     [InlineData(ShortBoard)]
     public void WhenFirstSlotBlockIsRemoved_ThenTheOtherBlocksAreMappedToTheirNewIndex(string source)
     {
-        // Arrange & Act
+        // Act
         var (_, _, _, map) = RemoveTile(source);
 
         // Assert: board, first tile, second tile, leaf, other
@@ -33,7 +33,7 @@ public class MarkdownBlockStructureTests
     [InlineData(ShortBoard)]
     public void WhenLastSlotBlockIsRemoved_ThenItAndTheBlockInItAreMappedToNothing(string source)
     {
-        // Arrange & Act
+        // Act
         var (_, _, _, map) = RemoveTile(source, position: 1);
 
         // Assert
@@ -110,7 +110,7 @@ public class MarkdownBlockStructureTests
     [InlineData(":: Demo.Board\n```json\n{ \"Tags\": [1] }\n```\n::\n", 2, "::: Tile\n:::")]
     public void WhenInsertedLinesChangeMoreThanTheirOwnBlock_ThenAlignmentFails(string source, int line, string text)
     {
-        // Arrange & Act
+        // Act
         var (_, _, _, map) = InsertLines(source, line, text);
 
         // Assert
@@ -199,7 +199,7 @@ public class MarkdownBlockStructureTests
     [InlineData(":: Demo.Board\nterm\n:   definition\n::: Tile\n:::\n\n")]
     public void WhenRemovalJoinsTheTextAfterTheBlockToTheTextBeforeIt_ThenAlignmentFails(string source)
     {
-        // Arrange & Act
+        // Act
         var (_, _, _, map) = RemoveTile(source);
 
         // Assert
@@ -250,7 +250,7 @@ public class MarkdownBlockStructureTests
     [InlineData(":: Demo.Panel\n    indented code\n::: Tile\n\n::\n", new[] { 0, -1 })]
     public void WhenRemovalChangesOnlyWhereMarkdigListsOrEndsOtherText_ThenAlignmentSucceeds(string source, int[] expected)
     {
-        // Arrange & Act
+        // Act
         var (_, _, _, map) = RemoveTile(source);
 
         // Assert
@@ -369,7 +369,7 @@ public class MarkdownBlockStructureTests
     [InlineData("  :: Demo.Board\n  ::: Tile\n  a term\n  :   a definition\n  > a quote\n  - an item\n")]
     public void WhenPlacementIsInsideAListItem_ThenTheNewBlockIsNoSlotBlockAndAlignmentFails(string source)
     {
-        // Arrange & Act
+        // Act
         var (_, after, edit, map) = InsertTile(source);
 
         // Assert

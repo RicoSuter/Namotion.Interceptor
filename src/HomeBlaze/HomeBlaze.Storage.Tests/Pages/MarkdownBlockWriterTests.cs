@@ -511,7 +511,7 @@ public class MarkdownBlockWriterTests
     [InlineData("text before\n:: Demo.Leaf", "text before\n")]
     public void WhenRemovalJoinsNoTwoTexts_ThenNoEmptyLineIsLeft(string source, string expected)
     {
-        // Arrange: the first slot block of the first block, or the first block when it has none.
+        // Arrange: the only slot block of the first block, or the first block when it has none.
         var owner = OwnerOf(source);
         var block = owner.Children.SingleOrDefault(child => child.Kind == MarkdownBlockKind.Slot) ?? owner;
 

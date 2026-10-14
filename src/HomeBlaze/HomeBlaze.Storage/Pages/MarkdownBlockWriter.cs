@@ -157,11 +157,9 @@ public static class MarkdownBlockWriter
     /// Gets the slot blocks of <paramref name="owner"/> with the name <paramref name="slotName"/>, in the order of
     /// their lines.
     /// </summary>
-    /// <remarks>
-    /// A block is a slot block only directly inside a widget or slot block, and the parser lists the blocks
-    /// directly inside a block in the order of the text.
-    /// </remarks>
     internal static IEnumerable<MarkdownBlock> GetSlotBlocks(MarkdownBlock owner, string slotName) =>
+        // The parser lists the children of a block in the order of the text, and a block is a slot block only
+        // directly inside a widget or slot block.
         owner.Children.Where(child => child.Kind == MarkdownBlockKind.Slot && child.Head!.Name == slotName);
 
     // The white space before the head line of the block on its line.

@@ -145,6 +145,7 @@ public class LayoutBlockSaveTests
         // Arrange
         var before = Normalize(await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(CanvasPage)));
         Assert.Contains(FirstNodeLine + "\nfirst node\n", before);
+        Assert.Contains("::: Node#second X=300 Y=40 Width=200 Height=100\nsecond node\n", before);
 
         await WithPageAsync(CanvasPage, before, async () =>
         {
