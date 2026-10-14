@@ -317,9 +317,9 @@ public class UpnpSoapClientTests
             EnvelopeEnd);
         var client = CreateClient(httpClient);
 
-        // Act
+        // Act: Task.Run so that a reader stuck in a synchronous loop still lets the timeout fail the test.
         var exception = await Assert.ThrowsAsync<UpnpFaultException>(
-                () => client.InvokeAsync(AvTransport, "Next", [("InstanceID", "0")], CancellationToken.None))
+                () => Task.Run(() => client.InvokeAsync(AvTransport, "Next", [("InstanceID", "0")], CancellationToken.None)))
             .WaitAsync(TimeSpan.FromSeconds(10));
 
         // Assert

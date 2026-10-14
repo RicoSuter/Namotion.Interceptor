@@ -51,8 +51,10 @@ public static class UpnpXml
     public static XmlReader CreateReader(Stream stream) => new DepthLimitedXmlReader(XmlReader.Create(stream, ReaderSettings), MaximumLevels);
 
     /// <summary>
-    /// Creates a reader over the bytes of a document like <see cref="CreateReader"/>, except that it reports a
-    /// whitespace-only value instead of discarding it.
+    /// Creates a reader over the bytes of a document, which takes the encoding from the document, throws
+    /// <see cref="XmlException"/> while reading when it is malformed or declares a document type, and reports a
+    /// whitespace-only value instead of discarding it. It does not limit how deeply elements nest, so it is only for a
+    /// caller that reads forward without building a tree or recursing.
     /// </summary>
     internal static XmlReader CreateValueReader(Stream stream) => XmlReader.Create(stream, ValueReaderSettings);
 }

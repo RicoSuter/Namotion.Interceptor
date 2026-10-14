@@ -1,4 +1,6 @@
+using System.Text;
 using System.Xml;
+using System.Xml.Linq;
 using Xunit;
 
 namespace Namotion.Devices.Upnp.Tests;
@@ -23,6 +25,20 @@ public class UpnpXmlTests
     {
         // Act
         var exception = Assert.Throws<XmlException>(() => UpnpXml.Parse(Nest(OneLevelTooMany)));
+
+        // Assert
+        Assert.Contains("deeper", exception.Message);
+    }
+
+    [Fact]
+    public void WhenAStreamNestsOneLevelMoreThanAllowed_ThenReadingItThrowsXmlException()
+    {
+        // Arrange
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(Nest(OneLevelTooMany)));
+        using var reader = UpnpXml.CreateReader(stream);
+
+        // Act
+        var exception = Assert.Throws<XmlException>(() => XDocument.Load(reader));
 
         // Assert
         Assert.Contains("deeper", exception.Message);
