@@ -19,7 +19,7 @@ public partial class FritzBox
     /// </param>
     internal void ApplySnapshot(FritzBoxSnapshot snapshot, long wlanCommandGeneration)
     {
-        if (snapshot.Router?.SerialNumber is { } serialNumber)
+        if (snapshot.Router.SerialNumber is { } serialNumber)
         {
             if (_stateSerialNumber is not null && _stateSerialNumber != serialNumber)
             {
@@ -73,13 +73,13 @@ public partial class FritzBox
         DownloadRate = snapshot.Traffic?.DownloadRate;
     }
 
-    private void ApplyRouterInfo(RouterInfo? router)
+    private void ApplyRouterInfo(RouterInfo router)
     {
-        Model = router?.Model;
-        SerialNumber = router?.SerialNumber;
-        HardwareRevision = router?.HardwareRevision;
-        SoftwareVersion = router?.SoftwareVersion;
-        Uptime = router?.Uptime;
+        Model = router.Model;
+        SerialNumber = router.SerialNumber;
+        HardwareRevision = router.HardwareRevision;
+        SoftwareVersion = router.SoftwareVersion;
+        Uptime = router.Uptime;
     }
 
     private void ApplyInternet(InternetInfo? internet)

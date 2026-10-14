@@ -149,8 +149,8 @@
             _username = RouterSubject.Username;
             _certificatePin = RouterSubject.CertificatePin;
 
-            // Loaded as the polling loop applies them, so a hand-edited value outside the range does not open the
-            // dialog invalid.
+            // Zero or less, including a stored sub-second value, loads as the default and a value outside the range
+            // is clamped, so a hand-edited value does not open the dialog invalid.
             _pollingIntervalSeconds = LoadInterval((int)RouterSubject.PollingInterval.TotalSeconds, FritzBox.DefaultPollingIntervalSeconds);
             _retryIntervalSeconds = LoadInterval((int)RouterSubject.RetryInterval.TotalSeconds, FritzBox.DefaultRetryIntervalSeconds);
         }

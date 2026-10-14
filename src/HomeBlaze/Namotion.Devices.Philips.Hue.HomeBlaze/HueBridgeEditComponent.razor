@@ -87,8 +87,8 @@
     }
 
     /// <summary>
-    /// Loads an interval as the bridge applies it: zero or less is the default, and a value outside the range is
-    /// clamped, so a stored value the range check rejects does not leave the dialog invalid.
+    /// Loads an interval in whole seconds: zero or less, including a stored sub-second value, is the default, and a
+    /// value outside the range is clamped, so a stored value the range check rejects does not leave the dialog invalid.
     /// </summary>
     private static int LoadInterval(int storedSeconds, int defaultSeconds) =>
         Math.Clamp(storedSeconds <= 0 ? defaultSeconds : storedSeconds, HueBridge.MinimumIntervalSeconds, HueBridge.MaximumIntervalSeconds);

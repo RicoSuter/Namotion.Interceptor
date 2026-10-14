@@ -18,7 +18,7 @@ public class FritzBoxPollerTests
         var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
 
         // Assert
-        Assert.Equal("FRITZ!Box 7590", snapshot.Router!.Model);
+        Assert.Equal("FRITZ!Box 7590", snapshot.Router.Model);
         Assert.Equal("SERIAL0001", snapshot.Router.SerialNumber);
         Assert.Equal(TimeSpan.FromHours(1), snapshot.Router.Uptime);
         Assert.Null(snapshot.AvailableSoftwareUpdate);
