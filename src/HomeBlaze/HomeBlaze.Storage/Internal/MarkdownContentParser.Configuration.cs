@@ -237,7 +237,7 @@ public sealed partial class MarkdownContentParser
         {
             if (slot.IsDefault)
             {
-                return $"'{slot.PropertyName}' is the content of the block on a page, so it cannot be set as an argument.";
+                return $"'{slot.PropertyName}' is the content of the block on a page, so it cannot be set as configuration.";
             }
 
             return slot.IsList

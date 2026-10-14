@@ -74,7 +74,7 @@ public class LayoutSlotBlockTests
         "Line 1: 'Nodes' is written as blocks on a page: one 'Node' block per value inside this block.")]
     [InlineData(
         ":: HomeBlaze.Components.GridLayout\n::: Cell Child=x\n::",
-        "Line 2: 'Child' is the content of the block on a page, so it cannot be set as an argument.")]
+        "Line 2: 'Child' is the content of the block on a page, so it cannot be set as configuration.")]
     public async Task WhenCellsOrNodesAreWrittenAsConfigurationOnAPage_ThenTheBlockIsAnError(string content, string expectedMessage)
     {
         // Arrange

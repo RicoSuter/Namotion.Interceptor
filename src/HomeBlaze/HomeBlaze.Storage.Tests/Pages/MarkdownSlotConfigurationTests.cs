@@ -46,10 +46,10 @@ public class MarkdownSlotConfigurationTests
         "Line 1: 'Tiles' is written as blocks on a page: one 'Tile' block per value inside this block.")]
     [InlineData(
         ":: {0}\n::: Tile Child=x\n:::\n::",
-        "Line 2: 'Child' is the content of the block on a page, so it cannot be set as an argument.")]
+        "Line 2: 'Child' is the content of the block on a page, so it cannot be set as configuration.")]
     [InlineData(
         ":: {0}\n::: Tile\n```json\n{{ \"Child\": {{ \"$type\": \"HomeBlaze.Storage.Tests.Pages.TestLeaf\" }} }}\n```\n:::\n::",
-        "Line 2: 'Child' is the content of the block on a page, so it cannot be set as an argument.")]
+        "Line 2: 'Child' is the content of the block on a page, so it cannot be set as configuration.")]
     public async Task WhenSlotPropertyIsSetAsConfigurationOnAPage_ThenTheBlockIsAnError(string format, string expectedMessage)
     {
         // Arrange
@@ -86,7 +86,7 @@ public class MarkdownSlotConfigurationTests
     [Theory]
     [InlineData("Rows=1","Line 1: 'Rows' is written as blocks on a page: one 'Row' block per value inside this block.")]
     [InlineData("Footer=x", "Line 1: 'Footer' is written as a block on a page: a 'Footer' block inside this block.")]
-    [InlineData("Content=x", "Line 1: 'Content' is the content of the block on a page, so it cannot be set as an argument.")]
+    [InlineData("Content=x", "Line 1: 'Content' is the content of the block on a page, so it cannot be set as configuration.")]
     public async Task WhenPropertyThatIsOnlyASlotIsSetAsArgument_ThenTheMessageSaysHowToWriteIt(string argument, string expectedMessage)
     {
         // Arrange
