@@ -40,8 +40,10 @@ public sealed class SubjectTransaction : IDisposable
     // the ones its applies are marked for. Never mutated in place: it starts as the context's cached service array.
     private ITransactionHandler[] _handlers;
 
-    // Cache only (a stale read just takes the slow path): the last subject context whose handlers were included.
+    // Caches only (a stale read just takes the slow path): the last subject context and handler array included.
+    // Written after _handlers with release semantics, so a reader that skips on a hit also sees the included handlers.
     private IInterceptorSubjectContext? _lastIncludedContext;
+    private ITransactionHandler[] _lastIncludedHandlers;
 
     /// <summary>
     /// Last write wins if the same property is written multiple times.
@@ -147,7 +149,7 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Gets the transaction handlers resolved from the context when the transaction began, followed by those added from
-    /// the contexts of written subjects.
+    /// the contexts of subjects when they are written.
     /// </summary>
     internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(Volatile.Read(ref _handlers));
 
@@ -156,8 +158,11 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Adds the transaction handlers of <paramref name="subjectContext"/> that are not registered on the transaction's
-    /// context, for a write the transaction is about to capture. Does nothing while a commit runs or once it committed.
+    /// context, when a subject of it is written and the transaction is about to capture the write.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown while a commit is in progress or commit handlers are checking the snapshot, like the capture would.
+    /// </exception>
     internal void IncludeHandlersOf(IInterceptorSubjectContext subjectContext)
     {
         if (ReferenceEquals(subjectContext, Context) || ReferenceEquals(subjectContext, Volatile.Read(ref _lastIncludedContext)))
@@ -165,11 +170,16 @@ public sealed class SubjectTransaction : IDisposable
             return;
         }
 
-        var subjectHandlers = subjectContext.GetServices<ITransactionHandler>().AsSpan();
-        if (!ContainsAll(Volatile.Read(ref _handlers), subjectHandlers) &&
-            !TryInclude(subjectHandlers, Context.GetServices<ITransactionHandler>().AsSpan()))
+        var subjectHandlers = ImmutableCollectionsMarshal.AsArray(subjectContext.GetServices<ITransactionHandler>()) ?? [];
+        if (!ReferenceEquals(subjectHandlers, Volatile.Read(ref _lastIncludedHandlers)))
         {
-            return;
+            if (!ContainsAll(Volatile.Read(ref _handlers), subjectHandlers) &&
+                !TryInclude(subjectHandlers, Context.GetServices<ITransactionHandler>().AsSpan()))
+            {
+                return;
+            }
+
+            Volatile.Write(ref _lastIncludedHandlers, subjectHandlers);
         }
 
         Volatile.Write(ref _lastIncludedContext, subjectContext);
@@ -178,7 +188,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Adds the handlers of <paramref name="subjectHandlers"/> that are in neither the transaction's handlers nor
     /// <paramref name="transactionContextHandlers"/>, so a handler registered on the transaction's context after it
-    /// began stays out. Returns false while a commit runs or once it committed.
+    /// began stays out. Returns false when the transaction is disposed or committed.
     /// </summary>
     private bool TryInclude(
         ReadOnlySpan<ITransactionHandler> subjectHandlers,
@@ -186,39 +196,58 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            if (_isValidating || _isCommitting || _isCommitted)
+            // Same checks and order as TryCaptureChange, which this write reaches next.
+            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
             {
                 return false;
             }
 
-            var handlers = _handlers;
-            ITransactionHandler[]? union = null;
-            var count = handlers.Length;
-            foreach (var handler in subjectHandlers)
+            ThrowIfCommittingConcurrently();
+            if (_isValidating)
             {
-                if (ContainsByReference(transactionContextHandlers, handler) ||
-                    ContainsByReference(union is null ? handlers : union.AsSpan(0, count), handler))
-                {
-                    continue;
-                }
-
-                if (union is null)
-                {
-                    union = new ITransactionHandler[handlers.Length + subjectHandlers.Length];
-                    handlers.CopyTo(union, 0);
-                }
-
-                union[count++] = handler;
+                ThrowCaptureDuringCommitValidation();
             }
 
-            if (union is not null)
+            var handlers = _handlers;
+            var additionCount = 0;
+            for (var index = 0; index < subjectHandlers.Length; index++)
             {
-                Array.Resize(ref union, count);
+                if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+                {
+                    additionCount++;
+                }
+            }
+
+            if (additionCount > 0)
+            {
+                var union = new ITransactionHandler[handlers.Length + additionCount];
+                handlers.CopyTo(union, 0);
+                var count = handlers.Length;
+                for (var index = 0; index < subjectHandlers.Length; index++)
+                {
+                    if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+                    {
+                        union[count++] = subjectHandlers[index];
+                    }
+                }
+
                 Volatile.Write(ref _handlers, union);
             }
 
             return true;
         }
+    }
+
+    private static bool IsAddition(
+        ReadOnlySpan<ITransactionHandler> subjectHandlers,
+        int index,
+        ReadOnlySpan<ITransactionHandler> handlers,
+        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
+    {
+        var handler = subjectHandlers[index];
+        return !ContainsByReference(handlers, handler) &&
+            !ContainsByReference(transactionContextHandlers, handler) &&
+            !ContainsByReference(subjectHandlers[..index], handler);
     }
 
     private static bool ContainsAll(ReadOnlySpan<ITransactionHandler> handlers, ReadOnlySpan<ITransactionHandler> candidates)
@@ -488,6 +517,7 @@ public sealed class SubjectTransaction : IDisposable
         _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
         _handlers = ImmutableCollectionsMarshal.AsArray(context.GetServices<ITransactionHandler>()) ?? [];
+        _lastIncludedHandlers = _handlers;
 
         Interlocked.Increment(ref _activeTransactionCount);
     }

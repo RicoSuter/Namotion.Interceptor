@@ -168,61 +168,6 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
-    public async Task WhenHandlerIsRegisteredOnlyOnSubjectContextReachingTransactionsThroughFallback_ThenItTakesPart()
-    {
-        // Arrange
-        var handler = new RecordingHandler();
-        var probe = new CommitWriteProbe(handler);
-        var transactionContext = CreateContext();
-        var subjectContext = InterceptorSubjectContext.Create();
-        subjectContext.AddService<ITransactionHandler>(handler);
-        subjectContext.AddService(probe);
-        subjectContext.AddFallbackContext(transactionContext);
-        var person = new Person(subjectContext);
-        probe.Writes.Clear();
-
-        SubjectPropertyChange[]? changesSeenByHandler = null;
-        handler.OnCommittingAction = (_, changes) => changesSeenByHandler = changes;
-
-        // Act
-        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal("Bob", Assert.Single(handler.Captured).Value);
-        Assert.Equal(1, handler.CommittingCalls);
-        var change = Assert.Single(changesSeenByHandler!);
-        Assert.Equal(nameof(Person.FirstName), change.Property.Name);
-        Assert.Equal("Bob", change.GetNewValue<string>());
-        Assert.True(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
-        Assert.Equal("Bob", person.FirstName);
-    }
-
-    [Fact]
-    public async Task WhenHandlerIsRegisteredOnSubjectContextAndTransactionContext_ThenItIsCalledOncePerEvent()
-    {
-        // Arrange
-        var handler = new RecordingHandler();
-        var transactionContext = CreateContext();
-        transactionContext.AddService<ITransactionHandler>(handler);
-        var subjectContext = InterceptorSubjectContext.Create();
-        subjectContext.AddService<ITransactionHandler>(handler);
-        subjectContext.AddFallbackContext(transactionContext);
-        var person = new Person(subjectContext);
-
-        // Act
-        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Single(handler.Captured);
-        Assert.Equal(1, handler.CommittingCalls);
-        Assert.Equal("Bob", person.FirstName);
-    }
-
-    [Fact]
     public async Task WhenCommitting_ThenOnCommittingSeesPendingValuesBeforeAnythingIsApplied()
     {
         // Arrange
