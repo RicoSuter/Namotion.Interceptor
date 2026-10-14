@@ -401,7 +401,8 @@ internal static class SqliteBucketReader
         return result;
     }
 
-    // Sum/Min/Max/SampleAverage/StandardDeviation: grouped numeric reductions over COALESCE(value_double, value_long).
+    // Sum/Min/Max/SampleAverage/StandardDeviation: grouped numeric reductions over COALESCE(value_double, value_long)
+    // read as REAL.
     // When the property is ulong, value_json numbers (ulong overflow) also count as numeric values; SQLite's
     // COALESCE includes value_json (numeric text parses to a number) so the reductions fold it in too.
     private static List<BucketPartial> ReadNumericPartials(
@@ -409,9 +410,11 @@ internal static class SqliteBucketReader
         long bucketTicks, long fromTicks, long toTicks)
     {
         // The numeric expression: for ulong properties also fold value_json (a JSON number stored as text).
+        // Read as REAL like TimeWeightedAverageSql: an integer SUM errors on long overflow, which the sum of
+        // squares reaches for values in the billions.
         var numeric = isUlong
-            ? "COALESCE(value_double, value_long, CAST(value_json AS REAL))"
-            : "COALESCE(value_double, value_long)";
+            ? "CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL)"
+            : "CAST(COALESCE(value_double, value_long) AS REAL)";
 
         using var command = connection.CreateCommand();
         command.CommandText =
