@@ -593,3 +593,44 @@ public partial class TestCallback : IConfigurable
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) =>
         OnApply?.Invoke() ?? Task.CompletedTask;
 }
+
+/// <summary>A subject with a list of subjects in its configuration, which a page writes in the json block.</summary>
+[InterceptorSubject]
+public partial class TestShelf : IConfigurable
+{
+    public TestShelf()
+    {
+        Rows = 2;
+        Items = [];
+    }
+
+    [Configuration]
+    public partial int Rows { get; set; }
+
+    [Configuration]
+    public partial int Columns { get; set; }
+
+    [Configuration]
+    public partial List<TestShelfItem> Items { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>One entry of a <see cref="TestShelf"/> with a subject of any type.</summary>
+[InterceptorSubject]
+public partial class TestShelfItem : IConfigurable
+{
+    [Configuration]
+    public partial int? Row { get; set; }
+
+    [Configuration]
+    public partial int? Column { get; set; }
+
+    [Configuration]
+    public partial int ColumnSpan { get; set; }
+
+    [Configuration]
+    public partial IInterceptorSubject? Child { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}

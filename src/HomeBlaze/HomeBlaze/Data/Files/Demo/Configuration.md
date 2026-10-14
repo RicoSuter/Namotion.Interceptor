@@ -34,45 +34,19 @@ A yes or no is written as `true` or `false`. The block below is a `CanvasLayout`
 
 ## Configuration in a json block
 
-A list or an object does not fit on the head line. The cells of a `GridLayout` are a list, so they are written as a JSON object in a `json` block: a fenced code block with the language `json` that is the first thing inside the block. Each cell here holds a `Widget` that refers to a motor next to this page. The names in the `json` block are property names like the keys on the head line, also inside a cell and inside the widget of a cell. Only `$type` is written as it is in a JSON file. Below the top level a name that is no property is skipped without a message, so a name in the camelCase of a JSON file, like `"path"`, leaves the widget without a path. The `json` block itself is not shown on the page.
+A list, an object or a text of several lines does not fit on the head line. The `Subtitle` of the `Card` below is a text of two lines, so it is written in a JSON object in a `json` block: a fenced code block with the language `json` that is the first thing inside the block. The names in the `json` block are property names like the keys on the head line, at every depth of the object. Only the `$type` of a subject inside the object is written as it is in a JSON file. Below the top level a name that is no property is skipped without a message, so a name in the camelCase of a JSON file, like `"path"`, is not read. The `json` block itself is not shown on the page.
 
 ~~~~markdown
-:: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
+:: HomeBlaze.Components.Card#note Title="Note"
 ```json
-{
-  "Cells": [
-    {
-      "Row": 0,
-      "Column": 0,
-      "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" }
-    },
-    {
-      "Row": 0,
-      "Column": 1,
-      "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../WaterPump" }
-    }
-  ]
-}
+{ "Subtitle": "First line\nSecond line" }
 ```
 ::
 ~~~~
 
-:: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
+:: HomeBlaze.Components.Card#note Title="Note"
 ```json
-{
-  "Cells": [
-    {
-      "Row": 0,
-      "Column": 0,
-      "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" }
-    },
-    {
-      "Row": 0,
-      "Column": 1,
-      "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../WaterPump" }
-    }
-  ]
-}
+{ "Subtitle": "First line\nSecond line" }
 ```
 ::
 

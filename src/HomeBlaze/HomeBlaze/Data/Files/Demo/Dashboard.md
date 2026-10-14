@@ -163,28 +163,24 @@ The conveyor runs at {{ /Demo/Conveyor/CurrentSpeed }} of {{ /Demo/Conveyor/Targ
 :::: HomeBlaze.Components.TabLayout
 ::::: Tab#grid Title="Grid" Icon=GridView
 :::::: HomeBlaze.Components.GridLayout#dashboardgrid Rows=2 Columns=3
-```json
-{
-  "Cells": [
-    { "Row": 0, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "/Demo/Compressor" } },
-    { "Row": 0, "Column": 1, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "/Demo/WaterPump" } },
-    { "Row": 0, "Column": 2, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "/Demo/Conveyor" } },
-    { "Row": 1, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "/Demo/CoolingFan" } },
-    { "Row": 1, "Column": 1, "ColumnSpan": 2, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "/Demo/ExhaustFan" } }
-  ]
-}
-```
+::::::: Cell Row=0 Column=0
+:::::::: HomeBlaze.Components.Widget Path=/Demo/Compressor
+::::::: Cell Row=0 Column=1
+:::::::: HomeBlaze.Components.Widget Path=/Demo/WaterPump
+::::::: Cell Row=0 Column=2
+:::::::: HomeBlaze.Components.Widget Path=/Demo/Conveyor
+::::::: Cell Row=1 Column=0
+:::::::: HomeBlaze.Components.Widget Path=/Demo/CoolingFan
+::::::: Cell Row=1 Column=1 ColumnSpan=2
+:::::::: HomeBlaze.Components.Widget Path=/Demo/ExhaustFan
 ::::: Tab#canvas Title="Canvas" Icon=Map
 :::::: HomeBlaze.Components.CanvasLayout#dashboardcanvas MinHeight=620 IsSnapToGridEnabled=true GridSize=20
-```json
-{
-  "Nodes": [
-    { "X": 20, "Y": 20, "Width": 320, "Height": 280, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "/Demo/WaterPump" } },
-    { "X": 380, "Y": 60, "Width": 320, "Height": 280, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "/Demo/Compressor" } },
-    { "X": 200, "Y": 320, "Width": 320, "Height": 280, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "/Demo/Conveyor" } }
-  ]
-}
-```
+::::::: Node X=20 Y=20 Width=320 Height=280
+:::::::: HomeBlaze.Components.Widget Path=/Demo/WaterPump
+::::::: Node X=380 Y=60 Width=320 Height=280
+:::::::: HomeBlaze.Components.Widget Path=/Demo/Compressor
+::::::: Node X=200 Y=320 Width=320 Height=280
+:::::::: HomeBlaze.Components.Widget Path=/Demo/Conveyor
 ::: Tab#hosted Title="On This Page" Icon=Tune
 :::: HomeBlaze.Components.Alert
 The motor in this tab exists only on this page. The second card finds it by its name, `dashboardmotor`.

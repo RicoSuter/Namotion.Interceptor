@@ -150,7 +150,7 @@
         var occupied = new HashSet<(int, int)>();
 
         // Mark all occupied cells (accounting for spans)
-        foreach (var cell in Grid.Cells)
+        foreach (var cell in Grid.Cells ?? [])
         {
             if (!cell.Row.HasValue || !cell.Column.HasValue) continue;
 
@@ -188,7 +188,7 @@
                 cell.Child = subject;
 
                 // Replace list to trigger property setter and parent tracking
-                Grid.Cells = [.. Grid.Cells, cell];
+                Grid.Cells = [.. Grid.Cells ?? [], cell];
             }
         });
     }
@@ -217,7 +217,7 @@
         if (confirmed == true)
         {
             // Replace list to trigger property setter and parent tracking
-            Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
+            Grid.Cells = (Grid.Cells ?? []).Where(c => c != cell).ToArray();
 
             await RootManager.WriteConfigurationOrWarnAsync(Grid, Snackbar, CancellationToken.None);
         }

@@ -754,28 +754,23 @@ Line 4: The slot 'Footer' holds content only and takes no arguments, name or jso
 
 ### The `json` Block
 
-A list or an object does not fit on the head line. Write such configuration as a JSON object in a fenced code block with the language `json` that is the first thing inside the block. This page calls it the `json` block.
+A list, an object or a text of several lines does not fit on the head line. Write such configuration as a JSON object in a fenced code block with the language `json` that is the first thing inside the block. This page calls it the `json` block.
 
-The cells of a `GridLayout` are a list. Each cell here holds a subject of its own, a `Widget` that shows a motor:
+The `Subtitle` of a `Card` is text. Here it is a text of two lines:
 
 ~~~~markdown
-:: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
+:: HomeBlaze.Components.Card#note Title="Note"
 ```json
-{
-  "Cells": [
-    { "Row": 0, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" } },
-    { "Row": 0, "Column": 1, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../WaterPump" } }
-  ]
-}
+{ "Subtitle": "First line\nSecond line" }
 ```
 ::
 ~~~~
 
-The reader sees a grid of one row with the two motors next to each other. The `json` block itself is not shown.
+The reader sees a card with the title and the subtitle. The `json` block itself is not shown.
 
 - **Where**: The `json` block is the first thing inside its block. Empty lines before it do not count. It is written with three or more backticks or tildes and the language `json` in lower case. A fenced code block with `json` anywhere else is ordinary content and is shown as code.
 - **Which blocks**: A widget block can have a `json` block, and so can a slot block that creates a subject, like a `Tab`.
-- **Names**: The names in the object are property names like the keys of the arguments. This holds at every depth: here for `Cells` of the grid, for `Row`, `Column` and `Child` of a cell, and for `Path` of the widget in the cell.
+- **Names**: The names in the object are property names like the keys of the arguments, here `Subtitle` of the card. This holds at every depth of the object.
 - **`$type`**: A subject inside the object names its type with `$type`, which is spelled the same as in a JSON file. It must be the first name in the braces of that subject. At the top level of the object, a `$type` is ignored, because the type of the block is on its head line.
 - **Argument and `json` block**: Both can be used together. When both set the same property, the argument wins.
 

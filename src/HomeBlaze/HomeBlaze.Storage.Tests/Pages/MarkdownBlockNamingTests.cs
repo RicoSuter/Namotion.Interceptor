@@ -17,18 +17,17 @@ public class MarkdownBlockNamingTests
     private const string Namespace = "HomeBlaze.Storage.Tests.Pages";
     private const string LeafType = $"{Namespace}.TestLeaf";
     private const string PanelType = $"{Namespace}.TestPanel";
-    private const string GridType = "HomeBlaze.Components.GridLayout";
+    private const string ShelfType = $"{Namespace}.TestShelf";
     private const string WidgetType = "HomeBlaze.Components.Widget";
 
     private const string GridPage = $$"""
-        :: {{GridType}}#grid Rows=1 Columns=2
+        :: {{ShelfType}}#grid Rows=1 Columns=2
         ```json
         {
-          "Cells": [
+          "Items": [
             {
               "Row": 0,
               "Column": 1,
-              "RowSpan": 1,
               "ColumnSpan": 2,
               "Child": {
                 "$type": "{{WidgetType}}",
@@ -134,11 +133,11 @@ public class MarkdownBlockNamingTests
         var page = await fixture.AddPageAsync("page.md", GridPage);
 
         // Assert
-        var grid = Assert.IsType<GridLayout>(page.Children["grid"]);
+        var grid = Assert.IsType<TestShelf>(page.Children["grid"]);
         Assert.Equal(1, grid.Rows);
         Assert.Equal(2, grid.Columns);
 
-        var cell = Assert.Single(grid.Cells);
+        var cell = Assert.Single(grid.Items);
         Assert.Equal(0, cell.Row);
         Assert.Equal(1, cell.Column);
         Assert.Equal(2, cell.ColumnSpan);
@@ -155,12 +154,12 @@ public class MarkdownBlockNamingTests
 
         // Act
         var page = await fixture.AddPageAsync(
-            "page.md", $":: {GridType}#grid Rows=1\n```json\n{{ \"cells\": [] }}\n```\n::");
+            "page.md", $":: {ShelfType}#grid Rows=1\n```json\n{{ \"items\": [] }}\n```\n::");
 
         // Assert
         Assert.False(page.Children.ContainsKey("grid"));
         Assert.Contains(
-            "GridLayout has no configuration property 'cells'. Did you mean 'Cells'? Available: Cells, Columns, Rows.",
+            "TestShelf has no configuration property 'items'. Did you mean 'Items'? Available: Columns, Items, Rows.",
             DecodedHtml(page));
     }
 
@@ -174,10 +173,10 @@ public class MarkdownBlockNamingTests
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $$"""
-            :: {{GridType}}#grid
+            :: {{ShelfType}}#grid
             ```json
             {
-              "Cells": [
+              "Items": [
                 { "row": 3, "Column": 1, "Child": { "$type": "{{WidgetType}}", "path": "../Compressor" } }
               ]
             }
@@ -188,7 +187,7 @@ public class MarkdownBlockNamingTests
         // Assert
         Assert.DoesNotContain("markdown-block-error", MarkdownPageFixture.Html(page.Children));
 
-        var cell = Assert.Single(Assert.IsType<GridLayout>(page.Children["grid"]).Cells);
+        var cell = Assert.Single(Assert.IsType<TestShelf>(page.Children["grid"]).Items);
         Assert.Null(cell.Row);
         Assert.Equal(1, cell.Column);
         Assert.Equal(string.Empty, Assert.IsType<Widget>(cell.Child).Path);
@@ -220,7 +219,7 @@ public class MarkdownBlockNamingTests
         // Arrange
         var fixture = await CreateFixtureWithComponentsAsync();
         var page = await fixture.AddPageAsync("page.md", GridPage);
-        var grid = (GridLayout)page.Children["grid"];
+        var grid = (TestShelf)page.Children["grid"];
         grid.Columns = 3;
 
         // Act
@@ -237,7 +236,7 @@ public class MarkdownBlockNamingTests
         // Arrange
         var fixture = await CreateFixtureWithComponentsAsync();
         var page = await fixture.AddPageAsync("page.md", GridPage);
-        var widget = (Widget)((GridLayout)page.Children["grid"]).Cells[0].Child!;
+        var widget = (Widget)((TestShelf)page.Children["grid"]).Items[0].Child!;
         widget.Path = "../CoolingFan";
 
         // Act

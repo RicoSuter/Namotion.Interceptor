@@ -445,111 +445,100 @@ A path that leads nowhere shows a message in place of a widget. Nothing exists a
 
 ## GridLayout
 
-A grid with a fixed number of rows and columns. Type name: `HomeBlaze.Components.GridLayout`. It has no slots: its cells are configuration and stand in the `json` block, and each cell holds one subject.
+A grid with a fixed number of rows and columns. Type name: `HomeBlaze.Components.GridLayout`.
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Rows` | Whole number | `2` | The number of rows |
 | `Columns` | Whole number | `2` | The number of columns |
-| `Cells` | List, in the `json` block | Empty | The cells of the grid |
 
-One cell in `Cells`:
+| Slot | Blocks | Holds |
+|------|--------|-------|
+| `Cell` | Any number | One cell per block. A `Cell` block creates a subject, so it takes arguments and an optional `#name`. Its content is what the cell shows: any page content |
 
-| Name | Kind of value | Default | Meaning |
-|------|---------------|---------|---------|
+The arguments of a `Cell` block:
+
+| Argument | Kind of value | Default | Meaning |
+|----------|---------------|---------|---------|
 | `Row` | Whole number | Not set | The row of the cell, counted from 0. Without it the grid places the cell itself |
 | `Column` | Whole number | Not set | The column of the cell, counted from 0. Without it the grid places the cell itself |
 | `RowSpan` | Whole number | `1` | How many rows the cell covers |
 | `ColumnSpan` | Whole number | `1` | How many columns the cell covers |
-| `Child` | Subject with `$type` | Not set | The subject that the cell shows |
 
-A grid of two rows and two columns. The two cells of the first row show the sample motors by name. The cell of the second row spans both columns and shows the pump once more:
+A grid of two rows and two columns. The two cells of the first row show the sample motors by name. The cell of the second row spans both columns and holds text with expressions:
 
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.GridLayout#motorgrid Rows=2 Columns=2
-```json
-{
-  "Cells": [
-    { "Row": 0, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "pump" } },
-    { "Row": 0, "Column": 1, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "fan" } },
-    { "Row": 1, "Column": 0, "ColumnSpan": 2, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "pump" } }
-  ]
-}
-```
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Widget Path=pump
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.Widget Path=fan
+::: Cell Row=1 Column=0 ColumnSpan=2
+The pump is set to **{{ pump/TargetSpeed }}** and the fan to **{{ fan/TargetSpeed }}**.
 ::
 ~~~~
 
 :: HomeBlaze.Components.GridLayout#motorgrid Rows=2 Columns=2
-```json
-{
-  "Cells": [
-    { "Row": 0, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "pump" } },
-    { "Row": 0, "Column": 1, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "fan" } },
-    { "Row": 1, "Column": 0, "ColumnSpan": 2, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "pump" } }
-  ]
-}
-```
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Widget Path=pump
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.Widget Path=fan
+::: Cell Row=1 Column=0 ColumnSpan=2
+The pump is set to **{{ pump/TargetSpeed }}** and the fan to **{{ fan/TargetSpeed }}**.
 ::
 
 - All rows have the same height and all columns the same width, and the grid is at least 400 pixels high.
-- The grid keeps its columns at every width of the screen. A cell cuts off a widget that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
-- A cell holds a subject, not page content. Text, expressions and blocks cannot stand in a cell. Use a `FlowLayout` with cards for that.
-- The subjects in the cells are created again on every reload of the page, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps). Show a subject that must keep running through a `Widget` in the cell.
-- The names inside `Cells` are not checked, see [The json Block](pages.md#the-json-block).
-- While the page is in edit mode, the grid has its own buttons to add, edit and remove cells. They write the `json` block for you.
+- The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
+- A cell with a `#name` keeps itself and everything in it when cells are added or removed. Cells without a name are matched by their position among the cells without a name, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps).
+- The cells cannot be written as `Cells` in the `json` block of a page. In a configuration file of its own, a `GridLayout` has its cells as the list `cells`, and each cell holds one subject as `child`.
+- While the page is in edit mode, the grid has its own buttons to add, edit and remove cells. They write the `Cell` blocks for you: a new cell is a block after the last one with the widget that you chose inside, and removing a cell removes its block with everything in it.
 
 ## CanvasLayout
 
-An area on which subjects are placed at any position. Type name: `HomeBlaze.Components.CanvasLayout`. It has no slots: its nodes are configuration and stand in the `json` block.
+An area on which content is placed at any position. Type name: `HomeBlaze.Components.CanvasLayout`.
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `MinHeight` | Whole number | Not set, which gives 400 | The height of the canvas in pixels |
 | `IsSnapToGridEnabled` | Yes or no | `false` | Whether a node that is placed or moved snaps to a grid |
 | `GridSize` | Whole number | `100` | The step of that grid in pixels |
-| `Nodes` | List, in the `json` block | Empty | The nodes on the canvas |
 
-One node in `Nodes`:
+| Slot | Blocks | Holds |
+|------|--------|-------|
+| `Node` | Any number | One node per block. A `Node` block creates a subject, so it takes arguments and an optional `#name`. Its content is what the node shows: any page content |
 
-| Name | Kind of value | Default | Meaning |
-|------|---------------|---------|---------|
+The arguments of a `Node` block:
+
+| Argument | Kind of value | Default | Meaning |
+|----------|---------------|---------|---------|
 | `X` | Whole number | `0` | The distance from the left edge in pixels |
 | `Y` | Whole number | `0` | The distance from the top edge in pixels |
 | `Width` | Whole number | `200` | The width in pixels |
 | `Height` | Whole number | `150` | The height in pixels |
-| `Child` | Subject with `$type` | Not set | The subject that the node shows |
 
 A canvas with two nodes that show the sample motors by name. A canvas does not adapt to the width of the screen: every node keeps its position and its size in pixels. The two nodes here are placed below each other, so that a narrow window shows both:
 
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.CanvasLayout#plan MinHeight=620 IsSnapToGridEnabled=true GridSize=20
-```json
-{
-  "Nodes": [
-    { "X": 20, "Y": 20, "Width": 300, "Height": 280, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "pump" } },
-    { "X": 40, "Y": 320, "Width": 300, "Height": 280, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "fan" } }
-  ]
-}
-```
+::: Node X=20 Y=20 Width=300 Height=280
+:::: HomeBlaze.Components.Widget Path=pump
+::: Node X=40 Y=320 Width=300 Height=280
+:::: HomeBlaze.Components.Widget Path=fan
 ::
 ~~~~
 
 :: HomeBlaze.Components.CanvasLayout#plan MinHeight=620 IsSnapToGridEnabled=true GridSize=20
-```json
-{
-  "Nodes": [
-    { "X": 20, "Y": 20, "Width": 300, "Height": 280, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "pump" } },
-    { "X": 40, "Y": 320, "Width": 300, "Height": 280, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "fan" } }
-  ]
-}
-```
+::: Node X=20 Y=20 Width=300 Height=280
+:::: HomeBlaze.Components.Widget Path=pump
+::: Node X=40 Y=320 Width=300 Height=280
+:::: HomeBlaze.Components.Widget Path=fan
 ::
 
-- While the page is in edit mode, the nodes can be moved with the mouse, and the canvas has its own buttons to add, edit and remove nodes. They write the `json` block for you.
+- While the page is in edit mode, the nodes can be moved with the mouse, and the canvas has its own buttons to add, edit and remove nodes. They write the `Node` blocks for you: a move changes `X` and `Y` on the line of its node.
 - A canvas can be zoomed with the mouse wheel and moved by dragging its background only while the page is edited. While the page is viewed, the canvas itself cannot be zoomed or moved, the wheel scrolls the page, and the widgets in its nodes work as anywhere else on the page. While the page is edited, the widgets in the nodes do not react to the mouse, so that a node can be moved without triggering what it shows. No line can be drawn between nodes in either mode.
-- The limits of the `GridLayout` hold here as well: a node holds a subject and no page content, the subjects are created again on every reload, and the names inside `Nodes` are not checked.
+- A node has a fixed size and cuts off content that needs more room. What holds for the cells of a `GridLayout` holds for nodes as well: the names, what an edit of the page keeps, and the list `nodes` in a configuration file.
 
 ## Value Widgets
 

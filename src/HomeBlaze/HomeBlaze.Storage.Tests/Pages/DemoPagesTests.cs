@@ -50,7 +50,7 @@ public class DemoPagesTests
     [InlineData("References.md", "secondcard", typeof(Card))]
     [InlineData("Configuration.md", "valuemotor", typeof(Motor))]
     [InlineData("Configuration.md", "canvas", typeof(CanvasLayout))]
-    [InlineData("Configuration.md", "grid", typeof(GridLayout))]
+    [InlineData("Configuration.md", "note", typeof(Card))]
     [InlineData("Configuration.md", "keptmotor", typeof(Motor))]
     public async Task WhenDemoPageIsLoaded_ThenTheBlockWithANameCreatesItsSubject(string fileName, string name, Type expectedType)
     {
@@ -87,9 +87,9 @@ public class DemoPagesTests
         var gridAndCanvas = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[1]));
         Assert.Equal(["Grid", "Canvas"], gridAndCanvas.Tabs.Select(tab => tab.Title));
         var grid = Assert.Single(FindInTab<GridLayout>(gridAndCanvas.Tabs[0]));
-        Assert.Equal((2, 3, 5), (grid.Rows, grid.Columns, grid.Cells.Count));
+        Assert.Equal((2, 3, 5), (grid.Rows, grid.Columns, grid.Cells.Length));
         var canvas = Assert.Single(FindInTab<CanvasLayout>(gridAndCanvas.Tabs[1]));
-        Assert.Equal(3, canvas.Nodes.Count);
+        Assert.Equal(3, canvas.Nodes.Length);
 
         // The motor that the page creates is shown once more by its name, in the same tab.
         var ownTab = PageErrorBoxes.Flatten([dashboard.Tabs[2]]).ToList();

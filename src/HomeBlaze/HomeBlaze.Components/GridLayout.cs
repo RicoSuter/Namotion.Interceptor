@@ -28,10 +28,10 @@ public partial class GridLayout : IConfigurable, ITitleProvider
     public partial int Columns { get; set; }
 
     /// <summary>
-    /// Collection of cells in the grid.
+    /// The cells of the grid. On a page one <c>Cell</c> block each, in a configuration file a list.
     /// </summary>
-    [Configuration, State]
-    public partial List<GridCell> Cells { get; set; }
+    [Configuration, State, Slot("Cell")]
+    public partial GridCell[] Cells { get; set; }
 
     public string? Title => "Grid";
 
