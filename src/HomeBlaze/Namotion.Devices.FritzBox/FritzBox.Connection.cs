@@ -246,16 +246,16 @@ public partial class FritzBox
             return;
         }
 
-        if (connection.PresentedCertificate is not { } presented)
+        if (connection.TrustedCertificatePin is not { } trustedPin)
         {
             return;
         }
 
-        CertificatePin = presented.Pin;
-        _logger.LogInformation("Trusting the certificate key {CertificatePin} of FRITZ!Box {HostAddress} on first use.", presented.Pin, HostAddress);
+        CertificatePin = trustedPin;
+        _logger.LogInformation("Trusting the certificate key {CertificatePin} of FRITZ!Box {HostAddress} on first use.", trustedPin, HostAddress);
 
         var isWritten = await TryWriteConfigurationAsync(cancellationToken);
-        _unsavedCertificatePin = isWritten ? null : presented.Pin;
+        _unsavedCertificatePin = isWritten ? null : trustedPin;
         if (!isWritten)
         {
             _logger.LogWarning("The trusted certificate key of FRITZ!Box {HostAddress} could not be saved.", HostAddress);

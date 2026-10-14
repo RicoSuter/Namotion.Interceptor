@@ -20,6 +20,12 @@ internal sealed class PinnedCertificateValidator(string? pin)
     internal CertificateInfo? Presented => Volatile.Read(ref _presented);
 
     /// <summary>
+    /// The key every handshake must present: the configured pin, or the key of the first handshake when none was
+    /// configured; null before that handshake.
+    /// </summary>
+    internal string? TrustedPin => Volatile.Read(ref _pin);
+
+    /// <summary>
     /// Whether a handshake presented a key other than the pinned one.
     /// </summary>
     internal bool IsRejected => _isRejected;

@@ -13,6 +13,7 @@ public class PinnedCertificateValidatorTests
         // Arrange
         using var first = FakeFritzBox.CreateCertificate();
         var validator = new PinnedCertificateValidator(null);
+        var pinBeforeHandshake = validator.TrustedPin;
 
         // Act
         var isFirstAccepted = validator.Validate(this, first, null, SslPolicyErrors.RemoteCertificateChainErrors);
@@ -22,6 +23,8 @@ public class PinnedCertificateValidatorTests
         Assert.True(isFirstAccepted);
         Assert.True(isRepeatedAccepted);
         Assert.False(validator.IsRejected);
+        Assert.Null(pinBeforeHandshake);
+        Assert.Equal(CertificateInfo.Create(first).Pin, validator.TrustedPin);
     }
 
     [Fact]
@@ -40,6 +43,7 @@ public class PinnedCertificateValidatorTests
         Assert.False(isAccepted);
         Assert.True(validator.IsRejected);
         Assert.Equal(CertificateInfo.Create(other), validator.Presented);
+        Assert.Equal(CertificateInfo.Create(first).Pin, validator.TrustedPin);
     }
 
     [Fact]
@@ -57,5 +61,6 @@ public class PinnedCertificateValidatorTests
         // Assert
         Assert.False(isOtherAccepted);
         Assert.True(isPinnedAccepted);
+        Assert.Equal(CertificateInfo.Create(pinned).Pin, validator.TrustedPin);
     }
 }

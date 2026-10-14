@@ -40,6 +40,12 @@ internal sealed class FritzBoxConnection : IDisposable
     internal CertificateInfo? PresentedCertificate => _certificateValidator.Presented;
 
     /// <summary>
+    /// The key every handshake of this connection must present: the configured pin, or the key of the first
+    /// handshake when none was configured; null before that handshake.
+    /// </summary>
+    internal string? TrustedCertificatePin => _certificateValidator.TrustedPin;
+
+    /// <summary>
     /// The WAN connection service carrying the internet connection, set by <see cref="ResolveInternetServiceAsync"/>.
     /// </summary>
     internal string? InternetServiceType { get; private set; }
