@@ -548,3 +548,48 @@ public partial class TestMeter : IConfigurable
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
+
+/// <summary>A layout whose values are configuration in a file and slot blocks on a page.</summary>
+[InterceptorSubject]
+public partial class TestBoard : IConfigurable
+{
+    public TestBoard()
+    {
+        Tiles = [];
+    }
+
+    [Configuration]
+    public partial int Columns { get; set; }
+
+    [Configuration, Slot("Tile")]
+    public partial TestTile[] Tiles { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>One value of a <see cref="TestBoard"/>. Its child is a subject in a file and content on a page.</summary>
+[InterceptorSubject]
+public partial class TestTile : IConfigurable
+{
+    [Configuration]
+    public partial int Position { get; set; }
+
+    [Configuration, Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Child { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>Runs code of the test while its configuration is applied, which is inside the reload of its page.</summary>
+[InterceptorSubject]
+public partial class TestCallback : IConfigurable
+{
+    [Configuration]
+    public partial string? Label { get; set; }
+
+    /// <summary>Awaited while the configuration is applied. Null does nothing.</summary>
+    public Func<Task>? OnApply { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) =>
+        OnApply?.Invoke() ?? Task.CompletedTask;
+}

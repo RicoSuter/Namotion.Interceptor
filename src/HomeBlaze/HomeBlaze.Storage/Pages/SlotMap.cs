@@ -8,6 +8,7 @@ namespace HomeBlaze.Storage.Pages;
 /// <summary>One slot of a type. The accessors are those of the intercepted property, so a write is tracked.</summary>
 internal sealed record SlotDefinition(
     string Name,
+    string PropertyName,
     Type PropertyType,
     Type ValueType,
     bool IsList,
@@ -41,6 +42,20 @@ internal sealed class SlotMap
 
     /// <summary>Set when the type declares its slots in a way that cannot be used.</summary>
     public string? Error { get; }
+
+    /// <summary>Gets the slot that the property with this name declares, ignoring case, or null.</summary>
+    public SlotDefinition? FindByPropertyName(string propertyName)
+    {
+        foreach (var slot in Named.Values)
+        {
+            if (string.Equals(slot.PropertyName, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                return slot;
+            }
+        }
+
+        return null;
+    }
 
     public static SlotMap For(Type type) => Cache.GetOrAdd(type, Create);
 
@@ -124,7 +139,8 @@ internal sealed class SlotMap
                 return Invalid($"the slot '{name}' needs a setter.");
             }
 
-            var slot = new SlotDefinition(name, property.PropertyType, valueType, isList, attribute.IsDefault, getValue, setValue);
+            var slot = new SlotDefinition(
+                name, property.Name, property.PropertyType, valueType, isList, attribute.IsDefault, getValue, setValue);
             named.Add(name, slot);
             if (attribute.IsDefault)
             {
