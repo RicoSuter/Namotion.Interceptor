@@ -43,6 +43,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// </summary>
     [Configuration]
     [State("Target", Position = 2)]
+    [Category("Speed")]
     public partial int TargetSpeed { get; set; }
 
     [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
@@ -63,6 +64,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// Current speed in RPM.
     /// </summary>
     [State("Speed", Position = 3)]
+    [Category("Speed")]
     public partial int CurrentSpeed { get; set; }
 
     /// <summary>
@@ -84,6 +86,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// </summary>
     [Derived]
     [State("Delta", Position = 5)]
+    [Category("Speed")]
     public int SpeedDelta => TargetSpeed - CurrentSpeed;
 
     /// <summary>
@@ -91,6 +94,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// </summary>
     [Derived]
     [State("At Target", Position = 6)]
+    [Category("Speed")]
     public bool IsAtTargetSpeed => Math.Abs(SpeedDelta) < 50;
 
     public Motor()
@@ -167,6 +171,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// Sets the target speed to the specified value.
     /// </summary>
     [Operation(Title = "Set Speed", Description = "Sets the motor target speed", Icon = "Speed", Position = 1)]
+    [Category("Speed")]
     public void SetTargetSpeed(int speed)
     {
         TargetSpeed = Math.Clamp(speed, TargetSpeed_Minimum, TargetSpeed_Maximum);
@@ -204,6 +209,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// Simulates running for a specified duration.
     /// </summary>
     [Operation(Title = "Run Test", Description = "Runs the motor at specified speed for a duration", Icon = "PlayArrow", Position = 4)]
+    [Category("Speed")]
     public async Task RunTestAsync(int speed, int durationSeconds)
     {
         var previousSpeed = TargetSpeed;

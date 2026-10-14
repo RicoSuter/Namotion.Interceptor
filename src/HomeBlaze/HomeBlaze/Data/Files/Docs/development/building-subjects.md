@@ -190,8 +190,8 @@ Properties without any `Position` (from class or interface) sort **last** in the
 
 HomeBlaze abstraction interfaces use reserved position ranges to ensure consistent default ordering when a device implements multiple interfaces:
 
-| Range | Category | Examples |
-|-------|----------|---------|
+| Range | Kind of property | Examples |
+|-------|------------------|---------|
 | 0–99 | Device-specific primary (custom per class) | Pin number, enabled state |
 | 100–199 | Primary device function | Switch on/off, brightness, cover position |
 | 200–299 | Sensor measurements | Temperature, humidity, presence |
@@ -261,6 +261,15 @@ public partial GpioPin[] Pins { get; set; }
 - Deterministic (same device always produces the same key)
 
 Good key sources: API resource IDs (GUIDs), hardware serial numbers, MAC addresses. Bad key sources: user-assignable names, discovery order, timestamps.
+
+### Shared Child Subjects
+
+A subject may be held by several collections, for example a light in a bridge's `Lights` and in a room's `Lights`, or a network client in a router's `Clients` and in an access point's `Clients`. Rules:
+
+- **The owning collection adds the subject first and sits at the shallowest level, because the canonical path is the shallowest, then earliest attached.** It creates the subject and adds it to its own collection before any other collection refers to it. A subject with several parents has one path per parent; paths are ordered by depth, with attach order deciding between equally deep ones, and history records values under the first. The other collections only refer to it and are replaced when their members change.
+- **The subject stays attached until the last collection drops it,** not the first: a subject with several parents detaches only once every collection holding it has dropped it. When the owner drops it, drop it from every other collection in the same update, or it stays attached, referenced by them but orphaned from its owner.
+- **Relative paths from a shared subject do not resolve.** A `../` path starting at a subject with several parents resolves to nothing, because its parent is ambiguous.
+- **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. The parent would become a child of its own child, and the two keep each other attached. Keep a back-reference to an owner in a field.
 
 ## Display Interfaces
 
@@ -341,6 +350,8 @@ A type belongs to exactly one group, the one that its `[Category]` names. The si
 | System | Parts of HomeBlaze itself, such as storage and plugins |
 
 When none of them fits, name a new group in `[Category]`. Using the name is all it takes to create the group, and group names are compared ignoring case. A type in such a group that sets no `[SubjectIcon]` gets a generic icon.
+
+On a property or a method, `[Category]` names a [category](#categories) of the property panel instead.
 
 ### Name of a New Subject
 
@@ -449,7 +460,7 @@ public partial class Motor
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
 
 **Key points:**
-- Operations appear in the subject's property panel under "Operations"
+- Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
 - Parameters with supported types (primitives, enums, nullable variants) show input dialogs
 - Async methods are supported and show a progress indicator
 - Methods returning values display the result in a dialog
@@ -514,6 +525,24 @@ public partial class Server
 - The `IsEnabled` property should be `[Derived]` so it automatically updates when dependencies change
 - When `IsEnabled` is `false`, the button is disabled in the UI
 - This uses the `TrackingScope` for automatic re-rendering when the derived property changes
+
+## Categories
+
+`[Category("...")]` from `System.ComponentModel` on a `[State]` property or on an `[Operation]` or `[Query]` method puts it under a heading of that name in the property panel, below the members without a category.
+
+```csharp
+[State("Speed", Position = 3)]
+[Category("Speed")]
+public partial int CurrentSpeed { get; set; }
+
+[Operation(Title = "Set Speed", Position = 1)]
+[Category("Speed")]
+public void SetTargetSpeed(int speed) { /* ... */ }
+```
+
+- Categories are ordered by the lowest `Position` of their state properties. Categories with only methods come last, and names break ties.
+- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume" and "Track" this way.
+- Names are case-sensitive. .NET shows "Default" as "Misc", "Config" as "Configurations", "DragDrop" as "Drag Drop" and "WindowStyle" as "Window Style".
 
 ## Background Services
 
@@ -601,6 +630,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
 
     [Configuration]
     [State("Target", Position = 2)]
+    [Category("Speed")]
     public partial int TargetSpeed { get; set; }
 
     [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
@@ -615,6 +645,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     // Live state (not persisted)
 
     [State("Speed", Position = 3)]
+    [Category("Speed")]
     public partial int CurrentSpeed { get; set; }
 
     [State(Unit = StateUnit.DegreeCelsius, Position = 4)]
@@ -627,10 +658,12 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
 
     [Derived]
     [State("Delta", Position = 5)]
+    [Category("Speed")]
     public int SpeedDelta => TargetSpeed - CurrentSpeed;
 
     [Derived]
     [State("At Target", Position = 6)]
+    [Category("Speed")]
     public bool IsAtTargetSpeed => Math.Abs(SpeedDelta) < 50;
 
     // Display interfaces
@@ -729,7 +762,7 @@ The subject project should only depend on `Namotion.Interceptor` and optionally 
 ```
 
 **Why separate?**
-- Subjects can be used in headless scenarios (APIs, console apps, background services)
+- Subject libraries must work in a plain .NET host without HomeBlaze, registered through their `Add...` service collection extension, for headless scenarios (APIs, console apps, background services)
 - No dependency on Blazor, MudBlazor, or any UI framework
 - Easier testing without UI dependencies
 - Cleaner dependency graph
@@ -790,8 +823,11 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
+| `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
+| `[State] + [SubjectPath(type)]` | Link to the subject at a canonical path, see [Path Properties](#path-properties) | No | Yes (as the subject) |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
+| `[Category]` on a property or method | Heading in the property panel, see [Categories](#categories) | No | Yes |
 | `[Slot]` | Content that a markdown page fills in | No | Rendered by the widget |
 | `[DisplayName]`, `[Description]`, `[Category]`, `[SubjectIcon]` | Describe the type in the create dialog | No | In the create dialog |
 | `[ExcludeFromCreation]`, `[SingleInstance]` | Hide the type from the create dialog | No | No |
@@ -819,7 +855,7 @@ Core platform interfaces and attributes:
 
 | Area | Contents |
 |------|----------|
-| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
+| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `[SubjectPath]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
 | Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
@@ -919,9 +955,33 @@ private IInterceptorSubject? ResolveSubject()
 
 `ResolveScopedSubject` and `ResolveScopedValue` are extension methods in `HomeBlaze.Services`. When the subject is on a markdown page, a relative path starts at the page and its first segment can be the name of a block on that page, as [Paths](../administration/paths.md) describes for page authors. When the subject is not on a page, they resolve relative to the subject, like `ResolveSubject` and `ResolveValue` with the subject as the third argument.
 
+### Path Properties
+
+`[SubjectPath]` on a `string` `[Configuration]` property makes the generated properties editor show a [`SubjectPathField`](#subjectpathfield-component), so that the path can be picked as well as typed. Without a type the path leads to a property, and with a type to a subject of that type, which can be an interface:
+
+```csharp
+[Configuration]
+[SubjectPath]
+public partial string? Path { get; set; }
+
+[Configuration]
+[SubjectPath(typeof(ValueMap))]
+public partial string? Map { get; set; }
+```
+
+The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.
+
+On a `[State]` property with a type, the property panel shows the subject at the path with a button that opens it. Use it to point at a subject elsewhere in the tree without attaching it, see [Shared Child Subjects](#shared-child-subjects):
+
+```csharp
+[State("Device")]
+[SubjectPath(typeof(IInterceptorSubject))]
+public partial string? DevicePath { get; internal set; }
+```
+
 ### SubjectPathField Component
 
-For subject path configuration properties, use the `SubjectPathField` component in edit forms. It provides a text input with a browse button that opens a tree picker dialog:
+In an Edit component of your own, use the `SubjectPathField` component for a path. It provides a text input with a browse button that opens a tree picker dialog:
 
 ```razor
 @using HomeBlaze.Components.Inputs
@@ -948,9 +1008,13 @@ For subject path configuration properties, use the `SubjectPathField` component 
 | `Value` | `string?` | `null` | The path value (two-way bindable) |
 | `Label` | `string` | `"Path"` | Input label |
 | `Placeholder` | `string` | `"Enter path or click to browse"` | Placeholder text |
-| `Variant` | `Variant` | `Variant.Outlined` | MudBlazor input variant |
+| `Variant` | `Variant` | `Variant.Text` | MudBlazor input variant |
+| `Required` | `bool` | `false` | Whether a `MudForm` reports the empty field as invalid |
 | `LocalSubjects` | `IDictionary<string, IInterceptorSubject>?` | `null` | Additional local subjects to show in picker |
 | `Class` | `string?` | `null` | CSS class for styling |
+| `IsPropertyVisible` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties the picker shows |
+| `CanSelectProperty` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties can be picked. Typed text is not checked |
+| `CanSelectSubject` | `Func<IInterceptorSubject, bool>?` | `null` | Which subjects can be picked. Typed text is not checked |
 
 ---
 
@@ -1164,7 +1228,7 @@ The second value of `Items`.
 ::
 ~~~~
 
-**A list of typed values.** When the type of the slot is a subject class of your own, the page creates one instance of that class per block. The arguments of the block set the `[Configuration]` properties of the instance, the block can have a `#name`, and the content of the block goes to the default slot of the instance. `TabLayout` gets its tabs this way, and `Tab` is the class of one tab:
+**A list of typed values.** When the type of the slot is a subject class of your own, the page creates one instance of that class per block. The arguments of the block set the `[Configuration]` properties of the instance, the block can have a `#name`, and the content of the block goes to the default slot of the instance. `TabLayout` gets its tabs this way, and `Tab` is the class of one tab (both shortened):
 
 ```csharp
 [InterceptorSubject]
@@ -1349,7 +1413,7 @@ Rules for rendering:
 
 What a widget author must know about the life of a subject that a page creates. It holds for the subject of a widget block and for a typed slot value alike.
 
-- **`IConfigurable` is required**: A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `TabLayout`. For a type without it, the page shows an error that says the type cannot be used as a block.
+- **`IConfigurable` is required**: A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `ValueList`. For a type without it, the page shows an error that says the type cannot be used as a block.
 - **Names of the configuration**: A page names a `[Configuration]` property by its property name, for example `TargetSpeed=1200` on the head line and `"TargetSpeed"` in the `json` block, also for the properties of nested objects and subjects. Configuration files keep camelCase, and a page uses the property names. An explicit JSON name on a property, such as `[JsonPropertyName]`, applies to configuration files only.
 - **Creation**: The page creates the subject through the service provider, so constructor injection works, then sets the `[Configuration]` properties that the block names and then fills the slots. It does not call `ApplyConfigurationAsync` for a new subject.
 - **Kept across reloads**: The page is read again with every change of its text. While the block stays, the page keeps the instance and updates it in place: it sets every `[Configuration]` property that the block names again, also when the value did not change, calls `ApplyConfigurationAsync`, and assigns the slots again. Expect all of this to run often.

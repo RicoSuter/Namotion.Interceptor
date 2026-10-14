@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Lifecycle;
@@ -575,6 +576,353 @@ public class MethodPropertyInitializerTests
         // Assert
         Assert.Empty(methods);
     }
+
+    [Fact]
+    public void WhenAMethodHasACategory_ThenTheMetadataKeepsIt()
+    {
+        // Arrange
+        var subject = new CategorizedMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var operation = registered.TryGetProperty("Play")!.GetValue() as MethodMetadata;
+        var query = registered.TryGetProperty("GetQueue")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Playback", operation!.Category);
+        Assert.Equal("Queue", query!.Category);
+    }
+
+    [Fact]
+    public void WhenAMethodHasNoCategory_ThenTheMetadataHasNone()
+    {
+        // Arrange
+        var subject = new CategorizedMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Reboot")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Null(metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenOnlyTheInterfaceMethodIsAnOperation_ThenTheMetadataHasTheCategoryOfTheInterfaceMethod()
+    {
+        // Arrange
+        var subject = new CategorizedMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Mute")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Volume", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTheClassMethodIsAnOperationWithoutACategory_ThenTheMetadataHasTheCategoryOfTheInterfaceMethod()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("SetVolume")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Volume", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTheClassAndTheInterfaceMethodHaveACategory_ThenTheMetadataHasTheOneOfTheClass()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Mute")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Sound", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenOnlyTheInterfaceMethodIsAnOperationAndTheClassMethodHasACategory_ThenTheMetadataHasTheOneOfTheClass()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Unmute")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Sound", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTheClassMethodHasAnEmptyCategory_ThenTheMetadataHasNoCategoryInsteadOfTheOneOfTheInterfaceMethod()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Reset")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Null(metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenACategoryHasSurroundingWhitespace_ThenTheMetadataHasTheTrimmedName()
+    {
+        // Arrange
+        var subject = new CategorizedMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Pause")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Playback", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTheInterfaceDeclaresOverloads_ThenTheMetadataHasTheCategoryOfTheOneWithTheSameParameterTypes()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Set")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal(typeof(int), Assert.Single(metadata!.Parameters).Type);
+        Assert.Equal("Number", metadata.Category);
+    }
+
+    [Fact]
+    public void WhenAnotherInterfaceDeclaresTheSameMethodWithAnotherCategory_ThenTheMetadataHasTheCategoryOfTheInterfaceWithTheOperation()
+    {
+        // Arrange
+        var subject = new TwoInterfaceCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Mute")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Volume", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTwoTypesImplementTheSameInterfaceMethod_ThenEachHasItsOwnCategory()
+    {
+        // Arrange
+        var context = CreateContext();
+
+        // Act
+        // Only the interface method is an operation, so both types look up the category of the same method.
+        var withClassCategory = new ClassCategoryMethodSubject(context);
+        var withoutClassCategory = new NoClassCategoryMethodSubject(context);
+
+        // Assert
+        Assert.Equal("Sound", GetMethod(withClassCategory, "Mute").Category);
+        Assert.Equal("Volume", GetMethod(withoutClassCategory, "Mute").Category);
+    }
+
+    [Fact]
+    public void WhenTheInterfaceMethodIsImplementedExplicitly_ThenTheMetadataHasTheCategoryOfTheInterfaceMethod()
+    {
+        // Arrange
+        var subject = new ExplicitCategoryMethodSubject(CreateContext());
+
+        // Act
+        var metadata = GetMethod(subject, "Mute");
+
+        // Assert
+        Assert.Equal("Volume", metadata.Category);
+    }
+
+    [Fact]
+    public void WhenAnOperationIsInheritedFromABaseClass_ThenTheMetadataKeepsItsCategory()
+    {
+        // Arrange
+        var subject = new DerivedCategoryMethodSubject(CreateContext());
+
+        // Act
+        var metadata = GetMethod(subject, "Play");
+
+        // Assert
+        Assert.Equal("Playback", metadata.Category);
+    }
+
+    [Fact]
+    public void WhenABaseClassImplementsTheInterfaceMethod_ThenTheMetadataKeepsTheCategories()
+    {
+        // Arrange
+        var subject = new DerivedCategoryMethodSubject(CreateContext());
+
+        // Act
+        var withoutClassCategory = GetMethod(subject, "Mute");
+        var withClassCategory = GetMethod(subject, "Unmute");
+
+        // Assert
+        Assert.Equal("Volume", withoutClassCategory.Category);
+        Assert.Equal("Sound", withClassCategory.Category);
+    }
+
+    private static MethodMetadata GetMethod(IInterceptorSubject subject, string propertyName)
+    {
+        return (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!.GetValue()!;
+    }
+}
+
+public interface ICategoryOnlyMethodInterface
+{
+    [Category("Other")]
+    Task MuteAsync();
+}
+
+public interface IOperationCategoryMethodInterface
+{
+    [Operation]
+    [Category("Volume")]
+    Task MuteAsync();
+
+    [Operation]
+    [Category("Volume")]
+    Task UnmuteAsync();
+}
+
+// The interface without the operation comes first, as it would be found first among the interfaces of the type.
+[InterceptorSubject]
+public partial class TwoInterfaceCategoryMethodSubject : ICategoryOnlyMethodInterface, IOperationCategoryMethodInterface
+{
+    public Task MuteAsync() => Task.CompletedTask;
+
+    public Task UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class ClassCategoryMethodSubject : IOperationCategoryMethodInterface
+{
+    [Category("Sound")]
+    public Task MuteAsync() => Task.CompletedTask;
+
+    public Task UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class NoClassCategoryMethodSubject : IOperationCategoryMethodInterface
+{
+    public Task MuteAsync() => Task.CompletedTask;
+
+    public Task UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class ExplicitCategoryMethodSubject : IOperationCategoryMethodInterface
+{
+    [Category("Sound")]
+    Task IOperationCategoryMethodInterface.MuteAsync() => Task.CompletedTask;
+
+    Task IOperationCategoryMethodInterface.UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public abstract partial class CategoryMethodSubjectBase : IOperationCategoryMethodInterface
+{
+    [Operation]
+    [Category("Playback")]
+    public Task PlayAsync() => Task.CompletedTask;
+
+    public Task MuteAsync() => Task.CompletedTask;
+
+    [Category("Sound")]
+    public Task UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class DerivedCategoryMethodSubject : CategoryMethodSubjectBase;
+
+public interface IInheritedCategoryMethodInterface
+{
+    [Category("Volume")]
+    Task SetVolumeAsync(decimal volume);
+
+    [Operation]
+    [Category("Volume")]
+    Task MuteAsync();
+
+    [Operation]
+    [Category("Volume")]
+    Task UnmuteAsync();
+
+    [Category("Volume")]
+    Task ResetAsync();
+
+    [Category("Text")]
+    Task SetAsync(string value);
+
+    [Category("Number")]
+    Task SetAsync(int value);
+}
+
+[InterceptorSubject]
+public partial class InheritedCategoryMethodSubject : IInheritedCategoryMethodInterface
+{
+    [Operation]
+    public Task SetVolumeAsync(decimal volume) => Task.CompletedTask;
+
+    [Operation]
+    [Category("Sound")]
+    public Task MuteAsync() => Task.CompletedTask;
+
+    [Category("Sound")]
+    public Task UnmuteAsync() => Task.CompletedTask;
+
+    [Operation]
+    [Category("")]
+    public Task ResetAsync() => Task.CompletedTask;
+
+    public Task SetAsync(string value) => Task.CompletedTask;
+
+    [Operation]
+    public Task SetAsync(int value) => Task.CompletedTask;
+}
+
+public interface ICategorizedMethodInterface
+{
+    [Operation]
+    [Category("Volume")]
+    Task MuteAsync();
+}
+
+[InterceptorSubject]
+public partial class CategorizedMethodSubject : ICategorizedMethodInterface
+{
+    [Operation]
+    [Category("Playback")]
+    public Task PlayAsync() => Task.CompletedTask;
+
+    [Operation]
+    [Category(" Playback ")]
+    public Task PauseAsync() => Task.CompletedTask;
+
+    [Query]
+    [Category("Queue")]
+    public string GetQueue() => string.Empty;
+
+    [Operation]
+    public Task RebootAsync() => Task.CompletedTask;
+
+    public Task MuteAsync() => Task.CompletedTask;
 }
 
 [InterceptorSubject]

@@ -90,6 +90,23 @@ A section is addressed by the id of its heading. Every heading gets its id from 
 
 ---
 
+## Pictures
+
+A picture is written as in any markdown text, with the address of a picture on the web:
+
+~~~~markdown
+![The heat pump](https://example.com/heat-pump.jpg)
+~~~~
+
+A picture is shown in a size that fits the page, and it always keeps its proportions:
+
+- **Width**: never wider than the place it stands in, such as the text of the page, a narrow screen or a card.
+- **Height**: at most four fifths of the height of the browser window.
+- **Your own width**: write the picture as HTML with a `width` to give it a size of its own, as in `<img src="https://example.com/heat-pump.jpg" width="300">`. Such a picture is still never wider than its place, and it has no limit of its height.
+- **Not available**: a picture that cannot be loaded is replaced by a placeholder with its text. The address of the picture is the tooltip of the placeholder.
+
+---
+
 ## Navigation Updates
 
 The navigation follows pages that are added, removed or changed while a browser tab is open:

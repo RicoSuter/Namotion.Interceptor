@@ -89,6 +89,8 @@ Each instance also exposes instance-level health as subjects in the knowledge gr
 
 AI agents can monitor both levels using the standard MCP tools; no separate monitoring integration is needed. Operators see health information in the Blazor UI alongside business subjects.
 
+Host and process values already exist as the `Host system` subject (CPU, memory, uptime, container limits, allocation rate, GC pause time); see [Monitoring](../../administration/monitoring.md#host-system). The planned instance health values (node role, property count, changes per second, last heartbeat) are separate from it.
+
 ## Key Decisions
 
 | Decision | Choice | Rationale |

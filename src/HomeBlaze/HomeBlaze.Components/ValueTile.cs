@@ -20,6 +20,7 @@ public partial class ValueTile : IConfigurable, ITitleProvider
     /// Path of the property whose value the tile shows.
     /// </summary>
     [Configuration]
+    [SubjectPath]
     public partial string? Path { get; set; }
 
     /// <summary>
@@ -38,6 +39,7 @@ public partial class ValueTile : IConfigurable, ITitleProvider
     /// Name or path of the <see cref="ValueMap"/> that says what the value gets.
     /// </summary>
     [Configuration]
+    [SubjectPath(typeof(ValueMap))]
     public partial string? Map { get; set; }
 
     public string? Title => null;

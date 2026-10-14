@@ -244,7 +244,11 @@ Limits:
 
 ## TabLayout
 
-Shows one of several tabs at a time. Type name: `HomeBlaze.Components.TabLayout`. It has no arguments.
+Shows one of several tabs at a time. Type name: `HomeBlaze.Components.TabLayout`.
+
+| Argument | Kind of value | Default | Meaning |
+|----------|---------------|---------|---------|
+| `Position` | `Top`, `Left`, `Right` or `Bottom` | `Top` | The side of the content that the tab bar is at. At `Left` and `Right` the tabs stand below each other |
 
 | Slot | Blocks | Holds |
 |------|--------|-------|
@@ -373,6 +377,26 @@ Both motors are shown by name, so they are the same motors as in the samples abo
 Both motors are shown by name, so they are the same motors as in the samples above.
 ::
 
+The tab bar at the left of the content:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.TabLayout Position=Left
+::: Tab#sidepump Title="Pump" Icon=WaterDrop
+:::: HomeBlaze.Components.Widget Path=pump
+::: Tab#sidefan Title="Fan" Icon=Air
+:::: HomeBlaze.Components.Widget Path=fan
+::
+~~~~
+
+:: HomeBlaze.Components.TabLayout Position=Left
+::: Tab#sidepump Title="Pump" Icon=WaterDrop
+:::: HomeBlaze.Components.Widget Path=pump
+::: Tab#sidefan Title="Fan" Icon=Air
+:::: HomeBlaze.Components.Widget Path=fan
+::
+
+- **Tabs at a side need a wide window**: With `Position=Left` or `Position=Right` the tab bar is at the top while the browser window is narrower than 600 pixels, because the content would have too little room beside it. The width of the window counts, not that of the place the layout stands in. Content that cannot get as narrow as the room beside the tab bar, like a wide table, scrolls inside the tab.
 - **All tabs are rendered**: Every tab is rendered and kept up to date, also the hidden ones. A subject in a hidden tab keeps running, and a hidden tab costs as much as a visible one.
 - **The first tab is selected**: When the page opens, the first tab is shown. The selection is not saved and there is no argument for it.
 - **Names keep the selection**: When the page text changes while the page is open, a tab with a name stays selected, also when tabs are added, removed or moved. A tab without a name is known by its position only, so the selection stays at the position. When the selected tab is gone, the first tab is selected.

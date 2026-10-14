@@ -39,8 +39,10 @@ namespace HomeBlaze.History.InMemory
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
         public long EstimatedMemorySize { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long EvictedCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public double IncomingChangesPerSecond { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool IsEnabled { get; set; }
@@ -51,12 +53,15 @@ namespace HomeBlaze.History.InMemory
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int MaxPointsPerProperty { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long OversizeCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int Priority { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public double RecordedChangesPerSecond { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long RecordedCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
         public long RetainedSampleCount { get; set; }

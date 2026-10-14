@@ -1,8 +1,8 @@
+using System.Globalization;
 using System.Net.WebSockets;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Namotion.Interceptor.Testing;
-using Sonos.Base.Services;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -14,6 +14,34 @@ public class SonosConnectionTests
     private static SonosConnection CreateConnection(FakeSonosSpeaker speaker, HttpClient httpClient) =>
         new(speaker.BaseUri, Uuid, httpClient);
 
+    private const string ExtraFavorite =
+        "<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">" +
+        "<item id=\"FV:2/5\" parentID=\"FV:2\" restricted=\"false\"><dc:title>Radio Extra</dc:title><res>x-rincon-mp3radio://radio.example/stream</res></item></DIDL-Lite>";
+
+    /// <summary>
+    /// Answers every page of favorites with one favorite and far more to come.
+    /// </summary>
+    private static void RespondWithEndlessFavorites(FakeSonosSpeaker speaker) =>
+        speaker.Respond("Browse", ("Result", ExtraFavorite), ("NumberReturned", "1"), ("TotalMatches", "2147483647"));
+
+    /// <summary>
+    /// Returns a source that is cancelled by the first page of favorites asked for past the expected number, so a
+    /// read that does not stop at the maximum fails its test instead of running forever.
+    /// </summary>
+    private static CancellationTokenSource CancelPastTheExpectedPages(FakeSonosSpeaker speaker, int expectedPages)
+    {
+        var runaway = new CancellationTokenSource();
+        var pages = 0;
+        speaker.CallReceived = call =>
+        {
+            if (call.Action == "Browse" && Interlocked.Increment(ref pages) > expectedPages)
+            {
+                runaway.Cancel();
+            }
+        };
+        return runaway;
+    }
+
     [Fact]
     public async Task WhenReadingPlayer_ThenSoapResponsesAreMapped()
     {
@@ -21,7 +49,7 @@ public class SonosConnectionTests
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondAsIdlePlayer(Uuid, "Küche");
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var reading = await connection.ReadPlayerAsync(isHomeTheater: true, [], CancellationToken.None);
@@ -50,7 +78,7 @@ public class SonosConnectionTests
         speaker.RespondAsIdlePlayer(Uuid, "Küche");
         speaker.RespondToEqualizer("DialogLevel", "3");
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var reading = await connection.ReadPlayerAsync(isHomeTheater: true, [], CancellationToken.None);
@@ -70,7 +98,7 @@ public class SonosConnectionTests
             "<item id=\"FV:2/5\" parentID=\"FV:2\" restricted=\"false\"><dc:title>Radio Extra</dc:title><res>x-rincon-mp3radio://radio.example/stream</res></item></DIDL-Lite>",
             numberReturned: 1, totalMatches: 5);
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var favorites = await connection.ReadFavoritesAsync(CancellationToken.None);
@@ -87,7 +115,7 @@ public class SonosConnectionTests
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondToBrowsePage(0, TestFixtures.Read("favorites.xml"), numberReturned: 4, totalMatches: 4);
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
         var first = await connection.ReadFavoritesAsync(CancellationToken.None);
 
         // Act
@@ -105,6 +133,55 @@ public class SonosConnectionTests
     }
 
     [Fact]
+    public async Task WhenTheSpeakerNeverEndsItsFavorites_ThenTheReadStopsAtTheMaximumNumberOfPagesAndWarns()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        RespondWithEndlessFavorites(speaker);
+        using var runaway = CancelPastTheExpectedPages(speaker, SonosConnection.MaximumFavoritesPages);
+        var logger = new RecordingLogger();
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(speaker.BaseUri, Uuid, httpClient, logger);
+
+        // Act
+        var favorites = await connection.ReadFavoritesAsync(runaway.Token);
+
+        // Assert
+        Assert.Equal(
+            Enumerable.Range(0, SonosConnection.MaximumFavoritesPages).Select(page => page.ToString(CultureInfo.InvariantCulture)),
+            speaker.Calls.Where(call => call.Action == "Browse").Select(call => call.GetArgument("StartingIndex")));
+        Assert.Equal(SonosConnection.MaximumFavoritesPages, favorites.Count);
+        Assert.All(favorites, favorite => Assert.Equal("Radio Extra", favorite.Title));
+        Assert.Contains("did not end its favorites", Assert.Single(logger.Warnings));
+    }
+
+    [Fact]
+    public async Task WhenTheSpeakerStillDoesNotEndItsFavorites_ThenTheWarningIsNotRepeatedUntilAReadEnded()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        RespondWithEndlessFavorites(speaker);
+        using var runaway = CancelPastTheExpectedPages(speaker, (3 * SonosConnection.MaximumFavoritesPages) + 1);
+        var logger = new RecordingLogger();
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(speaker.BaseUri, Uuid, httpClient, logger);
+        await connection.ReadFavoritesAsync(runaway.Token);
+
+        // Act
+        await connection.ReadFavoritesAsync(runaway.Token);
+        var warningsWhileEndless = logger.Warnings.Count;
+        speaker.Respond("Browse", ("Result", ExtraFavorite), ("NumberReturned", "1"), ("TotalMatches", "1"));
+        var ended = await connection.ReadFavoritesAsync(runaway.Token);
+        RespondWithEndlessFavorites(speaker);
+        await connection.ReadFavoritesAsync(runaway.Token);
+
+        // Assert
+        Assert.Equal(1, warningsWhileEndless);
+        Assert.Single(ended);
+        Assert.Equal(2, logger.Warnings.Count);
+    }
+
+    [Fact]
     public async Task WhenOneReadAnswersWithAFault_ThenOnlyItsValuesAreUnknownAndTheFaultIsReportedOnce()
     {
         // Arrange
@@ -113,7 +190,7 @@ public class SonosConnectionTests
         speaker.RespondWithFault("GetRemainingSleepTimerDuration", 701);
         speaker.RespondWithFault("GetVolume", 701);
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
         List<SonosReadFault> firstFaults = [];
         List<SonosReadFault> secondFaults = [];
 
@@ -138,7 +215,7 @@ public class SonosConnectionTests
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondAsIdlePlayer(Uuid, "Küche");
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var reading = await connection.ReadPlayerAsync(isHomeTheater: false, [], CancellationToken.None);
@@ -155,7 +232,7 @@ public class SonosConnectionTests
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondAsIdlePlayer(Uuid, "Küche");
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         var topology = await connection.ReadTopologyAsync(CancellationToken.None);
@@ -178,7 +255,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetVolumeAsync(50, CancellationToken.None);
@@ -193,16 +270,16 @@ public class SonosConnectionTests
     }
 
     [Fact]
-    public async Task WhenSpeakerAnswersWithFault_ThenCommandThrowsServiceException()
+    public async Task WhenSpeakerAnswersWithFault_ThenCommandThrowsFaultException()
     {
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondWithFault("SetVolume", 402);
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<SonosServiceException>(() => connection.SetVolumeAsync(50, CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SonosFaultException>(() => connection.SetVolumeAsync(50, CancellationToken.None));
         Assert.Equal(402, exception.UpnpErrorCode);
     }
 
@@ -212,7 +289,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SeekAsync(new TimeSpan(1, 2, 3), CancellationToken.None);
@@ -231,7 +308,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetSleepTimerAsync(TimeSpan.FromMinutes(90), CancellationToken.None);
@@ -248,7 +325,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetSleepTimerAsync(TimeSpan.Zero, CancellationToken.None);
@@ -265,7 +342,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => connection.SeekAsync(TimeSpan.FromSeconds(-1), CancellationToken.None));
@@ -279,7 +356,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => connection.SetSleepTimerAsync(TimeSpan.FromHours(24), CancellationToken.None));
@@ -292,7 +369,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.JoinAsync(TestFixtures.LivingRoomUuid, CancellationToken.None);
@@ -312,7 +389,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetEqualizerAsync(type, enabled, CancellationToken.None);
@@ -331,7 +408,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.PlayFromQueueAsync("x-rincon-cpcontainer:playlist", "<DIDL-Lite />", CancellationToken.None);
@@ -352,7 +429,7 @@ public class SonosConnectionTests
         const string metadata = "<DIDL-Lite><dc:title>Rock &amp; Roll</dc:title></DIDL-Lite>";
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetTransportUriAsync("x-rincon-mp3radio://stream.example.com/live.mp3", metadata, CancellationToken.None);
@@ -370,7 +447,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.SetGroupVolumeAsync(30, CancellationToken.None);
@@ -388,7 +465,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
 
         // Act
         await connection.ChangeGroupVolumeAsync(-5, CancellationToken.None);
@@ -405,7 +482,7 @@ public class SonosConnectionTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         using var httpClient = new HttpClient();
-        using var connection = CreateConnection(speaker, httpClient);
+        var connection = CreateConnection(speaker, httpClient);
         var soundUri = new Uri("http://127.0.0.1/sound.mp3");
 
         // Act
@@ -423,10 +500,103 @@ public class SonosConnectionTests
     {
         // Arrange
         using var httpClient = new HttpClient();
-        using var connection = new SonosConnection(
+        var connection = new SonosConnection(
             new Uri($"http://127.0.0.1:{LoopbackPorts.GetFreePort()}/"), Uuid, httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<HttpRequestException>(() => connection.SetVolumeAsync(50, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("PLAYING", "Pause")]
+    [InlineData("TRANSITIONING", "Pause")]
+    [InlineData("PAUSED_PLAYBACK", "Play")]
+    [InlineData("STOPPED", "Play")]
+    public async Task WhenTogglingPlayback_ThenAPlayingOrStartingPlayerIsPausedAndAnyOtherPlays(string state, string expectedAction)
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.Respond("GetTransportInfo", ("CurrentTransportState", state));
+        using var httpClient = new HttpClient();
+        var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.TogglePlaybackAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["GetTransportInfo", expectedAction], speaker.Calls.Select(call => call.Action));
+    }
+
+    [Fact]
+    public async Task WhenTogglingPlaybackOfAPlayerThatReportsNoState_ThenNothingIsSent()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.TogglePlaybackAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["GetTransportInfo"], speaker.Calls.Select(call => call.Action));
+    }
+
+    [Fact]
+    public async Task WhenTheIdOfTheUnitIsUnknown_ThenItIsReadOnceFromTheZoneInfoAndBuiltFromMacAddressAndPort()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.Respond("GetZoneInfo", ("MACAddress", "00:11:22:AA:BB:CC"));
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(speaker.BaseUri, null, httpClient);
+        var expectedUuid = $"RINCON_001122AABBCC0{speaker.BaseUri.Port}";
+
+        // Act
+        await connection.SwitchToTvAsync(CancellationToken.None);
+        await connection.SwitchToLineInAsync(CancellationToken.None);
+
+        // Assert
+        var calls = speaker.Calls.ToArray();
+        Assert.Equal(["GetZoneInfo", "SetAVTransportURI", "SetAVTransportURI"], calls.Select(call => call.Action));
+        Assert.Equal($"x-sonos-htastream:{expectedUuid}:spdif", calls[1].GetArgument("CurrentURI"));
+        Assert.Equal($"x-rincon-stream:{expectedUuid}", calls[2].GetArgument("CurrentURI"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheIdOfTheUnitIsUnknownAndTheSpeakerReportsNoMacAddress_ThenTheCommandThrowsAndSendsNothingElse(bool isEmpty)
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        if (isEmpty)
+        {
+            speaker.Respond("GetZoneInfo", ("MACAddress", string.Empty));
+        }
+
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(speaker.BaseUri, null, httpClient);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => connection.SwitchToTvAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Contains("MAC address", exception.Message);
+        Assert.Equal(["GetZoneInfo"], speaker.Calls.Select(call => call.Action));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(101)]
+    public async Task WhenTheNotificationVolumeIsNotOneToHundred_ThenPlayNotificationThrowsBeforeConnecting(int volume)
+    {
+        // Arrange
+        using var httpClient = new HttpClient();
+        var connection = new SonosConnection(new Uri("http://127.0.0.1:1400/"), Uuid, httpClient);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => connection.PlayNotificationAsync(new Uri("http://127.0.0.1/sound.mp3"), volume, CancellationToken.None));
     }
 }

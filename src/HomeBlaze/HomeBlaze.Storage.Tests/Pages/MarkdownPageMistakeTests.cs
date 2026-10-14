@@ -990,11 +990,11 @@ public class MarkdownPageMistakeTests
 
     [Theory]
     [InlineData(
-        ":: HomeBlaze.Components.TabLayout Title=x\n::",
-        "Line 1: TabLayout has no configuration properties, so 'Title' cannot be set.")]
+        ":: HomeBlaze.Components.ValueList Label=x\n::",
+        "Line 1: ValueList has no configuration properties, so 'Label' cannot be set.")]
     [InlineData(
-        ":: HomeBlaze.Components.TabLayout\n```json\n{ \"title\": \"x\" }\n```\n::",
-        "Line 1: TabLayout has no configuration properties, so 'title' cannot be set.")]
+        ":: HomeBlaze.Components.ValueList\n```json\n{ \"label\": \"x\" }\n```\n::",
+        "Line 1: ValueList has no configuration properties, so 'label' cannot be set.")]
     [InlineData(
         ":: HomeBlaze.Samples.Motor#m\n::: Footer\ntext\n:::\n::",
         "Line 2: Motor has no slots, so 'Footer' cannot be used inside it.")]

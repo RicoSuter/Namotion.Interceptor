@@ -100,6 +100,22 @@ public class StateUnitExtensionsTests
     }
 
     [Theory]
+    [InlineData("0.756", "75.6%")]
+    [InlineData("0.75", "75%")]
+    [InlineData("0", "0%")]
+    [InlineData("1", "100%")]
+    [InlineData("0.33333", "33.3%")]
+    [InlineData("-0.25", "-25%")]
+    public void WhenFractionIsFormattedAsPercent_ThenRoundsToOneDecimalPlace(string fraction, string expected)
+    {
+        // Act
+        var result = StateUnitExtensions.FormatPercent(decimal.Parse(fraction, System.Globalization.CultureInfo.InvariantCulture));
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
     [InlineData(3.14159, "3.14")]
     [InlineData(5.0, "5")]
     [InlineData(0.1, "0.1")]

@@ -12,6 +12,7 @@ using HomeBlaze.OpcUa;
 using HomeBlaze.OpcUa.Blazor;
 using HomeBlaze.Plugins;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Diagnostics;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor;
 using HomeBlaze.Storage.Blazor.Files;
@@ -23,6 +24,8 @@ using Namotion.Devices.Shelly;
 using Namotion.Devices.Shelly.HomeBlaze;
 using Namotion.Devices.Sonos;
 using Namotion.Devices.Sonos.HomeBlaze;
+using Namotion.Devices.FritzBox;
+using Namotion.Devices.FritzBox.HomeBlaze;
 using Namotion.Devices.SunSpec;
 using Namotion.Devices.SunSpec.HomeBlaze;
 using Namotion.Devices.Wallbox;
@@ -103,6 +106,7 @@ catch (Exception exception) when (exception is IOException or UnauthorizedAccess
 // This must happen before any service that depends on TypeProvider is used
 var typeProvider = app.Services.GetRequiredService<TypeProvider>();
 typeProvider
+    .AddAssembly(typeof(HostSystem).Assembly)                  // HomeBlaze.Services
     .AddAssembly(typeof(FluentStorageContainer).Assembly)      // HomeBlaze.Storage
     .AddAssembly(typeof(MarkdownFilePageComponent).Assembly)   // HomeBlaze.Storage.Blazor
     .AddAssembly(typeof(Widget).Assembly)                      // HomeBlaze.Components
@@ -131,6 +135,8 @@ typeProvider
     .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly)                                  // Namotion.Devices.Luxtronik.HomeBlaze
     .AddAssembly(typeof(SonosSystem).Assembly)                                              // Namotion.Devices.Sonos
     .AddAssembly(typeof(SonosSystemWidget).Assembly)                                        // Namotion.Devices.Sonos.HomeBlaze
+    .AddAssembly(typeof(FritzBox).Assembly)                                                 // Namotion.Devices.FritzBox
+    .AddAssembly(typeof(FritzBoxWidget).Assembly)                                           // Namotion.Devices.FritzBox.HomeBlaze
     .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
     .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly);                           // HomeBlaze.AI.Blazor
 

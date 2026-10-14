@@ -31,6 +31,7 @@ public partial class LuxtronikHeatPump :
     IPowerSensor,
     IThermalPowerSensor,
     IConnectionState,
+    INetworkHost,
     ISoftwareState,
     IMonitoredService,
     ITitleProvider,

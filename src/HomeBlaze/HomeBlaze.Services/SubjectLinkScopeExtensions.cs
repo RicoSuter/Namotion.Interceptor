@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Services;
 
@@ -19,6 +20,6 @@ public static class SubjectLinkScopeExtensions
             return link;
         }
 
-        return SubjectScopeFinder.FindNearest<ILinkScope>(subject)?.ResolveLink(link) ?? link;
+        return subject.TryGetFirstParentOrSelf<ILinkScope>()?.ResolveLink(link) ?? link;
     }
 }

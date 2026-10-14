@@ -17,6 +17,7 @@ public interface IColorTemperatureController
     /// <param name="colorTemperature">Color temperature (0 = warm, 1 = cool).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Operation]
+    [Category("Light")]
     Task SetColorTemperatureAsync(
         [OperationParameter(Unit = StateUnit.Percent)] decimal colorTemperature,
         CancellationToken cancellationToken);

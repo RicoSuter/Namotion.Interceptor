@@ -20,6 +20,7 @@ public partial class Indicator : IConfigurable, ITitleProvider
     /// Path of the property whose value the indicator shows.
     /// </summary>
     [Configuration]
+    [SubjectPath]
     public partial string? Path { get; set; }
 
     /// <summary>
@@ -27,6 +28,7 @@ public partial class Indicator : IConfigurable, ITitleProvider
     /// Without a map, a boolean that is true has the primary colour.
     /// </summary>
     [Configuration]
+    [SubjectPath(typeof(ValueMap))]
     public partial string? Map { get; set; }
 
     /// <summary>

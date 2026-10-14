@@ -33,15 +33,11 @@ public class PlaywrightFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Start the test server with Kestrel
-        _factory = new WebTestingHostFactory<App>();
+        // Start the test server with Kestrel. It learns the test subject and its widget before it loads anything.
+        _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget)]);
         // Force server to start by accessing ServerAddress which calls EnsureServer
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
-
-        // The registry of the components and the serializer of the configuration read the types once, when the first page asks
-        // for a component or for a configuration, so the test subject and its widget are added before any page is requested.
-        _factory.ServerServices.GetRequiredService<TypeProvider>().AddTypes([typeof(ControlsTestSubject), typeof(ControlsTestWidget)]);
 
         // The root subject is loaded by a background service, so the server serves requests before the
         // object graph behind them exists. The UI waits that window out on its own, but the wait would
@@ -105,10 +101,16 @@ public class PlaywrightFixture : IAsyncLifetime
     /// <param name="name">The name of the subject under the root, or null for a new one.</param>
     /// <param name="label">The label of the subject, which it has before it enters the graph.</param>
     /// <returns>The name of the subject under the root, which is its path, and the subject.</returns>
-    public (string Name, PlainConfigurableSubject Subject) AddPlainSubjectToRoot(string? name = null, string label = "Original label")
+    public async Task<(string Name, PlainConfigurableSubject Subject)> AddPlainSubjectToRootAsync(string? name = null, string label = "Original label")
     {
         name ??= CreatePlainSubjectName();
         var root = GetRoot();
+
+        // A pass of the storage that finds a change sets the children of the root anew from its files, which drops
+        // this subject. A pass now takes in what earlier tests left changed on disk, so that the pass they asked
+        // for, which runs seconds later, finds nothing.
+        await root.ReconcileAsync();
+
         var subject = CreatePlainSubject(label);
         root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
         return (name, subject);
@@ -120,7 +122,7 @@ public class PlaywrightFixture : IAsyncLifetime
     public static string CreatePlainSubjectName() => $"Plain{Guid.NewGuid():N}";
 
     /// <summary>
-    /// Puts a new subject in the place of a subject of <see cref="AddPlainSubjectToRoot"/> in one write, like a
+    /// Puts a new subject in the place of a subject of <see cref="AddPlainSubjectToRootAsync"/> in one write, like a
     /// device that connects again and gets a new subject under the name it had.
     /// </summary>
     /// <returns>The subject that is under the root now.</returns>
@@ -134,7 +136,7 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Takes a subject of <see cref="AddPlainSubjectToRoot"/> out of the graph again.
+    /// Takes a subject of <see cref="AddPlainSubjectToRootAsync"/> out of the graph again.
     /// </summary>
     public void RemovePlainSubjectFromRoot(string name, PlainConfigurableSubject subject)
     {

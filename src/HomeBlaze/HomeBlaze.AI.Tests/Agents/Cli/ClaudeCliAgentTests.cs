@@ -400,9 +400,14 @@ public class ClaudeCliAgentTests
     [UnixFact]
     public async Task WhenAPerModelWeeklyLimitRejectsTheRun_ThenTheAgentPausesUntilThatLimitResets()
     {
-        // Arrange - the weekly Opus limit rejects while the five-hour and seven-day windows still have room.
+        // Arrange - the weekly Opus limit rejects while the five-hour and seven-day windows still have room. The clock
+        // stands before the fixture's reset times, so the pause is in the future.
         using var cli = FakeClaudeCli.Create("usage-limit-opus.jsonl", exitCode: 1);
-        await using var test = await StartAsync(cli);
+        await using var test = await AgentTestContext<ClaudeCliAgent>.StartAsync(
+            services => new ClaudeCliAgent(services, NullLogger<ClaudeCliAgent>.Instance),
+            agent => agent.CliPath = cli.ScriptPath,
+            Endpoint,
+            timeProvider: new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero)));
 
         // Act
         test.Agent.RunNow();

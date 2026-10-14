@@ -382,6 +382,212 @@ public class MarkdownBlockTests
         await Assertions.Expect(tabs.GetByText("Content of beta")).ToHaveCountAsync(0);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Top")]
+    [InlineData("Left")]
+    [InlineData("Right")]
+    [InlineData("Bottom")]
+    public async Task WhenTabLayoutHasAPositionOrNone_ThenTheTabBarIsOnThatSideOrAtTheTopAndTheContentTakesTheRest(string? position)
+    {
+        // Arrange: the first tab has a line of code that cannot wrap, the second one a few words.
+        await WriteScratchPageAsync(CreatePositionedTabsPage(position));
+        var page = await OpenPageAsync(ScratchPage);
+        await page.SetViewportSizeAsync(1280, 800);
+        var tabs = page.GetByTestId("tab-layout");
+        await Assertions.Expect(tabs.GetByText("Content of alpha").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await WaitForLayoutAsync(page, "tab-layout", width => width > 800);
+        var isAtASide = position is "Left" or "Right";
+        await WaitForTabBarAsync(page, isAtASide ? Beside : position == "Bottom" ? Below : Above);
+
+        // Act
+        var layout = (await GetBoxesAsync(tabs)).Single();
+        var bar = (await GetBoxesAsync(tabs.Locator(".mud-tabs-tabbar"))).Single();
+        var widePanel = (await GetBoxesAsync(tabs.GetByTestId("tab-panel").First)).Single();
+        var buttons = await GetBoxesAsync(tabs.GetByRole(AriaRole.Tab));
+        var titleStarts = await tabs.GetByRole(AriaRole.Tab).EvaluateAllAsync<double[]>(
+            """
+            elements => elements.map(element => {
+                const range = document.createRange();
+                range.selectNodeContents(element);
+                return range.getBoundingClientRect().left;
+            })
+            """);
+        var scrollsSideways = await HasHorizontalScrollingAsync(page);
+
+        await GetTab(tabs, "Beta").ClickAsync();
+        await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
+        var narrowPanel = (await GetBoxesAsync(tabs.GetByTestId("tab-panel").Nth(1))).Single();
+
+        // Assert: the tabs stand below each other at a side and next to each other above or below the content.
+        Assert.True(isAtASide ? buttons[1].Top >= buttons[0].Bottom : buttons[1].Left >= buttons[0].Right, $"{buttons[0]} {buttons[1]}");
+        if (isAtASide)
+        {
+            // Titles of different lengths start at the same place, which centred titles do not.
+            Assert.All(titleStarts, start => Assert.Equal(titleStarts[0], start, 0.5));
+        }
+        Assert.True(position switch
+        {
+            "Left" => bar.Right <= widePanel.Left,
+            "Right" => bar.Left >= widePanel.Right,
+            "Bottom" => bar.Top >= widePanel.Bottom,
+            _ => bar.Bottom <= widePanel.Top
+        }, $"bar {bar}, panel {widePanel}");
+
+        // The content takes the room that the tab bar leaves: no more for content that is too wide, no less for narrow content.
+        var expectedWidth = layout.Right - layout.Left - (isAtASide ? bar.Right - bar.Left : 0);
+        Assert.Equal(expectedWidth, widePanel.Right - widePanel.Left, 1.0);
+        Assert.Equal(expectedWidth, narrowPanel.Right - narrowPanel.Left, 1.0);
+        Assert.False(scrollsSideways);
+    }
+
+    [Theory]
+    [InlineData("Left")]
+    [InlineData("Right")]
+    public async Task WhenContentBesideTheTabBarCannotGetNarrowEnough_ThenItScrollsInsideItsPanelAndLeavesTheTabsFree(string position)
+    {
+        // Arrange: a word without a place to break, far wider than the window.
+        await WriteScratchPageAsync(
+            "---\ntitle: Scratch\n---\n\n# Scratch\n\n" +
+            $":: HomeBlaze.Components.TabLayout#tabs Position={position}\n" +
+            CreateTab("alpha", "Alpha", new string('x', 800)) + CreateTab("beta", "Beta") + "::\n");
+        var page = await OpenPageAsync(ScratchPage);
+        await page.SetViewportSizeAsync(1280, 800);
+        var tabs = page.GetByTestId("tab-layout");
+        await Assertions.Expect(tabs.GetByTestId("tab-panel").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await WaitForLayoutAsync(page, "tab-layout", width => width > 800);
+        await WaitForTabBarAsync(page, Beside);
+
+        // Act
+        var panelScrolls = await tabs.GetByTestId("tab-panel").First.EvaluateAsync<bool>("panel => panel.scrollWidth > panel.clientWidth");
+        var tabIsOnTop = await GetTab(tabs, "Beta").EvaluateAsync<bool>(
+            """
+            tab => {
+                const box = tab.getBoundingClientRect();
+                const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+                return tab.contains(top);
+            }
+            """);
+        var scrollsSideways = await HasHorizontalScrollingAsync(page);
+
+        // Assert
+        Assert.True(panelScrolls);
+        Assert.True(tabIsOnTop);
+        Assert.False(scrollsSideways);
+    }
+
+    [Theory]
+    [InlineData("Left")]
+    [InlineData("Right")]
+    public async Task WhenAPageWithTabsAtASideOpensInANarrowWindow_ThenTheTabBarIsAtTheTop(string position)
+    {
+        // Arrange
+        await WriteScratchPageAsync(CreatePositionedTabsPage(position));
+        var page = await _fixture.CreatePageAsync(new() { ViewportSize = new() { Width = NarrowViewportWidth, Height = 844 } });
+
+        // Act
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        var tabs = page.GetByTestId("tab-layout");
+        await Assertions.Expect(tabs.GetByText("Content of alpha").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Assert
+        await WaitForTabBarAsync(page, Above);
+        await WaitForLayoutAsync(page, "tab-layout", IsNarrowContentWidth);
+        var buttons = await GetBoxesAsync(tabs.GetByRole(AriaRole.Tab));
+        Assert.Equal(buttons[0].Top, buttons[1].Top, 1.0);
+        Assert.False(await HasHorizontalScrollingAsync(page));
+    }
+
+    [Theory]
+    [InlineData("Left")]
+    [InlineData("Right")]
+    public async Task WhenTheWindowOfTabsAtASideGetsNarrowAndWideAgain_ThenTheTabBarFollowsAndTheSelectedTabStays(string position)
+    {
+        // Arrange
+        await WriteScratchPageAsync(CreatePositionedTabsPage(position));
+        var page = await OpenPageAsync(ScratchPage);
+        await page.SetViewportSizeAsync(1280, 800);
+        var tabs = page.GetByTestId("tab-layout");
+        await Assertions.Expect(tabs.GetByText("Content of alpha").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await WaitForTabBarAsync(page, Beside);
+        await GetTab(tabs, "Beta").ClickAsync();
+        await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
+
+        // Act: each wait ends when the tab bar is where the window width puts it.
+        await page.SetViewportSizeAsync(NarrowViewportWidth, 844);
+        await WaitForTabBarAsync(page, Above);
+        await WaitForLayoutAsync(page, "tab-layout", IsNarrowContentWidth);
+        var selectedWhenNarrow = await GetSelectedTab(tabs).InnerTextAsync();
+        var scrollsSidewaysWhenNarrow = await HasHorizontalScrollingAsync(page);
+
+        await page.SetViewportSizeAsync(1280, 800);
+        await WaitForTabBarAsync(page, Beside);
+        var selectedWhenWide = await GetSelectedTab(tabs).InnerTextAsync();
+
+        // Assert
+        Assert.Equal("BETA", selectedWhenNarrow.Trim(), ignoreCase: true);
+        Assert.Equal("BETA", selectedWhenWide.Trim(), ignoreCase: true);
+        Assert.False(scrollsSidewaysWhenNarrow);
+        await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Left")]
+    public async Task WhenAPageWithATabLayoutRendersAgain_ThenTheTabLayoutDoesNotMeasureItsTabsAgainAndTheTabBarStays(string? position)
+    {
+        // Arrange: the temperature of the motor has noise, so the text of the page renders again with every simulation
+        // step, and the tab layout below it with it.
+        var argument = position is null ? string.Empty : $" Position={position}";
+        await WriteScratchPageAsync(
+            "---\ntitle: Scratch\n---\n\n# Scratch\n\nMotor temperature {{ ../Motor/Temperature }}\n\n" +
+            $":: HomeBlaze.Components.TabLayout#tabs{argument}\n" +
+            CreateTab("alpha", "Alpha") + CreateTab("beta", "Beta") + "::\n");
+
+        var page = await OpenPageAsync(ScratchPage);
+        await page.SetViewportSizeAsync(1280, 800);
+        var liveText = page.Locator(".markdown-content p").Filter(new() { HasText = "Motor temperature" });
+        await Assertions.Expect(liveText).ToContainTextAsync("°C", new() { Timeout = 30000 });
+        await WaitForTabBarAsync(page, position is null ? Above : Beside);
+
+        await page.EvaluateAsync(
+            """
+            () => {
+                window.measuredElements = 0;
+                const measure = Element.prototype.getBoundingClientRect;
+                Element.prototype.getBoundingClientRect = function () {
+                    if (this.closest('.mud-tabs-tabbar')) {
+                        window.measuredElements++;
+                    }
+                    return measure.call(this);
+                };
+            }
+            """);
+
+        // The layout measures its tabs after its first renders. They are over when a render of the page adds no
+        // measurement. A layout that measures on every render never gets there, and fails below.
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var measuredBefore = await page.EvaluateAsync<int>("() => window.measuredElements");
+            await WaitForOtherTextAsync(liveText);
+            if (await page.EvaluateAsync<int>("() => window.measuredElements") == measuredBefore)
+            {
+                break;
+            }
+        }
+
+        await page.EvaluateAsync("() => { window.measuredElements = 0; }");
+
+        // Act
+        await WaitForOtherTextAsync(liveText);
+        await WaitForOtherTextAsync(liveText);
+        var measuredElements = await page.EvaluateAsync<int>("() => window.measuredElements");
+
+        // Assert
+        Assert.Equal(0, measuredElements);
+        await WaitForTabBarAsync(page, position is null ? Above : Beside);
+    }
+
     [Fact]
     public async Task WhenAWidgetInACardIsEditedInInlineMode_ThenOnlyItsHeadLineChangesInThePageSource()
     {
@@ -653,6 +859,51 @@ public class MarkdownBlockTests
     {
         return "---\ntitle: Scratch\n---\n\n# Scratch\n\n" + contentBefore +
             ":: HomeBlaze.Components.TabLayout#tabs\n" + string.Concat(tabs) + "::\n";
+    }
+
+    // Three tabs. The first has a paragraph that is longer than a line and a line of code that cannot wrap.
+    private static string CreatePositionedTabsPage(string? position)
+    {
+        var argument = position is null ? string.Empty : $" Position={position}";
+        var longText = string.Join(" ", Enumerable.Repeat("Content of alpha", 60));
+        var longCode = "```\n" + new string('x', 4000) + "\n```";
+        return "---\ntitle: Scratch\n---\n\n# Scratch\n\n" +
+            $":: HomeBlaze.Components.TabLayout#tabs{argument}\n" +
+            CreateTab("alpha", "Alpha", $"{longText}\n\n{longCode}") + CreateTab("beta", "Beta") + CreateTab("gamma", "Gamma") + "::\n";
+    }
+
+    // Waits until the element shows another text than it does now.
+    private static async Task WaitForOtherTextAsync(ILocator locator)
+    {
+        var text = await locator.InnerTextAsync();
+        await Assertions.Expect(locator).Not.ToHaveTextAsync(text, new() { Timeout = 30000, UseInnerText = true });
+    }
+
+    private const string Beside = "beside";
+    private const string Above = "above";
+    private const string Below = "below";
+
+    // Waits until the tab bar of the only tab layout stands beside, above or below the shown panel.
+    private static Task WaitForTabBarAsync(IPage page, string place)
+    {
+        return page.WaitForFunctionAsync(
+            """
+            place => {
+                const layout = document.querySelector('[data-testid=tab-layout]');
+                const bar = layout.querySelector('.mud-tabs-tabbar').getBoundingClientRect();
+                const panel = [...layout.querySelectorAll('[data-testid=tab-panel]')]
+                    .map(element => element.getBoundingClientRect())
+                    .find(rectangle => rectangle.width > 0);
+                if (!panel) {
+                    return false;
+                }
+                return place === 'beside' ? bar.right <= panel.left || bar.left >= panel.right
+                    : place === 'above' ? bar.bottom <= panel.top
+                    : bar.top >= panel.bottom;
+            }
+            """,
+            place,
+            new() { Timeout = 30000 });
     }
 
     private Task WriteScratchPageAsync(string content) => _fixture.WriteDemoPageAsync(ScratchPage, content);

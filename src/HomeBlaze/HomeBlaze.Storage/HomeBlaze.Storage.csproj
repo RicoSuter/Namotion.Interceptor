@@ -2,6 +2,7 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="HomeBlaze.Storage.Tests" />
+        <InternalsVisibleTo Include="HomeBlaze.E2E.Tests" />
     </ItemGroup>
 
     <ItemGroup>

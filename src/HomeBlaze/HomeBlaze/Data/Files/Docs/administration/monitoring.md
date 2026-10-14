@@ -9,6 +9,34 @@ HomeBlaze reports its health over HTTP and exports logs, metrics and traces with
 
 See [Observability Design](../architecture/design/observability.md) for the architectural design.
 
+## Host system
+
+The `Host system` subject reports the machine HomeBlaze runs on and the HomeBlaze process. A new installation has one in `Servers/HostSystem.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
+
+| Property | Description |
+|----------|-------------|
+| `CpuUsage` | CPU usage of the whole host across all its CPUs |
+| `TotalMemory`, `AvailableMemory`, `MemoryUsage` | Physical memory of the host |
+| `Uptime` | Time since the host booted |
+| `ContainerMemoryLimit`, `ContainerCpuLimit` | Limits of the container HomeBlaze runs in, empty without a limit |
+| `Process.CpuUsage` | CPU usage of HomeBlaze across the processors available to it |
+| `Process.WorkingSet` | Physical memory used by HomeBlaze |
+| `Process.GcHeapSize` | Size of the .NET heap at the last garbage collection |
+| `Process.AllocationRate` | Memory HomeBlaze allocates per second |
+| `Process.GcPauseTime` | Share of the time the garbage collector paused HomeBlaze; under 1 % is normal |
+
+The values refresh every `PollingInterval` (15 seconds by default, at least 1 second). CPU usage, allocation rate and GC pause time appear after the second reading.
+
+Inside a container the host values describe the machine running the container, and the container limits sit beside them. `Process.CpuUsage` is measured against the processors available to HomeBlaze, which is the container CPU limit rounded up.
+
+| Platform | Host CPU and memory | Container limits |
+|----------|---------------------|------------------|
+| Linux | Yes | Yes (cgroup v1 and v2) |
+| Windows | Yes | No |
+| macOS | Yes, available memory approximates Activity Monitor | No |
+
+The `Collect garbage` operation on `Process` runs a full, compacting garbage collection and returns free memory to the operating system. It pauses HomeBlaze while it runs and asks for confirmation. Use it to tell a memory leak apart from memory the garbage collector has not reclaimed yet.
+
 ## Health endpoints
 
 | Endpoint | Checks | Use |

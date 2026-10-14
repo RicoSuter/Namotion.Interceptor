@@ -32,6 +32,10 @@ public class ValueWidgetTests
 
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Values.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // The circuit replaces the prerendered elements when it connects. A box measured across that moment belongs
+        // to an element that has left the page, and is empty.
+        await ExpectInteractiveAsync(page);
         return page;
     }
 
@@ -300,7 +304,7 @@ public class ValueWidgetTests
         await Assertions.Expect(tile.GetByTestId("value-missing")).ToHaveTextAsync(MissingText, new() { Timeout = Timeout });
 
         // Act
-        var (_, subject) = _fixture.AddPlainSubjectToRoot(name, "Appeared label");
+        var (_, subject) = await _fixture.AddPlainSubjectToRootAsync(name, "Appeared label");
         try
         {
             // Assert
@@ -317,7 +321,7 @@ public class ValueWidgetTests
     public async Task WhenSubjectOfAnAbsolutePathIsReplaced_ThenTheTileFollowsTheNewSubjectWithoutAReload()
     {
         // Arrange
-        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
         try
         {
             var page = await OpenQuietPageAsync(CreateTilePage(name));
@@ -346,7 +350,7 @@ public class ValueWidgetTests
     public async Task WhenSubjectOfAnAbsolutePathIsRemoved_ThenTheTileShowsADashWithoutAReload()
     {
         // Arrange
-        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
         var isRemoved = false;
         try
         {
@@ -381,7 +385,7 @@ public class ValueWidgetTests
         await Assertions.Expect(paragraph).ToHaveTextAsync(new Regex(@"^Start\s*End$"), new() { Timeout = Timeout });
 
         // Act
-        var (_, subject) = _fixture.AddPlainSubjectToRoot(name, "Appeared label");
+        var (_, subject) = await _fixture.AddPlainSubjectToRootAsync(name, "Appeared label");
         try
         {
             // Assert
@@ -397,7 +401,7 @@ public class ValueWidgetTests
     public async Task WhenSubjectOfAnAbsolutePathIsReplaced_ThenTheExpressionShowsTheValueOfTheNewSubjectWithoutAReload()
     {
         // Arrange
-        var (name, subject) = _fixture.AddPlainSubjectToRoot();
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
         try
         {
             var page = await OpenQuietPageAsync(CreateExpressionPage(name));

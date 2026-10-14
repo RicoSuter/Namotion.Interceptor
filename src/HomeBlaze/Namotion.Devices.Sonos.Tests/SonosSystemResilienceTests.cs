@@ -286,4 +286,29 @@ public class SonosSystemResilienceTests
         Assert.True(household.System.IsConnected);
         Assert.Equal(ServiceStatus.Running, household.System.Status);
     }
+
+    [Fact]
+    public async Task WhenASpeakerAnswersWithMoreBytesThanAllowed_ThenThatRequestFailsAndItsValuesAreNotRead()
+    {
+        // Arrange: valid favorites, so only their size can fail the read.
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, configure: system =>
+            system.PollingInterval = TimeSpan.FromHours(1));
+        var favoritesBefore = connected.System.Favorites.Select(favorite => favorite.Title).ToArray();
+        connected.System.SetFavorites([]);
+        var padding = "<!--" + new string('x', SonosSystem.MaximumResponseBytes) + "-->";
+        var oversized = TestFixtures.Read("favorites.xml").Replace("</DIDL-Lite>", padding + "</DIDL-Lite>", StringComparison.Ordinal);
+        speaker.Respond("Browse", ("Result", oversized), ("NumberReturned", "4"), ("TotalMatches", "4"), ("UpdateID", "1"));
+        var browsesBefore = speaker.Calls.Count(call => call.Action == "Browse");
+
+        // Act
+        await connected.System.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.NotEmpty(favoritesBefore);
+        Assert.Contains(padding, oversized);
+        Assert.True(speaker.Calls.Count(call => call.Action == "Browse") > browsesBefore);
+        Assert.Empty(connected.System.Favorites);
+        Assert.True(connected.System.IsConnected);
+    }
 }

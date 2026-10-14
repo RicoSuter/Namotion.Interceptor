@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor.Registry;
@@ -19,6 +21,10 @@ public class MethodPropertyInitializer : ILifecycleHandler
     private static NullabilityInfoContext? _nullabilityContext;
 
     private static NullabilityInfoContext NullabilityContext => _nullabilityContext ??= new();
+
+    // Per subject type, as the class method that implements an interface method decides. Weak, so that the types of
+    // an unloaded plugin are not kept alive.
+    private static readonly ConditionalWeakTable<Type, ConcurrentDictionary<MethodInfo, string?>> CategoriesBySubjectType = new();
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
@@ -146,6 +152,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             Description = attribute.Description,
             Icon = attribute.Icon,
             Position = attribute.Position,
+            Category = GetCategory(subject.GetType(), method),
             RequiresConfirmation = requiresConfirmation,
             Parameters = parameters,
             ResultType = resultType,
@@ -157,6 +164,54 @@ public class MethodPropertyInitializer : ILifecycleHandler
             _ => metadata,
             null,
             [.. method.GetCustomAttributes<Attribute>()]);
+    }
+
+    private static string? GetCategory(Type subjectType, MethodInfo method)
+    {
+        return CategoriesBySubjectType
+            .GetValue(subjectType, static _ => new ConcurrentDictionary<MethodInfo, string?>())
+            .GetOrAdd(method, static (method, subjectType) => FindCategory(subjectType, method), subjectType);
+    }
+
+    private static string? FindCategory(Type subjectType, MethodInfo method)
+    {
+        var parameterTypes = Array.ConvertAll(method.GetParameters(), static parameter => parameter.ParameterType);
+        var isInterfaceMethod = method.DeclaringType is { IsInterface: true };
+
+        // An explicit implementation has another name and is not found, so the interface method decides for it.
+        var classMethod = isInterfaceMethod
+            ? FindMethod(subjectType, method.Name, parameterTypes)
+            : method;
+
+        // An attribute decides also when its name is empty, which is how a class method opts out.
+        if (classMethod?.GetCustomAttribute<CategoryAttribute>() is { } classCategory)
+        {
+            return classCategory.GetNormalizedCategory();
+        }
+
+        // Before the other interfaces, of which one may declare the same method with another category.
+        if (isInterfaceMethod && method.GetCustomAttribute<CategoryAttribute>() is { } ownCategory)
+        {
+            return ownCategory.GetNormalizedCategory();
+        }
+
+        foreach (var interfaceType in subjectType.GetInterfaces())
+        {
+            if (FindMethod(interfaceType, method.Name, parameterTypes)?.GetCustomAttribute<CategoryAttribute>() is { } interfaceCategory)
+            {
+                return interfaceCategory.GetNormalizedCategory();
+            }
+        }
+
+        return null;
+    }
+
+    // Not Type.GetMethod, whose binder also accepts parameter types that the given ones convert to.
+    private static MethodInfo? FindMethod(Type type, string name, Type[] parameterTypes)
+    {
+        return type.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(candidate =>
+            candidate.Name == name &&
+            candidate.GetParameters().Select(static parameter => parameter.ParameterType).SequenceEqual(parameterTypes));
     }
 
     private static Type? GetUnwrappedResultType(Type returnType)

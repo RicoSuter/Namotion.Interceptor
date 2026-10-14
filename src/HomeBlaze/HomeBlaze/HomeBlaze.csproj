@@ -13,6 +13,8 @@
         <ProjectReference Include="..\Namotion.Devices.Shelly.HomeBlaze\Namotion.Devices.Shelly.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Sonos\Namotion.Devices.Sonos.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Sonos.HomeBlaze\Namotion.Devices.Sonos.HomeBlaze.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.FritzBox\Namotion.Devices.FritzBox.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.FritzBox.HomeBlaze\Namotion.Devices.FritzBox.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.SunSpec\Namotion.Devices.SunSpec.csproj" />
         <ProjectReference Include="..\Namotion.Devices.SunSpec.HomeBlaze\Namotion.Devices.SunSpec.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Wallbox\Namotion.Devices.Wallbox.csproj" />
