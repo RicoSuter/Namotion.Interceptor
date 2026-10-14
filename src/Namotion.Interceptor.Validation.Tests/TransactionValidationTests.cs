@@ -18,6 +18,24 @@ public class TransactionValidationTests
             .WithService<IPropertyValidator>(() => new MotorSpeedValidator(validateLocalWritesOnly));
     }
 
+    /// <summary>
+    /// Creates a motor whose own context registers the validation and reaches the transaction interceptor through a
+    /// fallback context without validation, and returns that fallback context to begin transactions on.
+    /// </summary>
+    private static (IInterceptorSubjectContext TransactionContext, Motor Motor) CreateSubjectValidatedThroughFallback()
+    {
+        var transactionContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subjectContext = InterceptorSubjectContext
+            .Create()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => new MotorSpeedValidator());
+        subjectContext.AddFallbackContext(transactionContext);
+        return (transactionContext, new Motor(subjectContext));
+    }
+
     [Fact]
     public async Task WhenDeferredAndIntermediateValueIsInvalid_ThenFinalValueCommits()
     {
@@ -162,6 +180,42 @@ public class TransactionValidationTests
         // Act & Assert
         Assert.Throws<ValidationException>(() => motor.MotorSpeed = 150);
         Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenImmediateAndSubjectContextValidatesThroughFallback_ThenSetterThrows()
+    {
+        // Arrange
+        var (transactionContext, motor) = CreateSubjectValidatedThroughFallback();
+        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+
+        // Act & Assert
+        Assert.Throws<ValidationException>(() => motor.MotorSpeed = 150);
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenDeferredAndSubjectContextValidatesThroughFallback_ThenCommitThrowsBeforeAnythingIsWritten()
+    {
+        // Arrange
+        var (transactionContext, motor) = CreateSubjectValidatedThroughFallback();
+        var writer = new TestTransactionWriter();
+        transactionContext.AddService<ITransactionWriter>(writer);
+
+        // Act
+        SubjectTransactionValidationException exception;
+        using (var transaction = await transactionContext.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred))
+        {
+            motor.MotorSpeed = 150;
+            exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        Assert.Equal(nameof(Motor.MotorSpeed), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Equal(0, writer.WriteCount);
+        Assert.Equal(0, motor.MotorSpeed);
     }
 
     [Fact]

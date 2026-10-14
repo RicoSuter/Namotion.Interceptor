@@ -3,8 +3,10 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Tracking.Transactions;
 
 /// <summary>
-/// Participates in the transactions of the context it is registered on. Handlers are resolved from the
-/// transaction's context when the transaction begins and are called in the context's service order (registration
+/// Participates in the transactions of the context it is registered on. Handlers are resolved from the transaction's
+/// context when the transaction begins and from the context of each written subject at its first write in the
+/// transaction, except handlers registered on the transaction's context after it began; a handler takes part from
+/// then on. Handlers are called in the order they were resolved, each context's in its service order (registration
 /// order unless ordering attributes say otherwise); the first handler that throws stops the rest.
 /// </summary>
 public interface ITransactionHandler

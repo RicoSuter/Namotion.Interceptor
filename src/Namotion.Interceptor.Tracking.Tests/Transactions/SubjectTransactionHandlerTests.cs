@@ -168,6 +168,61 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenHandlerIsRegisteredOnlyOnSubjectContextReachingTransactionsThroughFallback_ThenItTakesPart()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var probe = new CommitWriteProbe(handler);
+        var transactionContext = CreateContext();
+        var subjectContext = InterceptorSubjectContext.Create();
+        subjectContext.AddService<ITransactionHandler>(handler);
+        subjectContext.AddService(probe);
+        subjectContext.AddFallbackContext(transactionContext);
+        var person = new Person(subjectContext);
+        probe.Writes.Clear();
+
+        SubjectPropertyChange[]? changesSeenByHandler = null;
+        handler.OnCommittingAction = (_, changes) => changesSeenByHandler = changes;
+
+        // Act
+        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Bob", Assert.Single(handler.Captured).Value);
+        Assert.Equal(1, handler.CommittingCalls);
+        var change = Assert.Single(changesSeenByHandler!);
+        Assert.Equal(nameof(Person.FirstName), change.Property.Name);
+        Assert.Equal("Bob", change.GetNewValue<string>());
+        Assert.True(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenHandlerIsRegisteredOnSubjectContextAndTransactionContext_ThenItIsCalledOncePerEvent()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var transactionContext = CreateContext();
+        transactionContext.AddService<ITransactionHandler>(handler);
+        var subjectContext = InterceptorSubjectContext.Create();
+        subjectContext.AddService<ITransactionHandler>(handler);
+        subjectContext.AddFallbackContext(transactionContext);
+        var person = new Person(subjectContext);
+
+        // Act
+        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Single(handler.Captured);
+        Assert.Equal(1, handler.CommittingCalls);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Fact]
     public async Task WhenCommitting_ThenOnCommittingSeesPendingValuesBeforeAnythingIsApplied()
     {
         // Arrange
@@ -1169,58 +1224,6 @@ public class SubjectTransactionHandlerTests
         {
             return !FailedPropertyNames.Contains(change.Property.Name) &&
                 !UnwrittenPropertyNames.Contains(change.Property.Name);
-        }
-    }
-
-    private sealed class RecordingHandler : ITransactionHandler
-    {
-        public List<(PropertyReference Property, object? Value, ChangeOrigin Origin)> Captured { get; } = [];
-
-        public Func<PropertyReference, object?, Exception?>? RejectCapture { get; set; }
-
-        public List<(RecordingHandler Handler, object? Value)>? CaptureLog { get; init; }
-
-        public int CommittingCalls { get; private set; }
-
-        public Action<SubjectTransaction, SubjectPropertyChange[]>? OnCommittingAction { get; set; }
-
-        public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
-        {
-            if (RejectCapture?.Invoke(property, newValue) is { } exception)
-            {
-                throw exception;
-            }
-
-            Captured.Add((property, newValue, origin));
-            CaptureLog?.Add((this, newValue));
-        }
-
-        public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
-        {
-            CommittingCalls++;
-            OnCommittingAction?.Invoke(transaction, changes.ToArray());
-        }
-    }
-
-    [RunsAfter(typeof(SubjectTransactionInterceptor))]
-    private sealed class CommitWriteProbe(ITransactionHandler handler) : IWriteInterceptor
-    {
-        public List<(string Property, object? Value, bool Consumed, bool ConsumedAgain)> Writes { get; } = [];
-
-        public string? ThrowOnConsumedProperty { get; set; }
-
-        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
-        {
-            var consumed = SubjectTransaction.TryConsumeCommitWrite(handler, context.Property, context.NewValue);
-            var consumedAgain = SubjectTransaction.TryConsumeCommitWrite(handler, context.Property, context.NewValue);
-            Writes.Add((context.Property.Name, context.NewValue, consumed, consumedAgain));
-
-            if (consumed && context.Property.Name == ThrowOnConsumedProperty)
-            {
-                throw new InvalidOperationException("apply failed");
-            }
-
-            next(ref context);
         }
     }
 }

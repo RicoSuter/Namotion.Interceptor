@@ -194,7 +194,7 @@ using var tx = await context.BeginTransactionAsync(
 
 See [Validation in transactions](validation.md#transactions) for details.
 
-This mode has no effect unless a transaction handler, such as property validation, is registered on the context the transaction begins on (see [Transaction Handlers](#transaction-handlers)). A handler registered only on a subject's own context, which reaches the transaction's context through a fallback, does not take part: handlers are resolved from the exact context passed to `BeginTransactionAsync`, not from each written subject's own context.
+This mode has no effect unless a transaction handler, such as property validation, is registered on the context the transaction begins on or on the context of a written subject (see [Transaction Handlers](#transaction-handlers)).
 
 ### Requirements
 
@@ -476,7 +476,7 @@ public partial class Motor
 
 ### Transaction Handlers
 
-An `ITransactionHandler` registered on the context participates in its transactions; property validation uses one. Handlers are resolved when the transaction begins and are called in the context's service order.
+An `ITransactionHandler` registered on the context participates in its transactions; property validation uses one. Handlers are resolved from the context the transaction begins on when it begins, and from the context of each subject written in it at the subject's first write. A handler registered only on a subject's own context, which reaches the transaction's context through a fallback, therefore takes part from that write on, while a handler registered on the transaction's context after it began does not take part. Handlers are called in the order they were resolved, each context's in its service order.
 
 - `OnCapturing` is called for every write the transaction is about to capture or cancel, before it is captured. Throwing rejects the write at the setter.
 - `OnCommitting` is called with the final set of changes before any source write or local apply, while reads still return the transaction's values. Throwing aborts the commit without writing anything and leaves the transaction retryable.

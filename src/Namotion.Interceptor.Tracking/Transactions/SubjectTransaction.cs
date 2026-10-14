@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Performance;
 
@@ -34,7 +35,13 @@ public sealed class SubjectTransaction : IDisposable
     private readonly TransactionRequirement _requirement;
     private readonly TimeSpan _commitTimeout;
     private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
-    private readonly ImmutableArray<ITransactionHandler> _handlers;
+
+    // Replaced under _pendingChangesLock only while no commit runs, so the handlers that checked a commit are exactly
+    // the ones its applies are marked for. Never mutated in place: it starts as the context's cached service array.
+    private ITransactionHandler[] _handlers;
+
+    // Cache only (a stale read just takes the slow path): the last subject context whose handlers were included.
+    private IInterceptorSubjectContext? _lastIncludedContext;
 
     /// <summary>
     /// Last write wins if the same property is written multiple times.
@@ -139,12 +146,106 @@ public sealed class SubjectTransaction : IDisposable
     internal SubjectTransactionInterceptor Interceptor { get; }
 
     /// <summary>
-    /// Gets the transaction handlers resolved from the context when the transaction began.
+    /// Gets the transaction handlers resolved from the context when the transaction began, followed by those added from
+    /// the contexts of written subjects.
     /// </summary>
-    internal ImmutableArray<ITransactionHandler> Handlers => _handlers;
+    internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(Volatile.Read(ref _handlers));
 
     // Applies carry the commit write mark only when handlers checked the final set.
-    private SubjectTransaction? MarkingTransaction => _handlers.IsDefaultOrEmpty ? null : this;
+    private SubjectTransaction? MarkingTransaction => _handlers.Length == 0 ? null : this;
+
+    /// <summary>
+    /// Adds the transaction handlers of <paramref name="subjectContext"/> that are not registered on the transaction's
+    /// context, for a write the transaction is about to capture. Does nothing while a commit runs or once it committed.
+    /// </summary>
+    internal void IncludeHandlersOf(IInterceptorSubjectContext subjectContext)
+    {
+        if (ReferenceEquals(subjectContext, Context) || ReferenceEquals(subjectContext, Volatile.Read(ref _lastIncludedContext)))
+        {
+            return;
+        }
+
+        var subjectHandlers = subjectContext.GetServices<ITransactionHandler>().AsSpan();
+        if (!ContainsAll(Volatile.Read(ref _handlers), subjectHandlers) &&
+            !TryInclude(subjectHandlers, Context.GetServices<ITransactionHandler>().AsSpan()))
+        {
+            return;
+        }
+
+        Volatile.Write(ref _lastIncludedContext, subjectContext);
+    }
+
+    /// <summary>
+    /// Adds the handlers of <paramref name="subjectHandlers"/> that are in neither the transaction's handlers nor
+    /// <paramref name="transactionContextHandlers"/>, so a handler registered on the transaction's context after it
+    /// began stays out. Returns false while a commit runs or once it committed.
+    /// </summary>
+    private bool TryInclude(
+        ReadOnlySpan<ITransactionHandler> subjectHandlers,
+        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
+    {
+        lock (_pendingChangesLock)
+        {
+            if (_isValidating || _isCommitting || _isCommitted)
+            {
+                return false;
+            }
+
+            var handlers = _handlers;
+            ITransactionHandler[]? union = null;
+            var count = handlers.Length;
+            foreach (var handler in subjectHandlers)
+            {
+                if (ContainsByReference(transactionContextHandlers, handler) ||
+                    ContainsByReference(union is null ? handlers : union.AsSpan(0, count), handler))
+                {
+                    continue;
+                }
+
+                if (union is null)
+                {
+                    union = new ITransactionHandler[handlers.Length + subjectHandlers.Length];
+                    handlers.CopyTo(union, 0);
+                }
+
+                union[count++] = handler;
+            }
+
+            if (union is not null)
+            {
+                Array.Resize(ref union, count);
+                Volatile.Write(ref _handlers, union);
+            }
+
+            return true;
+        }
+    }
+
+    private static bool ContainsAll(ReadOnlySpan<ITransactionHandler> handlers, ReadOnlySpan<ITransactionHandler> candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (!ContainsByReference(handlers, candidate))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ContainsByReference(ReadOnlySpan<ITransactionHandler> handlers, ITransactionHandler handler)
+    {
+        foreach (var candidate in handlers)
+        {
+            if (ReferenceEquals(candidate, handler))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Gets a snapshot of the pending changes as a read-only list, in insertion order.
@@ -386,7 +487,7 @@ public sealed class SubjectTransaction : IDisposable
         ValidationMode = validationMode;
         _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
-        _handlers = context.GetServices<ITransactionHandler>();
+        _handlers = ImmutableCollectionsMarshal.AsArray(context.GetServices<ITransactionHandler>()) ?? [];
 
         Interlocked.Increment(ref _activeTransactionCount);
     }
@@ -929,15 +1030,15 @@ public sealed class SubjectTransaction : IDisposable
 
     private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) StartCommitAndSnapshotChanges()
     {
-        if (_handlers.IsDefaultOrEmpty)
+        var (rentedArray, changes, handlers) = SnapshotChanges();
+        if (handlers.Length == 0)
         {
-            return SnapshotChanges(setCommitting: true);
+            return (rentedArray, changes);
         }
 
-        var (rentedArray, changes) = SnapshotChanges(setCommitting: false);
         try
         {
-            InvokeCommitHandlers(changes.Span);
+            InvokeCommitHandlers(handlers, changes.Span);
 
             lock (_pendingChangesLock)
             {
@@ -965,7 +1066,7 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) SnapshotChanges(bool setCommitting)
+    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes, ITransactionHandler[] Handlers) SnapshotChanges()
     {
         lock (_pendingChangesLock)
         {
@@ -974,8 +1075,10 @@ public sealed class SubjectTransaction : IDisposable
             var changeCount = pendingChanges?.Count ?? 0;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
-            // Set while holding the lock so no write can be captured between the snapshot and the commit.
-            if (setCommitting)
+            // Read the handlers and set the state while holding the lock so no write can be captured, and no
+            // handler included, between the snapshot and the commit.
+            var handlers = _handlers;
+            if (handlers.Length == 0)
             {
                 _isCommitting = true;
             }
@@ -993,13 +1096,13 @@ public sealed class SubjectTransaction : IDisposable
                 }
             }
 
-            return (rentedArray, rentedArray.AsMemory(0, changeCount));
+            return (rentedArray, rentedArray.AsMemory(0, changeCount), handlers);
         }
     }
 
-    private void InvokeCommitHandlers(ReadOnlySpan<SubjectPropertyChange> changes)
+    private void InvokeCommitHandlers(ITransactionHandler[] handlers, ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        foreach (var handler in _handlers)
+        foreach (var handler in handlers)
         {
             handler.OnCommitting(this, changes);
         }
@@ -1016,7 +1119,7 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<SubjectPropertyChange> failedSource)
     {
         // A transaction disposed from another flow mid-commit has dropped the pending values the reads need.
-        if (_handlers.IsDefaultOrEmpty || Volatile.Read(ref _isDisposed) != 0)
+        if (_handlers.Length == 0 || Volatile.Read(ref _isDisposed) != 0)
         {
             return ([], []);
         }
@@ -1037,7 +1140,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 using (EnterCommitValidationAccess())
                 {
-                    InvokeCommitHandlers(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount));
+                    InvokeCommitHandlers(_handlers, new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount));
                 }
 
                 return ([], []);

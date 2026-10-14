@@ -127,8 +127,10 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        ValidateTransactionContext(context.Property, transaction);
+        var subjectContext = context.Property.Subject.Context;
+        ValidateTransactionContext(subjectContext, context.Property, transaction);
 
+        transaction.IncludeHandlersOf(subjectContext);
         InvokeCapturingHandlers(transaction, context.Property, context.NewValue, context.Origin);
 
         // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
@@ -176,10 +178,12 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ValidateTransactionContext(PropertyReference property, SubjectTransaction transaction)
+    private static void ValidateTransactionContext(
+        IInterceptorSubjectContext subjectContext,
+        PropertyReference property,
+        SubjectTransaction transaction)
     {
-        var subjectInterceptors = property.Subject.Context
-            .GetServices<SubjectTransactionInterceptor>();
+        var subjectInterceptors = subjectContext.GetServices<SubjectTransactionInterceptor>();
         var isBoundToThisContext = subjectInterceptors.Length == 1
             ? ReferenceEquals(subjectInterceptors[0], transaction.Interceptor)
             : ContainsByReference(subjectInterceptors, transaction.Interceptor);
