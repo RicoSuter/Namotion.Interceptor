@@ -237,13 +237,10 @@ public static class MarkdownBlockWriter
             fenceLength = text.Length;
         }
 
-        var indentationColumns = 0;
-        foreach (var character in indentation)
-        {
-            indentationColumns = character == '\t' ? indentationColumns + 4 - indentationColumns % 4 : indentationColumns + 1;
-        }
-
-        if (fenceLength < MarkdownBlockFence.MinimumLength || MarkdownBlockFence.IsIndentedAsCode(indentationColumns))
+        // A tab reaches the fourth column, so only spaces need counting.
+        if (fenceLength < MarkdownBlockFence.MinimumLength ||
+            indentation.Contains('\t') ||
+            MarkdownBlockFence.IsIndentedAsCode(indentation.Length))
         {
             return true;
         }

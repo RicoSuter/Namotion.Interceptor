@@ -39,8 +39,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // A reload changes the subjects it reuses before it publishes its snapshot, and it reuses the values of a
     // slot by their position. Between the two, and after a reload that failed once it had begun, the slot
     // values of the graph do not belong to the blocks of the snapshot, so a write-back must not insert or
-    // remove a block then. The count tells a write-back that a reload began while it worked.
-    private int _reloadCount;
+    // remove a block then. A reload that publishes while a write-back works makes its exchange fail instead.
     private volatile bool _isGraphAheadOfSnapshot;
 
     // Each access reads the current snapshot. Code that needs two of these together must take
@@ -129,10 +128,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             var content = await reading;
             var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
-            // The flag before the count: a write-back reads the count first, and one that reads the count of
-            // this reload must find the flag set as well, or it would take this reload for one that is over.
+            // A full fence, because a volatile write lets later writes pass it: a write-back that sees a slot
+            // value this parse changed must also see the flag.
             _isGraphAheadOfSnapshot = true;
-            Interlocked.Increment(ref _reloadCount);
+            Thread.MemoryBarrier();
             var result = await _parser.ParseAsync(content, this, Children, cancellationToken);
 
             // The page itself is assigned only after the parse succeeded, so a failed reload leaves its content,
@@ -211,11 +210,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
-        // Before the snapshot, see _reloadCount: a reload that began earlier and is not over is seen by the flag,
-        // and one that begins later by the count.
-        var reloadCount = Volatile.Read(ref _reloadCount);
-        var wasGraphAhead = _isGraphAheadOfSnapshot;
-
         var snapshot = _parseResult;
         var blockIndex = FindBlock(snapshot.BlockSubjects, subject);
         if (snapshot.Page is not { } page || blockIndex < 0)
@@ -237,9 +231,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
 
         // After the graph was read and before anything is published: the blocks were compared with slot values
-        // that a reload may have changed since the snapshot was parsed.
-        if (write.HasInsertedOrRemovedBlocks &&
-            (wasGraphAhead || _isGraphAheadOfSnapshot || Volatile.Read(ref _reloadCount) != reloadCount))
+        // that a reload may have changed since the snapshot was parsed. A reload that published since then fails
+        // the exchange below.
+        if (write.HasInsertedOrRemovedBlocks && _isGraphAheadOfSnapshot)
         {
             _parser.LogRefusedWrite(FullPath, "Blocks cannot be inserted or removed until the page has been read again.");
             return false;
