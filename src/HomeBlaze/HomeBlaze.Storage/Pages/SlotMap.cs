@@ -43,32 +43,18 @@ internal sealed class SlotMap
     /// <summary>Set when the type declares its slots in a way that cannot be used.</summary>
     public string? Error { get; }
 
-    /// <summary>Gets the slot that the property with this name declares, ignoring case, or null.</summary>
-    public SlotDefinition? FindByPropertyName(string propertyName)
+    /// <summary>Gets the slot that the property with this name declares, or null.</summary>
+    public SlotDefinition? FindByPropertyName(string propertyName, StringComparison comparison)
     {
         foreach (var slot in Named.Values)
         {
-            if (string.Equals(slot.PropertyName, propertyName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(slot.PropertyName, propertyName, comparison))
             {
                 return slot;
             }
         }
 
         return null;
-    }
-
-    /// <summary>Gets whether the property with exactly this name declares a slot.</summary>
-    public bool IsSlotProperty(string propertyName)
-    {
-        foreach (var slot in Named.Values)
-        {
-            if (slot.PropertyName == propertyName)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     public static SlotMap For(Type type) => Cache.GetOrAdd(type, Create);
