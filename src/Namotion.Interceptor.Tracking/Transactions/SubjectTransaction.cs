@@ -19,6 +19,9 @@ public sealed class SubjectTransaction : IDisposable
     [ThreadStatic]
     private static SubjectTransaction? _commitModelAccessTransaction;
 
+    [ThreadStatic]
+    private static SubjectTransaction? _commitValidationTransaction;
+
     /// <summary>
     /// Gets a value indicating whether any transaction is currently active across all contexts.
     /// This is a fast-path check using a volatile read; it may briefly return true after
@@ -122,6 +125,11 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsCommitModelAccessAuthorized => ReferenceEquals(_commitModelAccessTransaction, this);
 
     /// <summary>
+    /// Gets a value indicating whether this thread runs this transaction's handlers right before the local apply.
+    /// </summary>
+    internal bool IsCommitValidationAuthorized => ReferenceEquals(_commitValidationTransaction, this);
+
+    /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
     /// </summary>
     internal SubjectTransactionInterceptor Interceptor { get; }
@@ -170,6 +178,25 @@ public sealed class SubjectTransaction : IDisposable
             value = default!;
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads a pending value for the handlers that run right before the local apply, while the transaction is
+    /// committing. Returns false when the property is not part of the transaction.
+    /// </summary>
+    internal bool TryGetCommitValidationValue<TProperty>(PropertyReference property, out TProperty value)
+    {
+        lock (_pendingChangesLock)
+        {
+            if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out var change))
+            {
+                value = change.GetNewValue<TProperty>();
+                return true;
+            }
+        }
+
+        value = default!;
+        return false;
     }
 
     /// <summary>
@@ -607,6 +634,43 @@ public sealed class SubjectTransaction : IDisposable
                 SubjectPropertyChangeOperations.Concat(sourceErrors, revert.Errors));
         }
 
+        return await ApplyAfterSourceWritesAsync(writer, changes, writeResult, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Checks the final set again and applies it locally after the source writes, reverting sources where the
+    /// failure handling requires it. Returns null on full success.
+    /// </summary>
+    private async ValueTask<SubjectTransactionException?> ApplyAfterSourceWritesAsync(
+        ITransactionWriter writer,
+        Memory<SubjectPropertyChange> changes,
+        SourceWriteResult writeResult,
+        CancellationToken cancellationToken)
+    {
+        var (written, failedSource, sourceErrors, revertState) = writeResult;
+
+        // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
+        // final set is checked again right before it lands.
+        var (invalid, invalidErrors) = CheckBeforeLocalApply(changes.Span, failedSource);
+        IReadOnlyList<SubjectPropertyChange> invalidWritten = [];
+        if (invalid.Count > 0)
+        {
+            if (_failureHandling == TransactionFailureHandling.Rollback)
+            {
+                var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
+                var notApplied = SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, invalid, written);
+                return CreateFailureException(
+                    [],
+                    SubjectPropertyChangeOperations.Concat(invalid, notApplied, revert.Failed),
+                    SubjectPropertyChangeOperations.Concat(invalidErrors, revert.Errors));
+            }
+
+            // BestEffort: skip the invalid changes like failed source writes, and revert the sources that accepted them.
+            invalidWritten = SubjectPropertyChangeOperations.IntersectByProperty(invalid, written);
+            failedSource = SubjectPropertyChangeOperations.Concat(failedSource, invalid);
+            sourceErrors = SubjectPropertyChangeOperations.Concat(sourceErrors, invalidErrors);
+        }
+
         // Apply the whole snapshot except the source-write failures in a single pass. With no source
         // failure, this is the entire snapshot, and ApplyAllChanges returns an empty Successful set.
         var exclude = failedSource.Count == 0 ? null : failedSource;
@@ -644,12 +708,21 @@ public sealed class SubjectTransaction : IDisposable
 
             // BestEffort: keep source == model for failed-apply properties by reverting only the
             // source writes whose property failed to apply (matched by Property equality).
-            var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
+            var toRevert = SubjectPropertyChangeOperations.Concat(SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written), invalidWritten);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
                 SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, bestEffortRevert.Failed),
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
+        }
+
+        if (invalidWritten.Count > 0)
+        {
+            var invalidRevert = await RevertSourceWritesSafelyAsync(writer, invalidWritten, revertState, cancellationToken).ConfigureAwait(false);
+            return CreateFailureException(
+                applied,
+                SubjectPropertyChangeOperations.Concat(failedSource, invalidRevert.Failed),
+                SubjectPropertyChangeOperations.Concat(sourceErrors, invalidRevert.Errors));
         }
 
         return CreateFailureAfterSuccessfulLocalApply(changes, exclude, applied, failedSource, sourceErrors);
@@ -906,6 +979,42 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
+    /// <summary>
+    /// Calls the handlers again right before the local apply, with reads returning the transaction's values. Returns
+    /// the changes they rejected: the failed changes of a <see cref="SubjectTransactionException"/>, or every change
+    /// for any other exception, excluding changes whose source write already failed.
+    /// </summary>
+    private (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) CheckBeforeLocalApply(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> failedSource)
+    {
+        // A transaction disposed from another flow mid-commit has dropped the pending values the reads need.
+        if (_handlers.IsDefaultOrEmpty || Volatile.Read(ref _isDisposed) != 0)
+        {
+            return ([], []);
+        }
+
+        try
+        {
+            using (EnterCommitValidationAccess())
+            {
+                InvokeCommitHandlers(changes);
+            }
+
+            return ([], []);
+        }
+        catch (SubjectTransactionException exception) when (exception.FailedChanges.Count > 0)
+        {
+            var candidates = SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []);
+            IReadOnlyList<Exception> errors = exception.Errors.Count > 0 ? exception.Errors : [exception];
+            return (SubjectPropertyChangeOperations.IntersectByProperty(exception.FailedChanges, candidates), errors);
+        }
+        catch (Exception exception)
+        {
+            return (SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []), [exception]);
+        }
+    }
+
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
@@ -945,6 +1054,29 @@ public sealed class SubjectTransaction : IDisposable
         public void Dispose()
         {
             _commitModelAccessTransaction = _previousTransaction;
+        }
+    }
+
+    private CommitValidationAccessScope EnterCommitValidationAccess() => new(this);
+
+    /// <summary>
+    /// Lets this thread read the transaction's pending values while it runs the handlers right before the local
+    /// apply. The previous identity is restored on disposal. Callers must dispose the scope before awaiting.
+    /// </summary>
+    private readonly struct CommitValidationAccessScope : IDisposable
+    {
+        private readonly SubjectTransaction? _previousTransaction;
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit validation identity and restores the previous identity on disposal, including nested scopes.")]
+        public CommitValidationAccessScope(SubjectTransaction transaction)
+        {
+            _previousTransaction = _commitValidationTransaction;
+            _commitValidationTransaction = transaction;
+        }
+
+        public void Dispose()
+        {
+            _commitValidationTransaction = _previousTransaction;
         }
     }
 

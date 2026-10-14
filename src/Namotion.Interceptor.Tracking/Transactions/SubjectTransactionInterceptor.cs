@@ -41,17 +41,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return next(ref context);
         }
 
-        if (transaction.IsCommitting)
+        if (transaction.IsCommitting && TryReadWhileCommitting(transaction, ref context, next, out var committingValue))
         {
-            if (transaction.IsCommitModelAccessAuthorized)
-            {
-                return next(ref context);
-            }
-
-            if (transaction.IsInactiveUnderLockOrThrowIfCommitting())
-            {
-                return next(ref context);
-            }
+            return committingValue;
         }
 
         // Recorder-active reads are the landed-model view. This access linearizes at the non-committing
@@ -67,6 +59,41 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         return next(ref context);
+    }
+
+    /// <summary>
+    /// Reads a property while <paramref name="transaction"/> commits. Returns false when the transaction stopped
+    /// committing and the caller continues the capturing read path; throws when the read is not authorized.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryReadWhileCommitting<TProperty>(
+        SubjectTransaction transaction,
+        ref PropertyReadContext<TProperty> context,
+        ReadInterceptionDelegate<TProperty> next,
+        out TProperty value)
+    {
+        if (transaction.IsCommitModelAccessAuthorized)
+        {
+            value = next(ref context);
+            return true;
+        }
+
+        if (transaction.IsCommitValidationAuthorized)
+        {
+            value = transaction.TryGetCommitValidationValue<TProperty>(context.Property, out var validationValue)
+                ? validationValue
+                : next(ref context);
+            return true;
+        }
+
+        if (transaction.IsInactiveUnderLockOrThrowIfCommitting())
+        {
+            value = next(ref context);
+            return true;
+        }
+
+        value = default!;
+        return false;
     }
 
     /// <inheritdoc />
