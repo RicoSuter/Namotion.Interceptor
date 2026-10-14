@@ -43,41 +43,48 @@ internal static class HostListParser
                     continue;
                 }
 
-                ApplyField(fields, reader.LocalName, reader.ReadElementContentAsString());
+                // Known fields are read as text; an unused field (Index, FriendlyName, InfoURL, ...) is skipped
+                // without allocating a string for its value.
+                if (!TryApplyKnownField(fields, reader))
+                {
+                    reader.Skip();
+                }
             }
         }
 
         return fields.ToHostEntry();
     }
 
-    private static void ApplyField(HostFields fields, string name, string value)
+    private static bool TryApplyKnownField(HostFields fields, XmlReader reader)
     {
-        switch (name)
+        switch (reader.LocalName)
         {
             case "MACAddress":
-                fields.MacAddress = value;
-                break;
+                fields.MacAddress = reader.ReadElementContentAsString();
+                return true;
             case "IPAddress":
-                fields.IpAddress = value;
-                break;
+                fields.IpAddress = reader.ReadElementContentAsString();
+                return true;
             case "HostName":
-                fields.HostName = value;
-                break;
+                fields.HostName = reader.ReadElementContentAsString();
+                return true;
             case "InterfaceType":
-                fields.InterfaceType = value;
-                break;
+                fields.InterfaceType = reader.ReadElementContentAsString();
+                return true;
             case "Active":
-                fields.IsActive = value.Trim() == "1";
-                break;
+                fields.IsActive = reader.ReadElementContentAsString().Trim() == "1";
+                return true;
             case "X_AVM-DE_Port":
-                fields.Port = ParseInt32(value);
-                break;
+                fields.Port = ParseInt32(reader.ReadElementContentAsString());
+                return true;
             case "X_AVM-DE_Speed":
-                fields.Speed = ParseInt32(value);
-                break;
+                fields.Speed = ParseInt32(reader.ReadElementContentAsString());
+                return true;
             case "X_AVM-DE_Guest":
-                fields.IsGuest = value.Trim() == "1";
-                break;
+                fields.IsGuest = reader.ReadElementContentAsString().Trim() == "1";
+                return true;
+            default:
+                return false;
         }
     }
 

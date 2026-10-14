@@ -20,7 +20,7 @@ public class MeshListParserTests
         // Assert
         Assert.Equal(5, meshList.Nodes!.Count);
         var router = meshList.Nodes[0];
-        Assert.True(router.IsMeshed);
+        Assert.True(router.IsMeshed == true);
         Assert.Equal("master", router.MeshRole);
         Assert.Equal("FRITZ!Box 7590", router.Model);
         var link = router.Interfaces![2].Links![0];
@@ -59,10 +59,39 @@ public class MeshListParserTests
     public void WhenTheMeshListNestsTooDeeply_ThenParsingThrowsJsonException()
     {
         // Arrange
-        using var stream = ToStream("""{"nodes":[{"uid":""" + string.Concat(Enumerable.Repeat("[", 1000)) + string.Concat(Enumerable.Repeat("]", 1000)) + "}]}");
+        using var stream = ToStream("""{"nodes":[{"extra":""" + string.Concat(Enumerable.Repeat("[", 1000)) + string.Concat(Enumerable.Repeat("]", 1000)) + "}]}");
 
-        // Act & Assert
-        Assert.Throws<JsonException>(() => MeshListParser.Parse(stream));
+        // Act
+        var exception = Assert.Throws<JsonException>(() => MeshListParser.Parse(stream));
+
+        // Assert
+        Assert.Contains("depth", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void WhenAnUnknownPropertyNestsWithinTheDepthLimit_ThenParsingStillSucceeds()
+    {
+        // Arrange
+        using var stream = ToStream("""{"nodes":[{"uid":"n-1","extra":""" + string.Concat(Enumerable.Repeat("[", 60)) + string.Concat(Enumerable.Repeat("]", 60)) + "}]}");
+
+        // Act
+        var meshList = MeshListParser.Parse(stream);
+
+        // Assert
+        Assert.Equal("n-1", meshList.Nodes![0].Uid);
+    }
+
+    [Fact]
+    public void WhenIsMeshedIsNull_ThenTheNodeIsStillRead()
+    {
+        // Arrange
+        using var stream = ToStream("""{"nodes":[{"uid":"n-1","is_meshed":null}]}""");
+
+        // Act
+        var meshList = MeshListParser.Parse(stream);
+
+        // Assert
+        Assert.Null(meshList.Nodes![0].IsMeshed);
     }
 
     private static MemoryStream ToStream(string json) => new(Encoding.UTF8.GetBytes(json));

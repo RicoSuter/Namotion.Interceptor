@@ -55,6 +55,19 @@ public class HostListParserTests
     }
 
     [Fact]
+    public void WhenThePortIsNotNumeric_ThenItIsNull()
+    {
+        // Arrange
+        using var stream = ToStream("<List><Item><X_AVM-DE_Port>not-a-number</X_AVM-DE_Port></Item></List>");
+
+        // Act
+        var hosts = HostListParser.Parse(stream);
+
+        // Assert
+        Assert.Null(hosts[0].Port);
+    }
+
+    [Fact]
     public void WhenTheHostListNestsTooDeeply_ThenParsingThrowsXmlException()
     {
         // Arrange

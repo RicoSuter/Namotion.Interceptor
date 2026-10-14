@@ -21,6 +21,10 @@ internal sealed class Tr64Description
         ModelName = modelName;
         Udn = udn;
         ControlPaths = controlPaths;
+        Services = controlPaths.ToDictionary(
+            pair => pair.Key,
+            pair => new UpnpService(pair.Key, pair.Value),
+            StringComparer.Ordinal);
         WlanServiceTypes = controlPaths.Keys
             .Where(serviceType => serviceType.StartsWith(Tr64Services.WlanConfigurationPrefix, StringComparison.Ordinal))
             .OrderBy(GetVersion)
@@ -43,8 +47,13 @@ internal sealed class Tr64Description
     /// </summary>
     internal IReadOnlyList<string> WlanServiceTypes { get; }
 
+    /// <summary>
+    /// One <see cref="UpnpService"/> instance per offered service, built once so repeated lookups do not allocate.
+    /// </summary>
+    private IReadOnlyDictionary<string, UpnpService> Services { get; }
+
     internal UpnpService? TryGetService(string serviceType) =>
-        ControlPaths.TryGetValue(serviceType, out var controlPath) ? new UpnpService(serviceType, controlPath) : null;
+        Services.TryGetValue(serviceType, out var service) ? service : null;
 
     /// <summary>
     /// Parses a description. Throws <see cref="XmlException"/> when it is malformed, declares a document type or
@@ -82,10 +91,7 @@ internal sealed class Tr64Description
     private static string? GetElementValue(XElement? parent, XNamespace ns, string name) =>
         StringValues.NullIfBlank(parent?.Element(ns + name)?.Value);
 
-    /// <returns>
-    /// Whether the value is a rooted path on the host it came from. A description fetched without authentication
-    /// must not be able to send the authenticated requests elsewhere.
-    /// </returns>
+    /// <returns>Whether the value is a rooted path on the host it came from: not a URI and not protocol-relative.</returns>
     internal static bool IsLocalPath([NotNullWhen(true)] string? value)
     {
         if (string.IsNullOrEmpty(value) || value[0] != '/')

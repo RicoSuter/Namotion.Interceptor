@@ -69,4 +69,40 @@ public class Tr64DescriptionTests
         // Act & Assert
         Assert.Throws<XmlException>(() => Tr64Description.Parse("<!DOCTYPE root [<!ENTITY e \"x\">]><root>&e;</root>"));
     }
+
+    [Fact]
+    public void WhenThereAreMoreThanNineWlans_ThenTheyStillSortNumerically()
+    {
+        // Arrange
+        const string xml =
+            "<root xmlns=\"urn:dslforum-org:device-1-0\"><device><serviceList>" +
+            "<service><serviceType>urn:dslforum-org:service:WLANConfiguration:10</serviceType><controlURL>/upnp/control/wlanconfig10</controlURL></service>" +
+            "<service><serviceType>urn:dslforum-org:service:WLANConfiguration:2</serviceType><controlURL>/upnp/control/wlanconfig2</controlURL></service>" +
+            "</serviceList></device></root>";
+
+        // Act
+        var description = Tr64Description.Parse(xml);
+
+        // Assert
+        Assert.Equal(
+            ["urn:dslforum-org:service:WLANConfiguration:2", "urn:dslforum-org:service:WLANConfiguration:10"],
+            description.WlanServiceTypes);
+    }
+
+    [Fact]
+    public void WhenAServiceTypeAppearsTwice_ThenTheFirstControlPathIsKept()
+    {
+        // Arrange
+        const string xml =
+            "<root xmlns=\"urn:dslforum-org:device-1-0\"><device><serviceList>" +
+            "<service><serviceType>urn:dslforum-org:service:Hosts:1</serviceType><controlURL>/upnp/control/hosts-first</controlURL></service>" +
+            "<service><serviceType>urn:dslforum-org:service:Hosts:1</serviceType><controlURL>/upnp/control/hosts-second</controlURL></service>" +
+            "</serviceList></device></root>";
+
+        // Act
+        var description = Tr64Description.Parse(xml);
+
+        // Assert
+        Assert.Equal("/upnp/control/hosts-first", description.ControlPaths[Tr64Services.Hosts]);
+    }
 }

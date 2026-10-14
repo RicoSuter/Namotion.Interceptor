@@ -35,7 +35,7 @@ internal sealed class MeshNode
     public string? MacAddress { get; set; }
 
     [JsonPropertyName("is_meshed")]
-    public bool IsMeshed { get; set; }
+    public bool? IsMeshed { get; set; }
 
     [JsonPropertyName("mesh_role")]
     public string? MeshRole { get; set; }
@@ -92,6 +92,6 @@ internal sealed class MeshNodeLink
     public long? CurrentDataRateTransmit { get; set; }
 }
 
-[JsonSourceGenerationOptions(NumberHandling = JsonNumberHandling.AllowReadingFromString)]
+[JsonSourceGenerationOptions(NumberHandling = JsonNumberHandling.AllowReadingFromString, GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(MeshList))]
 internal sealed partial class MeshJsonContext : JsonSerializerContext;

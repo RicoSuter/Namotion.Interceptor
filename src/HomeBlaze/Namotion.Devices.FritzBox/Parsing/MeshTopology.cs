@@ -42,6 +42,11 @@ internal sealed record MeshTopology(
     IReadOnlySet<string> MeshMacAddresses)
 {
     private const string ConnectedState = "CONNECTED";
+    private const string UplinkInterfacePrefix = "UPLINK";
+
+    // A link's own-side interface and the node reached across it, used to pick an uplink by priority rather than
+    // by JSON order.
+    private readonly record struct MeshLinkCandidate(MeshNode OtherNode, MeshNodeInterface OwnInterface, MeshNodeLink Link);
 
     internal static MeshTopology Build(MeshList meshList)
     {
@@ -55,20 +60,19 @@ internal sealed record MeshTopology(
         {
             var addresses = CollectNodeAddresses(node, interfaces, links);
             nodeMacAddresses[node] = addresses;
-            if (node.IsMeshed)
+            if (IsMeshNode(node))
             {
                 meshMacAddresses.UnionWith(addresses);
             }
         }
 
-        var uplinks = new Dictionary<MeshNode, MeshNodeLink>(ReferenceEqualityComparer.Instance);
-        var positions = BuildClientPositions(links, interfaces, uplinks);
+        var uplinks = ResolveUplinks(nodes, CollectMeshLinkCandidates(links, interfaces));
+        var positions = BuildClientPositions(links, interfaces);
         var accessPoints = BuildAccessPoints(nodes, nodeMacAddresses, uplinks);
 
         return new MeshTopology(accessPoints, positions, meshMacAddresses);
     }
 
-    // Keeps the per-node nesting at two levels: one extraction per node, one for its links.
     private static HashSet<string> CollectNodeAddresses(
         MeshNode node,
         Dictionary<string, (MeshNode Node, MeshNodeInterface Interface)> interfaces,
@@ -101,10 +105,95 @@ internal sealed record MeshTopology(
         }
     }
 
+    // One entry per node that has at least one connected link to another mesh node, listing every such link from
+    // that node's own side. Built once so the uplink of each node can be chosen by priority instead of by the
+    // order links happen to appear in the document.
+    private static Dictionary<MeshNode, List<MeshLinkCandidate>> CollectMeshLinkCandidates(
+        Dictionary<string, MeshNodeLink> links,
+        Dictionary<string, (MeshNode Node, MeshNodeInterface Interface)> interfaces)
+    {
+        var candidates = new Dictionary<MeshNode, List<MeshLinkCandidate>>(ReferenceEqualityComparer.Instance);
+        foreach (var link in links.Values)
+        {
+            if (!TryGetConnectedEndpoints(link, interfaces, out var first, out var second))
+            {
+                continue;
+            }
+
+            if (!IsMeshNode(first.Node) || !IsMeshNode(second.Node))
+            {
+                continue;
+            }
+
+            AddCandidate(candidates, first.Node, first.Interface, second.Node, link);
+            AddCandidate(candidates, second.Node, second.Interface, first.Node, link);
+        }
+
+        return candidates;
+    }
+
+    private static void AddCandidate(
+        Dictionary<MeshNode, List<MeshLinkCandidate>> candidates,
+        MeshNode node,
+        MeshNodeInterface ownInterface,
+        MeshNode otherNode,
+        MeshNodeLink link)
+    {
+        if (!candidates.TryGetValue(node, out var list))
+        {
+            list = [];
+            candidates[node] = list;
+        }
+
+        list.Add(new MeshLinkCandidate(otherNode, ownInterface, link));
+    }
+
+    private static Dictionary<MeshNode, MeshNodeLink> ResolveUplinks(
+        List<MeshNode> nodes,
+        Dictionary<MeshNode, List<MeshLinkCandidate>> candidatesByNode)
+    {
+        var uplinks = new Dictionary<MeshNode, MeshNodeLink>(ReferenceEqualityComparer.Instance);
+        foreach (var node in nodes)
+        {
+            if (IsMaster(node) || !candidatesByNode.TryGetValue(node, out var candidates))
+            {
+                continue;
+            }
+
+            uplinks[node] = SelectUplink(candidates);
+        }
+
+        return uplinks;
+    }
+
+    /// <returns>
+    /// The link towards the router: one whose other side is the master, otherwise one on an interface named
+    /// <c>UPLINK...</c>, otherwise the first connected mesh link, in that priority order.
+    /// </returns>
+    private static MeshNodeLink SelectUplink(List<MeshLinkCandidate> candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (IsMaster(candidate.OtherNode))
+            {
+                return candidate.Link;
+            }
+        }
+
+        foreach (var candidate in candidates)
+        {
+            if (candidate.OwnInterface.Name?.StartsWith(UplinkInterfacePrefix, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return candidate.Link;
+            }
+        }
+
+        return candidates[0].Link;
+    }
+
     private static Dictionary<string, ClientPosition> BuildClientPositions(
         Dictionary<string, MeshNodeLink> links,
-        Dictionary<string, (MeshNode Node, MeshNodeInterface Interface)> interfaces,
-        Dictionary<MeshNode, MeshNodeLink> uplinks)
+        Dictionary<string, (MeshNode Node, MeshNodeInterface Interface)> interfaces)
     {
         var positions = new Dictionary<string, ClientPosition>(StringComparer.Ordinal);
         foreach (var link in links.Values)
@@ -114,28 +203,21 @@ internal sealed record MeshTopology(
                 continue;
             }
 
-            if (first.Node.IsMeshed && second.Node.IsMeshed)
+            var firstIsMeshNode = IsMeshNode(first.Node);
+            var secondIsMeshNode = IsMeshNode(second.Node);
+            if (!firstIsMeshNode && !secondIsMeshNode)
             {
-                // Between two repeaters the direction is unknown, so each takes the first link it has.
-                if (!IsMaster(first.Node))
-                {
-                    uplinks.TryAdd(first.Node, link);
-                }
-
-                if (!IsMaster(second.Node))
-                {
-                    uplinks.TryAdd(second.Node, link);
-                }
-
+                // Neither side belongs to the mesh; this link connects two clients, which does not happen here.
                 continue;
             }
 
-            if (first.Node.IsMeshed == second.Node.IsMeshed)
+            if (firstIsMeshNode && secondIsMeshNode)
             {
+                // Both sides are mesh nodes; their uplink was already resolved by ResolveUplinks.
                 continue;
             }
 
-            AddClientPosition(positions, link, first, second);
+            AddClientPosition(positions, link, first, second, firstIsMeshNode);
         }
 
         return positions;
@@ -170,10 +252,11 @@ internal sealed record MeshTopology(
         Dictionary<string, ClientPosition> positions,
         MeshNodeLink link,
         (MeshNode Node, MeshNodeInterface Interface) first,
-        (MeshNode Node, MeshNodeInterface Interface) second)
+        (MeshNode Node, MeshNodeInterface Interface) second,
+        bool firstIsAccessPoint)
     {
-        var (accessPoint, client) = first.Node.IsMeshed ? (first, second) : (second, first);
-        var clientMacAddress = MacAddresses.Normalize(client.Node.MacAddress) ?? MacAddresses.Normalize(client.Interface.MacAddress);
+        var (accessPoint, client) = firstIsAccessPoint ? (first, second) : (second, first);
+        var clientMacAddress = MacAddresses.Normalize(client.Interface.MacAddress) ?? MacAddresses.Normalize(client.Node.MacAddress);
         var accessPointMacAddress = MacAddresses.Normalize(accessPoint.Node.MacAddress);
         if (clientMacAddress is null || accessPointMacAddress is null)
         {
@@ -198,7 +281,7 @@ internal sealed record MeshTopology(
         var accessPoints = new List<AccessPointInfo>();
         foreach (var node in nodes)
         {
-            if (!node.IsMeshed || MacAddresses.Normalize(node.MacAddress) is not { } macAddress)
+            if (!IsMeshNode(node) || MacAddresses.Normalize(node.MacAddress) is not { } macAddress)
             {
                 continue;
             }
@@ -256,6 +339,9 @@ internal sealed record MeshTopology(
             ? port
             : null;
     }
+
+    /// <returns>Whether the node is part of the mesh: the router always is, even when it reports no flag.</returns>
+    private static bool IsMeshNode(MeshNode node) => node.IsMeshed == true || IsMaster(node);
 
     private static bool IsMaster(MeshNode node) =>
         string.Equals(node.MeshRole, "master", StringComparison.OrdinalIgnoreCase);
