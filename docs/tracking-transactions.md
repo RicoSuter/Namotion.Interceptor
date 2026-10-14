@@ -194,6 +194,8 @@ using var tx = await context.BeginTransactionAsync(
 
 See [Validation in transactions](validation.md#transactions) for details.
 
+This mode has no effect unless a transaction handler, such as property validation, is registered on the context the transaction begins on (see [Transaction Handlers](#transaction-handlers)). A handler registered only on a subject's own context, which reaches the transaction's context through a fallback, does not take part: handlers are resolved from the exact context passed to `BeginTransactionAsync`, not from each written subject's own context.
+
 ### Requirements
 
 Enforces constraints on transaction scope, useful for protocols like OPC UA.
@@ -476,10 +478,11 @@ public partial class Motor
 
 An `ITransactionHandler` registered on the context participates in its transactions; property validation uses one. Handlers are resolved when the transaction begins and are called in the context's service order.
 
-- `OnCapturing` is called for every write the transaction captures, before it is captured. Throwing rejects the write at the setter.
+- `OnCapturing` is called for every write the transaction is about to capture or cancel, before it is captured. Throwing rejects the write at the setter.
 - `OnCommitting` is called with the final set of changes before any source write or local apply, while reads still return the transaction's values. Throwing aborts the commit without writing anything and leaves the transaction retryable.
 - With source transactions, `OnCommitting` is called again after the source writes, right before the local apply, with only the changes that will be applied and their captured origins. Reads return the pending values of those changes and the landed model otherwise. Throwing there fails the affected changes: a `SubjectTransactionException` with matching failed changes fails only those, any other exception fails every checked change. This is handled like a failed local apply, and the transaction is terminal. The second call is skipped when nothing will be applied or the transaction was disposed before it.
-- Handlers must not write properties: a write during either check throws `InvalidOperationException`. When the transaction is used from several threads, a write from another thread, for example a child task, can call `OnCapturing` while `OnCommitting` runs, and is then rejected; handlers must tolerate being called concurrently.
+- Handlers must not write properties. A write to a property the transaction would capture throws `InvalidOperationException`; during the first check a write to a settable derived property is still applied immediately as always, and a write of the landed value to a property with no pending change is dropped as unchanged, same as outside a check. When the transaction is used from several threads, a write from another thread, for example a child task, can call `OnCapturing` while `OnCommitting` runs, and is then rejected; handlers must tolerate being called concurrently.
+- Handlers must read properties synchronously on the calling thread during the second check. A read from another thread while the commit applies throws `InvalidOperationException`, which fails every checked change.
 
 A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the replay of a value it already checked, or a rollback restoring one.
 
@@ -510,7 +513,26 @@ catch (SubjectTransactionConflictException ex)
 }
 ```
 
-Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible. Dispose the transaction and start a new one.
+Post-write failures (a `SubjectTransactionException` whose changes already reached a source or the local model, from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible. Dispose the transaction and start a new one.
+
+`SubjectTransactionValidationException` (validation package, see [Validation in transactions](validation.md#transactions)) is a `SubjectTransactionException` subclass, but it is thrown before anything is written, so it is retryable like the conflict exception above. Catch it before the base `SubjectTransactionException`:
+
+```csharp
+try
+{
+    await transaction.CommitAsync(cancellationToken);
+}
+catch (SubjectTransactionValidationException ex)
+{
+    // Invalid values detected before any writes: pending changes are still intact.
+    motor.MotorSpeed = 90;
+    await transaction.CommitAsync(cancellationToken);
+}
+catch (SubjectTransactionException ex)
+{
+    // Changes may already have reached a source or the local model: dispose and start a new transaction.
+}
+```
 
 Note that concurrent `CommitAsync` calls on the same transaction are rejected: only one commit attempt can be in progress at a time.
 
@@ -526,7 +548,7 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected: o
 - Commit-owned synchronous local replay remains allowed, including property hooks, change handlers, and derived cascades initiated by that replay. This authorization does not extend into custom writer callbacks or child tasks.
 - A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws
 - Concurrent `CommitAsync` calls on the same transaction instance are rejected
-- While transaction handlers check a commit, writes captured by that transaction throw `InvalidOperationException`; reads return the pending values.
+- While transaction handlers check a commit, writes captured by that transaction throw `InvalidOperationException`; reads return the pending values, except during the second check, where a property whose source write failed reads its landed value instead (see [Transaction Handlers](#transaction-handlers)).
 
 ## Best Practices
 

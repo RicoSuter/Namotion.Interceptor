@@ -139,7 +139,7 @@ var context = InterceptorSubjectContext
     .WithService<IPropertyValidator>(() => new MyCustomValidator());
 ```
 
-Data Annotations and custom validators all run on each property write. If any validator returns errors, the write is rejected.
+Data Annotations and custom validators all run on each property write (in transactions, see [Transactions](#transactions)). If any validator returns errors, the write is rejected.
 
 ## Transactions
 
@@ -167,7 +167,7 @@ With source transactions, the final set is checked again right before the local 
 
 In `Immediate` mode the setter still throws `ValidationException` for a write that is invalid against the values written so far, so write order matters at the setter. `Deferred` accepts invalid intermediate values, and code running in the transaction's flow reads them until a later write replaces them or the commit checks the final value.
 
-The values a commit applies are not validated again, and neither are the values a rollback restores. Writes made while a commit applies its values, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write.
+The values a commit applies are not validated again, and neither are the values a rollback restores. Writes made while a commit applies its values, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write. With `BestEffort`, if applying one committed value fails, for example a hook throws, the other values still land; they are not checked again as a set.
 
 During the commit checks, validators are called with `object` as the type parameter and the boxed value, and `Origin` is the captured origin of the change. Test the value (`context.Value is int speed`) rather than `typeof(TProperty)`.
 
