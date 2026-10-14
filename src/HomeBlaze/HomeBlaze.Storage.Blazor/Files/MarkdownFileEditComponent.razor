@@ -465,8 +465,6 @@ else
         if (_editor != null)
         {
             _currentContent = await _editor.GetValue();
-
-            // Refresh decorations after content change
             await RefreshDecorationsAsync();
 
             IsDirtyChanged?.Invoke(IsDirty);
