@@ -83,6 +83,23 @@ public class FritzBoxPollerTests
     }
 
     [Fact]
+    public async Task WhenThePasswordChangedSinceTheLastPoll_ThenThePollFailsAfterOneLogin()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        using var connection = await OpenAsync(fake);
+        var actionsBeforeThePoll = fake.Actions.Count;
+        fake.Password = "changed";
+
+        // Act
+        await Assert.ThrowsAsync<FritzBoxLoginException>(() => FritzBoxPoller.PollAsync(connection, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(1, fake.FailedLogins);
+        Assert.Equal(actionsBeforeThePoll, fake.Actions.Count);
+    }
+
+    [Fact]
     public async Task WhenTheHostListPathIsMissing_ThenAnInvalidDataExceptionIsThrown()
     {
         // Arrange

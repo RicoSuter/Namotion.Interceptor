@@ -173,8 +173,9 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     /// the path of a plain GET, or <c>serviceType#action</c> of an authenticated action.
     /// </summary>
     /// <remarks>
-    /// Holds before the answer is computed, so the answer reflects the state at release, unlike
-    /// <see cref="HoldNextGuestWlanInfo"/>, which captures the state on arrival.
+    /// Holds an authenticated action before its credentials are checked and its answer is computed, so both reflect
+    /// the state at release, unlike <see cref="HoldNextGuestWlanInfo"/>, which captures the state on arrival. The
+    /// action is added to <see cref="Actions"/> only after release.
     /// </remarks>
     internal Hold HoldNext(string key)
     {
@@ -207,9 +208,20 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             return;
         }
 
+        var soapAction = GetAction(request);
+        var hasCredentials = request.Headers.Authorization.Count > 0;
+
+        // Holds the request that carries credentials before checking them, so a password changed while it is held
+        // applies to it.
+        if (hasCredentials && soapAction is (var heldServiceType, var heldAction) &&
+            !await TryPassHoldAsync($"{heldServiceType}#{heldAction}", context))
+        {
+            return;
+        }
+
         if (!IsAuthorized(request))
         {
-            if (request.Headers.Authorization.Count > 0)
+            if (hasCredentials)
             {
                 Interlocked.Increment(ref _failedLogins);
             }
@@ -219,19 +231,13 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             return;
         }
 
-        if (GetAction(request) is not { } soapAction)
+        if (soapAction is not (var serviceType, var action))
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
-        var (serviceType, action) = soapAction;
-
         Actions.Enqueue(action);
-        if (!await TryPassHoldAsync($"{serviceType}#{action}", context))
-        {
-            return;
-        }
 
         if (HttpErrors.TryGetValue(action, out var statusCode))
         {

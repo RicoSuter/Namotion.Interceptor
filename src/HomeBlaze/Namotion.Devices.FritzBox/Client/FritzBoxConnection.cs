@@ -63,8 +63,9 @@ internal sealed class FritzBoxConnection : IDisposable
     internal bool HasService(string serviceType) => Description.ControlPaths.ContainsKey(serviceType);
 
     /// <summary>
-    /// Reads the device information, the first authenticated request. Throws <see cref="FritzBoxLoginException"/>
-    /// when the login is refused and <see cref="FritzBoxCertificateException"/> when the key is not the pinned one.
+    /// Reads the device information on its own, which checks the login: the first authenticated request of a
+    /// connection and of every poll. Throws <see cref="FritzBoxLoginException"/> when the login is refused and
+    /// <see cref="FritzBoxCertificateException"/> when the key is not the pinned one.
     /// </summary>
     internal async Task<UpnpSoapResponse> CheckLoginAsync(CancellationToken cancellationToken)
     {

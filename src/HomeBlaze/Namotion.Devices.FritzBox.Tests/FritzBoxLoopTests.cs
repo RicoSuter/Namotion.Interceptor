@@ -92,7 +92,48 @@ public class FritzBoxLoopTests
     }
 
     [Fact]
-    public async Task WhenThePasswordChangesDuringASession_ThenPollingStopsUntilTheConfigurationChanges()
+    public async Task WhenThePasswordChangesDuringASession_ThenOnePollFailsOneLoginAndPollingStopsUntilTheConfigurationChanges()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var router = CreateRouter(fake);
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
+        var loginCheck = fake.HoldNext($"{Tr64Services.DeviceInfo}#GetInfo");
+        try
+        {
+            await loginCheck.Taken.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            var queriesBeforeTheChange = fake.Actions.Count;
+
+            // Act
+            fake.Password = "changed";
+            loginCheck.Released.TrySetResult();
+            await WaitForErrorAsync(router, LoginFailedMessage);
+
+            // Assert
+            Assert.False(router.IsConnected);
+            Assert.Equal(1, fake.FailedLogins);
+            Assert.Equal(queriesBeforeTheChange, fake.Actions.Count);
+
+            // Act
+            router.Password = fake.Password;
+            await router.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            // The login backoff is not timed here; that this is only the second connection proves that the router
+            // did not reconnect on its own before the configuration changed.
+            await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should reconnect after the configuration change.");
+            Assert.Equal(2, fake.SecurityPortRequests);
+            Assert.Equal(1, fake.FailedLogins);
+        }
+        finally
+        {
+            loginCheck.Released.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheHostListIsRefusedDuringASession_ThenPollingStopsUntilTheConfigurationChanges()
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
@@ -104,8 +145,8 @@ public class FritzBoxLoopTests
         {
             await hostListQuery.Taken.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-            // A 401 on the host list after a successful login is how the router answers once the password changed,
-            // so the login itself never fails and FailedLogins stays 0.
+            // A 401 on the host list after a successful login is how the router answers once the user lost the
+            // permission, so the login itself never fails and FailedLogins stays 0.
             fake.HttpErrors[HostListAction] = 401;
             var hostListQueries = CountActions(fake, HostListAction);
 
@@ -114,8 +155,9 @@ public class FritzBoxLoopTests
             await WaitForErrorAsync(router, LoginFailedMessage);
 
             // Assert
+            // The held query is counted once it is released; no further one follows it.
             Assert.False(router.IsConnected);
-            Assert.Equal(hostListQueries, CountActions(fake, HostListAction));
+            Assert.Equal(hostListQueries + 1, CountActions(fake, HostListAction));
             Assert.Equal(0, fake.FailedLogins);
 
             // Act

@@ -8,7 +8,7 @@ using Namotion.Devices.Upnp;
 namespace Namotion.Devices.FritzBox.Client;
 
 /// <summary>
-/// Reads everything one poll needs from the router, in parallel.
+/// Reads everything one poll needs from the router: the device information alone, then the rest in parallel.
 /// </summary>
 internal static class FritzBoxPoller
 {
@@ -17,22 +17,24 @@ internal static class FritzBoxPoller
 
     /// <summary>
     /// Reads one snapshot. Optional values the router does not offer are null. Throws
-    /// <see cref="FritzBoxFirmwareException"/> when the router offers no host list, <see cref="FritzBoxLoginException"/>
-    /// when it refuses the host list to this user, and any transport failure as is.
+    /// <see cref="FritzBoxLoginException"/> when the router refuses the login or the host list to this user,
+    /// <see cref="FritzBoxFirmwareException"/> when it offers no host list, and any transport failure as is.
     /// </summary>
     internal static async Task<FritzBoxSnapshot> PollAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
     {
-        var deviceInfoTask = connection.ReadOrDefaultAsync(Tr64Services.DeviceInfo, "GetInfo", null, cancellationToken);
+        // Alone first: a password changed since the last poll then costs one failed login, not one per parallel read.
+        var deviceInfo = await connection.CheckLoginAsync(cancellationToken);
+
         var userInterfaceTask = connection.ReadOrDefaultAsync(Tr64Services.UserInterface, "GetInfo", null, cancellationToken);
         var internetTask = ReadInternetAsync(connection, cancellationToken);
         var trafficTask = ReadTrafficAsync(connection, cancellationToken);
         var wlansTask = ReadWlansAsync(connection, cancellationToken);
         var hostsTask = ReadHostsAsync(connection, cancellationToken);
         var meshTask = ReadMeshAsync(connection, cancellationToken);
-        await Task.WhenAll(deviceInfoTask, userInterfaceTask, internetTask, trafficTask, wlansTask, hostsTask, meshTask);
+        await Task.WhenAll(userInterfaceTask, internetTask, trafficTask, wlansTask, hostsTask, meshTask);
 
         return new FritzBoxSnapshot(
-            ToRouterInfo(await deviceInfoTask),
+            ToRouterInfo(deviceInfo),
             ToAvailableSoftwareUpdate(await userInterfaceTask),
             await internetTask,
             await trafficTask,
@@ -86,9 +88,8 @@ internal static class FritzBoxPoller
         _ => null
     };
 
-    private static RouterInfo? ToRouterInfo(UpnpSoapResponse? answer) => answer is null
-        ? null
-        : new RouterInfo(
+    private static RouterInfo ToRouterInfo(UpnpSoapResponse answer) =>
+        new(
             StringValues.NullIfBlank(answer.GetString("NewModelName")),
             StringValues.NullIfBlank(answer.GetString("NewSerialNumber")),
             StringValues.NullIfBlank(answer.GetString("NewHardwareVersion")),
