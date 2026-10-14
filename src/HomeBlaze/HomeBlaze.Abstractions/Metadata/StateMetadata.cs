@@ -4,7 +4,7 @@ namespace HomeBlaze.Abstractions.Metadata;
 
 /// <summary>
 /// Registry attribute value for [State] properties.
-/// Mirrors all fields from <see cref="StateAttribute"/>.
+/// Mirrors all fields from <see cref="StateAttribute"/>, plus the category of the property.
 /// </summary>
 public class StateMetadata
 {
@@ -22,6 +22,11 @@ public class StateMetadata
     /// Display order position (lower values appear first).
     /// </summary>
     public int Position { get; init; }
+
+    /// <summary>
+    /// The category the UI groups the property under, or null when it has none.
+    /// </summary>
+    public string? Category { get; init; }
 
     /// <summary>
     /// Whether the value is cumulative (e.g., total energy consumption).

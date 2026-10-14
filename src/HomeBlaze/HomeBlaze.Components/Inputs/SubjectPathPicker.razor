@@ -1,19 +1,16 @@
-@using HomeBlaze.Abstractions
-@using HomeBlaze.Services
-@using Microsoft.AspNetCore.Components.Web
-@using Namotion.Interceptor.Registry.Abstractions
 @using Namotion.Interceptor.Registry.Attributes
 
 @inject RootManager RootManager
 @inject SubjectPathResolver PathResolver
 
 <div class="subject-path-picker" data-testid="subject-path-picker">
-    <MudTextField @bind-Value="Value"
+    <MudTextField T="string"
+                  Value="@Value"
+                  ValueChanged="OnPathTypedAsync"
                   Label="@Label"
                   Placeholder="@Placeholder"
                   Variant="Variant.Outlined"
-                  Immediate="true"
-                  OnKeyUp="OnPathKeyUp" />
+                  Immediate="true" />
 
     @if (_previewValue != null || _isValidPath)
     {
@@ -24,32 +21,44 @@
 
     <MudDivider Class="my-2" />
 
-    <div class="subject-path-picker-tree">
-        <MudTreeView T="PathTreeItem"
-                     Items="@_treeItems"
-                     SelectionMode="SelectionMode.SingleSelection"
-                     @bind-SelectedValue="_selectedItem"
-                     @bind-SelectedValue:after="OnSelectedValueChangedAsync"
-                     Hover="true"
-                     Dense="true">
-            <ItemTemplate>
-                <MudTreeViewItem T="PathTreeItem"
-                                 Value="@context.Value"
-                                 Items="@GetChildItems(context)"
-                                 Text="@context.Value?.DisplayName"
-                                 Icon="@context.Value?.Icon"
-                                 Expanded="@context.Expanded"
-                                 ExpandedChanged="@(expanded => OnExpandedChanged((TreeItemData<PathTreeItem>)context, expanded))"
-                                 Style="@GetItemStyle(context.Value)" />
-            </ItemTemplate>
-        </MudTreeView>
-    </div>
+    @* An item that cannot be selected is ReadOnly: rejecting it in OnSelectedValueChangedAsync is too late, as the
+       tree has selected it by then and keeps it selected. *@
+    <MudTreeView T="PathTreeItem"
+                 Items="@_treeItems"
+                 SelectionMode="SelectionMode.SingleSelection"
+                 @bind-SelectedValue="_selectedItem"
+                 @bind-SelectedValue:after="OnSelectedValueChangedAsync"
+                 Hover="true"
+                 Dense="true"
+                 Height="300px">
+        <ItemTemplate>
+            <MudTreeViewItem T="PathTreeItem"
+                             Value="@context.Value"
+                             Items="@GetChildItems(context)"
+                             Text="@context.Value?.DisplayName"
+                             Icon="@context.Value?.Icon"
+                             Expanded="@context.Expanded"
+                             ExpandedChanged="@(expanded => OnExpandedChanged((TreeItemData<PathTreeItem>)context, expanded))"
+                             ReadOnly="@(context.Value?.CanSelect == false)"
+                             OnClick="@(() => OnItemClicked((TreeItemData<PathTreeItem>)context))"
+                             Class="@GetItemClass(context.Value)" />
+        </ItemTemplate>
+    </MudTreeView>
 </div>
 
+@* MudBlazor puts the class of an item on the element that also contains its children, so the rules select the row
+   of the item: on the element, the opacity would dim everything below it, once more per level. *@
 <style>
-    .subject-path-picker-tree {
-        height: 300px;
-        overflow-y: auto;
+    .subject-path-picker .subject-path-picker-disabled > .mud-treeview-item-content {
+        opacity: 0.5;
+    }
+
+    .subject-path-picker .subject-path-picker-not-selectable > .mud-treeview-item-content {
+        opacity: 0.6;
+    }
+
+    .subject-path-picker .subject-path-picker-expands-on-click > .mud-treeview-item-content {
+        cursor: pointer;
     }
 </style>
 
@@ -74,6 +83,12 @@
 
     [Parameter]
     public Func<RegisteredSubjectProperty, bool>? CanSelectProperty { get; set; }
+
+    /// <summary>
+    /// Decides whether a subject can be selected, every subject when null. One that cannot still expands.
+    /// </summary>
+    [Parameter]
+    public Func<IInterceptorSubject, bool>? CanSelectSubject { get; set; }
 
     private readonly List<TreeItemData<PathTreeItem>> _treeItems = [];
 
@@ -124,7 +139,8 @@
             Path = path,
             Icon = Icons.Material.Filled.AccountTree,
             Subject = subject,
-            IsExpandable = isExpandable
+            IsExpandable = isExpandable,
+            CanSelect = CanSelectSubject == null || CanSelectSubject(subject)
         };
 
         var treeItem = new TreeItemData<PathTreeItem>
@@ -174,6 +190,14 @@
         }
 
         StateHasChanged();
+    }
+
+    private void OnItemClicked(TreeItemData<PathTreeItem> treeItem)
+    {
+        if (treeItem.Value is { CanSelect: false, IsExpandable: true })
+        {
+            OnExpandedChanged(treeItem, !treeItem.Expanded);
+        }
     }
 
     private List<TreeItemData<PathTreeItem>> LoadChildren(PathTreeItem parent)
@@ -329,7 +353,8 @@
             // Check if target path matches this item's path
             if (targetPath.Equals(itemPath, StringComparison.OrdinalIgnoreCase))
             {
-                _selectedItem = item.Value;
+                // ReadOnly only stops a click: the tree highlights any item that it is given as selected.
+                _selectedItem = item.Value.CanSelect ? item.Value : null;
                 return true;
             }
 
@@ -362,12 +387,6 @@
     {
         if (_selectedItem != null)
         {
-            // Prevent selection of non-selectable items
-            if (!_selectedItem.CanSelect)
-            {
-                return;
-            }
-
             // Use shortest canonical path when a subject is selected
             if (_selectedItem.Subject != null)
             {
@@ -423,25 +442,27 @@
         return Icons.Material.Filled.Label;
     }
 
-    private static string GetItemStyle(PathTreeItem? item)
+    private static string? GetItemClass(PathTreeItem? item)
     {
         if (item == null)
-            return "";
+            return null;
 
-        var styles = new List<string>();
-
-        if (!item.IsEnabled)
-            styles.Add("opacity: 0.5");
-
-        if (!item.CanSelect)
-            styles.Add("opacity: 0.6");
-
-        return string.Join("; ", styles);
+        return (item.IsEnabled, item.CanSelect, item.IsExpandable) switch
+        {
+            (false, false, true) => "subject-path-picker-disabled subject-path-picker-not-selectable subject-path-picker-expands-on-click",
+            (false, false, false) => "subject-path-picker-disabled subject-path-picker-not-selectable",
+            (true, false, true) => "subject-path-picker-not-selectable subject-path-picker-expands-on-click",
+            (true, false, false) => "subject-path-picker-not-selectable",
+            (false, true, _) => "subject-path-picker-disabled",
+            _ => null
+        };
     }
 
-    private async Task OnPathKeyUp(KeyboardEventArgs e)
+    // Binding the text field to Value would set the parameter here without raising ValueChanged to the parent.
+    private async Task OnPathTypedAsync(string? value)
     {
-        await ValueChanged.InvokeAsync(Value);
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
         UpdatePreview();
         ExpandToSelectedPath();
     }

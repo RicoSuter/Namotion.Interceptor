@@ -25,6 +25,7 @@ public partial class Progress : IConfigurable, ITitleProvider
     /// Path of the property whose value the bar shows.
     /// </summary>
     [Configuration]
+    [SubjectPath]
     public partial string? Path { get; set; }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -18,6 +19,7 @@ public partial class EcowittRainGauge :
     private readonly string _name;
 
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? RainEvent { get; internal set; }
 
     [State(Unit = StateUnit.MillimeterPerHour)]
@@ -27,24 +29,30 @@ public partial class EcowittRainGauge :
     /// Gets the rain over the last hour.
     /// </summary>
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? HourlyRain { get; internal set; }
 
     /// <summary>
     /// Gets the rain over the last 24 hours.
     /// </summary>
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? Last24HoursRain { get; internal set; }
 
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? DailyRain { get; internal set; }
 
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? WeeklyRain { get; internal set; }
 
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? MonthlyRain { get; internal set; }
 
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? YearlyRain { get; internal set; }
 
     [State(Unit = StateUnit.Percent)]

@@ -161,4 +161,61 @@ public class WidgetTests
         Assert.False(cardResult);
         Assert.True(selfResult);
     }
+
+    [Fact]
+    public void WhenAnotherPathThanTheSavedOneIsResolved_ThenTheSavedPathIsKept()
+    {
+        // Arrange
+        var first = new Card(_context);
+        var second = new Card(_context);
+        var root = new Card(_context) { Content = first, Footer = second };
+        var widget = new Widget(new SubjectPathResolver(() => root));
+        first.Content = widget;
+        widget.Path = "/Footer";
+
+        // Act
+        var resolved = widget.ResolveSubject("/Content");
+
+        // Assert
+        Assert.Same(first, resolved);
+        Assert.Equal("/Footer", widget.Path);
+        Assert.Same(second, widget.ResolvedSubject);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/Missing")]
+    [InlineData("/Missing/Content")]
+    public void WhenPathIsEmptyOrLeadsToNothing_ThenNoSubjectIsResolved(string path)
+    {
+        // Arrange
+        var root = new Card(_context) { Content = new Card(_context) };
+        var widget = new Widget(new SubjectPathResolver(() => root));
+        root.Footer = widget;
+
+        // Act
+        var resolved = widget.ResolveSubject(path);
+
+        // Assert
+        Assert.Null(resolved);
+    }
+
+    [Fact]
+    public void WhenWidgetIsNotInTheGraph_ThenOnlyAnAbsolutePathIsResolved()
+    {
+        // Arrange
+        var content = new Card(_context);
+        var root = new Card(_context) { Content = content };
+        var widget = new Widget(new SubjectPathResolver(() => root));
+
+        // Act
+        var absolute = widget.ResolveSubject("/Content");
+        var parent = widget.ResolveSubject("..");
+        var relative = widget.ResolveSubject("Content");
+
+        // Assert
+        Assert.Same(content, absolute);
+        Assert.Null(parent);
+        Assert.Null(relative);
+    }
 }

@@ -89,7 +89,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <summary>
     /// File size in bytes.
     /// </summary>
-    [State("Size", Position = 1)]
+    [State("Size", Unit = StateUnit.Byte, Position = 1)]
     public partial long FileSize { get; set; }
 
     /// <summary>
