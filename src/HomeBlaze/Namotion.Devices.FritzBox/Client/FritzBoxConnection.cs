@@ -26,7 +26,7 @@ internal sealed class FritzBoxConnection : IDisposable
         _unavailableActionLog = new UnavailableActionLog(logger);
         _certificateValidator = new PinnedCertificateValidator(options.CertificatePin);
 
-        _httpClient = FritzBoxHttpClient.Create(options, _certificateValidator, MaximumAnswerBytes);
+        _httpClient = FritzBoxHttpClient.Create(baseUri, options, _certificateValidator, MaximumAnswerBytes);
         _soapClient = new UpnpSoapClient(_httpClient, baseUri);
     }
 
@@ -79,15 +79,19 @@ internal sealed class FritzBoxConnection : IDisposable
         {
             return await QueryAsync(Tr64Services.DeviceInfo, "GetInfo", null, cancellationToken);
         }
-        catch (HttpRequestException exception) when (exception.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-        {
-            throw new FritzBoxLoginException(exception);
-        }
-        catch (UpnpFaultException exception) when (exception.ErrorCode == 606)
+        catch (Exception exception) when (IsLoginRefusal(exception))
         {
             throw new FritzBoxLoginException(exception);
         }
     }
+
+    /// <returns>
+    /// Whether the router refused a request to this user: HTTP 401 or 403, or the TR-064 fault 606 for a missing
+    /// permission.
+    /// </returns>
+    internal static bool IsLoginRefusal(Exception exception) =>
+        exception is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden } or
+            UpnpFaultException { ErrorCode: 606 };
 
     /// <summary>
     /// Finds the WAN connection service that carries the internet connection. Both are listed on many routers, so
@@ -198,9 +202,10 @@ internal sealed class FritzBoxConnection : IDisposable
     private bool IsTranslated(
         Exception exception, string request, CancellationTokenSource timeout, CancellationToken cancellationToken, out Exception translated)
     {
-        if (exception is HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError } && _certificateValidator.IsRejected)
+        if (exception is HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError } &&
+            _certificateValidator.Rejected is { } rejected)
         {
-            translated = new FritzBoxCertificateException(PresentedCertificate, exception);
+            translated = new FritzBoxCertificateException(rejected, exception);
             return true;
         }
 

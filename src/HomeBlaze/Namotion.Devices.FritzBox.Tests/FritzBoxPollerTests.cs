@@ -69,13 +69,15 @@ public class FritzBoxPollerTests
     }
 
     [Theory]
-    [InlineData(401)]
-    [InlineData(403)]
-    public async Task WhenTheHostListIsRefusedAfterLogin_ThenThePollFailsAsALoginFailure(int statusCode)
+    [InlineData(401, false)]
+    [InlineData(403, false)]
+    [InlineData(606, true)]
+    public async Task WhenTheHostListIsRefusedAfterLogin_ThenThePollFailsAsALoginFailure(int code, bool isUpnpFault)
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        fake.HttpErrors["X_AVM-DE_GetHostListPath"] = statusCode;
+        var refusals = isUpnpFault ? fake.Faults : fake.HttpErrors;
+        refusals["X_AVM-DE_GetHostListPath"] = code;
         using var connection = await OpenAsync(fake);
 
         // Act & Assert

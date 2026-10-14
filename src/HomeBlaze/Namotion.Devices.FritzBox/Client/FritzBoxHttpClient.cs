@@ -6,15 +6,20 @@ namespace Namotion.Devices.FritzBox.Client;
 internal static class FritzBoxHttpClient
 {
     /// <summary>
-    /// Creates the client for the authenticated HTTPS requests against a router on the local network: Digest
-    /// credentials, a pooled connection limit, no redirects, no proxy and the pinned key instead of chain validation.
-    /// Its timeout is infinite, so each request must bring its own.
+    /// Creates the client for the authenticated HTTPS requests against a router on the local network: credentials
+    /// answered only to a Digest challenge under <paramref name="baseUri"/>, a pooled connection limit, no redirects,
+    /// no proxy and the pinned key instead of chain validation. Its timeout is infinite, so each request must bring
+    /// its own.
     /// </summary>
-    internal static HttpClient Create(FritzBoxConnectionOptions options, PinnedCertificateValidator certificateValidator, int maximumAnswerBytes)
+    internal static HttpClient Create(
+        Uri baseUri, FritzBoxConnectionOptions options, PinnedCertificateValidator certificateValidator, int maximumAnswerBytes)
     {
         var handler = new SocketsHttpHandler
         {
-            Credentials = new NetworkCredential(options.Username ?? string.Empty, options.Password ?? string.Empty),
+            Credentials = new CredentialCache
+            {
+                { baseUri, "Digest", new NetworkCredential(options.Username ?? string.Empty, options.Password ?? string.Empty) }
+            },
             AllowAutoRedirect = false,
             UseProxy = false,
             MaxConnectionsPerServer = 4,

@@ -22,7 +22,7 @@ public class PinnedCertificateValidatorTests
         // Assert
         Assert.True(isFirstAccepted);
         Assert.True(isRepeatedAccepted);
-        Assert.False(validator.IsRejected);
+        Assert.Null(validator.Rejected);
         Assert.Null(pinBeforeHandshake);
         Assert.Equal(CertificateInfo.Create(first).Pin, validator.TrustedPin);
     }
@@ -41,7 +41,7 @@ public class PinnedCertificateValidatorTests
 
         // Assert
         Assert.False(isAccepted);
-        Assert.True(validator.IsRejected);
+        Assert.Equal(CertificateInfo.Create(other), validator.Rejected);
         Assert.Equal(CertificateInfo.Create(other), validator.Presented);
         Assert.Equal(CertificateInfo.Create(first).Pin, validator.TrustedPin);
     }
@@ -62,5 +62,22 @@ public class PinnedCertificateValidatorTests
         Assert.False(isOtherAccepted);
         Assert.True(isPinnedAccepted);
         Assert.Equal(CertificateInfo.Create(pinned).Pin, validator.TrustedPin);
+    }
+
+    [Fact]
+    public void WhenAnAcceptedHandshakeFollowsARejectedOne_ThenTheRejectedCertificateIsStillReported()
+    {
+        // Arrange
+        using var pinned = FakeFritzBox.CreateCertificate();
+        using var other = FakeFritzBox.CreateCertificate();
+        var validator = new PinnedCertificateValidator(CertificateInfo.Create(pinned).Pin);
+        validator.Validate(this, other, null, SslPolicyErrors.None);
+
+        // Act
+        validator.Validate(this, pinned, null, SslPolicyErrors.None);
+
+        // Assert
+        Assert.Equal(CertificateInfo.Create(other), validator.Rejected);
+        Assert.Equal(CertificateInfo.Create(pinned), validator.Presented);
     }
 }

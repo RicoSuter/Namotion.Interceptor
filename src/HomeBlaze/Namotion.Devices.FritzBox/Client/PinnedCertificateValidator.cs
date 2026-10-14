@@ -12,7 +12,7 @@ internal sealed class PinnedCertificateValidator(string? pin)
 {
     private string? _pin = pin;
     private CertificateInfo? _presented;
-    private volatile bool _isRejected;
+    private CertificateInfo? _rejected;
 
     /// <summary>
     /// The certificate presented at the last handshake, null before the first.
@@ -26,9 +26,9 @@ internal sealed class PinnedCertificateValidator(string? pin)
     internal string? TrustedPin => Volatile.Read(ref _pin);
 
     /// <summary>
-    /// Whether a handshake presented a key other than the pinned one.
+    /// The certificate of the last handshake that presented a key other than the pinned one, null while none did.
     /// </summary>
-    internal bool IsRejected => _isRejected;
+    internal CertificateInfo? Rejected => Volatile.Read(ref _rejected);
 
     /// <summary>
     /// The <see cref="RemoteCertificateValidationCallback"/>: the router's certificate is self-signed and not issued
@@ -48,7 +48,7 @@ internal sealed class PinnedCertificateValidator(string? pin)
         var isAccepted = string.Equals(presented.Pin, expectedPin, StringComparison.Ordinal);
         if (!isAccepted)
         {
-            _isRejected = true;
+            Volatile.Write(ref _rejected, presented);
         }
 
         return isAccepted;

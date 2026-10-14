@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net;
 using System.Text.Json;
 using Namotion.Devices.FritzBox.Model;
 using Namotion.Devices.FritzBox.Parsing;
@@ -210,7 +209,7 @@ internal static class FritzBoxPoller
             throw new FritzBoxFirmwareException(
                 "The FRITZ!Box does not offer its host list (X_AVM-DE_GetHostListPath). Update FRITZ!OS.", exception);
         }
-        catch (HttpRequestException exception) when (exception.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        catch (Exception exception) when (FritzBoxConnection.IsLoginRefusal(exception))
         {
             // The required list refused after a successful login means the password or permission changed since.
             throw new FritzBoxLoginException(exception);
