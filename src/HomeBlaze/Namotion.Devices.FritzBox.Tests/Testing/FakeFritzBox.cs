@@ -154,6 +154,10 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     /// Holds the next request for a key until <see cref="Hold.Released"/> completes or the client gives up. The key is
     /// the path of a plain GET, or <c>serviceType#action</c> of an authenticated action.
     /// </summary>
+    /// <remarks>
+    /// Holds before the answer is computed, so the answer reflects the state at release, unlike
+    /// <see cref="HoldNextGuestWlanInfo"/>, which captures the state on arrival.
+    /// </remarks>
     internal Hold HoldNext(string key)
     {
         var hold = new Hold();

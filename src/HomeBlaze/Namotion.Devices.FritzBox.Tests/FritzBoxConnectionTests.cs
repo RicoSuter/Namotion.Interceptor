@@ -245,14 +245,22 @@ public class FritzBoxConnectionTests
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
 
-        // Opened once with the default timeout first, so a slow first request cannot time out the open under test.
-        (await FritzBoxConnection.OpenAsync(Options(fake), NullLogger.Instance, CancellationToken.None)).Dispose();
+        // Opened and logged in once with the default timeout first, so a slow first open, handshake or login cannot
+        // use up the short timeout before the held request is reached.
+        using (var warmUp = await FritzBoxConnection.OpenAsync(Options(fake), NullLogger.Instance, CancellationToken.None))
+        {
+            await warmUp.CheckLoginAsync(CancellationToken.None);
+        }
 
         using var connection = await FritzBoxConnection.OpenAsync(Options(fake, requestTimeout: ShortTimeout), NullLogger.Instance, CancellationToken.None);
-        fake.HoldNext($"{Tr64Services.UserInterface}#GetInfo");
+        var hold = fake.HoldNext($"{Tr64Services.UserInterface}#GetInfo");
 
-        // Act & Assert
-        await Assert.ThrowsAsync<TimeoutException>(() => connection.QueryAsync(Tr64Services.UserInterface, "GetInfo", null, CancellationToken.None));
+        // Act
+        var exception = await Record.ExceptionAsync(() => connection.QueryAsync(Tr64Services.UserInterface, "GetInfo", null, CancellationToken.None));
+
+        // Assert
+        Assert.IsType<TimeoutException>(exception);
+        Assert.True(hold.Taken.Task.IsCompleted);
     }
 
     [Fact]
