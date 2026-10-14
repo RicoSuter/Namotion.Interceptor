@@ -23,7 +23,7 @@
                          Size="Size.Small"
                          Color="@(Wlan?.IsOn == true ? Color.Success : Color.Default)"
                          Variant="Variant.Filled">
-                    @(Wlan?.IsOn == true ? "On" : "Off")
+                    @(Wlan?.IsOn switch { true => "On", false => "Off", null => "Unknown" })
                 </MudChip>
             }
         </MudStack>
@@ -73,8 +73,7 @@
         }
         catch (Exception exception)
         {
-            // Catches every failure here, including ones the library may add later (certificate rejection,
-            // firmware, XML parsing): an uncaught exception from a UI event handler kills the Blazor circuit.
+            // Catches every failure: an uncaught exception from a UI event handler ends the Blazor circuit.
             _errorMessage = exception.Message;
         }
         finally

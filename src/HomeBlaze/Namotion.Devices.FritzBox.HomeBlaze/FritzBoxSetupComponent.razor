@@ -98,14 +98,11 @@
     private bool _isCertificateConfirmed;
     private FritzBoxConnectionCheckResult? _result;
 
-    // The username and password actually checked, saved alongside a successful result instead of the live fields:
-    // ResetCheck already discards _result on every edit, but this also protects a result that was already in
-    // flight when the fields changed (see the version check in CheckAsync).
+    // The username and password the successful check used; saved instead of the live fields.
     private string? _checkedUsername;
     private string? _checkedPassword;
 
-    // Bumped by every edit and by every new check; a check whose version no longer matches when it completes is
-    // for fields the user has since changed, so its result is discarded instead of overwriting newer input.
+    // Bumped by every edit and every check; a check that completes with an older version is discarded.
     private int _checkVersion;
 
     public bool IsValid => _result is { IsSuccess: true } && _isCertificateConfirmed;
@@ -127,8 +124,7 @@
         }
         catch (Exception)
         {
-            // Discovery is a convenience; a failure (no multicast, a malfunctioning answerer, ...) must not block
-            // entering the address by hand below.
+            // A failed discovery must not block entering the address by hand.
             _routers = [];
         }
     }
@@ -165,7 +161,7 @@
             return;
         }
 
-        var username = _username;
+        var username = string.IsNullOrWhiteSpace(_username) ? null : _username.Trim();
         var password = _password;
         var version = ++_checkVersion;
 
@@ -178,8 +174,7 @@
             var result = await FritzBoxConnectionCheck.CheckAsync(hostAddress, username, password, _cancellationTokenSource.Token);
             if (version != _checkVersion)
             {
-                // The host, username or password changed (or the component was disposed) while this check was in
-                // flight; a newer check or edit already invalidated it, so its result is not applied.
+                // The fields changed while this check ran.
                 return;
             }
 

@@ -23,7 +23,7 @@
         }
         @if (AccessPoint?.UplinkType != null)
         {
-            <MudText Typo="Typo.body2">Uplink: @AccessPoint.UplinkType @(AccessPoint.UplinkSpeed?.ToString("F0")) Mbit/s</MudText>
+            <MudText Typo="Typo.body2">Uplink: @AccessPoint.UplinkType @(AccessPoint.UplinkSpeed is { } uplinkSpeed ? $"{uplinkSpeed:F0} Mbit/s" : null)</MudText>
         }
         <MudText Typo="Typo.body2">Connected clients: @(AccessPoint?.ClientCount ?? 0)</MudText>
     </MudStack>

@@ -149,10 +149,8 @@
             _username = RouterSubject.Username;
             _certificatePin = RouterSubject.CertificatePin;
 
-            // Maps zero or below to the library's own default (FritzBox.GetEffectiveInterval does the same for the
-            // polling loop) and then clamps, so a value a previous, looser version of the library (or a hand-edited
-            // configuration file) could have stored outside the current range does not leave the dialog stuck on
-            // IsValid's range check with no field that explains why.
+            // Loaded as the polling loop applies them, so a hand-edited value outside the range does not open the
+            // dialog invalid.
             _pollingIntervalSeconds = LoadInterval((int)RouterSubject.PollingInterval.TotalSeconds, FritzBox.DefaultPollingIntervalSeconds);
             _retryIntervalSeconds = LoadInterval((int)RouterSubject.RetryInterval.TotalSeconds, FritzBox.DefaultRetryIntervalSeconds);
         }
@@ -167,8 +165,7 @@
         Math.Clamp(seconds, FritzBox.MinimumIntervalSeconds, FritzBox.MaximumIntervalSeconds);
 
     /// <summary>
-    /// Collapses blank to null so a user clearing a field back to what it loaded as (null) is not seen as a
-    /// change, and so saving does not turn a stored null into a stored "".
+    /// Trims and collapses blank to null, so clearing a field that loaded as null is no change and is not saved as "".
     /// </summary>
     private static string? Normalize(string? value)
     {
@@ -214,9 +211,7 @@
     {
         if (RouterSubject != null && IsValid)
         {
-            // Writes only what actually changed here: the router itself can update CertificatePin (and other
-            // properties) between this dialog loading its values and the user saving, and writing every field
-            // unconditionally would overwrite that with the stale value this dialog loaded.
+            // Writes only what changed here: the router can update CertificatePin while the dialog is open.
             if (_name != _originalName)
             {
                 RouterSubject.Name = _name;

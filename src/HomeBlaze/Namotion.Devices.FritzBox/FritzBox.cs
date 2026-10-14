@@ -195,14 +195,14 @@ public partial class FritzBox : BackgroundService,
     public partial Dictionary<string, FritzBoxWlan> Wlans { get; internal set; }
 
     /// <summary>
-    /// The key the router presents while it is not the trusted one; accepting it in the edit dialog trusts it.
+    /// The key the router presents while it is not the trusted one; setting it as <see cref="CertificatePin"/> trusts it.
     /// </summary>
     [State(Position = 940)]
     public partial string? PresentedCertificatePin { get; internal set; }
 
     /// <summary>
     /// The SHA-256 fingerprint of <see cref="PresentedCertificatePin"/>'s certificate, the form browsers show, for
-    /// the user to compare before accepting the key in the edit dialog.
+    /// the user to compare before trusting the key.
     /// </summary>
     [State(Position = 941)]
     public partial string? PresentedCertificateFingerprint { get; internal set; }

@@ -22,7 +22,7 @@ public sealed class FritzBoxLoginException : Exception
 public sealed class FritzBoxCertificateException : Exception
 {
     internal FritzBoxCertificateException(CertificateInfo? presented, Exception innerException)
-        : base("The FRITZ!Box presented a certificate other than the trusted one. Check it and accept it in the edit dialog.", innerException)
+        : base("The FRITZ!Box presented a certificate other than the trusted one. Check it and trust the new key by setting CertificatePin.", innerException)
     {
         Presented = presented;
     }
