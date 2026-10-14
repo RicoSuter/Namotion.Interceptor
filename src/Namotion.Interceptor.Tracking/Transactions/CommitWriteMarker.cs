@@ -1,10 +1,14 @@
+using System.Runtime.CompilerServices;
+
 namespace Namotion.Interceptor.Tracking.Transactions;
 
 /// <summary>
 /// Marks the write a commit is applying, or a rollback is restoring, so a transaction handler that checked the
-/// final set can recognize it. Thread-static by design: the local apply and the rollback are synchronous, so the
-/// mark is set and consumed within one call frame, never across an await. The first check for the marked property
-/// consumes it, so a nested write of the same property, for example from a change handler, is not covered.
+/// final set can recognize it. The first check for the marked property by one of the transaction's handlers
+/// consumes the mark, so nested writes (change handlers, derived recalculations) are not covered. Same-property
+/// re-entry before the consumer runs (an OnChanging hook or an earlier interceptor) takes the mark instead, the
+/// same limitation as PendingOrigin. Thread-static by design: the local apply and the rollback are synchronous,
+/// so the mark is set and consumed within one call frame, never across an await.
 /// </summary>
 internal static class CommitWriteMarker
 {
@@ -18,13 +22,9 @@ internal static class CommitWriteMarker
 
     [ThreadStatic] private static Frame _frame;
 
-    // Global gate so writes outside a commit apply pay one static read instead of a thread-static access.
-    private static int _armedCount;
-
     internal static Scope Set(SubjectTransaction transaction, PropertyReference target, object? value)
     {
         var scope = new Scope(_frame);
-        Interlocked.Increment(ref _armedCount);
         _frame = new Frame
         {
             HasValue = true,
@@ -35,30 +35,37 @@ internal static class CommitWriteMarker
         return scope;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool TryConsume<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
     {
-        if (Volatile.Read(ref _armedCount) == 0)
-        {
-            return false;
-        }
+        // A dispose mid-commit from another flow can clear this gate while a mark is set; the write is then validated.
+        return SubjectTransaction.HasActiveTransaction && TryConsumeMarked(handler, property, value);
+    }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool TryConsumeMarked<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
+    {
         var frame = _frame;
-        if (!frame.HasValue || !frame.Target.Equals(property))
+        if (!frame.HasValue || !frame.Target.Equals(property) || !frame.Transaction!.Handlers.Contains(handler))
         {
             return false;
         }
 
         _frame = default;
 
-        // A hook that changes the value at apply time produces a value nobody checked, which must not match.
-        var matches = frame.Value switch
+        // References match by identity: the apply passes the marked instance itself, and a loose Equals must not let
+        // a replaced, unchecked instance pass as checked.
+        if (!typeof(TProperty).IsValueType)
         {
-            TProperty typedValue => EqualityComparer<TProperty>.Default.Equals(typedValue, value),
-            null => value is null,
-            _ => false
-        };
+            return ReferenceEquals(frame.Value, value);
+        }
 
-        return matches && frame.Transaction!.Handlers.Contains(handler);
+        if (frame.Value is null)
+        {
+            return value is null;
+        }
+
+        return frame.Value is TProperty typedValue && EqualityComparer<TProperty>.Default.Equals(typedValue, value);
     }
 
     internal readonly ref struct Scope
@@ -73,7 +80,6 @@ internal static class CommitWriteMarker
         public void Dispose()
         {
             _frame = _previousFrame;
-            Interlocked.Decrement(ref _armedCount);
         }
     }
 }

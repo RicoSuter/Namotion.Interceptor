@@ -72,7 +72,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Returns true when the current write is a commit applying the value of <paramref name="property"/> that
     /// <paramref name="handler"/> checked in <see cref="ITransactionHandler.OnCommitting"/>, or a rollback restoring
-    /// it. Consumes the mark, so it returns true at most once per applied value.
+    /// it. Reference-type values match by identity, value-type values by equality. A call by one of the transaction's
+    /// handlers consumes the mark, so it returns true at most once per applied value.
     /// </summary>
     /// <typeparam name="TProperty">The type of the written value.</typeparam>
     /// <param name="handler">The handler asking whether it already checked the write.</param>

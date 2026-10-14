@@ -434,6 +434,60 @@ public class SubjectTransactionHandlerTests
         Assert.True(restore.Consumed);
     }
 
+    [Fact]
+    public async Task WhenWriterCommitAppliesCheckedValue_ThenCommitWriteIsConsumedOnce()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var probe = new CommitWriteProbe(handler);
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var writer = new CountingTransactionWriter();
+        context.AddService<ITransactionWriter>(writer);
+        context.AddService(probe);
+        var person = new Person(context) { FirstName = "Ann" };
+        probe.Writes.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        var applied = Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName));
+        Assert.Equal("Bob", applied.Value);
+        Assert.True(applied.Consumed);
+        Assert.False(applied.ConsumedAgain);
+        Assert.Equal(1, writer.WriteCalls);
+    }
+
+    [Fact]
+    public async Task WhenWriterCommitRollsBack_ThenRestoreIsConsumedAsCommitWrite()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) };
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var writer = new CountingTransactionWriter();
+        context.AddService<ITransactionWriter>(writer);
+        context.AddService(probe);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        probe.Writes.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal("Ann", person.FirstName);
+        var restore = Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName) && Equals(write.Value, "Ann"));
+        Assert.True(restore.Consumed);
+        Assert.Equal(1, writer.WriteCalls);
+    }
+
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
     {
         // An async method does not leak the transaction it begins into the caller's flow.

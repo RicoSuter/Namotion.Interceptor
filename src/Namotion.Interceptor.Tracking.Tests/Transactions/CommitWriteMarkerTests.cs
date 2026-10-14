@@ -104,21 +104,90 @@ public class CommitWriteMarkerTests
     }
 
     [Fact]
-    public async Task WhenHandlerIsNotPartOfTransaction_ThenMarkDoesNotMatch()
+    public async Task WhenHandlerIsNotPartOfTransaction_ThenMarkDoesNotMatchAndStaysSet()
     {
         // Arrange
-        var (context, _, person) = CreateContext();
+        var (context, handler, person) = CreateContext();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
         using (CommitWriteMarker.Set(transaction, property, "Bob"))
         {
             // Act
-            var matches = CommitWriteMarker.TryConsume(new NoOpHandler(), property, "Bob");
+            var foreignMatches = CommitWriteMarker.TryConsume(new NoOpHandler(), property, "Bob");
+            var handlerMatches = CommitWriteMarker.TryConsume(handler, property, "Bob");
 
             // Assert
-            Assert.False(matches);
+            Assert.False(foreignMatches);
+            Assert.True(handlerMatches);
         }
+    }
+
+    [Fact]
+    public async Task WhenReferenceValueIsOnlyEqual_ThenMarkMatchesOnlyTheSameInstance()
+    {
+        // Arrange
+        var (context, handler, person) = CreateContext();
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        var checkedValue = new AlwaysEqual();
+
+        // Act
+        bool equalInstanceMatches;
+        using (CommitWriteMarker.Set(transaction, property, checkedValue))
+        {
+            equalInstanceMatches = CommitWriteMarker.TryConsume(handler, property, new AlwaysEqual());
+        }
+
+        bool sameInstanceMatches;
+        using (CommitWriteMarker.Set(transaction, property, checkedValue))
+        {
+            sameInstanceMatches = CommitWriteMarker.TryConsume(handler, property, checkedValue);
+        }
+
+        // Assert
+        Assert.False(equalInstanceMatches);
+        Assert.True(sameInstanceMatches);
+    }
+
+    [Fact]
+    public async Task WhenValueIsNullableValueType_ThenEqualValueAndNullMatch()
+    {
+        // Arrange
+        var (context, handler, person) = CreateContext();
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+
+        // Act
+        bool equalValueMatches;
+        using (CommitWriteMarker.Set(transaction, property, (int?)5))
+        {
+            equalValueMatches = CommitWriteMarker.TryConsume<int?>(handler, property, 5);
+        }
+
+        bool otherValueMatches;
+        using (CommitWriteMarker.Set(transaction, property, (int?)5))
+        {
+            otherValueMatches = CommitWriteMarker.TryConsume<int?>(handler, property, 6);
+        }
+
+        bool nullMatches;
+        using (CommitWriteMarker.Set(transaction, property, null))
+        {
+            nullMatches = CommitWriteMarker.TryConsume<int?>(handler, property, null);
+        }
+
+        bool valueMatchesNullMark;
+        using (CommitWriteMarker.Set(transaction, property, null))
+        {
+            valueMatchesNullMark = CommitWriteMarker.TryConsume<int?>(handler, property, 5);
+        }
+
+        // Assert
+        Assert.True(equalValueMatches);
+        Assert.False(otherValueMatches);
+        Assert.True(nullMatches);
+        Assert.False(valueMatchesNullMark);
     }
 
     [Fact]
@@ -162,6 +231,13 @@ public class CommitWriteMarkerTests
             // Assert
             Assert.True(matches);
         }
+    }
+
+    private sealed class AlwaysEqual
+    {
+        public override bool Equals(object? obj) => obj is AlwaysEqual;
+
+        public override int GetHashCode() => 0;
     }
 
     private sealed class NoOpHandler : ITransactionHandler
