@@ -88,6 +88,47 @@ public class FritzBoxConnectionCheckTests
             FritzBoxConnectionCheck.CheckAsync(Options(fake, fake.Password), cancellationTokenSource.Token));
     }
 
+    [Theory]
+    [InlineData("192.168.178.1", "192.168.178.1")]
+    [InlineData("  192.168.178.1  ", "192.168.178.1")]
+    [InlineData("fritz.box", "fritz.box")]
+    [InlineData("fritzbox", "fritzbox")]
+    [InlineData("bücher.example", "bücher.example")]
+    [InlineData("fd00::1", "fd00::1")]
+    [InlineData("[fd00::1]", "fd00::1")]
+    public void WhenTheHostAddressIsValid_ThenItIsNormalized(string input, string expected)
+    {
+        // Act
+        var isValid = FritzBoxConnectionCheck.TryNormalizeHostAddress(input, out var normalized);
+
+        // Assert
+        Assert.True(isValid);
+        Assert.Equal(expected, normalized);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("http://fritz.box")]
+    [InlineData("https://192.168.178.1")]
+    [InlineData("192.168.178.1:49000")]
+    [InlineData("[fd00::1]:49000")]
+    [InlineData("fritz.box/path")]
+    [InlineData("fritz box")]
+    [InlineData("fritz\tbox")]
+    [InlineData("[fritz.box]")]
+    [InlineData("[fd00::1")]
+    public void WhenTheHostAddressIsInvalid_ThenItIsRejected(string? input)
+    {
+        // Act
+        var isValid = FritzBoxConnectionCheck.TryNormalizeHostAddress(input, out var normalized);
+
+        // Assert
+        Assert.False(isValid);
+        Assert.Equal(string.Empty, normalized);
+    }
+
     private static FritzBoxConnectionOptions Options(FakeFritzBox fake, string password) =>
         new("127.0.0.1", fake.Username, password, null) { DescriptionPort = fake.HttpPort };
 }

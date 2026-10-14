@@ -76,8 +76,8 @@
         {
             _bridgeId = BridgeSubject.BridgeId;
             _appKey = BridgeSubject.AppKey;
-            _pollingIntervalSeconds = (int)BridgeSubject.PollingInterval.TotalSeconds;
-            _retryIntervalSeconds = (int)BridgeSubject.RetryInterval.TotalSeconds;
+            _pollingIntervalSeconds = LoadInterval((int)BridgeSubject.PollingInterval.TotalSeconds, HueBridge.DefaultPollingIntervalSeconds);
+            _retryIntervalSeconds = LoadInterval((int)BridgeSubject.RetryInterval.TotalSeconds, HueBridge.DefaultRetryIntervalSeconds);
         }
 
         _originalBridgeId = _bridgeId;
@@ -85,6 +85,13 @@
         _originalPollingIntervalSeconds = _pollingIntervalSeconds;
         _originalRetryIntervalSeconds = _retryIntervalSeconds;
     }
+
+    /// <summary>
+    /// Loads an interval as the bridge applies it: zero or less is the default, and a value outside the range is
+    /// clamped, so a stored value the range check rejects does not leave the dialog invalid.
+    /// </summary>
+    private static int LoadInterval(int storedSeconds, int defaultSeconds) =>
+        Math.Clamp(storedSeconds <= 0 ? defaultSeconds : storedSeconds, HueBridge.MinimumIntervalSeconds, HueBridge.MaximumIntervalSeconds);
 
     private void OnFieldChanged()
     {

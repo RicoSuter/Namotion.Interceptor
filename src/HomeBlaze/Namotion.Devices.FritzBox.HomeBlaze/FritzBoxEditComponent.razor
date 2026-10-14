@@ -12,6 +12,9 @@
                   Label="Host Address (IP or hostname)"
                   Required="true"
                   RequiredError="Host address is required"
+                  HelperText="An IP address or host name, without http:// or a port"
+                  Error="@IsHostAddressRejected"
+                  ErrorText="@FritzBoxConnectionCheck.InvalidHostAddressMessage"
                   Immediate="true"
                   Class="mt-4" />
 
@@ -122,12 +125,12 @@
     private int _originalPollingIntervalSeconds = FritzBox.DefaultPollingIntervalSeconds;
     private int _originalRetryIntervalSeconds = FritzBox.DefaultRetryIntervalSeconds;
 
-    public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
+    public bool IsValid => FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _) &&
                            _pollingIntervalSeconds is >= FritzBox.MinimumIntervalSeconds and <= FritzBox.MaximumIntervalSeconds &&
                            _retryIntervalSeconds is >= FritzBox.MinimumIntervalSeconds and <= FritzBox.MaximumIntervalSeconds;
 
     public bool IsDirty => _name != _originalName ||
-                           Normalize(_hostAddress) != Normalize(_originalHostAddress) ||
+                           NormalizeHostAddress(_hostAddress) != NormalizeHostAddress(_originalHostAddress) ||
                            Normalize(_username) != Normalize(_originalUsername) ||
                            !string.IsNullOrEmpty(_password) ||
                            _certificatePin != _originalCertificatePin ||
@@ -173,6 +176,18 @@
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
 
+    /// <summary>
+    /// Normalizes a valid host address as the connection check does, and any other value with <see cref="Normalize"/>.
+    /// </summary>
+    private static string? NormalizeHostAddress(string? value) =>
+        FritzBoxConnectionCheck.TryNormalizeHostAddress(value, out var normalized) ? normalized : Normalize(value);
+
+    /// <summary>
+    /// Leaves an empty field to the required check, so only one error shows.
+    /// </summary>
+    private bool IsHostAddressRejected =>
+        !string.IsNullOrWhiteSpace(_hostAddress) && !FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _);
+
     private void RememberOriginals()
     {
         _originalName = _name;
@@ -207,9 +222,9 @@
                 RouterSubject.Name = _name;
             }
 
-            if (Normalize(_hostAddress) != Normalize(_originalHostAddress))
+            if (NormalizeHostAddress(_hostAddress) != NormalizeHostAddress(_originalHostAddress))
             {
-                RouterSubject.HostAddress = Normalize(_hostAddress);
+                RouterSubject.HostAddress = NormalizeHostAddress(_hostAddress);
             }
 
             if (Normalize(_username) != Normalize(_originalUsername))

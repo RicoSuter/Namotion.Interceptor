@@ -31,7 +31,10 @@ public sealed record FritzBoxConnectionCheckResult(
 /// </summary>
 public static class FritzBoxConnectionCheck
 {
-    private const string InvalidHostAddressMessage = "Enter the router's IP address or host name without http:// or a port.";
+    /// <summary>
+    /// The error a check reports for a host address <see cref="TryNormalizeHostAddress"/> rejects.
+    /// </summary>
+    public const string InvalidHostAddressMessage = "Enter the router's IP address or host name without http:// or a port.";
 
     /// <summary>
     /// Opens a connection to the router and logs in. Never throws for a failed check, including a malformed host
@@ -73,15 +76,22 @@ public static class FritzBoxConnectionCheck
     }
 
     /// <summary>
-    /// Accepts a bare host name or IP address, trimmed; rejects anything with a scheme, a path, embedded
-    /// whitespace or a port, since the TR-064 description port is fixed, not something the user supplies.
+    /// Validates a host address with the rules of <see cref="CheckAsync(string, string?, string?, CancellationToken)"/>:
+    /// an IPv4 address, an IPv6 address with or without brackets, or a host name, including an internationalized one.
+    /// Anything with a scheme, a path, embedded whitespace or a port is rejected.
     /// </summary>
-    private static bool TryNormalizeHostAddress(string hostAddress, out string host)
+    /// <param name="input">The host address as entered.</param>
+    /// <param name="normalized">
+    /// The address trimmed and, for IPv6, without brackets, as a router's <see cref="FritzBox.HostAddress"/> stores
+    /// it; empty when the input is rejected.
+    /// </param>
+    /// <returns>Whether the input is a valid host address.</returns>
+    public static bool TryNormalizeHostAddress(string? input, out string normalized)
     {
-        var value = hostAddress.Trim();
-        if (value.Length == 0 || value.Any(char.IsWhiteSpace) || value.Contains("://", StringComparison.Ordinal) || value.Contains('/'))
+        var value = input?.Trim() ?? string.Empty;
+        if (!IsBareHost(value))
         {
-            host = string.Empty;
+            normalized = string.Empty;
             return false;
         }
 
@@ -89,13 +99,17 @@ public static class FritzBoxConnectionCheck
         var hostNameType = Uri.CheckHostName(hostName);
         if (port is not null || hostNameType == UriHostNameType.Unknown || (wasBracketed && hostNameType != UriHostNameType.IPv6))
         {
-            host = string.Empty;
+            normalized = string.Empty;
             return false;
         }
 
-        host = hostName;
+        normalized = hostName;
         return true;
     }
+
+    /// <returns>Whether the value is not empty and has no whitespace, scheme or path.</returns>
+    private static bool IsBareHost(string value) =>
+        value.Length > 0 && !value.Any(char.IsWhiteSpace) && !value.Contains('/');
 
     /// <returns>
     /// The host, the port when present after a single colon or after a closing bracket, and whether the host came
