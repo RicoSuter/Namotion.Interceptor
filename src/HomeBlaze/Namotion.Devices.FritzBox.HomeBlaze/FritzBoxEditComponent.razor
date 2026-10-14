@@ -149,20 +149,20 @@
             _username = RouterSubject.Username;
             _certificatePin = RouterSubject.CertificatePin;
 
-            // Zero or less, including a stored sub-second value, loads as the default and a value outside the range
-            // is clamped, so a hand-edited value does not open the dialog invalid.
-            _pollingIntervalSeconds = LoadInterval((int)RouterSubject.PollingInterval.TotalSeconds, FritzBox.DefaultPollingIntervalSeconds);
-            _retryIntervalSeconds = LoadInterval((int)RouterSubject.RetryInterval.TotalSeconds, FritzBox.DefaultRetryIntervalSeconds);
+            _pollingIntervalSeconds = LoadInterval(RouterSubject.PollingInterval, FritzBox.DefaultPollingIntervalSeconds);
+            _retryIntervalSeconds = LoadInterval(RouterSubject.RetryInterval, FritzBox.DefaultRetryIntervalSeconds);
         }
 
         RememberOriginals();
     }
 
-    private static int LoadInterval(int storedSeconds, int defaultSeconds) =>
-        ClampInterval(storedSeconds <= 0 ? defaultSeconds : storedSeconds);
-
-    private static int ClampInterval(int seconds) =>
-        Math.Clamp(seconds, FritzBox.MinimumIntervalSeconds, FritzBox.MaximumIntervalSeconds);
+    /// <summary>
+    /// Matches the runtime clamp (<c>FritzBox.GetEffectiveInterval</c>).
+    /// </summary>
+    private static int LoadInterval(TimeSpan stored, int defaultSeconds) =>
+        stored <= TimeSpan.Zero
+            ? defaultSeconds
+            : Math.Clamp((int)stored.TotalSeconds, FritzBox.MinimumIntervalSeconds, FritzBox.MaximumIntervalSeconds);
 
     /// <summary>
     /// Trims and collapses blank to null, so clearing a field that loaded as null is no change and is not saved as "".

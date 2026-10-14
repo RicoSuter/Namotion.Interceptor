@@ -2,18 +2,16 @@
 @implements ISubjectEditComponent
 
 <MudForm>
-    <MudTextField @bind-Value="_bridgeId"
+    <MudTextField @bind-Value="_bridgeId" @bind-Value:after="OnFieldChanged"
                   Label="Bridge ID"
-                  Immediate="true"
-                  OnKeyUp="OnFieldChanged" />
+                  Immediate="true" />
 
-    <MudTextField @bind-Value="_appKey"
+    <MudTextField @bind-Value="_appKey" @bind-Value:after="OnFieldChanged"
                   Label="App Key"
                   Required="true"
                   RequiredError="App Key is required"
                   InputType="InputType.Password"
                   Immediate="true"
-                  OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
     <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
@@ -76,8 +74,8 @@
         {
             _bridgeId = BridgeSubject.BridgeId;
             _appKey = BridgeSubject.AppKey;
-            _pollingIntervalSeconds = LoadInterval((int)BridgeSubject.PollingInterval.TotalSeconds, HueBridge.DefaultPollingIntervalSeconds);
-            _retryIntervalSeconds = LoadInterval((int)BridgeSubject.RetryInterval.TotalSeconds, HueBridge.DefaultRetryIntervalSeconds);
+            _pollingIntervalSeconds = LoadInterval(BridgeSubject.PollingInterval, HueBridge.DefaultPollingIntervalSeconds);
+            _retryIntervalSeconds = LoadInterval(BridgeSubject.RetryInterval, HueBridge.DefaultRetryIntervalSeconds);
         }
 
         _originalBridgeId = _bridgeId;
@@ -87,11 +85,12 @@
     }
 
     /// <summary>
-    /// Loads an interval in whole seconds: zero or less, including a stored sub-second value, is the default, and a
-    /// value outside the range is clamped, so a stored value the range check rejects does not leave the dialog invalid.
+    /// Matches the runtime clamp (<c>HueBridge.GetEffectiveInterval</c>).
     /// </summary>
-    private static int LoadInterval(int storedSeconds, int defaultSeconds) =>
-        Math.Clamp(storedSeconds <= 0 ? defaultSeconds : storedSeconds, HueBridge.MinimumIntervalSeconds, HueBridge.MaximumIntervalSeconds);
+    private static int LoadInterval(TimeSpan stored, int defaultSeconds) =>
+        stored <= TimeSpan.Zero
+            ? defaultSeconds
+            : Math.Clamp((int)stored.TotalSeconds, HueBridge.MinimumIntervalSeconds, HueBridge.MaximumIntervalSeconds);
 
     private void OnFieldChanged()
     {
