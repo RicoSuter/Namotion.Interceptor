@@ -12,7 +12,11 @@ public partial class FritzBox
     private const string NoPasswordMessage = "No password configured.";
     private const string UnsavedCertificateWarning = "The trusted certificate could not be saved and is trusted anew after a restart.";
 
-    // A command holds the gate while it uses the connection, so the loop disposes a connection only after it.
+    private static readonly TimeSpan InitialLoginRetryDelay = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan MaximumLoginRetryDelay = TimeSpan.FromHours(2);
+
+    // Only the loop writes _connection. A command holds the gate while it uses the connection, so the loop clears
+    // and disposes a connection only after the command completes.
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private readonly Lock _wlanSwitchStateLock = new();
     private FritzBoxConnection? _connection;
@@ -21,7 +25,7 @@ public partial class FritzBox
     // Read and written by the polling loop only.
     private string? _stateHostAddress;
     private string? _unsavedCertificatePin;
-    private TimeSpan _loginRetryDelay;
+    private TimeSpan _loginRetryDelay = InitialLoginRetryDelay;
 
     /// <summary>
     /// Raised by every successful WLAN command, so a poll that read the switch state before it does not write it back.
@@ -64,7 +68,6 @@ public partial class FritzBox
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _loginRetryDelay = InitialLoginRetryDelay;
         while (!stoppingToken.IsCancellationRequested)
         {
             var hostAddress = UpdateHostAddress();
@@ -133,7 +136,7 @@ public partial class FritzBox
             _loginRetryDelay = InitialLoginRetryDelay;
             await TrustCertificateAsync(connection, stoppingToken);
             await connection.ResolveInternetServiceAsync(stoppingToken);
-            await PublishConnectionAsync(connection);
+            Volatile.Write(ref _connection, connection);
 
             Status = ServiceStatus.Running;
             StatusMessage = CertificateWarning;
@@ -238,7 +241,7 @@ public partial class FritzBox
         }
     }
 
-    private TimeSpan GetNextLoginRetryDelay(TimeSpan loginRetryDelay)
+    private static TimeSpan GetNextLoginRetryDelay(TimeSpan loginRetryDelay)
     {
         var doubled = loginRetryDelay * 2;
         return doubled > MaximumLoginRetryDelay ? MaximumLoginRetryDelay : doubled;
@@ -310,19 +313,6 @@ public partial class FritzBox
         }
     }
 
-    private async Task PublishConnectionAsync(FritzBoxConnection connection)
-    {
-        await _connectionGate.WaitAsync(CancellationToken.None);
-        try
-        {
-            _connection = connection;
-        }
-        finally
-        {
-            _connectionGate.Release();
-        }
-    }
-
     private async Task ReleaseConnectionAsync(FritzBoxConnection? connection)
     {
         if (connection is null)
@@ -333,10 +323,7 @@ public partial class FritzBox
         await _connectionGate.WaitAsync(CancellationToken.None);
         try
         {
-            if (ReferenceEquals(_connection, connection))
-            {
-                _connection = null;
-            }
+            _connection = null;
         }
         finally
         {

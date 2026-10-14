@@ -95,9 +95,9 @@ public static class FritzBoxConnectionCheck
             return false;
         }
 
-        var (hostName, port, wasBracketed) = SplitHostAndPort(value);
+        var (hostName, hasPort, wasBracketed) = SplitHostAndPort(value);
         var hostNameType = Uri.CheckHostName(hostName);
-        if (port is not null || hostNameType == UriHostNameType.Unknown || (wasBracketed && hostNameType != UriHostNameType.IPv6))
+        if (hasPort || hostNameType == UriHostNameType.Unknown || (wasBracketed && hostNameType != UriHostNameType.IPv6))
         {
             normalized = string.Empty;
             return false;
@@ -112,30 +112,22 @@ public static class FritzBoxConnectionCheck
         value.Length > 0 && !value.Any(char.IsWhiteSpace) && !value.Contains('/');
 
     /// <returns>
-    /// The host, the port when present after a single colon or after a closing bracket, and whether the host came
-    /// from inside brackets (valid only for an IPv6 literal, never for a host name).
+    /// The host to check (the part inside brackets, otherwise the whole value), whether a port follows it (after a
+    /// single colon or after a closing bracket), and whether the host came from inside brackets (valid only for an
+    /// IPv6 literal, never for a host name).
     /// </returns>
-    private static (string HostName, string? Port, bool WasBracketed) SplitHostAndPort(string value)
+    private static (string HostName, bool HasPort, bool WasBracketed) SplitHostAndPort(string value)
     {
         if (value.StartsWith('['))
         {
             var end = value.IndexOf(']');
-            if (end < 0)
-            {
-                return (value, string.Empty, true);
-            }
 
-            var afterBracket = end + 1 < value.Length ? value[(end + 1)..] : null;
-            return (value[1..end], afterBracket, true);
+            // Without a closing bracket the host keeps its opening one, which no host name type accepts.
+            return end < 0 ? (value, false, true) : (value[1..end], end + 1 < value.Length, true);
         }
 
-        if (value.Count(character => character == ':') != 1)
-        {
-            return (value, null, false);
-        }
-
-        var separator = value.IndexOf(':');
-        return (value[..separator], value[(separator + 1)..], false);
+        // An IPv6 literal without brackets has several colons; a single one separates a port.
+        return (value, value.AsSpan().Count(':') == 1, false);
     }
 
     /// <returns>Whether an exception from opening the connection or checking the login is a reportable failure, as opposed to a programming error.</returns>

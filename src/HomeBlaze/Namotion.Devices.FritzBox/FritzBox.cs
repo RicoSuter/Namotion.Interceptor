@@ -70,26 +70,7 @@ public partial class FritzBox : BackgroundService,
         IsConnected = false;
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
-        LastUpdated = null;
-        Model = null;
-        SerialNumber = null;
-        HardwareRevision = null;
-        SoftwareVersion = null;
-        AvailableSoftwareUpdate = null;
-        Uptime = null;
-        IsInternetConnected = null;
-        ExternalIpAddress = null;
-        ExternalIpv6Address = null;
-        InternetConnectionUptime = null;
-        MaximumUploadRate = null;
-        MaximumDownloadRate = null;
-        UploadRate = null;
-        DownloadRate = null;
-        PresentedCertificatePin = null;
-        PresentedCertificateFingerprint = null;
-        Clients = new Dictionary<string, FritzBoxClient>(StringComparer.Ordinal);
-        AccessPoints = new Dictionary<string, FritzBoxAccessPoint>(StringComparer.Ordinal);
-        Wlans = new Dictionary<string, FritzBoxWlan>(StringComparer.Ordinal);
+        ClearRouterState();
     }
 
     [Configuration]
@@ -242,10 +223,6 @@ public partial class FritzBox : BackgroundService,
     internal int DescriptionPort { get; set; } = Tr64Description.DescriptionPort;
 
     internal TimeSpan MinimumInterval { get; set; } = TimeSpan.FromSeconds(MinimumIntervalSeconds);
-
-    internal TimeSpan InitialLoginRetryDelay { get; set; } = TimeSpan.FromMinutes(15);
-
-    internal TimeSpan MaximumLoginRetryDelay { get; set; } = TimeSpan.FromHours(2);
 
     private TimeSpan EffectivePollingInterval => GetEffectiveInterval(PollingInterval, DefaultPollingIntervalSeconds, MinimumInterval);
 

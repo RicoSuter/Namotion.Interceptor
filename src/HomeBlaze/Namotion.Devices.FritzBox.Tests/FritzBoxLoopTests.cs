@@ -394,7 +394,6 @@ public class FritzBoxLoopTests
             CertificatePin = pin,
             DescriptionPort = fake.HttpPort,
             MinimumInterval = TimeSpan.FromMilliseconds(50),
-            InitialLoginRetryDelay = TimeSpan.FromHours(1),
             PollingInterval = TimeSpan.FromMilliseconds(100),
             RetryInterval = TimeSpan.FromMilliseconds(100)
         };
