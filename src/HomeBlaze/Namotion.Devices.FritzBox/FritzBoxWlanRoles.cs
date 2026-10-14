@@ -1,7 +1,7 @@
 namespace Namotion.Devices.FritzBox;
 
 /// <summary>
-/// The keys of the router's WLANs.
+/// The keys of <see cref="FritzBox.Wlans"/>.
 /// </summary>
 public static class FritzBoxWlanRoles
 {

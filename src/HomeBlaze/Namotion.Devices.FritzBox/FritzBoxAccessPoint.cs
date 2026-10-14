@@ -78,7 +78,7 @@ public partial class FritzBoxAccessPoint : IDeviceInfo, ISoftwareState, INetwork
     public partial decimal? UplinkSpeed { get; internal set; }
 
     /// <summary>
-    /// The present clients connected to this access point, the same subjects as the router's clients.
+    /// The present clients connected to this access point, the same subjects as in <see cref="FritzBox.Clients"/>.
     /// </summary>
     [State]
     public partial Dictionary<string, FritzBoxClient> Clients { get; internal set; }
