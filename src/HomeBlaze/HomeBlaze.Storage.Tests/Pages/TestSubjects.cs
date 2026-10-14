@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
@@ -634,6 +636,40 @@ public partial class TestCallback : IConfigurable
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) =>
         OnApply?.Invoke() ?? Task.CompletedTask;
+}
+
+/// <summary>Runs code of the test while its configuration is serialized, which is inside the synchronous part of a save.</summary>
+[InterceptorSubject]
+public partial class TestSerializerCallback : IConfigurable
+{
+    [Configuration]
+    public partial TestSerializerCallbackValue? Value { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>The value of a <see cref="TestSerializerCallback"/>, written as its text.</summary>
+[JsonConverter(typeof(TestSerializerCallbackValueConverter))]
+public sealed class TestSerializerCallbackValue(string text)
+{
+    public string Text { get; } = text;
+
+    /// <summary>Runs once, the next time the value is serialized. Null does nothing.</summary>
+    public Action? OnNextWrite { get; set; }
+}
+
+public sealed class TestSerializerCallbackValueConverter : JsonConverter<TestSerializerCallbackValue>
+{
+    public override TestSerializerCallbackValue Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        new(reader.GetString() ?? string.Empty);
+
+    public override void Write(Utf8JsonWriter writer, TestSerializerCallbackValue value, JsonSerializerOptions options)
+    {
+        var onNextWrite = value.OnNextWrite;
+        value.OnNextWrite = null;
+        onNextWrite?.Invoke();
+        writer.WriteStringValue(value.Text);
+    }
 }
 
 /// <summary>A subject with a list of subjects in its configuration, which a page writes in the json block.</summary>

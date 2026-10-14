@@ -202,9 +202,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Writes the configuration of the block that contains the subject. For every slot of that block subject that
     /// is a list of subjects of a type, a value without a block gets a new block and a block whose value is gone
     /// is removed with its content. Returns false, and writes nothing, when the page has no block for the subject,
-    /// when the page cannot keep the change or the change cannot be made without touching other content, or when
+    /// when the page cannot keep the change or the change cannot be made without touching other content, when
     /// blocks would be inserted or removed while a reload runs or after one that failed, until the page has been
-    /// read again.
+    /// read again, or when another write-back or a reload changed the page while this one ran.
     /// </remarks>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
@@ -240,6 +240,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return false;
         }
 
+        // The text was computed from the snapshot, so it would undo what another write-back or a reload
+        // published since then.
+        var published = snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects };
+        if (!ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, published, snapshot), snapshot))
+        {
+            _parser.LogRefusedWrite(FullPath, "The page changed while the configuration was written; save again.");
+            return false;
+        }
+
         // Before the write, because the storage reloads this file from inside WriteAsync. The reload
         // must find the keys that are now in the file, or a value that became null would recreate the subject.
         foreach (var (writtenSubject, configurationJson) in write.Configurations)
@@ -247,10 +256,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             _parser.RememberConfiguration(writtenSubject, configurationJson);
         }
 
-        // Only over the snapshot the text was computed from: a reload that published since then owns the graph,
-        // and the reload inside the write settles the page.
-        Interlocked.CompareExchange(
-            ref _parseResult, snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects }, snapshot);
         var content = write.Page.Source;
         Content = content;
 

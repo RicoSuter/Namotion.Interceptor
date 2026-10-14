@@ -18,6 +18,8 @@ public class MarkdownSlotWriteBackTests
 
     private const string ReloadRefusal = "Blocks cannot be inserted or removed until the page has been read again.";
 
+    private const string ChangedPageRefusal = "The page changed while the configuration was written; save again.";
+
     private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
 
     [Fact]
@@ -289,6 +291,72 @@ public class MarkdownSlotWriteBackTests
         Assert.True(handled);
         Assert.Contains($":: {LeafType}#leaf Count=7", written);
         Assert.Equal(7, leaf.Count);
+    }
+
+    [Fact]
+    public async Task WhenAnotherSaveIsWrittenWhileASaveSerializes_ThenTheSlowerSaveIsRefusedAndTheFileKeepsTheOtherChange()
+    {
+        // Arrange: the save of the callback block stops while its configuration is serialized.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var blocks =
+            $":: {Namespace}.TestSerializerCallback#callback\n```json\n{{ \"Value\": \"a\" }}\n```\n::\n\n" +
+            $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::\n";
+        var (page, board) = await AddBoardPageAsync(fixture, blocks + "::\n");
+        var callback = (TestSerializerCallback)page.Children["callback"];
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        callback.Value!.OnNextWrite = () =>
+        {
+            entered.SetResult();
+            release.Wait();
+        };
+
+        var slowSave = Task.Run(() => page.WriteConfigurationAsync(callback, CancellationToken.None));
+        await entered.Task.WaitAsync(DeadlockTimeout);
+
+        // Act
+        board.Tiles = [.. board.Tiles, new TestTile { Position = 2 }];
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+        release.Set();
+        var handledSlowSave = await slowSave.WaitAsync(DeadlockTimeout);
+
+        // Assert
+        Assert.True(handled);
+        Assert.False(handledSlowSave);
+        Assert.Equal(blocks + "::: Tile Position=2\n:::\n::\n", await fixture.ReadAsync("page.md"));
+        AssertRefusal(ChangedPageRefusal, log);
+    }
+
+    [Fact]
+    public async Task WhenAReloadOfAnOutsideEditEndsWhileASaveSerializes_ThenTheSaveIsRefusedAndTheEditStays()
+    {
+        // Arrange: the save of the callback block stops while its configuration is serialized.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var blocks =
+            $":: {Namespace}.TestSerializerCallback#callback\n```json\n{{ \"Value\": \"a\" }}\n```\n::\n\n" +
+            $":: {BoardType}#board Columns=";
+        var page = await fixture.AddPageAsync("page.md", blocks + "2\n::\n");
+        var callback = (TestSerializerCallback)page.Children["callback"];
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        callback.Value!.OnNextWrite = () =>
+        {
+            entered.SetResult();
+            release.Wait();
+        };
+
+        var save = Task.Run(() => page.WriteConfigurationAsync(callback, CancellationToken.None));
+        await entered.Task.WaitAsync(DeadlockTimeout);
+
+        // Act
+        await fixture.UpdatePageAsync(page, blocks + "5\n::\n");
+        release.Set();
+        var handled = await save.WaitAsync(DeadlockTimeout);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(blocks + "5\n::\n", await fixture.ReadAsync("page.md"));
+        AssertRefusal(ChangedPageRefusal, log);
     }
 
     [Fact]
