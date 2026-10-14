@@ -1027,7 +1027,7 @@ After:
 - Every entry of `Cells` becomes one `Cell` block inside the layout, and every entry of `Nodes` one `Node` block, in the order of the list.
 - The numbers of the entry become the arguments of that block: `Row`, `Column`, `RowSpan` and `ColumnSpan` for a cell, and `X`, `Y`, `Width` and `Height` for a node.
 - The `Child` of the entry becomes a block inside the `Cell` or `Node` block, with one colon more. The value of its `$type` becomes the type name, its single values become arguments, and every other value goes into a `json` block of that block. An entry without a `Child` becomes a block without content.
-- The earlier editors wrote `"Cells": []` or `"Nodes": []` into the `json` block of every layout that they saved, and an empty list is an error box as well. Remove it, together with the `json` block when nothing else is in it.
+- The earlier editors wrote `"Cells": []` or `"Nodes": []` into the `json` block of every layout that they saved. An empty list holds nothing to convert, so the page ignores it, and the next save of the layout leaves it out. The same holds for an empty list of any slot that takes several blocks.
 - A layout in a `*.json` configuration file of its own does not change.
 
 ---

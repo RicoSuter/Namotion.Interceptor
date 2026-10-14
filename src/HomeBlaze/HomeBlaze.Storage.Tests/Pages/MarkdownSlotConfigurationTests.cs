@@ -63,8 +63,28 @@ public class MarkdownSlotConfigurationTests
         Assert.DoesNotContain(page.Children.Values, child => child is TestBoard);
     }
 
+    [Fact]
+    public async Task WhenListOfASlotIsEmptyInTheJsonBlock_ThenItIsIgnoredAndTheNextSaveDropsIt()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $":: {BoardType}#board\n```json\n{{ \"Columns\": 2, \"Tiles\": [] }}\n```\n::: Tile Position=1\n:::\n::\n");
+        var board = Assert.IsType<TestBoard>(page.Children["board"]);
+        var tilesAfterLoad = board.Tiles.Select(tile => tile.Position).ToArray();
+        board.Columns = 3;
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { 1 }, tilesAfterLoad);
+        Assert.True(handled);
+        Assert.Equal($":: {BoardType}#board Columns=3\n::: Tile Position=1\n:::\n::\n", await fixture.ReadAsync("page.md"));
+    }
+
     [Theory]
-    [InlineData("Rows=1", "Line 1: 'Rows' is written as blocks on a page: one 'Row' block per value inside this block.")]
+    [InlineData("Rows=1","Line 1: 'Rows' is written as blocks on a page: one 'Row' block per value inside this block.")]
     [InlineData("Footer=x", "Line 1: 'Footer' is written as a block on a page: a 'Footer' block inside this block.")]
     [InlineData("Content=x", "Line 1: 'Content' is the content of the block on a page, so it cannot be set as an argument.")]
     public async Task WhenPropertyThatIsOnlyASlotIsSetAsArgument_ThenTheMessageSaysHowToWriteIt(string argument, string expectedMessage)

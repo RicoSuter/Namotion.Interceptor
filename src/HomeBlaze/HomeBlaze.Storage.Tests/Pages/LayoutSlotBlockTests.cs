@@ -67,10 +67,10 @@ public class LayoutSlotBlockTests
 
     [Theory]
     [InlineData(
-        ":: HomeBlaze.Components.GridLayout\n```json\n{ \"Cells\": [] }\n```\n::",
+        ":: HomeBlaze.Components.GridLayout\n```json\n{ \"Cells\": [ { \"Row\": 0 } ] }\n```\n::",
         "Line 1: 'Cells' is written as blocks on a page: one 'Cell' block per value inside this block.")]
     [InlineData(
-        ":: HomeBlaze.Components.CanvasLayout\n```json\n{ \"Nodes\": [] }\n```\n::",
+        ":: HomeBlaze.Components.CanvasLayout\n```json\n{ \"Nodes\": [ { \"X\": 0 } ] }\n```\n::",
         "Line 1: 'Nodes' is written as blocks on a page: one 'Node' block per value inside this block.")]
     [InlineData(
         ":: HomeBlaze.Components.GridLayout\n::: Cell Child=x\n::",
@@ -85,6 +85,29 @@ public class LayoutSlotBlockTests
 
         // Assert
         Assert.Contains(expectedMessage, WebUtility.HtmlDecode(MarkdownPageFixture.Html(page.Children)));
+    }
+
+    [Theory]
+    [InlineData("GridLayout", "Cells", "Cell Row=0 Column=0")]
+    [InlineData("CanvasLayout", "Nodes", "Node")]
+    public async Task WhenCellsOrNodesAreAnEmptyListInTheJsonBlock_ThenTheListIsIgnored(string layout, string property, string slotBlock)
+    {
+        // Arrange: the editors before the slot blocks wrote the empty list into every layout they saved.
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        var content = $":: HomeBlaze.Components.{layout}#layout\n```json\n{{ \"{property}\": [] }}\n```\n::: {slotBlock}\ntext\n:::\n::\n";
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", content);
+
+        // Assert
+        Assert.Empty(PageErrorBoxes.FindMessages(page));
+        var valueCount = page.Children["layout"] switch
+        {
+            GridLayout grid => grid.Cells.Length,
+            CanvasLayout canvas => canvas.Nodes.Length,
+            _ => -1
+        };
+        Assert.Equal(1, valueCount);
     }
 
     [Fact]

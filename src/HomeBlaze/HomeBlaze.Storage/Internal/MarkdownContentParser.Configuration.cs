@@ -200,12 +200,31 @@ public sealed partial class MarkdownContentParser
             return null;
         }
 
-        foreach (var (key, _) in configuration)
+        List<string>? emptySlotLists = null;
+        foreach (var (key, value) in configuration)
         {
-            if (key != TypeDiscriminator && !properties.ContainsKey(key))
+            if (key == TypeDiscriminator || properties.ContainsKey(key))
             {
-                error = FormatUnknownProperty(type, key, properties);
-                return null;
+                continue;
+            }
+
+            // Earlier versions wrote an empty list for the slot of a layout into every page they saved. It holds
+            // nothing, and the next save of the block leaves it out.
+            if (value is JsonArray { Count: 0 } && SlotMap.For(type).FindByPropertyName(key) is { IsList: true } slot && slot.PropertyName == key)
+            {
+                (emptySlotLists ??= []).Add(key);
+                continue;
+            }
+
+            error = FormatUnknownProperty(type, key, properties);
+            return null;
+        }
+
+        if (emptySlotLists is not null)
+        {
+            foreach (var key in emptySlotLists)
+            {
+                configuration.Remove(key);
             }
         }
 
