@@ -80,6 +80,7 @@ public partial class MyStromSwitch : BackgroundService,
     public partial decimal? Temperature { get; internal set; }
 
     [State(Position = 400)]
+    [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
 
     [Derived]
@@ -114,10 +115,12 @@ public partial class MyStromSwitch : BackgroundService,
 
     [Derived]
     [State(Position = 401)]
+    [Category("Device")]
     public string? DeviceType => _information?.Type;
 
     [Derived]
     [State(Position = 402)]
+    [Category("Device")]
     public string? FirmwareVersion => _information?.Version;
 
     public bool? IsWireless => true;

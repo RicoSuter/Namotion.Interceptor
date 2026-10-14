@@ -14,11 +14,13 @@ public interface IVolumeState
     /// The current volume level (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent, Position = 145)]
+    [Category("Volume")]
     decimal? Volume { get; }
 
     /// <summary>
     /// Whether audio is muted, independent of the volume level.
     /// </summary>
     [State(Position = 141)]
+    [Category("Volume")]
     bool? IsMuted { get; }
 }
