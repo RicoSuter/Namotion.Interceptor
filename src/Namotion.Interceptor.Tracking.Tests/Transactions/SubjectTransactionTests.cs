@@ -712,10 +712,12 @@ public class SubjectTransactionTests
         person.FirstName = "Bob";
         person.FirstName = "Ann";
         var valueInsideTransaction = person.FirstName;
+        var pendingBeforeCommit = transaction.GetPendingChanges();
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal("Ann", valueInsideTransaction);
+        Assert.Empty(pendingBeforeCommit);
         Assert.Equal("Ann", person.FirstName);
     }
 
@@ -734,6 +736,58 @@ public class SubjectTransactionTests
 
         // Assert
         Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsWrittenBackToLandedValue_ThenCommitPublishesNoChangeNotification()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var person = new Person(context) { FirstName = "Ann" };
+        changes.Clear();
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "Bob";
+            person.FirstName = "Ann";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(Person.FirstName));
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsWrittenBackToLandedValueThenAgain_ThenPendingChangeIsRecreatedCleanly()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        person.FirstName = "Carl";
+
+        // Assert
+        var pending = transaction.GetPendingChanges();
+        Assert.Single(pending);
+        Assert.Equal("Ann", pending[0].GetOldValue<string?>());
+        Assert.Equal("Carl", pending[0].GetNewValue<string?>());
+
+        await transaction.CommitAsync(CancellationToken.None);
     }
 
 }
