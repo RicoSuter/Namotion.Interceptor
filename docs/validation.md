@@ -161,7 +161,7 @@ motor.MaxAllowedSpeed = 200; // the order does not matter
 await transaction.CommitAsync(cancellationToken);
 ```
 
-The commit check validates every changed property with the validators of its subject's own context while reads return the transaction's values, so the order of the writes does not matter. If a value is invalid, `CommitAsync` throws `SubjectTransactionValidationException` before anything is written. Its `FailedChanges` and `Errors` list the invalid changes and their validation errors in the same order. The pending changes stay intact, so the values can be fixed and the commit retried.
+The commit check validates every changed property with the validators of its subject's context while reads return the transaction's values, so the order of the writes does not matter. If a value is invalid, `CommitAsync` throws `SubjectTransactionValidationException` before anything is written. Its `FailedChanges` and `Errors` list the invalid changes and their validation errors in the same order. The pending changes stay intact, so the values can be fixed and the commit retried.
 
 With source transactions, the final set is checked again right before the local apply, after the sources were written, because an inbound update can change a value a validator reads. A failure there is handled like a failed local apply: it reverts the affected source writes, arrives as a `SubjectTransactionException`, and ends the transaction.
 
