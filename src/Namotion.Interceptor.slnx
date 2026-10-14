@@ -86,6 +86,11 @@
     <Project Path="HomeBlaze/Namotion.Devices.SunSpec.Generator/Namotion.Devices.SunSpec.Generator.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.SunSpec.HomeBlaze/Namotion.Devices.SunSpec.HomeBlaze.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.SunSpec.Tests/Namotion.Devices.SunSpec.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Upnp/Namotion.Devices.Upnp.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Upnp.Tests/Namotion.Devices.Upnp.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.FritzBox/Namotion.Devices.FritzBox.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.FritzBox.Tests/Namotion.Devices.FritzBox.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.FritzBox.HomeBlaze/Namotion.Devices.FritzBox.HomeBlaze.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/History/">
     <Project Path="HomeBlaze/HomeBlaze.History/HomeBlaze.History.csproj" />

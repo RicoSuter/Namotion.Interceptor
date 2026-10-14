@@ -1,0 +1,267 @@
+@attribute [SubjectComponent(SubjectComponentType.Setup, typeof(FritzBox))]
+@implements ISubjectEditComponent
+@implements IDisposable
+
+<MudStack Spacing="3">
+    @if (_routers == null)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            <MudText>Searching for FRITZ!Box routers...</MudText>
+        </MudStack>
+    }
+    else if (_routers.Count > 0)
+    {
+        <MudText Typo="Typo.body1">Select a router or enter its address below.</MudText>
+        <MudList T="FritzBoxDiscoveryResult"
+                 @bind-SelectedValue="_selectedRouter"
+                 @bind-SelectedValue:after="OnRouterSelected"
+                 SelectionMode="SelectionMode.SingleSelection">
+            @foreach (var router in _routers)
+            {
+                <MudListItem T="FritzBoxDiscoveryResult" Value="router">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudIcon Icon="@Icons.Material.Filled.Router" />
+                        <MudText>@(router.FriendlyName ?? router.Model ?? FritzBox.DefaultName)</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">(@router.HostAddress)</MudText>
+                        @if (router.IsRepeater)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Repeater</MudChip>
+                        }
+                    </MudStack>
+                </MudListItem>
+            }
+        </MudList>
+        @if (_selectedRouter?.IsRepeater == true)
+        {
+            <MudAlert Severity="Severity.Info">
+                In a FRITZ!Box mesh, the clients of this repeater already appear under the FRITZ!Box router. Add the repeater only if your router is not a FRITZ!Box.
+            </MudAlert>
+        }
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Info">No FRITZ!Box was found automatically. Enter its address below.</MudAlert>
+    }
+
+    <MudTextField @bind-Value="_hostAddress"
+                  @bind-Value:after="OnHostAddressChanged"
+                  Label="Host Address (IP or hostname)"
+                  HelperText="An IP address or host name, without http:// or a port"
+                  Error="@IsHostAddressRejected"
+                  ErrorText="@FritzBoxConnectionCheck.InvalidHostAddressMessage"
+                  Immediate="true" />
+
+    <MudTextField @bind-Value="_username"
+                  @bind-Value:after="ResetCheck"
+                  Label="Username"
+                  HelperText="A FRITZ!Box user with the FRITZ!Box settings permission"
+                  Immediate="true" />
+
+    <MudTextField @bind-Value="_password"
+                  @bind-Value:after="ResetCheck"
+                  Label="Password"
+                  InputType="InputType.Password"
+                  UserAttributes="_passwordAttributes"
+                  Immediate="true" />
+
+    <MudButton Variant="Variant.Filled"
+               Color="Color.Primary"
+               OnClick="CheckAsync"
+               Disabled="@(_isChecking || !FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _))">
+        @if (_isChecking)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+        }
+        Test Connection
+    </MudButton>
+
+    @if (_result is { IsSuccess: false })
+    {
+        <MudAlert Severity="Severity.Error">@_result.ErrorMessage</MudAlert>
+    }
+    else if (_result is { IsSuccess: true })
+    {
+        <MudAlert Severity="Severity.Success">Connected to @(_result.Model ?? "the FRITZ!Box").</MudAlert>
+        <MudText Typo="Typo.body2">Certificate fingerprint (SHA-256). Compare it with the fingerprint your browser shows for this router's web UI before you confirm:</MudText>
+        <MudText Typo="Typo.caption" Style="font-family: monospace; word-break: break-all;">@_result.CertificateFingerprint</MudText>
+        <MudCheckBox T="bool"
+                     Value="_isCertificateConfirmed"
+                     ValueChanged="OnCertificateConfirmedChanged"
+                     Label="The fingerprint matches the one my browser shows for this FRITZ!Box" />
+    }
+</MudStack>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private FritzBox? RouterSubject => Subject as FritzBox;
+
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
+
+    private List<FritzBoxDiscoveryResult>? _routers;
+    private FritzBoxDiscoveryResult? _selectedRouter;
+    private string? _hostAddress;
+    private string? _username;
+    private string? _password;
+    private bool _isChecking;
+    private bool _isCertificateConfirmed;
+    private FritzBoxConnectionCheckResult? _result;
+
+    // Keeps the browser from autofilling a stored password into the router password.
+    private readonly Dictionary<string, object?> _passwordAttributes = new() { ["autocomplete"] = "new-password" };
+
+    // Bumped by every edit and every check; a check that completes with an older version is discarded.
+    private int _checkVersion;
+
+    public bool IsValid => _result is { IsSuccess: true } && _isCertificateConfirmed;
+
+    public bool IsDirty => IsValid;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _routers = (await FritzBoxDiscovery.DiscoverAsync(TimeSpan.FromSeconds(3), _cancellationTokenSource.Token)).ToList();
+        }
+        catch (OperationCanceledException) when (_cancellationTokenSource.IsCancellationRequested)
+        {
+            // The component was disposed before discovery finished.
+        }
+        catch (Exception)
+        {
+            // A failed discovery must not block entering the address by hand.
+            _routers = [];
+        }
+    }
+
+    private void OnRouterSelected()
+    {
+        _hostAddress = _selectedRouter?.HostAddress;
+        ResetCheck();
+    }
+
+    private void OnHostAddressChanged()
+    {
+        if (_selectedRouter != null && _hostAddress != _selectedRouter.HostAddress)
+        {
+            _selectedRouter = null;
+        }
+
+        ResetCheck();
+    }
+
+    private string? NormalizedUsername => string.IsNullOrWhiteSpace(_username) ? null : _username.Trim();
+
+    private bool IsHostAddressRejected =>
+        !string.IsNullOrWhiteSpace(_hostAddress) && !FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _);
+
+    private void ResetCheck()
+    {
+        _checkVersion++;
+        if (_result is null && !_isCertificateConfirmed)
+        {
+            return;
+        }
+
+        _result = null;
+        _isCertificateConfirmed = false;
+        NotifyValidity();
+    }
+
+    private async Task CheckAsync()
+    {
+        if (_isChecking)
+        {
+            return;
+        }
+
+        var hostAddress = _hostAddress;
+        if (string.IsNullOrWhiteSpace(hostAddress))
+        {
+            return;
+        }
+
+        var username = NormalizedUsername;
+        var password = _password;
+        var version = ++_checkVersion;
+
+        _isChecking = true;
+        _result = null;
+        _isCertificateConfirmed = false;
+        NotifyValidity();
+        try
+        {
+            var result = await FritzBoxConnectionCheck.CheckAsync(hostAddress, username, password, _cancellationTokenSource.Token);
+            if (version != _checkVersion)
+            {
+                // The fields changed while this check ran.
+                return;
+            }
+
+            _result = result;
+        }
+        catch (OperationCanceledException) when (_cancellationTokenSource.IsCancellationRequested)
+        {
+            // The component was disposed while checking.
+        }
+        catch (Exception exception)
+        {
+            if (version == _checkVersion)
+            {
+                _result = new FritzBoxConnectionCheckResult(false, null, exception.Message, null, null, null);
+            }
+        }
+        finally
+        {
+            _isChecking = false;
+            NotifyValidity();
+        }
+    }
+
+    private void OnCertificateConfirmedChanged(bool isConfirmed)
+    {
+        _isCertificateConfirmed = isConfirmed;
+        NotifyValidity();
+    }
+
+    private void NotifyValidity()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (RouterSubject != null && _result is { IsSuccess: true } result && _isCertificateConfirmed)
+        {
+            // Every field edit calls ResetCheck, so a successful _result always matches the live fields below.
+            RouterSubject.HostAddress = result.HostAddress;
+            RouterSubject.Username = NormalizedUsername;
+            RouterSubject.Password = string.IsNullOrEmpty(_password) ? null : _password;
+            RouterSubject.PublicKeyPin = result.PublicKeyPin;
+
+            // Without this, every router added here would be titled with the default name.
+            var routerName = _selectedRouter?.FriendlyName ?? result.Model;
+            if (RouterSubject.Name == FritzBox.DefaultName && !string.IsNullOrWhiteSpace(routerName))
+            {
+                RouterSubject.Name = routerName.Trim();
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        _cancellationTokenSource.Cancel();
+        _cancellationTokenSource.Dispose();
+    }
+}

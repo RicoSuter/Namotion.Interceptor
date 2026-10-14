@@ -499,25 +499,25 @@
             if (isInlinePathsProperty && pane.Index != null)
             {
                 // Only add the key for [InlinePaths] properties
-                pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+                pathParts.Add(pane.Index.ToString()!);
             }
             else
             {
                 // Add property name
                 if (pane.PropertyName != null)
                 {
-                    pathParts.Add(Uri.EscapeDataString(pane.PropertyName));
+                    pathParts.Add(pane.PropertyName);
                 }
 
                 // Add index/key if present (for collections/dictionaries)
                 if (pane.Index != null)
                 {
-                    pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+                    pathParts.Add(pane.Index.ToString()!);
                 }
             }
         }
 
-        var url = "/browser" + (pathParts.Any() ? "/" + string.Join("/", pathParts) : "");
+        var url = BrowserUrls.Create(pathParts);
 
         // Store the URL so OnLocationChanged knows to ignore this navigation
         _lastNavigatedUrl = url;
@@ -538,22 +538,21 @@
             if (isInlinePathsProp && pane.Index != null)
             {
                 // Only add the key for [InlinePaths] properties
-                breadcrumbParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+                breadcrumbParts.Add(pane.Index.ToString()!);
             }
             else
             {
                 if (pane.PropertyName != null)
                 {
-                    breadcrumbParts.Add(Uri.EscapeDataString(pane.PropertyName));
+                    breadcrumbParts.Add(pane.PropertyName);
                 }
                 if (pane.Index != null)
                 {
-                    breadcrumbParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+                    breadcrumbParts.Add(pane.Index.ToString()!);
                 }
             }
 
-            var breadcrumbPath = "/browser/" + string.Join("/", breadcrumbParts);
-            _breadcrumbs.Add(new BreadcrumbItem(pane.DisplayName, breadcrumbPath));
+            _breadcrumbs.Add(new BreadcrumbItem(pane.DisplayName, BrowserUrls.Create(breadcrumbParts)));
         }
     }
 

@@ -262,6 +262,15 @@ public partial GpioPin[] Pins { get; set; }
 
 Good key sources: API resource IDs (GUIDs), hardware serial numbers, MAC addresses. Bad key sources: user-assignable names, discovery order, timestamps.
 
+### Shared Child Subjects
+
+A subject may be held by several collections, for example a light in a bridge's `Lights` and in a room's `Lights`, or a network client in a router's `Clients` and in an access point's `Clients`. Rules:
+
+- **The owning collection adds the subject first and sits at the shallowest level, because the canonical path is the shallowest, then earliest attached.** It creates the subject and adds it to its own collection before any other collection refers to it. A subject with several parents has one path per parent; paths are ordered by depth, with attach order deciding between equally deep ones, and history records values under the first. The other collections only refer to it and are replaced when their members change.
+- **The subject stays attached until the last collection drops it,** not the first: a subject with several parents detaches only once every collection holding it has dropped it. When the owner drops it, drop it from every other collection in the same update, or it stays attached, referenced by them but orphaned from its owner.
+- **Relative paths from a shared subject do not resolve.** A `../` path starting at a subject with several parents resolves to nothing, because its parent is ambiguous.
+- **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. The parent would become a child of its own child, and the two keep each other attached. Keep a back-reference to an owner in a field.
+
 ## Display Interfaces
 
 Implement these interfaces for UI integration:
@@ -752,7 +761,7 @@ The subject project should only depend on `Namotion.Interceptor` and optionally 
 ```
 
 **Why separate?**
-- Subjects can be used in headless scenarios (APIs, console apps, background services)
+- Subject libraries must work in a plain .NET host without HomeBlaze, registered through their `Add...` service collection extension, for headless scenarios (APIs, console apps, background services)
 - No dependency on Blazor, MudBlazor, or any UI framework
 - Easier testing without UI dependencies
 - Cleaner dependency graph
@@ -814,6 +823,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
 | `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
+| `[State] + [SubjectPath(type)]` | Link to the subject at a canonical path, see [Path Properties](#path-properties) | No | Yes (as the subject) |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
 | `[Category]` on a property or method | Heading in the property panel, see [Categories](#categories) | No | Yes |
@@ -959,6 +969,14 @@ public partial string? Map { get; set; }
 ```
 
 The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.
+
+On a `[State]` property with a type, the property panel shows the subject at the path with a button that opens it. Use it to point at a subject elsewhere in the tree without attaching it, see [Shared Child Subjects](#shared-child-subjects):
+
+```csharp
+[State("Device")]
+[SubjectPath(typeof(IInterceptorSubject))]
+public partial string? DevicePath { get; internal set; }
+```
 
 ### SubjectPathField Component
 

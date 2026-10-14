@@ -108,6 +108,7 @@ Power and energy values are marked as estimated. The controller calculates them 
 - `ITemperatureSensor`: each measured temperature is its own child sensor
 - `ISwitchState`: each pump output is its own child switch (read only)
 - `IConnectionState`: SHI connection state
+- `INetworkHost`: configured host address
 - `ISoftwareState`: controller firmware version (`AvailableSoftwareUpdate` is always empty)
 - `IMonitoredService`: service status and heat pump error number
 
