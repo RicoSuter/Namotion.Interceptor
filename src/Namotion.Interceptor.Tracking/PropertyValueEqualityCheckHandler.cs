@@ -22,8 +22,8 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
         }
     }
 
-    // CurrentValue is the landed value, so inside a transaction a write back to it must still replace the
-    // pending value instead of being dropped as unchanged.
+    // CurrentValue is the landed value, so inside a transaction a write back to it must still reach the
+    // transaction, which cancels the pending change, instead of being dropped as unchanged.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsWriteBackOfPendingChange(PropertyReference property)
     {

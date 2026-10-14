@@ -148,9 +148,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="currentValue">The landed model value seen by the write interceptor chain.</param>
     /// <param name="newValue">The value being written.</param>
     /// <param name="restoresLandedValue">
-    /// True when <paramref name="newValue"/> equals <paramref name="currentValue"/>. When a pending change
-    /// already exists for <paramref name="property"/>, this cancels it instead of recording a no-op write,
-    /// so the result does not depend on write history within the transaction.
+    /// True when the new value equals the landed value; an existing pending change for the property is
+    /// then cancelled instead of updated.
     /// </param>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
     internal bool TryCaptureChange<TProperty>(

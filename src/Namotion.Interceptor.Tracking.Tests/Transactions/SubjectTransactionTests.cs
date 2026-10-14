@@ -769,7 +769,9 @@ public class SubjectTransactionTests
     [Fact]
     public async Task WhenPropertyIsWrittenBackToLandedValueThenAgain_ThenPendingChangeIsRecreatedCleanly()
     {
-        // Arrange
+        // Arrange: the LastName write in between lands between the cancelled and re-created FirstName entries
+        // only if the first FirstName entry was actually removed rather than merely overwritten in place, so
+        // the resulting [LastName, FirstName] order pins the removal rather than just the old/new values.
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithTransactions();
@@ -779,13 +781,16 @@ public class SubjectTransactionTests
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "Bob";
         person.FirstName = "Ann";
+        person.LastName = "Smith";
         person.FirstName = "Carl";
 
         // Assert
         var pending = transaction.GetPendingChanges();
-        Assert.Single(pending);
-        Assert.Equal("Ann", pending[0].GetOldValue<string?>());
-        Assert.Equal("Carl", pending[0].GetNewValue<string?>());
+        Assert.Equal([nameof(Person.LastName), nameof(Person.FirstName)], pending.Select(c => c.Property.Name));
+
+        var firstNameChange = pending.Single(c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Equal("Ann", firstNameChange.GetOldValue<string?>());
+        Assert.Equal("Carl", firstNameChange.GetNewValue<string?>());
 
         await transaction.CommitAsync(CancellationToken.None);
     }
