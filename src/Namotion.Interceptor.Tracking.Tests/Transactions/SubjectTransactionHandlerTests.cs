@@ -342,6 +342,78 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenTwoHandlersAreRegistered_ThenOnCommittingRunsInOrderAndFirstThrowStopsTheRest()
+    {
+        // Arrange
+        var reject = true;
+        var committingLog = new List<RecordingHandler>();
+        var first = new RecordingHandler();
+        var second = new RecordingHandler();
+        first.OnCommittingAction = (_, _) =>
+        {
+            committingLog.Add(first);
+            if (reject)
+            {
+                throw new InvalidOperationException("rejected");
+            }
+        };
+        second.OnCommittingAction = (_, _) => committingLog.Add(second);
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(first);
+        context.AddService<ITransactionHandler>(second);
+        var person = new Person(context);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+
+        // Act
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+        var secondCallsAfterRejection = second.CommittingCalls;
+        reject = false;
+        committingLog.Clear();
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(0, secondCallsAfterRejection);
+        Assert.Equal([first, second], committingLog);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenOnCommittingThrowsWithOptimisticLocking_ThenCommitLockIsReleased()
+    {
+        // Arrange
+        var reject = true;
+        var handler = new RecordingHandler
+        {
+            OnCommittingAction = (_, _) =>
+            {
+                if (reject)
+                {
+                    throw new InvalidOperationException("rejected");
+                }
+            }
+        };
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var person = new Person(context) { FirstName = "Ann" };
+        var flowWithoutTransaction = ExecutionContext.Capture()!;
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
+        person.FirstName = "Bob";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+        reject = false;
+
+        // Act
+        // Started inline so that it completes synchronously only if the failed commit released the lock.
+        Task? competingCommit = null;
+        ExecutionContext.Run(flowWithoutTransaction, _ => competingCommit = CommitInOwnFlowAsync(context, person), null);
+
+        // Assert
+        Assert.True(competingCommit!.IsCompletedSuccessfully);
+        Assert.Equal("Lee", person.LastName);
+    }
+
+    [Fact]
     public async Task WhenCommitAppliesCheckedValue_ThenCommitWriteIsConsumedOnce()
     {
         // Arrange
@@ -492,6 +564,14 @@ public class SubjectTransactionHandlerTests
     {
         // An async method does not leak the transaction it begins into the caller's flow.
         return await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+    }
+
+    private static async Task CommitInOwnFlowAsync(IInterceptorSubjectContext context, Person person)
+    {
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
+        person.LastName = "Lee";
+        await transaction.CommitAsync(CancellationToken.None);
     }
 
     private sealed class CountingTransactionWriter : ITransactionWriter

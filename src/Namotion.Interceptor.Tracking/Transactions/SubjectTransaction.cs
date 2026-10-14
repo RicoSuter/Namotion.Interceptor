@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Performance;
 
@@ -79,6 +80,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="handler">The handler asking whether it already checked the write.</param>
     /// <param name="property">The property being written.</param>
     /// <param name="value">The value being written.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TryConsumeCommitWrite<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
     {
         return CommitWriteMarker.TryConsume(handler, property, value);
