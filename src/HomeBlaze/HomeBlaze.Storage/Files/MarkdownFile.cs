@@ -39,7 +39,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // A reload changes the subjects it reuses before it publishes its snapshot, and it reuses the values of a
     // slot by their position. Between the two, and after a reload that failed once it had begun, the slot
     // values of the graph do not belong to the blocks of the snapshot, so a write-back must not insert or
-    // remove a block then. The count tells a write-back that a reload began while it worked.
+    // remove a block then. The count tells a write-back that a reload began while it worked. The flag is also
+    // set when a reload throws before it changed anything, which only costs refused inserts and removals until
+    // the next reload.
     private int _reloadCount;
     private volatile bool _isGraphAheadOfSnapshot;
 
@@ -203,7 +205,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// is a list of subjects of a type, a value without a block gets a new block and a block whose value is gone
     /// is removed with its content. Returns false, and writes nothing, when the page has no block for the subject,
     /// when the page cannot keep the change or the change cannot be made without touching other content, or when
-    /// blocks would be inserted or removed while the page is read again.
+    /// blocks would be inserted or removed while a reload runs or after one that failed, until the page has been
+    /// read again.
     /// </remarks>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
@@ -235,7 +238,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         if (write.HasInsertedOrRemovedBlocks &&
             (wasGraphAhead || _isGraphAheadOfSnapshot || Volatile.Read(ref _reloadCount) != reloadCount))
         {
-            _parser.LogRefusedWrite(FullPath, "Blocks cannot be inserted or removed while the page is read again.");
+            _parser.LogRefusedWrite(FullPath, "Blocks cannot be inserted or removed until the page has been read again.");
             return false;
         }
 
@@ -246,7 +249,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             _parser.RememberConfiguration(writtenSubject, configurationJson);
         }
 
-        _parseResult = snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects };
+        // Only over the snapshot that the text was computed from. A reload that published since then made the
+        // graph agree with its own snapshot, and the blocks of this write-back belong to the text before it:
+        // published over that snapshot they would stand beside the new graph without the flag or the count
+        // telling a later write-back. The text is written all the same, and the reload inside the write settles
+        // the page.
+        Interlocked.CompareExchange(
+            ref _parseResult, snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects }, snapshot);
         var content = write.Page.Source;
         Content = content;
 
