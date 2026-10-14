@@ -28,6 +28,7 @@
                   @bind-Value:after="OnFieldChanged"
                   Label="Password (leave empty to keep the current one)"
                   InputType="InputType.Password"
+                  UserAttributes="_passwordAttributes"
                   Immediate="true"
                   Class="mt-4" />
 
@@ -45,10 +46,10 @@
 
     <MudText Typo="Typo.subtitle2" Class="mt-4">Trusted certificate key</MudText>
     <MudText Typo="Typo.caption" Style="font-family: monospace; word-break: break-all;">
-        @(_certificatePin ?? "None yet: the next connection trusts the key the router presents.")
+        @(TrustedCertificatePin ?? "None yet: the next connection trusts the key the router presents.")
     </MudText>
 
-    @if (RouterSubject?.PresentedCertificatePin is { } presentedPin && presentedPin != _certificatePin)
+    @if (RouterSubject?.PresentedCertificatePin is { } presentedPin && presentedPin != TrustedCertificatePin)
     {
         <MudAlert Severity="Severity.Warning" Class="mt-2">
             The router presents a different certificate key: @presentedPin. Accept it only if you know why the router's certificate changed.
@@ -125,17 +126,41 @@
     private int _originalPollingIntervalSeconds = FritzBox.DefaultPollingIntervalSeconds;
     private int _originalRetryIntervalSeconds = FritzBox.DefaultRetryIntervalSeconds;
 
+    // Keeps the browser from autofilling a stored password into the router password.
+    private readonly Dictionary<string, object?> _passwordAttributes = new() { ["autocomplete"] = "new-password" };
+
     public bool IsValid => FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _) &&
                            _pollingIntervalSeconds is >= FritzBox.MinimumIntervalSeconds and <= FritzBox.MaximumIntervalSeconds &&
                            _retryIntervalSeconds is >= FritzBox.MinimumIntervalSeconds and <= FritzBox.MaximumIntervalSeconds;
 
-    public bool IsDirty => _name != _originalName ||
-                           NormalizeHostAddress(_hostAddress) != NormalizeHostAddress(_originalHostAddress) ||
-                           Normalize(_username) != Normalize(_originalUsername) ||
-                           !string.IsNullOrEmpty(_password) ||
-                           _certificatePin != _originalCertificatePin ||
-                           _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
-                           _retryIntervalSeconds != _originalRetryIntervalSeconds;
+    public bool IsDirty => IsNameChanged ||
+                           IsHostAddressChanged ||
+                           IsUsernameChanged ||
+                           IsPasswordChanged ||
+                           IsCertificatePinChanged ||
+                           IsPollingIntervalChanged ||
+                           IsRetryIntervalChanged;
+
+    private bool IsNameChanged => _name != _originalName;
+
+    private bool IsHostAddressChanged => NormalizeHostAddress(_hostAddress) != NormalizeHostAddress(_originalHostAddress);
+
+    private bool IsUsernameChanged => Normalize(_username) != Normalize(_originalUsername);
+
+    private bool IsPasswordChanged => !string.IsNullOrEmpty(_password);
+
+    private bool IsCertificatePinChanged => _certificatePin != _originalCertificatePin;
+
+    private bool IsPollingIntervalChanged => _pollingIntervalSeconds != _originalPollingIntervalSeconds;
+
+    private bool IsRetryIntervalChanged => _retryIntervalSeconds != _originalRetryIntervalSeconds;
+
+    /// <summary>
+    /// The pin entered here, or while it is unchanged the live one, which the router trusts on its own while the
+    /// dialog is open.
+    /// </summary>
+    private string? TrustedCertificatePin =>
+        RouterSubject is null || IsCertificatePinChanged ? _certificatePin : RouterSubject.CertificatePin;
 
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
@@ -212,37 +237,37 @@
         if (RouterSubject != null && IsValid)
         {
             // Writes only what changed here: the router can update CertificatePin while the dialog is open.
-            if (_name != _originalName)
+            if (IsNameChanged)
             {
                 RouterSubject.Name = _name;
             }
 
-            if (NormalizeHostAddress(_hostAddress) != NormalizeHostAddress(_originalHostAddress))
+            if (IsHostAddressChanged)
             {
                 RouterSubject.HostAddress = NormalizeHostAddress(_hostAddress);
             }
 
-            if (Normalize(_username) != Normalize(_originalUsername))
+            if (IsUsernameChanged)
             {
                 RouterSubject.Username = Normalize(_username);
             }
 
-            if (!string.IsNullOrEmpty(_password))
+            if (IsPasswordChanged)
             {
                 RouterSubject.Password = _password;
             }
 
-            if (_certificatePin != _originalCertificatePin)
+            if (IsCertificatePinChanged)
             {
                 RouterSubject.CertificatePin = _certificatePin;
             }
 
-            if (_pollingIntervalSeconds != _originalPollingIntervalSeconds)
+            if (IsPollingIntervalChanged)
             {
                 RouterSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
             }
 
-            if (_retryIntervalSeconds != _originalRetryIntervalSeconds)
+            if (IsRetryIntervalChanged)
             {
                 RouterSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
             }

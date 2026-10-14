@@ -71,7 +71,7 @@ FritzBox
 
 Clients and access points are keyed by MAC address in upper case, so their paths stay stable across restarts. A client that moves to another access point keeps its subject; only the two access point lists change. History records a client under `FritzBox.Clients`, wherever it is connected. See [Shared Child Subjects](../development/building-subjects.md#shared-child-subjects) for the general rule.
 
-WLANs are keyed `2.4GHz`, `5GHz` and `6GHz` for the radios, and `Guest` for the guest network. Any other position, or a key that would collide, falls back to a generated key.
+WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. When the router offers several WLAN services, the last one is taken as the guest network and keyed `Guest`. A radio that reports no known band is keyed by its position instead: the first three as `2.4GHz`, `5GHz` and `6GHz`, any later one as `WLAN<n>`, where n is its position. A second radio on a band already taken gets its position appended, for example `5GHz-3` for the second 5 GHz radio of a FRITZ!Box 4060.
 
 ## Widgets
 
@@ -97,7 +97,7 @@ WLANs are keyed `2.4GHz`, `5GHz` and `6GHz` for the radios, and `Guest` for the 
 | Property | Unit | Description |
 |---|---|---|
 | `IsInternetConnected` | | Whether the internet connection is up |
-| `ExternalIpAddress`, `ExternalIpv6Address` | | Addresses of the internet connection |
+| `ExternalIpAddress`, `ExternalIpv6Address` | | Addresses of the internet connection; `ExternalIpv6Address` is empty when the connection has no public IPv6 address |
 | `InternetConnectionUptime` | | Time since the connection was established |
 | `MaximumUploadRate`, `MaximumDownloadRate` | Mbit/s | Line speed |
 | `UploadRate`, `DownloadRate` | kB/s | Current traffic, converted from the bytes per second the router reports |
@@ -169,6 +169,9 @@ HomeBlaze connects to the router on TCP port 49000 (description, unauthenticated
 | "The FRITZ!Box does not offer its host list..." | The firmware is too old. Update FRITZ!OS, then save the configuration or restart HomeBlaze, since the subject only reconnects on a configuration change. |
 | Clients have no access point | The router does not offer the mesh list, the mesh list failed to download or was malformed, or the client is connected through a third-party access point. |
 | "Data may be stale (n of 3)" | A poll failed; after three in a row the connection is reset and retried after `RetryInterval`. |
+| Internet values, rates and line speed stay empty | The subject is a FRITZ!Repeater, which offers no internet services, or the user cannot read those services on the router. |
+| "The FRITZ!Box is not connected. Try again when its status is Running." when switching the guest WLAN | The router is not connected right now; the switch works again once `Status` is Running. |
+| "The device refused SetEnable..." when switching the guest WLAN | The router refused the command with the UPnP error shown; "action not authorized (UPnP error 606)" means the user lacks the FRITZ!Box settings permission. |
 
 ## Limitations
 

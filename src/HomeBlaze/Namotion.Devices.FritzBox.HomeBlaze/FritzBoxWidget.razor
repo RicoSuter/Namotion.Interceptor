@@ -5,7 +5,7 @@
     <MudStack Spacing="2">
         <MudStack Row="true" AlignItems="AlignItems.Center">
             <MudIcon Icon="@Icons.Material.Filled.Router" Class="mr-2" />
-            <MudText Typo="Typo.h6">@(RouterSubject?.Title ?? "FRITZ!Box")</MudText>
+            <MudText Typo="Typo.h6">@(RouterSubject?.Title ?? FritzBox.DefaultName)</MudText>
             <MudSpacer />
             <MudChip T="string"
                      Size="Size.Small"

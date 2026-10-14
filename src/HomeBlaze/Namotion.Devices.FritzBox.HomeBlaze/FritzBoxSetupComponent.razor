@@ -22,7 +22,7 @@
                 <MudListItem T="FritzBoxDiscoveryResult" Value="router">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                         <MudIcon Icon="@Icons.Material.Filled.Router" />
-                        <MudText>@(router.FriendlyName ?? router.Model ?? "FRITZ!Box")</MudText>
+                        <MudText>@(router.FriendlyName ?? router.Model ?? FritzBox.DefaultName)</MudText>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">(@router.HostAddress)</MudText>
                         @if (router.IsRepeater)
                         {
@@ -45,7 +45,7 @@
     }
 
     <MudTextField @bind-Value="_hostAddress"
-                  @bind-Value:after="ResetCheck"
+                  @bind-Value:after="OnHostAddressChanged"
                   Label="Host Address (IP or hostname)"
                   HelperText="An IP address or host name, without http:// or a port"
                   Error="@IsHostAddressRejected"
@@ -62,6 +62,7 @@
                   @bind-Value:after="ResetCheck"
                   Label="Password"
                   InputType="InputType.Password"
+                  UserAttributes="_passwordAttributes"
                   Immediate="true" />
 
     <MudButton Variant="Variant.Filled"
@@ -111,6 +112,9 @@
     private bool _isCertificateConfirmed;
     private FritzBoxConnectionCheckResult? _result;
 
+    // Keeps the browser from autofilling a stored password into the router password.
+    private readonly Dictionary<string, object?> _passwordAttributes = new() { ["autocomplete"] = "new-password" };
+
     // Bumped by every edit and every check; a check that completes with an older version is discarded.
     private int _checkVersion;
 
@@ -144,6 +148,18 @@
         ResetCheck();
     }
 
+    private void OnHostAddressChanged()
+    {
+        if (_selectedRouter != null && _hostAddress != _selectedRouter.HostAddress)
+        {
+            _selectedRouter = null;
+        }
+
+        ResetCheck();
+    }
+
+    private string? NormalizedUsername => string.IsNullOrWhiteSpace(_username) ? null : _username.Trim();
+
     private bool IsHostAddressRejected =>
         !string.IsNullOrWhiteSpace(_hostAddress) && !FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _);
 
@@ -173,7 +189,7 @@
             return;
         }
 
-        var username = string.IsNullOrWhiteSpace(_username) ? null : _username.Trim();
+        var username = NormalizedUsername;
         var password = _password;
         var version = ++_checkVersion;
 
@@ -228,9 +244,16 @@
         {
             // Every field edit calls ResetCheck, so a successful _result always matches the live fields below.
             RouterSubject.HostAddress = result.HostAddress;
-            RouterSubject.Username = string.IsNullOrWhiteSpace(_username) ? null : _username.Trim();
+            RouterSubject.Username = NormalizedUsername;
             RouterSubject.Password = string.IsNullOrEmpty(_password) ? null : _password;
             RouterSubject.CertificatePin = result.CertificatePin;
+
+            // Without this, every router added here would be titled with the default name.
+            var routerName = _selectedRouter?.FriendlyName ?? result.Model;
+            if (RouterSubject.Name == FritzBox.DefaultName && !string.IsNullOrWhiteSpace(routerName))
+            {
+                RouterSubject.Name = routerName.Trim();
+            }
         }
 
         return Task.CompletedTask;

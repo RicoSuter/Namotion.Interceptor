@@ -58,6 +58,11 @@
 
     private async Task SetGuestWlanAsync(FritzBoxGuestWlan guest, bool isOn)
     {
+        if (_isSwitching)
+        {
+            return;
+        }
+
         _isSwitching = true;
         _errorMessage = null;
         try
