@@ -23,9 +23,9 @@ public interface ITransactionHandler
     /// <summary>
     /// Called with the final set of changes before any source write or local apply and, with a registered
     /// <see cref="ITransactionWriter"/>, a second time after the source writes and right before the local apply,
-    /// with only the changes that will be applied (skipped when there are none). Property reads return the transaction's values for the passed
-    /// changes and the landed values otherwise. Handlers must not write properties and must not assume a single
-    /// call per commit.
+    /// with only the changes that will be applied (skipped when there are none). Property reads return the
+    /// transaction's values for the passed changes and the landed values otherwise. Handlers must not write
+    /// properties and must not assume a single call per commit.
     /// </summary>
     /// <remarks>
     /// Throwing on the first call aborts the commit without writing anything and leaves the transaction retryable;
@@ -35,6 +35,8 @@ public interface ITransactionHandler
     /// terminal.
     /// </remarks>
     /// <param name="transaction">The committing transaction.</param>
-    /// <param name="changes">The final set of changes, in insertion order.</param>
+    /// <param name="changes">
+    /// The final set of changes in insertion order; on the second call only the changes that will be applied.
+    /// </param>
     void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes);
 }

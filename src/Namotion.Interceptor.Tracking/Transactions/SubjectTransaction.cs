@@ -697,8 +697,8 @@ public sealed class SubjectTransaction : IDisposable
             sourceErrors = SubjectPropertyChangeOperations.Concat(sourceErrors, invalidErrors);
         }
 
-        // Apply the whole snapshot except the source-write failures in a single pass. With no source
-        // failure, this is the entire snapshot, and ApplyAllChanges returns an empty Successful set.
+        // Apply the whole snapshot except the source-write failures and the changes the handlers rejected in a single
+        // pass. With neither, this is the entire snapshot, and ApplyLocalChanges returns an empty Successful set.
         var exclude = failedSource.Count == 0 ? null : failedSource;
         IReadOnlyList<SubjectPropertyChange> applied;
         IReadOnlyList<SubjectPropertyChange> applyFailed;
@@ -732,8 +732,8 @@ public sealed class SubjectTransaction : IDisposable
                     SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
             }
 
-            // BestEffort: keep source == model for failed-apply properties by reverting only the
-            // source writes whose property failed to apply (matched by Property equality).
+            // BestEffort: keep source == model for failed-apply and rejected properties by reverting only the
+            // source writes whose property failed to apply (matched by Property equality) or was rejected.
             var toRevert = SubjectPropertyChangeOperations.Concat(SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written), invalidWritten);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
@@ -1028,6 +1028,7 @@ public sealed class SubjectTransaction : IDisposable
             return ([], []);
         }
 
+        (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) result = ([], []);
         _commitValidationExcludedChanges = landingChanges is null ? null : failedSource;
         try
         {
@@ -1035,25 +1036,56 @@ public sealed class SubjectTransaction : IDisposable
             {
                 InvokeCommitHandlers(checkedChanges);
             }
-
-            return ([], []);
         }
         catch (Exception exception)
         {
-            return GetRejectedChanges(exception, landingChanges ?? checkedChanges.ToArray());
+            result = GetRejectedChanges(exception, landingChanges ?? checkedChanges.ToArray());
         }
         finally
         {
             _commitValidationExcludedChanges = null;
         }
+
+        // Disposal clears the pending values, so the reads may have mixed landed values in: the outcome is discarded
+        // like a check skipped for a transaction disposed before it.
+        return Volatile.Read(ref _isDisposed) != 0 ? ([], []) : result;
     }
 
     private static SubjectPropertyChange[] ExcludeFailedSourceChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,
         IReadOnlyList<SubjectPropertyChange> failedSource)
     {
-        var landingChanges = SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []);
-        return landingChanges as SubjectPropertyChange[] ?? [.. landingChanges];
+        var failedProperties = new HashSet<PropertyReference>(failedSource.Count, PropertyReference.Comparer);
+        foreach (var change in failedSource)
+        {
+            failedProperties.Add(change.Property);
+        }
+
+        var landingCount = 0;
+        foreach (var change in changes)
+        {
+            if (!failedProperties.Contains(change.Property))
+            {
+                landingCount++;
+            }
+        }
+
+        if (landingCount == 0)
+        {
+            return [];
+        }
+
+        var landingChanges = new SubjectPropertyChange[landingCount];
+        var index = 0;
+        foreach (var change in changes)
+        {
+            if (!failedProperties.Contains(change.Property))
+            {
+                landingChanges[index++] = change;
+            }
+        }
+
+        return landingChanges;
     }
 
     /// <summary>
@@ -1070,11 +1102,49 @@ public sealed class SubjectTransaction : IDisposable
             var rejected = SubjectPropertyChangeOperations.IntersectByProperty(transactionException.FailedChanges, checkedChanges);
             if (rejected.Count > 0)
             {
-                return (rejected, transactionException.Errors.Count > 0 ? transactionException.Errors : [exception]);
+                return (rejected, GetRejectionErrors(transactionException, checkedChanges));
             }
         }
 
         return (checkedChanges, [exception]);
+    }
+
+    /// <summary>
+    /// Returns the errors of a rejection. When the failed changes and errors align one to one, only the errors of
+    /// the failed changes that were checked are kept; otherwise all errors, or the exception itself when it has none.
+    /// </summary>
+    private static IReadOnlyList<Exception> GetRejectionErrors(
+        SubjectTransactionException exception,
+        IReadOnlyList<SubjectPropertyChange> checkedChanges)
+    {
+        var failedChanges = exception.FailedChanges;
+        var errors = exception.Errors;
+        if (errors.Count == 0)
+        {
+            return [exception];
+        }
+
+        if (errors.Count != failedChanges.Count)
+        {
+            return errors;
+        }
+
+        var checkedProperties = new HashSet<PropertyReference>(checkedChanges.Count, PropertyReference.Comparer);
+        foreach (var change in checkedChanges)
+        {
+            checkedProperties.Add(change.Property);
+        }
+
+        var alignedErrors = new List<Exception>(errors.Count);
+        for (var index = 0; index < failedChanges.Count; index++)
+        {
+            if (checkedProperties.Contains(failedChanges[index].Property))
+            {
+                alignedErrors.Add(errors[index]);
+            }
+        }
+
+        return alignedErrors;
     }
 
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)

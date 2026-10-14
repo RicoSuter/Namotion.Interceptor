@@ -113,19 +113,10 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        if (transaction.IsCommitting)
+        if (transaction.IsCommitting && ShouldWriteThroughWhileCommitting(transaction))
         {
-            if (transaction.IsCommitModelAccessAuthorized)
-            {
-                next(ref context);
-                return;
-            }
-
-            if (transaction.IsInactiveUnderLockOrThrowIfCommitting())
-            {
-                next(ref context);
-                return;
-            }
+            next(ref context);
+            return;
         }
 
         // Settable-derived writes are immediate and outside the transaction. This access linearizes at the
@@ -161,6 +152,27 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         next(ref context);
+    }
+
+    /// <summary>
+    /// Returns true when a write while <paramref name="transaction"/> commits goes straight to the model, and false
+    /// when the transaction stopped committing and the caller continues the capturing write path. Throws when the
+    /// write is not authorized.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool ShouldWriteThroughWhileCommitting(SubjectTransaction transaction)
+    {
+        if (transaction.IsCommitModelAccessAuthorized)
+        {
+            return true;
+        }
+
+        if (transaction.IsCommitValidationAuthorized)
+        {
+            SubjectTransaction.ThrowCaptureDuringCommitValidation();
+        }
+
+        return transaction.IsInactiveUnderLockOrThrowIfCommitting();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
