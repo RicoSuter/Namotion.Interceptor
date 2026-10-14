@@ -204,7 +204,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// is removed with its content. Returns false, and writes nothing, when the page has no block for the subject,
     /// when the page cannot keep the change or the change cannot be made without touching other content, when
     /// blocks would be inserted or removed while a reload runs or after one that failed, until the page has been
-    /// read again, or when another write-back or a reload changed the page while this one ran.
+    /// read again, or when another write-back or a reload changed the page while this one ran. When the page cannot
+    /// keep the change, it is read again from its file before this returns, so the graph matches the text again.
     /// </remarks>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
@@ -228,6 +229,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         if (write is null)
         {
             _parser.LogRefusedWrite(FullPath, refusal!);
+
+            // The graph keeps the refused values of a slot, and a later reload would give the blocks to them by
+            // their position, so a value would take the block of another one.
+            await OnFileChangedAsync(cancellationToken);
             return false;
         }
 

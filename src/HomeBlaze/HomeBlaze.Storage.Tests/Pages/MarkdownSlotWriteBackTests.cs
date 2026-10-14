@@ -563,6 +563,29 @@ public class MarkdownSlotWriteBackTests
     }
 
     [Fact]
+    public async Task WhenRemovalOfABlockIsRefused_ThenThePageIsReadAgainAndTheValuesMatchTheBlocks()
+    {
+        // Arrange: the lone carriage return refuses the removal.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content =
+            $"intro\ra\n\n:: {BoardType}#board Columns=2\n" +
+            "::: Tile Position=1\none\n:::\n::: Tile Position=2\ntwo\n:::\n::: Tile Position=3\nthree\n:::\n::\n";
+        var (page, board) = await AddBoardPageAsync(fixture, content);
+        board.Tiles = [board.Tiles[1], board.Tiles[2]];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        await AssertNothingWrittenAsync(
+            handled, content, fixture, page, log, "Blocks cannot be inserted or removed on a page with a line ending that is a carriage return alone.");
+        Assert.Equal(new[] { 1, 2, 3 }, board.Tiles.Select(tile => tile.Position).ToArray());
+        Assert.Equal(
+            new[] { "\n<p>one</p>\n", "\n<p>two</p>\n", "\n<p>three</p>\n" },
+            board.Tiles.Select(tile => MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(tile.Child).Children)).ToArray());
+    }
+
+    [Fact]
     public async Task WhenPageHasALoneCarriageReturnAndOnlyAHeadLineChanges_ThenItIsWritten()
     {
         // Arrange
