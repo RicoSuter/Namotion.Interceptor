@@ -1028,7 +1028,6 @@ public sealed class SubjectTransaction : IDisposable
             return ([], []);
         }
 
-        (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) result = ([], []);
         _commitValidationExcludedChanges = landingChanges is null ? null : failedSource;
         try
         {
@@ -1036,19 +1035,17 @@ public sealed class SubjectTransaction : IDisposable
             {
                 InvokeCommitHandlers(checkedChanges);
             }
+
+            return ([], []);
         }
         catch (Exception exception)
         {
-            result = GetRejectedChanges(exception, landingChanges ?? checkedChanges.ToArray());
+            return GetRejectedChanges(exception, landingChanges ?? checkedChanges.ToArray());
         }
         finally
         {
             _commitValidationExcludedChanges = null;
         }
-
-        // Disposal clears the pending values, so the reads may have mixed landed values in: the outcome is discarded
-        // like a check skipped for a transaction disposed before it.
-        return Volatile.Read(ref _isDisposed) != 0 ? ([], []) : result;
     }
 
     private static SubjectPropertyChange[] ExcludeFailedSourceChanges(

@@ -888,7 +888,7 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
-    public async Task WhenDisposedFromAnotherFlowDuringSecondCheck_ThenItsRejectionIsDiscarded()
+    public async Task WhenDisposedFromAnotherFlowDuringSecondCheck_ThenItsRejectionIsKept()
     {
         // Arrange
         var calls = 0;
@@ -911,12 +911,13 @@ public class SubjectTransactionHandlerTests
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert
         Assert.Equal(2, handler.CommittingCalls);
-        Assert.Equal("Bob", person.FirstName);
-        Assert.Empty(writer.Reverted);
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(writer.Reverted).Property.Name);
     }
 
     [Fact]
