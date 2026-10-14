@@ -620,11 +620,19 @@ public partial class TestShelf : IConfigurable
 [InterceptorSubject]
 public partial class TestShelfItem : IConfigurable
 {
+    public TestShelfItem()
+    {
+        RowSpan = 1;
+    }
+
     [Configuration]
     public partial int? Row { get; set; }
 
     [Configuration]
     public partial int? Column { get; set; }
+
+    [Configuration]
+    public partial int RowSpan { get; set; }
 
     [Configuration]
     public partial int ColumnSpan { get; set; }

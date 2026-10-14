@@ -1,4 +1,5 @@
 using System.Net;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Samples;
 using HomeBlaze.Storage.Pages;
@@ -35,6 +36,7 @@ public class LayoutSlotBlockTests
         Assert.Equal("pump", widget.Path);
         Assert.Contains("<strong>Pump</strong>", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(grid.Cells[1].Child).Children));
         Assert.Null(grid.Cells[2].Child);
+        Assert.Same(grid.Cells[1], ((IPathScope)page).TryGetNamedSubject("status"));
     }
 
     [Fact]
@@ -57,6 +59,7 @@ public class LayoutSlotBlockTests
             new[] { (20, 40, 300, 120), (0, 0, 200, 150) },
             canvas.Nodes.Select(node => (node.X, node.Y, node.Width, node.Height)).ToArray());
         Assert.Single(Assert.IsType<MarkdownFragment>(canvas.Nodes[0].Child).Children.Values.OfType<Widget>());
+        Assert.Contains("text", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(canvas.Nodes[1].Child).Children));
     }
 
     [Theory]

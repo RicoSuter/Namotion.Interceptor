@@ -20,14 +20,15 @@ public class MarkdownBlockNamingTests
     private const string ShelfType = $"{Namespace}.TestShelf";
     private const string WidgetType = "HomeBlaze.Components.Widget";
 
-    private const string GridPage = $$"""
-        :: {{ShelfType}}#grid Rows=1 Columns=2
+    private const string ShelfPage = $$"""
+        :: {{ShelfType}}#shelf Rows=1 Columns=2
         ```json
         {
           "Items": [
             {
               "Row": 0,
               "Column": 1,
+              "RowSpan": 1,
               "ColumnSpan": 2,
               "Child": {
                 "$type": "{{WidgetType}}",
@@ -130,19 +131,19 @@ public class MarkdownBlockNamingTests
         var fixture = await CreateFixtureWithComponentsAsync();
 
         // Act
-        var page = await fixture.AddPageAsync("page.md", GridPage);
+        var page = await fixture.AddPageAsync("page.md", ShelfPage);
 
         // Assert
-        var grid = Assert.IsType<TestShelf>(page.Children["grid"]);
-        Assert.Equal(1, grid.Rows);
-        Assert.Equal(2, grid.Columns);
+        var shelf = Assert.IsType<TestShelf>(page.Children["shelf"]);
+        Assert.Equal(1, shelf.Rows);
+        Assert.Equal(2, shelf.Columns);
 
-        var cell = Assert.Single(grid.Items);
-        Assert.Equal(0, cell.Row);
-        Assert.Equal(1, cell.Column);
-        Assert.Equal(2, cell.ColumnSpan);
+        var item = Assert.Single(shelf.Items);
+        Assert.Equal(0, item.Row);
+        Assert.Equal(1, item.Column);
+        Assert.Equal(2, item.ColumnSpan);
 
-        var widget = Assert.IsType<Widget>(cell.Child);
+        var widget = Assert.IsType<Widget>(item.Child);
         Assert.Equal("../Compressor", widget.Path);
     }
 
@@ -154,10 +155,10 @@ public class MarkdownBlockNamingTests
 
         // Act
         var page = await fixture.AddPageAsync(
-            "page.md", $":: {ShelfType}#grid Rows=1\n```json\n{{ \"items\": [] }}\n```\n::");
+            "page.md", $":: {ShelfType}#shelf Rows=1\n```json\n{{ \"items\": [] }}\n```\n::");
 
         // Assert
-        Assert.False(page.Children.ContainsKey("grid"));
+        Assert.False(page.Children.ContainsKey("shelf"));
         Assert.Contains(
             "TestShelf has no configuration property 'items'. Did you mean 'Items'? Available: Columns, Items, Rows.",
             DecodedHtml(page));
@@ -173,7 +174,7 @@ public class MarkdownBlockNamingTests
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $$"""
-            :: {{ShelfType}}#grid
+            :: {{ShelfType}}#shelf
             ```json
             {
               "Items": [
@@ -187,10 +188,10 @@ public class MarkdownBlockNamingTests
         // Assert
         Assert.DoesNotContain("markdown-block-error", MarkdownPageFixture.Html(page.Children));
 
-        var cell = Assert.Single(Assert.IsType<TestShelf>(page.Children["grid"]).Items);
-        Assert.Null(cell.Row);
-        Assert.Equal(1, cell.Column);
-        Assert.Equal(string.Empty, Assert.IsType<Widget>(cell.Child).Path);
+        var item = Assert.Single(Assert.IsType<TestShelf>(page.Children["shelf"]).Items);
+        Assert.Null(item.Row);
+        Assert.Equal(1, item.Column);
+        Assert.Equal(string.Empty, Assert.IsType<Widget>(item.Child).Path);
     }
 
     [Fact]
@@ -218,16 +219,16 @@ public class MarkdownBlockNamingTests
     {
         // Arrange
         var fixture = await CreateFixtureWithComponentsAsync();
-        var page = await fixture.AddPageAsync("page.md", GridPage);
-        var grid = (TestShelf)page.Children["grid"];
-        grid.Columns = 3;
+        var page = await fixture.AddPageAsync("page.md", ShelfPage);
+        var shelf = (TestShelf)page.Children["shelf"];
+        shelf.Columns = 3;
 
         // Act
-        var handled = await page.WriteConfigurationAsync(grid, CancellationToken.None);
+        var handled = await page.WriteConfigurationAsync(shelf, CancellationToken.None);
 
         // Assert
         Assert.True(handled);
-        Assert.Equal(GridPage.Replace("Columns=2", "Columns=3"), await fixture.ReadAsync("page.md"));
+        Assert.Equal(ShelfPage.Replace("Columns=2", "Columns=3"), await fixture.ReadAsync("page.md"));
     }
 
     [Fact]
@@ -235,8 +236,8 @@ public class MarkdownBlockNamingTests
     {
         // Arrange
         var fixture = await CreateFixtureWithComponentsAsync();
-        var page = await fixture.AddPageAsync("page.md", GridPage);
-        var widget = (Widget)((TestShelf)page.Children["grid"]).Items[0].Child!;
+        var page = await fixture.AddPageAsync("page.md", ShelfPage);
+        var widget = (Widget)((TestShelf)page.Children["shelf"]).Items[0].Child!;
         widget.Path = "../CoolingFan";
 
         // Act
@@ -244,7 +245,7 @@ public class MarkdownBlockNamingTests
 
         // Assert
         Assert.True(handled);
-        Assert.Equal(GridPage.Replace("../Compressor", "../CoolingFan"), await fixture.ReadAsync("page.md"));
+        Assert.Equal(ShelfPage.Replace("../Compressor", "../CoolingFan"), await fixture.ReadAsync("page.md"));
     }
 
     [Fact]
