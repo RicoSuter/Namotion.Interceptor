@@ -18,10 +18,16 @@ internal static class LayoutPageExtensions
     /// <summary>
     /// Opens the layout page in inline edit mode.
     /// </summary>
-    public static async Task<IPage> OpenLayoutPageInInlineModeAsync(this PlaywrightFixture fixture)
+    public static Task<IPage> OpenLayoutPageInInlineModeAsync(this PlaywrightFixture fixture)
+        => fixture.OpenPageInInlineModeAsync(PagePath);
+
+    /// <summary>
+    /// Opens a page, given by its path under the test data folder, in inline edit mode.
+    /// </summary>
+    public static async Task<IPage> OpenPageInInlineModeAsync(this PlaywrightFixture fixture, string pagePath)
     {
         var page = await fixture.CreatePageAsync();
-        await page.GotoAsync($"{fixture.ServerAddress}pages/{PagePath}");
+        await page.GotoAsync($"{fixture.ServerAddress}pages/{pagePath}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The edit menu is prerendered, and a click before the circuit is connected is lost.

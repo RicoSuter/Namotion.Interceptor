@@ -1,9 +1,12 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.History.InMemory;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
@@ -137,6 +140,28 @@ public class SubjectSetupDialogTests
         var dialog = page.GetByRole(AriaRole.Dialog);
         await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         return dialog;
+    }
+
+    /// <summary>
+    /// Waits until the content of a cell of the grid page holds a subject of the type and returns the key of
+    /// that subject in the content.
+    /// </summary>
+    private async Task<string> WaitForKeyInContentOfCellAsync<TSubject>(int cellIndex)
+    {
+        string? key = null;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var gridPage = (MarkdownFile)_fixture.GetDemoFolder().Children["Grid.md"];
+                var cells = gridPage.Children.TryGetValue("grid", out var grid) ? ((GridLayout)grid).Cells : [];
+                key = cellIndex < cells.Length && cells[cellIndex].Child is MarkdownFragment content
+                    ? content.Children.FirstOrDefault(child => child.Value is TSubject).Key
+                    : null;
+                return key is not null;
+            },
+            message: $"The content of cell {cellIndex} of the grid page holds no {typeof(TSubject).Name}.");
+
+        return key!;
     }
 
     private static bool FileContains(string filePath, string text)
@@ -1232,8 +1257,10 @@ public class SubjectSetupDialogTests
             await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
             // Assert - the store reads IsEnabled once when it starts, so a start that saw the constructor
-            // default reports Running for good instead of Disabled.
-            await page.GotoAsync($"{_fixture.ServerAddress}browser/Demo/Grid.md/grid/Cells/{cellIndex}/Child");
+            // default reports Running for good instead of Disabled. Creating the cell writes the page, which is
+            // read again, and the child of a cell of a page is then the content of the cell, with the store in it.
+            var storeKey = await WaitForKeyInContentOfCellAsync<InMemoryHistoryStoreSubject>(cellIndex);
+            await page.GotoAsync($"{_fixture.ServerAddress}browser/Demo/Grid.md/grid/Cells/{cellIndex}/Child/{storeKey}");
             await Assertions.Expect(page.GetByText("In-Memory History").First)
                 .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
             await Assertions.Expect(page.GetByText("Status: Disabled"))

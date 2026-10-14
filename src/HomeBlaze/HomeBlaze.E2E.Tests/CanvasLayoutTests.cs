@@ -27,7 +27,7 @@ public class CanvasLayoutTests
     // The page that tests overwrite. Each of them writes its own content before it opens the page.
     private const string ScratchPage = "Scratch.md";
 
-    private static readonly Regex FirstNodePositionPattern = new("\"X\": (-?\\d+),\\s*\"Y\": (-?\\d+),");
+    private static readonly Regex FirstNodePositionPattern = new("^::: Node X=(-?\\d+) Y=(-?\\d+) ", RegexOptions.Multiline);
 
     private readonly PlaywrightFixture _fixture;
 
@@ -705,27 +705,29 @@ public class CanvasLayoutTests
         var builder = new StringBuilder();
         builder.Append("---\ntitle: Scratch\n---\n\n# Scratch\n\n");
         builder.Append($":: HomeBlaze.Components.CanvasLayout#canvas MinHeight={CanvasHeight}\n");
-        builder.Append("```json\n");
-        builder.Append("{\n  \"Nodes\": [\n");
         if (withControlsWidget)
         {
             // One node with a widget that has a slider, a text field, a button and an area that scrolls.
-            builder.Append("    { \"X\": 40, \"Y\": 10, \"Width\": 420, \"Height\": 380, \"Child\": { \"$type\": \"HomeBlaze.E2E.Tests.Models.ControlsTestSubject\" } }\n");
+            builder.Append("::: Node X=40 Y=10 Width=420 Height=380\n");
+            builder.Append(":::: HomeBlaze.E2E.Tests.Models.ControlsTestSubject\n");
         }
         else if (withOperableWidgets)
         {
             // A card whose title is a link, and an icon indicator whose path does not exist, so that its tooltip is the path.
-            builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Card\", \"Title\": \"Linked Card\", \"Href\": \"/pages/Demo/Blocks.md\" } },\n");
-            builder.Append("    { \"X\": 420, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Indicator\", \"Path\": \"../Motor/Missing\", \"Kind\": \"Icon\" } }\n");
+            builder.Append("::: Node X=40 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Card Title=\"Linked Card\" Href=/pages/Demo/Blocks.md\n");
+            builder.Append("::: Node X=420 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Indicator Path=../Motor/Missing Kind=Icon\n");
         }
         else
         {
-            builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } },\n");
-            builder.Append("    { \"X\": 420, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } }\n");
+            builder.Append("::: Node X=40 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Widget Path=../Motor\n");
+            builder.Append("::: Node X=420 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Widget Path=../Motor\n");
         }
 
-        builder.Append("  ]\n}\n");
-        builder.Append("```\n::\n\n");
+        builder.Append("::\n\n");
 
         if (withTextBelow)
         {
