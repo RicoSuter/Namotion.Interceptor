@@ -698,4 +698,42 @@ public class SubjectTransactionTests
         Assert.Equal("Modified", person.FirstName);
     }
 
+    [Fact]
+    public async Task WhenPropertyIsWrittenBackToLandedValue_ThenCommitKeepsLandedValue()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        var valueInsideTransaction = person.FirstName;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Ann", valueInsideTransaction);
+        Assert.Equal("Ann", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenLandedValueIsWrittenWithoutPendingChange_ThenNothingIsCaptured()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Ann";
+
+        // Assert
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
 }

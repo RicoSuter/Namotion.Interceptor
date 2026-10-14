@@ -173,6 +173,24 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
+    /// Returns true when the current flow's transaction is capturing and already holds a pending change for
+    /// <paramref name="property"/>.
+    /// </summary>
+    internal static bool HasPendingChangeInCurrentTransaction(PropertyReference property)
+    {
+        var transaction = CurrentTransaction.Value;
+        if (transaction is null || transaction.IsDisposed || transaction._isCommitted || transaction._isCommitting)
+        {
+            return false;
+        }
+
+        lock (transaction._pendingChangesLock)
+        {
+            return transaction._pendingChanges?.ContainsKey(property) == true;
+        }
+    }
+
+    /// <summary>
     /// Rechecks an interceptor's lock-free state observation. Returns true when the transaction became
     /// inactive, throws while a live commit still owns the model, and otherwise returns false so the caller
     /// can continue the live non-committing path.
