@@ -202,4 +202,19 @@ public class SubjectPathSelectionTests
         Assert.NotNull(attribute);
         Assert.Equal(expectedSubjectType, attribute.SubjectType);
     }
+
+    [Fact]
+    public void WhenAPathAttributeSetsNoFilter_ThenItAcceptsEveryValueWithOrWithoutASetter()
+    {
+        // Act
+        var attribute = new SubjectPathAttribute();
+
+        // Assert
+        Assert.Equal(SubjectPathKinds.Value, attribute.Kind);
+        Assert.False(attribute.Writable);
+        Assert.Equal(
+            SubjectPathKinds.Boolean | SubjectPathKinds.Number | SubjectPathKinds.Enum | SubjectPathKinds.OtherValue,
+            SubjectPathKinds.Value);
+        Assert.False(SubjectPathKinds.Value.HasFlag(SubjectPathKinds.Operation));
+    }
 }

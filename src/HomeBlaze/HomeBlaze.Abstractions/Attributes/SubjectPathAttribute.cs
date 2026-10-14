@@ -22,4 +22,10 @@ public sealed class SubjectPathAttribute : Attribute
     /// The type that the subject at the path is an instance of, or null when the path leads to a property.
     /// </summary>
     public Type? SubjectType { get; }
+
+    /// <summary>What a path to a property may lead to. Flags combine with OR. Ignored when <see cref="SubjectType"/> is set.</summary>
+    public SubjectPathKinds Kind { get; set; } = SubjectPathKinds.Value;
+
+    /// <summary>Whether only properties with a public setter may be selected. Combined with <see cref="Kind"/> with AND. Ignored when <see cref="SubjectType"/> is set.</summary>
+    public bool Writable { get; set; }
 }
