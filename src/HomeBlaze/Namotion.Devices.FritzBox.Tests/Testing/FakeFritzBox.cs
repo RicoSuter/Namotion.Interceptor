@@ -261,38 +261,34 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         await WriteAsync(context, StatusCodes.Status200OK, "text/xml", CreateEnvelope(serviceType, action, values));
     }
 
-    private Task HandleSecureGetAsync(HttpContext context)
+    private async Task HandleSecureGetAsync(HttpContext context)
     {
         var request = context.Request;
         var pathAndQuery = request.Path + request.QueryString.ToString();
         if (AbortedPaths.ContainsKey(pathAndQuery))
         {
             context.Abort();
-            return Task.CompletedTask;
+            return;
         }
 
-        return HandleSecureGetAnswerAsync(context, pathAndQuery);
-    }
+        (string Body, string ContentType)? list = pathAndQuery switch
+        {
+            HostListPath => (HostListXml, "text/xml"),
+            MeshListPath => (MeshListJson, "application/json"),
+            _ => null
+        };
 
-    private async Task HandleSecureGetAnswerAsync(HttpContext context, string pathAndQuery)
-    {
-        if (pathAndQuery == HostListPath)
+        if (list is not (var body, var contentType))
         {
-            if (!TryAnswerHttpError(context, HostListPath))
-            {
-                await WriteAsync(context, StatusCodes.Status200OK, "text/xml", HostListXml);
-            }
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
         }
-        else if (pathAndQuery == MeshListPath)
+        else if (HttpErrors.TryGetValue(pathAndQuery, out var statusCode))
         {
-            if (!TryAnswerHttpError(context, MeshListPath))
-            {
-                await WriteAsync(context, StatusCodes.Status200OK, "application/json", MeshListJson);
-            }
+            context.Response.StatusCode = statusCode;
         }
         else
         {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await WriteAsync(context, StatusCodes.Status200OK, contentType, body);
         }
     }
 
@@ -323,18 +319,6 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
         }
-    }
-
-    /// <returns>Whether a status in <see cref="HttpErrors"/> was found for <paramref name="key"/> and answered.</returns>
-    private bool TryAnswerHttpError(HttpContext context, string key)
-    {
-        if (!HttpErrors.TryGetValue(key, out var statusCode))
-        {
-            return false;
-        }
-
-        context.Response.StatusCode = statusCode;
-        return true;
     }
 
     /// <returns>False when the request was held and the client gave up waiting, so nothing must be answered.</returns>

@@ -230,11 +230,8 @@ internal static class FritzBoxPoller
             return null;
         }
 
-        // The mesh list is optional: a malformed document, a path rejected as unsafe or an HTTP status error on the
-        // download all leave the snapshot without a mesh rather than failing the poll. A connection failure (reset,
-        // refused) has no HTTP status and is not mesh-specific, so it still propagates and fails the poll, rather
-        // than letting access point assignments flicker for one cycle. A certificate problem, a timeout and
-        // cancellation propagate for the same reason.
+        // A malformed document, an unsafe path or an HTTP status error drops only the mesh; a connection failure,
+        // a certificate problem, a timeout or cancellation fails the poll, so access points do not flicker for a cycle.
         try
         {
             await using var content = await connection.DownloadAsync(path, FritzBoxConnection.MaximumListBytes, cancellationToken);

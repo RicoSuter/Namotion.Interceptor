@@ -80,8 +80,10 @@ internal sealed record MeshTopology(
             }
         }
 
-        var uplinks = ResolveUplinks(nodes, CollectMeshLinkCandidates(links, interfaces));
-        var positions = BuildClientPositions(links, interfaces);
+        var candidates = new Dictionary<MeshNode, List<MeshLinkCandidate>>(ReferenceEqualityComparer.Instance);
+        var positions = new Dictionary<string, ClientPosition>(StringComparer.Ordinal);
+        ClassifyLinks(links, interfaces, candidates, positions);
+        var uplinks = ResolveUplinks(nodes, candidates);
         var accessPoints = BuildAccessPoints(nodes, nodeMacAddresses, uplinks);
 
         return new MeshTopology(accessPoints, positions, meshMacAddresses);
@@ -126,13 +128,16 @@ internal sealed record MeshTopology(
         return addresses;
     }
 
-    // One entry per node that has at least one connected link to another mesh node, listing every such link from
-    // that node's own side.
-    private static Dictionary<MeshNode, List<MeshLinkCandidate>> CollectMeshLinkCandidates(
+    /// <summary>
+    /// Sorts each connected link: one between two mesh nodes is an uplink candidate of both, listed from each node's
+    /// own side; one between a mesh node and another device is the position of that client; any other is skipped.
+    /// </summary>
+    private static void ClassifyLinks(
         Dictionary<string, MeshNodeLink> links,
-        Dictionary<string, (MeshNode Node, MeshNodeInterface Interface)> interfaces)
+        Dictionary<string, (MeshNode Node, MeshNodeInterface Interface)> interfaces,
+        Dictionary<MeshNode, List<MeshLinkCandidate>> candidates,
+        Dictionary<string, ClientPosition> positions)
     {
-        var candidates = new Dictionary<MeshNode, List<MeshLinkCandidate>>(ReferenceEqualityComparer.Instance);
         foreach (var link in links.Values)
         {
             if (!TryGetConnectedEndpoints(link, interfaces, out var first, out var second))
@@ -140,16 +145,18 @@ internal sealed record MeshTopology(
                 continue;
             }
 
-            if (!IsMeshNode(first.Node) || !IsMeshNode(second.Node))
+            var firstIsMeshNode = IsMeshNode(first.Node);
+            var secondIsMeshNode = IsMeshNode(second.Node);
+            if (firstIsMeshNode && secondIsMeshNode)
             {
-                continue;
+                AddCandidate(candidates, first.Node, first.Interface, second.Node, link);
+                AddCandidate(candidates, second.Node, second.Interface, first.Node, link);
             }
-
-            AddCandidate(candidates, first.Node, first.Interface, second.Node, link);
-            AddCandidate(candidates, second.Node, second.Interface, first.Node, link);
+            else if (firstIsMeshNode || secondIsMeshNode)
+            {
+                AddClientPosition(positions, link, first, second, firstIsMeshNode);
+            }
         }
-
-        return candidates;
     }
 
     private static void AddCandidate(
@@ -212,36 +219,6 @@ internal sealed record MeshTopology(
         }
 
         return candidates[0].Link;
-    }
-
-    private static Dictionary<string, ClientPosition> BuildClientPositions(
-        Dictionary<string, MeshNodeLink> links,
-        Dictionary<string, (MeshNode Node, MeshNodeInterface Interface)> interfaces)
-    {
-        var positions = new Dictionary<string, ClientPosition>(StringComparer.Ordinal);
-        foreach (var link in links.Values)
-        {
-            if (!TryGetConnectedEndpoints(link, interfaces, out var first, out var second))
-            {
-                continue;
-            }
-
-            var firstIsMeshNode = IsMeshNode(first.Node);
-            var secondIsMeshNode = IsMeshNode(second.Node);
-            if (!firstIsMeshNode && !secondIsMeshNode)
-            {
-                continue;
-            }
-
-            if (firstIsMeshNode && secondIsMeshNode)
-            {
-                continue;
-            }
-
-            AddClientPosition(positions, link, first, second, firstIsMeshNode);
-        }
-
-        return positions;
     }
 
     /// <returns>

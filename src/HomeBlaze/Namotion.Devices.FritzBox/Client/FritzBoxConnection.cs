@@ -60,7 +60,7 @@ internal sealed class FritzBoxConnection : IDisposable
         return new FritzBoxConnection(description, baseUri, options, logger);
     }
 
-    internal bool HasService(string serviceType) => Description.ControlPaths.ContainsKey(serviceType);
+    internal bool HasService(string serviceType) => Description.HasService(serviceType);
 
     /// <summary>
     /// Reads the device information on its own, which checks the login: the first authenticated request of a
@@ -125,7 +125,7 @@ internal sealed class FritzBoxConnection : IDisposable
         {
             return await _soapClient.QueryAsync(service, action, arguments ?? [], timeout.Token);
         }
-        catch (Exception exception) when (IsTranslated(exception, action, timeout, cancellationToken, out var translated))
+        catch (Exception exception) when (Translate(exception, action, timeout, cancellationToken) is { } translated)
         {
             throw translated;
         }
@@ -141,7 +141,7 @@ internal sealed class FritzBoxConnection : IDisposable
         {
             await _soapClient.InvokeAsync(service, action, arguments ?? [], timeout.Token);
         }
-        catch (Exception exception) when (IsTranslated(exception, action, timeout, cancellationToken, out var translated))
+        catch (Exception exception) when (Translate(exception, action, timeout, cancellationToken) is { } translated)
         {
             throw translated;
         }
@@ -185,7 +185,7 @@ internal sealed class FritzBoxConnection : IDisposable
             response.EnsureSuccessStatusCode();
             return await BoundedContent.ReadAsync(response.Content, maximumBytes, timeout.Token);
         }
-        catch (Exception exception) when (IsTranslated(exception, path, timeout, cancellationToken, out var translated))
+        catch (Exception exception) when (Translate(exception, path, timeout, cancellationToken) is { } translated)
         {
             throw translated;
         }
@@ -199,24 +199,26 @@ internal sealed class FritzBoxConnection : IDisposable
 
     public void Dispose() => _httpClient.Dispose();
 
-    private bool IsTranslated(
-        Exception exception, string request, CancellationTokenSource timeout, CancellationToken cancellationToken, out Exception translated)
+    /// <returns>
+    /// The exception to throw instead: a <see cref="FritzBoxCertificateException"/> for a handshake that presented an
+    /// untrusted key, a <see cref="TimeoutException"/> when the request timeout and not the caller cancelled, otherwise
+    /// null to let the exception propagate as is.
+    /// </returns>
+    private Exception? Translate(
+        Exception exception, string request, CancellationTokenSource timeout, CancellationToken cancellationToken)
     {
         if (exception is HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError } &&
             _certificateValidator.Rejected is { } rejected)
         {
-            translated = new FritzBoxCertificateException(rejected, exception);
-            return true;
+            return new FritzBoxCertificateException(rejected, exception);
         }
 
         if (exception is OperationCanceledException && timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            translated = new TimeoutException($"The FRITZ!Box did not answer {request} in time.", exception);
-            return true;
+            return new TimeoutException($"The FRITZ!Box did not answer {request} in time.", exception);
         }
 
-        translated = exception;
-        return false;
+        return null;
     }
 
     private async Task<string?> FindConnectedServiceAsync(CancellationToken cancellationToken)

@@ -17,9 +17,12 @@ public class Tr64DescriptionTests
         Assert.Equal("FRITZ!Box 7590", description.FriendlyName);
         Assert.Equal("FRITZ!Box 7590", description.ModelName);
         Assert.Equal("uuid:75802409-bccb-40e7-8e6c-0123456789ab", description.Udn);
-        Assert.Equal(10, description.ControlPaths.Count);
-        Assert.Equal("/upnp/control/hosts", description.ControlPaths[Tr64Services.Hosts]);
-        Assert.Equal("/upnp/control/wanpppconn1", description.ControlPaths[Tr64Services.WanPppConnection]);
+        Assert.All(
+            [Tr64Services.DeviceInfo, Tr64Services.UserInterface, Tr64Services.Layer3Forwarding, Tr64Services.WanCommonInterfaceConfig,
+             Tr64Services.WanPppConnection, Tr64Services.WanIpConnection, Tr64Services.Hosts],
+            serviceType => Assert.True(description.HasService(serviceType), serviceType));
+        Assert.Equal("/upnp/control/hosts", description.TryGetService(Tr64Services.Hosts)!.ControlPath);
+        Assert.Equal("/upnp/control/wanpppconn1", description.TryGetService(Tr64Services.WanPppConnection)!.ControlPath);
         Assert.Equal(
             ["urn:dslforum-org:service:WLANConfiguration:1", "urn:dslforum-org:service:WLANConfiguration:2", "urn:dslforum-org:service:WLANConfiguration:3"],
             description.WlanServiceTypes);
@@ -40,7 +43,9 @@ public class Tr64DescriptionTests
         var description = Tr64Description.Parse(xml);
 
         // Assert
-        Assert.Equal([Tr64Services.UserInterface], description.ControlPaths.Keys);
+        Assert.True(description.HasService(Tr64Services.UserInterface));
+        Assert.False(description.HasService(Tr64Services.Hosts));
+        Assert.False(description.HasService(Tr64Services.DeviceInfo));
     }
 
     [Theory]
@@ -103,6 +108,6 @@ public class Tr64DescriptionTests
         var description = Tr64Description.Parse(xml);
 
         // Assert
-        Assert.Equal("/upnp/control/hosts-first", description.ControlPaths[Tr64Services.Hosts]);
+        Assert.Equal("/upnp/control/hosts-first", description.TryGetService(Tr64Services.Hosts)!.ControlPath);
     }
 }

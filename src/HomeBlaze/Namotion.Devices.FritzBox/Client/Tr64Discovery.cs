@@ -15,17 +15,17 @@ internal static class Tr64Discovery
     internal static async Task<(Tr64Description Description, Uri BaseUri)> DiscoverAsync(
         FritzBoxConnectionOptions options, CancellationToken cancellationToken)
     {
-        var descriptionUri = new UriBuilder(Uri.UriSchemeHttp, options.HostAddress, options.DescriptionPort, Tr64Description.DescriptionPath).Uri;
         using var plainClient = FritzBoxHttpClient.CreatePlain(Timeout.InfiniteTimeSpan, Tr64Description.MaximumBytes);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(options.RequestTimeout);
         try
         {
-            var description = Tr64Description.Parse(await plainClient.GetStringAsync(descriptionUri, timeout.Token));
+            var description = await Tr64Description.LoadAsync(plainClient, options.HostAddress, options.DescriptionPort, timeout.Token);
             var deviceInfo = description.TryGetService(Tr64Services.DeviceInfo)
                 ?? throw new FritzBoxFirmwareException("The FRITZ!Box description lists no DeviceInfo service.");
-            var securityPort = (await new UpnpSoapClient(plainClient, descriptionUri).QueryAsync(deviceInfo, "GetSecurityPort", [], timeout.Token))
+            var plainUri = new UriBuilder(Uri.UriSchemeHttp, options.HostAddress, options.DescriptionPort).Uri;
+            var securityPort = (await new UpnpSoapClient(plainClient, plainUri).QueryAsync(deviceInfo, "GetSecurityPort", [], timeout.Token))
                 .GetInt32("NewSecurityPort")
                 ?? throw new XmlException("The FRITZ!Box did not report its HTTPS port.");
             if (securityPort is < 1 or > IPEndPoint.MaxPort)

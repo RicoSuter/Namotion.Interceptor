@@ -15,19 +15,15 @@ internal sealed class Tr64Description
     internal const string DescriptionPath = "/tr64desc.xml";
     internal const int MaximumBytes = 1024 * 1024;
 
-    private readonly IReadOnlyDictionary<string, UpnpService> _services;
+    private readonly Dictionary<string, UpnpService> _services;
 
-    private Tr64Description(string? friendlyName, string? modelName, string? udn, Dictionary<string, string> controlPaths)
+    private Tr64Description(string? friendlyName, string? modelName, string? udn, Dictionary<string, UpnpService> services)
     {
         FriendlyName = friendlyName;
         ModelName = modelName;
         Udn = udn;
-        ControlPaths = controlPaths;
-        _services = controlPaths.ToDictionary(
-            pair => pair.Key,
-            pair => new UpnpService(pair.Key, pair.Value),
-            StringComparer.Ordinal);
-        WlanServiceTypes = controlPaths.Keys
+        _services = services;
+        WlanServiceTypes = services.Keys
             .Where(serviceType => serviceType.StartsWith(Tr64Services.WlanConfigurationPrefix, StringComparison.Ordinal))
             .OrderBy(GetVersion)
             .ToArray();
@@ -40,17 +36,24 @@ internal sealed class Tr64Description
     internal string? Udn { get; }
 
     /// <summary>
-    /// The control path of each offered service, by service type.
-    /// </summary>
-    internal IReadOnlyDictionary<string, string> ControlPaths { get; }
-
-    /// <summary>
     /// The WLAN services in the order of their version, which is the order of the router's WLANs.
     /// </summary>
     internal IReadOnlyList<string> WlanServiceTypes { get; }
 
+    internal bool HasService(string serviceType) => _services.ContainsKey(serviceType);
+
     internal UpnpService? TryGetService(string serviceType) =>
         _services.TryGetValue(serviceType, out var service) ? service : null;
+
+    /// <summary>
+    /// Reads the description from <c>http://host:port/tr64desc.xml</c> without authentication. Throws what
+    /// <see cref="HttpClient.GetStringAsync(Uri, CancellationToken)"/> and <see cref="Parse"/> throw.
+    /// </summary>
+    internal static async Task<Tr64Description> LoadAsync(HttpClient httpClient, string host, int port, CancellationToken cancellationToken)
+    {
+        var uri = new UriBuilder(Uri.UriSchemeHttp, host, port, DescriptionPath).Uri;
+        return Parse(await httpClient.GetStringAsync(uri, cancellationToken));
+    }
 
     /// <summary>
     /// Parses a description. Throws <see cref="XmlException"/> when it is malformed, declares a document type or
@@ -66,23 +69,23 @@ internal sealed class Tr64Description
             GetElementValue(device, ns, "friendlyName"),
             GetElementValue(device, ns, "modelName"),
             GetElementValue(device, ns, "UDN"),
-            ReadControlPaths(root, ns));
+            ReadServices(root, ns));
     }
 
-    private static Dictionary<string, string> ReadControlPaths(XElement root, XNamespace ns)
+    private static Dictionary<string, UpnpService> ReadServices(XElement root, XNamespace ns)
     {
-        var controlPaths = new Dictionary<string, string>(StringComparer.Ordinal);
+        var services = new Dictionary<string, UpnpService>(StringComparer.Ordinal);
         foreach (var service in root.Descendants(ns + "service"))
         {
             var serviceType = GetElementValue(service, ns, "serviceType");
             var controlUrl = service.Element(ns + "controlURL")?.Value.Trim();
             if (serviceType is not null && IsLocalPath(controlUrl))
             {
-                controlPaths.TryAdd(serviceType, controlUrl);
+                services.TryAdd(serviceType, new UpnpService(serviceType, controlUrl));
             }
         }
 
-        return controlPaths;
+        return services;
     }
 
     private static string? GetElementValue(XElement? parent, XNamespace ns, string name) =>

@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 
 namespace Namotion.Devices.FritzBox.Client;
 
@@ -22,18 +21,7 @@ internal sealed record CertificateInfo(string Pin, string Fingerprint)
     private static CertificateInfo Create(X509Certificate2 certificate)
     {
         var pin = Convert.ToBase64String(SHA256.HashData(certificate.PublicKey.ExportSubjectPublicKeyInfo()));
-        var hex = Convert.ToHexString(SHA256.HashData(certificate.RawData));
-        var fingerprint = new StringBuilder(hex.Length + hex.Length / 2);
-        for (var index = 0; index < hex.Length; index += 2)
-        {
-            if (index > 0)
-            {
-                fingerprint.Append(':');
-            }
-
-            fingerprint.Append(hex, index, 2);
-        }
-
-        return new CertificateInfo(pin, fingerprint.ToString());
+        var fingerprint = BitConverter.ToString(SHA256.HashData(certificate.RawData)).Replace('-', ':');
+        return new CertificateInfo(pin, fingerprint);
     }
 }

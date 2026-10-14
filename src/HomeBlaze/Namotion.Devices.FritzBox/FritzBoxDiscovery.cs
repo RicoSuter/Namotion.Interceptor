@@ -101,8 +101,7 @@ public static class FritzBoxDiscovery
     {
         try
         {
-            var location = new UriBuilder(Uri.UriSchemeHttp, host, port, Tr64Description.DescriptionPath).Uri;
-            var description = Tr64Description.Parse(await httpClient.GetStringAsync(location, cancellationToken));
+            var description = await Tr64Description.LoadAsync(httpClient, host, port, cancellationToken);
             if (description.TryGetService(Tr64Services.DeviceInfo) is null)
             {
                 return null;
