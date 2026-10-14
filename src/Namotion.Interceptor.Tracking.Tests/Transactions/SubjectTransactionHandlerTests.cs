@@ -1035,6 +1035,72 @@ public class SubjectTransactionHandlerTests
         Assert.Same(checkedError, Assert.Single(exception.Errors));
     }
 
+    [Fact]
+    public async Task WhenWriterMarksAcceptedSlotsAsConfirmed_ThenBothChecksSeeTheCapturedOrigin()
+    {
+        // Arrange
+        var source = new object();
+        var originsSeen = new List<ChangeOriginKind[]>();
+        var handler = new RecordingHandler
+        {
+            OnCommittingAction = (_, changes) => originsSeen.Add(changes.Select(change => change.Origin.Kind).ToArray())
+        };
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService<ITransactionWriter>(new CountingTransactionWriter { ConfirmingSource = source });
+        var notifications = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
+        var person = new Person(context) { FirstName = "Ann" };
+        notifications.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, originsSeen.Count);
+        Assert.All(originsSeen, origins => Assert.Equal([ChangeOriginKind.Local], origins));
+        var applied = Assert.Single(notifications, change => change.Property.Name == nameof(Person.FirstName));
+        Assert.Equal(ChangeOriginKind.Confirmed, applied.Origin.Kind);
+        Assert.Same(source, applied.Origin.Source);
+    }
+
+    [Fact]
+    public async Task WhenSecondCheckRejectsChangeOfMarkingWriter_ThenWriterMarkedSlotIsReported()
+    {
+        // Arrange
+        var source = new object();
+        var calls = 0;
+        var handler = new RecordingHandler
+        {
+            OnCommittingAction = (_, _) =>
+            {
+                if (++calls == 2)
+                {
+                    throw new InvalidOperationException("rejected");
+                }
+            }
+        };
+        var writer = new CountingTransactionWriter { ConfirmingSource = source };
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService<ITransactionWriter>(writer);
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal("Ann", person.FirstName);
+        var failed = Assert.Single(exception.FailedChanges);
+        Assert.Equal(ChangeOriginKind.Confirmed, failed.Origin.Kind);
+        Assert.Same(source, failed.Origin.Source);
+        Assert.Equal(ChangeOriginKind.Confirmed, Assert.Single(writer.Reverted).Origin.Kind);
+    }
+
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
     {
         // An async method does not leak the transaction it begins into the caller's flow.
@@ -1059,6 +1125,8 @@ public class SubjectTransactionHandlerTests
 
         public HashSet<string> UnwrittenPropertyNames { get; } = [];
 
+        public object? ConfirmingSource { get; set; }
+
         public List<SubjectPropertyChange> Reverted { get; } = [];
 
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
@@ -1068,11 +1136,22 @@ public class SubjectTransactionHandlerTests
         {
             WriteCalls++;
             DuringWrite?.Invoke();
+            if (ConfirmingSource is not null)
+            {
+                // Marks accepted slots in place, as the writer contract requires.
+                var span = changes.Span;
+                for (var index = 0; index < span.Length; index++)
+                {
+                    if (IsWritten(span[index]))
+                    {
+                        span[index] = span[index].WithOrigin(ChangeOrigin.Confirmed(ConfirmingSource));
+                    }
+                }
+            }
+
             var all = changes.ToArray();
             var failed = all.Where(change => FailedPropertyNames.Contains(change.Property.Name)).ToArray();
-            var written = all.Where(change =>
-                !FailedPropertyNames.Contains(change.Property.Name) &&
-                !UnwrittenPropertyNames.Contains(change.Property.Name)).ToArray();
+            var written = all.Where(IsWritten).ToArray();
             Exception[] errors = failed.Length > 0 ? [new InvalidOperationException("source write failed")] : [];
             return new(new SourceWriteResult(written, failed, errors, RevertState: null));
         }
@@ -1084,6 +1163,12 @@ public class SubjectTransactionHandlerTests
         {
             Reverted.AddRange(written);
             return new(new SourceRevertResult([], []));
+        }
+
+        private bool IsWritten(SubjectPropertyChange change)
+        {
+            return !FailedPropertyNames.Contains(change.Property.Name) &&
+                !UnwrittenPropertyNames.Contains(change.Property.Name);
         }
     }
 

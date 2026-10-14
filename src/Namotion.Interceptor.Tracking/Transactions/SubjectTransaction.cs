@@ -1007,8 +1007,9 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Calls the handlers again right before the local apply with the changes that will be applied, with reads
-    /// returning the transaction's values for them. Returns the changes they rejected: the failed changes of a
-    /// <see cref="SubjectTransactionException"/> that match checked changes, or every checked change otherwise.
+    /// returning the transaction's values for them. Returns the snapshot slots of the changes they rejected: the
+    /// failed changes of a <see cref="SubjectTransactionException"/> that match checked changes, or every checked
+    /// change otherwise.
     /// </summary>
     private (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) CheckBeforeLocalApply(
         ReadOnlySpan<SubjectPropertyChange> changes,
@@ -1020,75 +1021,83 @@ public sealed class SubjectTransaction : IDisposable
             return ([], []);
         }
 
-        // Changes whose source write failed do not land, so the handlers neither receive them nor read their values.
-        var landingChanges = failedSource.Count == 0 ? null : ExcludeFailedSourceChanges(changes, failedSource);
-        var checkedChanges = landingChanges is null ? changes : new ReadOnlySpan<SubjectPropertyChange>(landingChanges);
-        if (checkedChanges.IsEmpty)
-        {
-            return ([], []);
-        }
-
-        _commitValidationExcludedChanges = landingChanges is null ? null : failedSource;
+        // The writer marks accepted snapshot slots as Confirmed, but handlers must see the captured origin, which the
+        // pending changes still hold. Changes whose source write failed do not land, so the handlers neither receive
+        // them nor read their values.
+        var (rentedArray, checkedCount) = RentLandingPendingChanges(failedSource);
         try
         {
-            using (EnterCommitValidationAccess())
+            if (checkedCount == 0)
             {
-                InvokeCommitHandlers(checkedChanges);
+                return ([], []);
             }
 
-            return ([], []);
-        }
-        catch (Exception exception)
-        {
-            return GetRejectedChanges(exception, landingChanges ?? checkedChanges.ToArray());
+            _commitValidationExcludedChanges = failedSource.Count == 0 ? null : failedSource;
+            try
+            {
+                using (EnterCommitValidationAccess())
+                {
+                    InvokeCommitHandlers(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount));
+                }
+
+                return ([], []);
+            }
+            catch (Exception exception)
+            {
+                return GetRejectedChanges(exception, SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []));
+            }
+            finally
+            {
+                _commitValidationExcludedChanges = null;
+            }
         }
         finally
         {
-            _commitValidationExcludedChanges = null;
+            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
         }
-    }
-
-    private static SubjectPropertyChange[] ExcludeFailedSourceChanges(
-        ReadOnlySpan<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> failedSource)
-    {
-        var failedProperties = new HashSet<PropertyReference>(failedSource.Count, PropertyReference.Comparer);
-        foreach (var change in failedSource)
-        {
-            failedProperties.Add(change.Property);
-        }
-
-        var landingCount = 0;
-        foreach (var change in changes)
-        {
-            if (!failedProperties.Contains(change.Property))
-            {
-                landingCount++;
-            }
-        }
-
-        if (landingCount == 0)
-        {
-            return [];
-        }
-
-        var landingChanges = new SubjectPropertyChange[landingCount];
-        var index = 0;
-        foreach (var change in changes)
-        {
-            if (!failedProperties.Contains(change.Property))
-            {
-                landingChanges[index++] = change;
-            }
-        }
-
-        return landingChanges;
     }
 
     /// <summary>
-    /// Returns the checked changes a handler exception rejects. A <see cref="SubjectTransactionException"/> rejects
-    /// its failed changes; when none of them was checked, the rejection fails closed like any other exception and
-    /// rejects every checked change.
+    /// Copies the pending changes whose property is not in <paramref name="failedSource"/> into a rented array, in
+    /// insertion order. The caller returns the array to <see cref="ArrayPool{T}.Shared"/>.
+    /// </summary>
+    private (SubjectPropertyChange[] RentedArray, int Count) RentLandingPendingChanges(
+        IReadOnlyList<SubjectPropertyChange> failedSource)
+    {
+        HashSet<PropertyReference>? failedProperties = null;
+        if (failedSource.Count > 0)
+        {
+            failedProperties = new HashSet<PropertyReference>(failedSource.Count, PropertyReference.Comparer);
+            foreach (var change in failedSource)
+            {
+                failedProperties.Add(change.Property);
+            }
+        }
+
+        lock (_pendingChangesLock)
+        {
+            var pendingChanges = _pendingChanges;
+            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(pendingChanges?.Count ?? 0);
+            var count = 0;
+            if (pendingChanges is not null)
+            {
+                foreach (var change in pendingChanges.Values)
+                {
+                    if (failedProperties is null || !failedProperties.Contains(change.Property))
+                    {
+                        rentedArray[count++] = change;
+                    }
+                }
+            }
+
+            return (rentedArray, count);
+        }
+    }
+
+    /// <summary>
+    /// Returns the snapshot slots in <paramref name="checkedChanges"/> that a handler exception rejects, matched by
+    /// property. A <see cref="SubjectTransactionException"/> rejects its failed changes; when none of them was
+    /// checked, the rejection fails closed like any other exception and rejects every checked change.
     /// </summary>
     private static (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) GetRejectedChanges(
         Exception exception,
