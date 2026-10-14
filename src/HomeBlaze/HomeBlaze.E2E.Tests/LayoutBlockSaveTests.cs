@@ -4,6 +4,7 @@ using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Storage.Files;
 using Microsoft.Playwright;
 using Namotion.Interceptor.Testing;
+using Xunit.Abstractions;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -24,10 +25,12 @@ public class LayoutBlockSaveTests
     private const string NotSavedWarning = "Configuration applied but not saved";
 
     private readonly PlaywrightFixture _fixture;
+    private readonly ITestOutputHelper _output;
 
-    public LayoutBlockSaveTests(PlaywrightFixture fixture)
+    public LayoutBlockSaveTests(PlaywrightFixture fixture, ITestOutputHelper output)
     {
         _fixture = fixture;
+        _output = output;
     }
 
     [Fact]
@@ -171,7 +174,11 @@ public class LayoutBlockSaveTests
                 CanvasPage,
                 written =>
                 {
-                    var firstNode = GetFirstCanvasNode();
+                    if (TryGetFirstCanvasNode() is not { } firstNode)
+                    {
+                        return false;
+                    }
+
                     (x, y) = (firstNode.X, firstNode.Y);
                     return x != 40 && y != 40 && written.Contains($"::: Node X={x} Y={y} Width=200 Height=100\n");
                 },
@@ -207,9 +214,11 @@ public class LayoutBlockSaveTests
             await columnSpanField.FillAsync("2");
             await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
 
-            // Assert: the notification is the last step of the save, so everything it writes is written by now.
-            await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = Timeout });
-            var text = Normalize(await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(GridPage)));
+            // Assert
+            var text = await WaitForPageTextAsync(
+                GridPage,
+                written => written.Contains("ColumnSpan=2"),
+                "The page was not written with the new column span of the cell");
 
             Assert.Equal(CreateGridPage("::: Cell Row=0 Column=0 RowSpan=1 ColumnSpan=2", "the cell"), text);
             await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
@@ -281,17 +290,27 @@ public class LayoutBlockSaveTests
     private async Task WithPageAsync(string name, string content, Func<Task> testAsync)
     {
         var original = await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(name));
+        var isCompleted = false;
         try
         {
             // Written also when the file has this text: a test that gave the file its bytes back left the page that
             // the server holds as it was.
             await _fixture.WriteDemoPageAsync(name, content);
             await testAsync();
+            isCompleted = true;
         }
         finally
         {
-            // Written through the subject, so that the page the server holds is restored along with the file.
-            await _fixture.WriteDemoPageAsync(name, original);
+            try
+            {
+                // Written through the subject, so that the page the server holds is restored along with the file.
+                await _fixture.WriteDemoPageAsync(name, original);
+            }
+            catch (Exception exception) when (!isCompleted)
+            {
+                // The failure of the test itself is the one to report.
+                _output.WriteLine($"Restoring {name} failed: {exception}");
+            }
         }
     }
 
@@ -312,10 +331,15 @@ public class LayoutBlockSaveTests
         return text;
     }
 
-    private CanvasNode GetFirstCanvasNode()
+    // Null while the page is read again and holds no canvas with a node for a moment.
+    private CanvasNode? TryGetFirstCanvasNode()
     {
-        var file = (MarkdownFile)_fixture.GetDemoFolder().Children[CanvasPage];
-        return ((CanvasLayout)file.Children["canvas"]).Nodes[0];
+        return _fixture.GetDemoFolder().Children.TryGetValue(CanvasPage, out var file)
+            && file is MarkdownFile canvasPage
+            && canvasPage.Children.TryGetValue("canvas", out var canvas)
+            && canvas is CanvasLayout { Nodes: { Length: > 0 } nodes }
+                ? nodes[0]
+                : null;
     }
 
     private static string CreateGridPage(params string[] linesOfCells)

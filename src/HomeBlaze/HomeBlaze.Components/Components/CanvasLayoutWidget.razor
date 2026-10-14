@@ -51,17 +51,9 @@
                             <div class="canvas-node-content">
                                 @if (IsEditing)
                                 {
-                                    <div class="layout-item-actions">
-                                        <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                                                       Size="Size.Small"
-                                                       title="Edit Node"
-                                                       OnClick="() => EditNode(node)" />
-                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                       Size="Size.Small"
-                                                       Color="Color.Error"
-                                                       title="Delete"
-                                                       OnClick="() => DeleteNode(node)" />
-                                    </div>
+                                    <LayoutItemActions EditTitle="Edit Node"
+                                                       OnEdit="() => EditNode(node)"
+                                                       OnDelete="() => DeleteNode(node)" />
                                 }
                                 <SubjectComponent Subject="@node.Child"
                                                   Type="SubjectComponentType.Widget" />
@@ -142,25 +134,6 @@
         width: 100%;
         height: 100%;
         position: relative;
-    }
-
-    /* The buttons of the node itself. They are at the left, because what the node shows has its own at the right. */
-    .layout-item-actions {
-        position: absolute;
-        top: 4px;
-        left: 4px;
-        z-index: 10;
-        display: flex;
-        gap: 2px;
-        background: rgba(255,255,255,0.95);
-        border-radius: 4px;
-        padding: 2px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        pointer-events: auto;
-    }
-
-    .layout-item-actions .mud-icon-button {
-        padding: 4px;
     }
 </style>
 

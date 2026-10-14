@@ -9,22 +9,15 @@
     if (registration?.ComponentType != null)
     {
         <div class="subject-component-wrapper" style="position: relative;">
-            @if (IsEditing && Type == SubjectComponentType.Widget && (ActionButtons != null || HasEditComponent))
+            @if (IsEditing && Type == SubjectComponentType.Widget && HasEditComponent)
             {
                 <div class="subject-edit-overlay">
-                    @* Built-in edit button (if edit component exists) *@
-                    @if (HasEditComponent)
-                    {
-                        <MudIconButton Icon="@Icons.Material.Filled.Edit"
-                                       Size="Size.Small"
-                                       Color="Color.Primary"
-                                       title="Edit"
-                                       OnClick="OpenEditDialog"
-                                       data-testid="edit-subject-button" />
-                    }
-
-                    @* Additional action buttons from parent *@
-                    @ActionButtons
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                   Size="Size.Small"
+                                   Color="Color.Primary"
+                                   title="Edit"
+                                   OnClick="OpenEditDialog"
+                                   data-testid="edit-subject-button" />
                 </div>
             }
             <DynamicComponent Type="registration.ComponentType"
@@ -75,13 +68,6 @@
 
     [Parameter]
     public SubjectComponentType Type { get; set; }
-
-    /// <summary>
-    /// Additional action buttons to display in the edit overlay.
-    /// Rendered after the built-in edit button.
-    /// </summary>
-    [Parameter]
-    public RenderFragment? ActionButtons { get; set; }
 
     /// <summary>
     /// Additional parameters to pass to the rendered component (e.g., IsCreating).

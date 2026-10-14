@@ -37,17 +37,9 @@
             <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
                 @if (IsEditing)
                 {
-                    <div class="layout-item-actions">
-                        <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                                       Size="Size.Small"
-                                       title="Edit Cell"
-                                       OnClick="() => EditCell(cell)" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                       Size="Size.Small"
-                                       Color="Color.Error"
-                                       title="Delete"
-                                       OnClick="() => DeleteCell(cell)" />
-                    </div>
+                    <LayoutItemActions EditTitle="Edit Cell"
+                                       OnEdit="() => EditCell(cell)"
+                                       OnDelete="() => DeleteCell(cell)" />
                 }
                 <div class="grid-cell-content">
                     <SubjectComponent Subject="@cell.Child"
@@ -120,25 +112,6 @@
 
     .add-icon {
         opacity: 0.5;
-    }
-
-    /* The buttons of the cell itself. They are at the left, because what the cell shows has its own at the right. */
-    .layout-item-actions {
-        position: absolute;
-        top: 4px;
-        left: 4px;
-        z-index: 10;
-        display: flex;
-        gap: 2px;
-        background: rgba(255,255,255,0.95);
-        border-radius: 4px;
-        padding: 2px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        pointer-events: auto;
-    }
-
-    .layout-item-actions .mud-icon-button {
-        padding: 4px;
     }
 </style>
 
