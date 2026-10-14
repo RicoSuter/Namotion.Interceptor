@@ -4,14 +4,14 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 
 /// <summary>
 /// Participates in the transactions of the context it is registered on. Handlers are resolved from the
-/// transaction's context when the transaction begins and are called in registration order; the first handler
-/// that throws stops the rest.
+/// transaction's context when the transaction begins and are called in the context's service order (registration
+/// order unless ordering attributes say otherwise); the first handler that throws stops the rest.
 /// </summary>
 public interface ITransactionHandler
 {
     /// <summary>
     /// Called for a write the transaction is about to capture, outside the transaction lock. Throwing rejects the
-    /// write: nothing is captured and the exception propagates to the setter.
+    /// write: nothing is captured and the exception propagates to the setter. Handlers must not write properties.
     /// </summary>
     /// <typeparam name="TProperty">The property type.</typeparam>
     /// <param name="transaction">The capturing transaction.</param>

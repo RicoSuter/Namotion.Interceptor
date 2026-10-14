@@ -99,11 +99,82 @@ public class SubjectTransactionHandlerTests
         Assert.Empty(handler.Captured);
     }
 
+    [Fact]
+    public async Task WhenWriteComesFromSource_ThenOnCapturingReceivesSourceOrigin()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var person = new Person(context);
+        var source = new object();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        new PropertyReference(person, nameof(Person.FirstName)).SetValueFromSource(source, null, null, "Bob");
+
+        // Assert
+        var captured = Assert.Single(handler.Captured);
+        Assert.Equal("Bob", captured.Value);
+        Assert.Equal(ChangeOriginKind.FromSource, captured.Origin.Kind);
+        Assert.Same(source, captured.Origin.Source);
+    }
+
+    [Fact]
+    public async Task WhenTwoHandlersAreRegistered_ThenTheyRunInOrderAndFirstThrowStopsTheRest()
+    {
+        // Arrange
+        var captureLog = new List<(RecordingHandler Handler, object? Value)>();
+        var first = new RecordingHandler
+        {
+            CaptureLog = captureLog,
+            RejectCapture = (_, value) => Equals(value, "Bad") ? new InvalidOperationException("bad value") : null
+        };
+        var second = new RecordingHandler { CaptureLog = captureLog };
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(first);
+        context.AddService<ITransactionHandler>(second);
+        var person = new Person(context);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+
+        // Act
+        person.FirstName = "Good";
+        var exception = Record.Exception(() => person.FirstName = "Bad");
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal(2, captureLog.Count);
+        Assert.Same(first, captureLog[0].Handler);
+        Assert.Equal("Good", captureLog[0].Value);
+        Assert.Same(second, captureLog[1].Handler);
+        Assert.Equal("Good", captureLog[1].Value);
+        Assert.DoesNotContain(second.Captured, captured => Equals(captured.Value, "Bad"));
+    }
+
+    [Fact]
+    public async Task WhenHandlerIsRegisteredAfterBegin_ThenItDoesNotTakePart()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var context = CreateContext();
+        var person = new Person(context);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        context.AddService<ITransactionHandler>(handler);
+
+        // Act
+        person.FirstName = "Bob";
+
+        // Assert
+        Assert.Empty(handler.Captured);
+    }
+
     private sealed class RecordingHandler : ITransactionHandler
     {
         public List<(PropertyReference Property, object? Value, ChangeOrigin Origin)> Captured { get; } = [];
 
         public Func<PropertyReference, object?, Exception?>? RejectCapture { get; set; }
+
+        public List<(RecordingHandler Handler, object? Value)>? CaptureLog { get; init; }
 
         public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
         {
@@ -113,6 +184,7 @@ public class SubjectTransactionHandlerTests
             }
 
             Captured.Add((property, newValue, origin));
+            CaptureLog?.Add((this, newValue));
         }
 
         public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
