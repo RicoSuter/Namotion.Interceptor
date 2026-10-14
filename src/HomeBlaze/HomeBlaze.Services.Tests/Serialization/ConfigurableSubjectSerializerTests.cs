@@ -295,7 +295,25 @@ public class ConfigurableSubjectSerializerTests
 
         // Assert
         Assert.DoesNotContain("child", json);
+        Assert.Contains($"\"$type\": \"{typeof(SubjectWithAnyChild).FullName}\"", json);
         Assert.ThrowsAny<Exception>(() => _serializer.Serialize(subject));
+    }
+
+    [Fact]
+    public void WhenNamingIsJsonProperty_ThenAPropertyIsExcludedByItsDeclaredName()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var subject = new SubjectWithMixedProperties(context) { ConfigOne = "one", ConfigTwo = 2 };
+
+        // Act
+        var json = _serializer.Serialize(
+            subject, static name => name == nameof(SubjectWithMixedProperties.ConfigOne), ConfigurationNaming.JsonProperty);
+
+        // Assert
+        Assert.Contains("\"configTwo\": 2", json);
+        Assert.DoesNotContain("configOne", json);
+        Assert.DoesNotContain("ConfigOne", json);
     }
 
     [Fact]

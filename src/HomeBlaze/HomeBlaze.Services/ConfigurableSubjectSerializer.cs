@@ -81,7 +81,7 @@ public class ConfigurableSubjectSerializer
     /// properties of the subject itself for which <paramref name="isExcluded"/> returns true.
     /// </summary>
     /// <param name="subject">The subject to serialize.</param>
-    /// <param name="isExcluded">Gets the declared name of a property of the subject and decides whether it is left out.</param>
+    /// <param name="isExcluded">Receives the declared name of a property of the subject and returns true to leave it out.</param>
     /// <param name="naming">The naming of the JSON.</param>
     /// <remarks>
     /// The value of an excluded property is not read. A subject that is nested in another property is written
@@ -107,7 +107,8 @@ public class ConfigurableSubjectSerializer
         // equals Serialize apart from what is excluded.
         foreach (var property in options.GetTypeInfo(type).Properties)
         {
-            var declaredName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
+            // The resolver creates every property from a member of the type and adds none of its own.
+            var declaredName = ((MemberInfo)property.AttributeProvider!).Name;
             if (property.Get is not { } getValue || isExcluded(declaredName))
             {
                 continue;
