@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -47,6 +48,15 @@ public static class RegisteredSubjectMethodExtensions
             .Where(m => m.Kind == MethodKind.Query)
             .OrderBy(m => m.Position)
             .ToList();
+    }
+
+    /// <summary>
+    /// Gets whether the operation or query that the method property holds is enabled: the value of its
+    /// <see cref="KnownAttributes.IsEnabled"/> attribute, true without one.
+    /// </summary>
+    public static bool IsMethodEnabled(this RegisteredSubjectProperty methodProperty)
+    {
+        return methodProperty.TryGetAttribute(KnownAttributes.IsEnabled)?.GetValue() as bool? ?? true;
     }
 
     private static bool CanContainMethodMetadata(RegisteredSubjectProperty property)
