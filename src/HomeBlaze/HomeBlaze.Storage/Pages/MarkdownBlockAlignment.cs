@@ -16,52 +16,86 @@ internal static class MarkdownBlockAlignment
     /// <param name="expectedInsertedBlockCount">How many blocks the inserted lines must hold.</param>
     /// <param name="owner">The block of <paramref name="before"/> that the lines were inserted into, or null for a removal.</param>
     /// <returns>
-    /// Null when a block that the change did not touch is not the same block afterwards: another kind, fence,
-    /// head line or closing line, other lines than the change explains, or another number of inserted blocks.
+    /// Null when the change did more than insert or remove its blocks. Every other block, of every kind, must
+    /// have the same kind, fence, head line, closing line and json block as before, the lines that the change
+    /// explains, and the same block around it. The first inserted block must be a slot block directly inside
+    /// <paramref name="owner"/>, and every inserted block must end on the inserted lines.
     /// </returns>
     public static int[]? TryAlign(
         MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
     {
+        var oldBlocks = Flatten(before.Blocks);
+        var newBlocks = Flatten(after.Blocks);
         var removedEnd = edit.Line + edit.RemovedLineCount;
         var insertedEnd = edit.Line + edit.InsertedLineCount;
-        HashSet<MarkdownBlock> blocksAroundOwner = owner is null ? [] : FindBlocksAround(before.Blocks, owner);
+        var blocksAroundOwner = FindBlocksAround(oldBlocks, owner);
 
+        // The block of the page after the change for every block that stays.
+        var counterparts = new Dictionary<MarkdownBlock, MarkdownBlock>(ReferenceEqualityComparer.Instance);
+        var insertedBlocks = new HashSet<MarkdownBlock>(ReferenceEqualityComparer.Instance);
         var map = new int[before.AllBlocks.Count];
-        var newIndex = 0;
-        var insertedBlockCount = 0;
+        Array.Fill(map, -1);
+        var newPosition = 0;
 
-        void SkipInsertedBlocks()
+        bool TakeInsertedBlocks()
         {
-            while (newIndex < after.AllBlocks.Count &&
-                   after.AllBlocks[newIndex].Line >= edit.Line &&
-                   after.AllBlocks[newIndex].Line < insertedEnd)
+            while (newPosition < newBlocks.Count &&
+                   newBlocks[newPosition].Block.Line >= edit.Line &&
+                   newBlocks[newPosition].Block.Line < insertedEnd)
             {
-                newIndex++;
-                insertedBlockCount++;
+                var (block, parent) = newBlocks[newPosition++];
+                var isInsideInsertedBlock = parent is not null && insertedBlocks.Contains(parent);
+                var isSlotBlockOfOwner =
+                    block.Kind == MarkdownBlockKind.Slot &&
+                    owner is not null &&
+                    counterparts.TryGetValue(owner, out var newOwner) &&
+                    ReferenceEquals(parent, newOwner);
+
+                // A block that goes on after the inserted lines has taken over what follows it.
+                if (block.EndLine >= insertedEnd || (!isInsideInsertedBlock && !isSlotBlockOfOwner))
+                {
+                    return false;
+                }
+
+                insertedBlocks.Add(block);
             }
+
+            return true;
         }
 
-        for (var oldIndex = 0; oldIndex < map.Length; oldIndex++)
+        foreach (var (oldBlock, oldParent) in oldBlocks)
         {
-            var oldBlock = before.AllBlocks[oldIndex];
             if (oldBlock.Line >= edit.Line && oldBlock.Line < removedEnd)
             {
-                map[oldIndex] = -1;
                 continue;
             }
 
-            SkipInsertedBlocks();
-            if (newIndex == after.AllBlocks.Count ||
-                !IsSameBlock(before, oldBlock, after, after.AllBlocks[newIndex], edit, blocksAroundOwner.Contains(oldBlock)))
+            if (!TakeInsertedBlocks() || newPosition == newBlocks.Count)
             {
                 return null;
             }
 
-            map[oldIndex] = newIndex++;
+            var (newBlock, newParent) = newBlocks[newPosition++];
+            var hasSameParent = oldParent is null
+                ? newParent is null
+                : counterparts.TryGetValue(oldParent, out var expectedParent) && ReferenceEquals(expectedParent, newParent);
+
+            if (!hasSameParent ||
+                !IsSameBlock(before, oldBlock, after, newBlock, edit, blocksAroundOwner.Contains(oldBlock)))
+            {
+                return null;
+            }
+
+            counterparts[oldBlock] = newBlock;
+            if (oldBlock.Index >= 0)
+            {
+                map[oldBlock.Index] = newBlock.Index;
+            }
         }
 
-        SkipInsertedBlocks();
-        return newIndex == after.AllBlocks.Count && insertedBlockCount == expectedInsertedBlockCount ? map : null;
+        return TakeInsertedBlocks() && newPosition == newBlocks.Count && insertedBlocks.Count == expectedInsertedBlockCount
+            ? map
+            : null;
     }
 
     private static bool IsSameBlock(
@@ -75,6 +109,7 @@ internal static class MarkdownBlockAlignment
         if (oldBlock.Kind != newBlock.Kind ||
             oldBlock.FenceLength != newBlock.FenceLength ||
             oldBlock.HasClosingLine != newBlock.HasClosingLine ||
+            !string.Equals(oldBlock.ConfigurationJson, newBlock.ConfigurationJson, StringComparison.Ordinal) ||
             !GetHeadLine(before, oldBlock).SequenceEqual(GetHeadLine(after, newBlock)))
         {
             return false;
@@ -115,25 +150,40 @@ internal static class MarkdownBlockAlignment
     private static ReadOnlySpan<char> GetHeadLine(MarkdownPage page, MarkdownBlock block) =>
         page.Source.AsSpan(block.HeadSpan.Start, block.HeadSpan.Length);
 
-    // The block itself and every block around it.
-    private static HashSet<MarkdownBlock> FindBlocksAround(IReadOnlyList<MarkdownBlock> blocks, MarkdownBlock target)
+    // Every block of every kind with the block around it, in the order in which the parser lists them. A style
+    // block is in no index of the page, and it can take over text like any other block.
+    private static List<(MarkdownBlock Block, MarkdownBlock? Parent)> Flatten(IReadOnlyList<MarkdownBlock> blocks)
     {
-        var path = new HashSet<MarkdownBlock>();
-        Find(blocks);
-        return path;
+        var result = new List<(MarkdownBlock Block, MarkdownBlock? Parent)>();
+        Add(blocks, null);
+        return result;
 
-        bool Find(IReadOnlyList<MarkdownBlock> candidates)
+        void Add(IReadOnlyList<MarkdownBlock> siblings, MarkdownBlock? parent)
         {
-            foreach (var candidate in candidates)
+            foreach (var block in siblings)
             {
-                if (ReferenceEquals(candidate, target) || Find(candidate.Children))
-                {
-                    path.Add(candidate);
-                    return true;
-                }
+                result.Add((block, parent));
+                Add(block.Children, block);
             }
-
-            return false;
         }
+    }
+
+    // The block itself and every block around it.
+    private static HashSet<MarkdownBlock> FindBlocksAround(
+        List<(MarkdownBlock Block, MarkdownBlock? Parent)> blocks, MarkdownBlock? target)
+    {
+        var parents = new Dictionary<MarkdownBlock, MarkdownBlock?>(ReferenceEqualityComparer.Instance);
+        foreach (var (block, parent) in blocks)
+        {
+            parents[block] = parent;
+        }
+
+        var result = new HashSet<MarkdownBlock>(ReferenceEqualityComparer.Instance);
+        for (var current = target; current is not null; current = parents.GetValueOrDefault(current))
+        {
+            result.Add(current);
+        }
+
+        return result;
     }
 }

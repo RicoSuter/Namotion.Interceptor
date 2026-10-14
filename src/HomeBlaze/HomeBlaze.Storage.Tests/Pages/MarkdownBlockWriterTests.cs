@@ -456,7 +456,7 @@ public class MarkdownBlockWriterTests
         var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
 
         // Assert
-        Assert.Equal(new MarkdownBlockPlacement(10, true, string.Empty, "\n"), placement);
+        Assert.Equal(new MarkdownBlockPlacement(10, 3, true, string.Empty, "\n"), placement);
     }
 
     [Fact]
@@ -469,7 +469,7 @@ public class MarkdownBlockWriterTests
         var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
 
         // Assert
-        Assert.Equal(new MarkdownBlockPlacement(8, false, string.Empty, "\n"), placement);
+        Assert.Equal(new MarkdownBlockPlacement(8, 3, false, string.Empty, "\n"), placement);
     }
 
     [Theory]
@@ -503,7 +503,20 @@ public class MarkdownBlockWriterTests
         var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
 
         // Assert
-        Assert.Equal(new MarkdownBlockPlacement(2, true, "  ", "\r\n"), placement);
+        Assert.Equal(new MarkdownBlockPlacement(2, 3, true, "  ", "\r\n"), placement);
+    }
+
+    [Fact]
+    public void WhenSiblingIsIndentedAndUsesWindowsLineEndings_ThenPlacementIsWrittenLikeTheSibling()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Board\r\n  :::: Tile\r\n  ::::\r\n::\r\n");
+
+        // Act
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
+
+        // Assert
+        Assert.Equal(new MarkdownBlockPlacement(4, 4, true, "  ", "\r\n"), placement);
     }
 
     [Fact]

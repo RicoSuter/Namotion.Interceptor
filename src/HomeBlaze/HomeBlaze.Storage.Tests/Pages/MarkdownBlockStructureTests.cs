@@ -52,8 +52,8 @@ public class MarkdownBlockStructureTests
         var owner = before.Blocks[0];
         var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
         var text = MarkdownBlockWriter.CreateBlock(
-            "Tile", null, """{ "Position": 3 }""", 3, hasClosingLine: placement.HasClosingLine,
-            content: MarkdownBlockWriter.CreateBlock("Demo.Leaf", null, "{}", 4, hasClosingLine: placement.HasClosingLine));
+            "Tile", null, """{ "Position": 3 }""", placement.FenceLength, hasClosingLine: placement.HasClosingLine,
+            content: MarkdownBlockWriter.CreateBlock("Demo.Leaf", null, "{}", placement.FenceLength + 1, hasClosingLine: placement.HasClosingLine));
         var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
 
         // Act
@@ -75,7 +75,7 @@ public class MarkdownBlockStructureTests
         var before = MarkdownPageParser.Parse(source);
         var owner = before.Blocks[0];
         var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
-        var text = MarkdownBlockWriter.CreateBlock("Tile", null, "{}", 3, hasClosingLine: placement.HasClosingLine);
+        var text = MarkdownBlockWriter.CreateBlock("Tile", null, "{}", placement.FenceLength, hasClosingLine: placement.HasClosingLine);
         var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
 
         // Act
@@ -147,102 +147,313 @@ public class MarkdownBlockStructureTests
     }
 
     [Fact]
-    public void WhenRandomBlocksAreInsertedAndRemoved_ThenEverythingElseStaysByteForByte()
+    public void WhenInsertedBlockTakesOverTheBlockAfterIt_ThenAlignmentFails()
+    {
+        // Arrange: the leaf has four fence characters, so a new block with three does not end before it.
+        const string source = ":: Demo.Board\n:::: Tile\none\n:::: Demo.Leaf\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var owner = before.Blocks[0];
+        var result = MarkdownBlockWriter.InsertLines(source, 4, "::: Tile", "\n", out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
+
+        // Assert
+        Assert.Null(map);
+    }
+
+    [Fact]
+    public void WhenSiblingHasMoreFenceCharactersThanNeeded_ThenTheNewBlockGetsAsMany()
+    {
+        // Arrange
+        const string source = ":: Demo.Board\n:::: Tile\none\n:::: Demo.Leaf\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var owner = before.Blocks[0];
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
+        var text = MarkdownBlockWriter.CreateBlock("Tile", null, "{}", placement.FenceLength, hasClosingLine: placement.HasClosingLine);
+        var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
+
+        // Act
+        var after = MarkdownPageParser.Parse(result);
+        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 1, owner);
+
+        // Assert: the leaf is still directly inside the board.
+        Assert.Equal(":: Demo.Board\n:::: Tile\none\n:::: Tile\n:::: Demo.Leaf\n::\n", result);
+        Assert.Equal(new[] { 0, 1, 3 }, map);
+        Assert.Equal(3, after.Blocks[0].Children.Count);
+    }
+
+    [Fact]
+    public void WhenRemovalLetsAStyleBlockTakeTextAfterIt_ThenAlignmentFails()
+    {
+        // Arrange: the style block has no closing line and is ended by the head line of the tile.
+        const string source = ":: Demo.Panel\n::: {.note}\nstyled\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+    }
+
+    [Fact]
+    public void WhenOwnerIsEndedByTheEndOfThePage_ThenItsFirstSlotBlockIsAligned()
+    {
+        // Arrange
+        const string source = "intro\n\n:: Demo.Board Columns=2";
+        var before = MarkdownPageParser.Parse(source);
+        var owner = before.Blocks[0];
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
+        var text = MarkdownBlockWriter.CreateBlock("Tile", null, "{}", placement.FenceLength, hasClosingLine: placement.HasClosingLine);
+        var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
+
+        // Assert
+        Assert.Equal("intro\n\n:: Demo.Board Columns=2\n::: Tile", result);
+        Assert.Equal(new[] { 0 }, map);
+    }
+
+    [Fact]
+    public void WhenRandomBlocksAreInsertedAndRemoved_ThenNothingElseChangesAndTheCheckAgreesWithTheBlocks()
     {
         // Arrange
         var random = new Random(20261014);
+        var cleanRemovals = 0;
+        var refusedRemovals = 0;
+        var inserts = 0;
 
-        for (var round = 0; round < 300; round++)
+        for (var round = 0; round < 400; round++)
         {
-            var hasClosingLines = random.Next(2) == 0;
             var lineEnding = random.Next(4) == 0 ? "\r\n" : "\n";
-            var source = CreateRandomPage(random, hasClosingLines, lineEnding);
+            var source = CreateRandomPage(random, closingLineChance: random.Next(3) * 50, lineEnding);
 
             for (var step = 0; step < 6; step++)
             {
-                // Act
                 var before = MarkdownPageParser.Parse(source);
                 var owners = before.AllBlocks.Where(block => block.Head?.Name == "Demo.Board").ToList();
                 var owner = owners[random.Next(owners.Count)];
                 var tiles = owner.Children.Where(child => child.Kind == MarkdownBlockKind.Slot).ToList();
 
-                string result;
-                MarkdownLineEdit edit;
-                int[]? map;
                 if (tiles.Count > 0 && random.Next(2) == 0)
                 {
-                    result = MarkdownBlockWriter.RemoveBlock(source, tiles[random.Next(tiles.Count)], out edit);
-                    map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+                    // Act
+                    var result = MarkdownBlockWriter.RemoveBlock(source, tiles[random.Next(tiles.Count)], out var edit);
+                    var after = MarkdownPageParser.Parse(result);
+                    var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+                    var context = $"Round {round}, step {step}, removal at line {edit.Line}:\n{source}\n--- became ---\n{result}";
+
+                    // Assert: the check says yes exactly when every other block has its text and its place.
+                    AssertOnlyTheEditedLinesChanged(source, result, edit, context);
+                    var isClean = Describe(before, edit.Line, edit.RemovedLineCount).SequenceEqual(Describe(after, 0, 0));
+                    Assert.True(isClean == (map is not null), context);
+                    if (map is null)
+                    {
+                        refusedRemovals++;
+                        continue;
+                    }
+
+                    cleanRemovals++;
+                    AssertMapKeepsHeadLines(before, after, map, context);
+                    Assert.Equal(tiles.Count - 1, after.AllBlocks[map[owner.Index]].Children.Count(child => child.Kind == MarkdownBlockKind.Slot));
+                    source = result;
                 }
                 else
                 {
+                    // Act
                     var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
                     var text = MarkdownBlockWriter.Indent(
                         MarkdownBlockWriter.CreateBlock(
-                            "Tile", null, $$"""{ "Position": {{step}} }""", owner.FenceLength + 1, placement.LineEnding, placement.HasClosingLine),
+                            "Tile", null, $$"""{ "Position": {{step}} }""", placement.FenceLength, placement.LineEnding, placement.HasClosingLine),
                         placement.Indentation,
                         placement.LineEnding);
-                    result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out edit);
-                    map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
+                    var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
+                    var after = MarkdownPageParser.Parse(result);
+                    var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 1, owner);
+                    var context = $"Round {round}, step {step}, insert at line {edit.Line}:\n{source}\n--- became ---\n{result}";
+
+                    // Assert: an insert at the placement never touches another block.
+                    AssertOnlyTheEditedLinesChanged(source, result, edit, context);
+                    AssertInsertedLinesEndLikeThePage(result, edit, placement.LineEnding, context);
+                    Assert.True(Describe(before, 0, 0).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount)), context);
+                    Assert.True(map is not null, context);
+                    AssertMapKeepsHeadLines(before, after, map!, context);
+                    Assert.Equal(tiles.Count + 1, after.AllBlocks[map![owner.Index]].Children.Count(child => child.Kind == MarkdownBlockKind.Slot));
+                    inserts++;
+                    source = result;
+                }
+            }
+        }
+
+        // All three outcomes occur, so none of the comparisons above is empty.
+        Assert.True(inserts > 0 && cleanRemovals > 0 && refusedRemovals > 0, $"{inserts} inserts, {cleanRemovals} removals, {refusedRemovals} refused removals");
+    }
+
+    // Every block of every kind that is not on the given lines: the head line of the block around it, its own
+    // head line, and its lines without the given ones. Equal lists before and after a change mean that every
+    // other block kept its text and its place.
+    private static List<string> Describe(MarkdownPage page, int skippedLine, int skippedLineCount)
+    {
+        // Without line endings: an insert after a last line without one gives that line a line ending, and
+        // AssertOnlyTheEditedLinesChanged compares the line endings of all other lines.
+        var lines = page.Source.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+        var result = new List<string>();
+        Add(page.Blocks, "page");
+        return result;
+
+        bool IsSkipped(int line) => line >= skippedLine && line < skippedLine + skippedLineCount;
+
+        void Add(IReadOnlyList<MarkdownBlock> blocks, string parent)
+        {
+            foreach (var block in blocks.OrderBy(candidate => candidate.Line))
+            {
+                if (IsSkipped(block.Line))
+                {
+                    continue;
                 }
 
-                // Assert
-                Assert.True(map is not null, $"Round {round}, step {step}:\n{source}\n--- became ---\n{result}");
-                AssertOnlyTheEditedLinesChanged(source, result, edit);
-                source = result;
+                var head = lines[block.Line - 1];
+                var ownLines = Enumerable.Range(block.Line, block.EndLine - block.Line + 1)
+                    .Where(line => !IsSkipped(line))
+                    .Select(line => lines[line - 1]);
+
+                // Empty lines at the end are not content: a block without a closing line ends at its last line that is not empty.
+                result.Add($"{parent} > {head} [{block.Kind}]\n{string.Join('\n', ownLines).TrimEnd('\n', '\r')}");
+                Add(block.Children, head);
             }
         }
     }
 
-    private static void AssertOnlyTheEditedLinesChanged(string before, string after, MarkdownLineEdit edit)
+    private static void AssertMapKeepsHeadLines(MarkdownPage before, MarkdownPage after, int[] map, string context)
     {
-        var beforeLines = before.Split('\n').ToList();
-        var afterLines = after.Split('\n').ToList();
+        for (var index = 0; index < map.Length; index++)
+        {
+            if (map[index] < 0)
+            {
+                continue;
+            }
 
-        // A change at the end of a text without a final line ending moves that line ending, so the last
-        // lines are compared without it.
-        beforeLines.RemoveRange(edit.Line - 1, edit.RemovedLineCount);
-        afterLines.RemoveRange(edit.Line - 1, edit.InsertedLineCount);
-        Assert.Equal(
-            beforeLines.Select(line => line.TrimEnd('\r')).Where((_, index) => index < beforeLines.Count - 1 || beforeLines[^1].Length > 0),
-            afterLines.Select(line => line.TrimEnd('\r')).Where((_, index) => index < afterLines.Count - 1 || afterLines[^1].Length > 0));
+            var oldBlock = before.AllBlocks[index];
+            var newBlock = after.AllBlocks[map[index]];
+            Assert.True(
+                before.Source.Substring(oldBlock.HeadSpan.Start, oldBlock.HeadSpan.Length) ==
+                after.Source.Substring(newBlock.HeadSpan.Start, newBlock.HeadSpan.Length),
+                context);
+        }
     }
 
-    private static string CreateRandomPage(Random random, bool hasClosingLines, string lineEnding)
+    private static void AssertOnlyTheEditedLinesChanged(string before, string after, MarkdownLineEdit edit, string context)
+    {
+        var beforeLines = SplitKeepingLineEndings(before);
+        var afterLines = SplitKeepingLineEndings(after);
+        beforeLines.RemoveRange(edit.Line - 1, edit.RemovedLineCount);
+        afterLines.RemoveRange(edit.Line - 1, edit.InsertedLineCount);
+
+        Assert.True(beforeLines.Count == afterLines.Count, context);
+        for (var index = 0; index < beforeLines.Count; index++)
+        {
+            // A change at the very end of a text without a final line ending moves that line ending to the
+            // line before the change, so only that line is compared without it.
+            var isLineBeforeChangeAtTheEnd = index == beforeLines.Count - 1 && index == edit.Line - 2;
+            var isSame = isLineBeforeChangeAtTheEnd
+                ? beforeLines[index].TrimEnd('\r', '\n') == afterLines[index].TrimEnd('\r', '\n')
+                : beforeLines[index] == afterLines[index];
+            Assert.True(isSame, $"Line {index + 1} changed.\n{context}");
+        }
+    }
+
+    private static void AssertInsertedLinesEndLikeThePage(string after, MarkdownLineEdit edit, string lineEnding, string context)
+    {
+        var lines = SplitKeepingLineEndings(after);
+        for (var index = edit.Line - 1; index < edit.Line - 1 + edit.InsertedLineCount; index++)
+        {
+            var isLastLineOfTheText = index == lines.Count - 1;
+            Assert.True(
+                isLastLineOfTheText ? !lines[index].EndsWith('\n') || lines[index].EndsWith(lineEnding) : HasLineEnding(lines[index], lineEnding),
+                $"Line {index + 1} has another line ending.\n{context}");
+        }
+    }
+
+    private static bool HasLineEnding(string line, string lineEnding) =>
+        line.EndsWith(lineEnding) && (lineEnding == "\r\n" || !line.EndsWith("\r\n"));
+
+    private static List<string> SplitKeepingLineEndings(string text)
+    {
+        var lines = new List<string>();
+        var start = 0;
+        while (start < text.Length)
+        {
+            var lineFeed = text.IndexOf('\n', start);
+            var end = lineFeed < 0 ? text.Length : lineFeed + 1;
+            lines.Add(text[start..end]);
+            start = end;
+        }
+
+        return lines;
+    }
+
+    // Boards with tiles, in three styles: every block with a closing line, none, or each one by chance. Tiles have
+    // one or two fence characters more than their board, a board can be indented, and style blocks and text
+    // stand between the tiles.
+    private static string CreateRandomPage(Random random, int closingLineChance, string lineEnding)
     {
         var lines = new List<string> { "intro", string.Empty };
         var boardCount = random.Next(1, 4);
         for (var board = 0; board < boardCount; board++)
         {
-            lines.Add($":: Demo.Board#board{board} Columns=2");
+            var indentation = random.Next(5) == 0 ? "  " : string.Empty;
+            var tileFence = new string(':', random.Next(3) == 0 ? 4 : 3);
+
+            void Add(string line) => lines.Add(indentation + line);
+            bool HasClosingLine() => random.Next(100) < closingLineChance;
+
+            Add($":: Demo.Board#board{board} Columns=2");
             var tileCount = random.Next(0, 4);
             for (var tile = 0; tile < tileCount; tile++)
             {
-                lines.Add($"::: Tile Position={tile}");
+                Add($"{tileFence} Tile Position={tile}");
                 if (random.Next(2) == 0)
                 {
-                    lines.Add($"text {tile} with {{{{ /a/b }}}}");
+                    Add($"text {tile} with {{{{ /a/b }}}}");
                 }
 
                 if (random.Next(3) == 0)
                 {
-                    lines.Add(":::: Demo.Leaf Count=1");
-                    if (hasClosingLines)
+                    Add($"{tileFence}: Demo.Leaf Count=1");
+                    if (HasClosingLine())
                     {
-                        lines.Add("::::");
+                        Add($"{tileFence}:");
                     }
                 }
 
-                if (hasClosingLines)
+                if (HasClosingLine())
                 {
-                    lines.Add(":::");
+                    Add(tileFence);
+                }
+
+                if (random.Next(4) == 0)
+                {
+                    Add("::: {.note}");
+                    Add("styled");
+                    if (HasClosingLine())
+                    {
+                        Add(":::");
+                    }
+                }
+
+                if (random.Next(4) == 0)
+                {
+                    Add("text after a tile");
                 }
             }
 
-            // The last block of a page in the short form has a closing line, like the samples of the documentation.
-            if (hasClosingLines || board == boardCount - 1 || random.Next(2) == 0)
+            if (HasClosingLine())
             {
-                lines.Add("::");
+                Add("::");
             }
 
             if (random.Next(2) == 0)

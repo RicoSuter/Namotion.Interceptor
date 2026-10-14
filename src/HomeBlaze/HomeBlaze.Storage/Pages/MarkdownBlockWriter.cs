@@ -118,17 +118,17 @@ public static class MarkdownBlockWriter
 
     /// <summary>
     /// Gets where a new block of the slot <paramref name="slotName"/> of <paramref name="owner"/> goes: after
-    /// the last block of that slot, in its style, or without one at the end of the content of the owner, in
-    /// the style of the page.
+    /// the last block of that slot, written like that block, or without one at the end of the content of the
+    /// owner, in the style of the page.
     /// </summary>
     /// <remarks>
-    /// The style of the page is without closing lines when any widget or slot block of it has none. A block
-    /// without a closing line is valid at the returned line, because what follows that line ends it.
+    /// The style of the page is without closing lines when any widget or slot block of it has none. After a
+    /// block of the slot, the new block has as many fence characters as that block, so that what ended that
+    /// block ends the new one as well.
     /// </remarks>
     public static MarkdownBlockPlacement GetSlotBlockPlacement(MarkdownPage page, MarkdownBlock owner, string slotName)
     {
         var source = page.Source;
-        var indentation = source[GetLineStart(source, owner.Line)..owner.HeadSpan.Start];
 
         MarkdownBlock? lastSibling = null;
         foreach (var child in owner.Children)
@@ -142,13 +142,17 @@ public static class MarkdownBlockWriter
         if (lastSibling is not null)
         {
             return new MarkdownBlockPlacement(
-                lastSibling.EndLine + 1, lastSibling.HasClosingLine, indentation, GetLineEnding(source, lastSibling.HeadSpan.End));
+                lastSibling.EndLine + 1,
+                lastSibling.FenceLength,
+                lastSibling.HasClosingLine,
+                GetIndentation(source, lastSibling),
+                GetLineEnding(source, lastSibling.HeadSpan.End));
         }
 
         var hasClosingLine = true;
         foreach (var block in page.AllBlocks)
         {
-            if (block.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot && !block.HasClosingLine)
+            if (block.Kind is (MarkdownBlockKind.Widget or MarkdownBlockKind.Slot) && !block.HasClosingLine)
             {
                 hasClosingLine = false;
                 break;
@@ -157,8 +161,13 @@ public static class MarkdownBlockWriter
 
         // Before the closing line of the owner, or after its last line of content.
         var line = owner.HasClosingLine ? owner.EndLine : owner.EndLine + 1;
-        return new MarkdownBlockPlacement(line, hasClosingLine, indentation, GetLineEnding(source, owner.HeadSpan.End));
+        return new MarkdownBlockPlacement(
+            line, owner.FenceLength + 1, hasClosingLine, GetIndentation(source, owner), GetLineEnding(source, owner.HeadSpan.End));
     }
+
+    // The white space before the head line of the block on its line.
+    private static string GetIndentation(string source, MarkdownBlock block) =>
+        source[GetLineStart(source, block.Line)..block.HeadSpan.Start];
 
     /// <summary>
     /// Inserts <paramref name="text"/> as lines of their own before the 1-based <paramref name="line"/>. A line
