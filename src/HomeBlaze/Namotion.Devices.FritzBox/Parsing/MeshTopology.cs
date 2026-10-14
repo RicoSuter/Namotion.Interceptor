@@ -44,9 +44,22 @@ internal sealed record MeshTopology(
     private const string ConnectedState = "CONNECTED";
     private const string UplinkInterfacePrefix = "UPLINK";
 
-    // A link's own-side interface and the node reached across it, used to pick an uplink by priority rather than
-    // by JSON order.
-    private readonly record struct MeshLinkCandidate(MeshNode OtherNode, MeshNodeInterface OwnInterface, MeshNodeLink Link);
+    // A link from one node's own side, and the node reached across it.
+    private readonly struct MeshLinkCandidate
+    {
+        internal MeshLinkCandidate(MeshNode otherNode, MeshNodeInterface ownInterface, MeshNodeLink link)
+        {
+            OtherNode = otherNode;
+            OwnInterface = ownInterface;
+            Link = link;
+        }
+
+        internal MeshNode OtherNode { get; }
+
+        internal MeshNodeInterface OwnInterface { get; }
+
+        internal MeshNodeLink Link { get; }
+    }
 
     internal static MeshTopology Build(MeshList meshList)
     {
@@ -106,8 +119,7 @@ internal sealed record MeshTopology(
     }
 
     // One entry per node that has at least one connected link to another mesh node, listing every such link from
-    // that node's own side. Built once so the uplink of each node can be chosen by priority instead of by the
-    // order links happen to appear in the document.
+    // that node's own side.
     private static Dictionary<MeshNode, List<MeshLinkCandidate>> CollectMeshLinkCandidates(
         Dictionary<string, MeshNodeLink> links,
         Dictionary<string, (MeshNode Node, MeshNodeInterface Interface)> interfaces)
@@ -166,6 +178,9 @@ internal sealed record MeshTopology(
         return uplinks;
     }
 
+    /// <summary>
+    /// Picks a node's uplink by priority rather than by the order links happen to appear in the document.
+    /// </summary>
     /// <returns>
     /// The link towards the router: one whose other side is the master, otherwise one on an interface named
     /// <c>UPLINK...</c>, otherwise the first connected mesh link, in that priority order.
@@ -207,13 +222,11 @@ internal sealed record MeshTopology(
             var secondIsMeshNode = IsMeshNode(second.Node);
             if (!firstIsMeshNode && !secondIsMeshNode)
             {
-                // Neither side belongs to the mesh; this link connects two clients, which does not happen here.
                 continue;
             }
 
             if (firstIsMeshNode && secondIsMeshNode)
             {
-                // Both sides are mesh nodes; their uplink was already resolved by ResolveUplinks.
                 continue;
             }
 

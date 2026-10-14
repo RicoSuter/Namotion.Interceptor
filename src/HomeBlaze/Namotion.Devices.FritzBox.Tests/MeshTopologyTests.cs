@@ -137,7 +137,7 @@ public class MeshTopologyTests
             {
               "nodes": [
                 { "uid": "n-master", "device_mac_address": "AA:AA:AA:00:00:00", "is_meshed": true, "mesh_role": "master",
-                  "node_interfaces": [ { "uid": "i-master", "name": "LAN:1", "type": "WLAN", "mac_address": "AA:AA:AA:00:00:00",
+                  "node_interfaces": [ { "uid": "i-master", "name": "AP:5G:0", "type": "WLAN", "mac_address": "AA:AA:AA:00:00:00",
                     "node_links": [ { "uid": "l-ma", "type": "WLAN", "state": "CONNECTED", "node_interface_1_uid": "i-master", "node_interface_2_uid": "i-a-up", "cur_data_rate_rx": 1000000, "cur_data_rate_tx": 1000000 } ] } ] },
                 { "uid": "n-c", "device_mac_address": "AA:AA:AA:00:00:03", "is_meshed": true, "mesh_role": "slave",
                   "node_interfaces": [ { "uid": "i-c-up", "name": "UPLINK:5G:0", "type": "WLAN", "mac_address": "AA:AA:AA:00:00:03",
@@ -167,6 +167,41 @@ public class MeshTopologyTests
         var nodeB = topology.AccessPoints.Single(accessPoint => accessPoint.MacAddress == "AA:AA:AA:00:00:02");
         Assert.Equal(1000m, nodeA.UplinkSpeed);
         Assert.Equal(500m, nodeB.UplinkSpeed);
+    }
+
+    [Fact]
+    public void WhenANonMasterNodesMasterLinkComesAfterAnotherMeshLinkInItsCandidateOrder_ThenTheMasterLinkIsStillItsUplink()
+    {
+        // Arrange: repeater R has a link to another repeater R2 (inserted into the document first) and a link to
+        // the master (inserted second), and neither of R's own interfaces is named UPLINK, so only the "other side
+        // is the master" priority can pick the right one.
+        const string json =
+            """
+            {
+              "nodes": [
+                { "uid": "n-r2", "device_mac_address": "AA:AA:AA:00:00:05", "is_meshed": true, "mesh_role": "slave",
+                  "node_interfaces": [ { "uid": "i-r2", "name": "AP:5G:0", "type": "WLAN", "mac_address": "AA:AA:AA:00:00:05",
+                    "node_links": [ { "uid": "l-r-r2", "type": "WLAN", "state": "CONNECTED", "node_interface_1_uid": "i-r-to-r2", "node_interface_2_uid": "i-r2", "cur_data_rate_rx": 200000, "cur_data_rate_tx": 200000 } ] } ] },
+                { "uid": "n-r", "device_mac_address": "AA:AA:AA:00:00:06", "is_meshed": true, "mesh_role": "slave",
+                  "node_interfaces": [
+                    { "uid": "i-r-to-r2", "name": "AP:5G:0", "type": "WLAN", "mac_address": "AA:AA:AA:00:00:06",
+                      "node_links": [ { "uid": "l-r-r2", "type": "WLAN", "state": "CONNECTED", "node_interface_1_uid": "i-r-to-r2", "node_interface_2_uid": "i-r2", "cur_data_rate_rx": 200000, "cur_data_rate_tx": 200000 } ] },
+                    { "uid": "i-r-to-m", "name": "AP:5G:1", "type": "WLAN", "mac_address": "AA:AA:AA:00:00:06",
+                      "node_links": [ { "uid": "l-r-m", "type": "WLAN", "state": "CONNECTED", "node_interface_1_uid": "i-r-to-m", "node_interface_2_uid": "i-m", "cur_data_rate_rx": 1000000, "cur_data_rate_tx": 1000000 } ] } ] },
+                { "uid": "n-m", "device_mac_address": "AA:AA:AA:00:00:00", "is_meshed": true, "mesh_role": "master",
+                  "node_interfaces": [ { "uid": "i-m", "name": "AP:5G:0", "type": "WLAN", "mac_address": "AA:AA:AA:00:00:00",
+                    "node_links": [ { "uid": "l-r-m", "type": "WLAN", "state": "CONNECTED", "node_interface_1_uid": "i-r-to-m", "node_interface_2_uid": "i-m", "cur_data_rate_rx": 1000000, "cur_data_rate_tx": 1000000 } ] } ] }
+              ]
+            }
+            """;
+        using var stream = ToStream(json);
+
+        // Act
+        var topology = MeshTopology.Build(MeshListParser.Parse(stream));
+
+        // Assert
+        var repeater = topology.AccessPoints.Single(accessPoint => accessPoint.MacAddress == "AA:AA:AA:00:00:06");
+        Assert.Equal(1000m, repeater.UplinkSpeed);
     }
 
     [Fact]

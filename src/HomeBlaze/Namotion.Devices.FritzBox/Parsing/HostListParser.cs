@@ -11,7 +11,7 @@ internal static class HostListParser
 {
     /// <summary>
     /// Reads every item. Throws <see cref="XmlException"/> when the document is malformed, declares a document type,
-    /// nests deeper than <see cref="UpnpXml.MaximumLevels"/> or an item value holds elements.
+    /// nests deeper than <see cref="UpnpXml.MaximumLevels"/> or a field it reads holds elements.
     /// </summary>
     internal static List<HostEntry> Parse(Stream stream)
     {

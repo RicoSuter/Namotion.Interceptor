@@ -15,13 +15,15 @@ internal sealed class Tr64Description
     internal const string DescriptionPath = "/tr64desc.xml";
     internal const int MaximumBytes = 1024 * 1024;
 
+    private readonly IReadOnlyDictionary<string, UpnpService> _services;
+
     private Tr64Description(string? friendlyName, string? modelName, string? udn, Dictionary<string, string> controlPaths)
     {
         FriendlyName = friendlyName;
         ModelName = modelName;
         Udn = udn;
         ControlPaths = controlPaths;
-        Services = controlPaths.ToDictionary(
+        _services = controlPaths.ToDictionary(
             pair => pair.Key,
             pair => new UpnpService(pair.Key, pair.Value),
             StringComparer.Ordinal);
@@ -47,13 +49,8 @@ internal sealed class Tr64Description
     /// </summary>
     internal IReadOnlyList<string> WlanServiceTypes { get; }
 
-    /// <summary>
-    /// One <see cref="UpnpService"/> instance per offered service, built once so repeated lookups do not allocate.
-    /// </summary>
-    private IReadOnlyDictionary<string, UpnpService> Services { get; }
-
     internal UpnpService? TryGetService(string serviceType) =>
-        Services.TryGetValue(serviceType, out var service) ? service : null;
+        _services.TryGetValue(serviceType, out var service) ? service : null;
 
     /// <summary>
     /// Parses a description. Throws <see cref="XmlException"/> when it is malformed, declares a document type or
