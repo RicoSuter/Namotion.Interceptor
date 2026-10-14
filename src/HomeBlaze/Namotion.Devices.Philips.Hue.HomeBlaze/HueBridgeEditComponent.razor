@@ -84,13 +84,8 @@
         _originalRetryIntervalSeconds = _retryIntervalSeconds;
     }
 
-    /// <summary>
-    /// Matches the runtime clamp (<c>HueBridge.GetEffectiveInterval</c>).
-    /// </summary>
     private static int LoadInterval(TimeSpan stored, int defaultSeconds) =>
-        stored <= TimeSpan.Zero
-            ? defaultSeconds
-            : Math.Clamp((int)stored.TotalSeconds, HueBridge.MinimumIntervalSeconds, HueBridge.MaximumIntervalSeconds);
+        (int)HueBridge.GetEffectiveInterval(stored, defaultSeconds).TotalSeconds;
 
     private void OnFieldChanged()
     {

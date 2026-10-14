@@ -446,10 +446,14 @@ public partial class HueBridge : BackgroundService,
     private TimeSpan EffectiveRetryInterval => GetEffectiveInterval(RetryInterval, DefaultRetryIntervalSeconds);
 
     /// <summary>
-    /// Returns the configured interval clamped to <see cref="MinimumIntervalSeconds"/> through
-    /// <see cref="MaximumIntervalSeconds"/>, or the default when it is zero or negative.
+    /// Gets the interval a bridge runs with for a configured interval: the configured interval clamped to
+    /// <see cref="MinimumIntervalSeconds"/> through <see cref="MaximumIntervalSeconds"/>, or the default when it is
+    /// zero or negative.
     /// </summary>
-    internal static TimeSpan GetEffectiveInterval(TimeSpan configured, int defaultSeconds)
+    /// <param name="configured">The configured interval, such as <see cref="PollingInterval"/>.</param>
+    /// <param name="defaultSeconds">The interval in seconds to use when the configured one is zero or negative.</param>
+    /// <returns>The effective interval.</returns>
+    public static TimeSpan GetEffectiveInterval(TimeSpan configured, int defaultSeconds)
     {
         if (configured <= TimeSpan.Zero)
         {
