@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Setup, typeof(FritzBox))]
 @implements ISubjectEditComponent
+@implements IDisposable
 
 <MudStack Spacing="3">
     @if (_routers == null)
@@ -34,21 +35,21 @@
     }
 
     <MudTextField @bind-Value="_hostAddress"
+                  @bind-Value:after="ResetCheck"
                   Label="Host Address (IP or hostname)"
-                  Immediate="true"
-                  OnKeyUp="OnConnectionFieldChanged" />
+                  Immediate="true" />
 
     <MudTextField @bind-Value="_username"
+                  @bind-Value:after="ResetCheck"
                   Label="Username"
                   HelperText="A FRITZ!Box user with the FRITZ!Box settings permission"
-                  Immediate="true"
-                  OnKeyUp="OnConnectionFieldChanged" />
+                  Immediate="true" />
 
     <MudTextField @bind-Value="_password"
+                  @bind-Value:after="ResetCheck"
                   Label="Password"
                   InputType="InputType.Password"
-                  Immediate="true"
-                  OnKeyUp="OnConnectionFieldChanged" />
+                  Immediate="true" />
 
     <MudButton Variant="Variant.Filled"
                Color="Color.Primary"
@@ -86,6 +87,8 @@
 
     private FritzBox? RouterSubject => Subject as FritzBox;
 
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
+
     private List<FritzBoxDiscoveryResult>? _routers;
     private FritzBoxDiscoveryResult? _selectedRouter;
     private string? _hostAddress;
@@ -94,6 +97,16 @@
     private bool _isChecking;
     private bool _isCertificateConfirmed;
     private FritzBoxConnectionCheckResult? _result;
+
+    // The username and password actually checked, saved alongside a successful result instead of the live fields:
+    // ResetCheck already discards _result on every edit, but this also protects a result that was already in
+    // flight when the fields changed (see the version check in CheckAsync).
+    private string? _checkedUsername;
+    private string? _checkedPassword;
+
+    // Bumped by every edit and by every new check; a check whose version no longer matches when it completes is
+    // for fields the user has since changed, so its result is discarded instead of overwriting newer input.
+    private int _checkVersion;
 
     public bool IsValid => _result is { IsSuccess: true } && _isCertificateConfirmed;
 
@@ -104,7 +117,20 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _routers = (await FritzBoxDiscovery.DiscoverAsync(TimeSpan.FromSeconds(3), CancellationToken.None)).ToList();
+        try
+        {
+            _routers = (await FritzBoxDiscovery.DiscoverAsync(TimeSpan.FromSeconds(3), _cancellationTokenSource.Token)).ToList();
+        }
+        catch (OperationCanceledException) when (_cancellationTokenSource.IsCancellationRequested)
+        {
+            // The component was disposed before discovery finished.
+        }
+        catch (Exception)
+        {
+            // Discovery is a convenience; a failure (no multicast, a malfunctioning answerer, ...) must not block
+            // entering the address by hand below.
+            _routers = [];
+        }
     }
 
     private void OnRouterSelected()
@@ -113,10 +139,9 @@
         ResetCheck();
     }
 
-    private void OnConnectionFieldChanged() => ResetCheck();
-
     private void ResetCheck()
     {
+        _checkVersion++;
         if (_result is null && !_isCertificateConfirmed)
         {
             return;
@@ -129,11 +154,20 @@
 
     private async Task CheckAsync()
     {
+        if (_isChecking)
+        {
+            return;
+        }
+
         var hostAddress = _hostAddress;
         if (string.IsNullOrWhiteSpace(hostAddress))
         {
             return;
         }
+
+        var username = _username;
+        var password = _password;
+        var version = ++_checkVersion;
 
         _isChecking = true;
         _result = null;
@@ -141,11 +175,33 @@
         NotifyValidity();
         try
         {
-            _result = await FritzBoxConnectionCheck.CheckAsync(hostAddress, _username, _password, CancellationToken.None);
+            var result = await FritzBoxConnectionCheck.CheckAsync(hostAddress, username, password, _cancellationTokenSource.Token);
+            if (version != _checkVersion)
+            {
+                // The host, username or password changed (or the component was disposed) while this check was in
+                // flight; a newer check or edit already invalidated it, so its result is not applied.
+                return;
+            }
+
+            _result = result;
+            _checkedUsername = username;
+            _checkedPassword = password;
+        }
+        catch (OperationCanceledException) when (_cancellationTokenSource.IsCancellationRequested)
+        {
+            // The component was disposed while checking.
+        }
+        catch (Exception exception)
+        {
+            if (version == _checkVersion)
+            {
+                _result = new FritzBoxConnectionCheckResult(false, null, exception.Message, null, null, null);
+            }
         }
         finally
         {
             _isChecking = false;
+            NotifyValidity();
         }
     }
 
@@ -166,11 +222,17 @@
         if (RouterSubject != null && _result is { IsSuccess: true } result && _isCertificateConfirmed)
         {
             RouterSubject.HostAddress = result.HostAddress;
-            RouterSubject.Username = _username;
-            RouterSubject.Password = _password;
+            RouterSubject.Username = _checkedUsername;
+            RouterSubject.Password = _checkedPassword;
             RouterSubject.CertificatePin = result.CertificatePin;
         }
 
         return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        _cancellationTokenSource.Cancel();
+        _cancellationTokenSource.Dispose();
     }
 }

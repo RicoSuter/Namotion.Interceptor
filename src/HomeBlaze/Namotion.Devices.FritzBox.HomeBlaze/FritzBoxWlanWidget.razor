@@ -1,4 +1,3 @@
-@using Namotion.Devices.Upnp
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FritzBoxWlan))]
 @implements ISubjectComponent
 
@@ -14,7 +13,8 @@
                            Value="@(guest.IsOn == true)"
                            ValueChanged="isOn => SetGuestWlanAsync(guest, isOn)"
                            Disabled="_isSwitching"
-                           Color="Color.Primary" />
+                           Color="Color.Primary"
+                           aria-label="@($"Turn {guest.Title ?? "the guest WLAN"} on or off")" />
             }
             else
             {
@@ -65,8 +65,10 @@
                 await guest.TurnOffAsync(CancellationToken.None);
             }
         }
-        catch (Exception exception) when (exception is InvalidOperationException or HttpRequestException or TimeoutException or UpnpFaultException)
+        catch (Exception exception)
         {
+            // Catches every failure here, including ones the library may add later (certificate rejection,
+            // firmware, XML parsing): an uncaught exception from a UI event handler kills the Blazor circuit.
             _errorMessage = exception.Message;
         }
         finally

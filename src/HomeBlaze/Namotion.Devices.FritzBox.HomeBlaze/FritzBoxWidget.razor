@@ -41,12 +41,12 @@
             <MudText Typo="Typo.caption">External IP: @RouterSubject.ExternalIpAddress</MudText>
         }
 
-        @if (RouterSubject?.HostAddress != null)
+        @if (!string.IsNullOrWhiteSpace(RouterSubject?.HostAddress))
         {
             <MudButton Variant="Variant.Text"
                        Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.OpenInNew"
-                       Href="@($"https://{RouterSubject.HostAddress}")"
+                       Href="@GetWebUiUrl(RouterSubject.HostAddress)"
                        Target="_blank"
                        Size="Size.Small">
                 Open Web UI
@@ -60,4 +60,14 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private FritzBox? RouterSubject => Subject as FritzBox;
+
+    /// <summary>
+    /// An IPv6 literal must be bracketed in a URL authority (e.g. "https://[::1]"), unlike a host name or IPv4
+    /// address.
+    /// </summary>
+    private static string GetWebUiUrl(string hostAddress)
+    {
+        var host = Uri.CheckHostName(hostAddress) == UriHostNameType.IPv6 ? $"[{hostAddress}]" : hostAddress;
+        return $"https://{host}";
+    }
 }

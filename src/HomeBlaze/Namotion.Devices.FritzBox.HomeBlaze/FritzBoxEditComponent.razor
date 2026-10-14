@@ -3,29 +3,29 @@
 
 <MudForm>
     <MudTextField @bind-Value="_name"
+                  @bind-Value:after="OnFieldChanged"
                   Label="Name"
-                  Immediate="true"
-                  OnKeyUp="OnFieldChanged" />
+                  Immediate="true" />
 
     <MudTextField @bind-Value="_hostAddress"
+                  @bind-Value:after="OnFieldChanged"
                   Label="Host Address (IP or hostname)"
                   Required="true"
                   RequiredError="Host address is required"
                   Immediate="true"
-                  OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
     <MudTextField @bind-Value="_username"
+                  @bind-Value:after="OnFieldChanged"
                   Label="Username"
                   Immediate="true"
-                  OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
     <MudTextField @bind-Value="_password"
+                  @bind-Value:after="OnFieldChanged"
                   Label="Password (leave empty to keep the current one)"
                   InputType="InputType.Password"
                   Immediate="true"
-                  OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
     <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
@@ -127,8 +127,8 @@
                            _retryIntervalSeconds is >= FritzBox.MinimumIntervalSeconds and <= FritzBox.MaximumIntervalSeconds;
 
     public bool IsDirty => _name != _originalName ||
-                           _hostAddress != _originalHostAddress ||
-                           _username != _originalUsername ||
+                           Normalize(_hostAddress) != Normalize(_originalHostAddress) ||
+                           Normalize(_username) != Normalize(_originalUsername) ||
                            !string.IsNullOrEmpty(_password) ||
                            _certificatePin != _originalCertificatePin ||
                            _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
@@ -145,11 +145,28 @@
             _hostAddress = RouterSubject.HostAddress;
             _username = RouterSubject.Username;
             _certificatePin = RouterSubject.CertificatePin;
-            _pollingIntervalSeconds = (int)RouterSubject.PollingInterval.TotalSeconds;
-            _retryIntervalSeconds = (int)RouterSubject.RetryInterval.TotalSeconds;
+
+            // Clamps a value a previous, looser version of the library (or a hand-edited configuration file) could
+            // have stored outside the current range, so the dialog does not open already stuck on IsValid's range
+            // check with no field that explains why.
+            _pollingIntervalSeconds = ClampInterval((int)RouterSubject.PollingInterval.TotalSeconds);
+            _retryIntervalSeconds = ClampInterval((int)RouterSubject.RetryInterval.TotalSeconds);
         }
 
         RememberOriginals();
+    }
+
+    private static int ClampInterval(int seconds) =>
+        Math.Clamp(seconds, FritzBox.MinimumIntervalSeconds, FritzBox.MaximumIntervalSeconds);
+
+    /// <summary>
+    /// Collapses blank to null so a user clearing a field back to what it loaded as (null) is not seen as a
+    /// change, and so saving does not turn a stored null into a stored "".
+    /// </summary>
+    private static string? Normalize(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
 
     private void RememberOriginals()
@@ -178,17 +195,43 @@
     {
         if (RouterSubject != null && IsValid)
         {
-            RouterSubject.Name = _name;
-            RouterSubject.HostAddress = _hostAddress?.Trim();
-            RouterSubject.Username = _username;
+            // Writes only what actually changed here: the router itself can update CertificatePin (and other
+            // properties) between this dialog loading its values and the user saving, and writing every field
+            // unconditionally would overwrite that with the stale value this dialog loaded.
+            if (_name != _originalName)
+            {
+                RouterSubject.Name = _name;
+            }
+
+            if (Normalize(_hostAddress) != Normalize(_originalHostAddress))
+            {
+                RouterSubject.HostAddress = Normalize(_hostAddress);
+            }
+
+            if (Normalize(_username) != Normalize(_originalUsername))
+            {
+                RouterSubject.Username = Normalize(_username);
+            }
+
             if (!string.IsNullOrEmpty(_password))
             {
                 RouterSubject.Password = _password;
             }
 
-            RouterSubject.CertificatePin = _certificatePin;
-            RouterSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
-            RouterSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
+            if (_certificatePin != _originalCertificatePin)
+            {
+                RouterSubject.CertificatePin = _certificatePin;
+            }
+
+            if (_pollingIntervalSeconds != _originalPollingIntervalSeconds)
+            {
+                RouterSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+            }
+
+            if (_retryIntervalSeconds != _originalRetryIntervalSeconds)
+            {
+                RouterSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
+            }
 
             _password = null;
             RememberOriginals();
