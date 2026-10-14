@@ -26,10 +26,10 @@ public class FritzBoxPollerTests
         Assert.Equal("203.0.113.7", snapshot.Internet.ExternalIpAddress);
         Assert.Equal("2001:db8::7", snapshot.Internet.ExternalIpv6Address);
         Assert.Equal(TimeSpan.FromHours(2), snapshot.Internet.Uptime);
-        Assert.Equal(40m, snapshot.Internet.MaximumUploadRate);
-        Assert.Equal(250m, snapshot.Internet.MaximumDownloadRate);
         Assert.Equal(5m, snapshot.Traffic!.UploadRate);
         Assert.Equal(120m, snapshot.Traffic.DownloadRate);
+        Assert.Equal(40m, snapshot.Traffic.MaximumUploadRate);
+        Assert.Equal(250m, snapshot.Traffic.MaximumDownloadRate);
         Assert.Equal([FritzBoxWlanRoles.Band24, FritzBoxWlanRoles.Band5, FritzBoxWlanRoles.Guest], snapshot.Wlans.Select(wlan => wlan.Role));
         Assert.False(snapshot.Wlans[2].IsEnabled);
         Assert.Equal(FakeFritzBox.GuestWlanServiceType, snapshot.Wlans[2].ServiceType);
@@ -203,7 +203,6 @@ public class FritzBoxPollerTests
         Assert.Null(snapshot.Internet!.ExternalIpv6Address);
         Assert.True(snapshot.Internet.IsConnected);
         Assert.Equal("203.0.113.7", snapshot.Internet.ExternalIpAddress);
-        Assert.Equal(40m, snapshot.Internet.MaximumUploadRate);
     }
 
     [Fact]
@@ -211,7 +210,6 @@ public class FritzBoxPollerTests
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        fake.Faults["GetCommonLinkProperties"] = 401;
         fake.Faults["GetStatusInfo"] = 401;
         fake.Faults["GetExternalIPAddress"] = 401;
         fake.Faults["GetAppRemoteInfo"] = 401;
@@ -222,6 +220,25 @@ public class FritzBoxPollerTests
 
         // Assert
         Assert.Null(snapshot.Internet);
+    }
+
+    [Fact]
+    public async Task WhenAnEthernetWanReportsItsLineSpeed_ThenTheMaximumRatesAreInMegabitsPerSecond()
+    {
+        // Arrange: the online monitor of a FRITZ!Box 4060 on a 2.5 Gbit/s port, in bytes per second.
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.Answers[$"{Tr64Services.WanCommonInterfaceConfig}#X_AVM-DE_GetOnlineMonitor"] =
+            "<NewTotalNumberSyncGroups>1</NewTotalNumberSyncGroups><Newmax_ds>312500000</Newmax_ds><Newmax_us>312500000</Newmax_us>" +
+            "<Newds_current_bps>108410,101566</Newds_current_bps><Newus_current_bps>87291,64364</Newus_current_bps>";
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2500m, snapshot.Traffic!.MaximumDownloadRate);
+        Assert.Equal(2500m, snapshot.Traffic.MaximumUploadRate);
+        Assert.Equal(108.41m, snapshot.Traffic.DownloadRate);
     }
 
     [Fact]

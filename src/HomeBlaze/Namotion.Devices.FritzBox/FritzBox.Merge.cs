@@ -71,6 +71,8 @@ public partial class FritzBox
         ApplyInternet(snapshot.Internet);
         UploadRate = snapshot.Traffic?.UploadRate;
         DownloadRate = snapshot.Traffic?.DownloadRate;
+        MaximumUploadRate = snapshot.Traffic?.MaximumUploadRate;
+        MaximumDownloadRate = snapshot.Traffic?.MaximumDownloadRate;
     }
 
     private void ApplyRouterInfo(RouterInfo router)
@@ -88,8 +90,6 @@ public partial class FritzBox
         ExternalIpAddress = internet?.ExternalIpAddress;
         ExternalIpv6Address = internet?.ExternalIpv6Address;
         InternetConnectionUptime = internet?.Uptime;
-        MaximumUploadRate = internet?.MaximumUploadRate;
-        MaximumDownloadRate = internet?.MaximumDownloadRate;
     }
 
     /// <returns>The hosts by normalized MAC address, without entries without an address; the last of repeated

@@ -101,25 +101,23 @@ internal static class FritzBoxPoller
     private static async Task<InternetInfo?> ReadInternetAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
     {
         var serviceType = connection.InternetServiceType;
-        var linkTask = connection.ReadOrDefaultAsync(Tr64Services.WanCommonInterfaceConfig, "GetCommonLinkProperties", null, cancellationToken);
         var statusTask = ReadInternetServiceAnswerAsync(connection, serviceType, "GetStatusInfo", cancellationToken);
         var addressTask = ReadInternetServiceAnswerAsync(connection, serviceType, "GetExternalIPAddress", cancellationToken);
         var ipv6Task = connection.HasService(Tr64Services.AppSetup)
             ? connection.ReadOrDefaultAsync(Tr64Services.AppSetup, "GetAppRemoteInfo", null, cancellationToken)
             : NoAnswer;
-        await Task.WhenAll(linkTask, statusTask, addressTask, ipv6Task);
+        await Task.WhenAll(statusTask, addressTask, ipv6Task);
 
-        return ToInternetInfo(await linkTask, await statusTask, await addressTask, await ipv6Task);
+        return ToInternetInfo(await statusTask, await addressTask, await ipv6Task);
     }
 
     private static Task<UpnpSoapResponse?> ReadInternetServiceAnswerAsync(
         FritzBoxConnection connection, string? serviceType, string action, CancellationToken cancellationToken) =>
         serviceType is null ? NoAnswer : connection.ReadOrDefaultAsync(serviceType, action, null, cancellationToken);
 
-    private static InternetInfo? ToInternetInfo(
-        UpnpSoapResponse? link, UpnpSoapResponse? status, UpnpSoapResponse? address, UpnpSoapResponse? ipv6)
+    private static InternetInfo? ToInternetInfo(UpnpSoapResponse? status, UpnpSoapResponse? address, UpnpSoapResponse? ipv6)
     {
-        if (IsEntirelyUnanswered(link, status, address, ipv6))
+        if (status is null && address is null && ipv6 is null)
         {
             return null;
         }
@@ -128,14 +126,8 @@ internal static class FritzBoxPoller
             GetIsConnected(status),
             StringValues.NullIfBlank(address?.GetString("NewExternalIPAddress")),
             StringValues.NullIfBlank(ipv6?.GetString("NewExternalIPv6Address")),
-            ToTimeSpan(status?.GetInt64("NewUptime")),
-            ToMegabitsPerSecond(link?.GetInt64("NewLayer1UpstreamMaxBitRate")),
-            ToMegabitsPerSecond(link?.GetInt64("NewLayer1DownstreamMaxBitRate")));
+            ToTimeSpan(status?.GetInt64("NewUptime")));
     }
-
-    private static bool IsEntirelyUnanswered(
-        UpnpSoapResponse? link, UpnpSoapResponse? status, UpnpSoapResponse? address, UpnpSoapResponse? ipv6) =>
-        link is null && status is null && address is null && ipv6 is null;
 
     private static bool? GetIsConnected(UpnpSoapResponse? status)
     {
@@ -152,10 +144,13 @@ internal static class FritzBoxPoller
             return null;
         }
 
-        // The online monitor reports bytes per second.
+        // The online monitor reports bytes per second, also for the line speed. GetCommonLinkProperties is not used
+        // for it: an Ethernet WAN reports its Layer1 rates there in kbit/s instead of bit/s.
         return new TrafficInfo(
             GetMostRecentSample(answer.GetString("Newus_current_bps")) / 1000m,
-            GetMostRecentSample(answer.GetString("Newds_current_bps")) / 1000m);
+            GetMostRecentSample(answer.GetString("Newds_current_bps")) / 1000m,
+            ToMegabitsPerSecond(answer.GetInt64("Newmax_us")),
+            ToMegabitsPerSecond(answer.GetInt64("Newmax_ds")));
     }
 
     private static async Task<IReadOnlyList<WlanInfo>> ReadWlansAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
@@ -246,5 +241,5 @@ internal static class FritzBoxPoller
 
     private static TimeSpan? ToTimeSpan(long? seconds) => seconds is { } value ? TimeSpan.FromSeconds(value) : null;
 
-    private static decimal? ToMegabitsPerSecond(long? bitsPerSecond) => bitsPerSecond / 1_000_000m;
+    private static decimal? ToMegabitsPerSecond(long? bytesPerSecond) => bytesPerSecond * 8 / 1_000_000m;
 }

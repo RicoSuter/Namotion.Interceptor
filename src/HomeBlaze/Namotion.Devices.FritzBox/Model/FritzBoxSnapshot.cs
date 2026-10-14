@@ -24,20 +24,19 @@ internal sealed record RouterInfo(
     TimeSpan? Uptime);
 
 /// <summary>
-/// The state of the internet connection. <c>MaximumUploadRate</c> and <c>MaximumDownloadRate</c> are in Mbit/s.
+/// The state of the internet connection.
 /// </summary>
 internal sealed record InternetInfo(
     bool? IsConnected,
     string? ExternalIpAddress,
     string? ExternalIpv6Address,
-    TimeSpan? Uptime,
-    decimal? MaximumUploadRate,
-    decimal? MaximumDownloadRate);
+    TimeSpan? Uptime);
 
 /// <summary>
-/// The current traffic on the internet connection. <c>UploadRate</c> and <c>DownloadRate</c> are in kB/s.
+/// The traffic on the internet connection. <c>UploadRate</c> and <c>DownloadRate</c> are the current rates in kB/s,
+/// <c>MaximumUploadRate</c> and <c>MaximumDownloadRate</c> the line speed in Mbit/s.
 /// </summary>
-internal sealed record TrafficInfo(decimal? UploadRate, decimal? DownloadRate);
+internal sealed record TrafficInfo(decimal? UploadRate, decimal? DownloadRate, decimal? MaximumUploadRate, decimal? MaximumDownloadRate);
 
 /// <summary>
 /// One WLAN of the router. <c>Role</c> is the key in <c>FritzBox.Wlans</c>. <c>ServiceType</c> is the

@@ -393,11 +393,8 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
                 "<NewUpgradeAvailable>0</NewUpgradeAvailable><NewX_AVM-DE_Version></NewX_AVM-DE_Version>",
             (Tr64Services.Layer3Forwarding, "GetDefaultConnectionService") =>
                 "<NewDefaultConnectionService>1.WANPPPConnection.1</NewDefaultConnectionService>",
-            (Tr64Services.WanCommonInterfaceConfig, "GetCommonLinkProperties") =>
-                "<NewWANAccessType>DSL</NewWANAccessType><NewLayer1UpstreamMaxBitRate>40000000</NewLayer1UpstreamMaxBitRate>" +
-                "<NewLayer1DownstreamMaxBitRate>250000000</NewLayer1DownstreamMaxBitRate><NewPhysicalLinkStatus>Up</NewPhysicalLinkStatus>",
             (Tr64Services.WanCommonInterfaceConfig, "X_AVM-DE_GetOnlineMonitor") =>
-                "<NewTotalNumberSyncGroups>1</NewTotalNumberSyncGroups><Newus_current_bps>5000,4000,3000</Newus_current_bps><Newds_current_bps>120000,1000,0</Newds_current_bps>",
+                "<NewTotalNumberSyncGroups>1</NewTotalNumberSyncGroups><Newmax_ds>31250000</Newmax_ds><Newmax_us>5000000</Newmax_us><Newus_current_bps>5000,4000,3000</Newus_current_bps><Newds_current_bps>120000,1000,0</Newds_current_bps>",
             (Tr64Services.WanPppConnection, "GetStatusInfo") =>
                 "<NewConnectionStatus>Connected</NewConnectionStatus><NewLastConnectionError>ERROR_NONE</NewLastConnectionError><NewUptime>7200</NewUptime>",
             (Tr64Services.WanPppConnection, "GetExternalIPAddress") =>

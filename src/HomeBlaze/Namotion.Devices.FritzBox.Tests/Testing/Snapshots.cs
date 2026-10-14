@@ -40,8 +40,8 @@ internal static class Snapshots
         new(
             Router(),
             null,
-            new InternetInfo(true, "203.0.113.7", "2001:db8::7", TimeSpan.FromHours(2), 40m, 250m),
-            new TrafficInfo(5m, 120m),
+            new InternetInfo(true, "203.0.113.7", "2001:db8::7", TimeSpan.FromHours(2)),
+            new TrafficInfo(5m, 120m, 40m, 250m),
             wlans ?? Wlans(),
             hosts ?? Hosts(),
             mesh ?? Mesh());
