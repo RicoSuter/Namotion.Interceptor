@@ -71,6 +71,21 @@ public class FritzBoxConnectionTests
     }
 
     [Fact]
+    public async Task WhenTheRouterChallengesWithBasic_ThenTheLoginFailsWithoutSendingThePassword()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.ChallengesWithBasic = true;
+        using var connection = await FritzBoxConnection.OpenAsync(Options(fake), NullLogger.Instance, CancellationToken.None);
+
+        // Act
+        await Assert.ThrowsAsync<FritzBoxLoginException>(() => connection.CheckLoginAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal(0, fake.BasicAuthorizationHeaders);
+    }
+
+    [Fact]
     public async Task WhenAnOptionalActionIsRefused_ThenReadingItReturnsNull()
     {
         // Arrange

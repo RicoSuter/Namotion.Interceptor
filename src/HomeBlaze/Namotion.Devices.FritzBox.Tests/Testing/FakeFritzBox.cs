@@ -33,6 +33,7 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     private int _securityPortRequests;
     private int _secureRequests;
     private int _plainAuthorizationHeaders;
+    private int _basicAuthorizationHeaders;
     private volatile bool _isGuestWlanEnabled;
     private Hold? _armedGuestWlanHold;
 
@@ -106,6 +107,16 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     /// The requests received over plain HTTP that carried an <c>Authorization</c> header.
     /// </summary>
     internal int PlainAuthorizationHeaders => Volatile.Read(ref _plainAuthorizationHeaders);
+
+    /// <summary>
+    /// The requests received over HTTPS that carried an <c>Authorization: Basic</c> header.
+    /// </summary>
+    internal int BasicAuthorizationHeaders => Volatile.Read(ref _basicAuthorizationHeaders);
+
+    /// <summary>
+    /// Whether an unauthenticated request is challenged with Basic instead of Digest. A Basic answer is never accepted.
+    /// </summary>
+    internal bool ChallengesWithBasic { get; set; }
 
     internal bool IsGuestWlanEnabled
     {
@@ -201,6 +212,10 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         }
 
         Interlocked.Increment(ref _secureRequests);
+        if (request.Headers.Authorization.ToString().StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+        {
+            Interlocked.Increment(ref _basicAuthorizationHeaders);
+        }
 
         if (HttpMethods.IsGet(request.Method))
         {
@@ -227,7 +242,9 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             }
 
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            context.Response.Headers.WWWAuthenticate = $"Digest realm=\"{Realm}\", nonce=\"{Nonce}\", algorithm=MD5, qop=\"auth\"";
+            context.Response.Headers.WWWAuthenticate = ChallengesWithBasic
+                ? $"Basic realm=\"{Realm}\""
+                : $"Digest realm=\"{Realm}\", nonce=\"{Nonce}\", algorithm=MD5, qop=\"auth\"";
             return;
         }
 
