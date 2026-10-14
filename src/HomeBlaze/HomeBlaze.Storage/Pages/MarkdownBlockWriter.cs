@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Services;
@@ -215,22 +216,47 @@ public static class MarkdownBlockWriter
     }
 
     // Whether the line between the two offsets has text that is no head line and no closing line of a block.
-    // Next to such a fence line, and next to an empty line, nothing is joined. A fence after four columns of
-    // indentation, which a tab always gives, is code, and code continues a paragraph before it like any text.
+    // Next to such a fence line, and next to an empty line, nothing is joined. Mirrors TryReadFence and IsHead
+    // of MarkdownBlockContainerParser, so a change of what a fence line is there is a change here: a fence
+    // after four columns of indentation, which a tab always gives, is code, and a fence before text that starts
+    // no head line, such as a time, is text. Both continue a paragraph before them.
     private static bool IsTextLine(string source, int lineStart, int nextLineStart)
     {
-        var line = source.AsSpan(lineStart, nextLineStart - lineStart).TrimEnd();
-        var text = line.TrimStart();
-        var indentation = line[..^text.Length];
-        var isFenceLine =
-            text.Length >= MarkdownBlockFence.MinimumLength &&
-            text[0] == MarkdownBlockFence.Character &&
-            text[1] == MarkdownBlockFence.Character &&
-            indentation.Length < 4 &&
-            !indentation.Contains('\t');
+        // Only spaces and tabs are indentation, and only a line of nothing else is empty.
+        var line = source.AsSpan(lineStart, nextLineStart - lineStart).TrimEnd("\r\n");
+        var text = line.TrimStart(" \t");
+        if (text.IsEmpty)
+        {
+            return false;
+        }
 
-        return text.Length > 0 && !isFenceLine;
+        var indentation = line[..^text.Length];
+        var fenceLength = text.IndexOfAnyExcept(MarkdownBlockFence.Character);
+        if (fenceLength < 0)
+        {
+            fenceLength = text.Length;
+        }
+
+        if (fenceLength < MarkdownBlockFence.MinimumLength || indentation.Length >= 4 || indentation.Contains('\t'))
+        {
+            return true;
+        }
+
+        foreach (var character in text[fenceLength..])
+        {
+            if (!IsMarkdownWhiteSpace(character))
+            {
+                return !char.IsLetter(character) && character != '_' && character != '{';
+            }
+        }
+
+        return false;
     }
+
+    // What Markdig trims off the text after a fence: the white space of CommonMark, which has no vertical tab.
+    private static bool IsMarkdownWhiteSpace(char character) =>
+        character is ' ' or '\t' or '\f' or '\r' or '\n' ||
+        char.GetUnicodeCategory(character) == UnicodeCategory.SpaceSeparator;
 
     /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/>.</summary>
     public static string Indent(string text, string indentation, string lineEnding) =>

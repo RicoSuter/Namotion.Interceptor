@@ -1,4 +1,6 @@
+using System.Text;
 using Markdig.Extensions.Footnotes;
+using Markdig.Renderers.Html;
 using Markdig.Syntax;
 
 namespace HomeBlaze.Storage.Pages;
@@ -21,11 +23,13 @@ internal static class MarkdownBlockAlignment
     /// <returns>
     /// Null when the change did more than insert or remove its blocks. Every other block, of every kind, must
     /// have the same kind, fence, head line, closing line and json block as before, the lines that the change
-    /// explains, and the same block around it. The first inserted block must be a slot block directly inside
-    /// <paramref name="owner"/>, and every inserted block must end on the inserted lines. Every leaf block of the
-    /// document that does not start on a line of the change, such as a paragraph, a heading or a code block,
-    /// must have the same kind, the same text and the same containers around it as before, and every container
-    /// that does not start there, such as a list or a quote, must still be a container of its own.
+    /// explains, and the same block around it. Every inserted block must be a slot block directly inside
+    /// <paramref name="owner"/> or stand inside another inserted block, and must end on the inserted lines.
+    /// Every leaf block of the document that does not start on a line of the change, such as a paragraph, a
+    /// heading or a code block, must have the same kind, the same text, the same classes and properties of its
+    /// attributes and the same containers around it as before, and every container that does not start there,
+    /// such as a list or a quote, must still be a container of its own with the same classes and properties.
+    /// Link reference definitions and the id of a block are not compared.
     /// </returns>
     public static int[]? TryAlign(
         MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
@@ -107,9 +111,9 @@ internal static class MarkdownBlockAlignment
             : null;
     }
 
-    // The kind of a block of the document, the containers around it from the document inwards, and for a leaf
-    // block where its text is.
-    private readonly record struct DocumentBlockDescription(Type Kind, string Containers, int Start, int Length);
+    // The kind of a block of the document, the containers around it from the document inwards, the classes and
+    // the properties of its attributes, and for a leaf block where its text is.
+    private readonly record struct DocumentBlockDescription(Type Kind, string Containers, string Attributes, int Start, int Length);
 
     private static bool HasSameDocumentBlocks(MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit)
     {
@@ -126,6 +130,7 @@ internal static class MarkdownBlockAlignment
             var newBlock = newBlocks[index];
             if (oldBlock.Kind != newBlock.Kind ||
                 !string.Equals(oldBlock.Containers, newBlock.Containers, StringComparison.Ordinal) ||
+                !string.Equals(oldBlock.Attributes, newBlock.Attributes, StringComparison.Ordinal) ||
                 !before.Source.AsSpan(oldBlock.Start, oldBlock.Length).SequenceEqual(after.Source.AsSpan(newBlock.Start, newBlock.Length)))
             {
                 return false;
@@ -136,9 +141,9 @@ internal static class MarkdownBlockAlignment
     }
 
     // Every block of the Markdig document that does not start on the given lines, in the order of the document:
-    // its kind and the containers around it, and for a leaf block its text. A change that only inserts or removes
-    // its own lines leaves this list as it was. The containers are listed themselves, because two lists that
-    // become one keep every leaf block as it is.
+    // its kind, the containers around it and its attributes, and for a leaf block its text. A change that only
+    // inserts or removes its own lines leaves this list as it was. The containers are listed themselves, because
+    // two lists that become one keep every leaf block as it is.
     private static List<DocumentBlockDescription> DescribeDocumentBlocks(MarkdownPage page, int skippedLine, int skippedLineCount)
     {
         var source = page.Source;
@@ -165,7 +170,7 @@ internal static class MarkdownBlockAlignment
                     // The group of the footnotes has no line of its own. Its footnotes are listed.
                     if (!isSkipped && child is not FootnoteGroup)
                     {
-                        result.Add(new DocumentBlockDescription(child.GetType(), containers, 0, 0));
+                        result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), 0, 0));
                     }
 
                     // A block of the page is named by its head line, so that text which moves into the block
@@ -179,10 +184,43 @@ internal static class MarkdownBlockAlignment
                     var start = Math.Clamp(child.Span.Start, 0, source.Length);
                     var end = Math.Clamp(child.Span.End + 1, start, source.Length);
                     var length = source.AsSpan(start, end - start).TrimEnd().Length;
-                    result.Add(new DocumentBlockDescription(child.GetType(), containers, start, length));
+                    result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), start, length));
                 }
             }
         }
+    }
+
+    // The classes and the properties of a block, which a line that holds only attributes gives to the block
+    // after it, whatever that is after the change. Without the id: Markdig gives every heading one and numbers
+    // the ids of headings with the same text, so a removed heading changes the id of another one.
+    private static string DescribeAttributes(Block block)
+    {
+        var attributes = block.TryGetAttributes();
+        var classes = attributes?.Classes;
+        var properties = attributes?.Properties;
+        if (classes is not { Count: > 0 } && properties is not { Count: > 0 })
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        if (classes is not null)
+        {
+            foreach (var name in classes)
+            {
+                builder.Append('.').Append(name).Append('\n');
+            }
+        }
+
+        if (properties is not null)
+        {
+            foreach (var (key, value) in properties)
+            {
+                builder.Append(key).Append('=').Append(value).Append('\n');
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static ReadOnlySpan<char> GetLine(string source, int offset)

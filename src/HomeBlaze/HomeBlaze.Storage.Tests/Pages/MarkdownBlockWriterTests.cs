@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using HomeBlaze.Storage.Pages;
+using Markdig.Syntax;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -447,13 +448,16 @@ public class MarkdownBlockWriterTests
     }
 
     [Theory]
-    [InlineData("> ::: {.note}\n> styled")]
-    [InlineData("- first\n- second")]
-    [InlineData("a paragraph")]
-    public void WhenRemovalWouldJoinTheTextBeforeAndAfterTheBlock_ThenAnEmptyLineStaysInItsPlace(string textBefore)
+    [InlineData("> ::: {.note}\n> styled", "text of the panel")]
+    [InlineData("- first\n- second", "text of the panel")]
+    [InlineData("a paragraph", "text of the panel")]
+    // A fence before text that starts no head line is text for the parser.
+    [InlineData("a paragraph", ":: 12:30 lunch")]
+    [InlineData(":: 12:30 lunch", "text of the panel")]
+    public void WhenRemovalWouldJoinTheTextBeforeAndAfterTheBlock_ThenAnEmptyLineStaysInItsPlace(string textBefore, string textAfter)
     {
         // Arrange
-        var source = $":: Demo.Panel\n{textBefore}\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
+        var source = $":: Demo.Panel\n{textBefore}\n::: Tile\ntwo\n:::\n{textAfter}\n::\n";
         var tile = OwnerOf(source).Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
 
         // Act
@@ -461,7 +465,7 @@ public class MarkdownBlockWriterTests
 
         // Assert
         var removedLine = textBefore.Count(character => character == '\n') + 3;
-        Assert.Equal($":: Demo.Panel\n{textBefore}\n\ntext of the panel\n::\n", result);
+        Assert.Equal($":: Demo.Panel\n{textBefore}\n\n{textAfter}\n::\n", result);
         Assert.Equal(new MarkdownLineEdit(removedLine, 3, 1), edit);
     }
 
@@ -518,6 +522,48 @@ public class MarkdownBlockWriterTests
         var emptyLine = expectedEmptyLineCount == 1 ? "\n" : string.Empty;
         Assert.Equal($":: Demo.Panel\na paragraph\n{emptyLine}{lineAfter}\n::\n", result);
         Assert.Equal(new MarkdownLineEdit(3, 2, expectedEmptyLineCount), edit);
+    }
+
+    [Theory]
+    [InlineData(":: 12:30 lunch")]
+    [InlineData("::: :-)")]
+    [InlineData(":: :")]
+    [InlineData(":: 9 lives")]
+    [InlineData("::")]
+    [InlineData(":::")]
+    [InlineData("::::")]
+    [InlineData("::: Tile")]
+    [InlineData(":::Tile")]
+    [InlineData(":: _name")]
+    [InlineData("::: {.note}")]
+    [InlineData(":: {")]
+    [InlineData(":: \u00C4rger")]
+    [InlineData(": a definition")]
+    [InlineData(" :: Demo.Leaf")]
+    [InlineData("   ::: 12:30")]
+    [InlineData("\u00A0:: Demo.Leaf")]
+    [InlineData("::\u00A0")]
+    [InlineData("::\u00A0Tile")]
+    [InlineData(":: \u000B")]
+    [InlineData("\u000B:: Demo.Leaf")]
+    [InlineData("::\u000C")]
+    [InlineData("::\u2003Tile")]
+    [InlineData(":: \t")]
+    [InlineData("\u00A0")]
+    public void WhenLineAfterTheBlockIsNotEmpty_ThenAnEmptyLineStaysExactlyWhenTheParserReadsTheLineAsText(string lineAfter)
+    {
+        // Arrange: the parser opens or closes a block on a fence line, and on no other line.
+        var source = $":: Demo.Panel\na paragraph\n::: Tile\n:::\n{lineAfter}\n";
+        var page = MarkdownPageParser.Parse(source);
+        var tile = page.Blocks[0].Children.First(child => child.Kind == MarkdownBlockKind.Slot);
+        var isFenceLine = page.Document.Descendants<MarkdownBlockContainer>().Any(container =>
+            container.Line == 4 || (container.HasClosingLine && container.EndLine == 4));
+
+        // Act
+        MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Assert
+        Assert.Equal(isFenceLine ? 0 : 1, edit.InsertedLineCount);
     }
 
     [Fact]

@@ -1,6 +1,8 @@
 using HomeBlaze.Storage.Pages;
 using Markdig.Extensions.Footnotes;
+using Markdig.Renderers.Html;
 using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -348,10 +350,10 @@ public class MarkdownBlockStructureTests
     [Theory]
     // The heading in the tile is the first of the page, so Markdig lists the link definition after the panel
     // before the removal and at the end of the page after it.
-    [InlineData("intro\n\n:: Demo.Panel\n::: Tile\n# A heading\n:::\n::\n\ntext with [a link]\n\n:: Demo.Other\n::\n\n[a link]: http://example.com\n")]
+    [InlineData("intro\n\n:: Demo.Panel\n::: Tile\n# A heading\n:::\n::\n\ntext with [a link]\n\n:: Demo.Other\n::\n\n[a link]: http://example.com\n", new[] { 0, -1, 1 })]
     // The span of the indented code takes the empty line after it once the tile is gone.
-    [InlineData(":: Demo.Panel\n    indented code\n::: Tile\n\n::\n")]
-    public void WhenRemovalChangesOnlyWhereMarkdigListsOrEndsOtherText_ThenAlignmentSucceeds(string source)
+    [InlineData(":: Demo.Panel\n    indented code\n::: Tile\n\n::\n", new[] { 0, -1 })]
+    public void WhenRemovalChangesOnlyWhereMarkdigListsOrEndsOtherText_ThenAlignmentSucceeds(string source, int[] expected)
     {
         // Arrange
         var before = MarkdownPageParser.Parse(source);
@@ -362,7 +364,88 @@ public class MarkdownBlockStructureTests
         var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
 
         // Assert
-        Assert.NotNull(map);
+        Assert.Equal(expected, map);
+    }
+
+    [Fact]
+    public void WhenRemovalBindsAnAttributeLineToTheTextAfterTheBlock_ThenAlignmentFails()
+    {
+        // Arrange: Markdig gives the attributes of a line that holds nothing else to the block after it, which is
+        // the tile before the removal and the text of the panel after it, also across an empty line.
+        const string source = ":: Demo.Panel\n{.highlight}\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var after = MarkdownPageParser.Parse(result);
+        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+        Assert.Null(before.Document.Descendants<ParagraphBlock>().Last().TryGetAttributes());
+        Assert.Equal(["highlight"], after.Document.Descendants<ParagraphBlock>().Single().TryGetAttributes()?.Classes);
+    }
+
+    [Fact]
+    public void WhenRemovedBlockHoldsAHeadingWhoseTextStandsLaterInThePage_ThenAlignmentSucceeds()
+    {
+        // Arrange: Markdig numbers the ids of headings with the same text, so the heading after the panel gets
+        // another id once the tile is gone. Nothing of its text or its place changes.
+        const string source = ":: Demo.Panel\n::: Tile\n# A heading\n:::\n::\n\n# A heading\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var after = MarkdownPageParser.Parse(result);
+        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+
+        // Assert
+        Assert.Equal(new[] { 0, -1 }, map);
+        Assert.NotEqual(
+            before.Document.Descendants<HeadingBlock>().Last().TryGetAttributes()?.Id,
+            after.Document.Descendants<HeadingBlock>().Single().TryGetAttributes()?.Id);
+    }
+
+    [Fact]
+    public void WhenRemovedBlockHoldsTheOnlyReferenceToAFootnote_ThenAlignmentFails()
+    {
+        // Arrange: Markdig drops a footnote that nothing refers to, so the text of the footnote outside the tile
+        // is gone from the document. That follows from content that the user removes, and it is refused all the same.
+        const string source = ":: Demo.Panel\n::: Tile\ntext with a note[^1]\n:::\n::\n\n[^1]: The note.\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var after = MarkdownPageParser.Parse(result);
+        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+        Assert.Single(before.Document.Descendants<Footnote>());
+        Assert.Empty(after.Document.Descendants<Footnote>());
+    }
+
+    [Fact]
+    public void WhenRemovedBlockHoldsALinkDefinitionThatTextOutsideUses_ThenAlignmentSucceedsAndTheTextLosesItsLink()
+    {
+        // Arrange: link reference definitions are not compared, so the removal is accepted although the text
+        // after the panel is no link any more. That follows from content that the user removes.
+        const string source = ":: Demo.Panel\n::: Tile\n[a link]: http://example.com\n:::\n::\n\ntext with [a link]\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var after = MarkdownPageParser.Parse(result);
+        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+
+        // Assert
+        Assert.Equal(new[] { 0, -1 }, map);
+        Assert.Single(before.Document.Descendants<LinkInline>());
+        Assert.Empty(after.Document.Descendants<LinkInline>());
     }
 
     [Fact]
@@ -439,6 +522,7 @@ public class MarkdownBlockStructureTests
         var random = new Random(20261014);
         var cleanRemovals = 0;
         var refusedRemovals = 0;
+        var removalsRefusedForTheDocumentOnly = 0;
         var inserts = 0;
 
         for (var round = 0; round < 400; round++)
@@ -473,6 +557,11 @@ public class MarkdownBlockStructureTests
                     if (map is null)
                     {
                         refusedRemovals++;
+                        if (hasSameBlocks)
+                        {
+                            removalsRefusedForTheDocumentOnly++;
+                        }
+
                         continue;
                     }
 
@@ -501,6 +590,8 @@ public class MarkdownBlockStructureTests
                     AssertAppendGivesTheLastLineTheLineEndingOfThePage(source, result, edit, placement.LineEnding, context);
                     Assert.True(Describe(before, 0, 0).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount)), context);
                     Assert.True(DescribeDocument(before, 0, 0).SequenceEqual(DescribeDocument(after, edit.Line, edit.InsertedLineCount)), $"The document changed.\n{context}");
+                    // The one known page shape that refuses an insert is a placement inside a list item, which
+                    // WhenPlacementIsInsideAListItem_ThenTheNewBlockIsNoSlotBlockAndAlignmentFails shows.
                     Assert.True(map is not null, $"The insert was refused.\n{context}");
                     AssertMapKeepsHeadLines(before, after, map!, context);
                     Assert.Equal(tiles.Count + 1, after.AllBlocks[map![owner.Index]].Children.Count(child => child.Kind == MarkdownBlockKind.Slot));
@@ -510,8 +601,13 @@ public class MarkdownBlockStructureTests
             }
         }
 
-        // All three outcomes occur, so none of the comparisons above is empty.
-        Assert.True(inserts > 0 && cleanRemovals > 0 && refusedRemovals > 0, $"{inserts} inserts, {cleanRemovals} removals, {refusedRemovals} refused removals");
+        // All three outcomes occur, so none of the comparisons above is empty, and so do removals that only the
+        // document refuses, so the description of the blocks alone does not decide every one of them.
+        var counters =
+            $"{inserts} inserts, {cleanRemovals} removals, {refusedRemovals} refused removals, " +
+            $"{removalsRefusedForTheDocumentOnly} of them for the document only";
+        Assert.True(inserts > 0 && cleanRemovals > 0 && refusedRemovals > 0, counters);
+        Assert.True(removalsRefusedForTheDocumentOnly > 0, counters);
     }
 
     // Every block of every kind that is not on the given lines: the head line of the block around it, its own
@@ -550,10 +646,11 @@ public class MarkdownBlockStructureTests
     }
 
     // Every block of the Markdig document that does not start on the given lines, in the order of the document:
-    // its kind, the containers around it from the block outwards, and for a leaf block its text. A block of the
-    // page is named by its head line. Equal lists before and after a change mean that every text outside the
-    // change is what it was and that no list or quote was joined or split. Written apart from the check on
-    // purpose, so that the two must agree.
+    // its kind, the containers around it from the block outwards, the classes and the properties of its attributes,
+    // and for a leaf block its text. A block of the page is named by its head line. The id of the attributes is
+    // left out, because Markdig numbers the ids of headings with the same text. Equal lists before and after a
+    // change mean that every text outside the change is what it was, with the attributes it had, and that no list
+    // or quote was joined or split. Written apart from the check on purpose, so that the two must agree.
     private static List<string> DescribeDocument(MarkdownPage page, int skippedLine, int skippedLineCount)
     {
         var lines = page.Source.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
@@ -579,7 +676,12 @@ public class MarkdownBlockStructureTests
             var text = block is LeafBlock && block.Span.End >= block.Span.Start
                 ? page.Source[block.Span.Start..Math.Min(block.Span.End + 1, page.Source.Length)]
                 : string.Empty;
-            result.Add($"{block.GetType().Name} in {string.Join(" < ", containers)}\n{text.Replace("\r", string.Empty).TrimEnd()}");
+            var attributes = block.TryGetAttributes();
+            var classes = string.Join(' ', attributes?.Classes ?? []);
+            var properties = string.Join(' ', (attributes?.Properties ?? []).Select(property => $"{property.Key}={property.Value}"));
+            result.Add(
+                $"{block.GetType().Name} in {string.Join(" < ", containers)} with [{classes}] [{properties}]\n" +
+                text.Replace("\r", string.Empty).TrimEnd());
         }
 
         return result;
