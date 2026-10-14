@@ -66,7 +66,7 @@ public class LayoutBlockSaveTests
             Assert.DoesNotContain("json", text);
             await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
 
-            // The buttons of the cell are beside the edit button of the widget in it, and not over it.
+            // The buttons of the cell are below the edit button of the widget in it, and not over it.
             var cell = page.Locator(".grid-cell.editing[style*='grid-column: 3 / span 1']");
             await Assertions.Expect(cell).ToContainTextAsync(motorName, new() { Timeout = Timeout });
             await Assertions.Expect(cell.GetByTitle("Edit Cell")).ToBeVisibleAsync();
@@ -75,8 +75,8 @@ public class LayoutBlockSaveTests
             var cellButtons = await GetBoxAsync(cell.Locator(".layout-item-actions"));
             var widgetButton = await GetBoxAsync(cell.GetByTestId("edit-subject-button"));
             Assert.True(
-                cellButtons.Right <= widgetButton.Left,
-                $"The buttons of the cell end at {cellButtons.Right} and cover the edit button of the widget, which starts at {widgetButton.Left}.");
+                widgetButton.Bottom <= cellButtons.Top,
+                $"The buttons of the cell start at {cellButtons.Top} and cover the edit button of the widget, which ends at {widgetButton.Bottom}.");
         });
     }
 
@@ -124,11 +124,11 @@ public class LayoutBlockSaveTests
             await Assertions.Expect(cell.GetByTitle("Edit Cell")).ToBeVisibleAsync();
             await Assertions.Expect(cell.GetByTitle("Delete", new() { Exact = true })).ToBeVisibleAsync();
 
-            // They are at the left corner of the cell, where nothing that the cell shows has buttons of its own.
+            // They are at the bottom right corner of the cell, away from where its content starts.
             var cellBox = await GetBoxAsync(cell);
             var buttons = await GetBoxAsync(cell.Locator(".layout-item-actions"));
-            Assert.InRange(buttons.Left - cellBox.Left, 0, 12);
-            Assert.InRange(buttons.Top - cellBox.Top, 0, 12);
+            Assert.InRange(cellBox.Right - buttons.Right, 0, 12);
+            Assert.InRange(cellBox.Bottom - buttons.Bottom, 0, 12);
 
             // A button that is visible can still be covered or take no clicks, so one of them is used.
             await cell.GetByTitle("Edit Cell").ClickAsync();
@@ -354,6 +354,8 @@ public class LayoutBlockSaveTests
     private sealed record Box(double Left, double Top, double Width, double Height)
     {
         public double Right => Left + Width;
+
+        public double Bottom => Top + Height;
     }
 
     // Left, top, width and height come from one call, so that a layout that is still moving cannot give values of different moments.

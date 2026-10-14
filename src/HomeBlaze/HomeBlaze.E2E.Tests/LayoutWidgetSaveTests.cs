@@ -100,8 +100,8 @@ public class LayoutWidgetSaveTests
         var node = page.Locator(".canvas-node.editing");
         await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = 30000 });
 
-        // The buttons of the node are at its top left and the one of the widget in it at its top right, so it is
-        // grabbed at its lower left.
+        // The buttons of the node are at its bottom right and the one of the widget in it at its top right, so it
+        // is grabbed at its lower left.
         var box = (await node.BoundingBoxAsync())!;
         var startX = box.X + box.Width / 4;
         var startY = box.Y + box.Height * 3 / 4;

@@ -14,14 +14,15 @@
 
 <style>
     /*
-     * The buttons of the item itself. They are at the left, because what the item shows has its own at the right.
-     * The place is relative to the nearest positioned element, which the layout makes the item. The content of an
-     * item takes no pointer events while the layout is edited, and the buttons are inside it on a canvas.
+     * The buttons of the item itself. They are at the bottom right: what the item shows starts at the top left,
+     * and it has its own edit button at the top right. The place is relative to the nearest positioned element,
+     * which the layout makes the item. The content of an item takes no pointer events while the layout is edited,
+     * and the buttons are inside it on a canvas.
      */
     .layout-item-actions {
         position: absolute;
-        top: 4px;
-        left: 4px;
+        bottom: 4px;
+        right: 4px;
         z-index: 10;
         display: flex;
         gap: 2px;
