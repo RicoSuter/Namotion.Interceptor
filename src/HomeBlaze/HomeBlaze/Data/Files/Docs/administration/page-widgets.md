@@ -14,7 +14,7 @@ Every other type that can be configured works as a block as well, see [Widgets](
 
 ## Sample Motors
 
-Several samples need a subject to show. They use two sample motors, the subject files `Pump.json` and `Fan.json` in the folder `widgets` next to this page. A path that starts with `../` starts at the folder of this page, so the samples refer to the motors as `../widgets/Pump` and `../widgets/Fan`, in a `Path` and in expressions. A sample that you copy to a page of your own needs the path of one of your subjects in their place.
+Several samples need a subject to show. They use the two [sample motors](widgets/basics.md#sample-motors) of the widget pages, the subject files `Pump.json` and `Fan.json` in the folder `widgets` next to this page. A path that starts with `../` starts at the folder of this page, so the samples refer to the motors as `../widgets/Pump` and `../widgets/Fan`, in a `Path` and in expressions. A sample that you copy to a page of your own needs the path of one of your subjects in their place.
 
 All samples on this page are written in the short form, where the closing line of the last block ends the sample and the text of the page goes on below it, see [Closing and Nesting](pages.md#closing-and-nesting). A name is unique on a page, so every name on this page, like the name of a tab, belongs to one sample only.
 
