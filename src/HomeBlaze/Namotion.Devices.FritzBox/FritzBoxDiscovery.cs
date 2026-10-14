@@ -65,10 +65,14 @@ public static class FritzBoxDiscovery
             // No IPv4 adapter usable for multicast exists, or the search itself failed; fritz.box is still tried.
         }
 
-        hosts.Add(WellKnownHost);
-
         using var httpClient = FritzBoxHttpClient.CreatePlain(timeout, Tr64Description.MaximumBytes);
-        var distinctHosts = hosts.Distinct(StringComparer.OrdinalIgnoreCase).Take(MaximumLocations).ToArray();
+
+        // A slot is reserved for the fritz.box fallback so a flood of SSDP answers cannot push it out of the cap.
+        var distinctHosts = hosts.Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaximumLocations - 1)
+            .Append(WellKnownHost)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var descriptions = await Task.WhenAll(
             distinctHosts.Select(host => DescribeAsync(httpClient, host, Tr64Description.DescriptionPort, cancellationToken)));
 

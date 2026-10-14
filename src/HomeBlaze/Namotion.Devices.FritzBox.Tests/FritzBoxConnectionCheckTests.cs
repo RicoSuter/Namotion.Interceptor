@@ -19,6 +19,7 @@ public class FritzBoxConnectionCheckTests
 
         // Assert
         Assert.True(result.IsSuccess);
+        Assert.Equal("127.0.0.1", result.HostAddress);
         Assert.Null(result.ErrorMessage);
         Assert.Equal("FRITZ!Box 7590", result.Model);
         Assert.Equal(expected.Pin, result.CertificatePin);
@@ -58,6 +59,7 @@ public class FritzBoxConnectionCheckTests
     [InlineData("http://fritz.box")]
     [InlineData("192.168.178.1:49000")]
     [InlineData("fritz box")]
+    [InlineData("[fritz.box]")]
     public async Task WhenTheHostAddressIsInvalid_ThenTheCheckSaysSoWithoutAnyRequest(string hostAddress)
     {
         // Arrange
@@ -68,6 +70,7 @@ public class FritzBoxConnectionCheckTests
 
         // Assert
         Assert.False(result.IsSuccess);
+        Assert.Null(result.HostAddress);
         Assert.Equal("Enter the router's IP address or host name without http:// or a port.", result.ErrorMessage);
         Assert.Equal(0, fake.SecurityPortRequests);
     }

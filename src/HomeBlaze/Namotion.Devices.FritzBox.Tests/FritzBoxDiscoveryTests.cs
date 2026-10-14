@@ -12,7 +12,7 @@ public class FritzBoxDiscoveryTests
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        using var httpClient = new HttpClient();
+        using var httpClient = CreateHttpClient();
 
         // Act
         var result = await FritzBoxDiscovery.DescribeAsync(httpClient, "127.0.0.1", fake.HttpPort, CancellationToken.None);
@@ -25,7 +25,7 @@ public class FritzBoxDiscoveryTests
     public async Task WhenTheRouterDoesNotAnswer_ThenItIsSkipped()
     {
         // Arrange
-        using var httpClient = new HttpClient();
+        using var httpClient = CreateHttpClient();
 
         // Act
         var result = await FritzBoxDiscovery.DescribeAsync(httpClient, "127.0.0.1", LoopbackPorts.GetFreePort(), CancellationToken.None);
@@ -43,7 +43,7 @@ public class FritzBoxDiscoveryTests
             "<root xmlns=\"urn:dslforum-org:device-1-0\"><device><friendlyName>Other</friendlyName><serviceList>" +
             "<service><serviceType>urn:dslforum-org:service:UserInterface:1</serviceType><controlURL>/upnp/control/userif</controlURL></service>" +
             "</serviceList></device></root>";
-        using var httpClient = new HttpClient();
+        using var httpClient = CreateHttpClient();
 
         // Act
         var result = await FritzBoxDiscovery.DescribeAsync(httpClient, "127.0.0.1", fake.HttpPort, CancellationToken.None);
@@ -58,7 +58,7 @@ public class FritzBoxDiscoveryTests
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
         fake.DescriptionXml = "<not-well-formed";
-        using var httpClient = new HttpClient();
+        using var httpClient = CreateHttpClient();
 
         // Act
         var result = await FritzBoxDiscovery.DescribeAsync(httpClient, "127.0.0.1", fake.HttpPort, CancellationToken.None);
@@ -73,7 +73,7 @@ public class FritzBoxDiscoveryTests
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
         fake.DescriptionXml = new string('x', Tr64Description.MaximumBytes + 1);
-        using var httpClient = new HttpClient { MaxResponseContentBufferSize = Tr64Description.MaximumBytes };
+        using var httpClient = CreateHttpClient();
 
         // Act
         var result = await FritzBoxDiscovery.DescribeAsync(httpClient, "127.0.0.1", fake.HttpPort, CancellationToken.None);
@@ -87,7 +87,7 @@ public class FritzBoxDiscoveryTests
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        using var httpClient = new HttpClient();
+        using var httpClient = CreateHttpClient();
         using var cancellationTokenSource = new CancellationTokenSource();
         await cancellationTokenSource.CancelAsync();
 
@@ -95,4 +95,11 @@ public class FritzBoxDiscoveryTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             FritzBoxDiscovery.DescribeAsync(httpClient, "127.0.0.1", fake.HttpPort, cancellationTokenSource.Token));
     }
+
+    /// <summary>
+    /// Builds the client the way <see cref="FritzBoxDiscovery.DiscoverAsync"/> does, so tests exercise the real
+    /// discovery settings, including the size cap that the oversized-description test relies on.
+    /// </summary>
+    private static HttpClient CreateHttpClient() =>
+        FritzBoxHttpClient.CreatePlain(TimeSpan.FromSeconds(5), Tr64Description.MaximumBytes);
 }

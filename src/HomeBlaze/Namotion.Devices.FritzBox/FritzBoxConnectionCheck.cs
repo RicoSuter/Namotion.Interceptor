@@ -9,12 +9,17 @@ namespace Namotion.Devices.FritzBox;
 /// The result of a connection check.
 /// </summary>
 /// <param name="IsSuccess">Whether the login succeeded.</param>
+/// <param name="HostAddress">
+/// The host address exactly as checked, normalized (trimmed, brackets stripped for IPv6), for a setup dialog to save
+/// alongside the other settings. Null when the input was invalid, since no address was ever checked.
+/// </param>
 /// <param name="ErrorMessage">Why the check failed, or null on success.</param>
 /// <param name="Model">The model name the router reported, or null on failure.</param>
 /// <param name="CertificatePin">The key the router presented, to store in <see cref="FritzBox.CertificatePin"/>.</param>
 /// <param name="CertificateFingerprint">The SHA-256 fingerprint of the router's certificate, the form browsers show, for the user to compare.</param>
 public sealed record FritzBoxConnectionCheckResult(
     bool IsSuccess,
+    string? HostAddress,
     string? ErrorMessage,
     string? Model,
     string? CertificatePin,
@@ -32,7 +37,10 @@ public static class FritzBoxConnectionCheck
     /// Opens a connection to the router and logs in. Never throws for a failed check, including a malformed host
     /// address: a failure is reported in the result. Cancellation still propagates.
     /// </summary>
-    /// <param name="hostAddress">The host name or IP address of the router, without a scheme or a port.</param>
+    /// <param name="hostAddress">
+    /// The host name or IP address of the router, without a scheme or a port: an IPv4 address, an IPv6 address with
+    /// or without brackets, or a host name, including an internationalized one.
+    /// </param>
     /// <param name="username">The user to log in as, or null for none.</param>
     /// <param name="password">The password of the user, or null for none.</param>
     /// <param name="cancellationToken">Cancels the check.</param>
@@ -41,7 +49,7 @@ public static class FritzBoxConnectionCheck
     {
         if (!TryNormalizeHostAddress(hostAddress, out var host))
         {
-            return Task.FromResult(new FritzBoxConnectionCheckResult(false, InvalidHostAddressMessage, null, null, null));
+            return Task.FromResult(new FritzBoxConnectionCheckResult(false, null, InvalidHostAddressMessage, null, null, null));
         }
 
         return CheckAsync(new FritzBoxConnectionOptions(host, username, password, null), cancellationToken);
@@ -56,11 +64,11 @@ public static class FritzBoxConnectionCheck
             var pin = connection.TrustedCertificatePin;
             var fingerprint = connection.PresentedCertificate?.Fingerprint;
             return new FritzBoxConnectionCheckResult(
-                true, null, StringValues.NullIfBlank(info.GetString("NewModelName")), pin, fingerprint);
+                true, options.HostAddress, null, StringValues.NullIfBlank(info.GetString("NewModelName")), pin, fingerprint);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested && IsHandledFailure(exception))
         {
-            return new FritzBoxConnectionCheckResult(false, exception.Message, null, null, null);
+            return new FritzBoxConnectionCheckResult(false, options.HostAddress, exception.Message, null, null, null);
         }
     }
 
@@ -77,8 +85,9 @@ public static class FritzBoxConnectionCheck
             return false;
         }
 
-        var (hostName, port) = SplitHostAndPort(value);
-        if (port is not null || Uri.CheckHostName(hostName) == UriHostNameType.Unknown)
+        var (hostName, port, wasBracketed) = SplitHostAndPort(value);
+        var hostNameType = Uri.CheckHostName(hostName);
+        if (port is not null || hostNameType == UriHostNameType.Unknown || (wasBracketed && hostNameType != UriHostNameType.IPv6))
         {
             host = string.Empty;
             return false;
@@ -88,28 +97,31 @@ public static class FritzBoxConnectionCheck
         return true;
     }
 
-    /// <returns>The host and, when present, the port after a single colon or after a bracketed IPv6 literal.</returns>
-    private static (string HostName, string? Port) SplitHostAndPort(string value)
+    /// <returns>
+    /// The host, the port when present after a single colon or after a closing bracket, and whether the host came
+    /// from inside brackets (valid only for an IPv6 literal, never for a host name).
+    /// </returns>
+    private static (string HostName, string? Port, bool WasBracketed) SplitHostAndPort(string value)
     {
         if (value.StartsWith('['))
         {
             var end = value.IndexOf(']');
             if (end < 0)
             {
-                return (value, string.Empty);
+                return (value, string.Empty, true);
             }
 
             var afterBracket = end + 1 < value.Length ? value[(end + 1)..] : null;
-            return (value[1..end], afterBracket);
+            return (value[1..end], afterBracket, true);
         }
 
         if (value.Count(character => character == ':') != 1)
         {
-            return (value, null);
+            return (value, null, false);
         }
 
         var separator = value.IndexOf(':');
-        return (value[..separator], value[(separator + 1)..]);
+        return (value[..separator], value[(separator + 1)..], false);
     }
 
     /// <returns>Whether an exception from opening the connection or checking the login is a reportable failure, as opposed to a programming error.</returns>
