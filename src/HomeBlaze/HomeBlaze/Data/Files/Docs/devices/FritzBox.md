@@ -43,7 +43,7 @@ Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped
   "name": "FRITZ!Box",
   "hostAddress": "192.168.178.1",
   "username": "homeblaze",
-  "password": "",
+  "password": null,
   "certificatePin": null,
   "pollingInterval": "00:00:15",
   "retryInterval": "00:00:30"
@@ -56,7 +56,7 @@ Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped
 |---|---|---|
 | Stopped | `HostAddress` empty | "No host address configured" |
 | Starting | Connecting | "Connecting..." |
-| Running | Polling | Empty, or a warning when the trusted certificate could not be saved |
+| Running | Polling | Empty; "Data may be stale (n of 3): ..." after failed polls; or a warning when the trusted certificate could not be saved |
 | Error | No password configured, connection failed, login failed, certificate changed, or firmware too old | The cause |
 
 ## Subject Model

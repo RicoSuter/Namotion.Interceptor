@@ -12,28 +12,17 @@ public class FritzBoxIntervalTests
     [InlineData(60, 60)]
     [InlineData(FritzBox.MaximumIntervalSeconds, FritzBox.MaximumIntervalSeconds)]
     [InlineData(86400, FritzBox.MaximumIntervalSeconds)]
-    public void WhenAnIntervalIsConfigured_ThenItIsClampedOrFallsBackToTheDefault(double configuredSeconds, int expectedSeconds)
+    [InlineData(0, FritzBox.DefaultRetryIntervalSeconds, FritzBox.DefaultRetryIntervalSeconds)]
+    public void WhenAnIntervalIsConfigured_ThenItIsClampedOrFallsBackToTheDefault(
+        double configuredSeconds, int expectedSeconds, int defaultSeconds = FritzBox.DefaultPollingIntervalSeconds)
     {
         // Act
         var effective = FritzBox.GetEffectiveInterval(
             TimeSpan.FromSeconds(configuredSeconds),
-            FritzBox.DefaultPollingIntervalSeconds,
+            defaultSeconds,
             TimeSpan.FromSeconds(FritzBox.MinimumIntervalSeconds));
 
         // Assert
         Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), effective);
-    }
-
-    [Fact]
-    public void WhenAZeroIntervalIsConfigured_ThenItFallsBackToTheGivenDefault()
-    {
-        // Act
-        var effective = FritzBox.GetEffectiveInterval(
-            TimeSpan.Zero,
-            FritzBox.DefaultRetryIntervalSeconds,
-            TimeSpan.FromSeconds(FritzBox.MinimumIntervalSeconds));
-
-        // Assert
-        Assert.Equal(TimeSpan.FromSeconds(FritzBox.DefaultRetryIntervalSeconds), effective);
     }
 }

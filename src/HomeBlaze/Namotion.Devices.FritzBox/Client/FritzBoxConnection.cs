@@ -158,8 +158,7 @@ internal sealed class FritzBoxConnection : IDisposable
         {
             return await QueryAsync(serviceType, action, arguments, cancellationToken);
         }
-        catch (Exception exception) when (exception is UpnpFaultException or FritzBoxServiceUnavailableException ||
-                                          exception is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden })
+        catch (Exception exception) when (exception is UpnpFaultException or FritzBoxServiceUnavailableException || IsLoginRefusal(exception))
         {
             LogUnavailable(serviceType, action, exception);
             return null;
@@ -201,8 +200,8 @@ internal sealed class FritzBoxConnection : IDisposable
 
     /// <returns>
     /// The exception to throw instead: a <see cref="FritzBoxCertificateException"/> for a handshake that presented an
-    /// untrusted key, a <see cref="TimeoutException"/> when the request timeout and not the caller cancelled, otherwise
-    /// null to let the exception propagate as is.
+    /// untrusted key, a <see cref="TimeoutException"/> when the request timed out rather than the caller cancelling,
+    /// otherwise null to let the exception propagate as is.
     /// </returns>
     private Exception? Translate(
         Exception exception, string request, CancellationTokenSource timeout, CancellationToken cancellationToken)
