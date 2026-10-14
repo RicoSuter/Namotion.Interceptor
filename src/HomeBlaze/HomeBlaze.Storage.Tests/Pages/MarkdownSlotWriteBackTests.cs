@@ -1,7 +1,10 @@
+using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -264,9 +267,9 @@ public class MarkdownSlotWriteBackTests
     }
 
     [Fact]
-    public async Task WhenWriteBackStartsDuringAReload_ThenItWritesTheTextOfThatReload()
+    public async Task WhenSubjectIsChangedAndSavedWhileAReloadRuns_ThenTheChangeIsWritten()
     {
-        // Arrange
+        // Arrange: the reload stops in the first block, before it reaches the leaf.
         var fixture = await MarkdownPageFixture.CreateAsync();
         var blocks = $":: {Namespace}.TestCallback#callback Label={{0}}\n::\n\n:: {LeafType}#leaf Count=1\n::\n";
         var page = await fixture.AddPageAsync("page.md", string.Format(blocks, "a"));
@@ -280,79 +283,240 @@ public class MarkdownSlotWriteBackTests
             await release.Task;
         };
 
-        var reload = fixture.UpdatePageAsync(page, "added by the reload\n\n" + string.Format(blocks, "b"));
+        var reload = fixture.UpdatePageAsync(page, string.Format(blocks, "b"));
         await entered.Task.WaitAsync(DeadlockTimeout);
 
-        // Act
-        var write = page.WriteConfigurationAsync(leaf, CancellationToken.None);
+        // Act: the save does not wait for the reload.
+        leaf.Count = 7;
+        var handled = await page.WriteConfigurationAsync(leaf, CancellationToken.None).WaitAsync(DeadlockTimeout);
+        var written = await fixture.ReadAsync("page.md");
         release.SetResult();
         await reload.WaitAsync(DeadlockTimeout);
-        var handled = await write.WaitAsync(DeadlockTimeout);
+        await page.OnFileChangedAsync(CancellationToken.None);
 
-        // Assert: a write-back that did not wait would have written the text from before the reload.
+        // Assert
         Assert.True(handled);
-        Assert.StartsWith("added by the reload\n", await fixture.ReadAsync("page.md"));
+        Assert.Contains($":: {LeafType}#leaf Count=7", written);
+        Assert.Equal(7, leaf.Count);
     }
 
     [Fact]
-    public async Task WhenWriteBackIsCalledFromInsideAReloadOfThePage_ThenItIsRefused()
+    public async Task WhenConfigurationOfASubjectWithSlotsIsSerializedForItsBlock_ThenTheSlotsAreLeftOut()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", $":: {Namespace}.TestCallback#callback Label=a\n::\n");
-        var callback = (TestCallback)page.Children["callback"];
-        Exception? refusal = null;
-        callback.OnApply = async () =>
-        {
-            try
-            {
-                await page.WriteConfigurationAsync(callback, CancellationToken.None);
-            }
-            catch (Exception exception)
-            {
-                refusal = exception;
-            }
-        };
+        var page = await fixture.AddPageAsync("page.md", $":: {BoardType}#board Columns=2\n::: Tile Position=1\ntext\n:::\n::\n");
+        var board = (TestBoard)page.Children["board"];
+        var serializer = fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>();
 
         // Act
-        await fixture.UpdatePageAsync(page, $":: {Namespace}.TestCallback#callback Label=b\n::\n").WaitAsync(DeadlockTimeout);
+        var boardJson = MarkdownBlockConfiguration.Serialize(serializer, board);
+        var tileJson = MarkdownBlockConfiguration.Serialize(serializer, board.Tiles[0]);
 
         // Assert
-        Assert.Equal(
-            "The page cannot be written from inside its own reload.",
-            Assert.IsType<InvalidOperationException>(refusal).Message);
-        Assert.Same(callback, page.Children["callback"]);
+        Assert.Contains("\"Columns\": 2", boardJson);
+        Assert.DoesNotContain("Tiles", boardJson);
+        Assert.Contains("\"Position\": 1", tileJson);
+        Assert.DoesNotContain("Child", tileJson);
     }
 
     [Fact]
-    public async Task WhenWriteBackComesAfterTheReloadFromWorkThatTheReloadStarted_ThenItIsWritten()
+    public async Task WhenValuesAreReordered_ThenNothingIsWritten()
     {
-        // Arrange: a subject starts work while its configuration is applied, and that work saves it later.
-        var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", $":: {Namespace}.TestCallback#callback Label=a\n::\n");
-        var callback = (TestCallback)page.Children["callback"];
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task<bool>? write = null;
-        callback.OnApply = () =>
-        {
-            write = Task.Run(async () =>
-            {
-                await release.Task;
-                return await page.WriteConfigurationAsync(callback, CancellationToken.None);
-            });
-
-            return Task.CompletedTask;
-        };
-
-        await fixture.UpdatePageAsync(page, $":: {Namespace}.TestCallback#callback Label=b\n::\n").WaitAsync(DeadlockTimeout);
-        callback.Label = "c";
+        // Arrange
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $":: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n::: Tile Position=2\ntwo\n:::\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        board.Tiles = [board.Tiles[1], board.Tiles[0]];
 
         // Act
-        release.SetResult();
-        var handled = await write!.WaitAsync(DeadlockTimeout);
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal(
+            "The order of the 'Tile' values differs from the order of their blocks. The order is changed in the text of the page.",
+            log);
+    }
+
+    [Fact]
+    public async Task WhenNewValueStandsBeforeAValueWithABlock_ThenNothingIsWritten()
+    {
+        // Arrange
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $":: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n::: Tile Position=2\ntwo\n:::\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        board.Tiles = [new TestTile { Position = 0 }, .. board.Tiles];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal(
+            "The order of the 'Tile' values differs from the order of their blocks. The order is changed in the text of the page.",
+            log);
+    }
+
+    [Fact]
+    public async Task WhenNewValueHasAnotherTypeThanTheSlot_ThenNothingIsWritten()
+    {
+        // Arrange
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $":: {BoardType}#board Columns=2\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        board.Tiles = [new TestWideTile { Position = 1, Span = 2 }];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal(
+            "A new 'Tile' block cannot be written for a subject of the type TestWideTile, because the slot holds subjects of the type TestTile.",
+            log);
+    }
+
+    [Fact]
+    public async Task WhenTypeOfANewChildCannotBeNamedOnAPage_ThenNothingIsWritten()
+    {
+        // Arrange: the full name of a nested type has a '+'.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $":: {BoardType}#board Columns=2\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        board.Tiles = [new TestTile { Position = 1, Child = new TestNesting.TestNestedLeaf { Count = 3 } }];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal(
+            "The new 'Tile' block cannot be written, because the type TestNestedLeaf of the subject in it cannot be named on a page.",
+            log);
+    }
+
+    [Fact]
+    public async Task WhenSlotOfTheSavedBlockHoldsASubjectFromTheGraph_ThenNothingIsWritten()
+    {
+        // Arrange
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        var child = new TestLeaf { Count = 3 };
+        board.Tiles[0].Child = child;
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(child, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal(
+            "The slot 'Child' of the block holds a subject that is not content of the page, so it cannot be written.",
+            log);
+    }
+
+    [Fact]
+    public async Task WhenRemovingABlockWouldLetAnotherBlockTakeTextAfterIt_ThenNothingIsWritten()
+    {
+        // Arrange: the first row has no closing line, so without the second one it goes on to the end of the panel.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $":: {Namespace}.TestPanel#panel Title=T\n::: Row Label=a\none\n::: Row Label=b\ntwo\n:::\ntext of the panel\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var panel = (TestPanel)page.Children["panel"];
+        panel.Rows = [panel.Rows[0]];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(panel, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal("Removing the 'Row' block at line 4 would change other blocks of the page.", log);
+    }
+
+    [Fact]
+    public async Task WhenNewChildHasAValueThatDoesNotFitOnTheHeadLine_ThenItsBlockGetsAJsonBlock()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $":: {BoardType}#board Columns=2\n::\n");
+        var board = (TestBoard)page.Children["board"];
+        board.Tiles = [new TestTile { Position = 1, Child = new TestLeaf { Count = 3, Tags = ["a", "b"] } }];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+        var written = await fixture.ReadAsync("page.md");
+        await page.OnFileChangedAsync(CancellationToken.None);
 
         // Assert
         Assert.True(handled);
-        Assert.Equal($":: {Namespace}.TestCallback#callback Label=c\n::\n", await fixture.ReadAsync("page.md"));
+        Assert.Equal(
+            $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::: {LeafType} Count=3 Enabled=false Interval=00:00:00\n" +
+            "```json\n{\n  \"Tags\": [\n    \"a\",\n    \"b\"\n  ]\n}\n```\n::::\n:::\n::\n",
+            written);
+        var tile = Assert.Single(board.Tiles);
+        var leaf = Assert.IsType<MarkdownFragment>(tile.Child).Children.Values.OfType<TestLeaf>().Single();
+        Assert.Equal(3, leaf.Count);
+        Assert.Equal(["a", "b"], leaf.Tags);
     }
+
+    [Fact]
+    public async Task WhenPageHasWindowsLineEndings_ThenTheNewBlockHasThemToo()
+    {
+        // Arrange: the fixture writes line feeds only, so the file is written through the storage.
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content = $":: {BoardType}#board Columns=2\r\n::: Tile Position=1\r\none\r\n:::\r\n::\r\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(content)))
+        {
+            await fixture.Storage.WriteBlobAsync("page.md", stream, CancellationToken.None);
+        }
+
+        await page.OnFileChangedAsync(CancellationToken.None);
+        var contentOfThePage = page.Content;
+        var board = (TestBoard)page.Children["board"];
+        board.Tiles = [.. board.Tiles, new TestTile { Position = 2, Child = new TestLeaf { Count = 3, Tags = ["a"] } }];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+        var written = await fixture.ReadAsync("page.md");
+
+        // Assert
+        var expected =
+            $":: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n" +
+            $"::: Tile Position=2\n:::: {LeafType} Count=3 Enabled=false Interval=00:00:00\n" +
+            "```json\n{\n  \"Tags\": [\n    \"a\"\n  ]\n}\n```\n::::\n:::\n::\n";
+        Assert.True(handled);
+        Assert.Equal(content, contentOfThePage);
+        Assert.Equal(expected.Replace("\n", "\r\n"), written);
+    }
+
+    private static async Task<(MarkdownPageFixture Fixture, RecordingLogger<MarkdownContentParser> Log)> CreateFixtureWithLogAsync()
+    {
+        var log = new RecordingLogger<MarkdownContentParser>();
+        var fixture = await MarkdownPageFixture.CreateAsync(
+            services => services.AddSingleton<ILogger<MarkdownContentParser>>(log));
+
+        return (fixture, log);
+    }
+
+    private static void AssertRefusal(string expectedReason, RecordingLogger<MarkdownContentParser> log) =>
+        Assert.Equal($"A change was not written to the page page.md: {expectedReason}", Assert.Single(log.Entries).Message);
 }

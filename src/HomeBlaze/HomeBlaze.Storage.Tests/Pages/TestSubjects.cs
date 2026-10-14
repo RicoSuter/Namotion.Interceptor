@@ -634,3 +634,24 @@ public partial class TestShelfItem : IConfigurable
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
+
+/// <summary>A tile of a type that the slot of a <see cref="TestBoard"/> does not create.</summary>
+[InterceptorSubject]
+public partial class TestWideTile : TestTile
+{
+    [Configuration]
+    public partial int Span { get; set; }
+}
+
+/// <summary>Holds a subject class whose full name has a '+', which the head line of a block cannot carry.</summary>
+public static partial class TestNesting
+{
+    [InterceptorSubject]
+    public partial class TestNestedLeaf : IConfigurable
+    {
+        [Configuration]
+        public partial int Count { get; set; }
+
+        public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+}
