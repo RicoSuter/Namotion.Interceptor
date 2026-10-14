@@ -72,13 +72,13 @@ public class MeshListParserTests
     public void WhenAnUnknownPropertyNestsWithinTheDepthLimit_ThenParsingStillSucceeds()
     {
         // Arrange
-        using var stream = ToStream("""{"nodes":[{"uid":"n-1","extra":""" + string.Concat(Enumerable.Repeat("[", 60)) + string.Concat(Enumerable.Repeat("]", 60)) + "}]}");
+        using var stream = ToStream("""{"nodes":[{"device_name":"Repeater","extra":""" + string.Concat(Enumerable.Repeat("[", 60)) + string.Concat(Enumerable.Repeat("]", 60)) + "}]}");
 
         // Act
         var meshList = MeshListParser.Parse(stream);
 
         // Assert
-        Assert.Equal("n-1", meshList.Nodes![0].Uid);
+        Assert.Equal("Repeater", meshList.Nodes![0].Name);
     }
 
     [Fact]

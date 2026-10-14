@@ -7,18 +7,12 @@ namespace Namotion.Devices.FritzBox.Parsing;
 /// </summary>
 internal sealed class MeshList
 {
-    [JsonPropertyName("schema_version")]
-    public string? SchemaVersion { get; set; }
-
     [JsonPropertyName("nodes")]
     public List<MeshNode>? Nodes { get; set; }
 }
 
 internal sealed class MeshNode
 {
-    [JsonPropertyName("uid")]
-    public string? Uid { get; set; }
-
     [JsonPropertyName("device_name")]
     public string? Name { get; set; }
 

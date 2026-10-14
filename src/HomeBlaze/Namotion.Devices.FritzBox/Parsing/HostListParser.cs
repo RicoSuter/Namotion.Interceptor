@@ -45,7 +45,7 @@ internal static class HostListParser
 
                 // Known fields are read as text; an unused field (Index, FriendlyName, InfoURL, ...) is skipped
                 // without allocating a string for its value.
-                if (!TryApplyKnownField(fields, reader))
+                if (!TryApplyKnownField(ref fields, reader))
                 {
                     reader.Skip();
                 }
@@ -55,7 +55,7 @@ internal static class HostListParser
         return fields.ToHostEntry();
     }
 
-    private static bool TryApplyKnownField(HostFields fields, XmlReader reader)
+    private static bool TryApplyKnownField(ref HostFields fields, XmlReader reader)
     {
         switch (reader.LocalName)
         {
@@ -91,8 +91,7 @@ internal static class HostListParser
     private static int? ParseInt32(string value) =>
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ? number : null;
 
-    // Accumulates one item's fields while reading, since HostEntry itself is immutable.
-    private sealed class HostFields
+    private struct HostFields
     {
         internal string? MacAddress;
         internal string? IpAddress;

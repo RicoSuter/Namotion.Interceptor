@@ -71,10 +71,11 @@ internal sealed record MeshTopology(
 
         foreach (var node in nodes)
         {
-            var addresses = CollectNodeAddresses(node, interfaces, links);
-            nodeMacAddresses[node] = addresses;
+            RegisterInterfaces(node, interfaces, links);
             if (IsMeshNode(node))
             {
+                var addresses = CollectNodeAddresses(node);
+                nodeMacAddresses[node] = addresses;
                 meshMacAddresses.UnionWith(addresses);
             }
         }
@@ -86,13 +87,11 @@ internal sealed record MeshTopology(
         return new MeshTopology(accessPoints, positions, meshMacAddresses);
     }
 
-    private static HashSet<string> CollectNodeAddresses(
+    private static void RegisterInterfaces(
         MeshNode node,
         Dictionary<string, (MeshNode Node, MeshNodeInterface Interface)> interfaces,
         Dictionary<string, MeshNodeLink> links)
     {
-        var addresses = new HashSet<string>(StringComparer.Ordinal);
-        AddAddress(addresses, node.MacAddress);
         foreach (var nodeInterface in node.Interfaces ?? [])
         {
             if (nodeInterface.Uid is { } interfaceUid)
@@ -100,11 +99,8 @@ internal sealed record MeshTopology(
                 interfaces.TryAdd(interfaceUid, (node, nodeInterface));
             }
 
-            AddAddress(addresses, nodeInterface.MacAddress);
             CollectLinks(nodeInterface, links);
         }
-
-        return addresses;
     }
 
     private static void CollectLinks(MeshNodeInterface nodeInterface, Dictionary<string, MeshNodeLink> links)
@@ -116,6 +112,18 @@ internal sealed record MeshTopology(
                 links.TryAdd(linkUid, link);
             }
         }
+    }
+
+    private static HashSet<string> CollectNodeAddresses(MeshNode node)
+    {
+        var addresses = new HashSet<string>(StringComparer.Ordinal);
+        AddAddress(addresses, node.MacAddress);
+        foreach (var nodeInterface in node.Interfaces ?? [])
+        {
+            AddAddress(addresses, nodeInterface.MacAddress);
+        }
+
+        return addresses;
     }
 
     // One entry per node that has at least one connected link to another mesh node, listing every such link from
