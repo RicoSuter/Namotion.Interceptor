@@ -17,10 +17,10 @@ Connects to an AVM FRITZ!Box router over its documented local TR-064 interface, 
 
 1. In the FRITZ!Box web UI, enable **Home Network > Network > Network Settings > Allow access for applications**.
 2. Create a FRITZ!Box user under **System > FRITZ!Box Users** with the **FRITZ!Box settings** permission. A dedicated user is recommended.
-3. In HomeBlaze, create a **FRITZ!Box**. The setup searches the network for TR-064 routers (requests at `http://<host>:49000/tr64desc.xml`, the same request an opened connection makes) and also tries `fritz.box`; select the router found or enter its address by hand. Multicast often does not reach a container on a bridge network, so enter the address by hand there. The address field accepts an IPv4 address, an IPv6 address with or without brackets, or a host name, without a scheme or a port.
-4. Enter the user and password and select **Test Connection**. Compare the shown certificate fingerprint with the one your browser shows for `https://<router address>` and confirm it.
+3. In HomeBlaze, create a **FRITZ!Box**. The setup searches the network for routers and also tries `fritz.box`; select the one found or enter its address by hand. The address field accepts an IPv4 address, an IPv6 address, or a host name, without a scheme or a port.
+4. Enter the user and password and select **Test Connection**. The router's certificate is self-signed, so your browser normally warns about it; open `https://<router address>` once and read the certificate details from that warning page or the padlock. They show the same SHA-256 fingerprint HomeBlaze shows here. A match proves HomeBlaze reached the same device your browser did; tick the confirmation box only once they match, then save.
 
-The router's certificate key is pinned. When it changes, the router reports an error and the edit dialog offers **Accept New Certificate**, showing the new fingerprint to compare again.
+The router's certificate key is pinned. When it changes, the FRITZ!Box subject shows an error, and the edit dialog offers **Accept New Certificate**, showing the new fingerprint to compare again; accepting it takes effect once the edit dialog is saved.
 
 ## Configuration
 
@@ -31,8 +31,10 @@ The router's certificate key is pinned. When it changes, the router reports an e
 | `Username` | string | | FRITZ!Box user with the FRITZ!Box settings permission |
 | `Password` | string | | Password of that user, stored as a secret |
 | `CertificatePin` | string | | Base64 SHA-256 of the trusted certificate's public key. Empty trusts the key the router presents next and stores it. |
-| `PollingInterval` | TimeSpan | 15s | Interval of the poll. Clamped to 5 s through 1 h; zero or less uses the default. |
-| `RetryInterval` | TimeSpan | 30s | Wait after a failed connection. Clamped to 5 s through 1 h; zero or less uses the default. |
+| `PollingInterval` | TimeSpan | 15 seconds | How often the router is polled |
+| `RetryInterval` | TimeSpan | 30 seconds | Wait after a failed connection |
+
+Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped, and zero or less uses the default.
 
 ```json
 {
@@ -54,19 +56,21 @@ The router's certificate key is pinned. When it changes, the router reports an e
 | Stopped | `HostAddress` empty | "No host address configured" |
 | Starting | Connecting | "Connecting..." |
 | Running | Polling | Empty; "Data may be stale (n of 3): ..." after failed polls; a warning when the trusted certificate could not be saved |
-| Error | Connection failed, login failed, certificate changed, or firmware too old | The cause |
+| Error | Connection failed (including "No password configured."), login failed, certificate changed, or firmware too old | The cause |
 
 ## Subject Model
 
 ```
 FritzBox
-├── Clients[MAC]                 every device the router lists
+├── Clients[MAC]                 every device the router lists, except the mesh access points themselves
 ├── AccessPoints[MAC]            the router and every meshed FRITZ! device
 │     └── Clients[MAC]           the present clients connected there, the same subjects as above
 └── Wlans[Role]                  2.4GHz, 5GHz, 6GHz and Guest
 ```
 
 Clients and access points are keyed by MAC address in upper case, so their paths stay stable across restarts. A client that moves to another access point keeps its subject; only the two access point lists change. History records a client under `FritzBox.Clients`, wherever it is connected. See [Shared Child Subjects](../development/building-subjects.md#shared-child-subjects) for the general rule.
+
+A WLAN that reports its band (2.4, 5 or 6 GHz) is keyed by it; a router without a reported band, or with more radios than bands, falls back to `WLAN1`, `WLAN2`, and so on, with a `-2` suffix added if a key would otherwise collide. The WLAN beyond the router's radios is always the `Guest` key.
 
 ## Widgets
 
@@ -97,7 +101,8 @@ Clients and access points are keyed by MAC address in upper case, so their paths
 | `MaximumUploadRate`, `MaximumDownloadRate` | Mbit/s | Line speed |
 | `UploadRate`, `DownloadRate` | kB/s | Current traffic, converted from the bytes per second the router reports |
 | `ClientCount`, `PresentClientCount` | | All listed and currently present clients |
-| `Model`, `SerialNumber`, `SoftwareVersion`, `AvailableSoftwareUpdate`, `Uptime` | | Router identity and firmware |
+| `Manufacturer`, `Model`, `SerialNumber`, `HardwareRevision` | | Router identity |
+| `SoftwareVersion`, `AvailableSoftwareUpdate`, `Uptime` | | Firmware and uptime |
 | `PresentedCertificatePin` | | The key the router presents while it is not the trusted one |
 | `PresentedCertificateFingerprint` | | SHA-256 fingerprint of `PresentedCertificatePin`'s certificate, the form browsers show, to compare before accepting it in the edit dialog |
 
@@ -108,9 +113,8 @@ Clients and access points are keyed by MAC address in upper case, so their paths
 | `IsPresent` | | Whether the router sees the device as active |
 | `HostName`, `IpAddress`, `MacAddress` | | Identity |
 | `InterfaceType`, `IsWireless`, `IsGuest` | | How it is connected |
-| `AccessPointName`, `AccessPointMacAddress` | | Where it is connected, empty while the device is absent or the mesh list does not place it |
-| `Band` | | WLAN band, empty for a wired device, or while absent or unplaced |
-| `Port` | | LAN port, taken from the mesh list position when the mesh list places the device there; otherwise falls back to the host list entry's port while the device is present. Empty for a wireless device or when neither source reports one |
+| `AccessPointName`, `AccessPointMacAddress` | | Where it is connected, empty while absent or unplaced |
+| `Band`, `Port` | | WLAN band or LAN port, empty while absent or unplaced; see [How It Works](#how-it-works) |
 | `LinkSpeed` | Mbit/s | Current link speed |
 
 ### FritzBoxAccessPoint
@@ -119,7 +123,8 @@ Clients and access points are keyed by MAC address in upper case, so their paths
 |---|---|---|
 | `IsConnected` | | Whether the device is part of the mesh |
 | `MeshRole` | | Master for the router, Slave for repeaters |
-| `UplinkType`, `UplinkSpeed` | Mbit/s | Link towards the router |
+| `UplinkType` | | Link type towards the router (LAN or WLAN) |
+| `UplinkSpeed` | Mbit/s | Current speed of that link |
 | `ClientCount` | | Present clients connected here |
 
 ### FritzBoxWlan
@@ -138,11 +143,18 @@ Clients and access points are keyed by MAC address in upper case, so their paths
 
 ## How It Works
 
-1. The subject reads `http://<router>:49000/tr64desc.xml` without authentication and asks the router for its HTTPS port over the same unauthenticated HTTP connection.
-2. It logs in once with HTTP Digest over HTTPS (`DeviceInfo:1 GetInfo`) and checks the certificate key, then asks the router which internet connection is active. Without a configured password, the connection fails before any login attempt, so a missing password never adds to the router's login lockout.
-3. **Certificate trust:** with no `CertificatePin` configured, the connection trusts the key the first handshake presents and refuses any later handshake on that connection with a different key. The trusted key is written to `CertificatePin` and saved through the subject's configuration writer; when no writer is available (for example, a standalone host), it is kept in memory only, and `StatusMessage` carries a warning until a writer saves it, retried on every reconnect. A key that differs from a configured pin fails the connection and is shown in `PresentedCertificatePin` and `PresentedCertificateFingerprint` for the edit dialog's **Accept New Certificate**.
-4. Every poll reads, in parallel: device information, firmware updates, the internet connection, the online monitor, every WLAN, the host list and the mesh list. An action the firmware does not offer only leaves its value empty.
+1. The subject reads the router's TR-064 description without authentication, then asks for its HTTPS port over the same unauthenticated connection.
+2. It logs in once over HTTPS with HTTP Digest and checks the certificate key, then asks the router which internet connection is active. Without a configured password, the connection fails before any login attempt, so a missing password never adds to the router's login lockout.
+3. Every poll reads, in parallel: device information, firmware updates, the internet connection, the online monitor, every WLAN, the host list and the mesh list. An action the firmware does not offer only leaves its value empty.
+4. The mesh list places each present client at an access point with its band or LAN port and link speed. A client the mesh list does not place, for example because the router offers no mesh list or the client sits behind a third-party access point, falls back to the LAN port and link speed the host list itself reports while the client is present, and has no access point.
 5. Existing subjects are updated in place. A collection is replaced only when clients, access points or WLANs appear or disappear.
+
+### Certificate Trust
+
+The router's certificate is self-signed, so its public key, not its certificate chain, is what gets checked against `CertificatePin`.
+
+- **No `CertificatePin` configured:** the connection trusts the key its first handshake presents, and refuses a later handshake on that connection with a different key. The trusted key is written to `CertificatePin` and saved through the subject's configuration storage; when that storage is not available, for example in a standalone host, the key is kept in memory only, and `StatusMessage` carries a warning until a save succeeds, retried on every reconnect.
+- **A key other than the configured `CertificatePin`:** the connection fails and the key is shown in `PresentedCertificatePin` and `PresentedCertificateFingerprint`. Accepting it with **Accept New Certificate** in the edit dialog takes effect once the dialog is saved.
 
 ## Network and Firewall
 
@@ -152,19 +164,20 @@ HomeBlaze connects to the router on TCP port 49000 (description, unauthenticated
 
 | Symptom | Cause and fix |
 |---|---|
-| "No password configured" | `Password` is empty; nothing is attempted until one is set. |
-| "Login failed" | Wrong user or password, the user lacks the FRITZ!Box settings permission, or "Allow access for applications" is off. A login refused while the connection was already running (for example, the password or permission changed) is treated the same way. The next attempt waits 15 minutes, doubling up to 2 hours, because every failed login lengthens the router's lockout; saving the configuration retries at once. |
-| "presented a certificate other than the trusted one" | The router's certificate key changed. Check why, then use **Accept New Certificate** in the edit dialog; the connection waits until then. |
-| "does not offer its host list" | The firmware is too old. Update FRITZ!OS. |
-| Clients have no access point | The router does not offer the mesh list, or the client is connected through a third-party access point. A mesh list that fails to download, is oversized or malformed is treated the same as a missing one and does not fail the poll; a connection failure or timeout downloading it does fail the poll. |
+| The FRITZ!Box did not answer, or setup finds no router | The address is wrong, "Allow access for applications" is off, or port 49000 is blocked by a firewall; check those first. Enter the address by hand when discovery cannot reach the router, for example in a container on a bridge network. |
+| "No password configured" | `Password` is empty, so no login is attempted. |
+| "Login failed: check user, password and the FRITZ!Box settings permission." | Wrong user or password, or the user lacks the permission. Shown the same way when the host list refuses the same user later, for example after the password or permission changed while the connection was running. The next attempt waits 15 minutes, doubling up to 2 hours, because every failed login lengthens the router's lockout; saving the configuration retries at once. |
+| "The FRITZ!Box presented a certificate other than the trusted one..." | The router's certificate key changed. Check why, then use **Accept New Certificate** in the edit dialog and save it. |
+| "The FRITZ!Box does not offer its host list..." | The firmware is too old. Update FRITZ!OS, then save the configuration or restart HomeBlaze, since the subject only reconnects on a configuration change. |
+| Clients have no access point | The router does not offer the mesh list, the mesh list failed to download or was malformed (treated the same as a missing one, without failing the poll), or the client is connected through a third-party access point. |
 | "Data may be stale (n of 3)" | A poll failed; after three in a row the connection is reset and retried after `RetryInterval`. |
-| Setup finds no router | Multicast does not reach HomeBlaze, for example in a container on a bridge network. Enter the address by hand. |
 
 ## Limitations
 
 - Phones and tablets that use private, rotating MAC addresses appear as a new client for every address, and the router keeps the old ones.
 - Byte totals are not reported, only current rates.
-- Between two repeaters, the uplink is chosen by priority rather than document order: a link to the master first, then a link on an interface named `UPLINK...`, then the first connected mesh link.
+- The mesh list does not say which way a link between two repeaters points, so the uplink is guessed: a link to the router first, then a link on an interface named `UPLINK...`, then the first connected link. A repeater daisy-chained behind another repeater can therefore show the wrong uplink.
+- SSDP discovery uses IPv4 only.
 
 ## Follow-ups
 
