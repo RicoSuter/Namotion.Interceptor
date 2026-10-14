@@ -12,7 +12,11 @@ namespace Namotion.Devices.FritzBox;
 /// <param name="FriendlyName">The friendly name from its TR-064 description, or null when it has none.</param>
 /// <param name="Model">The model name from its TR-064 description, or null when it has none.</param>
 /// <param name="Udn">The unique device name from its TR-064 description, or null when it has none.</param>
-public sealed record FritzBoxDiscoveryResult(string HostAddress, string? FriendlyName, string? Model, string? Udn);
+/// <param name="IsRepeater">
+/// Whether the device offers no internet connection, as a FRITZ!Repeater: in a FRITZ!Box mesh its clients already
+/// appear under the router.
+/// </param>
+public sealed record FritzBoxDiscoveryResult(string HostAddress, string? FriendlyName, string? Model, string? Udn, bool IsRepeater);
 
 /// <summary>
 /// Finds FRITZ!Box routers on the local network over SSDP and by their usual host name.
@@ -40,8 +44,9 @@ public static class FritzBoxDiscovery
     /// <param name="timeout">How long to wait for SSDP answers and for each description request.</param>
     /// <param name="cancellationToken">Cancels the search and every description request.</param>
     /// <returns>
-    /// The routers found, de-duplicated by unique device name, or by host address when that is absent. A router
-    /// found by both SSDP and the <c>fritz.box</c> fallback is kept once, under its SSDP host address.
+    /// The routers found, de-duplicated by unique device name, or by host address when that is absent, with
+    /// repeaters last. A router found by both SSDP and the <c>fritz.box</c> fallback is kept once, under its SSDP
+    /// host address.
     /// </returns>
     public static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -85,7 +90,7 @@ public static class FritzBoxDiscovery
             }
         }
 
-        return results.Values.ToArray();
+        return results.Values.OrderBy(result => result.IsRepeater).ToArray();
     }
 
     /// <summary>
@@ -107,7 +112,9 @@ public static class FritzBoxDiscovery
                 return null;
             }
 
-            return new FritzBoxDiscoveryResult(host, description.FriendlyName, description.ModelName, description.Udn);
+            return new FritzBoxDiscoveryResult(
+                host, description.FriendlyName, description.ModelName, description.Udn,
+                IsRepeater: !description.HasService(Tr64Services.WanCommonInterfaceConfig));
         }
         catch (Exception exception) when ((exception is HttpRequestException or XmlException or TaskCanceledException) && !cancellationToken.IsCancellationRequested)
         {

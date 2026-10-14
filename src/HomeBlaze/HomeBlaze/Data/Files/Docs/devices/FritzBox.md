@@ -17,7 +17,7 @@ Connects to an AVM FRITZ!Box router over its documented local TR-064 interface, 
 
 1. In the FRITZ!Box web UI, enable **Home Network > Network > Network Settings > Allow access for applications**.
 2. Create a FRITZ!Box user under **System > FRITZ!Box Users** with the **FRITZ!Box settings** permission. A dedicated user is recommended.
-3. In HomeBlaze, create a **FRITZ!Box**. The setup searches the network for routers and also tries `fritz.box`; select the one found or enter its address by hand. The address field accepts an IPv4 address, an IPv6 address, or a host name, without a scheme or a port.
+3. In HomeBlaze, create a **FRITZ!Box**. The setup searches the network for routers and also tries `fritz.box`; select the one found or enter its address by hand. Repeaters are listed last and marked: in a FRITZ!Box mesh their clients already appear under the router, so add a repeater only when your router is not a FRITZ!Box. The address field accepts an IPv4 address, an IPv6 address, or a host name, without a scheme or a port.
 4. Enter the user and password and select **Test Connection**.
 5. The router's certificate is self-signed, so your browser normally warns about it; open `https://<router address>` once and read the certificate details from that warning page or the padlock. Compare that SHA-256 fingerprint with the one HomeBlaze shows here, and tick the confirmation box only once they match, then save.
 

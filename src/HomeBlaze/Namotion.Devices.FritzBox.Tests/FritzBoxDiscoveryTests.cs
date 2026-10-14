@@ -18,7 +18,27 @@ public class FritzBoxDiscoveryTests
         var result = await FritzBoxDiscovery.DescribeAsync(httpClient, "127.0.0.1", fake.HttpPort, CancellationToken.None);
 
         // Assert
-        Assert.Equal(new FritzBoxDiscoveryResult("127.0.0.1", "FRITZ!Box 7590", "FRITZ!Box 7590", "uuid:75802409-bccb-40e7-8e6c-0123456789ab"), result);
+        Assert.Equal(new FritzBoxDiscoveryResult("127.0.0.1", "FRITZ!Box 7590", "FRITZ!Box 7590", "uuid:75802409-bccb-40e7-8e6c-0123456789ab", IsRepeater: false), result);
+    }
+
+    [Fact]
+    public async Task WhenTheDescriptionListsNoInternetConnection_ThenTheDeviceIsARepeater()
+    {
+        // Arrange: the services a FRITZ!Repeater 1200 AX lists.
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.DescriptionXml =
+            "<root xmlns=\"urn:dslforum-org:device-1-0\"><device><friendlyName>Repeater</friendlyName><modelName>FRITZ!Repeater 1200 AX</modelName><serviceList>" +
+            "<service><serviceType>urn:dslforum-org:service:DeviceInfo:1</serviceType><controlURL>/upnp/control/deviceinfo</controlURL></service>" +
+            "<service><serviceType>urn:dslforum-org:service:Hosts:1</serviceType><controlURL>/upnp/control/hosts</controlURL></service>" +
+            "</serviceList></device></root>";
+        using var httpClient = CreateHttpClient();
+
+        // Act
+        var result = await FritzBoxDiscovery.DescribeAsync(httpClient, "127.0.0.1", fake.HttpPort, CancellationToken.None);
+
+        // Assert
+        Assert.True(result!.IsRepeater);
+        Assert.Equal("FRITZ!Repeater 1200 AX", result.Model);
     }
 
     [Fact]

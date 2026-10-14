@@ -24,10 +24,20 @@
                         <MudIcon Icon="@Icons.Material.Filled.Router" />
                         <MudText>@(router.FriendlyName ?? router.Model ?? "FRITZ!Box")</MudText>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">(@router.HostAddress)</MudText>
+                        @if (router.IsRepeater)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Repeater</MudChip>
+                        }
                     </MudStack>
                 </MudListItem>
             }
         </MudList>
+        @if (_selectedRouter?.IsRepeater == true)
+        {
+            <MudAlert Severity="Severity.Info">
+                In a FRITZ!Box mesh, the clients of this repeater already appear under the FRITZ!Box router. Add the repeater only if your router is not a FRITZ!Box.
+            </MudAlert>
+        }
     }
     else
     {
