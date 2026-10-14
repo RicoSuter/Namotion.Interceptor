@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using HomeBlaze.Abstractions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Host.Components.Browser;
 using HomeBlaze.Services;
@@ -123,9 +124,9 @@ public class SubjectBrowserLayoutTests
     private static void AssertScrolledThrough(PlaceholderWatch watch, double end) =>
         Assert.Contains(watch.Positions, position => position > end + 1 && position < watch.Start - 1);
 
-    private async Task<IPage> OpenAsync(string path, int width, int height, int paneCount)
+    private async Task<IPage> OpenAsync(string path, int width, int height, int paneCount, BrowserNewContextOptions? contextOptions = null)
     {
-        var page = await _fixture.CreatePageAsync();
+        var page = await _fixture.CreatePageAsync(contextOptions);
         await page.SetViewportSizeAsync(width, height);
         await page.GotoAsync($"{_fixture.ServerAddress}{path}");
         await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
@@ -399,6 +400,67 @@ public class SubjectBrowserLayoutTests
         // The status has a value and therefore a row, which shows that a row is found by its name.
         await Assertions.Expect(ValueRow(pane, "Status")).ToHaveCountAsync(1);
         await Assertions.Expect(ValueRow(pane, "StatusMessage")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenAStatePathLeadsToASubject_ThenItsRowShowsTheSubjectAndLinksToIt()
+    {
+        // Arrange
+        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
+        var motor = resolver.ResolveSubject("/Demo/Motor", PathStyle.Route)
+            ?? throw new InvalidOperationException("The demo motor is missing.");
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
+        try
+        {
+            subject.LinkedPath = resolver.GetPath(motor, PathStyle.Canonical);
+            var page = await OpenAsync($"browser/{name}", 1280, 720, paneCount: 2);
+            var row = ValueRow(LastPane(page), "LinkedPath");
+            var link = row.Locator("[data-testid='subject-pane-value-link']");
+            await Assertions.Expect(row.Locator("[data-testid='subject-pane-value-text']"))
+                .ToHaveTextAsync(((ITitleProvider)motor).Title!, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(link).ToHaveAttributeAsync("href", "/browser/Demo/Motor");
+
+            // Act
+            await link.ClickAsync();
+
+            // Assert
+            await page.WaitForURLAsync("**/browser/Demo/Motor", new() { Timeout = PageLoadTimeout });
+            await WaitUntilSettledAsync(page, paneCount: 3);
+        }
+        finally
+        {
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheCopyButtonOfAValueIsClicked_ThenTheValueIsInTheClipboard()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
+        try
+        {
+            // A path that leads to no subject is shown as text, with a copy button.
+            subject.LinkedPath = "/Missing/Subject";
+            var page = await OpenAsync($"browser/{name}", 1280, 720, paneCount: 2,
+                new() { Permissions = ["clipboard-read", "clipboard-write"] });
+            var row = ValueRow(LastPane(page), "LinkedPath");
+            var copy = row.Locator("[data-testid='subject-pane-value-copy']");
+            await Assertions.Expect(copy).ToHaveCSSAsync("opacity", "0", new() { Timeout = PageLoadTimeout });
+
+            // Act
+            await row.HoverAsync();
+            await Assertions.Expect(copy).ToHaveCSSAsync("opacity", "1");
+            await copy.ClickAsync();
+
+            // Assert
+            await Assertions.Expect(page.Locator(".mud-snackbar").GetByText("Copied")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            Assert.Equal("/Missing/Subject", await page.EvaluateAsync<string>("() => navigator.clipboard.readText()"));
+        }
+        finally
+        {
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+        }
     }
 
     [Theory]

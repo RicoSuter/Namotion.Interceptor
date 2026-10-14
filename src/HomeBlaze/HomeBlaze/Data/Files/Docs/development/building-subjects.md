@@ -823,6 +823,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
 | `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
+| `[State] + [SubjectPath(type)]` | Link to the subject at a canonical path, see [Path Properties](#path-properties) | No | Yes (as the subject) |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
 | `[Category]` on a property or method | Heading in the property panel, see [Categories](#categories) | No | Yes |
@@ -968,6 +969,14 @@ public partial string? Map { get; set; }
 ```
 
 The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.
+
+On a `[State]` property with a type, the property panel shows the subject at the path instead of the path, with its title and a button that opens it. Use it to point at a subject that lives elsewhere in the tree, such as the device behind a network client: a subject reference held in an intercepted property would attach that subject a second time, see [Shared Child Subjects](#shared-child-subjects). The path must be canonical, and a path that does not lead to a subject of the type shows as text:
+
+```csharp
+[State("Device")]
+[SubjectPath(typeof(IInterceptorSubject))]
+public partial string? DevicePath { get; internal set; }
+```
 
 ### SubjectPathField Component
 

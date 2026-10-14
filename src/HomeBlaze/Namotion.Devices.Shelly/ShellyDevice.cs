@@ -27,6 +27,7 @@ public partial class ShellyDevice : BackgroundService,
     ILastUpdatedProvider,
     IConnectionState,
     INetworkAdapter,
+    INetworkHost,
     ISoftwareState,
     IDeviceInfo,
     IUptimeState

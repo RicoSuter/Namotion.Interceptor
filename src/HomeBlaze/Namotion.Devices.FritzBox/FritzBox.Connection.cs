@@ -215,6 +215,7 @@ public partial class FritzBox
                 IsConnected = true;
                 LastUpdated = DateTimeOffset.UtcNow;
                 StatusMessage = CertificateWarning;
+                TryApplyDevicePaths();
             }
             catch (Exception exception) when (IsTolerated(exception, stoppingToken))
             {

@@ -1,8 +1,9 @@
 namespace HomeBlaze.Abstractions.Attributes;
 
 /// <summary>
-/// Marks a string property as a path, so that an editor lets the user pick the path as well as type it.
-/// Without a type the path leads to a property, and with a type to a subject of that type.
+/// Marks a string property as a path. Without a type the path leads to a property, and with a type to a subject of
+/// that type. An editor lets the user pick the path as well as type it, and the property panel shows a
+/// <see cref="StateAttribute"/> property with a type as the subject at its canonical path, with a link to it.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property)]
 public sealed class SubjectPathAttribute : Attribute

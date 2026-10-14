@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Networking;
 using HomeBlaze.Abstractions.Sensors;
 using Namotion.Devices.FritzBox.Parsing;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.FritzBox;
@@ -28,6 +29,7 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
         Band = null;
         Port = null;
         LinkSpeed = null;
+        DevicePath = null;
     }
 
     [State(Position = 400)]
@@ -89,6 +91,15 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     [State(Position = 407, Unit = StateUnit.MegabitPerSecond)]
     [Category("Network")]
     public partial decimal? LinkSpeed { get; internal set; }
+
+    /// <summary>
+    /// The canonical path of the subject of this device, null when no subject matches it unambiguously, see
+    /// <see cref="FritzBoxDeviceMatcher"/>.
+    /// </summary>
+    [State("Device", Position = 408)]
+    [Category("Network")]
+    [SubjectPath(typeof(IInterceptorSubject))]
+    public partial string? DevicePath { get; internal set; }
 
     [Derived]
     public string? Title => HostName ?? IpAddress ?? MacAddress;

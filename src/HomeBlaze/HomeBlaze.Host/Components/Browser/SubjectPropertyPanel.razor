@@ -7,7 +7,7 @@
 @using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
 
-@implements IDisposable
+@implements IAsyncDisposable
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
@@ -15,6 +15,8 @@
 @inject SubjectPathResolver PathResolver
 @inject IServiceProvider ServiceProvider
 @inject ITimeZoneDisplay TimeZone
+@inject IJSRuntime JsRuntime
+@inject ISnackbar Snackbar
 
 @if (Subject != null)
 {
@@ -78,7 +80,7 @@
                 </MudListSubheader>
 
                 @* Each block gets the gap above it from GetGapClass, by the block before it. *@
-                <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
+                <div @ref="_contentElement" data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
                     @* Primitive properties and methods (operations and queries) without a category *@
                     @{
                         var members = GetMemberGroups();
@@ -217,6 +219,23 @@
 <style>
     /* MudBlazor has no parameter or class for the rules below. */
 
+    /* The copy button of a value shows while its row is hovered or focused, and always on a device without hover.
+       Transparent rather than hidden, so that it stays in the tab order. */
+    .subject-pane-copy {
+        opacity: 0;
+    }
+
+    .subject-pane-row:hover .subject-pane-copy,
+    .subject-pane-row:focus-within .subject-pane-copy {
+        opacity: 1;
+    }
+
+    @@media (hover: none) {
+        .subject-pane-copy {
+            opacity: 1;
+        }
+    }
+
     /* The height of the count chip and of the chevron of the selected child, so that all rows are equally high. */
     .subject-pane-child-name {
         line-height: 24px;
@@ -275,6 +294,15 @@
 
     private readonly HashSet<string> _expandedProperties = [];
 
+    private ElementReference _contentElement;
+    private string? _copyButtonsElementId;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<SubjectPropertyPanel>? _dotNetReference;
+    private bool _isDisposed;
+
+    // The subject type of each path property of the shown subject, null for one that does not lead to a subject.
+    private readonly Dictionary<RegisteredSubjectProperty, Type?> _linkedSubjectTypes = [];
+
     private RegisteredSubject? _registeredSubject;
     private MethodMetadata? _executingMethod;
 
@@ -310,17 +338,79 @@
 
     private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
+        _isDisposed = true;
         TimeZone.Changed -= OnTimeZoneChanged;
+        _dotNetReference?.Dispose();
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is gone, and with it the module.
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        // The content gets a new element when the pane shows no subject in between, which needs its own listener.
+        if (Subject is null || _contentElement.Id is null || _contentElement.Id == _copyButtonsElementId)
+        {
+            return;
+        }
+
+        try
+        {
+            _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/HomeBlaze.Host/Components/Browser/SubjectPropertyPanel.razor.js");
+            if (_isDisposed)
+            {
+                await _module.DisposeAsync();
+                return;
+            }
+
+            _dotNetReference ??= DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("registerCopyButtons", _contentElement, _dotNetReference);
+            _copyButtonsElementId = _contentElement.Id;
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
+        {
+            // Without the script the copy buttons do nothing; the values are still shown.
+        }
+    }
+
+    [JSInvokable]
+    public void OnValueCopied(bool isCopied)
+    {
+        if (isCopied)
+        {
+            Snackbar.Add("Copied", Severity.Normal, options => options.VisibleStateDuration = 1500);
+        }
+        else
+        {
+            Snackbar.Add("The value could not be copied.", Severity.Warning);
+        }
     }
 
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
-        _registeredSubject = Subject != null && SubjectRegistry != null
+        var registeredSubject = Subject != null && SubjectRegistry != null
             ? SubjectRegistry.TryGetRegisteredSubject(Subject)
             : null;
+        if (registeredSubject != _registeredSubject)
+        {
+            _linkedSubjectTypes.Clear();
+        }
+
+        _registeredSubject = registeredSubject;
     }
 
     private string GetSubjectTitle()
@@ -437,6 +527,11 @@
         var isExpanded = _expandedProperties.Contains(prop.Name);
         var displayName = prop.IsAttribute ? prop.AttributeMetadata.AttributeName : GetPropertyDisplayName(prop);
         var displayValue = prop.GetPropertyDisplayValue(value, TimeZone);
+        var linkedSubject = ResolveLinkedSubject(prop, value);
+        if (linkedSubject is not null)
+        {
+            displayValue = (linkedSubject as ITitleProvider)?.Title is { Length: > 0 } title ? title : displayValue;
+        }
 
         // A row without a value is dimmed by the colour of disabled text, as MudBlazor has no class for an opacity.
         var nameClass = value is null
@@ -445,7 +540,7 @@
         var valueClass = value is null ? "subject-pane-value-text mud-text-disabled" : "subject-pane-value-text mud-text-primary";
 
         // A detail without an arrow starts where the name of one with an arrow starts.
-        var rowClass = depth > 0 && !hasAttributes ? "d-flex align-start py-1 pl-6" : "d-flex align-start py-1";
+        var rowClass = depth > 0 && !hasAttributes ? "subject-pane-row d-flex align-start py-1 pl-6" : "subject-pane-row d-flex align-start py-1";
 
         RenderFragment nameAndValue =
             @<text>
@@ -485,6 +580,28 @@
             {
                 <div class="@NameAndValueClass">@nameAndValue</div>
             }
+            @if (linkedSubject is not null && PathResolver.GetPath(linkedSubject, PathStyle.Route) is { } routePath)
+            {
+                <MudTooltip Text="Open">
+                    <MudIconButton Href="@BrowserUrls.FromRoutePath(routePath)"
+                                   Icon="@Icons.Material.Filled.OpenInNew"
+                                   Size="Size.Small"
+                                   Class="pa-0 ml-2"
+                                   aria-label="@($"Open {displayValue}")"
+                                   data-testid="subject-pane-value-link" />
+                </MudTooltip>
+            }
+            else if (value is not null)
+            {
+                @* Copied by the script of the pane in the click itself, see SubjectPropertyPanel.razor.js. *@
+                <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                               Size="Size.Small"
+                               Class="pa-0 ml-2 subject-pane-copy"
+                               title="Copy"
+                               aria-label="@($"Copy {displayName}")"
+                               data-copy-value="@displayValue"
+                               data-testid="subject-pane-value-copy" />
+            }
         </div>
 
         @if (isExpanded && hasAttributes)
@@ -499,6 +616,40 @@
             </div>
         }
     };
+
+    // A [State] path property with a subject type shows the subject at the path. The path is resolved here only, so
+    // that the subject is not attached a second time under the property's subject.
+    private IInterceptorSubject? ResolveLinkedSubject(RegisteredSubjectProperty property, object? value)
+    {
+        if (value is not string { Length: > 0 } path || property.IsAttribute)
+        {
+            return null;
+        }
+
+        if (!_linkedSubjectTypes.TryGetValue(property, out var subjectType))
+        {
+            subjectType = GetLinkedSubjectType(property);
+            _linkedSubjectTypes[property] = subjectType;
+        }
+
+        return subjectType is not null && PathResolver.ResolveSubject(path, PathStyle.Canonical) is { } subject &&
+            subjectType.IsInstanceOfType(subject)
+            ? subject
+            : null;
+    }
+
+    private static Type? GetLinkedSubjectType(RegisteredSubjectProperty property)
+    {
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            if (attribute is SubjectPathAttribute { SubjectType: { } subjectType })
+            {
+                return subjectType;
+            }
+        }
+
+        return null;
+    }
 
     // An attribute that the row of its property shows when expanded, which gives the row its arrow.
     private static bool IsDetail(RegisteredSubjectProperty attribute) =>

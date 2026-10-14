@@ -6,6 +6,7 @@ using Namotion.Devices.FritzBox.Client;
 using Namotion.Devices.FritzBox.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -365,6 +366,32 @@ public class FritzBoxLoopTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => guest.TurnOnAsync(CancellationToken.None));
     }
 
+    [Fact]
+    public async Task WhenLinkingTheClientsToTheirDevicesFails_ThenThePollsStillSucceedAndTheFailureIsLoggedOnce()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var logger = new RecordingLogger<FritzBox>();
+        var router = CreateRouter(fake, logger: logger);
+        var device = new TestNetworkDevice(Snapshots.Laptop);
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        context.AddService<ISubjectPathResolver>(new ThrowingPathResolver());
+        ((IInterceptorSubject)router).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)device).Context.AddFallbackContext(context);
+
+        // Act
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(() => router.LastUpdated is not null, message: "The router should poll once.");
+        var firstPoll = router.LastUpdated;
+        await AsyncTestHelpers.WaitUntilAsync(() => router.LastUpdated > firstPoll, message: "The router should poll again.");
+
+        // Assert
+        Assert.True(router.IsConnected);
+        Assert.Equal(ServiceStatus.Running, router.Status);
+        Assert.Null(router.Clients[Snapshots.Laptop].DevicePath);
+        Assert.Single(logger.Warnings, warning => warning.Contains("linking the clients", StringComparison.Ordinal));
+    }
+
     private static FritzBox CreateRouter(FakeFritzBox fake, string? password = null, string? pin = null, ILogger<FritzBox>? logger = null) =>
         new(logger ?? NullLogger<FritzBox>.Instance)
         {
@@ -413,6 +440,15 @@ public class FritzBoxLoopTests
             router.Dispose();
         }
     }
+
+    private sealed class ThrowingPathResolver : ISubjectPathResolver
+    {
+        public string GetPath(IInterceptorSubject subject, PathStyle style) => throw new InvalidOperationException("The path cannot be resolved.");
+
+        public IReadOnlyList<string> GetPaths(IInterceptorSubject subject, PathStyle style) => [GetPath(subject, style)];
+
+        public IInterceptorSubject? ResolveSubject(string path, PathStyle style, IInterceptorSubject? relativeTo = null) => null;
+    }
 }
 
 [InterceptorSubject]
@@ -429,4 +465,5 @@ public partial class TestConfigurationWriter : IConfigurationWriter
         Interlocked.Increment(ref _writeCount);
         return Task.FromResult(true);
     }
+
 }

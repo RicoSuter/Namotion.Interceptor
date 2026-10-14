@@ -84,7 +84,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 
 | Subject | Interfaces |
 |---|---|
-| `FritzBox` | `IConfigurable`, `IMonitoredService`, `IConnectionState`, `IHubDevice`, `IDeviceInfo`, `ISoftwareState`, `IUptimeState`, `ITitleProvider`, `IIconProvider`, `ILastUpdatedProvider` |
+| `FritzBox` | `IConfigurable`, `IMonitoredService`, `IConnectionState`, `INetworkHost`, `IHubDevice`, `IDeviceInfo`, `ISoftwareState`, `IUptimeState`, `ITitleProvider`, `IIconProvider`, `ILastUpdatedProvider` |
 | `FritzBoxClient` | `IPresenceSensor`, `INetworkAdapter`, `ITitleProvider`, `IIconProvider` |
 | `FritzBoxAccessPoint` | `IDeviceInfo`, `ISoftwareState`, `INetworkAdapter`, `IConnectionState`, `ITitleProvider`, `IIconProvider` |
 | `FritzBoxWlan` | `ISwitchState`, `ITitleProvider` |
@@ -117,6 +117,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 | `AccessPointName`, `AccessPointMacAddress` | | Where it is connected, empty while absent or unplaced |
 | `Band`, `Port` | | WLAN band or LAN port, empty while absent; a client the mesh list does not place has no band but can have the host list's port, see [How It Works](#how-it-works) |
 | `LinkSpeed` | Mbit/s | Current link speed; a client the mesh list does not place falls back to the host list's speed while present |
+| `DevicePath` | | Path of the subject of this device, shown as "Device" with a link to it, see [Linked Devices](#linked-devices) |
 
 ### FritzBoxAccessPoint
 
@@ -145,6 +146,16 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 ## How It Works
 
 The router is polled every `PollingInterval`, read only. Each poll starts with its own login check, so a password changed on the router costs one failed login, not one per request. The mesh list places each present client at an access point with its band or LAN port and link speed; a client it does not place, for example because the router offers no mesh list or the client sits behind a third-party access point, falls back to the host list's port and link speed while present. Existing subjects are updated in place.
+
+### Linked Devices
+
+After each poll every client's `DevicePath` is set to the path of the HomeBlaze subject of the same device, so that the property panel links from the client to that device:
+
+- A subject that reports a MAC address (`INetworkAdapter`, such as Shelly, myStrom, Ecowitt or Sonos) matches the client with that address only, in any notation.
+- A subject without one matches by its IP address or its configured host address (`INetworkHost`, such as SunSpec or Luxtronik), as an IP address or as a host name compared with the client's name. Only a single client may have it, a present one before absent ones, as the host list keeps the last address of absent devices.
+- A client that several subjects match gets none, and a match by MAC address wins over one by host.
+
+The link is a path, not a subject reference: the device stays where it is in the tree, and a deleted or moved device is unlinked or relinked with the next poll. A failure while linking is logged once and does not fail the poll.
 
 ### Certificate Trust
 
