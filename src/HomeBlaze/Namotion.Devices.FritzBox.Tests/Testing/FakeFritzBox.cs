@@ -73,6 +73,12 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     internal ConcurrentDictionary<string, int> HttpErrors { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// Paths of a plain GET of a list (<see cref="HostListPath"/> or <see cref="MeshListPath"/>) that are answered
+    /// by aborting the connection before any response is sent, simulating a reset rather than an HTTP status error.
+    /// </summary>
+    internal ConcurrentDictionary<string, bool> AbortedPaths { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// The authenticated actions received, in order.
     /// </summary>
     internal ConcurrentQueue<string> Actions { get; } = new();
@@ -239,10 +245,21 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         await WriteAsync(context, StatusCodes.Status200OK, "text/xml", CreateEnvelope(serviceType, action, values));
     }
 
-    private async Task HandleSecureGetAsync(HttpContext context)
+    private Task HandleSecureGetAsync(HttpContext context)
     {
         var request = context.Request;
         var pathAndQuery = request.Path + request.QueryString.ToString();
+        if (AbortedPaths.ContainsKey(pathAndQuery))
+        {
+            context.Abort();
+            return Task.CompletedTask;
+        }
+
+        return HandleSecureGetAnswerAsync(context, pathAndQuery);
+    }
+
+    private async Task HandleSecureGetAnswerAsync(HttpContext context, string pathAndQuery)
+    {
         if (pathAndQuery == HostListPath)
         {
             if (!TryAnswerHttpError(context, HostListPath))

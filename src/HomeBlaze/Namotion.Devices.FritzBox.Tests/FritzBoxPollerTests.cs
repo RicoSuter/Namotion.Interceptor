@@ -128,6 +128,18 @@ public class FritzBoxPollerTests
     }
 
     [Fact]
+    public async Task WhenTheMeshDownloadConnectionFails_ThenThePollFails()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.AbortedPaths[FakeFritzBox.MeshListPath] = true;
+        using var connection = await OpenAsync(fake);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<HttpRequestException>(() => FritzBoxPoller.PollAsync(connection, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task WhenTheInternetIsDisconnected_ThenIsConnectedIsFalse()
     {
         // Arrange

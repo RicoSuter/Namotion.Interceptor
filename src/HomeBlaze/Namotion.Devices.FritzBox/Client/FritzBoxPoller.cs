@@ -223,15 +223,17 @@ internal static class FritzBoxPoller
             return null;
         }
 
-        // The mesh list is optional: a malformed document, a path rejected as unsafe or an HTTP error on the
-        // download all leave the snapshot without a mesh rather than failing the poll. A certificate problem, a
-        // timeout and cancellation are not mesh-specific failures, so they still propagate.
+        // The mesh list is optional: a malformed document, a path rejected as unsafe or an HTTP status error on the
+        // download all leave the snapshot without a mesh rather than failing the poll. A connection failure (reset,
+        // refused) has no HTTP status and is not mesh-specific, so it still propagates and fails the poll, rather
+        // than letting access point assignments flicker for one cycle. A certificate problem, a timeout and
+        // cancellation propagate for the same reason.
         try
         {
             await using var content = await connection.DownloadAsync(path, FritzBoxConnection.MaximumListBytes, cancellationToken);
             return MeshTopology.Build(MeshListParser.Parse(content));
         }
-        catch (Exception exception) when (exception is JsonException or InvalidDataException or HttpRequestException)
+        catch (Exception exception) when (exception is JsonException or InvalidDataException or HttpRequestException { StatusCode: not null })
         {
             connection.LogUnavailable(Tr64Services.Hosts, "X_AVM-DE_GetMeshListPath", exception);
             return null;
