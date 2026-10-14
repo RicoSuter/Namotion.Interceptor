@@ -177,6 +177,33 @@ public class UpnpSoapClientTests
     }
 
     [Fact]
+    public async Task WhenTheAnswerIsIndentedWithAHeaderBeforeTheBody_ThenQueryingReadsItsValues()
+    {
+        // Arrange: the kind of multi-line, indented SOAP with a header a real device sends.
+        await using var device = Answer(
+            HttpStatusCode.OK,
+            "<?xml version=\"1.0\"?>\n" +
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\n" +
+            "  <s:Header>\n" +
+            "    <SessionId>abc</SessionId>\n" +
+            "  </s:Header>\n" +
+            "  <s:Body>\n" +
+            "    <u:GetVolumeResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">\n" +
+            "      <CurrentVolume>50</CurrentVolume>\n" +
+            "    </u:GetVolumeResponse>\n" +
+            "  </s:Body>\n" +
+            "</s:Envelope>\n");
+        using var httpClient = new HttpClient();
+        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+
+        // Act
+        var response = await client.QueryAsync(RenderingControl, "GetVolume", [], CancellationToken.None);
+
+        // Assert
+        Assert.Equal(50, response.GetInt32("CurrentVolume"));
+    }
+
+    [Fact]
     public async Task WhenTheCharsetOfTheAnswerHeaderIsWrong_ThenTheTextIsStillReadFromTheDocument()
     {
         // Arrange
@@ -255,6 +282,40 @@ public class UpnpSoapClientTests
         // Act
         var exception = await Assert.ThrowsAsync<UpnpFaultException>(
             () => client.InvokeAsync(AvTransport, "Next", [("InstanceID", "0")], CancellationToken.None));
+
+        // Assert
+        Assert.Equal(402, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task WhenTheAnswerIsIndentedWithAHeaderAndCarriesAFaultWithASuccessStatus_ThenInvokingThrowsTheFault()
+    {
+        // Arrange: the kind of multi-line, indented SOAP with a header a real device sends.
+        await using var device = Answer(
+            HttpStatusCode.OK,
+            "<?xml version=\"1.0\"?>\n" +
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\n" +
+            "  <s:Header>\n" +
+            "    <SessionId>abc</SessionId>\n" +
+            "  </s:Header>\n" +
+            "  <s:Body>\n" +
+            "    <s:Fault>\n" +
+            "      <faultcode>s:Client</faultcode>\n" +
+            "      <faultstring>UPnPError</faultstring>\n" +
+            "      <detail>\n" +
+            "        <UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\">\n" +
+            "          <errorCode>402</errorCode>\n" +
+            "        </UPnPError>\n" +
+            "      </detail>\n" +
+            "    </s:Fault>\n" +
+            "  </s:Body>\n" +
+            "</s:Envelope>\n");
+        using var httpClient = new HttpClient();
+        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<UpnpFaultException>(
+            () => client.InvokeAsync(AvTransport, "Play", [], CancellationToken.None));
 
         // Assert
         Assert.Equal(402, exception.ErrorCode);

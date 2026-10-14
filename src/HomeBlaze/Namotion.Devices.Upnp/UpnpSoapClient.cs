@@ -10,7 +10,7 @@ namespace Namotion.Devices.Upnp;
 /// The size of an answer is bounded by <see cref="HttpClient.MaxResponseContentBufferSize"/> of the borrowed client,
 /// which the caller must set to what its device can reasonably answer. The action name, the argument names and the
 /// service type are written into the envelope verbatim and must be valid XML names; the service type must also not
-/// contain a quote. Only argument and property values are escaped. A timeout is the caller's responsibility, through
+/// contain a quote. Only argument values are escaped. A timeout is the caller's responsibility, through
 /// <see cref="HttpClient.Timeout"/> or the cancellation token passed to each call.
 /// </remarks>
 public sealed class UpnpSoapClient
@@ -125,7 +125,7 @@ public sealed class UpnpSoapClient
         }
         catch (XmlException)
         {
-            // Empty, not XML, or no envelope with a fault.
+            // Empty or not XML, so no fault.
         }
     }
 

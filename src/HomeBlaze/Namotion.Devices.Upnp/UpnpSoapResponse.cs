@@ -14,7 +14,10 @@ public sealed class UpnpSoapResponse
         _values = values;
     }
 
-    /// <returns>The value, empty for an empty element and null when the device did not return it as text.</returns>
+    /// <returns>
+    /// The value as the device sent it, including any whitespace; empty for an empty element and null when the
+    /// device did not return it as text.
+    /// </returns>
     public string? GetString(string name)
     {
         foreach (var (valueName, value) in _values)
@@ -41,10 +44,30 @@ public sealed class UpnpSoapResponse
     /// Device Architecture allows a boolean to be written as 1, true or yes for true and 0, false or no for false,
     /// matched case-insensitively.
     /// </returns>
-    public bool? GetBoolean(string name) => GetString(name)?.Trim().ToUpperInvariant() switch
+    public bool? GetBoolean(string name)
     {
-        "1" or "TRUE" or "YES" => true,
-        "0" or "FALSE" or "NO" => false,
-        _ => null
-    };
+        var value = GetString(name);
+        if (value is null)
+        {
+            return null;
+        }
+
+        var trimmed = value.AsSpan().Trim();
+        if (IsOneOf(trimmed, "1", "true", "yes"))
+        {
+            return true;
+        }
+
+        if (IsOneOf(trimmed, "0", "false", "no"))
+        {
+            return false;
+        }
+
+        return null;
+    }
+
+    private static bool IsOneOf(ReadOnlySpan<char> value, string first, string second, string third) =>
+        value.Equals(first, StringComparison.OrdinalIgnoreCase) ||
+        value.Equals(second, StringComparison.OrdinalIgnoreCase) ||
+        value.Equals(third, StringComparison.OrdinalIgnoreCase);
 }

@@ -5,9 +5,7 @@ namespace Namotion.Devices.Upnp;
 /// </summary>
 public sealed class UpnpFaultException : Exception
 {
-    // A lookup instead of a switch: a switch over this many cases trips S1541 (cyclomatic complexity); the
-    // dictionary is built once and keeps the single description per code in one place.
-    private static readonly Dictionary<int, string> StandardDescriptions = new()
+    private static readonly IReadOnlyDictionary<int, string> StandardDescriptions = new Dictionary<int, string>
     {
         [401] = "invalid action",
         [402] = "invalid arguments",
