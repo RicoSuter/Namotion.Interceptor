@@ -165,7 +165,7 @@ The commit check validates every changed property while reads return the transac
 
 With source transactions, the final set is checked again right before the local apply, after the sources were written, because an inbound update can change a value a validator reads. A failure there is handled like a failed local apply: it reverts the affected source writes, arrives as a `SubjectTransactionException`, and ends the transaction.
 
-In `Immediate` mode the setter still throws `ValidationException` for a write that is invalid against the values written so far, so write order matters at the setter. `Deferred` accepts invalid intermediate values, and code running in the transaction's flow reads them until the commit rejects them.
+In `Immediate` mode the setter still throws `ValidationException` for a write that is invalid against the values written so far, so write order matters at the setter. `Deferred` accepts invalid intermediate values, and code running in the transaction's flow reads them until a later write replaces them or the commit checks the final value.
 
 The values a commit applies are not validated again, and neither are the values a rollback restores. Writes made while a commit applies its values, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write.
 
