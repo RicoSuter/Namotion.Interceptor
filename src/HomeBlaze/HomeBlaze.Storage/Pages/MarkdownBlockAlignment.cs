@@ -135,8 +135,8 @@ internal static class MarkdownBlockAlignment
     /// does not start on a line of the change is what it was.
     /// </summary>
     /// <returns>
-    /// False when the line directly before the change holds only attributes in braces. Otherwise false unless
-    /// every leaf block of the document that does not start on a line of the change, such as a paragraph, a
+    /// False when the last line before the change that is not empty holds only attributes in braces. Otherwise
+    /// false unless every leaf block of the document that does not start on a line of the change, such as a paragraph, a
     /// heading or a code block, has the same kind, the same text, the same classes and properties of its
     /// attributes and the same containers around it as before, and every container that does not start there,
     /// such as a list or a quote, is still a container of its own with the same classes and properties, and a
@@ -145,11 +145,11 @@ internal static class MarkdownBlockAlignment
     /// </returns>
     internal static bool HasSameDocument(MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit)
     {
-        // Markdig gives the attributes of such a line to the block after it, which the change replaces: removed
-        // lines pass them on to what follows, and inserted lines take them. The rule is about the line and not
-        // about the ids that move, because ids are not compared: Markdig gives every heading an id of its own,
-        // which changes when a heading with the same text is inserted or removed before it.
-        if (IsAttributeLine(before.Source, edit.Line - 1))
+        // Markdig gives the attributes of such a line to the next block, also after empty lines, which the change
+        // replaces: removed lines pass them on to what follows, and inserted lines take them. The rule is about the
+        // line and not about the ids that move, because ids are not compared: Markdig gives every heading an id of
+        // its own, which changes when a heading with the same text is inserted or removed before it.
+        if (FollowsAttributeLine(before.Source, edit.Line))
         {
             return false;
         }
@@ -230,7 +230,8 @@ internal static class MarkdownBlockAlignment
 
     // A loose list renders the text of its items as paragraphs. A definition is loose when Markdig kept an empty
     // line in it, which it does for an empty line at the end of the page as well, and renders its text as a
-    // paragraph then.
+    // paragraph then. Any empty line in it counts, also one the renderer would show no difference for, which is
+    // on the safe side: it only refuses more.
     private static bool IsLoose(ContainerBlock container)
     {
         if (container is ListBlock list)
@@ -252,27 +253,34 @@ internal static class MarkdownBlockAlignment
         return false;
     }
 
-    // Whether the 1-based line holds nothing but attributes in braces, with white space around them.
-    private static bool IsAttributeLine(string source, int line)
+    // Whether the last line before the 1-based line that is not empty and not only spaces and tabs holds nothing but
+    // attributes in braces, with white space around them.
+    private static bool FollowsAttributeLine(string source, int line)
     {
-        if (line < 1)
-        {
-            return false;
-        }
-
+        var lastText = ReadOnlySpan<char>.Empty;
         var offset = 0;
-        for (var current = 1; current < line; current++)
+        for (var current = 1; current < line && offset <= source.Length; current++)
         {
+            var text = GetLine(source, offset).Trim(" \t");
+            if (!text.IsEmpty)
+            {
+                lastText = text;
+            }
+
             var lineFeed = source.IndexOf('\n', offset);
             if (lineFeed < 0)
             {
-                return false;
+                break;
             }
 
             offset = lineFeed + 1;
         }
 
-        var text = GetLine(source, offset).Trim(" \t");
+        return IsAttributeText(lastText);
+    }
+
+    private static bool IsAttributeText(ReadOnlySpan<char> text)
+    {
         if (text.IsEmpty || text[0] != '{' || text[^1] != '}')
         {
             return false;

@@ -444,6 +444,25 @@ public class MarkdownBlockStructureTests
     }
 
     [Theory]
+    [InlineData("\n", "text of the panel")]
+    [InlineData("\n", "# Heading of the panel")]
+    [InlineData("\n \t\n", "# Heading of the panel")]
+    public void WhenRemovedBlockStandsAfterAnAttributeLineAndEmptyLines_ThenAlignmentFails(string emptyLines, string textAfter)
+    {
+        // Arrange: Markdig gives the attributes of the line to the next block also across empty lines.
+        var source = $":: Demo.Panel\n{{#custom}}\n{emptyLines}::: Tile\ntwo\n:::\n{textAfter}\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+    }
+
+    [Theory]
     [InlineData("{#custom}")]
     [InlineData("{.highlight}")]
     public void WhenBlockIsInsertedDirectlyAfterAnAttributeLine_ThenAlignmentFails(string attributeLine)
@@ -669,6 +688,9 @@ public class MarkdownBlockStructureTests
         var cleanRemovals = 0;
         var refusedRemovals = 0;
         var removalsRefusedForTheDocumentOnly = 0;
+        var refusedRemovalsAfterAttributeLines = 0;
+        var refusedInserts = 0;
+        var refusedInsertsAfterAttributeLines = 0;
         var inserts = 0;
 
         for (var round = 0; round < 400; round++)
@@ -709,6 +731,11 @@ public class MarkdownBlockStructureTests
                             removalsRefusedForTheDocumentOnly++;
                         }
 
+                        if (followsAttributeLine)
+                        {
+                            refusedRemovalsAfterAttributeLines++;
+                        }
+
                         continue;
                     }
 
@@ -731,17 +758,33 @@ public class MarkdownBlockStructureTests
                     var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 1, owner);
                     var context = $"Round {round}, step {step}, insert at line {edit.Line}:\n{source}\n--- became ---\n{result}";
 
-                    // Assert: an insert at the placement never touches another block.
+                    // Assert: an insert at the placement never touches another line or another block.
                     AssertOnlyTheEditedLinesChanged(source, result, edit, context);
                     AssertInsertedLinesEndLikeThePage(result, edit, placement.LineEnding, context);
                     AssertAppendGivesTheLastLineTheLineEndingOfThePage(source, result, edit, placement.LineEnding, context);
                     Assert.True(Describe(before, 0, 0).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount)), context);
-                    Assert.True(DescribeDocument(before, 0, 0).SequenceEqual(DescribeDocument(after, edit.Line, edit.InsertedLineCount)), $"The document changed.\n{context}");
-                    // The one known page shape that refuses an insert is a placement inside a list item, which
-                    // WhenPlacementIsInsideAListItem_ThenTheNewBlockIsNoSlotBlockAndAlignmentFails shows.
-                    Assert.True(map is not null, $"The insert was refused.\n{context}");
-                    AssertMapKeepsHeadLines(before, after, map!, context);
-                    Assert.Equal(tiles.Count + 1, after.AllBlocks[map![owner.Index]].Children.Count(child => child.Kind == MarkdownBlockKind.Slot));
+
+                    // The check says yes exactly when the document outside the new tile is what it was and the tile
+                    // does not take the attributes of an attribute line before it. The document changes after a
+                    // definition at the end of the page, which loses the empty line that made it loose.
+                    var hasSameDocumentAfterInsert = DescribeDocument(before, 0, 0).SequenceEqual(DescribeDocument(after, edit.Line, edit.InsertedLineCount));
+                    var followsAttributeLineBeforeInsert = FollowsAttributeLine(source, edit.Line);
+                    Assert.True(
+                        (hasSameDocumentAfterInsert && !followsAttributeLineBeforeInsert) == (map is not null),
+                        $"Same document: {hasSameDocumentAfterInsert}, after an attribute line: {followsAttributeLineBeforeInsert}, map: {map is not null}.\n{context}");
+                    if (map is null)
+                    {
+                        refusedInserts++;
+                        if (followsAttributeLineBeforeInsert)
+                        {
+                            refusedInsertsAfterAttributeLines++;
+                        }
+
+                        continue;
+                    }
+
+                    AssertMapKeepsHeadLines(before, after, map, context);
+                    Assert.Equal(tiles.Count + 1, after.AllBlocks[map[owner.Index]].Children.Count(child => child.Kind == MarkdownBlockKind.Slot));
                     inserts++;
                     source = result;
                 }
@@ -752,10 +795,12 @@ public class MarkdownBlockStructureTests
         // document refuses, so the description of the blocks alone does not decide every one of them.
         var counters =
             $"{inserts} inserts, {cleanRemovals} removals, {refusedRemovals} refused removals, " +
-            $"{removalsRefusedForTheDocumentOnly} of them for the document only";
+            $"{removalsRefusedForTheDocumentOnly} of them for the document only, " +
+            $"{refusedRemovalsAfterAttributeLines} of them after an attribute line, " +
+            $"{refusedInserts} refused inserts, {refusedInsertsAfterAttributeLines} of them after an attribute line";
         Assert.True(inserts > 0 && cleanRemovals > 0 && refusedRemovals > 0, counters);
         Assert.True(removalsRefusedForTheDocumentOnly > 0, counters);
-    }
+        Assert.True(refusedRemovalsAfterAttributeLines > 0, counters);    }
 
     // Every block of every kind that is not on the given lines: the head line of the block around it, its own
     // head line, and its lines without the given ones. Equal lists before and after a change mean that every
@@ -792,9 +837,11 @@ public class MarkdownBlockStructureTests
         }
     }
 
-    // Whether the line before the given 1-based line holds only attributes, which Markdig gives to the block after it.
+    // Whether the last line before the given 1-based line that is not blank is an attribute line as CreateRandomPage
+    // writes it, an id or a class in braces, which Markdig gives to the next block also across empty lines.
     private static bool FollowsAttributeLine(string source, int line) =>
-        line > 1 && Regex.IsMatch(source.Split('\n')[line - 2], @"^[ \t]*\{[^{}]*\}[ \t]*\r?$");
+        source.Split('\n').Take(line - 1).LastOrDefault(text => !string.IsNullOrWhiteSpace(text)) is { } lastText &&
+        Regex.IsMatch(lastText, @"^[ \t]*\{(#id-\d+|\.highlight)\}\r?$");
 
     // Every block of the Markdig document that does not start on the given lines, in the order of the document:
     // its kind, whether a list is loose or a definition holds an empty line, the containers around it from the
@@ -935,7 +982,7 @@ public class MarkdownBlockStructureTests
     // has one or two fence characters more than its board, so a tile can stand inside the tile before it. A board
     // can be indented, can stand inside an open block, can start with a line of text and can end with a widget
     // block after its tiles. Style blocks, text and lines that join what stands before them when a tile between
-    // them is removed stand between the tiles. An indented board after a board that ends with a list item stands
+    // them is removed stand between the tiles, and a tile can have an attribute line before it. An indented board after a board that ends with a list item stands
     // inside that item, where it is an invalid block and no owner.
     private static string CreateRandomPage(Random random, int closingLineChance, string lineEnding)
     {
@@ -994,6 +1041,16 @@ public class MarkdownBlockStructureTests
             if (joiningLines >= 0)
             {
                 Add(joiningLines == 2 ? "a term before a tile" : "- an item before a tile");
+            }
+
+            // An attribute line, which Markdig gives to the tile, also across an empty line.
+            if (random.Next(10) == 0)
+            {
+                Add(random.Next(2) == 0 ? $"{{#id-{tile}}}" : "{.highlight}");
+                if (random.Next(2) == 0)
+                {
+                    lines.Add(string.Empty);
+                }
             }
 
             Add($"{tileFence} Tile Position={tile}");

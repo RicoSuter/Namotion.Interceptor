@@ -263,7 +263,8 @@ public class LayoutBlockSaveTests
             // After it took the text of the dialog, the editor refreshes its decorations once more outside of the
             // renderer, and a save during that refresh fails with "Index was outside the bounds of the array". Nothing
             // on the page shows the end of that refresh, so this waits for the notification of the dialog to be gone,
-            // which is long after it.
+            // which is long after it. The race is in the page editor and older than the layout blocks: fix the
+            // editor, then wait here for the end of the save instead.
             await Assertions.Expect(page.GetByText("Configuration saved.")).ToHaveCountAsync(0, new() { Timeout = Timeout });
 
             // Saving writes the page and reads it again, which gives the page a new dictionary of children. The
