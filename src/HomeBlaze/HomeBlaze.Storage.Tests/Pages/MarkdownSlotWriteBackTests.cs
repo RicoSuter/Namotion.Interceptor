@@ -207,7 +207,7 @@ public class MarkdownSlotWriteBackTests
     public async Task WhenValueWithoutBlockHoldsContentOfThePage_ThenNothingIsWritten()
     {
         // Arrange: a tile of the first board is put into the second one. Its content exists only as text of the first.
-        var fixture = await MarkdownPageFixture.CreateAsync();
+        var (fixture, log) = await CreateFixtureWithLogAsync();
         var content =
             $":: {BoardType}#first Columns=1\n::: Tile Position=1\nhand-written **text**\n:::\n::\n\n" +
             $":: {BoardType}#second Columns=1\n::\n";
@@ -223,13 +223,16 @@ public class MarkdownSlotWriteBackTests
         Assert.False(handled);
         Assert.Equal(content, await fixture.ReadAsync("page.md"));
         Assert.Equal(content, page.Content);
+        AssertRefusal(
+            "The new 'Tile' block cannot be written, because its slot 'Child' holds content of a page or more than one new subject.",
+            log);
     }
 
     [Fact]
     public async Task WhenChildOfANewValueHasSlotContent_ThenNothingIsWritten()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
+        var (fixture, log) = await CreateFixtureWithLogAsync();
         var content = $":: {BoardType}#board Columns=1\n::\n";
         var page = await fixture.AddPageAsync("page.md", content);
         var board = (TestBoard)page.Children["board"];
@@ -242,6 +245,50 @@ public class MarkdownSlotWriteBackTests
         // Assert
         Assert.False(handled);
         Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        AssertRefusal(
+            "The new 'Tile' block cannot be written, because its slot 'Child' holds content of a page or more than one new subject.",
+            log);
+    }
+
+    [Fact]
+    public async Task WhenNewValueIsNotConfigurable_ThenNothingIsWritten()
+    {
+        // Arrange: the type of the slot itself is not configurable, so the value has the type of the slot.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $":: {Namespace}.TestPlainHost#host\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var host = (TestPlainHost)page.Children["host"];
+        host.PlainValues = [new TestPlain()];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(host, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal("A new 'Plain' block cannot be written for a subject of the type TestPlain, which is not configurable.", log);
+    }
+
+    [Fact]
+    public async Task WhenInsertingABlockWouldChangeOtherBlocks_ThenNothingIsWritten()
+    {
+        // Arrange: Markdig keeps the empty line at the end of the page in the definition, which makes it loose.
+        // After a new row the empty line is no part of it any more.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $":: {Namespace}.TestPanel#panel Title=T\nterm\n:   definition\n\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var panel = (TestPanel)page.Children["panel"];
+        panel.Rows = [new TestRow { Label = "a" }];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(panel, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal("Inserting a 'Row' block at line 4 would change other blocks of the page.", log);
     }
 
     [Fact]

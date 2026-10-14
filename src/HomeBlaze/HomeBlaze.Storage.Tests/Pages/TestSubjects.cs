@@ -130,6 +130,21 @@ public partial class TestRow : IConfigurable
 [InterceptorSubject]
 public partial class TestPlain;
 
+/// <summary>Has a list slot of a type that is not configurable, so a new value of it cannot be written as a block.</summary>
+[InterceptorSubject]
+public partial class TestPlainHost : IConfigurable
+{
+    public TestPlainHost()
+    {
+        PlainValues = [];
+    }
+
+    [Slot("Plain")]
+    public partial TestPlain[] PlainValues { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
 /// <summary>Has slots whose values fail when they are created or configured.</summary>
 [InterceptorSubject]
 public partial class TestFaultyHost : IConfigurable

@@ -681,6 +681,26 @@ public class MarkdownBlockStructureTests
     }
 
     [Fact]
+    public void WhenOnlyTheAttributesOfALeafBlockOutsideTheChangeDiffer_ThenTheComparisonOfTheDocumentRefuses()
+    {
+        // Arrange: the inserted attribute line and the empty line after it stand on the lines of the change, and
+        // no attribute line stands before the change, so only the classes of the paragraph after it tell the two
+        // pages apart.
+        const string source = ":: Demo.Panel\n::: Tile\n:::\ntext of the panel\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var edit = new MarkdownLineEdit(2, 2, 2);
+        var after = MarkdownPageParser.Parse(":: Demo.Panel\n{.highlight}\n\ntext of the panel\n::\n");
+
+        // Act
+        var isSame = MarkdownBlockAlignment.HasSameDocument(before, after, edit);
+
+        // Assert
+        Assert.False(isSame);
+        Assert.Null(before.Document.Descendants<ParagraphBlock>().Single().TryGetAttributes());
+        Assert.Equal(["highlight"], after.Document.Descendants<ParagraphBlock>().Single().TryGetAttributes()?.Classes);
+    }
+
+    [Fact]
     public void WhenRandomBlocksAreInsertedAndRemoved_ThenNothingElseChangesAndTheCheckAgreesWithTheBlocks()
     {
         // Arrange
