@@ -14,6 +14,7 @@ namespace Namotion.Devices.FritzBox.Tests;
 public class FritzBoxLoopTests
 {
     private const string HostListAction = "X_AVM-DE_GetHostListPath";
+    private const string OnlineMonitorAction = "X_AVM-DE_GetOnlineMonitor";
     private const string LoginFailedMessage = "Login failed";
     private const string UnsavedCertificateFragment = "could not be saved";
 
@@ -24,25 +25,18 @@ public class FritzBoxLoopTests
         await using var fake = await FakeFritzBox.StartAsync();
         var router = CreateRouter(fake);
 
-        try
-        {
-            // Act
-            await router.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => router.IsConnected && router.LastUpdated is not null && router.Clients.Count == 3,
-                message: "The router should connect and list its clients.");
+        // Act
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => router.IsConnected && router.LastUpdated is not null && router.Clients.Count == 3,
+            message: "The router should connect and list its clients.");
 
-            // Assert
-            Assert.Equal(ServiceStatus.Running, router.Status);
-            Assert.Equal(2, router.AccessPoints.Count);
-            Assert.Equal(3, router.Wlans.Count);
-            Assert.Equal("203.0.113.7", router.ExternalIpAddress);
-            Assert.Equal("FRITZ!Box 7590", router.Model);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        Assert.Equal(ServiceStatus.Running, router.Status);
+        Assert.Equal(2, router.AccessPoints.Count);
+        Assert.Equal(3, router.Wlans.Count);
+        Assert.Equal("203.0.113.7", router.ExternalIpAddress);
+        Assert.Equal("FRITZ!Box 7590", router.Model);
     }
 
     [Fact]
@@ -52,22 +46,14 @@ public class FritzBoxLoopTests
         await using var fake = await FakeFritzBox.StartAsync();
         var router = CreateRouter(fake, password: "wrong");
 
-        try
-        {
-            // Act
-            await router.StartAsync(CancellationToken.None);
-            await WaitForErrorAsync(router, LoginFailedMessage);
+        // Act
+        await using var running = await RunAsync(router);
+        await WaitForErrorAsync(router, LoginFailedMessage);
 
-            // Assert
-            Assert.Equal(ServiceStatus.Error, router.Status);
-            Assert.False(router.IsConnected);
-            Assert.Equal(1, fake.FailedLogins);
-            Assert.DoesNotContain(HostListAction, fake.Actions);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        Assert.False(router.IsConnected);
+        Assert.Equal(1, fake.FailedLogins);
+        Assert.DoesNotContain(HostListAction, fake.Actions);
     }
 
     [Fact]
@@ -78,21 +64,13 @@ public class FritzBoxLoopTests
         var router = CreateRouter(fake);
         router.Password = null;
 
-        try
-        {
-            // Act
-            await router.StartAsync(CancellationToken.None);
-            await WaitForErrorAsync(router, "No password configured");
+        // Act
+        await using var running = await RunAsync(router);
+        await WaitForErrorAsync(router, "No password configured");
 
-            // Assert
-            Assert.Equal(ServiceStatus.Error, router.Status);
-            Assert.Equal(0, fake.FailedLogins);
-            Assert.Equal(0, fake.SecureRequests);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        Assert.Equal(0, fake.FailedLogins);
+        Assert.Equal(0, fake.SecureRequests);
     }
 
     [Fact]
@@ -101,24 +79,16 @@ public class FritzBoxLoopTests
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
         var router = CreateRouter(fake, password: "wrong");
+        await using var running = await RunAsync(router);
+        await WaitForErrorAsync(router, LoginFailedMessage);
 
-        try
-        {
-            await router.StartAsync(CancellationToken.None);
-            await WaitForErrorAsync(router, LoginFailedMessage);
+        // Act
+        router.Password = fake.Password;
+        await router.ApplyConfigurationAsync(CancellationToken.None);
 
-            // Act
-            router.Password = fake.Password;
-            await router.ApplyConfigurationAsync(CancellationToken.None);
-
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect after the configuration change.");
-            Assert.Equal(1, fake.FailedLogins);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect after the configuration change.");
+        Assert.Equal(1, fake.FailedLogins);
     }
 
     [Fact]
@@ -127,36 +97,40 @@ public class FritzBoxLoopTests
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
         var router = CreateRouter(fake);
-        FakeFritzBox.Hold? hostListQuery = null;
-
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
+        var hostListQuery = fake.HoldNext($"{Tr64Services.Hosts}#{HostListAction}");
         try
         {
-            await router.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
-            hostListQuery = fake.HoldNext($"{Tr64Services.Hosts}#{HostListAction}");
             await hostListQuery.Taken.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-            // Act
+            // A 401 on the host list after a successful login is how the router answers once the password changed,
+            // so the login itself never fails and FailedLogins stays 0.
             fake.HttpErrors[HostListAction] = 401;
             var hostListQueries = CountActions(fake, HostListAction);
+
+            // Act
             hostListQuery.Released.TrySetResult();
             await WaitForErrorAsync(router, LoginFailedMessage);
 
             // Assert
-            Assert.Equal(ServiceStatus.Error, router.Status);
             Assert.False(router.IsConnected);
             Assert.Equal(hostListQueries, CountActions(fake, HostListAction));
             Assert.Equal(0, fake.FailedLogins);
 
+            // Act
             fake.HttpErrors.TryRemove(HostListAction, out _);
             await router.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            // The login backoff is not timed here; that this is only the second connection proves that the router
+            // did not reconnect on its own before the configuration changed.
             await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should reconnect after the configuration change.");
             Assert.Equal(2, fake.SecurityPortRequests);
         }
         finally
         {
-            hostListQuery?.Released.TrySetResult();
-            await StopAsync(router);
+            hostListQuery.Released.TrySetResult();
         }
     }
 
@@ -167,21 +141,14 @@ public class FritzBoxLoopTests
         await using var fake = await FakeFritzBox.StartAsync();
         var router = CreateRouter(fake);
 
-        try
-        {
-            // Act
-            await router.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
+        // Act
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
 
-            // Assert
-            Assert.Equal(CertificateInfo.Create(fake.Certificate).Pin, router.CertificatePin);
-            Assert.Equal(ServiceStatus.Running, router.Status);
-            Assert.Contains(UnsavedCertificateFragment, router.StatusMessage);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        Assert.Equal(fake.CertificatePin, router.CertificatePin);
+        Assert.Equal(ServiceStatus.Running, router.Status);
+        Assert.Contains(UnsavedCertificateFragment, router.StatusMessage);
     }
 
     [Fact]
@@ -192,21 +159,14 @@ public class FritzBoxLoopTests
         var router = CreateRouter(fake);
         var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithParents()) { Router = router };
 
-        try
-        {
-            // Act
-            await router.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
+        // Act
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
 
-            // Assert
-            Assert.Equal(CertificateInfo.Create(fake.Certificate).Pin, router.CertificatePin);
-            Assert.Equal(1, writer.WriteCount);
-            Assert.Null(router.StatusMessage);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        Assert.Equal(fake.CertificatePin, router.CertificatePin);
+        Assert.Equal(1, writer.WriteCount);
+        Assert.Null(router.StatusMessage);
     }
 
     [Fact]
@@ -219,28 +179,21 @@ public class FritzBoxLoopTests
         // Keeps the loop idle between polls while the writer is attached.
         router.PollingInterval = TimeSpan.FromHours(1);
 
-        try
-        {
-            await router.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => router.IsConnected && router.StatusMessage?.Contains(UnsavedCertificateFragment) == true,
-                message: "The router should connect with the unsaved key warning.");
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => router.IsConnected && router.StatusMessage?.Contains(UnsavedCertificateFragment) == true,
+            message: "The router should connect with the unsaved key warning.");
 
-            // Act
-            var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithParents()) { Router = router };
-            await router.ApplyConfigurationAsync(CancellationToken.None);
+        // Act
+        var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithParents()) { Router = router };
+        await router.ApplyConfigurationAsync(CancellationToken.None);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => writer.WriteCount == 1 && router.IsConnected && router.StatusMessage is null,
-                message: "The router should save the key and clear the warning after reconnecting.");
-            Assert.Equal(CertificateInfo.Create(fake.Certificate).Pin, router.CertificatePin);
-            Assert.Equal(ServiceStatus.Running, router.Status);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => writer.WriteCount == 1 && router.IsConnected && router.StatusMessage is null,
+            message: "The router should save the key and clear the warning after reconnecting.");
+        Assert.Equal(fake.CertificatePin, router.CertificatePin);
+        Assert.Equal(ServiceStatus.Running, router.Status);
     }
 
     [Fact]
@@ -249,25 +202,19 @@ public class FritzBoxLoopTests
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
         using var other = FakeFritzBox.CreateCertificate();
-        var router = CreateRouter(fake, pin: CertificateInfo.Create(other).Pin);
+        var otherPin = CertificateInfo.Create(other).Pin;
+        var router = CreateRouter(fake, pin: otherPin);
 
-        try
-        {
-            // Act
-            await router.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => router.PresentedCertificatePin is not null && router.Status == ServiceStatus.Error,
-                message: "The router should refuse the key.");
+        // Act
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => router.PresentedCertificatePin is not null && router.Status == ServiceStatus.Error,
+            message: "The router should refuse the key.");
 
-            // Assert
-            Assert.Equal(CertificateInfo.Create(fake.Certificate).Pin, router.PresentedCertificatePin);
-            Assert.Equal(CertificateInfo.Create(other).Pin, router.CertificatePin);
-            Assert.Empty(fake.Actions);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        Assert.Equal(fake.CertificatePin, router.PresentedCertificatePin);
+        Assert.Equal(otherPin, router.CertificatePin);
+        Assert.Empty(fake.Actions);
     }
 
     [Fact]
@@ -275,25 +222,18 @@ public class FritzBoxLoopTests
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        fake.Faults["X_AVM-DE_GetOnlineMonitor"] = 606;
+        fake.Faults[OnlineMonitorAction] = 606;
         var router = CreateRouter(fake);
 
-        try
-        {
-            // Act
-            await router.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected && router.Clients.Count == 3, message: "The router should connect.");
+        // Act
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected && router.Clients.Count == 3, message: "The router should connect.");
 
-            // Assert
-            Assert.Null(router.UploadRate);
-            Assert.Null(router.DownloadRate);
-            Assert.Equal(40m, router.MaximumUploadRate);
-            Assert.Equal(ServiceStatus.Running, router.Status);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        Assert.Null(router.UploadRate);
+        Assert.Null(router.DownloadRate);
+        Assert.Equal(40m, router.MaximumUploadRate);
+        Assert.Equal(ServiceStatus.Running, router.Status);
     }
 
     [Fact]
@@ -304,20 +244,13 @@ public class FritzBoxLoopTests
         fake.Faults[HostListAction] = 501;
         var router = CreateRouter(fake);
 
-        try
-        {
-            // Act
-            await router.StartAsync(CancellationToken.None);
+        // Act
+        await using var running = await RunAsync(router);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => fake.SecurityPortRequests >= 2, message: "The router should reconnect after three failed polls.");
-            Assert.True(CountActions(fake, HostListAction) >= 3);
-            Assert.Null(router.LastUpdated);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => fake.SecurityPortRequests >= 2, message: "The router should reconnect after three failed polls.");
+        Assert.True(CountActions(fake, HostListAction) >= 3);
+        Assert.Null(router.LastUpdated);
     }
 
     [Fact]
@@ -328,20 +261,12 @@ public class FritzBoxLoopTests
         fake.Faults[HostListAction] = 401;
         var router = CreateRouter(fake);
 
-        try
-        {
-            // Act
-            await router.StartAsync(CancellationToken.None);
-            await WaitForErrorAsync(router, "FRITZ!OS");
+        // Act
+        await using var running = await RunAsync(router);
+        await WaitForErrorAsync(router, "FRITZ!OS");
 
-            // Assert
-            Assert.Equal(ServiceStatus.Error, router.Status);
-            Assert.Equal(1, fake.SecurityPortRequests);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        Assert.Equal(1, fake.SecurityPortRequests);
     }
 
     [Fact]
@@ -350,25 +275,16 @@ public class FritzBoxLoopTests
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
         var router = CreateRouter(fake);
+        await using var running = await RunAsync(router);
+        var guest = await WaitForGuestWlanAsync(router);
 
-        try
-        {
-            await router.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => router.Wlans.ContainsKey(FritzBoxWlanRoles.Guest), message: "The router should list its guest WLAN.");
-            var guest = (FritzBoxGuestWlan)router.Wlans[FritzBoxWlanRoles.Guest];
+        // Act
+        await guest.TurnOnAsync(CancellationToken.None);
 
-            // Act
-            await guest.TurnOnAsync(CancellationToken.None);
-
-            // Assert
-            Assert.True(fake.IsGuestWlanEnabled);
-            Assert.True(guest.IsOn);
-            Assert.Contains("SetEnable", fake.Actions);
-        }
-        finally
-        {
-            await StopAsync(router);
-        }
+        // Assert
+        Assert.True(fake.IsGuestWlanEnabled);
+        Assert.True(guest.IsOn);
+        Assert.Contains("SetEnable", fake.Actions);
     }
 
     [Fact]
@@ -377,15 +293,12 @@ public class FritzBoxLoopTests
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
         var router = CreateRouter(fake);
-        FakeFritzBox.Hold? staleRead = null;
+        await using var running = await RunAsync(router);
+        var guest = await WaitForGuestWlanAsync(router);
+        var staleRead = fake.HoldNextGuestWlanInfo();
         FakeFritzBox.Hold? nextRead = null;
-
         try
         {
-            await router.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => router.Wlans.ContainsKey(FritzBoxWlanRoles.Guest), message: "The router should list its guest WLAN.");
-            var guest = (FritzBoxGuestWlan)router.Wlans[FritzBoxWlanRoles.Guest];
-            staleRead = fake.HoldNextGuestWlanInfo();
             await staleRead.Taken.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
             // Act
@@ -402,9 +315,8 @@ public class FritzBoxLoopTests
         }
         finally
         {
-            staleRead?.Released.TrySetResult();
+            staleRead.Released.TrySetResult();
             nextRead?.Released.TrySetResult();
-            await StopAsync(router);
         }
     }
 
@@ -434,6 +346,15 @@ public class FritzBoxLoopTests
         };
 
     /// <summary>
+    /// Starts the router; disposing the result stops and disposes it. Release held requests before that.
+    /// </summary>
+    private static async Task<RunningRouter> RunAsync(FritzBox router)
+    {
+        await router.StartAsync(CancellationToken.None);
+        return new RunningRouter(router);
+    }
+
+    /// <summary>
     /// Waits for the error status with a message containing <paramref name="messageFragment"/>; the message is
     /// written after the status.
     /// </summary>
@@ -442,13 +363,22 @@ public class FritzBoxLoopTests
             () => router.Status == ServiceStatus.Error && router.StatusMessage?.Contains(messageFragment, StringComparison.Ordinal) == true,
             message: $"The router should report an error containing '{messageFragment}'.");
 
+    private static async Task<FritzBoxGuestWlan> WaitForGuestWlanAsync(FritzBox router)
+    {
+        await AsyncTestHelpers.WaitUntilAsync(() => router.Wlans.ContainsKey(FritzBoxWlanRoles.Guest), message: "The router should list its guest WLAN.");
+        return (FritzBoxGuestWlan)router.Wlans[FritzBoxWlanRoles.Guest];
+    }
+
     private static int CountActions(FakeFritzBox fake, string action) =>
         fake.Actions.Count(received => received == action);
 
-    private static async Task StopAsync(FritzBox router)
+    private sealed class RunningRouter(FritzBox router) : IAsyncDisposable
     {
-        await router.StopAsync(CancellationToken.None);
-        router.Dispose();
+        public async ValueTask DisposeAsync()
+        {
+            await router.StopAsync(CancellationToken.None);
+            router.Dispose();
+        }
     }
 }
 
