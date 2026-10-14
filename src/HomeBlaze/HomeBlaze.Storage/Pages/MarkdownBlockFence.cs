@@ -19,4 +19,10 @@ internal static class MarkdownBlockFence
     /// Other text, such as a time or a smiley, makes the line no fence line.
     /// </summary>
     public static bool StartsHeadLine(char character) => char.IsLetter(character) || character == '_' || character == '{';
+
+    /// <summary>
+    /// Gets whether a fence after this many columns of indentation is code and no fence line. A tab counts up to
+    /// the next multiple of four columns, so a tab in the indentation always makes the fence code.
+    /// </summary>
+    public static bool IsIndentedAsCode(int indentationColumns) => indentationColumns >= 4;
 }

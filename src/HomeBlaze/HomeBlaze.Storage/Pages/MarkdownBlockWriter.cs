@@ -218,9 +218,8 @@ public static class MarkdownBlockWriter
 
     // Whether the line between the two offsets has text that is no head line and no closing line of a block.
     // Next to such a fence line, and next to an empty line, nothing is joined. Mirrors TryReadFence of
-    // MarkdownBlockContainerParser, so a change of what a fence line is there is a change here: a fence after
-    // four columns of indentation, which a tab always gives, is code, and a fence before text that starts no
-    // head line, such as a time, is text. Both continue a paragraph before them.
+    // MarkdownBlockContainerParser through the rules of MarkdownBlockFence: a fence indented as code and a
+    // fence before text that starts no head line, such as a time, are text. Both continue a paragraph before them.
     private static bool IsTextLine(string source, int lineStart, int nextLineStart)
     {
         // Only spaces and tabs are indentation, and only a line of nothing else is empty.
@@ -238,7 +237,13 @@ public static class MarkdownBlockWriter
             fenceLength = text.Length;
         }
 
-        if (fenceLength < MarkdownBlockFence.MinimumLength || indentation.Length >= 4 || indentation.Contains('\t'))
+        var indentationColumns = 0;
+        foreach (var character in indentation)
+        {
+            indentationColumns = character == '\t' ? indentationColumns + 4 - indentationColumns % 4 : indentationColumns + 1;
+        }
+
+        if (fenceLength < MarkdownBlockFence.MinimumLength || MarkdownBlockFence.IsIndentedAsCode(indentationColumns))
         {
             return true;
         }

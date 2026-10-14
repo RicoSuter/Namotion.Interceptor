@@ -210,10 +210,9 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
             fenceStart--;
         }
 
-        // Four columns of indentation make the line code. The characters that were taken off count as
-        // indentation for the processor, so they are subtracted.
+        // The characters that were taken off count as indentation for the processor, so they are subtracted.
         fenceLength = processor.Start - fenceStart;
-        if (processor.Indent - fenceLength >= 4)
+        if (MarkdownBlockFence.IsIndentedAsCode(processor.Indent - fenceLength))
         {
             return false;
         }
