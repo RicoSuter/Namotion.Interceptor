@@ -22,7 +22,7 @@
 {
     @* The header stays in place and the content below it scrolls. The grid cell gives the column its height through
        the element the tracking scope adds around it in developer mode. *@
-    <div style="display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); height: 100%;">
+    <div @ref="_rootElement" style="display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); height: 100%;">
         <TrackingScope Context="Subject.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
             <div style="display: flex; flex-direction: column; height: 100%;">
                 <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
@@ -80,7 +80,7 @@
                 </MudListSubheader>
 
                 @* Each block gets the gap above it from GetGapClass, by the block before it. *@
-                <div @ref="_contentElement" data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
+                <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
                     @* Primitive properties and methods (operations and queries) without a category *@
                     @{
                         var members = GetMemberGroups();
@@ -294,7 +294,7 @@
 
     private readonly HashSet<string> _expandedProperties = [];
 
-    private ElementReference _contentElement;
+    private ElementReference _rootElement;
     private string? _copyButtonsElementId;
     private IJSObjectReference? _module;
     private DotNetObjectReference<SubjectPropertyPanel>? _dotNetReference;
@@ -360,12 +360,15 @@
     {
         await base.OnAfterRenderAsync(firstRender);
 
-        // The content gets a new element when the pane shows no subject in between, which needs its own listener.
-        if (Subject is null || _contentElement.Id is null || _contentElement.Id == _copyButtonsElementId)
+        // The listener sits on the root, as the tracking scope replaces everything inside it on every change in
+        // developer mode. The root is new only when the pane showed no subject in between.
+        if (Subject is null || _rootElement.Id is null || _rootElement.Id == _copyButtonsElementId)
         {
             return;
         }
 
+        // Claimed before the awaits, so that a render during them does not register the element again.
+        _copyButtonsElementId = _rootElement.Id;
         try
         {
             _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>(
@@ -377,8 +380,7 @@
             }
 
             _dotNetReference ??= DotNetObjectReference.Create(this);
-            await _module.InvokeVoidAsync("registerCopyButtons", _contentElement, _dotNetReference);
-            _copyButtonsElementId = _contentElement.Id;
+            await _module.InvokeVoidAsync("registerCopyButtons", _rootElement, _dotNetReference);
         }
         catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
         {

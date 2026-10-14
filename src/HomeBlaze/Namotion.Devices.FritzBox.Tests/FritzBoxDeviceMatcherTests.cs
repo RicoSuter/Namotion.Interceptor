@@ -25,18 +25,64 @@ public class FritzBoxDeviceMatcherTests
         Assert.Same(device, matches[client]);
     }
 
-    [Fact]
-    public void WhenADeviceReportsAMacAddressOfNoClient_ThenItDoesNotMatchByItsIpAddress()
+    [Theory]
+    [InlineData("AA:AA:AA:00:00:09")]
+    [InlineData("not a MAC address")]
+    public void WhenAConnectedDeviceReportsAMacAddressOfNoClient_ThenItMatchesByItsIpAddress(string macAddress)
     {
         // Arrange
+        // A device with several interfaces can report the MAC address of another one than the router sees.
         var client = CreateClient("AA:AA:AA:00:00:01", "192.168.178.20", "laptop");
-        var device = new TestNetworkDevice("AA:AA:AA:00:00:09", "192.168.178.20", "192.168.178.20");
+        var device = new TestNetworkDevice(macAddress, "192.168.178.20");
 
         // Act
         var matches = FritzBoxDeviceMatcher.Match([device], [client]);
 
         // Assert
+        Assert.Same(device, matches[client]);
+    }
+
+    [Fact]
+    public void WhenADeviceIsNotConnected_ThenItDoesNotMatchTheClientThatHasItsOldAddressNow()
+    {
+        // Arrange
+        var phone = CreateClient("AA:AA:AA:00:00:03", "192.168.178.20", "phone");
+        var device = new TestNetworkDevice(hostAddress: "192.168.178.20") { IsConnected = false };
+
+        // Act
+        var matches = FritzBoxDeviceMatcher.Match([device], [phone]);
+
+        // Assert
         Assert.Empty(matches);
+    }
+
+    [Fact]
+    public void WhenTwoPresentClientsHaveTheHostName_ThenNeitherMatches()
+    {
+        // Arrange
+        var first = CreateClient("AA:AA:AA:00:00:01", "192.168.178.20", "laptop");
+        var second = CreateClient("AA:AA:AA:00:00:02", "192.168.178.21", "laptop");
+        var device = new TestNetworkDevice(hostAddress: "laptop.fritz.box");
+
+        // Act
+        var matches = FritzBoxDeviceMatcher.Match([device], [first, second]);
+
+        // Assert
+        Assert.Empty(matches);
+    }
+
+    [Fact]
+    public void WhenAClientHasNoIpAddress_ThenItMatchesByItsHostName()
+    {
+        // Arrange
+        var client = CreateClient("AA:AA:AA:00:00:01", null, "laptop");
+        var device = new TestNetworkDevice(ipAddress: "192.168.178.20", hostAddress: "laptop");
+
+        // Act
+        var matches = FritzBoxDeviceMatcher.Match([device], [client]);
+
+        // Assert
+        Assert.Same(device, matches[client]);
     }
 
     [Theory]
@@ -143,6 +189,10 @@ public class FritzBoxDeviceMatcherTests
     [InlineData("[fe80::1]", "fe80::1")]
     [InlineData("[fe80::1]:1400", "fe80::1")]
     [InlineData("FE80:0:0::1", "fe80::1")]
+    [InlineData("::ffff:192.168.178.20", "192.168.178.20")]
+    [InlineData("1234", null)]
+    [InlineData("1234:80", null)]
+    [InlineData("192.168.178", null)]
     [InlineData("laptop", null)]
     [InlineData("laptop.fritz.box:80", null)]
     [InlineData("", null)]
@@ -160,6 +210,7 @@ public class FritzBoxDeviceMatcherTests
     [InlineData("Laptop", "laptop")]
     [InlineData("laptop.fritz.box", "laptop")]
     [InlineData("laptop:8080", "laptop")]
+    [InlineData("1234", "1234")]
     [InlineData("192.168.178.20", null)]
     [InlineData("[fe80::1]:1400", null)]
     [InlineData(" ", null)]
@@ -172,7 +223,7 @@ public class FritzBoxDeviceMatcherTests
         Assert.Equal(expected, label);
     }
 
-    private static FritzBoxClient CreateClient(string macAddress, string ipAddress, string hostName, bool isPresent = true)
+    private static FritzBoxClient CreateClient(string macAddress, string? ipAddress, string hostName, bool isPresent = true)
     {
         var client = new FritzBoxClient(macAddress);
         client.Update(new HostEntry(macAddress, ipAddress, isPresent, hostName, "Ethernet", null, null, false), null);

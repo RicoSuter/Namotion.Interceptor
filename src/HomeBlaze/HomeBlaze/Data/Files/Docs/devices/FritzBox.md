@@ -151,9 +151,11 @@ The router is polled every `PollingInterval`, read only. Each poll starts with i
 
 After each poll every client's `DevicePath` is set to the path of the HomeBlaze subject of the same device, so that the property panel links from the client to that device:
 
-- A subject that reports a MAC address (`INetworkAdapter`, such as Shelly, myStrom, Ecowitt or Sonos) matches the client with that address only, in any notation.
-- A subject without one matches by its IP address or its configured host address (`INetworkHost`, such as SunSpec or Luxtronik), as an IP address or as a host name compared with the client's name. Only a single client may have it, a present one before absent ones, as the host list keeps the last address of absent devices.
+- A subject that reports the MAC address of a client (`INetworkAdapter`, such as Shelly, myStrom, Ecowitt or Sonos) matches that client, in any notation.
+- Any other subject matches by its IP address or its configured host address (`INetworkHost`, such as SunSpec or Luxtronik), as an IP address or as a host name compared with the client's name. This also covers a device with several interfaces that reports the MAC address of another one than the router sees.
+- A match by host needs the subject to be connected (`IConnectionState`), as the host list keeps the last address of absent devices and DHCP can give it to another one. Only a single client may have the address, a present one before absent ones.
 - A client that several subjects match gets none, and a match by MAC address wins over one by host.
+- Subjects of this library are never matched, so a client is not linked to a `FritzBoxAccessPoint` or to the `FritzBox` subject of another router.
 
 The link is a path, not a subject reference: the device stays where it is in the tree, and a deleted or moved device is unlinked or relinked with the next poll. A failure while linking is logged once and does not fail the poll.
 

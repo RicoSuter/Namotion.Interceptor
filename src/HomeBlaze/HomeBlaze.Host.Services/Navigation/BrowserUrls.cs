@@ -13,7 +13,10 @@ public static class BrowserUrls
     /// </summary>
     public const string Root = "/browser";
 
-    /// <returns>The URL of the browser at the path of the segments, each escaped.</returns>
+    /// <summary>
+    /// Builds the URL of the browser at the path of unescaped segments, such as property names and keys.
+    /// </summary>
+    /// <returns>The URL, with each segment escaped.</returns>
     public static string Create(IEnumerable<string> segments)
     {
         var url = new StringBuilder(Root);
@@ -25,7 +28,10 @@ public static class BrowserUrls
         return url.ToString();
     }
 
-    /// <returns>The URL of the browser at a <see cref="PathStyle.Route"/> path.</returns>
+    /// <summary>
+    /// Builds the URL of the browser at a <see cref="PathStyle.Route"/> path, whose segments are separated by slashes.
+    /// </summary>
+    /// <returns>The URL, with each segment escaped.</returns>
     public static string FromRoutePath(string routePath) =>
         Create(routePath.Split('/', StringSplitOptions.RemoveEmptyEntries));
 }

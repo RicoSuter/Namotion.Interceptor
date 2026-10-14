@@ -433,20 +433,29 @@ public class SubjectBrowserLayoutTests
         }
     }
 
-    [Fact]
-    public async Task WhenTheCopyButtonOfAValueIsClicked_ThenTheValueIsInTheClipboard()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)] // Developer mode replaces the content of a pane on every change of a value.
+    public async Task WhenTheCopyButtonOfAChangedValueIsClicked_ThenTheValueIsInTheClipboard(bool isDeveloperMode)
     {
         // Arrange
+        var developerMode = _fixture.ServerServices.GetRequiredService<DeveloperModeService>();
+        var wasDeveloperMode = developerMode.IsEnabled;
+        developerMode.SetEnabled(isDeveloperMode);
         var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
         try
         {
             // A path that leads to no subject is shown as text, with a copy button.
-            subject.LinkedPath = "/Missing/Subject";
+            subject.LinkedPath = "/Missing/First";
             var page = await OpenAsync($"browser/{name}", 1280, 720, paneCount: 2,
                 new() { Permissions = ["clipboard-read", "clipboard-write"] });
             var row = ValueRow(LastPane(page), "LinkedPath");
             var copy = row.Locator("[data-testid='subject-pane-value-copy']");
             await Assertions.Expect(copy).ToHaveCSSAsync("opacity", "0", new() { Timeout = PageLoadTimeout });
+
+            subject.LinkedPath = "/Missing/Second";
+            await Assertions.Expect(row.Locator("[data-testid='subject-pane-value-text']"))
+                .ToHaveTextAsync("/Missing/Second", new() { Timeout = PageLoadTimeout });
 
             // Act
             await row.HoverAsync();
@@ -454,12 +463,13 @@ public class SubjectBrowserLayoutTests
             await copy.ClickAsync();
 
             // Assert
-            await Assertions.Expect(page.Locator(".mud-snackbar").GetByText("Copied")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-            Assert.Equal("/Missing/Subject", await page.EvaluateAsync<string>("() => navigator.clipboard.readText()"));
+            await Assertions.Expect(page.Locator(".mud-snackbar").GetByText("Copied")).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
+            Assert.Equal("/Missing/Second", await page.EvaluateAsync<string>("() => navigator.clipboard.readText()"));
         }
         finally
         {
             _fixture.RemovePlainSubjectFromRoot(name, subject);
+            developerMode.SetEnabled(wasDeveloperMode);
         }
     }
 

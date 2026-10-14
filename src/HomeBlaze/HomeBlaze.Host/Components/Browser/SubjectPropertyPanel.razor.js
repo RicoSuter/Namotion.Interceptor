@@ -1,6 +1,14 @@
+const registeredElements = new WeakSet();
+
 // Copies the value of a copy button within the element in the click itself, as browsers refuse to copy once the
-// click is over, which a round trip to the server would be. Reports whether the copy succeeded.
+// click is over, which a round trip to the server would be. Reports whether the copy succeeded. An element is
+// registered once, however often it is passed.
 export function registerCopyButtons(element, dotNetReference) {
+    if (registeredElements.has(element)) {
+        return;
+    }
+
+    registeredElements.add(element);
     element.addEventListener('click', event => {
         const button = event.target.closest('[data-copy-value]');
         if (button === null || !element.contains(button)) {

@@ -465,5 +465,4 @@ public partial class TestConfigurationWriter : IConfigurationWriter
         Interlocked.Increment(ref _writeCount);
         return Task.FromResult(true);
     }
-
 }
