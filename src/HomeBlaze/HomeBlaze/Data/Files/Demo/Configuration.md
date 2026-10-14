@@ -72,7 +72,7 @@ The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ va
 The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ valuemotor/CurrentSpeed }} RPM.
 ::
 
-The second cell has the name `speed`. A cell with a name keeps itself and everything in it when cells are added or removed before it. The nodes of a `CanvasLayout` are written the same way, as `Node` blocks with `X`, `Y`, `Width` and `Height`. With "Split" or "Inline" in the menu with the eye icon, a grid shows a plus in every free place, which adds a cell there, and each cell has buttons to edit and remove it. All of them write these blocks for you.
+The second cell has the name `speed`. A cell with a name keeps itself and everything in it when cells are added or removed before it. The nodes of a `CanvasLayout` are written the same way, as `Node` blocks with `X`, `Y`, `Width` and `Height`. With "Split" or "Inline" in the menu with the eye icon, a grid shows a plus in every free place, which adds a cell there, and each cell has buttons to edit and remove it. All of them write these blocks for you. Use them with "Inline": in "Split", the editor next to the page does not show what they wrote until the page is opened again, so do not save the text of the editor after using them.
 
 ## Style blocks
 

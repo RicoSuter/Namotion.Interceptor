@@ -1205,6 +1205,8 @@ What a page author cannot do with each kind:
 - **One block for a single value**: A second block for a slot that is no array is an error on the page.
 - **A slot is not set as configuration**: The property of a slot cannot be set by an argument or in the `json` block of a page. The page shows an error that says how the slot is filled. This holds for a property that is configuration too, like `Cells` of `GridLayout`: it is configuration in a `*.json` file and a slot on a page.
 
+**An editor for a list of typed values.** To add or remove a value, the editor of a widget replaces the array with a new one and saves the owner, as the editors of `GridLayout` and `CanvasLayout` do with `RootManager.WriteConfigurationOrWarnAsync`. To change a value, it saves that value, which writes the head line and the `json` block of its block. A new value is written as a block after the last block of the slot. The order of the values is never written, because the text decides it: a save with the values in another order than their blocks is refused, and so is a save with one value twice.
+
 #### Rules for a Slot Property
 
 A slot property must meet these rules. A declaration that breaks one cannot be used: every block of that type then shows an error box with the message of the table, with the short type name and a colon before it, like "Gauge: the slot 'Content' needs a setter." No instance is created.
@@ -1227,7 +1229,7 @@ More that a declaration should follow:
 - **Name**: The slot name defaults to the property name and is case-sensitive. For an array, set the singular explicitly, like `[Slot("Item")]` on `Items`.
 - **Arrays**: Initialize an array property with an empty array in the constructor. All values of one slot have the same type. Mixed types in one list slot are not supported.
 - **The class of a typed slot**: It must implement `IConfigurable` and be known to HomeBlaze like every subject type. Otherwise the page shows "The type 'MyCompany.Widgets.Sidebar' of the slot 'Sidebar' could not be created. It must be a registered configurable subject type." Give it a default slot of its own when its blocks should take content. Put `[ExcludeFromCreation]` on it, because it only exists inside its widget and the create dialog would offer it on its own otherwise, see [Hiding a Type](#hiding-a-type).
-- **Not configuration**: A slot property is not configuration and is not saved. The content lives in the text of the page. Do not put `[Configuration]` on it.
+- **Not configuration on a page**: A slot property is not configuration on a page. Its values live in the text of the page as blocks. Put `[Configuration]` on it as well only when the same property must also be read and written in a configuration file, as `GridLayout.Cells` does.
 
 #### Rendering Slots
 
