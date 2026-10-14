@@ -64,4 +64,52 @@ public class FritzBoxClientTests
         // Assert
         Assert.Equal(expected, interfaceType);
     }
+
+    [Theory]
+    [InlineData("Ethernet", false)]
+    [InlineData("802.11", true)]
+    [InlineData("HomePlug", false)]
+    [InlineData("", null)]
+    public void WhenAClientHasNoMeshPosition_ThenIsWirelessComesFromTheInterfaceType(string interfaceTypeValue, bool? expected)
+    {
+        // Arrange
+        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var host = new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", interfaceTypeValue, 1, 100, false);
+
+        // Act
+        client.Update(host, null);
+
+        // Assert
+        Assert.Equal(expected, client.IsWireless);
+    }
+
+    [Fact]
+    public void WhenAnActiveClientHasNoMeshPosition_ThenLinkSpeedAndPortComeFromTheHost()
+    {
+        // Arrange
+        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var host = new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "Ethernet", 3, 1000, false);
+
+        // Act
+        client.Update(host, null);
+
+        // Assert
+        Assert.Equal(1000, client.LinkSpeed);
+        Assert.Equal(3, client.Port);
+    }
+
+    [Fact]
+    public void WhenAnInactiveClientHasAPositiveHostSpeed_ThenLinkSpeedAndPortAreNull()
+    {
+        // Arrange
+        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var host = new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", false, "laptop", "Ethernet", 3, 1000, false);
+
+        // Act
+        client.Update(host, null);
+
+        // Assert
+        Assert.Null(client.LinkSpeed);
+        Assert.Null(client.Port);
+    }
 }

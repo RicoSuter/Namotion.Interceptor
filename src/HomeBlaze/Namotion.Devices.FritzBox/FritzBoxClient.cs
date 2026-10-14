@@ -52,31 +52,34 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     [State(Position = 401)]
     public partial FritzBoxInterfaceType InterfaceType { get; internal set; }
 
-    [State(Position = 402, IsDiscrete = true)]
+    [State(Position = 402)]
     public partial bool? IsGuest { get; internal set; }
 
     /// <summary>
-    /// The name of the access point the device is connected to, null while it is absent.
+    /// The name of the access point the device is connected to, null while the device is absent or the mesh list
+    /// does not place it.
     /// </summary>
-    [State(Position = 230)]
+    [State(Position = 403)]
     public partial string? AccessPointName { get; internal set; }
 
-    [State(Position = 231)]
+    [State(Position = 404)]
     public partial string? AccessPointMacAddress { get; internal set; }
 
     /// <summary>
-    /// The WLAN band, null for a wired or absent device.
+    /// The WLAN band, null for a wired device, or while the device is absent or the mesh list does not place it.
     /// </summary>
-    [State(Position = 232)]
+    [State(Position = 405)]
     public partial string? Band { get; internal set; }
 
     /// <summary>
-    /// The LAN port of the access point, null for a wireless or absent device.
+    /// The LAN port of the access point. Taken from the mesh list position when the device is placed there,
+    /// otherwise falls back to the host list entry's port while the device is active; null for a wireless
+    /// device or when neither source reports one.
     /// </summary>
-    [State(Position = 233)]
+    [State(Position = 406)]
     public partial int? Port { get; internal set; }
 
-    [State(Position = 234, Unit = StateUnit.MegabitPerSecond)]
+    [State(Position = 407, Unit = StateUnit.MegabitPerSecond)]
     public partial decimal? LinkSpeed { get; internal set; }
 
     [Derived]
@@ -90,16 +93,18 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
 
     internal void Update(HostEntry host, ClientPosition? position)
     {
+        var interfaceType = FritzBoxInterfaceTypes.Parse(host.InterfaceType);
+
         HostName = StringValues.NullIfBlank(host.HostName);
         IpAddress = StringValues.NullIfBlank(host.IpAddress);
         IsPresent = host.IsActive;
-        InterfaceType = FritzBoxInterfaceTypes.Parse(host.InterfaceType);
-        IsWireless = GetIsWireless(InterfaceType, position);
+        InterfaceType = interfaceType;
+        IsWireless = GetIsWireless(interfaceType, position);
         IsGuest = host.IsGuest;
         AccessPointName = position?.AccessPointName;
         AccessPointMacAddress = position?.AccessPointMacAddress;
         Band = position?.Band;
-        Port = position?.Port;
+        Port = GetPort(host, position);
         LinkSpeed = GetLinkSpeed(host, position);
     }
 
@@ -116,6 +121,16 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
             FritzBoxInterfaceType.Ethernet or FritzBoxInterfaceType.HomePlug => false,
             _ => null
         };
+    }
+
+    private static int? GetPort(HostEntry host, ClientPosition? position)
+    {
+        if (position is not null)
+        {
+            return position.Port;
+        }
+
+        return host is { IsActive: true, Port: > 0 } ? host.Port : null;
     }
 
     private static decimal? GetLinkSpeed(HostEntry host, ClientPosition? position)

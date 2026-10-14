@@ -3,7 +3,8 @@ using Namotion.Devices.FritzBox.Parsing;
 namespace Namotion.Devices.FritzBox.Model;
 
 /// <summary>
-/// Everything one poll read from the router. A part is null when the router did not answer it.
+/// Everything one poll read from the router. A part is null when the router did not answer it, except
+/// <see cref="Wlans"/> and <see cref="Hosts"/>, which are empty rather than null when unanswered.
 /// </summary>
 internal sealed record FritzBoxSnapshot(
     RouterInfo? Router,

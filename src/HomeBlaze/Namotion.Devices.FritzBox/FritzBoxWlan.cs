@@ -49,7 +49,7 @@ public partial class FritzBoxWlan : ISwitchState, ITitleProvider
     [Derived]
     public string? Title => GetTitle();
 
-    internal string ServiceType { get; set; }
+    internal string ServiceType { get; private set; }
 
     private string GetTitle()
     {

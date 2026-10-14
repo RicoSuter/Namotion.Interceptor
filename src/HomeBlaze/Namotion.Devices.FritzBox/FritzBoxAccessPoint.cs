@@ -66,7 +66,6 @@ public partial class FritzBoxAccessPoint : IDeviceInfo, ISoftwareState, INetwork
     /// <summary>
     /// Whether the access point is part of the mesh right now.
     /// </summary>
-    [State(IsDiscrete = true)]
     public partial bool IsConnected { get; internal set; }
 
     [State(Position = 401)]
