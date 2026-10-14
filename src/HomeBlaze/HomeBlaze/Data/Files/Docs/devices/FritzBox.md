@@ -70,7 +70,7 @@ FritzBox
 
 Clients and access points are keyed by MAC address in upper case, so their paths stay stable across restarts. A client that moves to another access point keeps its subject; only the two access point lists change. History records a client under `FritzBox.Clients`, wherever it is connected. See [Shared Child Subjects](../development/building-subjects.md#shared-child-subjects) for the general rule.
 
-A WLAN that reports its band (2.4, 5 or 6 GHz) is keyed by it; a router without a reported band, or with more radios than bands, falls back to `WLAN1`, `WLAN2`, and so on, with a `-2` suffix added if a key would otherwise collide. The WLAN beyond the router's radios is always the `Guest` key.
+A WLAN is keyed by the band it reports or, failing that, by its position (first `2.4GHz`, second `5GHz`, third `6GHz`), otherwise `WLAN<n>`; a key that would collide gets its position as a suffix, such as `5GHz-3`. Of several WLANs, the last is `Guest`.
 
 ## Widgets
 
@@ -114,8 +114,8 @@ A WLAN that reports its band (2.4, 5 or 6 GHz) is keyed by it; a router without 
 | `HostName`, `IpAddress`, `MacAddress` | | Identity |
 | `InterfaceType`, `IsWireless`, `IsGuest` | | How it is connected |
 | `AccessPointName`, `AccessPointMacAddress` | | Where it is connected, empty while absent or unplaced |
-| `Band`, `Port` | | WLAN band or LAN port, empty while absent or unplaced; see [How It Works](#how-it-works) |
-| `LinkSpeed` | Mbit/s | Current link speed |
+| `Band`, `Port` | | WLAN band or LAN port, empty while absent; a client the mesh list does not place has no band but can have the host list's port, see [How It Works](#how-it-works) |
+| `LinkSpeed` | Mbit/s | Current link speed; a client the mesh list does not place falls back to the host list's speed while present |
 
 ### FritzBoxAccessPoint
 

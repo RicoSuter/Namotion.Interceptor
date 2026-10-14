@@ -270,7 +270,7 @@ A subject may be held by several collections, for example a light in a bridge's 
 - **The subject stays attached until the last collection drops it,** not the first: a subject with several parents detaches only once every collection holding it has dropped it. When the owner drops it, drop it from every other collection in the same update, or it stays attached, referenced by them but orphaned from its owner.
 - **The canonical path is the shallowest one.** A subject with several parents has one path per parent; paths are ordered by depth, with attach order deciding between equally deep ones, and history records values under the first. Put the owning collection at the shallowest level.
 - **Relative paths from a shared subject do not resolve.** A `../` path starting at a subject with several parents resolves to nothing, because its parent is ambiguous.
-- **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. Keep a back-reference to an owner in a field, or a plain, non-intercepted property.
+- **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. Keep a back-reference to an owner in a field.
 
 ## Display Interfaces
 
