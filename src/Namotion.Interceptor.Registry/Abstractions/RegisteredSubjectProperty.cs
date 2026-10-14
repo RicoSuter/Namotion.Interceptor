@@ -152,6 +152,13 @@ public class RegisteredSubjectProperty
     public bool HasSetter => Reference.Metadata.SetValue is not null;
 
     /// <summary>
+    /// Gets a value indicating whether the property has a setter that is public. A dynamic property without
+    /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> counts as public when it has a setter.
+    /// </summary>
+    // TODO: Read the accessibility from the generated metadata instead of the PropertyInfo (see #102)
+    public bool HasPublicSetter => HasSetter && Reference.Metadata.PropertyInfo?.SetMethod?.IsPublic != false;
+
+    /// <summary>
     /// Gets the current value of the property.
     /// </summary>
     /// <returns>The value.</returns>
