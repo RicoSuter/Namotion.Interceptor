@@ -15,6 +15,9 @@ internal sealed record SoapBody(string? Name, List<(string Name, string? Value)>
     private const string EnvelopeNamespace = "http://schemas.xmlsoap.org/soap/envelope/";
     private const string ControlNamespace = "urn:schemas-upnp-org:control-1-0";
 
+    // TR-064 devices may put UPnPError in the namespace of the DSL Forum instead.
+    private const string DslForumControlNamespace = "urn:dslforum-org:control-1-0";
+
     private static readonly SoapBody None = new(null, null, null);
 
     /// <summary>
@@ -102,7 +105,7 @@ internal sealed record SoapBody(string? Name, List<(string Name, string? Value)>
             {
                 text = ReadText(reader);
             }
-            else if (IsElement(reader, "errorCode") && reader.NamespaceURI == ControlNamespace)
+            else if (IsElement(reader, "errorCode") && reader.NamespaceURI is ControlNamespace or DslForumControlNamespace)
             {
                 // Normally at detail/UPnPError/errorCode, but taken at any depth. ReadText must run even once
                 // errorCode is already set, or the reader never advances past a second errorCode and the loop

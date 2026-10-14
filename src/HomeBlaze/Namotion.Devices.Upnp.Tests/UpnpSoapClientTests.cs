@@ -262,6 +262,48 @@ public class UpnpSoapClientTests
     }
 
     [Fact]
+    public async Task WhenAFaultIsFormattedOnSeveralLines_ThenTheErrorCodeIsRead()
+    {
+        // Arrange: the layout a FRITZ!Box answers with.
+        using var httpClient = Answer(
+            HttpStatusCode.InternalServerError,
+            "<?xml version=\"1.0\"?>\n" +
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\n" +
+            "<s:Body>\n<s:Fault>\n<faultcode>s:Client</faultcode>\n<faultstring>UPnPError</faultstring>\n<detail>\n" +
+            "<UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\">\n<errorCode>401</errorCode>\n" +
+            "<errorDescription>Invalid Action</errorDescription>\n</UPnPError>\n</detail>\n</s:Fault>\n</s:Body>\n</s:Envelope>\n");
+        var client = CreateClient(httpClient);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<UpnpFaultException>(
+            () => client.QueryAsync(AvTransport, "Next", [], CancellationToken.None));
+
+        // Assert
+        Assert.Equal(401, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task WhenAFaultUsesTheDslForumControlNamespace_ThenTheErrorCodeIsRead()
+    {
+        // Arrange
+        using var httpClient = Answer(
+            HttpStatusCode.InternalServerError,
+            AnswerStart +
+            "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
+            "<detail><UPnPError xmlns=\"urn:dslforum-org:control-1-0\"><errorCode>606</errorCode>" +
+            "<errorDescription>Action Not Authorized</errorDescription></UPnPError></detail></s:Fault>" +
+            EnvelopeEnd);
+        var client = CreateClient(httpClient);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<UpnpFaultException>(
+            () => client.QueryAsync(AvTransport, "Next", [], CancellationToken.None));
+
+        // Assert
+        Assert.Equal(606, exception.ErrorCode);
+    }
+
+    [Fact]
     public async Task WhenAFaultCarriesSeveralErrorCodeElements_ThenTheFirstOneIsUsed()
     {
         // Arrange: a second errorCode must not stall the reader once the first one has already been parsed.
