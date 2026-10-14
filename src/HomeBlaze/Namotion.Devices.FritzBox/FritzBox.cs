@@ -173,19 +173,19 @@ public partial class FritzBox : BackgroundService,
     /// <summary>
     /// Every device the router lists, keyed by MAC address. Owns the client subjects.
     /// </summary>
-    [State]
+    [State(Position = 962)]
     public partial Dictionary<string, FritzBoxClient> Clients { get; internal set; }
 
     /// <summary>
     /// The router itself and every meshed access point, keyed by MAC address.
     /// </summary>
-    [State]
+    [State(Position = 960)]
     public partial Dictionary<string, FritzBoxAccessPoint> AccessPoints { get; internal set; }
 
     /// <summary>
     /// The WLANs, keyed by <see cref="FritzBoxWlanRoles"/>.
     /// </summary>
-    [State]
+    [State(Position = 961)]
     public partial Dictionary<string, FritzBoxWlan> Wlans { get; internal set; }
 
     /// <summary>
