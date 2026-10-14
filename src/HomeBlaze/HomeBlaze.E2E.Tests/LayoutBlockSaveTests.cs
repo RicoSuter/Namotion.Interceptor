@@ -1,10 +1,10 @@
-using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Storage.Files;
 using Microsoft.Playwright;
 using Namotion.Interceptor.Testing;
 using Xunit.Abstractions;
+using static HomeBlaze.E2E.Tests.Infrastructure.PageGeometry;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -41,7 +41,7 @@ public class LayoutBlockSaveTests
 
         await WithPageAsync(GridPage, CreateGridPage(), async () =>
         {
-            var page = await _fixture.OpenPageInInlineModeAsync($"Demo/{GridPage}");
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
             var emptyCell = page.Locator(".grid-cell.empty[style*='grid-column: 3']");
             await Assertions.Expect(emptyCell).ToBeVisibleAsync(new() { Timeout = Timeout });
 
@@ -55,7 +55,7 @@ public class LayoutBlockSaveTests
             await Assertions.Expect(SubjectSetupDialogTests.Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = Timeout });
 
             // Assert
-            var text = await WaitForPageTextAsync(
+            var text = await _fixture.WaitForDemoPageTextAsync(
                 GridPage,
                 written => written.Contains("::: Cell "),
                 "The page was not written with a block for the new cell");
@@ -88,7 +88,7 @@ public class LayoutBlockSaveTests
 
         await WithPageAsync(GridPage, before, async () =>
         {
-            var page = await _fixture.OpenPageInInlineModeAsync($"Demo/{GridPage}");
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
             var firstCell = page.Locator(".grid-cell.editing").Filter(new() { HasText = "first cell" });
             await Assertions.Expect(firstCell).ToBeVisibleAsync(new() { Timeout = Timeout });
 
@@ -97,7 +97,7 @@ public class LayoutBlockSaveTests
             await page.Locator(".mud-dialog").GetByRole(AriaRole.Button, new() { Name = "Delete" }).ClickAsync();
 
             // Assert
-            var text = await WaitForPageTextAsync(
+            var text = await _fixture.WaitForDemoPageTextAsync(
                 GridPage,
                 written => !written.Contains("first cell"),
                 "The page was not written without the block of the deleted cell");
@@ -116,7 +116,7 @@ public class LayoutBlockSaveTests
         await WithPageAsync(GridPage, CreateGridPage("::: Cell Row=0 Column=0"), async () =>
         {
             // Act
-            var page = await _fixture.OpenPageInInlineModeAsync($"Demo/{GridPage}");
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
 
             // Assert
             var cell = page.Locator(".grid-cell.editing");
@@ -148,7 +148,7 @@ public class LayoutBlockSaveTests
 
         await WithPageAsync(CanvasPage, before, async () =>
         {
-            var page = await _fixture.OpenPageInInlineModeAsync($"Demo/{CanvasPage}");
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{CanvasPage}");
             var canvas = page.Locator(".canvas-layout-container.editing");
             await Assertions.Expect(canvas).ToBeVisibleAsync(new() { Timeout = Timeout });
 
@@ -161,16 +161,13 @@ public class LayoutBlockSaveTests
             var startY = box.Top + box.Height / 2;
 
             // Act
-            await page.Mouse.MoveAsync((float)startX, (float)startY);
-            await page.Mouse.DownAsync();
-            await page.Mouse.MoveAsync((float)(startX + 100), (float)(startY + 60), new() { Steps = 10 });
-            await page.Mouse.UpAsync();
+            await DragAsync(page, startX, startY, startX + 100, startY + 60);
 
             // Assert: the position is the final one only after the events of the drag have arrived, and the page is
             // written at the release.
             var x = 0;
             var y = 0;
-            var text = await WaitForPageTextAsync(
+            var text = await _fixture.WaitForDemoPageTextAsync(
                 CanvasPage,
                 written =>
                 {
@@ -187,7 +184,6 @@ public class LayoutBlockSaveTests
             Assert.True(x > 40, $"X is {x}");
             Assert.True(y > 40, $"Y is {y}");
             Assert.Equal(before.Replace(FirstNodeLine, $"::: Node X={x} Y={y} Width=200 Height=100"), text);
-            Assert.Contains("::: Node#second X=300 Y=40 Width=200 Height=100\nsecond node\n", text);
             await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
         });
@@ -201,7 +197,7 @@ public class LayoutBlockSaveTests
 
         await WithPageAsync(GridPage, before, async () =>
         {
-            var page = await _fixture.OpenPageInInlineModeAsync($"Demo/{GridPage}");
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
             var cell = page.Locator(".grid-cell.editing").Filter(new() { HasText = "the cell" });
             await Assertions.Expect(cell).ToBeVisibleAsync(new() { Timeout = Timeout });
 
@@ -215,7 +211,7 @@ public class LayoutBlockSaveTests
             await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
 
             // Assert
-            var text = await WaitForPageTextAsync(
+            var text = await _fixture.WaitForDemoPageTextAsync(
                 GridPage,
                 written => written.Contains("ColumnSpan=2"),
                 "The page was not written with the new column span of the cell");
@@ -234,15 +230,7 @@ public class LayoutBlockSaveTests
 
         await WithPageAsync(GridPage, before, async () =>
         {
-            var page = await _fixture.CreatePageAsync();
-            await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{GridPage}");
-            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-            await Assertions.Expect(page.Locator(".grid-cell").GetByText("first cell")).ToBeVisibleAsync(new() { Timeout = Timeout });
-
-            // The edit menu is prerendered, and a click before the circuit is connected is lost.
-            await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await page.GetByTestId("edit-mode-menu").ClickAsync();
-            await page.Locator(".mud-popover-open").GetByText("Split", new() { Exact = true }).ClickAsync();
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}", "Split");
 
             // The editor only knows its block regions once the decorations are applied.
             await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -280,10 +268,6 @@ public class LayoutBlockSaveTests
             // Assert
             var text = Normalize(await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(GridPage)));
 
-            Assert.Contains(":: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=3\n", text);
-            Assert.Contains("::: Cell Row=0 Column=0\nfirst cell\n", text);
-            Assert.Contains("::: Cell Row=0 Column=1\nsecond cell\n", text);
-            Assert.DoesNotContain("json", text);
             Assert.Equal(before.Replace("Columns=4", "Columns=3"), text);
             await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
         });
@@ -317,43 +301,6 @@ public class LayoutBlockSaveTests
         }
     }
 
-    // Reads the page until its text is the expected one. A write that the page refuses leaves the text as it was.
-    private async Task<string> WaitForPageTextAsync(string name, Func<string, bool> isExpected, string message)
-    {
-        var path = _fixture.GetDemoPagePath(name);
-        var text = string.Empty;
-
-        await AsyncTestHelpers.WaitUntilAsync(
-            () =>
-            {
-                if (!TryReadFile(path, out var written))
-                {
-                    return false;
-                }
-
-                text = Normalize(written);
-                return isExpected(text);
-            },
-            message: message);
-
-        return text;
-    }
-
-    // The server holds the file open while it reads it again after a write, and the poll tries a failed read again.
-    private static bool TryReadFile(string path, out string text)
-    {
-        try
-        {
-            text = File.ReadAllText(path);
-            return true;
-        }
-        catch (IOException)
-        {
-            text = string.Empty;
-            return false;
-        }
-    }
-
     // Null while the page is read again and holds no canvas with a node for a moment.
     private CanvasNode? TryGetFirstCanvasNode()
     {
@@ -373,25 +320,4 @@ public class LayoutBlockSaveTests
     }
 
     private static string Normalize(string text) => text.Replace("\r\n", "\n");
-
-    private sealed record Box(double Left, double Top, double Width, double Height)
-    {
-        public double Right => Left + Width;
-
-        public double Bottom => Top + Height;
-    }
-
-    // Left, top, width and height come from one call, so that a layout that is still moving cannot give values of different moments.
-    private static async Task<Box> GetBoxAsync(ILocator locator)
-    {
-        var values = await locator.EvaluateAsync<double[]>(
-            """
-            element => {
-                const rectangle = element.getBoundingClientRect();
-                return [rectangle.left, rectangle.top, rectangle.width, rectangle.height];
-            }
-            """);
-
-        return new Box(values[0], values[1], values[2], values[3]);
-    }
 }

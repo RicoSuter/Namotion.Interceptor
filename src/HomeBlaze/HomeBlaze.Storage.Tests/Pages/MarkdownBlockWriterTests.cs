@@ -506,29 +506,17 @@ public class MarkdownBlockWriterTests
     [InlineData(":: Demo.Panel\ntext before\n\n::: Tile\ntwo\n:::\ntext after\n::\n", ":: Demo.Panel\ntext before\n\ntext after\n::\n")]
     [InlineData(":: Demo.Panel\ntext before\n::: Tile\ntwo\n:::\n\ntext after\n::\n", ":: Demo.Panel\ntext before\n\ntext after\n::\n")]
     [InlineData(":: Demo.Panel\ntext before\n::: Tile\ntwo\n:::\n  \ntext after\n::\n", ":: Demo.Panel\ntext before\n  \ntext after\n::\n")]
-    public void WhenRemovalJoinsNoTwoTexts_ThenNoEmptyLineIsLeft(string source, string expected)
-    {
-        // Arrange
-        var tile = OwnerOf(source).Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-
-        // Act
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-
-        // Assert
-        Assert.Equal(expected, result);
-        Assert.Equal(0, edit.InsertedLineCount);
-    }
-
-    [Theory]
+    // The removed block starts or ends the text.
     [InlineData(":: Demo.Leaf\n::\ntext after\n", "text after\n")]
     [InlineData("text before\n:: Demo.Leaf", "text before\n")]
-    public void WhenRemovedBlockStartsOrEndsTheText_ThenNoEmptyLineIsLeft(string source, string expected)
+    public void WhenRemovalJoinsNoTwoTexts_ThenNoEmptyLineIsLeft(string source, string expected)
     {
-        // Arrange
-        var leaf = OwnerOf(source);
+        // Arrange: the first slot block of the first block, or the first block when it has none.
+        var owner = OwnerOf(source);
+        var block = owner.Children.SingleOrDefault(child => child.Kind == MarkdownBlockKind.Slot) ?? owner;
 
         // Act
-        var result = MarkdownBlockWriter.RemoveBlock(source, leaf, out var edit);
+        var result = MarkdownBlockWriter.RemoveBlock(source, block, out var edit);
 
         // Assert
         Assert.Equal(expected, result);
@@ -611,40 +599,38 @@ public class MarkdownBlockWriterTests
         Assert.Equal(":: Demo.Panel\r\na paragraph\r\n\r\ntext of the panel\r\n::\r\n", result);
     }
 
-    [Fact]
-    public void WhenSiblingHasClosingLine_ThenPlacementIsAfterItWithClosingLine()
+    [Theory]
+    // With a closing line, after it.
+    [InlineData(Board, 10, 3, true, "", "\n")]
+    // Without a closing line, after its content.
+    [InlineData(ShortBoard, 8, 3, false, "", "\n")]
+    // With the indentation, the fence length and the line ending of the sibling.
+    [InlineData(":: Demo.Board\r\n  :::: Tile\r\n  ::::\r\n::\r\n", 4, 4, true, "  ", "\r\n")]
+    public void WhenOwnerHasABlockOfTheSlot_ThenPlacementIsAfterTheLastOneAndWrittenLikeIt(
+        string source, int expectedLine, int expectedFenceLength, bool expectedClosingLine, string expectedIndentation, string expectedLineEnding)
     {
         // Arrange
-        var page = MarkdownPageParser.Parse(Board);
+        var page = MarkdownPageParser.Parse(source);
 
         // Act
         var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
 
         // Assert
-        Assert.Equal(new MarkdownBlockPlacement(10, 3, true, string.Empty, "\n"), placement);
-    }
-
-    [Fact]
-    public void WhenSiblingHasNoClosingLine_ThenPlacementIsAfterItsContentWithoutClosingLine()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse(ShortBoard);
-
-        // Act
-        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
-
-        // Assert
-        Assert.Equal(new MarkdownBlockPlacement(8, 3, false, string.Empty, "\n"), placement);
+        Assert.Equal(
+            new MarkdownBlockPlacement(expectedLine, expectedFenceLength, expectedClosingLine, expectedIndentation, expectedLineEnding),
+            placement);
     }
 
     [Theory]
-    [InlineData(":: Demo.Board Columns=2\n::\n", 2, true)]
-    [InlineData(":: Demo.Board Columns=2\n```json\n{ \"Tags\": [1] }\n```\n::\n", 5, true)]
-    [InlineData(":: Demo.Board Columns=2\n", 2, false)]
-    [InlineData(":: Demo.Board Columns=2\n```json\n{ \"Tags\": [1] }\n```\n\n:: Demo.Other\n", 5, false)]
-    [InlineData(":: Demo.Card\n::: Demo.Leaf\n::\n\n:: Demo.Board Columns=2\n::\n", 6, false)]
+    [InlineData(":: Demo.Board Columns=2\n::\n", 2, true, "", "\n")]
+    [InlineData(":: Demo.Board Columns=2\n```json\n{ \"Tags\": [1] }\n```\n::\n", 5, true, "", "\n")]
+    [InlineData(":: Demo.Board Columns=2\n", 2, false, "", "\n")]
+    [InlineData(":: Demo.Board Columns=2\n```json\n{ \"Tags\": [1] }\n```\n\n:: Demo.Other\n", 5, false, "", "\n")]
+    [InlineData(":: Demo.Card\n::: Demo.Leaf\n::\n\n:: Demo.Board Columns=2\n::\n", 6, false, "", "\n")]
+    // With the indentation and the line ending of the owner.
+    [InlineData("  :: Demo.Board\r\n  ::\r\n", 2, true, "  ", "\r\n")]
     public void WhenOwnerHasNoBlockOfTheSlot_ThenPlacementIsAtTheEndOfItsContentInTheStyleOfThePage(
-        string source, int expectedLine, bool expectedClosingLine)
+        string source, int expectedLine, bool expectedClosingLine, string expectedIndentation, string expectedLineEnding)
     {
         // Arrange
         var page = MarkdownPageParser.Parse(source);
@@ -653,35 +639,8 @@ public class MarkdownBlockWriterTests
         // Act
         var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, owner, "Tile");
 
-        // Assert
-        Assert.Equal(expectedLine, placement.Line);
-        Assert.Equal(expectedClosingLine, placement.HasClosingLine);
-    }
-
-    [Fact]
-    public void WhenOwnerIsIndentedAndUsesWindowsLineEndings_ThenPlacementCarriesBoth()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse("  :: Demo.Board\r\n  ::\r\n");
-
-        // Act
-        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
-
-        // Assert
-        Assert.Equal(new MarkdownBlockPlacement(2, 3, true, "  ", "\r\n"), placement);
-    }
-
-    [Fact]
-    public void WhenSiblingIsIndentedAndUsesWindowsLineEndings_ThenPlacementIsWrittenLikeTheSibling()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse(":: Demo.Board\r\n  :::: Tile\r\n  ::::\r\n::\r\n");
-
-        // Act
-        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
-
-        // Assert
-        Assert.Equal(new MarkdownBlockPlacement(4, 4, true, "  ", "\r\n"), placement);
+        // Assert: one fence character more than the owner.
+        Assert.Equal(new MarkdownBlockPlacement(expectedLine, 3, expectedClosingLine, expectedIndentation, expectedLineEnding), placement);
     }
 
     [Fact]

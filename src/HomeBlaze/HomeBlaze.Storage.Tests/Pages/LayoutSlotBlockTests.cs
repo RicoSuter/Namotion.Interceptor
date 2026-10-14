@@ -247,27 +247,4 @@ public class LayoutSlotBlockTests
         Assert.Equal((400, 80), (nodes[1].X, nodes[1].Y));
         Assert.Equal(3, ((GridLayout)((IPathScope)page).TryGetNamedSubject("dashboardgrid")!).Cells.Length);
     }
-
-    [Fact]
-    public async Task WhenCellIsRemovedAndTheGridSaved_ThenItsBlockIsRemovedWithItsContent()
-    {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
-        var content =
-            ":: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2\n" +
-            "::: Cell Row=0 Column=0\nfirst\n" +
-            "::: Cell Row=0 Column=1\nsecond\n" +
-            "::\n";
-        var page = await fixture.AddPageAsync("page.md", content);
-        var grid = (GridLayout)page.Children["grid"];
-        grid.Cells = [grid.Cells[1]];
-
-        // Act
-        await page.WriteConfigurationAsync(grid, CancellationToken.None);
-
-        // Assert
-        Assert.Equal(
-            ":: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2\n::: Cell Row=0 Column=1\nsecond\n::\n",
-            await fixture.ReadAsync("page.md"));
-    }
 }

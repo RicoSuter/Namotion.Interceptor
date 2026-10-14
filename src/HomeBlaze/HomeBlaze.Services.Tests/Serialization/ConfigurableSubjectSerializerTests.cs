@@ -266,20 +266,22 @@ public class ConfigurableSubjectSerializerTests
         Assert.Equal(_serializer.Serialize(mixed, naming), scalars);
     }
 
-    [Fact]
-    public void WhenPropertyIsExcluded_ThenItIsNotWrittenAndTheOthersAre()
+    [Theory]
+    [InlineData(ConfigurationNaming.CSharpProperty, "\"ConfigTwo\": 2")]
+    [InlineData(ConfigurationNaming.JsonProperty, "\"configTwo\": 2")]
+    public void WhenPropertyIsExcludedByItsDeclaredName_ThenItIsNotWrittenAndTheOthersAre(ConfigurationNaming naming, string expectedOther)
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var subject = new SubjectWithMixedProperties(context) { ConfigOne = "one", ConfigTwo = 2 };
 
         // Act
-        var json = _serializer.Serialize(
-            subject, static name => name == nameof(SubjectWithMixedProperties.ConfigOne), ConfigurationNaming.CSharpProperty);
+        var json = _serializer.Serialize(subject, static name => name == nameof(SubjectWithMixedProperties.ConfigOne), naming);
 
         // Assert
         Assert.DoesNotContain("ConfigOne", json);
-        Assert.Contains("\"ConfigTwo\": 2", json);
+        Assert.DoesNotContain("configOne", json);
+        Assert.Contains(expectedOther, json);
         Assert.Contains($"\"$type\": \"{typeof(SubjectWithMixedProperties).FullName}\"", json);
     }
 
@@ -297,23 +299,6 @@ public class ConfigurableSubjectSerializerTests
         Assert.DoesNotContain("child", json);
         Assert.Contains($"\"$type\": \"{typeof(SubjectWithAnyChild).FullName}\"", json);
         Assert.ThrowsAny<Exception>(() => _serializer.Serialize(subject));
-    }
-
-    [Fact]
-    public void WhenNamingIsJsonProperty_ThenAPropertyIsExcludedByItsDeclaredName()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create();
-        var subject = new SubjectWithMixedProperties(context) { ConfigOne = "one", ConfigTwo = 2 };
-
-        // Act
-        var json = _serializer.Serialize(
-            subject, static name => name == nameof(SubjectWithMixedProperties.ConfigOne), ConfigurationNaming.JsonProperty);
-
-        // Assert
-        Assert.Contains("\"configTwo\": 2", json);
-        Assert.DoesNotContain("configOne", json);
-        Assert.DoesNotContain("ConfigOne", json);
     }
 
     [Fact]

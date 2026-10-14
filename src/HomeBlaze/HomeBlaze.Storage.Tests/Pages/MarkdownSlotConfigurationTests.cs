@@ -2,16 +2,13 @@ using System.Net;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
+using static HomeBlaze.Storage.Tests.Pages.TestTypeNames;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
 [Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownSlotConfigurationTests
 {
-    private const string Namespace = "HomeBlaze.Storage.Tests.Pages";
-    private const string BoardType = Namespace + ".TestBoard";
-    private const string LeafType = Namespace + ".TestLeaf";
-
     [Fact]
     public async Task WhenSlotPropertyIsAlsoConfiguration_ThenBlocksFillItOnAPage()
     {

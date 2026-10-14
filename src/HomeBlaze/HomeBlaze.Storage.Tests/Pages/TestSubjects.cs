@@ -9,6 +9,14 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
+/// <summary>The names of the test subject types as a head line of a page names them.</summary>
+public static class TestTypeNames
+{
+    public const string Namespace = "HomeBlaze.Storage.Tests.Pages";
+    public const string BoardType = Namespace + ".TestBoard";
+    public const string LeafType = Namespace + ".TestLeaf";
+}
+
 [InterceptorSubject]
 public partial class TestLeaf : IConfigurable
 {

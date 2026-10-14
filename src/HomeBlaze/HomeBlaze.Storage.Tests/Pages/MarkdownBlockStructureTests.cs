@@ -21,12 +21,8 @@ public class MarkdownBlockStructureTests
     [InlineData(ShortBoard)]
     public void WhenFirstSlotBlockIsRemoved_ThenTheOtherBlocksAreMappedToTheirNewIndex(string source)
     {
-        // Arrange
-        var before = MarkdownPageParser.Parse(source);
-        var result = MarkdownBlockWriter.RemoveBlock(source, before.Blocks[0].Children[0], out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+        // Arrange & Act
+        var (_, _, _, map) = RemoveTile(source);
 
         // Assert: board, first tile, second tile, leaf, other
         Assert.Equal(new[] { 0, -1, 1, 2, 3 }, map);
@@ -37,12 +33,8 @@ public class MarkdownBlockStructureTests
     [InlineData(ShortBoard)]
     public void WhenLastSlotBlockIsRemoved_ThenItAndTheBlockInItAreMappedToNothing(string source)
     {
-        // Arrange
-        var before = MarkdownPageParser.Parse(source);
-        var result = MarkdownBlockWriter.RemoveBlock(source, before.Blocks[0].Children[1], out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+        // Arrange & Act
+        var (_, _, _, map) = RemoveTile(source, position: 1);
 
         // Assert
         Assert.Equal(new[] { 0, 1, -1, -1, 2 }, map);
@@ -78,48 +70,13 @@ public class MarkdownBlockStructureTests
     {
         // Arrange
         const string source = "intro\n\n:: Demo.Board Columns=2\n\n:: Demo.Other\n";
-        var before = MarkdownPageParser.Parse(source);
-        var owner = before.Blocks[0];
-        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
-        var text = MarkdownBlockWriter.CreateBlock("Tile", null, "{}", placement.FenceLength, hasClosingLine: placement.HasClosingLine);
-        var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
 
         // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
+        var (_, after, _, map) = InsertTile(source);
 
         // Assert
-        Assert.Equal("intro\n\n:: Demo.Board Columns=2\n::: Tile\n\n:: Demo.Other\n", result);
+        Assert.Equal("intro\n\n:: Demo.Board Columns=2\n::: Tile\n\n:: Demo.Other\n", after.Source);
         Assert.Equal(new[] { 0, 2 }, map);
-    }
-
-    [Fact]
-    public void WhenRemovalLetsTheBlockBeforeTakeTextAfterIt_ThenAlignmentFails()
-    {
-        // Arrange: the first tile has no closing line and is ended by the head line of the second one.
-        const string source = ":: Demo.Panel\n::: Tile\none\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var result = MarkdownBlockWriter.RemoveBlock(source, before.Blocks[0].Children[1], out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
-
-        // Assert
-        Assert.Null(map);
-    }
-
-    [Fact]
-    public void WhenInsertedTextHoldsMoreBlocksThanExpected_ThenAlignmentFails()
-    {
-        // Arrange
-        var before = MarkdownPageParser.Parse(Board);
-        var owner = before.Blocks[0];
-        var result = MarkdownBlockWriter.InsertLines(Board, 11, "::: Tile\n:::\n::: Tile\n:::", "\n", out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
-
-        // Assert
-        Assert.Null(map);
     }
 
     [Fact]
@@ -137,32 +94,24 @@ public class MarkdownBlockStructureTests
         Assert.Null(map);
     }
 
-    [Fact]
-    public void WhenInsertedBlockEndsABlockThatWasOpen_ThenAlignmentFails()
+    [Theory]
+    // More blocks than expected.
+    [InlineData(Board, 11, "::: Tile\n:::\n::: Tile\n:::")]
+    // A head line with two fence characters ends the board, so the other block is no longer beside it.
+    [InlineData(ShortBoard, 6, ":: Demo.Stray")]
+    // The leaf has four fence characters, so a new block with three does not end before it and takes it over.
+    [InlineData(":: Demo.Board\n:::: Tile\none\n:::: Demo.Leaf\n::\n", 4, "::: Tile")]
+    // The new block makes two lists of one.
+    [InlineData(":: Demo.Board\n- first\n- second\n::\n", 3, "::: Tile\n:::")]
+    // Directly after an attribute line, the new tile takes the attributes of the line from the heading after it.
+    [InlineData(":: Demo.Board\n{#custom}\n# Heading of the board\n::\n", 3, "::: Tile\n:::")]
+    [InlineData(":: Demo.Board\n{.highlight}\n# Heading of the board\n::\n", 3, "::: Tile\n:::")]
+    // The json block is the configuration of the board only while it is the first thing in it.
+    [InlineData(":: Demo.Board\n```json\n{ \"Tags\": [1] }\n```\n::\n", 2, "::: Tile\n:::")]
+    public void WhenInsertedLinesChangeMoreThanTheirOwnBlock_ThenAlignmentFails(string source, int line, string text)
     {
-        // Arrange: a head line with two fence characters ends the board, so the other block is no longer beside it.
-        var before = MarkdownPageParser.Parse(ShortBoard);
-        var owner = before.Blocks[0];
-        var result = MarkdownBlockWriter.InsertLines(ShortBoard, 6, ":: Demo.Stray", "\n", out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
-
-        // Assert
-        Assert.Null(map);
-    }
-
-    [Fact]
-    public void WhenInsertedBlockTakesOverTheBlockAfterIt_ThenAlignmentFails()
-    {
-        // Arrange: the leaf has four fence characters, so a new block with three does not end before it.
-        const string source = ":: Demo.Board\n:::: Tile\none\n:::: Demo.Leaf\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var owner = before.Blocks[0];
-        var result = MarkdownBlockWriter.InsertLines(source, 4, "::: Tile", "\n", out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
+        // Arrange & Act
+        var (_, _, _, map) = InsertLines(source, line, text);
 
         // Assert
         Assert.Null(map);
@@ -173,36 +122,14 @@ public class MarkdownBlockStructureTests
     {
         // Arrange
         const string source = ":: Demo.Board\n:::: Tile\none\n:::: Demo.Leaf\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var owner = before.Blocks[0];
-        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
-        var text = MarkdownBlockWriter.CreateBlock("Tile", null, "{}", placement.FenceLength, hasClosingLine: placement.HasClosingLine);
-        var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
 
         // Act
-        var after = MarkdownPageParser.Parse(result);
-        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 1, owner);
+        var (_, after, _, map) = InsertTile(source);
 
         // Assert: the leaf is still directly inside the board.
-        Assert.Equal(":: Demo.Board\n:::: Tile\none\n:::: Tile\n:::: Demo.Leaf\n::\n", result);
+        Assert.Equal(":: Demo.Board\n:::: Tile\none\n:::: Tile\n:::: Demo.Leaf\n::\n", after.Source);
         Assert.Equal(new[] { 0, 1, 3 }, map);
         Assert.Equal(3, after.Blocks[0].Children.Count);
-    }
-
-    [Fact]
-    public void WhenRemovalLetsAStyleBlockTakeTextAfterIt_ThenAlignmentFails()
-    {
-        // Arrange: the style block has no closing line and is ended by the head line of the tile.
-        const string source = ":: Demo.Panel\n::: {.note}\nstyled\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
-
-        // Assert
-        Assert.Null(map);
     }
 
     [Fact]
@@ -210,17 +137,12 @@ public class MarkdownBlockStructureTests
     {
         // Arrange
         const string source = "intro\n\n:: Demo.Board Columns=2";
-        var before = MarkdownPageParser.Parse(source);
-        var owner = before.Blocks[0];
-        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
-        var text = MarkdownBlockWriter.CreateBlock("Tile", null, "{}", placement.FenceLength, hasClosingLine: placement.HasClosingLine);
-        var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
 
         // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
+        var (_, after, _, map) = InsertTile(source);
 
         // Assert
-        Assert.Equal("intro\n\n:: Demo.Board Columns=2\n::: Tile", result);
+        Assert.Equal("intro\n\n:: Demo.Board Columns=2\n::: Tile", after.Source);
         Assert.Equal(new[] { 0 }, map);
     }
 
@@ -232,17 +154,13 @@ public class MarkdownBlockStructureTests
     {
         // Arrange
         var source = $":: Demo.Panel\n{textBefore}\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
 
         // Act
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-        var after = MarkdownPageParser.Parse(result);
-        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+        var (_, after, _, map) = RemoveTile(source);
 
         // Assert: the paragraph of the text starts on the line of the text, so it continues nothing before it.
         Assert.NotNull(map);
-        var textLine = result.Split('\n').ToList().IndexOf("text of the panel");
+        var textLine = after.Source.Split('\n').ToList().IndexOf("text of the panel");
         Assert.Contains(
             after.Document.Descendants<ParagraphBlock>(),
             paragraph => paragraph.Line == textLine && paragraph.Parent is MarkdownBlockContainer);
@@ -253,57 +171,36 @@ public class MarkdownBlockStructureTests
     {
         // Arrange: four columns of indentation make the line code, and code continues a paragraph before it.
         const string source = ":: Demo.Panel\na paragraph\n::: Tile\n:::\n    :: Demo.Leaf\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
 
         // Act
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-        var after = MarkdownPageParser.Parse(result);
-        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+        var (_, after, _, map) = RemoveTile(source);
 
         // Assert
         Assert.NotNull(map);
-        var codeLine = result.Split('\n').ToList().IndexOf("    :: Demo.Leaf");
+        var codeLine = after.Source.Split('\n').ToList().IndexOf("    :: Demo.Leaf");
         Assert.Contains(
             after.Document.Descendants<CodeBlock>(),
             code => code.Line == codeLine && code.Parent is MarkdownBlockContainer);
     }
 
     [Theory]
+    // The text becomes a part of the list item, with two or four columns of indentation.
     [InlineData(":: Demo.Panel\n- first\n::: Tile\ntwo\n:::\n  text of the panel\n::\n")]
     [InlineData(":: Demo.Panel\n- first\n::: Tile\ntwo\n:::\n    text of the panel\n::\n")]
+    // The text becomes the definition of the term, also after an empty line.
     [InlineData(":: Demo.Panel\na term\n::: Tile\ntwo\n:::\n:   text of the panel\n::\n")]
     [InlineData(":: Demo.Panel\na term\n\n::: Tile\ntwo\n:::\n:   text of the panel\n::\n")]
-    public void WhenRemovalChangesWhatTheTextAfterTheBlockIs_ThenAlignmentFails(string source)
+    // Every text keeps its kind and its containers by name, but the two lists become one, also across the empty
+    // line that the removal leaves, and a list with an empty line between its items is rendered with paragraphs.
+    [InlineData(":: Demo.Panel\n- first\n::: Tile\ntwo\n:::\n- second\n::\n")]
+    [InlineData(":: Demo.Panel\n1. first\n::: Tile\ntwo\n:::\n2. second\n::\n")]
+    [InlineData(":: Demo.Panel\na term\n:   a definition\n::: Tile\ntwo\n:::\nanother term\n:   another definition\n::\n")]
+    // Without the tile, the empty line at the end of the page follows the definition and makes it loose.
+    [InlineData(":: Demo.Board\nterm\n:   definition\n::: Tile\n:::\n\n")]
+    public void WhenRemovalJoinsTheTextAfterTheBlockToTheTextBeforeIt_ThenAlignmentFails(string source)
     {
-        // Arrange: the text becomes a part of the list item or the definition of the term, also after an empty line.
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
-
-        // Assert
-        Assert.Null(map);
-    }
-
-    [Theory]
-    [InlineData("- first", "- second")]
-    [InlineData("1. first", "2. second")]
-    [InlineData("a term\n:   a definition", "another term\n:   another definition")]
-    public void WhenRemovalMakesOneListOfTheListsBeforeAndAfterTheBlock_ThenAlignmentFails(string listBefore, string listAfter)
-    {
-        // Arrange: every text keeps its kind and its containers by name, but the two lists become one, also
-        // across the empty line that the removal leaves, and a list with an empty line between its items is
-        // rendered with paragraphs.
-        var source = $":: Demo.Panel\n{listBefore}\n::: Tile\ntwo\n:::\n{listAfter}\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+        // Arrange & Act
+        var (_, _, _, map) = RemoveTile(source);
 
         // Assert
         Assert.Null(map);
@@ -315,45 +212,9 @@ public class MarkdownBlockStructureTests
         // Arrange: Markdig keeps the empty line at the end of the page in the definition, which makes it loose
         // and renders its text as a paragraph. After the new tile the empty line is no part of it any more.
         const string source = ":: Demo.Board\nterm\n:   definition\n\n";
-        var before = MarkdownPageParser.Parse(source);
-        var owner = before.Blocks[0];
-        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
-        var text = MarkdownBlockWriter.CreateBlock("Tile", null, """{ "Position": 1 }""", placement.FenceLength, hasClosingLine: placement.HasClosingLine);
-        var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
 
         // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
-
-        // Assert
-        Assert.Null(map);
-    }
-
-    [Fact]
-    public void WhenRemovalMakesADefinitionAtTheEndOfThePageLoose_ThenAlignmentFails()
-    {
-        // Arrange: without the tile, the empty line at the end of the page follows the definition and makes it loose.
-        const string source = ":: Demo.Board\nterm\n:   definition\n::: Tile\n:::\n\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
-
-        // Assert
-        Assert.Null(map);
-    }
-
-    [Fact]
-    public void WhenInsertedBlockMakesTwoListsOfOne_ThenAlignmentFails()
-    {
-        // Arrange
-        const string source = ":: Demo.Board\n- first\n- second\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var result = MarkdownBlockWriter.InsertLines(source, 3, "::: Tile\n:::", "\n", out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, before.Blocks[0]);
+        var (_, _, _, map) = InsertTile(source, """{ "Position": 1 }""");
 
         // Assert
         Assert.Null(map);
@@ -373,12 +234,9 @@ public class MarkdownBlockStructureTests
     {
         // Arrange
         var source = $":: Demo.Panel\n{textBefore}\n::: Tile\ntwo\n:::\n{textAfter}\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
 
         // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+        var (_, _, _, map) = RemoveTile(source);
 
         // Assert
         Assert.Equal(new[] { 0, -1 }, map);
@@ -392,13 +250,8 @@ public class MarkdownBlockStructureTests
     [InlineData(":: Demo.Panel\n    indented code\n::: Tile\n\n::\n", new[] { 0, -1 })]
     public void WhenRemovalChangesOnlyWhereMarkdigListsOrEndsOtherText_ThenAlignmentSucceeds(string source, int[] expected)
     {
-        // Arrange
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+        // Arrange & Act
+        var (_, _, _, map) = RemoveTile(source);
 
         // Assert
         Assert.Equal(expected, map);
@@ -410,13 +263,9 @@ public class MarkdownBlockStructureTests
         // Arrange: Markdig gives the attributes of a line that holds nothing else to the block after it, which is
         // the tile before the removal and the text of the panel after it, also across an empty line.
         const string source = ":: Demo.Panel\n{.highlight}\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
 
         // Act
-        var after = MarkdownPageParser.Parse(result);
-        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+        var (before, after, _, map) = RemoveTile(source);
 
         // Assert
         Assert.Null(map);
@@ -425,56 +274,20 @@ public class MarkdownBlockStructureTests
     }
 
     [Theory]
-    [InlineData("{#custom}", "text of the panel")]
-    [InlineData("{#custom}", "# Heading of the panel")]
-    [InlineData("{.highlight}", "# Heading of the panel")]
-    public void WhenRemovedBlockStandsDirectlyAfterAnAttributeLine_ThenAlignmentFails(string attributeLine, string textAfter)
+    [InlineData("{#custom}", "", "text of the panel")]
+    [InlineData("{#custom}", "", "# Heading of the panel")]
+    [InlineData("{.highlight}", "", "# Heading of the panel")]
+    [InlineData("{#custom}", "\n", "text of the panel")]
+    [InlineData("{#custom}", "\n", "# Heading of the panel")]
+    [InlineData("{#custom}", "\n \t\n", "# Heading of the panel")]
+    public void WhenRemovedBlockStandsAfterAnAttributeLine_ThenAlignmentFails(string attributeLine, string emptyLines, string textAfter)
     {
-        // Arrange: the attributes of the line belong to the tile before the removal and to the text after it.
-        var source = $":: Demo.Panel\n{attributeLine}\n::: Tile\ntwo\n:::\n{textAfter}\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+        // Arrange: the attributes of the line belong to the tile before the removal and to the text after it,
+        // because Markdig gives them to the next block also across empty lines.
+        var source = $":: Demo.Panel\n{attributeLine}\n{emptyLines}::: Tile\ntwo\n:::\n{textAfter}\n::\n";
 
         // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
-
-        // Assert
-        Assert.Null(map);
-    }
-
-    [Theory]
-    [InlineData("\n", "text of the panel")]
-    [InlineData("\n", "# Heading of the panel")]
-    [InlineData("\n \t\n", "# Heading of the panel")]
-    public void WhenRemovedBlockStandsAfterAnAttributeLineAndEmptyLines_ThenAlignmentFails(string emptyLines, string textAfter)
-    {
-        // Arrange: Markdig gives the attributes of the line to the next block also across empty lines.
-        var source = $":: Demo.Panel\n{{#custom}}\n{emptyLines}::: Tile\ntwo\n:::\n{textAfter}\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
-
-        // Assert
-        Assert.Null(map);
-    }
-
-    [Theory]
-    [InlineData("{#custom}")]
-    [InlineData("{.highlight}")]
-    public void WhenBlockIsInsertedDirectlyAfterAnAttributeLine_ThenAlignmentFails(string attributeLine)
-    {
-        // Arrange: the new tile takes the attributes of the line from the heading after it.
-        var source = $":: Demo.Board\n{attributeLine}\n# Heading of the board\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var owner = before.Blocks[0];
-        var result = MarkdownBlockWriter.InsertLines(source, 3, "::: Tile\n:::", "\n", out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
+        var (_, _, _, map) = RemoveTile(source);
 
         // Assert
         Assert.Null(map);
@@ -486,13 +299,9 @@ public class MarkdownBlockStructureTests
         // Arrange: Markdig numbers the ids of headings with the same text, so the heading after the panel gets
         // another id once the tile is gone. Nothing of its text or its place changes.
         const string source = ":: Demo.Panel\n::: Tile\n# A heading\n:::\n::\n\n# A heading\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
 
         // Act
-        var after = MarkdownPageParser.Parse(result);
-        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+        var (before, after, _, map) = RemoveTile(source);
 
         // Assert
         Assert.Equal(new[] { 0, -1 }, map);
@@ -507,13 +316,9 @@ public class MarkdownBlockStructureTests
         // Arrange: Markdig drops a footnote that nothing refers to, so the text of the footnote outside the tile
         // is gone from the document. That follows from content that the user removes, and it is refused all the same.
         const string source = ":: Demo.Panel\n::: Tile\ntext with a note[^1]\n:::\n::\n\n[^1]: The note.\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
 
         // Act
-        var after = MarkdownPageParser.Parse(result);
-        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+        var (before, after, _, map) = RemoveTile(source);
 
         // Assert
         Assert.Null(map);
@@ -527,13 +332,9 @@ public class MarkdownBlockStructureTests
         // Arrange: link reference definitions are not compared, so the removal is accepted although the text
         // after the panel is no link any more. That follows from content that the user removes.
         const string source = ":: Demo.Panel\n::: Tile\n[a link]: http://example.com\n:::\n::\n\ntext with [a link]\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
 
         // Act
-        var after = MarkdownPageParser.Parse(result);
-        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+        var (before, after, _, map) = RemoveTile(source);
 
         // Assert
         Assert.Equal(new[] { 0, -1 }, map);
@@ -550,16 +351,10 @@ public class MarkdownBlockStructureTests
             "- [ ] a task\n- an item\n\n1. one\n2. two\n\n> a quote\n\n```\ncode\n```\n\n    indented code\n\n<div>\nhtml\n</div>\n\n" +
             "A heading\n=========\n\n***\n\ntext with [a link]";
         var source = $"intro with [a link]\n\n:: Demo.Panel\ntext before\n::: Tile\n{content}\n:::\n# Another heading\ntext after\n::\n\noutro\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
 
         // Act
-        var removed = MarkdownBlockWriter.RemoveBlock(source, tile, out var removal);
-        var without = MarkdownPageParser.Parse(removed);
-        var removalMap = MarkdownBlockAlignment.TryAlign(before, without, removal, 0, owner: null);
-
-        var inserted = MarkdownBlockWriter.InsertLines(removed, removal.Line, $"::: Tile\n{content}\n:::", "\n", out var insert);
-        var insertMap = MarkdownBlockAlignment.TryAlign(without, MarkdownPageParser.Parse(inserted), insert, 1, without.Blocks[0]);
+        var (_, without, removal, removalMap) = RemoveTile(source);
+        var (_, _, _, insertMap) = InsertLines(without.Source, removal.Line, $"::: Tile\n{content}\n:::");
 
         // Assert
         Assert.Equal(new[] { 0, -1 }, removalMap);
@@ -574,38 +369,12 @@ public class MarkdownBlockStructureTests
     [InlineData("  :: Demo.Board\n  ::: Tile\n  a term\n  :   a definition\n  > a quote\n  - an item\n")]
     public void WhenPlacementIsInsideAListItem_ThenTheNewBlockIsNoSlotBlockAndAlignmentFails(string source)
     {
-        // Arrange
-        var before = MarkdownPageParser.Parse(source);
-        var owner = before.Blocks[0];
-        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
-        var text = MarkdownBlockWriter.Indent(
-            MarkdownBlockWriter.CreateBlock("Tile", null, "{}", placement.FenceLength, placement.LineEnding, placement.HasClosingLine),
-            placement.Indentation,
-            placement.LineEnding);
-        var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
-
-        // Act
-        var after = MarkdownPageParser.Parse(result);
-        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 1, owner);
+        // Arrange & Act
+        var (_, after, edit, map) = InsertTile(source);
 
         // Assert
         Assert.Null(map);
         Assert.Equal(MarkdownBlockKind.Invalid, after.AllBlocks.Single(block => block.Line == edit.Line).Kind);
-    }
-
-    [Fact]
-    public void WhenLinesAreInsertedBeforeTheJsonBlockOfTheOwner_ThenAlignmentFails()
-    {
-        // Arrange: the json block is the configuration of the board only while it is the first thing in it.
-        const string source = ":: Demo.Board\n```json\n{ \"Tags\": [1] }\n```\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var result = MarkdownBlockWriter.InsertLines(source, 2, "::: Tile\n:::", "\n", out var edit);
-
-        // Act
-        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, before.Blocks[0]);
-
-        // Assert
-        Assert.Null(map);
     }
 
     [Fact]
@@ -614,9 +383,7 @@ public class MarkdownBlockStructureTests
         // Arrange: the first tile has no closing line and is ended by the head line of the second one, so it is
         // neither the owner nor around it and takes the text after the removed tile.
         const string source = ":: Demo.Panel\n::: Tile\none\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var result = MarkdownBlockWriter.RemoveBlock(source, before.Blocks[0].Children[1], out var edit);
-        var after = MarkdownPageParser.Parse(result);
+        var (before, after, edit, _) = RemoveTile(source, position: 1);
 
         // Act
         var map = MarkdownBlockAlignment.TryMapBlocks(before, after, edit, 0, owner: null);
@@ -631,9 +398,7 @@ public class MarkdownBlockStructureTests
     {
         // Arrange: the new tile has no closing line, so it takes the text after it up to the closing line of the board.
         const string source = ":: Demo.Board\n::: Tile\n:::\ntext of the board\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var result = MarkdownBlockWriter.InsertLines(source, 4, "::: Tile", "\n", out var edit);
-        var after = MarkdownPageParser.Parse(result);
+        var (before, after, edit, _) = InsertLines(source, 4, "::: Tile");
 
         // Act
         var map = MarkdownBlockAlignment.TryMapBlocks(before, after, edit, 1, before.Blocks[0]);
@@ -649,10 +414,7 @@ public class MarkdownBlockStructureTests
         // Arrange: the style block has no closing line and is ended by the head line of the tile. It is in no
         // index of the page, and the walk looks at it all the same.
         const string source = ":: Demo.Panel\n::: {.note}\nstyled\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
-        var before = MarkdownPageParser.Parse(source);
-        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
-        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
-        var after = MarkdownPageParser.Parse(result);
+        var (before, after, edit, _) = RemoveTile(source);
 
         // Act
         var map = MarkdownBlockAlignment.TryMapBlocks(before, after, edit, 0, owner: null);
@@ -709,8 +471,6 @@ public class MarkdownBlockStructureTests
         var refusedRemovals = 0;
         var removalsRefusedForTheDocumentOnly = 0;
         var refusedRemovalsAfterAttributeLines = 0;
-        var refusedInserts = 0;
-        var refusedInsertsAfterAttributeLines = 0;
         var inserts = 0;
 
         for (var round = 0; round < 400; round++)
@@ -784,22 +544,14 @@ public class MarkdownBlockStructureTests
                     AssertAppendGivesTheLastLineTheLineEndingOfThePage(source, result, edit, placement.LineEnding, context);
                     Assert.True(Describe(before, 0, 0).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount)), context);
 
-                    // The check says yes exactly when the document outside the new tile is what it was and the tile
-                    // does not take the attributes of an attribute line before it. The document changes after a
-                    // definition at the end of the page, which loses the empty line that made it loose.
+                    // The check says yes exactly when the document outside the new tile is what it was. The document
+                    // changes after a definition at the end of the page, which loses the empty line that made it loose.
                     var hasSameDocumentAfterInsert = DescribeDocument(before, 0, 0).SequenceEqual(DescribeDocument(after, edit.Line, edit.InsertedLineCount));
-                    var followsAttributeLineBeforeInsert = FollowsAttributeLine(source, edit.Line);
                     Assert.True(
-                        (hasSameDocumentAfterInsert && !followsAttributeLineBeforeInsert) == (map is not null),
-                        $"Same document: {hasSameDocumentAfterInsert}, after an attribute line: {followsAttributeLineBeforeInsert}, map: {map is not null}.\n{context}");
+                        hasSameDocumentAfterInsert == (map is not null),
+                        $"Same document: {hasSameDocumentAfterInsert}, map: {map is not null}.\n{context}");
                     if (map is null)
                     {
-                        refusedInserts++;
-                        if (followsAttributeLineBeforeInsert)
-                        {
-                            refusedInsertsAfterAttributeLines++;
-                        }
-
                         continue;
                     }
 
@@ -816,11 +568,42 @@ public class MarkdownBlockStructureTests
         var counters =
             $"{inserts} inserts, {cleanRemovals} removals, {refusedRemovals} refused removals, " +
             $"{removalsRefusedForTheDocumentOnly} of them for the document only, " +
-            $"{refusedRemovalsAfterAttributeLines} of them after an attribute line, " +
-            $"{refusedInserts} refused inserts, {refusedInsertsAfterAttributeLines} of them after an attribute line";
+            $"{refusedRemovalsAfterAttributeLines} of them after an attribute line";
         Assert.True(inserts > 0 && cleanRemovals > 0 && refusedRemovals > 0, counters);
         Assert.True(removalsRefusedForTheDocumentOnly > 0, counters);
-        Assert.True(refusedRemovalsAfterAttributeLines > 0, counters);    }
+        Assert.True(refusedRemovalsAfterAttributeLines > 0, counters);
+    }
+
+    // Removes the slot block at the position among the slot blocks of the first block, and aligns the pages.
+    private static (MarkdownPage Before, MarkdownPage After, MarkdownLineEdit Edit, int[]? Map) RemoveTile(string source, int position = 0)
+    {
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Where(child => child.Kind == MarkdownBlockKind.Slot).ElementAt(position);
+        var after = MarkdownPageParser.Parse(MarkdownBlockWriter.RemoveBlock(source, tile, out var edit));
+        return (before, after, edit, MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null));
+    }
+
+    // Inserts the lines of one block into the first block, and aligns the pages.
+    private static (MarkdownPage Before, MarkdownPage After, MarkdownLineEdit Edit, int[]? Map) InsertLines(string source, int line, string text)
+    {
+        var before = MarkdownPageParser.Parse(source);
+        var after = MarkdownPageParser.Parse(MarkdownBlockWriter.InsertLines(source, line, text, "\n", out var edit));
+        return (before, after, edit, MarkdownBlockAlignment.TryAlign(before, after, edit, 1, before.Blocks[0]));
+    }
+
+    // Inserts a tile at its placement in the first block, written the way the write-back writes it, and aligns the pages.
+    private static (MarkdownPage Before, MarkdownPage After, MarkdownLineEdit Edit, int[]? Map) InsertTile(string source, string configurationJson = "{}")
+    {
+        var before = MarkdownPageParser.Parse(source);
+        var owner = before.Blocks[0];
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
+        var text = MarkdownBlockWriter.Indent(
+            MarkdownBlockWriter.CreateBlock("Tile", null, configurationJson, placement.FenceLength, placement.LineEnding, placement.HasClosingLine),
+            placement.Indentation,
+            placement.LineEnding);
+        var after = MarkdownPageParser.Parse(MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit));
+        return (before, after, edit, MarkdownBlockAlignment.TryAlign(before, after, edit, 1, owner));
+    }
 
     // Every block of every kind that is not on the given lines: the head line of the block around it, its own
     // head line, and its lines without the given ones. Equal lists before and after a change mean that every
@@ -1002,8 +785,8 @@ public class MarkdownBlockStructureTests
     // has one or two fence characters more than its board, so a tile can stand inside the tile before it. A board
     // can be indented, can stand inside an open block, can start with a line of text and can end with a widget
     // block after its tiles. Style blocks, text and lines that join what stands before them when a tile between
-    // them is removed stand between the tiles, and a tile can have an attribute line before it. An indented board after a board that ends with a list item stands
-    // inside that item, where it is an invalid block and no owner.
+    // them is removed stand between the tiles, and a tile can have an attribute line before it. An indented board
+    // after a board that ends with a list item stands inside that item, where it is an invalid block and no owner.
     private static string CreateRandomPage(Random random, int closingLineChance, string lineEnding)
     {
         var lines = new List<string> { "intro", string.Empty };

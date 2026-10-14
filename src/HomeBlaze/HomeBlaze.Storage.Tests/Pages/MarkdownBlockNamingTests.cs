@@ -4,6 +4,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
+using static HomeBlaze.Storage.Tests.Pages.TestTypeNames;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -14,8 +15,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 [Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownBlockNamingTests
 {
-    private const string Namespace = "HomeBlaze.Storage.Tests.Pages";
-    private const string LeafType = $"{Namespace}.TestLeaf";
     private const string PanelType = $"{Namespace}.TestPanel";
     private const string ShelfType = $"{Namespace}.TestShelf";
     private const string WidgetType = "HomeBlaze.Components.Widget";
