@@ -1,3 +1,4 @@
+using System.Reactive.Concurrency;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.FritzBox.Model;
 using Namotion.Devices.FritzBox.Parsing;
@@ -5,6 +6,7 @@ using Namotion.Devices.FritzBox.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Xunit;
 
 namespace Namotion.Devices.FritzBox.Tests;
@@ -135,7 +137,7 @@ public class FritzBoxMergeTests
         ];
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts, hasMesh: false), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts) with { Mesh = null }, router.WlanCommandGeneration);
 
         // Assert
         var client = Assert.Single(router.Clients);
@@ -167,28 +169,12 @@ public class FritzBoxMergeTests
         var router = CreateRouter();
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(hasMesh: false), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create() with { Mesh = null }, router.WlanCommandGeneration);
 
         // Assert
         Assert.Empty(router.AccessPoints);
         Assert.Equal(4, router.Clients.Count);
         Assert.Null(router.Clients[Snapshots.Laptop].AccessPointName);
-    }
-
-    [Fact]
-    public void WhenTheSerialNumberChanges_ThenEveryCollectionStartsOver()
-    {
-        // Arrange
-        var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
-        var laptop = router.Clients[Snapshots.Laptop];
-
-        // Act
-        router.ApplySnapshot(Snapshots.Create(router: Snapshots.Router("SERIAL0002")), router.WlanCommandGeneration);
-
-        // Assert
-        Assert.NotSame(laptop, router.Clients[Snapshots.Laptop]);
-        Assert.Equal("SERIAL0002", router.SerialNumber);
     }
 
     [Fact]
@@ -243,21 +229,28 @@ public class FritzBoxMergeTests
     }
 
     [Fact]
-    public void WhenAClientBecomesPresent_ThenThePresentCountChangesWithoutReplacingTheClients()
+    public void WhenAClientBecomesPresent_ThenThePresentCountChangeIsPublishedWithoutReplacingTheClients()
     {
         // Arrange
         var router = CreateRouter();
         router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
         var clients = router.Clients;
         var hosts = Snapshots.Hosts().Select(host => host.MacAddress == Snapshots.Phone ? host with { IsActive = true } : host).ToList();
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = ((IInterceptorSubject)router).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
 
         // Act
         router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
 
         // Assert
         Assert.Same(clients, router.Clients);
-        Assert.Equal(3, router.PresentClientCount);
         Assert.Equal(3, router.ClientCount);
+        var change = Assert.Single(changes, change =>
+            ReferenceEquals(change.Property.Subject, router) && change.Property.Name == nameof(FritzBox.PresentClientCount));
+        Assert.Equal(2, change.GetOldValue<int>());
+        Assert.Equal(3, change.GetNewValue<int>());
     }
 
     [Fact]
@@ -303,7 +296,7 @@ public class FritzBoxMergeTests
     }
 
     [Fact]
-    public void WhenTheSerialNumberChanges_ThenThePreviousSubjectsAreDetachedAndThePresentedKeyIsCleared()
+    public void WhenTheSerialNumberChanges_ThenEveryCollectionStartsOverAndThePresentedKeyIsCleared()
     {
         // Arrange
         var router = CreateRouter();
@@ -314,14 +307,16 @@ public class FritzBoxMergeTests
         var guest = router.Wlans[FritzBoxWlanRoles.Guest];
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(router: Snapshots.Router("SERIAL0002")), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create() with { Router = Snapshots.Router("SERIAL0002") }, router.WlanCommandGeneration);
 
         // Assert
+        Assert.Equal("SERIAL0002", router.SerialNumber);
+        Assert.NotSame(laptop, router.Clients[Snapshots.Laptop]);
+        Assert.NotSame(guest, router.Wlans[FritzBoxWlanRoles.Guest]);
         Assert.Null(laptop.TryGetRegisteredSubject());
         Assert.Null(repeater.TryGetRegisteredSubject());
         Assert.Null(guest.TryGetRegisteredSubject());
         Assert.Null(router.PresentedCertificatePin);
-        Assert.NotSame(guest, router.Wlans[FritzBoxWlanRoles.Guest]);
     }
 
     private static FritzBox CreateRouter()

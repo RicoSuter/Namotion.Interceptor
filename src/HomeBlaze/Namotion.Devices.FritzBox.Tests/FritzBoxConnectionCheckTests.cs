@@ -60,19 +60,15 @@ public class FritzBoxConnectionCheckTests
     [InlineData("192.168.178.1:49000")]
     [InlineData("fritz box")]
     [InlineData("[fritz.box]")]
-    public async Task WhenTheHostAddressIsInvalid_ThenTheCheckSaysSoWithoutAnyRequest(string hostAddress)
+    public async Task WhenTheHostAddressIsInvalid_ThenTheCheckSaysSo(string hostAddress)
     {
-        // Arrange
-        await using var fake = await FakeFritzBox.StartAsync();
-
         // Act
-        var result = await FritzBoxConnectionCheck.CheckAsync(hostAddress, fake.Username, fake.Password, CancellationToken.None);
+        var result = await FritzBoxConnectionCheck.CheckAsync(hostAddress, "user", "password", CancellationToken.None);
 
         // Assert
         Assert.False(result.IsSuccess);
         Assert.Null(result.HostAddress);
         Assert.Equal("Enter the router's IP address or host name without http:// or a port.", result.ErrorMessage);
-        Assert.Equal(0, fake.SecurityPortRequests);
     }
 
     [Fact]

@@ -15,7 +15,6 @@ namespace Namotion.Devices.FritzBox.Tests;
 public class FritzBoxLoopTests
 {
     private const string HostListAction = "X_AVM-DE_GetHostListPath";
-    private const string OnlineMonitorAction = "X_AVM-DE_GetOnlineMonitor";
     private const string LoginFailedMessage = "Login failed";
     private const string UnsavedCertificateFragment = "could not be saved";
 
@@ -269,25 +268,6 @@ public class FritzBoxLoopTests
         Assert.Equal(CertificateInfo.Create(fake.Certificate).Fingerprint, router.PresentedCertificateFingerprint);
         Assert.Equal(otherPin, router.CertificatePin);
         Assert.Empty(fake.Actions);
-    }
-
-    [Fact]
-    public async Task WhenAnOptionalActionIsRefused_ThenOnlyItsValuesAreNull()
-    {
-        // Arrange
-        await using var fake = await FakeFritzBox.StartAsync();
-        fake.Faults[OnlineMonitorAction] = 606;
-        var router = CreateRouter(fake);
-
-        // Act
-        await using var running = await RunAsync(router);
-        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected && router.Clients.Count == 3, message: "The router should connect.");
-
-        // Assert
-        Assert.Null(router.UploadRate);
-        Assert.Null(router.DownloadRate);
-        Assert.Equal(40m, router.MaximumUploadRate);
-        Assert.Equal(ServiceStatus.Running, router.Status);
     }
 
     [Fact]

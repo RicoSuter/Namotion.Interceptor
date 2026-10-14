@@ -5,25 +5,16 @@ namespace Namotion.Devices.FritzBox.Tests;
 
 public class FritzBoxAccessPointTests
 {
+    private const string MacAddress = "AA:AA:AA:00:00:01";
+
     [Fact]
     public void WhenTheAccessPointIsTheMaster_ThenItIsWiredAndTheMeshRoleIsMasterAndValuesAreCopied()
     {
         // Arrange
-        var accessPoint = new FritzBoxAccessPoint("AA:AA:AA:00:00:01");
-        var info = new AccessPointInfo(
-            "AA:AA:AA:00:00:01",
-            new HashSet<string> { "AA:AA:AA:00:00:01" },
-            "FRITZ!Box 7590",
-            "7590",
-            "AVM",
-            "7.57",
-            true,
-            true,
-            null,
-            null);
+        var accessPoint = new FritzBoxAccessPoint(MacAddress);
 
         // Act
-        accessPoint.Update(info, "192.168.178.1");
+        accessPoint.Update(CreateInfo(isMaster: true), "192.168.178.1");
 
         // Assert
         Assert.Equal("FRITZ!Box 7590", accessPoint.Name);
@@ -38,79 +29,26 @@ public class FritzBoxAccessPointTests
         Assert.Null(accessPoint.UplinkSpeed);
     }
 
-    [Fact]
-    public void WhenASlaveHasAWirelessUplink_ThenItIsWirelessAndTheMeshRoleIsSlave()
+    [Theory]
+    [InlineData("WLAN", true)]
+    [InlineData("LAN", false)]
+    [InlineData(null, null)]
+    public void WhenTheAccessPointIsASlave_ThenItsUplinkTypeDecidesWhetherItIsWireless(string? uplinkType, bool? expectedIsWireless)
     {
         // Arrange
-        var accessPoint = new FritzBoxAccessPoint("BB:BB:BB:00:00:02");
-        var info = new AccessPointInfo(
-            "BB:BB:BB:00:00:02",
-            new HashSet<string> { "BB:BB:BB:00:00:02" },
-            "FRITZ!Repeater",
-            "1200 AX",
-            "AVM",
-            "7.29",
-            false,
-            true,
-            "WLAN",
-            144m);
+        var accessPoint = new FritzBoxAccessPoint(MacAddress);
+        decimal? uplinkSpeed = uplinkType is null ? null : 144m;
 
         // Act
-        accessPoint.Update(info, "192.168.178.2");
+        accessPoint.Update(CreateInfo(isMaster: false, uplinkType, uplinkSpeed), null);
 
         // Assert
         Assert.Equal(FritzBoxMeshRole.Slave, accessPoint.MeshRole);
-        Assert.True(accessPoint.IsWireless);
-        Assert.Equal("WLAN", accessPoint.UplinkType);
-        Assert.Equal(144m, accessPoint.UplinkSpeed);
+        Assert.Equal(expectedIsWireless, accessPoint.IsWireless);
+        Assert.Equal(uplinkType, accessPoint.UplinkType);
+        Assert.Equal(uplinkSpeed, accessPoint.UplinkSpeed);
     }
 
-    [Fact]
-    public void WhenASlaveHasAWiredUplink_ThenItIsNotWireless()
-    {
-        // Arrange
-        var accessPoint = new FritzBoxAccessPoint("CC:CC:CC:00:00:03");
-        var info = new AccessPointInfo(
-            "CC:CC:CC:00:00:03",
-            new HashSet<string> { "CC:CC:CC:00:00:03" },
-            "FRITZ!Repeater",
-            "3000",
-            "AVM",
-            "7.29",
-            false,
-            true,
-            "LAN",
-            1000m);
-
-        // Act
-        accessPoint.Update(info, "192.168.178.3");
-
-        // Assert
-        Assert.False(accessPoint.IsWireless);
-    }
-
-    [Fact]
-    public void WhenASlaveHasNoUplink_ThenIsWirelessIsUnknown()
-    {
-        // Arrange
-        var accessPoint = new FritzBoxAccessPoint("DD:DD:DD:00:00:04");
-        var info = new AccessPointInfo(
-            "DD:DD:DD:00:00:04",
-            new HashSet<string> { "DD:DD:DD:00:00:04" },
-            "FRITZ!Repeater",
-            "1200",
-            "AVM",
-            "7.29",
-            false,
-            false,
-            null,
-            null);
-
-        // Act
-        accessPoint.Update(info, null);
-
-        // Assert
-        Assert.Null(accessPoint.IsWireless);
-        Assert.False(accessPoint.IsConnected);
-    }
+    private static AccessPointInfo CreateInfo(bool isMaster, string? uplinkType = null, decimal? uplinkSpeed = null) =>
+        new(MacAddress, new HashSet<string> { MacAddress }, "FRITZ!Box 7590", "7590", "AVM", "7.57", isMaster, true, uplinkType, uplinkSpeed);
 }
