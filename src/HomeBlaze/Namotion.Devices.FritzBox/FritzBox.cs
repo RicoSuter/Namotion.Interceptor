@@ -69,7 +69,7 @@ public partial class FritzBox : BackgroundService,
         HostAddress = null;
         Username = null;
         Password = null;
-        CertificatePin = null;
+        PublicKeyPin = null;
         PollingInterval = TimeSpan.FromSeconds(DefaultPollingIntervalSeconds);
         RetryInterval = TimeSpan.FromSeconds(DefaultRetryIntervalSeconds);
 
@@ -102,7 +102,7 @@ public partial class FritzBox : BackgroundService,
     /// and stores it here.
     /// </summary>
     [Configuration]
-    public partial string? CertificatePin { get; set; }
+    public partial string? PublicKeyPin { get; set; }
 
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }
@@ -190,14 +190,14 @@ public partial class FritzBox : BackgroundService,
     public partial Dictionary<string, FritzBoxWlan> Wlans { get; internal set; }
 
     /// <summary>
-    /// The key the router presents while it is not the trusted one; setting it as <see cref="CertificatePin"/> trusts it.
+    /// The key the router presents while it is not the trusted one; setting it as <see cref="PublicKeyPin"/> trusts it.
     /// </summary>
     [State(Position = 940)]
     [Category("Certificate")]
-    public partial string? PresentedCertificatePin { get; internal set; }
+    public partial string? PresentedPublicKeyPin { get; internal set; }
 
     /// <summary>
-    /// The SHA-256 fingerprint of <see cref="PresentedCertificatePin"/>'s certificate, the form browsers show, for
+    /// The SHA-256 fingerprint of <see cref="PresentedPublicKeyPin"/>'s certificate, the form browsers show, for
     /// the user to compare before trusting the key.
     /// </summary>
     [State(Position = 941)]

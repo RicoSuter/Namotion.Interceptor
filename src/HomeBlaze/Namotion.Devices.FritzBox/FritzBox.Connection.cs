@@ -24,7 +24,7 @@ public partial class FritzBox
 
     // Read and written by the polling loop only.
     private string? _stateHostAddress;
-    private string? _unsavedCertificatePin;
+    private string? _unsavedPublicKeyPin;
     private TimeSpan _loginRetryDelay = InitialLoginRetryDelay;
 
     /// <summary>
@@ -33,7 +33,7 @@ public partial class FritzBox
     internal long WlanCommandGeneration => Interlocked.Read(ref _wlanCommandGeneration);
 
     private string? CertificateWarning =>
-        _unsavedCertificatePin is not null && CertificatePin == _unsavedCertificatePin ? UnsavedCertificateWarning : null;
+        _unsavedPublicKeyPin is not null && PublicKeyPin == _unsavedPublicKeyPin ? UnsavedCertificateWarning : null;
 
     internal void AdvanceWlanCommandGeneration()
     {
@@ -129,7 +129,7 @@ public partial class FritzBox
             Status = ServiceStatus.Starting;
             StatusMessage = "Connecting...";
             connection = await FritzBoxConnection.OpenAsync(
-                new FritzBoxConnectionOptions(hostAddress, Username, Password, StringValues.NullIfBlank(CertificatePin)) { DescriptionPort = DescriptionPort },
+                new FritzBoxConnectionOptions(hostAddress, Username, Password, StringValues.NullIfBlank(PublicKeyPin)) { DescriptionPort = DescriptionPort },
                 _logger,
                 stoppingToken);
             await connection.CheckLoginAsync(stoppingToken);
@@ -189,8 +189,8 @@ public partial class FritzBox
     private void OnCertificateRejected(string hostAddress, FritzBoxCertificateException exception)
     {
         var presentedPin = exception.Presented?.Pin;
-        _logger.LogWarning("FRITZ!Box {HostAddress} presented the untrusted certificate key {CertificatePin}.", hostAddress, presentedPin);
-        PresentedCertificatePin = presentedPin;
+        _logger.LogWarning("FRITZ!Box {HostAddress} presented the untrusted certificate key {PublicKeyPin}.", hostAddress, presentedPin);
+        PresentedPublicKeyPin = presentedPin;
         PresentedCertificateFingerprint = exception.Presented?.Fingerprint;
         SetError(exception.Message);
     }
@@ -254,24 +254,24 @@ public partial class FritzBox
 
     private async Task TrustCertificateAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
     {
-        PresentedCertificatePin = null;
+        PresentedPublicKeyPin = null;
         PresentedCertificateFingerprint = null;
-        if (StringValues.NullIfBlank(CertificatePin) is not null)
+        if (StringValues.NullIfBlank(PublicKeyPin) is not null)
         {
             await RetryUnsavedCertificateAsync(cancellationToken);
             return;
         }
 
-        if (connection.TrustedCertificatePin is not { } trustedPin)
+        if (connection.TrustedPublicKeyPin is not { } trustedPin)
         {
             return;
         }
 
-        CertificatePin = trustedPin;
-        _logger.LogInformation("Trusting the certificate key {CertificatePin} of FRITZ!Box {HostAddress} on first use.", trustedPin, HostAddress);
+        PublicKeyPin = trustedPin;
+        _logger.LogInformation("Trusting the certificate key {PublicKeyPin} of FRITZ!Box {HostAddress} on first use.", trustedPin, HostAddress);
 
         var isWritten = await TryWriteConfigurationAsync(cancellationToken);
-        _unsavedCertificatePin = isWritten ? null : trustedPin;
+        _unsavedPublicKeyPin = isWritten ? null : trustedPin;
         if (!isWritten)
         {
             _logger.LogWarning("The trusted certificate key of FRITZ!Box {HostAddress} could not be saved.", HostAddress);
@@ -283,14 +283,14 @@ public partial class FritzBox
     /// </summary>
     private async Task RetryUnsavedCertificateAsync(CancellationToken cancellationToken)
     {
-        if (_unsavedCertificatePin is null)
+        if (_unsavedPublicKeyPin is null)
         {
             return;
         }
 
-        if (_unsavedCertificatePin != CertificatePin || await TryWriteConfigurationAsync(cancellationToken))
+        if (_unsavedPublicKeyPin != PublicKeyPin || await TryWriteConfigurationAsync(cancellationToken))
         {
-            _unsavedCertificatePin = null;
+            _unsavedPublicKeyPin = null;
         }
     }
 

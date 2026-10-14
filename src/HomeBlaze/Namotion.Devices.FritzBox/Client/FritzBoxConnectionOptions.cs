@@ -8,8 +8,8 @@ namespace Namotion.Devices.FritzBox.Client;
 /// <param name="HostAddress">The host name or IP address of the router.</param>
 /// <param name="Username">The user to log in as, or null for none.</param>
 /// <param name="Password">The password of the user, or null for none.</param>
-/// <param name="CertificatePin">The pinned key, or null to trust the key the router presents first.</param>
-internal sealed record FritzBoxConnectionOptions(string HostAddress, string? Username, string? Password, string? CertificatePin)
+/// <param name="PublicKeyPin">The pinned key, or null to trust the key the router presents first.</param>
+internal sealed record FritzBoxConnectionOptions(string HostAddress, string? Username, string? Password, string? PublicKeyPin)
 {
     internal int DescriptionPort { get; init; } = Tr64Description.DescriptionPort;
 
@@ -22,7 +22,7 @@ internal sealed record FritzBoxConnectionOptions(string HostAddress, string? Use
         builder
             .Append("HostAddress = ").Append(HostAddress)
             .Append(", Username = ").Append(Username)
-            .Append(", CertificatePin = ").Append(CertificatePin);
+            .Append(", PublicKeyPin = ").Append(PublicKeyPin);
         return true;
     }
 }

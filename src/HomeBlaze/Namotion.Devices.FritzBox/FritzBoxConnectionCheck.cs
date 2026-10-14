@@ -15,14 +15,14 @@ namespace Namotion.Devices.FritzBox;
 /// </param>
 /// <param name="ErrorMessage">Why the check failed, or null on success.</param>
 /// <param name="Model">The model name the router reported, or null on failure.</param>
-/// <param name="CertificatePin">The key the router presented, to store in <see cref="FritzBox.CertificatePin"/>.</param>
+/// <param name="PublicKeyPin">The key the router presented, to store in <see cref="FritzBox.PublicKeyPin"/>.</param>
 /// <param name="CertificateFingerprint">The SHA-256 fingerprint of the router's certificate, the form browsers show, for the user to compare.</param>
 public sealed record FritzBoxConnectionCheckResult(
     bool IsSuccess,
     string? HostAddress,
     string? ErrorMessage,
     string? Model,
-    string? CertificatePin,
+    string? PublicKeyPin,
     string? CertificateFingerprint);
 
 /// <summary>
@@ -64,7 +64,7 @@ public static class FritzBoxConnectionCheck
         {
             using var connection = await FritzBoxConnection.OpenAsync(options, NullLogger.Instance, cancellationToken);
             var info = await connection.CheckLoginAsync(cancellationToken);
-            var pin = connection.TrustedCertificatePin;
+            var pin = connection.TrustedPublicKeyPin;
             var fingerprint = connection.PresentedCertificate?.Fingerprint;
             return new FritzBoxConnectionCheckResult(
                 true, options.HostAddress, null, StringValues.NullIfBlank(info.GetString("NewModelName")), pin, fingerprint);

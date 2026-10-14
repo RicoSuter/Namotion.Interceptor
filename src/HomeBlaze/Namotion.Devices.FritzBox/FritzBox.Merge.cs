@@ -59,7 +59,7 @@ public partial class FritzBox
         MaximumDownloadRate = null;
         UploadRate = null;
         DownloadRate = null;
-        PresentedCertificatePin = null;
+        PresentedPublicKeyPin = null;
         PresentedCertificateFingerprint = null;
         LastUpdated = null;
     }

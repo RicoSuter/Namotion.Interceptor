@@ -31,7 +31,7 @@ The router's certificate key is pinned on first connection; see [Certificate Tru
 | `HostAddress` | string | | IP address or host name of the router. Empty stops the subject. |
 | `Username` | string | | FRITZ!Box user with the FRITZ!Box settings permission |
 | `Password` | string | | Password of that user, stored as a secret |
-| `CertificatePin` | string | | Base64 SHA-256 of the trusted certificate's public key. Empty trusts the key the router presents next and stores it. |
+| `PublicKeyPin` | string | | Base64 SHA-256 of the trusted certificate's public key. Empty trusts the key the router presents next and stores it. |
 | `PollingInterval` | TimeSpan | 15 seconds | How often the router is polled |
 | `RetryInterval` | TimeSpan | 30 seconds | Wait after a failed connection |
 
@@ -44,7 +44,7 @@ Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped
   "hostAddress": "192.168.178.1",
   "username": "homeblaze",
   "password": null,
-  "certificatePin": null,
+  "publicKeyPin": null,
   "pollingInterval": "00:00:15",
   "retryInterval": "00:00:30"
 }
@@ -104,8 +104,8 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 | `ClientCount`, `PresentClientCount` | | All listed and currently present clients |
 | `Manufacturer`, `Model`, `SerialNumber`, `HardwareRevision` | | Router identity |
 | `SoftwareVersion`, `AvailableSoftwareUpdate`, `Uptime` | | Firmware and uptime |
-| `PresentedCertificatePin` | | The key the router presents while it is not the trusted one |
-| `PresentedCertificateFingerprint` | | SHA-256 fingerprint of `PresentedCertificatePin`'s certificate, the form browsers show, to compare before accepting it in the edit dialog |
+| `PresentedPublicKeyPin` | | The key the router presents while it is not the trusted one |
+| `PresentedCertificateFingerprint` | | SHA-256 fingerprint of `PresentedPublicKeyPin`'s certificate, the form browsers show, to compare before accepting it in the edit dialog |
 
 ### FritzBoxClient
 
@@ -159,10 +159,10 @@ The link is a path, not a subject reference: the device stays where it is in the
 
 ### Certificate Trust
 
-The router's certificate is self-signed, so its public key, not its certificate chain, is what gets checked against `CertificatePin`.
+The router's certificate is self-signed, so its public key, not its certificate chain, is what gets checked against `PublicKeyPin`.
 
-- **No `CertificatePin` configured:** the connection trusts the key its first handshake presents, and refuses a later handshake on that connection with a different key. The trusted key is written to `CertificatePin` and saved through the subject's configuration storage; when that storage is not available, for example in a standalone host, the key is kept in memory only, and `StatusMessage` carries a warning until a save succeeds, retried on every reconnect.
-- **A key other than the configured `CertificatePin`:** the connection fails and the key is shown in `PresentedCertificatePin` and `PresentedCertificateFingerprint`. Accepting it with **Accept New Certificate** in the edit dialog takes effect once the dialog is saved.
+- **No `PublicKeyPin` configured:** the connection trusts the key its first handshake presents, and refuses a later handshake on that connection with a different key. The trusted key is written to `PublicKeyPin` and saved through the subject's configuration storage; when that storage is not available, for example in a standalone host, the key is kept in memory only, and `StatusMessage` carries a warning until a save succeeds, retried on every reconnect.
+- **A key other than the configured `PublicKeyPin`:** the connection fails and the key is shown in `PresentedPublicKeyPin` and `PresentedCertificateFingerprint`. Accepting it with **Accept New Certificate** in the edit dialog takes effect once the dialog is saved.
 
 ## Network and Firewall
 

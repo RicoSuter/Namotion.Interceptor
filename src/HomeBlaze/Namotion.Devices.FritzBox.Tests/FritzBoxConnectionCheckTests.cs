@@ -22,7 +22,7 @@ public class FritzBoxConnectionCheckTests
         Assert.Equal("127.0.0.1", result.HostAddress);
         Assert.Null(result.ErrorMessage);
         Assert.Equal("FRITZ!Box 7590", result.Model);
-        Assert.Equal(expected.Pin, result.CertificatePin);
+        Assert.Equal(expected.Pin, result.PublicKeyPin);
         Assert.Equal(expected.Fingerprint, result.CertificateFingerprint);
     }
 

@@ -199,7 +199,7 @@ public class FritzBoxLoopTests
         await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
 
         // Assert
-        Assert.Equal(fake.CertificatePin, router.CertificatePin);
+        Assert.Equal(fake.PublicKeyPin, router.PublicKeyPin);
         Assert.Equal(ServiceStatus.Running, router.Status);
         Assert.Contains(UnsavedCertificateFragment, router.StatusMessage);
     }
@@ -217,7 +217,7 @@ public class FritzBoxLoopTests
         await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
 
         // Assert
-        Assert.Equal(fake.CertificatePin, router.CertificatePin);
+        Assert.Equal(fake.PublicKeyPin, router.PublicKeyPin);
         Assert.Equal(1, writer.WriteCount);
         Assert.Null(router.StatusMessage);
     }
@@ -245,7 +245,7 @@ public class FritzBoxLoopTests
         await AsyncTestHelpers.WaitUntilAsync(
             () => writer.WriteCount == 1 && router.IsConnected && router.StatusMessage is null,
             message: "The router should save the key and clear the warning after reconnecting.");
-        Assert.Equal(fake.CertificatePin, router.CertificatePin);
+        Assert.Equal(fake.PublicKeyPin, router.PublicKeyPin);
         Assert.Equal(ServiceStatus.Running, router.Status);
     }
 
@@ -261,13 +261,13 @@ public class FritzBoxLoopTests
         // Act
         await using var running = await RunAsync(router);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => router.PresentedCertificatePin is not null && router.Status == ServiceStatus.Error,
+            () => router.PresentedPublicKeyPin is not null && router.Status == ServiceStatus.Error,
             message: "The router should refuse the key.");
 
         // Assert
-        Assert.Equal(fake.CertificatePin, router.PresentedCertificatePin);
+        Assert.Equal(fake.PublicKeyPin, router.PresentedPublicKeyPin);
         Assert.Equal(CertificateInfo.Create(fake.Certificate).Fingerprint, router.PresentedCertificateFingerprint);
-        Assert.Equal(otherPin, router.CertificatePin);
+        Assert.Equal(otherPin, router.PublicKeyPin);
         Assert.Empty(fake.Actions);
     }
 
@@ -398,7 +398,7 @@ public class FritzBoxLoopTests
             HostAddress = "127.0.0.1",
             Username = fake.Username,
             Password = password ?? fake.Password,
-            CertificatePin = pin,
+            PublicKeyPin = pin,
             DescriptionPort = fake.HttpPort,
             MinimumInterval = TimeSpan.FromMilliseconds(50),
             PollingInterval = TimeSpan.FromMilliseconds(100),

@@ -304,7 +304,7 @@ public class FritzBoxMergeTests
         // Arrange
         var router = CreateRouter();
         router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
-        router.PresentedCertificatePin = "presented";
+        router.PresentedPublicKeyPin = "presented";
         var laptop = router.Clients[Snapshots.Laptop];
         var repeater = router.AccessPoints[Snapshots.RepeaterAccessPoint];
         var guest = router.Wlans[FritzBoxWlanRoles.Guest];
@@ -319,7 +319,7 @@ public class FritzBoxMergeTests
         Assert.Null(laptop.TryGetRegisteredSubject());
         Assert.Null(repeater.TryGetRegisteredSubject());
         Assert.Null(guest.TryGetRegisteredSubject());
-        Assert.Null(router.PresentedCertificatePin);
+        Assert.Null(router.PresentedPublicKeyPin);
     }
 
     private static FritzBox CreateRouter()

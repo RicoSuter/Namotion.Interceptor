@@ -51,7 +51,7 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     /// <summary>
     /// The pin of <see cref="Certificate"/>.
     /// </summary>
-    internal string CertificatePin => CertificateInfo.Create(Certificate).Pin;
+    internal string PublicKeyPin => CertificateInfo.Create(Certificate).Pin;
 
     internal int HttpPort { get; private set; }
 

@@ -46,10 +46,10 @@
 
     <MudText Typo="Typo.subtitle2" Class="mt-4">Trusted certificate key</MudText>
     <MudText Typo="Typo.caption" Style="font-family: monospace; word-break: break-all;">
-        @(TrustedCertificatePin ?? "None yet: the next connection trusts the key the router presents.")
+        @(TrustedPublicKeyPin ?? "None yet: the next connection trusts the key the router presents.")
     </MudText>
 
-    @if (RouterSubject?.PresentedCertificatePin is { } presentedPin && presentedPin != TrustedCertificatePin)
+    @if (RouterSubject?.PresentedPublicKeyPin is { } presentedPin && presentedPin != TrustedPublicKeyPin)
     {
         <MudAlert Severity="Severity.Warning" Class="mt-2">
             The router presents a different certificate key: @presentedPin. Accept it only if you know why the router's certificate changed.
@@ -115,14 +115,14 @@
     private string? _hostAddress;
     private string? _username;
     private string? _password;
-    private string? _certificatePin;
+    private string? _publicKeyPin;
     private int _pollingIntervalSeconds = FritzBox.DefaultPollingIntervalSeconds;
     private int _retryIntervalSeconds = FritzBox.DefaultRetryIntervalSeconds;
 
     private string _originalName = string.Empty;
     private string? _originalHostAddress;
     private string? _originalUsername;
-    private string? _originalCertificatePin;
+    private string? _originalPublicKeyPin;
     private int _originalPollingIntervalSeconds = FritzBox.DefaultPollingIntervalSeconds;
     private int _originalRetryIntervalSeconds = FritzBox.DefaultRetryIntervalSeconds;
 
@@ -137,7 +137,7 @@
                            IsHostAddressChanged ||
                            IsUsernameChanged ||
                            IsPasswordChanged ||
-                           IsCertificatePinChanged ||
+                           IsPublicKeyPinChanged ||
                            IsPollingIntervalChanged ||
                            IsRetryIntervalChanged;
 
@@ -149,7 +149,7 @@
 
     private bool IsPasswordChanged => !string.IsNullOrEmpty(_password);
 
-    private bool IsCertificatePinChanged => _certificatePin != _originalCertificatePin;
+    private bool IsPublicKeyPinChanged => _publicKeyPin != _originalPublicKeyPin;
 
     private bool IsPollingIntervalChanged => _pollingIntervalSeconds != _originalPollingIntervalSeconds;
 
@@ -159,8 +159,8 @@
     /// The pin entered here, or while it is unchanged the live one, which the router trusts on its own while the
     /// dialog is open.
     /// </summary>
-    private string? TrustedCertificatePin =>
-        RouterSubject is null || IsCertificatePinChanged ? _certificatePin : RouterSubject.CertificatePin;
+    private string? TrustedPublicKeyPin =>
+        RouterSubject is null || IsPublicKeyPinChanged ? _publicKeyPin : RouterSubject.PublicKeyPin;
 
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
@@ -172,7 +172,7 @@
             _name = RouterSubject.Name;
             _hostAddress = RouterSubject.HostAddress;
             _username = RouterSubject.Username;
-            _certificatePin = RouterSubject.CertificatePin;
+            _publicKeyPin = RouterSubject.PublicKeyPin;
 
             _pollingIntervalSeconds = LoadInterval(RouterSubject.PollingInterval, FritzBox.DefaultPollingIntervalSeconds);
             _retryIntervalSeconds = LoadInterval(RouterSubject.RetryInterval, FritzBox.DefaultRetryIntervalSeconds);
@@ -215,14 +215,14 @@
         _originalName = _name;
         _originalHostAddress = _hostAddress;
         _originalUsername = _username;
-        _originalCertificatePin = _certificatePin;
+        _originalPublicKeyPin = _publicKeyPin;
         _originalPollingIntervalSeconds = _pollingIntervalSeconds;
         _originalRetryIntervalSeconds = _retryIntervalSeconds;
     }
 
     private void AcceptPresentedCertificate(string presentedPin)
     {
-        _certificatePin = presentedPin;
+        _publicKeyPin = presentedPin;
         OnFieldChanged();
     }
 
@@ -236,7 +236,7 @@
     {
         if (RouterSubject != null && IsValid)
         {
-            // Writes only what changed here: the router can update CertificatePin while the dialog is open.
+            // Writes only what changed here: the router can update PublicKeyPin while the dialog is open.
             if (IsNameChanged)
             {
                 RouterSubject.Name = _name;
@@ -257,9 +257,9 @@
                 RouterSubject.Password = _password;
             }
 
-            if (IsCertificatePinChanged)
+            if (IsPublicKeyPinChanged)
             {
-                RouterSubject.CertificatePin = _certificatePin;
+                RouterSubject.PublicKeyPin = _publicKeyPin;
             }
 
             if (IsPollingIntervalChanged)

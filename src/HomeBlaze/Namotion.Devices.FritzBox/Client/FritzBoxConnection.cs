@@ -24,7 +24,7 @@ internal sealed class FritzBoxConnection : IDisposable
         BaseUri = baseUri;
         _options = options;
         _unavailableActionLog = new UnavailableActionLog(logger);
-        _certificateValidator = new PinnedCertificateValidator(options.CertificatePin);
+        _certificateValidator = new PinnedCertificateValidator(options.PublicKeyPin);
 
         _httpClient = FritzBoxHttpClient.Create(baseUri, options, _certificateValidator, MaximumAnswerBytes);
         _soapClient = new UpnpSoapClient(_httpClient, baseUri);
@@ -43,7 +43,7 @@ internal sealed class FritzBoxConnection : IDisposable
     /// The key every handshake of this connection must present: the configured pin, or the key of the first
     /// handshake when none was configured; null before that handshake.
     /// </summary>
-    internal string? TrustedCertificatePin => _certificateValidator.TrustedPin;
+    internal string? TrustedPublicKeyPin => _certificateValidator.TrustedPin;
 
     /// <summary>
     /// The WAN connection service carrying the internet connection, set by <see cref="ResolveInternetServiceAsync"/>.

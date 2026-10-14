@@ -246,7 +246,7 @@
             RouterSubject.HostAddress = result.HostAddress;
             RouterSubject.Username = NormalizedUsername;
             RouterSubject.Password = string.IsNullOrEmpty(_password) ? null : _password;
-            RouterSubject.CertificatePin = result.CertificatePin;
+            RouterSubject.PublicKeyPin = result.PublicKeyPin;
 
             // Without this, every router added here would be titled with the default name.
             var routerName = _selectedRouter?.FriendlyName ?? result.Model;
