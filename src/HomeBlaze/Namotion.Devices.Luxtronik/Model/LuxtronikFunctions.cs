@@ -1,4 +1,5 @@
 // Register map: AIT SHI manual 83026900aDE.
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Interceptor;
@@ -134,6 +135,7 @@ public partial class LuxtronikFunctions : IModbusBaseAddressProvider
     /// </summary>
     [ModbusRegister(6, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 7)]
+    [Category("Mixing Circuits")]
     public partial bool? IsMixingCircuit1HeatingEnabled { get; internal set; }
 
     /// <summary>
@@ -141,6 +143,7 @@ public partial class LuxtronikFunctions : IModbusBaseAddressProvider
     /// </summary>
     [ModbusRegister(7, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 8)]
+    [Category("Mixing Circuits")]
     public partial bool? IsMixingCircuit1CoolingEnabled { get; internal set; }
 
     /// <summary>
@@ -148,6 +151,7 @@ public partial class LuxtronikFunctions : IModbusBaseAddressProvider
     /// </summary>
     [ModbusRegister(8, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 9)]
+    [Category("Mixing Circuits")]
     public partial bool? IsMixingCircuit2HeatingEnabled { get; internal set; }
 
     /// <summary>
@@ -155,6 +159,7 @@ public partial class LuxtronikFunctions : IModbusBaseAddressProvider
     /// </summary>
     [ModbusRegister(9, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 10)]
+    [Category("Mixing Circuits")]
     public partial bool? IsMixingCircuit2CoolingEnabled { get; internal set; }
 
     /// <summary>
@@ -162,6 +167,7 @@ public partial class LuxtronikFunctions : IModbusBaseAddressProvider
     /// </summary>
     [ModbusRegister(10, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 11)]
+    [Category("Mixing Circuits")]
     public partial bool? IsMixingCircuit3HeatingEnabled { get; internal set; }
 
     /// <summary>
@@ -169,5 +175,6 @@ public partial class LuxtronikFunctions : IModbusBaseAddressProvider
     /// </summary>
     [ModbusRegister(11, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 12)]
+    [Category("Mixing Circuits")]
     public partial bool? IsMixingCircuit3CoolingEnabled { get; internal set; }
 }

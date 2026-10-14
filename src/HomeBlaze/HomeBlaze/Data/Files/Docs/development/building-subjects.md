@@ -190,8 +190,8 @@ Properties without any `Position` (from class or interface) sort **last** in the
 
 HomeBlaze abstraction interfaces use reserved position ranges to ensure consistent default ordering when a device implements multiple interfaces:
 
-| Range | Category | Examples |
-|-------|----------|---------|
+| Range | Kind of property | Examples |
+|-------|------------------|---------|
 | 0–99 | Device-specific primary (custom per class) | Pin number, enabled state |
 | 100–199 | Primary device function | Switch on/off, brightness, cover position |
 | 200–299 | Sensor measurements | Temperature, humidity, presence |
@@ -351,6 +351,8 @@ A type belongs to exactly one group, the one that its `[Category]` names. The si
 
 When none of them fits, name a new group in `[Category]`. Using the name is all it takes to create the group, and group names are compared ignoring case. A type in such a group that sets no `[SubjectIcon]` gets a generic icon.
 
+On a property or a method, `[Category]` names a [category](#categories) of the property panel instead.
+
 ### Name of a New Subject
 
 Where the new subject needs a name, the dialog asks for it on the configure page and suggests the class name, with a number appended when it is already used (`Motor`, `Motor2`). A name that already exists in the same place is rejected, and the messages name the field by its label ("This file name is already used").
@@ -458,7 +460,7 @@ public partial class Motor
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
 
 **Key points:**
-- Operations appear in the subject's property panel under "Operations"
+- Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
 - Parameters with supported types (primitives, enums, nullable variants) show input dialogs
 - Async methods are supported and show a progress indicator
 - Methods returning values display the result in a dialog
@@ -522,6 +524,24 @@ public partial class Server
 - The `IsEnabled` property should be `[Derived]` so it automatically updates when dependencies change
 - When `IsEnabled` is `false`, the button is disabled in the UI
 - This uses the `TrackingScope` for automatic re-rendering when the derived property changes
+
+## Categories
+
+`[Category("...")]` from `System.ComponentModel` on a `[State]` property or on an `[Operation]` or `[Query]` method puts it under a heading of that name in the property panel, below the members without a category.
+
+```csharp
+[State("Speed", Position = 3)]
+[Category("Speed")]
+public partial int CurrentSpeed { get; set; }
+
+[Operation(Title = "Set Speed", Position = 1)]
+[Category("Speed")]
+public void SetTargetSpeed(int speed) { /* ... */ }
+```
+
+- Categories are ordered by the lowest `Position` of their state properties. Categories with only methods come last, and names break ties.
+- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume" and "Track" this way.
+- Names are case-sensitive. .NET shows "Default" as "Misc", "Config" as "Configurations", "DragDrop" as "Drag Drop" and "WindowStyle" as "Window Style".
 
 ## Background Services
 
@@ -609,6 +629,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
 
     [Configuration]
     [State("Target", Position = 2)]
+    [Category("Speed")]
     public partial int TargetSpeed { get; set; }
 
     [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
@@ -623,6 +644,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     // Live state (not persisted)
 
     [State("Speed", Position = 3)]
+    [Category("Speed")]
     public partial int CurrentSpeed { get; set; }
 
     [State(Unit = StateUnit.DegreeCelsius, Position = 4)]
@@ -635,10 +657,12 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
 
     [Derived]
     [State("Delta", Position = 5)]
+    [Category("Speed")]
     public int SpeedDelta => TargetSpeed - CurrentSpeed;
 
     [Derived]
     [State("At Target", Position = 6)]
+    [Category("Speed")]
     public bool IsAtTargetSpeed => Math.Abs(SpeedDelta) < 50;
 
     // Display interfaces
@@ -798,8 +822,10 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
+| `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
+| `[Category]` on a property or method | Heading in the property panel, see [Categories](#categories) | No | Yes |
 | `[Slot]` | Content that a markdown page fills in | No | Rendered by the widget |
 | `[DisplayName]`, `[Description]`, `[Category]`, `[SubjectIcon]` | Describe the type in the create dialog | No | In the create dialog |
 | `[ExcludeFromCreation]`, `[SingleInstance]` | Hide the type from the create dialog | No | No |
@@ -827,7 +853,7 @@ Core platform interfaces and attributes:
 
 | Area | Contents |
 |------|----------|
-| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
+| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `[SubjectPath]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
 | Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
@@ -927,9 +953,25 @@ private IInterceptorSubject? ResolveSubject()
 
 `ResolveScopedSubject` and `ResolveScopedValue` are extension methods in `HomeBlaze.Services`. When the subject is on a markdown page, a relative path starts at the page and its first segment can be the name of a block on that page, as [Paths](../administration/paths.md) describes for page authors. When the subject is not on a page, they resolve relative to the subject, like `ResolveSubject` and `ResolveValue` with the subject as the third argument.
 
+### Path Properties
+
+`[SubjectPath]` on a `string` `[Configuration]` property makes the generated properties editor show a [`SubjectPathField`](#subjectpathfield-component), so that the path can be picked as well as typed. Without a type the path leads to a property, and with a type to a subject of that type, which can be an interface:
+
+```csharp
+[Configuration]
+[SubjectPath]
+public partial string? Path { get; set; }
+
+[Configuration]
+[SubjectPath(typeof(ValueMap))]
+public partial string? Map { get; set; }
+```
+
+The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.
+
 ### SubjectPathField Component
 
-For subject path configuration properties, use the `SubjectPathField` component in edit forms. It provides a text input with a browse button that opens a tree picker dialog:
+In an Edit component of your own, use the `SubjectPathField` component for a path. It provides a text input with a browse button that opens a tree picker dialog:
 
 ```razor
 @using HomeBlaze.Components.Inputs
@@ -956,9 +998,13 @@ For subject path configuration properties, use the `SubjectPathField` component 
 | `Value` | `string?` | `null` | The path value (two-way bindable) |
 | `Label` | `string` | `"Path"` | Input label |
 | `Placeholder` | `string` | `"Enter path or click to browse"` | Placeholder text |
-| `Variant` | `Variant` | `Variant.Outlined` | MudBlazor input variant |
+| `Variant` | `Variant` | `Variant.Text` | MudBlazor input variant |
+| `Required` | `bool` | `false` | Whether a `MudForm` reports the empty field as invalid |
 | `LocalSubjects` | `IDictionary<string, IInterceptorSubject>?` | `null` | Additional local subjects to show in picker |
 | `Class` | `string?` | `null` | CSS class for styling |
+| `IsPropertyVisible` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties the picker shows |
+| `CanSelectProperty` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties can be picked. Typed text is not checked |
+| `CanSelectSubject` | `Func<IInterceptorSubject, bool>?` | `null` | Which subjects can be picked. Typed text is not checked |
 
 ---
 

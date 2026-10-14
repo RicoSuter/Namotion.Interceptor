@@ -16,6 +16,7 @@ public partial class ValueRow : IConfigurable
     /// Path of the property whose value the row shows. Optional when the row has content.
     /// </summary>
     [Configuration]
+    [SubjectPath]
     public partial string? Path { get; set; }
 
     /// <summary>
@@ -34,6 +35,7 @@ public partial class ValueRow : IConfigurable
     /// Name or path of the <see cref="ValueMap"/> that says what the value gets.
     /// </summary>
     [Configuration]
+    [SubjectPath(typeof(ValueMap))]
     public partial string? Map { get; set; }
 
     /// <summary>

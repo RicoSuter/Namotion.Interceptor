@@ -49,12 +49,14 @@ namespace HomeBlaze.History.Sqlite
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string DatabasePath { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long DropCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
         public long EstimatedStorageSize { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int FlushIntervalSeconds { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public double IncomingChangesPerSecond { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool IsEnabled { get; set; }
@@ -67,6 +69,7 @@ namespace HomeBlaze.History.Sqlite
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int MaxJsonSize { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long OversizeCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.History.Sqlite.PartitionInterval PartitionInterval { get; set; }
@@ -75,8 +78,10 @@ namespace HomeBlaze.History.Sqlite
         [HomeBlaze.Abstractions.Attributes.State]
         public int QueueDepth { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public double RecordedChangesPerSecond { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long RecordedCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
         public string Status { get; set; }

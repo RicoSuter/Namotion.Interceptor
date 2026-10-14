@@ -6,6 +6,7 @@
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
+@inject PropertyRowLayoutService RowLayout
 
 @implements IDisposable
 @implements IAsyncDisposable
@@ -13,14 +14,32 @@
 @* The panes take the height the breadcrumbs leave, which wrap on a narrow view. 66px is the top padding of the main
    content below the app bar plus 2px of slack. *@
 <div style="display: flex; flex-direction: column; height: calc(100vh - 66px);">
-    <MudStack Row="true" Class="browser-toolbar mb-2" Style="flex-shrink: 0;">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="browser-toolbar mb-2" Style="flex-shrink: 0;">
         <MudBreadcrumbs Items="_breadcrumbs" />
         <MudSpacer />
+        @* To the left, as a tooltip below the button would cover the open menu. *@
+        <MudTooltip Text="Row layout" Placement="Placement.Left">
+            <MudMenu Icon="@Icons.Material.Filled.ViewAgenda" Size="Size.Small" Dense="true" AriaLabel="Row layout"
+                     AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" data-testid="row-layout-menu">
+                @* MudBlazor gives a menu and its items no roles, without which an item cannot state that it is chosen. *@
+                <div role="menu" aria-label="Row layout">
+                    @foreach (var (layout, label, testId) in RowLayouts)
+                    {
+                        var isCurrent = RowLayout.Layout == layout;
+                        <MudMenuItem Icon="@(isCurrent ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)"
+                                     OnClick="@(() => SetRowLayoutAsync(layout))"
+                                     role="menuitemradio"
+                                     aria-checked="@(isCurrent ? "true" : "false")"
+                                     data-testid="@testId">@label</MudMenuItem>
+                    }
+                </div>
+            </MudMenu>
+        </MudTooltip>
     </MudStack>
 
     @* The row always has its scrollbar: one that appears with the pane that makes the row scroll takes its height
        from the panes, which then all jump shorter. *@
-    <div id="scrollContainer" @ref="_paneContainer"
+    <div id="scrollContainer" @ref="_paneContainer" class="@RowLayoutClass"
          style="@($"flex: 1 1 auto; min-height: 0; width: 100%; overflow-x: scroll; overflow-y: hidden; display: flex; gap: {PaneGap}px; scroll-snap-type: var(--pane-snap, x mandatory);")">
         @for (var i = 0; i < _panes.Count; i++)
         {
@@ -63,6 +82,21 @@
     private static readonly string PaneStyle =
         $"flex: 0 0 var(--pane-width, min({MinimumPaneWidth}px, 100%)); min-width: 0; scroll-snap-align: start;";
 
+    private static readonly (PropertyRowLayout Layout, string Label, string TestId)[] RowLayouts =
+    [
+        (PropertyRowLayout.Automatic, "Automatic", "row-layout-automatic"),
+        (PropertyRowLayout.SideBySide, "Side by side", "row-layout-side-by-side"),
+        (PropertyRowLayout.Stacked, "Stacked", "row-layout-stacked")
+    ];
+
+    // The rules of these classes are in the style block of SubjectPropertyPanel. Side by side needs none.
+    private string RowLayoutClass => RowLayout.Layout switch
+    {
+        PropertyRowLayout.SideBySide => "subject-pane-rows-side-by-side",
+        PropertyRowLayout.Stacked => "subject-pane-rows-stacked",
+        _ => "subject-pane-rows-automatic"
+    };
+
     [Parameter]
     public string? Path { get; set; }
 
@@ -84,6 +118,27 @@
     {
         base.OnInitialized();
         NavigationManager.LocationChanged += OnLocationChanged;
+        RowLayout.OnChange += OnRowLayoutChanged;
+    }
+
+    private void OnRowLayoutChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task SetRowLayoutAsync(PropertyRowLayout layout)
+    {
+        RowLayout.SetLayout(layout);
+        if (_jsModule is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _jsModule.InvokeVoidAsync("saveRowLayout", PropertyRowLayoutInitializer.CookieName, RowLayout.StoredValue);
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
+        {
+            // A layout that cannot be remembered still applies to this visit.
+        }
     }
 
     protected override void OnParametersSet()
@@ -510,6 +565,7 @@
     {
         _disposed = true;
         NavigationManager.LocationChanged -= OnLocationChanged;
+        RowLayout.OnChange -= OnRowLayoutChanged;
     }
 
     public async ValueTask DisposeAsync()

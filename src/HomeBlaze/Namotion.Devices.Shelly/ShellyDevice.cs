@@ -152,6 +152,7 @@ public partial class ShellyDevice : BackgroundService,
 
     [Derived]
     [State(Position = 401)]
+    [Category("Device")]
     public int? Generation => _deviceInfo?.Generation;
 
     public ShellyDevice(IHttpClientFactory httpClientFactory, ILogger<ShellyDevice> logger)

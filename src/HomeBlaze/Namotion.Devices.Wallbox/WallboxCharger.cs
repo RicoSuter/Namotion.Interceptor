@@ -72,49 +72,61 @@ public partial class WallboxCharger : BackgroundService,
     public partial bool? IsCharging { get; internal set; }
 
     [State(Unit = StateUnit.Watt, Position = 4)]
+    [Category("Charging")]
     public partial decimal? ChargingPower { get; internal set; }
 
     // Workaround: Pulsar MAX firmware always returns charging_speed=0.
     // Derived from power and phases assuming 230V nominal (EU/Type 2 markets).
     [State(Unit = StateUnit.Ampere, IsEstimated = true, Position = 5)]
+    [Category("Charging")]
     public partial decimal? ChargingCurrent { get; internal set; }
 
     // max_available_power from the API is actually the hardware max current in amps
     [State(Unit = StateUnit.Ampere, Position = 6)]
+    [Category("Charging")]
     public partial decimal? MaximumAvailableChargingCurrent { get; internal set; }
 
     [State(Unit = StateUnit.Ampere, Position = 7)]
+    [Category("Charging")]
     public partial decimal? MaximumChargingCurrent { get; internal set; }
 
     [State(Unit = StateUnit.Watt, Position = 8)]
+    [Category("Charging")]
     public partial decimal? MaximumChargingPower { get; internal set; }
 
     [State(IsDiscrete = true, Position = 9)]
+    [Category("Lock")]
     public partial bool? IsLocked { get; internal set; }
 
     // IVehicleChargerState (ChargeLevel delegated to Session)
 
     [Derived]
     [State(Unit = StateUnit.Percent, Position = 10)]
+    [Category("Charging")]
     public decimal? ChargeLevel => Session.ChargeLevel;
 
     // Energy
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 12)]
+    [Category("Energy")]
     public partial decimal? TotalConsumedEnergy { get; internal set; }
 
     [State(Position = 13)]
+    [Category("Energy")]
     public partial decimal? EnergyPrice { get; internal set; }
 
     [State(Position = 14)]
+    [Category("Energy")]
     public partial string? Currency { get; internal set; }
 
     // Eco-Smart
 
     [State(IsDiscrete = true, Position = 15)]
+    [Category("Energy")]
     public partial bool? IsEcoSmartEnabled { get; internal set; }
 
     [State(IsDiscrete = true, Position = 16)]
+    [Category("Energy")]
     public partial WallboxEcoSmartMode? EcoSmartMode { get; internal set; }
 
     // IDeviceInfo
@@ -162,6 +174,7 @@ public partial class WallboxCharger : BackgroundService,
     // IPowerSensor (TotalConsumedEnergy implements it directly)
 
     [Derived]
+    [Category("Energy")]
     public decimal? Power => ChargingPower;
 
     // Derived
@@ -259,6 +272,7 @@ public partial class WallboxCharger : BackgroundService,
     // Device-specific operations
 
     [Operation(Title = "Lock", Icon = "Lock")]
+    [Category("Lock")]
     public async Task LockAsync(CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -269,6 +283,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Unlock", Icon = "LockOpen")]
+    [Category("Lock")]
     public async Task UnlockAsync(CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -279,6 +294,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Set Maximum Charging Current", RequiresConfirmation = true)]
+    [Category("Charging")]
     public async Task SetMaximumChargingCurrentAsync(int amperes, CancellationToken cancellationToken)
     {
         if (_client is not null && amperes is >= 6 and <= 32)
@@ -289,6 +305,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Set Energy Price")]
+    [Category("Energy")]
     public async Task SetEnergyPriceAsync(decimal pricePerKwh, CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -299,6 +316,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Set ICP Max Current", RequiresConfirmation = true)]
+    [Category("Charging")]
     public async Task SetIcpMaxCurrentAsync(int amperes, CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -309,6 +327,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Set Eco-Smart Mode")]
+    [Category("Energy")]
     public async Task SetEcoSmartAsync(WallboxEcoSmartMode mode, CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -319,6 +338,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Reboot", RequiresConfirmation = true)]
+    [Category("Device")]
     public async Task RebootAsync(CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -328,6 +348,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Update Firmware", RequiresConfirmation = true)]
+    [Category("Device")]
     public async Task UpdateFirmwareAsync(CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -342,6 +363,7 @@ public partial class WallboxCharger : BackgroundService,
     // These operations therefore toggle pause/resume to control the physical latch.
 
     [Operation(Title = "Toggle Charge Port Lock")]
+    [Category("Lock")]
     public async Task ToggleChargePortLockAsync(CancellationToken cancellationToken)
     {
         if (ChargerStatus == WallboxChargerStatus.Paused)
@@ -351,6 +373,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Lock Charge Port")]
+    [Category("Lock")]
     public async Task LockChargePortAsync(CancellationToken cancellationToken)
     {
         // Resume charging to re-engage the connector latch
@@ -359,6 +382,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Unlock Charge Port")]
+    [Category("Lock")]
     public async Task UnlockChargePortAsync(CancellationToken cancellationToken)
     {
         // The Type 2 connector latch disengages when the session is paused.

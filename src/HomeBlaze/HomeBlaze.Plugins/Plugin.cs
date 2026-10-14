@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -61,12 +62,15 @@ public partial class Plugin : ITitleProvider, IIconProvider, IMonitoredService
     public partial string[] Tags { get; internal set; }
 
     [State]
+    [Category("Assemblies")]
     public partial string[] Assemblies { get; internal set; }
 
     [State]
+    [Category("Assemblies")]
     public partial string[] PrivateDependencies { get; internal set; }
 
     [State]
+    [Category("Assemblies")]
     public partial string[] HostDependencies { get; internal set; }
 
     [Operation(Title = "Remove Plugin", RequiresConfirmation = true)]

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Reactive.Subjects;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -34,18 +35,23 @@ public partial class ShellySwitch :
     public partial string? Source { get; internal set; }
 
     [State(Unit = StateUnit.Watt)]
+    [Category("Energy")]
     public partial decimal? MeasuredPower { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
+    [Category("Energy")]
     public partial decimal? TotalImportedEnergy { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
+    [Category("Energy")]
     public partial decimal? TotalExportedEnergy { get; internal set; }
 
     [State(Unit = StateUnit.Volt)]
+    [Category("Energy")]
     public partial decimal? ElectricalVoltage { get; internal set; }
 
     [State(Unit = StateUnit.Ampere)]
+    [Category("Energy")]
     public partial decimal? ElectricalCurrent { get; internal set; }
 
     [State(Unit = StateUnit.DegreeCelsius)]
