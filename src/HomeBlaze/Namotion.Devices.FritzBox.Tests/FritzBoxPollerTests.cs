@@ -69,6 +69,18 @@ public class FritzBoxPollerTests
     }
 
     [Fact]
+    public async Task WhenTheHostListPathIsMissing_ThenAnInvalidDataExceptionIsThrown()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.Answers[$"{Tr64Services.Hosts}#X_AVM-DE_GetHostListPath"] = string.Empty;
+        using var connection = await OpenAsync(fake);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidDataException>(() => FritzBoxPoller.PollAsync(connection, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task WhenTheMeshListIsNotOffered_ThenTheSnapshotHasNoMesh()
     {
         // Arrange
@@ -99,6 +111,106 @@ public class FritzBoxPollerTests
         Assert.Null(snapshot.Mesh);
     }
 
+    [Fact]
+    public async Task WhenTheMeshDownloadFailsWithAnHttpError_ThenTheSnapshotHasNoMeshButHostsAreRead()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.HttpErrors[FakeFritzBox.MeshListPath] = 500;
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Null(snapshot.Mesh);
+        Assert.Equal(5, snapshot.Hosts.Count);
+    }
+
+    [Fact]
+    public async Task WhenTheInternetIsDisconnected_ThenIsConnectedIsFalse()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.Answers[$"{Tr64Services.WanPppConnection}#GetStatusInfo"] =
+            "<NewConnectionStatus>Disconnected</NewConnectionStatus><NewLastConnectionError>ERROR_NONE</NewLastConnectionError><NewUptime>0</NewUptime>";
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.False(snapshot.Internet!.IsConnected);
+    }
+
+    [Fact]
+    public async Task WhenTheIpv6ActionFaults_ThenOnlyTheIpv6AddressIsNull()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.Faults["X_AVM-DE_GetExternalIPv6Address"] = 401;
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Null(snapshot.Internet!.ExternalIpv6Address);
+        Assert.True(snapshot.Internet.IsConnected);
+        Assert.Equal("203.0.113.7", snapshot.Internet.ExternalIpAddress);
+        Assert.Equal(40m, snapshot.Internet.MaximumUploadRate);
+    }
+
+    [Fact]
+    public async Task WhenEveryInternetActionFaults_ThenInternetIsNull()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.Faults["GetCommonLinkProperties"] = 401;
+        fake.Faults["GetStatusInfo"] = 401;
+        fake.Faults["GetExternalIPAddress"] = 401;
+        fake.Faults["X_AVM-DE_GetExternalIPv6Address"] = 401;
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Null(snapshot.Internet);
+    }
+
+    [Fact]
+    public async Task WhenTheOnlineMonitorFaults_ThenTrafficIsNull()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.Faults["X_AVM-DE_GetOnlineMonitor"] = 401;
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Null(snapshot.Traffic);
+    }
+
+    [Fact]
+    public async Task WhenTwoRadiosReportTheSameBand_ThenTheSecondRoleGetsASuffix()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.Answers[$"{Tr64Services.WlanConfigurationPrefix}2#GetInfo"] =
+            "<NewEnable>1</NewEnable><NewSSID>Home5</NewSSID><NewChannel>6</NewChannel><NewX_AVM-DE_FrequencyBand>2400</NewX_AVM-DE_FrequencyBand>";
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(FritzBoxWlanRoles.Band24, snapshot.Wlans[0].Role);
+        Assert.Equal($"{FritzBoxWlanRoles.Band24}-2", snapshot.Wlans[1].Role);
+    }
+
     [Theory]
     [InlineData("5000,4000,3000", 5000L)]
     [InlineData(" 7 ", 7L)]
@@ -121,6 +233,8 @@ public class FritzBoxPollerTests
     [InlineData(2, 3, null, FritzBoxWlanRoles.Guest, null)]
     [InlineData(0, 1, null, FritzBoxWlanRoles.Band24, FritzBoxWlanRoles.Band24)]
     [InlineData(2, 4, "6000", FritzBoxWlanRoles.Band6, FritzBoxWlanRoles.Band6)]
+    [InlineData(1, 3, "unknown", FritzBoxWlanRoles.Band5, FritzBoxWlanRoles.Band5)]
+    [InlineData(4, 6, null, "WLAN5", null)]
     public void WhenAWlanIsClassified_ThenTheLastOfSeveralIsTheGuest(int index, int count, string? frequencyBand, string expectedRole, string? expectedBand)
     {
         // Act
@@ -131,9 +245,7 @@ public class FritzBoxPollerTests
         Assert.Equal(expectedBand, band);
     }
 
-    private static Task<FritzBoxConnection> OpenAsync(FakeFritzBox fake) => OpenAndResolveAsync(fake);
-
-    private static async Task<FritzBoxConnection> OpenAndResolveAsync(FakeFritzBox fake)
+    private static async Task<FritzBoxConnection> OpenAsync(FakeFritzBox fake)
     {
         var connection = await FritzBoxConnection.OpenAsync(
             new FritzBoxConnectionOptions("127.0.0.1", fake.Username, fake.Password, null) { DescriptionPort = fake.HttpPort },

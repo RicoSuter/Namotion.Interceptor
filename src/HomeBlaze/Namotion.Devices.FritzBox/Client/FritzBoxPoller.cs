@@ -12,6 +12,7 @@ namespace Namotion.Devices.FritzBox.Client;
 internal static class FritzBoxPoller
 {
     private static readonly Task<UpnpSoapResponse?> NoAnswer = Task.FromResult<UpnpSoapResponse?>(null);
+    private static readonly (string Name, string Value)[] OnlineMonitorArguments = [("NewSyncGroupIndex", "0")];
 
     /// <summary>
     /// Reads one snapshot. Optional values the router does not offer are null. Throws
@@ -143,13 +144,13 @@ internal static class FritzBoxPoller
     private static async Task<TrafficInfo?> ReadTrafficAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
     {
         var answer = await connection.ReadOrDefaultAsync(
-            Tr64Services.WanCommonInterfaceConfig, "X_AVM-DE_GetOnlineMonitor", [("NewSyncGroupIndex", "0")], cancellationToken);
+            Tr64Services.WanCommonInterfaceConfig, "X_AVM-DE_GetOnlineMonitor", OnlineMonitorArguments, cancellationToken);
         if (answer is null)
         {
             return null;
         }
 
-        // The online monitor reports bytes per second; converted here to kB/s to match the router's own display.
+        // The online monitor reports bytes per second.
         return new TrafficInfo(
             GetMostRecentSample(answer.GetString("Newus_current_bps")) / 1000m,
             GetMostRecentSample(answer.GetString("Newds_current_bps")) / 1000m);
@@ -158,26 +159,23 @@ internal static class FritzBoxPoller
     private static async Task<IReadOnlyList<WlanInfo>> ReadWlansAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
     {
         var serviceTypes = connection.Description.WlanServiceTypes;
-        var infoTasks = new Task<UpnpSoapResponse?>[serviceTypes.Count];
-        var associationTasks = new Task<UpnpSoapResponse?>[serviceTypes.Count];
-        for (var index = 0; index < serviceTypes.Count; index++)
+        var count = serviceTypes.Count;
+        var tasks = new Task<UpnpSoapResponse?>[count * 2];
+        for (var index = 0; index < count; index++)
         {
-            infoTasks[index] = connection.ReadOrDefaultAsync(serviceTypes[index], "GetInfo", null, cancellationToken);
-            associationTasks[index] = connection.ReadOrDefaultAsync(serviceTypes[index], "GetTotalAssociations", null, cancellationToken);
+            tasks[index] = connection.ReadOrDefaultAsync(serviceTypes[index], "GetInfo", null, cancellationToken);
+            tasks[count + index] = connection.ReadOrDefaultAsync(serviceTypes[index], "GetTotalAssociations", null, cancellationToken);
         }
 
-        // Both sets of tasks were already started above, so awaiting them one after the other does not serialize
-        // the requests; it only avoids allocating a combined array.
-        await Task.WhenAll(infoTasks);
-        await Task.WhenAll(associationTasks);
+        await Task.WhenAll(tasks);
 
-        var wlans = new List<WlanInfo>(serviceTypes.Count);
+        var wlans = new List<WlanInfo>(count);
         var roles = new HashSet<string>(StringComparer.Ordinal);
-        for (var index = 0; index < serviceTypes.Count; index++)
+        for (var index = 0; index < count; index++)
         {
-            var info = await infoTasks[index];
-            var associations = await associationTasks[index];
-            var (role, band) = ClassifyWlan(index, serviceTypes.Count, info?.GetString("NewX_AVM-DE_FrequencyBand"));
+            var info = await tasks[index];
+            var associations = await tasks[count + index];
+            var (role, band) = ClassifyWlan(index, count, info?.GetString("NewX_AVM-DE_FrequencyBand"));
             if (!roles.Add(role))
             {
                 role = $"{role}-{index + 1}";
@@ -225,12 +223,15 @@ internal static class FritzBoxPoller
             return null;
         }
 
-        await using var content = await connection.DownloadAsync(path, FritzBoxConnection.MaximumListBytes, cancellationToken);
+        // The mesh list is optional: a malformed document, a path rejected as unsafe or an HTTP error on the
+        // download all leave the snapshot without a mesh rather than failing the poll. A certificate problem, a
+        // timeout and cancellation are not mesh-specific failures, so they still propagate.
         try
         {
+            await using var content = await connection.DownloadAsync(path, FritzBoxConnection.MaximumListBytes, cancellationToken);
             return MeshTopology.Build(MeshListParser.Parse(content));
         }
-        catch (JsonException exception)
+        catch (Exception exception) when (exception is JsonException or InvalidDataException or HttpRequestException)
         {
             connection.LogUnavailable(Tr64Services.Hosts, "X_AVM-DE_GetMeshListPath", exception);
             return null;

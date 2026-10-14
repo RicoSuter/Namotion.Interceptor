@@ -66,7 +66,9 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     internal ConcurrentDictionary<string, int> Faults { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// HTTP status codes by action name; an action listed here is answered with that status and no body.
+    /// HTTP status codes by action name for an authenticated action, or by path for a plain GET of a list
+    /// (<see cref="HostListPath"/> or <see cref="MeshListPath"/>); a key listed here is answered with that status
+    /// and no body.
     /// </summary>
     internal ConcurrentDictionary<string, int> HttpErrors { get; } = new(StringComparer.Ordinal);
 
@@ -185,20 +187,7 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
 
         if (HttpMethods.IsGet(request.Method))
         {
-            var pathAndQuery = request.Path + request.QueryString.ToString();
-            if (pathAndQuery == HostListPath)
-            {
-                await WriteAsync(context, StatusCodes.Status200OK, "text/xml", HostListXml);
-            }
-            else if (pathAndQuery == MeshListPath)
-            {
-                await WriteAsync(context, StatusCodes.Status200OK, "application/json", MeshListJson);
-            }
-            else
-            {
-                context.Response.StatusCode = StatusCodes.Status404NotFound;
-            }
-
+            await HandleSecureGetAsync(context);
             return;
         }
 
@@ -250,6 +239,30 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         await WriteAsync(context, StatusCodes.Status200OK, "text/xml", CreateEnvelope(serviceType, action, values));
     }
 
+    private async Task HandleSecureGetAsync(HttpContext context)
+    {
+        var request = context.Request;
+        var pathAndQuery = request.Path + request.QueryString.ToString();
+        if (pathAndQuery == HostListPath)
+        {
+            if (!TryAnswerHttpError(context, HostListPath))
+            {
+                await WriteAsync(context, StatusCodes.Status200OK, "text/xml", HostListXml);
+            }
+        }
+        else if (pathAndQuery == MeshListPath)
+        {
+            if (!TryAnswerHttpError(context, MeshListPath))
+            {
+                await WriteAsync(context, StatusCodes.Status200OK, "application/json", MeshListJson);
+            }
+        }
+        else
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+        }
+    }
+
     private async Task HandlePlainAsync(HttpContext context)
     {
         var request = context.Request;
@@ -277,6 +290,18 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
         }
+    }
+
+    /// <returns>Whether a status in <see cref="HttpErrors"/> was found for <paramref name="key"/> and answered.</returns>
+    private bool TryAnswerHttpError(HttpContext context, string key)
+    {
+        if (!HttpErrors.TryGetValue(key, out var statusCode))
+        {
+            return false;
+        }
+
+        context.Response.StatusCode = statusCode;
+        return true;
     }
 
     /// <returns>False when the request was held and the client gave up waiting, so nothing must be answered.</returns>
