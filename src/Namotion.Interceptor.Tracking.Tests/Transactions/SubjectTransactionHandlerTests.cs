@@ -168,6 +168,136 @@ public class SubjectTransactionHandlerTests
         Assert.Empty(handler.Captured);
     }
 
+    [Fact]
+    public async Task WhenCommitting_ThenOnCommittingSeesPendingValuesBeforeAnythingIsApplied()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var notifications = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
+        var person = new Person(context) { FirstName = "Ann" };
+        notifications.Clear();
+
+        string? firstNameSeenByHandler = null;
+        var notificationsSeenByHandler = -1;
+        handler.OnCommittingAction = (_, _) =>
+        {
+            firstNameSeenByHandler = person.FirstName;
+            notificationsSeenByHandler = notifications.Count;
+        };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, handler.CommittingCalls);
+        Assert.Equal("Bob", firstNameSeenByHandler);
+        Assert.Equal(0, notificationsSeenByHandler);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenOnCommittingThrows_ThenNothingIsAppliedAndRetryCommits()
+    {
+        // Arrange
+        var reject = true;
+        var handler = new RecordingHandler
+        {
+            OnCommittingAction = (_, _) =>
+            {
+                if (reject)
+                {
+                    throw new InvalidOperationException("rejected");
+                }
+            }
+        };
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var notifications = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
+        var person = new Person(context) { FirstName = "Ann" };
+        notifications.Clear();
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        var notificationsAfterFailure = notifications.Count;
+        var pendingAfterFailure = transaction.GetPendingChanges().Count;
+        reject = false;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("rejected", exception.Message);
+        Assert.Equal(0, notificationsAfterFailure);
+        Assert.Equal(1, pendingAfterFailure);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenHandlerWritesDuringOnCommitting_ThenWriteThrowsAndIsNotCaptured()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var person = new Person(context);
+        Exception? writeError = null;
+        handler.OnCommittingAction = (_, _) => writeError = Record.Exception(() => person.LastName = "Smith");
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(writeError);
+        Assert.Equal("Bob", person.FirstName);
+        Assert.Null(person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenDisposedDuringOnCommitting_ThenCommitThrowsAndLockIsReleased()
+    {
+        // Arrange
+        var handler = new RecordingHandler { OnCommittingAction = (transaction, _) => transaction.Dispose() };
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var person = new Person(context) { FirstName = "Ann" };
+        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+
+        // Act
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+        transaction.Dispose();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var next = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort, cancellationToken: timeout.Token);
+
+        // Assert
+        Assert.Equal("Ann", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenNoHandlerIsRegistered_ThenCommitSucceeds()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Bob", person.FirstName);
+    }
+
     private sealed class RecordingHandler : ITransactionHandler
     {
         public List<(PropertyReference Property, object? Value, ChangeOrigin Origin)> Captured { get; } = [];
@@ -175,6 +305,10 @@ public class SubjectTransactionHandlerTests
         public Func<PropertyReference, object?, Exception?>? RejectCapture { get; set; }
 
         public List<(RecordingHandler Handler, object? Value)>? CaptureLog { get; init; }
+
+        public int CommittingCalls { get; private set; }
+
+        public Action<SubjectTransaction, SubjectPropertyChange[]>? OnCommittingAction { get; set; }
 
         public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
         {
@@ -189,6 +323,8 @@ public class SubjectTransactionHandlerTests
 
         public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
         {
+            CommittingCalls++;
+            OnCommittingAction?.Invoke(transaction, changes.ToArray());
         }
     }
 }
