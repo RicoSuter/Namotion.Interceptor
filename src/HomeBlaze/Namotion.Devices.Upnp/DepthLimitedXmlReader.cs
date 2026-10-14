@@ -13,10 +13,16 @@ public sealed class DepthLimitedXmlReader : XmlReader
     private readonly XmlReader _reader;
     private readonly int _maximumLevels;
 
+    /// <summary>
+    /// Wraps a reader with a depth limit.
+    /// </summary>
     /// <param name="reader">The reader to pass through.</param>
     /// <param name="maximumLevels">How many elements may nest, the root included.</param>
     public DepthLimitedXmlReader(XmlReader reader, int maximumLevels)
     {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumLevels);
+
         _reader = reader;
         _maximumLevels = maximumLevels;
     }

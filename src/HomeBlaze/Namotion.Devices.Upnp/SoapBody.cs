@@ -25,7 +25,7 @@ internal sealed record SoapBody(string? Name, List<(string Name, string? Value)>
     {
         // Read forward instead of built into a document: the time stays linear and the stack flat however deeply a
         // hostile document nests.
-        using var reader = UpnpXml.CreateReader(stream);
+        using var reader = UpnpXml.CreateValueReader(stream);
         if (reader.MoveToContent() != XmlNodeType.Element || !IsEnvelopeElement(reader, "Envelope") || !MoveToFirstChild(reader))
         {
             return None;

@@ -17,6 +17,16 @@ public static class UpnpXml
         XmlResolver = null
     };
 
+    // Like ReaderSettings, but keeps whitespace-only text: discarding it would turn a value that is only spaces
+    // into an empty string instead of the value a device sent. XmlReader.MoveToContent still skips whitespace
+    // between elements regardless of this setting, so navigation between elements is unaffected.
+    private static readonly XmlReaderSettings ValueReaderSettings = new()
+    {
+        DtdProcessing = DtdProcessing.Prohibit,
+        IgnoreWhitespace = false,
+        XmlResolver = null
+    };
+
     /// <summary>
     /// How many elements may nest in a document <see cref="Parse"/> loads, the root included.
     /// </summary>
@@ -39,4 +49,10 @@ public static class UpnpXml
     /// limit: wrap it in a <see cref="DepthLimitedXmlReader"/> unless the caller skips what it does not read.
     /// </summary>
     public static XmlReader CreateReader(Stream stream) => XmlReader.Create(stream, ReaderSettings);
+
+    /// <summary>
+    /// Creates a reader over the bytes of a document like <see cref="CreateReader"/>, except that it reports a
+    /// whitespace-only value instead of discarding it.
+    /// </summary>
+    internal static XmlReader CreateValueReader(Stream stream) => XmlReader.Create(stream, ValueReaderSettings);
 }

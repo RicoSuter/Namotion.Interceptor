@@ -5,9 +5,31 @@ namespace Namotion.Devices.Upnp;
 /// </summary>
 public sealed class UpnpFaultException : Exception
 {
+    // A lookup instead of a switch: a switch over this many cases trips S1541 (cyclomatic complexity); the
+    // dictionary is built once and keeps the single description per code in one place.
+    private static readonly Dictionary<int, string> StandardDescriptions = new()
+    {
+        [401] = "invalid action",
+        [402] = "invalid arguments",
+        [501] = "action failed",
+        [600] = "argument value invalid",
+        [601] = "argument value out of range",
+        [602] = "optional action not implemented",
+        [603] = "out of memory",
+        [604] = "human intervention required",
+        [605] = "string argument too long",
+        [606] = "action not authorized"
+    };
+
+    /// <summary>
+    /// Creates the exception for a UPnP fault a device answered an action with.
+    /// </summary>
     public UpnpFaultException(string serviceType, string action, int? errorCode, string? faultText)
         : base(CreateMessage(action, errorCode, faultText))
     {
+        ArgumentNullException.ThrowIfNull(serviceType);
+        ArgumentNullException.ThrowIfNull(action);
+
         ServiceType = serviceType;
         Action = action;
         ErrorCode = errorCode;
@@ -34,15 +56,12 @@ public sealed class UpnpFaultException : Exception
     /// </summary>
     public string? FaultText { get; }
 
-    /// <returns>The description of a code every UPnP service shares, or null for any other code.</returns>
-    public static string? GetStandardDescription(int errorCode) => errorCode switch
-    {
-        401 => "invalid action",
-        402 => "invalid arguments",
-        501 => "action failed",
-        606 => "action not authorized",
-        _ => null
-    };
+    /// <summary>
+    /// Describes a UPnP error code every service shares; a code from 700 on is defined by each service instead.
+    /// </summary>
+    /// <param name="errorCode">The UPnP error code to describe.</param>
+    /// <returns>The description of the code, or null when it is not one every UPnP service shares.</returns>
+    public static string? GetStandardDescription(int errorCode) => StandardDescriptions.GetValueOrDefault(errorCode);
 
     private static string CreateMessage(string action, int? errorCode, string? faultText)
     {

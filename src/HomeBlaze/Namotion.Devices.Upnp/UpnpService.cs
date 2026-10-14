@@ -9,6 +9,9 @@ public sealed class UpnpService
     /// <param name="controlPath">The control path, resolved against the base URI of the client.</param>
     public UpnpService(string serviceType, string controlPath)
     {
+        ArgumentNullException.ThrowIfNull(serviceType);
+        ArgumentNullException.ThrowIfNull(controlPath);
+
         ServiceType = serviceType;
         ControlPath = controlPath;
     }

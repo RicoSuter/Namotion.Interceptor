@@ -115,6 +115,7 @@ public class UpnpSoapClientTests
             "<Name>K&amp;uuml;che &lt;1&gt;</Name><Empty></Empty><Volume>44</Volume><Negative>-3</Negative><NotANumber>loud</NotANumber>" +
             "<Large>4294967296</Large>" +
             "<One>1</One><Zero>0</Zero><True>true</True><False>false</False><Maybe>maybe</Maybe>" +
+            "<Yes>yes</Yes><No>NO</No><TrueUpper>TRUE</TrueUpper>" +
             "<PaddedNumber> 7 </PaddedNumber><PaddedTrue> 1 </PaddedTrue><Nested><Inner>5</Inner></Nested>" +
             "<Split>a<!-- c -->b</Split><Section><![CDATA[<x>]]></Section><u:Prefixed>p</u:Prefixed><Last>z</Last>" +
             "</u:GetThingsResponse>" + EnvelopeEnd);
@@ -142,6 +143,9 @@ public class UpnpSoapClientTests
         Assert.False(response.GetBoolean("False"));
         Assert.Null(response.GetBoolean("Maybe"));
         Assert.Null(response.GetBoolean("Missing"));
+        Assert.True(response.GetBoolean("Yes"));
+        Assert.False(response.GetBoolean("No"));
+        Assert.True(response.GetBoolean("TrueUpper"));
         Assert.Equal(7, response.GetInt32("PaddedNumber"));
         Assert.True(response.GetBoolean("PaddedTrue"));
         Assert.Null(response.GetString("Nested"));
@@ -149,6 +153,27 @@ public class UpnpSoapClientTests
         Assert.Equal("<x>", response.GetString("Section"));
         Assert.Equal("p", response.GetString("Prefixed"));
         Assert.Equal("z", response.GetString("Last"));
+    }
+
+    [Fact]
+    public async Task WhenAValueIsWhitespaceOrHasSurroundingSpaces_ThenItIsReturnedAsSent()
+    {
+        // Arrange
+        await using var device = Answer(
+            HttpStatusCode.OK,
+            AnswerStart +
+            "<u:GetNamesResponse xmlns:u=\"urn:schemas-upnp-org:service:DeviceProperties:1\">" +
+            "<Blank> </Blank><Padded> x </Padded>" +
+            "</u:GetNamesResponse>" + EnvelopeEnd);
+        using var httpClient = new HttpClient();
+        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+
+        // Act
+        var response = await client.QueryAsync(DeviceProperties, "GetNames", [], CancellationToken.None);
+
+        // Assert
+        Assert.Equal(" ", response.GetString("Blank"));
+        Assert.Equal(" x ", response.GetString("Padded"));
     }
 
     [Fact]
@@ -214,10 +239,37 @@ public class UpnpSoapClientTests
         Assert.Equal("The device refused Next (UPnP error 701).", exception.Message);
     }
 
+    [Fact]
+    public async Task WhenACommandIsAnsweredWithAFaultAndASuccessStatus_ThenInvokingThrowsTheFault()
+    {
+        // Arrange
+        await using var device = Answer(
+            HttpStatusCode.OK,
+            AnswerStart +
+            "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
+            "<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>402</errorCode></UPnPError></detail></s:Fault>" +
+            EnvelopeEnd);
+        using var httpClient = new HttpClient();
+        var client = new UpnpSoapClient(httpClient, device.BaseUri);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<UpnpFaultException>(
+            () => client.InvokeAsync(AvTransport, "Next", [("InstanceID", "0")], CancellationToken.None));
+
+        // Assert
+        Assert.Equal(402, exception.ErrorCode);
+    }
+
     [Theory]
     [InlineData(401, "invalid action")]
     [InlineData(402, "invalid arguments")]
     [InlineData(501, "action failed")]
+    [InlineData(600, "argument value invalid")]
+    [InlineData(601, "argument value out of range")]
+    [InlineData(602, "optional action not implemented")]
+    [InlineData(603, "out of memory")]
+    [InlineData(604, "human intervention required")]
+    [InlineData(605, "string argument too long")]
     [InlineData(606, "action not authorized")]
     public async Task WhenTheFaultCodeIsStandard_ThenTheMessageDescribesIt(int code, string description)
     {
@@ -351,6 +403,51 @@ public class UpnpSoapClientTests
 
         // Assert
         Assert.Equal(402, exception.ErrorCode);
+    }
+
+    [Fact]
+    public void WhenTheHttpClientIsNull_ThenConstructingTheClientThrowsArgumentNullException()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => new UpnpSoapClient(null!, new Uri("http://localhost/")));
+    }
+
+    [Fact]
+    public void WhenTheBaseUriIsNull_ThenConstructingTheClientThrowsArgumentNullException()
+    {
+        // Arrange
+        using var httpClient = new HttpClient();
+
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => new UpnpSoapClient(httpClient, null!));
+    }
+
+    [Fact]
+    public void WhenTheServiceTypeIsNull_ThenConstructingTheServiceThrowsArgumentNullException()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => new UpnpService(null!, "/path"));
+    }
+
+    [Fact]
+    public void WhenTheControlPathIsNull_ThenConstructingTheServiceThrowsArgumentNullException()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => new UpnpService("urn:schemas-upnp-org:service:AVTransport:1", null!));
+    }
+
+    [Fact]
+    public void WhenTheFaultServiceTypeIsNull_ThenConstructingTheExceptionThrowsArgumentNullException()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => new UpnpFaultException(null!, "Play", null, null));
+    }
+
+    [Fact]
+    public void WhenTheFaultActionIsNull_ThenConstructingTheExceptionThrowsArgumentNullException()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => new UpnpFaultException("urn:schemas-upnp-org:service:AVTransport:1", null!, null, null));
     }
 
     private static LoopbackHttpServer Answer(HttpStatusCode status, string body) =>

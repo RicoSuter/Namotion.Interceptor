@@ -8,7 +8,10 @@ namespace Namotion.Devices.Upnp;
 /// </summary>
 /// <remarks>
 /// The size of an answer is bounded by <see cref="HttpClient.MaxResponseContentBufferSize"/> of the borrowed client,
-/// which the caller must set to what its device can reasonably answer.
+/// which the caller must set to what its device can reasonably answer. The action name, the argument names and the
+/// service type are written into the envelope verbatim and must be valid XML names; the service type must also not
+/// contain a quote. Only argument and property values are escaped. A timeout is the caller's responsibility, through
+/// <see cref="HttpClient.Timeout"/> or the cancellation token passed to each call.
 /// </remarks>
 public sealed class UpnpSoapClient
 {
@@ -24,6 +27,9 @@ public sealed class UpnpSoapClient
     /// <param name="baseUri">The base URI the control paths are resolved against.</param>
     public UpnpSoapClient(HttpClient httpClient, Uri baseUri)
     {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentNullException.ThrowIfNull(baseUri);
+
         _httpClient = httpClient;
         _baseUri = baseUri;
     }
@@ -37,9 +43,9 @@ public sealed class UpnpSoapClient
         InvokeAsync(service, action, CreateEnvelope(service, action, arguments), cancellationToken);
 
     /// <summary>
-    /// Invokes an action and returns the values of its answer. Throws <see cref="UpnpFaultException"/> and
-    /// <see cref="HttpRequestException"/> as a command does, and <see cref="XmlException"/> for an answer that is not
-    /// the SOAP answer to the action.
+    /// Invokes an action and returns the values of its answer. Throws the same exceptions as
+    /// <see cref="InvokeAsync(UpnpService, string, ReadOnlySpan{ValueTuple{string, string}}, CancellationToken)"/>,
+    /// and <see cref="XmlException"/> for an answer that is not the SOAP answer to the action.
     /// </summary>
     public Task<UpnpSoapResponse> QueryAsync(
         UpnpService service, string action, ReadOnlySpan<(string Name, string Value)> arguments, CancellationToken cancellationToken) =>
@@ -76,7 +82,8 @@ public sealed class UpnpSoapClient
         return envelope.Append(EnvelopeEnd).ToString();
     }
 
-    // Quotes are escaped as well, although XML does not require it in text: a value can be a document itself.
+    // Quotes are escaped as well, although XML does not require it in text, because devices are known to accept
+    // this form.
     private static void AppendEscaped(StringBuilder envelope, string value)
     {
         foreach (var character in value)
@@ -104,8 +111,22 @@ public sealed class UpnpSoapClient
 
     private async Task InvokeAsync(UpnpService service, string action, string envelope, CancellationToken cancellationToken)
     {
-        // The answer of a command carries nothing to read, so only its status counts.
         using var response = await PostAsync(service, action, envelope, cancellationToken);
+
+        // A command may still answer with HTTP 200 and a UPnP fault in its body; any other failure to read the
+        // body, including one with nothing to read, is not a fault and leaves the command successful.
+        try
+        {
+            await using var content = await response.Content.ReadAsStreamAsync(cancellationToken);
+            if (SoapBody.Read(content).Fault is { } fault)
+            {
+                throw new UpnpFaultException(service.ServiceType, action, fault.ErrorCode, fault.Text);
+            }
+        }
+        catch (XmlException)
+        {
+            // Empty, not XML, or no envelope with a fault.
+        }
     }
 
     private async Task<UpnpSoapResponse> QueryAsync(UpnpService service, string action, string envelope, CancellationToken cancellationToken)
