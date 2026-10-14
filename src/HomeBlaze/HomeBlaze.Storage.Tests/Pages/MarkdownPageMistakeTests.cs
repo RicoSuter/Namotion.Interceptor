@@ -806,7 +806,7 @@ public class MarkdownPageMistakeTests
         var page = await fixture.AddPageAsync("page.md", """
             Text before.
 
-            :: HomeBlaze.Storage.Tests.Pages.TestShelf#grid Rows=1 Columns=2
+            :: HomeBlaze.Storage.Tests.Pages.TestShelf#shelf Rows=1 Columns=2
             ```json
             {
               "Items": [
@@ -825,7 +825,7 @@ public class MarkdownPageMistakeTests
         Assert.StartsWith("Line 3: The value of 'Items' in the json block cannot be read at Items[1].Child: ", box);
         Assert.Contains("HomeBlaze.Components.Widgt", box);
         Assert.DoesNotContain("LineNumber", box);
-        Assert.False(page.Children.ContainsKey("grid"));
+        Assert.False(page.Children.ContainsKey("shelf"));
         Assert.Contains("Text after.", MarkdownPageFixture.Html(page.Children));
     }
 
@@ -866,13 +866,13 @@ public class MarkdownPageMistakeTests
 
         // Act
         var page = await fixture.AddPageAsync(
-            "page.md", $"Text before.\n\n:: HomeBlaze.Storage.Tests.Pages.TestShelf#grid\n```json\n{json}\n```\n::\n\nText after.");
+            "page.md", $"Text before.\n\n:: HomeBlaze.Storage.Tests.Pages.TestShelf#shelf\n```json\n{json}\n```\n::\n\nText after.");
 
         // Assert
         Assert.Equal(
             [$"Line 3: The value of 'Items' in the json block cannot be read at {expectedPlace}: {MissingTypeError}"],
             PageErrorBoxes.FindSortedByLine(page));
-        Assert.False(page.Children.ContainsKey("grid"));
+        Assert.False(page.Children.ContainsKey("shelf"));
         Assert.Contains("Text after.", MarkdownPageFixture.Html(page.Children));
     }
 

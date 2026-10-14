@@ -51,6 +51,8 @@ public class DemoPagesTests
     [InlineData("Configuration.md", "valuemotor", typeof(Motor))]
     [InlineData("Configuration.md", "canvas", typeof(CanvasLayout))]
     [InlineData("Configuration.md", "note", typeof(Card))]
+    [InlineData("Configuration.md", "cellgrid", typeof(GridLayout))]
+    [InlineData("Configuration.md", "speed", typeof(GridCell))]
     [InlineData("Configuration.md", "keptmotor", typeof(Motor))]
     public async Task WhenDemoPageIsLoaded_ThenTheBlockWithANameCreatesItsSubject(string fileName, string name, Type expectedType)
     {

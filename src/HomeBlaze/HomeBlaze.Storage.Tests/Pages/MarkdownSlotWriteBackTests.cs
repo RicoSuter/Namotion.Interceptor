@@ -296,7 +296,8 @@ public class MarkdownSlotWriteBackTests
         await reload.WaitAsync(DeadlockTimeout);
         await page.OnFileChangedAsync(CancellationToken.None);
 
-        // Assert
+        // Assert: the save writes the text of the last parse it knows, so the outside edit that the reload was
+        // reading is replaced in the file. Saves behaved like this before blocks were inserted and removed.
         Assert.True(handled);
         Assert.Contains($":: {LeafType}#leaf Count=7", written);
         Assert.Equal(7, leaf.Count);
@@ -744,7 +745,9 @@ public class MarkdownSlotWriteBackTests
         var handledRemoval = await page.WriteConfigurationAsync(board, CancellationToken.None);
 
         // Assert: the head line is written into the text of the snapshot, which is the text before the failed
-        // reload. A removal is still refused.
+        // reload. The save writes the text of the last parse it knows, so the outside edit that the reload was
+        // reading is replaced in the file. Saves behaved like this before blocks were inserted and removed. A
+        // removal is still refused.
         Assert.True(handled);
         Assert.Equal(string.Format(blocks, 5, "a"), written);
         Assert.False(handledRemoval);

@@ -260,8 +260,10 @@ public class LayoutBlockSaveTests
             var writtenHeadLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "Columns=3" });
             await Assertions.Expect(writtenHeadLine).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-            // The dialog reports its save before the editor writes its text, and the editor is done long before
-            // that notification is gone again.
+            // After it took the text of the dialog, the editor refreshes its decorations once more outside of the
+            // renderer, and a save during that refresh fails with "Index was outside the bounds of the array". Nothing
+            // on the page shows the end of that refresh, so this waits for the notification of the dialog to be gone,
+            // which is long after it.
             await Assertions.Expect(page.GetByText("Configuration saved.")).ToHaveCountAsync(0, new() { Timeout = Timeout });
 
             // Saving writes the page and reads it again, which gives the page a new dictionary of children. The
@@ -323,12 +325,32 @@ public class LayoutBlockSaveTests
         await AsyncTestHelpers.WaitUntilAsync(
             () =>
             {
-                text = Normalize(_fixture.ReadFileAsync(path).GetAwaiter().GetResult());
+                if (!TryReadFile(path, out var written))
+                {
+                    return false;
+                }
+
+                text = Normalize(written);
                 return isExpected(text);
             },
             message: message);
 
         return text;
+    }
+
+    // The server holds the file open while it reads it again after a write, and the poll tries a failed read again.
+    private static bool TryReadFile(string path, out string text)
+    {
+        try
+        {
+            text = File.ReadAllText(path);
+            return true;
+        }
+        catch (IOException)
+        {
+            text = string.Empty;
+            return false;
+        }
     }
 
     // Null while the page is read again and holds no canvas with a node for a moment.

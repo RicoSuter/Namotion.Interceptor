@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
-using HomeBlaze.History.InMemory;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
