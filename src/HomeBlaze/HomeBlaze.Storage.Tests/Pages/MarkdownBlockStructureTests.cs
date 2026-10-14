@@ -1,4 +1,6 @@
+using System.Text.RegularExpressions;
 using HomeBlaze.Storage.Pages;
+using Markdig.Extensions.DefinitionLists;
 using Markdig.Extensions.Footnotes;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
@@ -308,6 +310,41 @@ public class MarkdownBlockStructureTests
     }
 
     [Fact]
+    public void WhenInsertedBlockMakesADefinitionAtTheEndOfThePageTight_ThenAlignmentFails()
+    {
+        // Arrange: Markdig keeps the empty line at the end of the page in the definition, which makes it loose
+        // and renders its text as a paragraph. After the new tile the empty line is no part of it any more.
+        const string source = ":: Demo.Board\nterm\n:   definition\n\n";
+        var before = MarkdownPageParser.Parse(source);
+        var owner = before.Blocks[0];
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
+        var text = MarkdownBlockWriter.CreateBlock("Tile", null, """{ "Position": 1 }""", placement.FenceLength, hasClosingLine: placement.HasClosingLine);
+        var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
+
+        // Assert
+        Assert.Null(map);
+    }
+
+    [Fact]
+    public void WhenRemovalMakesADefinitionAtTheEndOfThePageLoose_ThenAlignmentFails()
+    {
+        // Arrange: without the tile, the empty line at the end of the page follows the definition and makes it loose.
+        const string source = ":: Demo.Board\nterm\n:   definition\n::: Tile\n:::\n\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+    }
+
+    [Fact]
     public void WhenInsertedBlockMakesTwoListsOfOne_ThenAlignmentFails()
     {
         // Arrange
@@ -385,6 +422,43 @@ public class MarkdownBlockStructureTests
         Assert.Null(map);
         Assert.Null(before.Document.Descendants<ParagraphBlock>().Last().TryGetAttributes());
         Assert.Equal(["highlight"], after.Document.Descendants<ParagraphBlock>().Single().TryGetAttributes()?.Classes);
+    }
+
+    [Theory]
+    [InlineData("{#custom}", "text of the panel")]
+    [InlineData("{#custom}", "# Heading of the panel")]
+    [InlineData("{.highlight}", "# Heading of the panel")]
+    public void WhenRemovedBlockStandsDirectlyAfterAnAttributeLine_ThenAlignmentFails(string attributeLine, string textAfter)
+    {
+        // Arrange: the attributes of the line belong to the tile before the removal and to the text after it.
+        var source = $":: Demo.Panel\n{attributeLine}\n::: Tile\ntwo\n:::\n{textAfter}\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+    }
+
+    [Theory]
+    [InlineData("{#custom}")]
+    [InlineData("{.highlight}")]
+    public void WhenBlockIsInsertedDirectlyAfterAnAttributeLine_ThenAlignmentFails(string attributeLine)
+    {
+        // Arrange: the new tile takes the attributes of the line from the heading after it.
+        var source = $":: Demo.Board\n{attributeLine}\n# Heading of the board\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var owner = before.Blocks[0];
+        var result = MarkdownBlockWriter.InsertLines(source, 3, "::: Tile\n:::", "\n", out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, owner);
+
+        // Assert
+        Assert.Null(map);
     }
 
     [Fact]
@@ -623,9 +697,10 @@ public class MarkdownBlockStructureTests
                     AssertRemovalLeavesNothingButOneEmptyLine(result, edit, lineEnding, context);
                     var hasSameBlocks = Describe(before, edit.Line, edit.RemovedLineCount).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount));
                     var hasSameDocument = DescribeDocument(before, edit.Line, edit.RemovedLineCount).SequenceEqual(DescribeDocument(after, edit.Line, edit.InsertedLineCount));
+                    var followsAttributeLine = FollowsAttributeLine(source, edit.Line);
                     Assert.True(
-                        (hasSameBlocks && hasSameDocument) == (map is not null),
-                        $"Same blocks: {hasSameBlocks}, same document: {hasSameDocument}, map: {map is not null}.\n{context}");
+                        (hasSameBlocks && hasSameDocument && !followsAttributeLine) == (map is not null),
+                        $"Same blocks: {hasSameBlocks}, same document: {hasSameDocument}, after an attribute line: {followsAttributeLine}, map: {map is not null}.\n{context}");
                     if (map is null)
                     {
                         refusedRemovals++;
@@ -717,12 +792,17 @@ public class MarkdownBlockStructureTests
         }
     }
 
+    // Whether the line before the given 1-based line holds only attributes, which Markdig gives to the block after it.
+    private static bool FollowsAttributeLine(string source, int line) =>
+        line > 1 && Regex.IsMatch(source.Split('\n')[line - 2], @"^[ \t]*\{[^{}]*\}[ \t]*\r?$");
+
     // Every block of the Markdig document that does not start on the given lines, in the order of the document:
-    // its kind, the containers around it from the block outwards, the classes and the properties of its attributes,
-    // and for a leaf block its text. A block of the page is named by its head line. The id of the attributes is
-    // left out, because Markdig numbers the ids of headings with the same text. Equal lists before and after a
-    // change mean that every text outside the change is what it was, with the attributes it had, and that no list
-    // or quote was joined or split. Written apart from the check on purpose, so that the two must agree.
+    // its kind, whether a list is loose or a definition holds an empty line, the containers around it from the
+    // block outwards, the classes and the properties of its attributes, and for a leaf block its text. A block of
+    // the page is named by its head line. The id of the attributes is left out, because Markdig numbers the ids of
+    // headings with the same text. Equal lists before and after a change mean that every text outside the change
+    // is what it was, with the attributes it had and rendered as a paragraph or not as before, and that no list or
+    // quote was joined or split. Written apart from the check on purpose, so that the two must agree.
     private static List<string> DescribeDocument(MarkdownPage page, int skippedLine, int skippedLineCount)
     {
         var lines = page.Source.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
@@ -751,8 +831,14 @@ public class MarkdownBlockStructureTests
             var attributes = block.TryGetAttributes();
             var classes = string.Join(' ', attributes?.Classes ?? []);
             var properties = string.Join(' ', (attributes?.Properties ?? []).Select(property => $"{property.Key}={property.Value}"));
+            var looseness = block switch
+            {
+                ListBlock list => list.IsLoose ? " loose" : " tight",
+                DefinitionItem item => item.OfType<BlankLineBlock>().Any() ? " loose" : " tight",
+                _ => string.Empty
+            };
             result.Add(
-                $"{block.GetType().Name} in {string.Join(" < ", containers)} with [{classes}] [{properties}]\n" +
+                $"{block.GetType().Name}{looseness} in {string.Join(" < ", containers)} with [{classes}] [{properties}]\n" +
                 text.Replace("\r", string.Empty).TrimEnd());
         }
 

@@ -368,6 +368,37 @@ public class MarkdownBlockWriterTests
         Assert.Equal(expected, lineEnding);
     }
 
+    [Theory]
+    [InlineData("intro\ra\n", true)]
+    [InlineData("intro\r", true)]
+    [InlineData("\r\r\n", true)]
+    [InlineData("one\r\ntwo\r\n", false)]
+    [InlineData("one\ntwo", false)]
+    [InlineData("", false)]
+    public void WhenTextHasACarriageReturnWithoutALineFeedAfterIt_ThenItHasALoneCarriageReturn(string source, bool expected)
+    {
+        // Act
+        var hasLoneCarriageReturn = MarkdownBlockWriter.HasLoneCarriageReturn(source);
+
+        // Assert
+        Assert.Equal(expected, hasLoneCarriageReturn);
+    }
+
+    [Fact]
+    public void WhenPageHasALoneCarriageReturnBeforeTheOwner_ThenMarkdigCountsALineThatTheTextFunctionsDoNotCount()
+    {
+        // Arrange
+        const string source = "intro\ra\n\n:: Demo.Board#board Columns=2\n::: Tile Position=1\none\n:::\n::\n";
+
+        // Act
+        var page = MarkdownPageParser.Parse(source);
+
+        // Assert: the head line of the board is the third line by line feeds, and the fourth for Markdig.
+        Assert.True(MarkdownBlockWriter.HasLoneCarriageReturn(source));
+        Assert.Equal(3, source[..page.Blocks[0].HeadSpan.Start].Count(character => character == '\n') + 1);
+        Assert.Equal(4, page.Blocks[0].Line);
+    }
+
     private const string Board =
         "intro\n\n:: Demo.Board#board Columns=2\n::: Tile Position=1\none\n:::\n::: Tile Position=2\ntwo\n:::\n::\n\noutro\n";
 

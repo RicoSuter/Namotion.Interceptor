@@ -1,5 +1,8 @@
 using System.Text;
+using Markdig.Extensions.DefinitionLists;
 using Markdig.Extensions.Footnotes;
+using Markdig.Extensions.GenericAttributes;
+using Markdig.Helpers;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
 
@@ -122,22 +125,35 @@ internal static class MarkdownBlockAlignment
     }
 
     // The kind of a block of the document, the containers around it from the document inwards, the classes and
-    // the properties of its attributes, and for a leaf block where its text is.
-    private readonly record struct DocumentBlockDescription(Type Kind, string Containers, string Attributes, int Start, int Length);
+    // the properties of its attributes, whether it is a loose list or definition, and for a leaf block where its
+    // text is.
+    private readonly record struct DocumentBlockDescription(
+        Type Kind, string Containers, string Attributes, bool IsLoose, int Start, int Length);
 
     /// <summary>
     /// The comparison of the Markdig document outside the change: gets whether every block of the document that
     /// does not start on a line of the change is what it was.
     /// </summary>
     /// <returns>
-    /// False unless every leaf block of the document that does not start on a line of the change, such as a
-    /// paragraph, a heading or a code block, has the same kind, the same text, the same classes and properties
-    /// of its attributes and the same containers around it as before, and every container that does not start
-    /// there, such as a list or a quote, is still a container of its own with the same classes and properties.
-    /// Link reference definitions and the id of a block are not compared.
+    /// False when the line directly before the change holds only attributes in braces. Otherwise false unless
+    /// every leaf block of the document that does not start on a line of the change, such as a paragraph, a
+    /// heading or a code block, has the same kind, the same text, the same classes and properties of its
+    /// attributes and the same containers around it as before, and every container that does not start there,
+    /// such as a list or a quote, is still a container of its own with the same classes and properties, and a
+    /// list or a definition is as loose as before. Link reference definitions and the id of a block are not
+    /// compared.
     /// </returns>
     internal static bool HasSameDocument(MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit)
     {
+        // Markdig gives the attributes of such a line to the block after it, which the change replaces: removed
+        // lines pass them on to what follows, and inserted lines take them. The rule is about the line and not
+        // about the ids that move, because ids are not compared: Markdig gives every heading an id of its own,
+        // which changes when a heading with the same text is inserted or removed before it.
+        if (IsAttributeLine(before.Source, edit.Line - 1))
+        {
+            return false;
+        }
+
         var oldBlocks = DescribeDocumentBlocks(before, edit.Line, edit.RemovedLineCount);
         var newBlocks = DescribeDocumentBlocks(after, edit.Line, edit.InsertedLineCount);
         if (oldBlocks.Count != newBlocks.Count)
@@ -150,6 +166,7 @@ internal static class MarkdownBlockAlignment
             var oldBlock = oldBlocks[index];
             var newBlock = newBlocks[index];
             if (oldBlock.Kind != newBlock.Kind ||
+                oldBlock.IsLoose != newBlock.IsLoose ||
                 !string.Equals(oldBlock.Containers, newBlock.Containers, StringComparison.Ordinal) ||
                 !string.Equals(oldBlock.Attributes, newBlock.Attributes, StringComparison.Ordinal) ||
                 !before.Source.AsSpan(oldBlock.Start, oldBlock.Length).SequenceEqual(after.Source.AsSpan(newBlock.Start, newBlock.Length)))
@@ -191,7 +208,7 @@ internal static class MarkdownBlockAlignment
                     // The group of the footnotes has no line of its own. Its footnotes are listed.
                     if (!isSkipped && child is not FootnoteGroup)
                     {
-                        result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), 0, 0));
+                        result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), IsLoose(inner), 0, 0));
                     }
 
                     // A block of the page is named by its head line, so that text which moves into the block
@@ -205,10 +222,64 @@ internal static class MarkdownBlockAlignment
                     var start = Math.Clamp(child.Span.Start, 0, source.Length);
                     var end = Math.Clamp(child.Span.End + 1, start, source.Length);
                     var length = source.AsSpan(start, end - start).TrimEnd().Length;
-                    result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), start, length));
+                    result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), false, start, length));
                 }
             }
         }
+    }
+
+    // A loose list renders the text of its items as paragraphs. A definition is loose when Markdig kept an empty
+    // line in it, which it does for an empty line at the end of the page as well, and renders its text as a
+    // paragraph then.
+    private static bool IsLoose(ContainerBlock container)
+    {
+        if (container is ListBlock list)
+        {
+            return list.IsLoose;
+        }
+
+        if (container is DefinitionItem)
+        {
+            foreach (var child in container)
+            {
+                if (child is BlankLineBlock)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    // Whether the 1-based line holds nothing but attributes in braces, with white space around them.
+    private static bool IsAttributeLine(string source, int line)
+    {
+        if (line < 1)
+        {
+            return false;
+        }
+
+        var offset = 0;
+        for (var current = 1; current < line; current++)
+        {
+            var lineFeed = source.IndexOf('\n', offset);
+            if (lineFeed < 0)
+            {
+                return false;
+            }
+
+            offset = lineFeed + 1;
+        }
+
+        var text = GetLine(source, offset).Trim(" \t");
+        if (text.IsEmpty || text[0] != '{' || text[^1] != '}')
+        {
+            return false;
+        }
+
+        var slice = new StringSlice(text.ToString());
+        return GenericAttributesParser.TryParse(ref slice, out _) && slice.IsEmptyOrWhitespace();
     }
 
     // The classes and the properties of a block, which a line that holds only attributes gives to the block

@@ -128,7 +128,8 @@ public static class MarkdownBlockWriter
     /// <remarks>
     /// The style of the page is without closing lines when any widget or slot block of it has none. After a
     /// block of the slot, the new block has as many fence characters as that block, so that what ended that
-    /// block ends the new one as well.
+    /// block ends the new one as well. The text of the page must have no lone carriage return, see
+    /// <see cref="HasLoneCarriageReturn"/>.
     /// </remarks>
     internal static MarkdownBlockPlacement GetSlotBlockPlacement(MarkdownPage page, MarkdownBlock owner, string slotName)
     {
@@ -177,6 +178,10 @@ public static class MarkdownBlockWriter
     /// Inserts <paramref name="text"/> as lines of their own before the 1-based <paramref name="line"/>. A line
     /// after the last line of the text appends them. The text has no line ending after its last line.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="source"/> must have no lone carriage return when the line comes from a parsed page, see
+    /// <see cref="HasLoneCarriageReturn"/>.
+    /// </remarks>
     internal static string InsertLines(string source, int line, string text, string lineEnding, out MarkdownLineEdit edit)
     {
         var offset = GetLineStart(source, line);
@@ -200,7 +205,8 @@ public static class MarkdownBlockWriter
     /// <remarks>
     /// One empty line stays in place of the block when the line before it and the line after it are both text.
     /// As neighbours they would be joined: the text after the block would continue the paragraph, the list item
-    /// or the quote before it.
+    /// or the quote before it. <paramref name="source"/> must have no lone carriage return, see
+    /// <see cref="HasLoneCarriageReturn"/>.
     /// </remarks>
     internal static string RemoveBlock(string source, MarkdownBlock block, out MarkdownLineEdit edit)
     {
@@ -281,6 +287,27 @@ public static class MarkdownBlockWriter
         }
 
         return offset;
+    }
+
+    /// <summary>
+    /// Gets whether <paramref name="source"/> has a carriage return that no line feed follows. Markdig ends a line
+    /// there as well, so the line numbers of a page parsed from such a text are not the ones that
+    /// <see cref="GetSlotBlockPlacement"/>, <see cref="InsertLines"/> and <see cref="RemoveBlock"/> count.
+    /// </summary>
+    internal static bool HasLoneCarriageReturn(string source)
+    {
+        var text = source.AsSpan();
+        for (var index = text.IndexOf('\r'); index >= 0; index = text.IndexOf('\r'))
+        {
+            if (index + 1 == text.Length || text[index + 1] != '\n')
+            {
+                return true;
+            }
+
+            text = text[(index + 2)..];
+        }
+
+        return false;
     }
 
     /// <summary>

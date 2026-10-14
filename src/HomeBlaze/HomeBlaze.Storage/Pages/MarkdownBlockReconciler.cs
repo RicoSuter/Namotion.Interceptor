@@ -141,6 +141,11 @@ internal static class MarkdownBlockReconciler
 
             while (FindBlockWithoutValue(ownerIndex, slot.Name, values) is { } block)
             {
+                if (!CanInsertOrRemoveBlocks())
+                {
+                    return false;
+                }
+
                 var source = MarkdownBlockWriter.RemoveBlock(Page.Source, block, out var edit);
                 if (!TryApply(source, edit, expectedInsertedBlockCount: 0, owner: null))
                 {
@@ -234,6 +239,11 @@ internal static class MarkdownBlockReconciler
                 return false;
             }
 
+            if (!CanInsertOrRemoveBlocks())
+            {
+                return false;
+            }
+
             var ownerBlock = Page.AllBlocks[ownerIndex];
             var placement = MarkdownBlockWriter.GetSlotBlockPlacement(Page, ownerBlock, slot.Name);
             var fenceLength = placement.FenceLength;
@@ -289,6 +299,19 @@ internal static class MarkdownBlockReconciler
             Subjects[slotBlocks[^1].Index] = value;
             Configurations.Add(new KeyValuePair<IInterceptorSubject, string>(value, configurationJson));
             return true;
+        }
+
+        // The text functions count lines by line feeds, and Markdig ends a line at a lone carriage return as well,
+        // so the lines of the blocks would point at other lines of the text. The head line is written by offsets.
+        private bool CanInsertOrRemoveBlocks()
+        {
+            if (!MarkdownBlockWriter.HasLoneCarriageReturn(Page.Source))
+            {
+                return true;
+            }
+
+            Refusal = "Blocks cannot be inserted or removed on a page with a line ending that is a carriage return alone.";
+            return false;
         }
 
         // Takes the new text only when every block that the change did not touch is still the same block.

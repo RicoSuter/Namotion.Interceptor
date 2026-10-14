@@ -535,6 +535,52 @@ public class MarkdownSlotWriteBackTests
         Assert.Equal(expected.Replace("\n", "\r\n"), written);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenPageHasALoneCarriageReturnAndABlockIsInsertedOrRemoved_ThenNothingIsWritten(bool isInsert)
+    {
+        // Arrange: Markdig ends a line at the carriage return as well, so its line numbers after it are not the
+        // line numbers of the text functions.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $"intro\ra\n\n:: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n::: Tile Position=2\ntwo\n:::\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        board.Tiles = isInsert ? [.. board.Tiles, new TestTile { Position = 3 }] : [board.Tiles[0]];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal("Blocks cannot be inserted or removed on a page with a line ending that is a carriage return alone.", log);
+    }
+
+    [Fact]
+    public async Task WhenPageHasALoneCarriageReturnAndOnlyAHeadLineChanges_ThenItIsWritten()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content = $"intro\ra\n\n:: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        board.Columns = 3;
+        board.Tiles[0].Position = 5;
+
+        // Act
+        var handledBoard = await page.WriteConfigurationAsync(board, CancellationToken.None);
+        var handledTile = await page.WriteConfigurationAsync(board.Tiles[0], CancellationToken.None);
+
+        // Assert
+        Assert.True(handledBoard);
+        Assert.True(handledTile);
+        Assert.Equal(
+            $"intro\ra\n\n:: {BoardType}#board Columns=3\n::: Tile Position=5\none\n:::\n::\n",
+            await fixture.ReadAsync("page.md"));
+    }
+
     [Fact]
     public async Task WhenOwnerIsSavedWhileAReloadHasDroppedAValue_ThenNoBlockIsRemoved()
     {
