@@ -19,11 +19,9 @@ public class ReadPropertyRecorder : IReadInterceptor
     /// Uses AsyncLocal for proper isolation across async contexts.
     /// </summary>
     /// <param name="properties">Optional preallocated properties dictionary.</param>
-    /// <returns>The recording scope. Dispose to stop recording.</returns>
+    /// <returns>The recording scope. Dispose to stop recording; this may happen on any async context.</returns>
     public static ReadPropertyRecorderScope Start(ConcurrentDictionary<PropertyReference, bool>? properties = null)
     {
-        var scope = new ReadPropertyRecorderScope(properties);
-
         // Get or create the scopes list for this async context
         var scopes = _activeScopes.Value;
         if (scopes == null)
@@ -32,24 +30,13 @@ public class ReadPropertyRecorder : IReadInterceptor
             _activeScopes.Value = scopes;
         }
 
+        var scope = new ReadPropertyRecorderScope(properties, scopes);
         lock (scopes)
         {
             scopes.Add(scope);
         }
 
         return scope;
-    }
-
-    internal static void RemoveScope(ReadPropertyRecorderScope scope)
-    {
-        var scopes = _activeScopes.Value;
-        if (scopes is not null)
-        {
-            lock (scopes)
-            {
-                scopes.Remove(scope);
-            }
-        }
     }
 
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
