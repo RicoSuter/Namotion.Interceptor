@@ -182,7 +182,7 @@
                 cell.Column = column;
                 cell.Child = subject;
 
-                // Replace list to trigger property setter and parent tracking
+                // Replace the array to trigger the property setter and parent tracking
                 Grid.Cells = [.. Grid.Cells ?? [], cell];
             }
         });
@@ -211,8 +211,8 @@
 
         if (confirmed == true)
         {
-            // Replace list to trigger property setter and parent tracking
-            Grid.Cells = (Grid.Cells ?? []).Where(c => c != cell).ToArray();
+            // Replace the array to trigger the property setter and parent tracking
+            Grid.Cells = (Grid.Cells ?? []).Where(existing => existing != cell).ToArray();
 
             await RootManager.WriteConfigurationOrWarnAsync(Grid, Snackbar, CancellationToken.None);
         }

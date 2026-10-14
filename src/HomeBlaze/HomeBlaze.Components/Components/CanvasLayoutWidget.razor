@@ -247,7 +247,7 @@
                 node.Y = y;
                 node.Child = subject;
 
-                // Replace list to trigger property setter and parent tracking
+                // Replace the array to trigger the property setter and parent tracking
                 Canvas.Nodes = [.. Canvas.Nodes ?? [], node];
             }
         });
@@ -276,8 +276,8 @@
 
         if (confirmed == true)
         {
-            // Replace list to trigger property setter and parent tracking
-            Canvas.Nodes = (Canvas.Nodes ?? []).Where(n => n != node).ToArray();
+            // Replace the array to trigger the property setter and parent tracking
+            Canvas.Nodes = (Canvas.Nodes ?? []).Where(existing => existing != node).ToArray();
 
             await RootManager.WriteConfigurationOrWarnAsync(Canvas, Snackbar, CancellationToken.None);
         }

@@ -5,7 +5,10 @@ using HomeBlaze.Services;
 
 namespace HomeBlaze.Storage.Pages;
 
-/// <summary>Writes the configuration of one block back into the page text. Block content is never touched.</summary>
+/// <summary>
+/// Pure text functions for the head line and the json block of a block, and for inserting and removing whole
+/// blocks. They know nothing about subjects.
+/// </summary>
 public static class MarkdownBlockWriter
 {
     private const string UnixLineEnding = "\n";
@@ -127,7 +130,7 @@ public static class MarkdownBlockWriter
     /// block of the slot, the new block has as many fence characters as that block, so that what ended that
     /// block ends the new one as well.
     /// </remarks>
-    public static MarkdownBlockPlacement GetSlotBlockPlacement(MarkdownPage page, MarkdownBlock owner, string slotName)
+    internal static MarkdownBlockPlacement GetSlotBlockPlacement(MarkdownPage page, MarkdownBlock owner, string slotName)
     {
         var source = page.Source;
 
@@ -174,7 +177,7 @@ public static class MarkdownBlockWriter
     /// Inserts <paramref name="text"/> as lines of their own before the 1-based <paramref name="line"/>. A line
     /// after the last line of the text appends them. The text has no line ending after its last line.
     /// </summary>
-    public static string InsertLines(string source, int line, string text, string lineEnding, out MarkdownLineEdit edit)
+    internal static string InsertLines(string source, int line, string text, string lineEnding, out MarkdownLineEdit edit)
     {
         var offset = GetLineStart(source, line);
         var insertedLineCount = text.AsSpan().Count('\n') + 1;
@@ -199,7 +202,7 @@ public static class MarkdownBlockWriter
     /// As neighbours they would be joined: the text after the block would continue the paragraph, the list item
     /// or the quote before it.
     /// </remarks>
-    public static string RemoveBlock(string source, MarkdownBlock block, out MarkdownLineEdit edit)
+    internal static string RemoveBlock(string source, MarkdownBlock block, out MarkdownLineEdit edit)
     {
         var start = GetLineStart(source, block.Line);
         var end = GetLineStart(source, block.EndLine + 1);
@@ -216,10 +219,10 @@ public static class MarkdownBlockWriter
     }
 
     // Whether the line between the two offsets has text that is no head line and no closing line of a block.
-    // Next to such a fence line, and next to an empty line, nothing is joined. Mirrors TryReadFence and IsHead
-    // of MarkdownBlockContainerParser, so a change of what a fence line is there is a change here: a fence
-    // after four columns of indentation, which a tab always gives, is code, and a fence before text that starts
-    // no head line, such as a time, is text. Both continue a paragraph before them.
+    // Next to such a fence line, and next to an empty line, nothing is joined. Mirrors TryReadFence of
+    // MarkdownBlockContainerParser, so a change of what a fence line is there is a change here: a fence after
+    // four columns of indentation, which a tab always gives, is code, and a fence before text that starts no
+    // head line, such as a time, is text. Both continue a paragraph before them.
     private static bool IsTextLine(string source, int lineStart, int nextLineStart)
     {
         // Only spaces and tabs are indentation, and only a line of nothing else is empty.
@@ -246,7 +249,7 @@ public static class MarkdownBlockWriter
         {
             if (!IsMarkdownWhiteSpace(character))
             {
-                return !char.IsLetter(character) && character != '_' && character != '{';
+                return !MarkdownBlockFence.StartsHeadLine(character);
             }
         }
 
@@ -259,7 +262,7 @@ public static class MarkdownBlockWriter
         char.GetUnicodeCategory(character) == UnicodeCategory.SpaceSeparator;
 
     /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/>.</summary>
-    public static string Indent(string text, string indentation, string lineEnding) =>
+    internal static string Indent(string text, string indentation, string lineEnding) =>
         indentation.Length == 0 ? text : indentation + text.Replace(lineEnding, lineEnding + indentation);
 
     // The offset of the first character of the 1-based line, or the length of the text for a line after the last one.

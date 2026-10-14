@@ -21,17 +21,28 @@ internal static class MarkdownBlockAlignment
     /// <param name="expectedInsertedBlockCount">How many blocks of every kind the inserted lines must hold.</param>
     /// <param name="owner">The block of <paramref name="before"/> that the lines were inserted into, or null for a removal.</param>
     /// <returns>
-    /// Null when the change did more than insert or remove its blocks. Every other block, of every kind, must
-    /// have the same kind, fence, head line, closing line and json block as before, the lines that the change
-    /// explains, and the same block around it. Every inserted block must be a slot block directly inside
-    /// <paramref name="owner"/> or stand inside another inserted block, and must end on the inserted lines.
-    /// Every leaf block of the document that does not start on a line of the change, such as a paragraph, a
-    /// heading or a code block, must have the same kind, the same text, the same classes and properties of its
-    /// attributes and the same containers around it as before, and every container that does not start there,
-    /// such as a list or a quote, must still be a container of its own with the same classes and properties.
-    /// Link reference definitions and the id of a block are not compared.
+    /// Null when the change did more than insert or remove its blocks, that is when either
+    /// <see cref="TryMapBlocks"/> or <see cref="HasSameDocument"/> says no.
     /// </returns>
     public static int[]? TryAlign(
+        MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
+    {
+        var map = TryMapBlocks(before, after, edit, expectedInsertedBlockCount, owner);
+        return map is not null && HasSameDocument(before, after, edit) ? map : null;
+    }
+
+    /// <summary>
+    /// The walk over the blocks of the page: gets for every block index of <paramref name="before"/> the index
+    /// of the same block in <paramref name="after"/>, and -1 for a block on a removed line.
+    /// </summary>
+    /// <returns>
+    /// Null when a block of the page tells that the change did more than insert or remove its blocks. Every
+    /// other block, of every kind, must have the same kind, fence, head line, closing line and json block as
+    /// before, the lines that the change explains, and the same block around it. Every inserted block must be a
+    /// slot block directly inside <paramref name="owner"/> or stand inside another inserted block, and must end
+    /// on the inserted lines.
+    /// </returns>
+    internal static int[]? TryMapBlocks(
         MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
     {
         var oldBlocks = Flatten(before.Blocks);
@@ -105,8 +116,7 @@ internal static class MarkdownBlockAlignment
 
         return TakeInsertedBlocks() &&
                newPosition == newBlocks.Count &&
-               insertedBlocks.Count == expectedInsertedBlockCount &&
-               HasSameDocumentBlocks(before, after, edit)
+               insertedBlocks.Count == expectedInsertedBlockCount
             ? map
             : null;
     }
@@ -115,7 +125,18 @@ internal static class MarkdownBlockAlignment
     // the properties of its attributes, and for a leaf block where its text is.
     private readonly record struct DocumentBlockDescription(Type Kind, string Containers, string Attributes, int Start, int Length);
 
-    private static bool HasSameDocumentBlocks(MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit)
+    /// <summary>
+    /// The comparison of the Markdig document outside the change: gets whether every block of the document that
+    /// does not start on a line of the change is what it was.
+    /// </summary>
+    /// <returns>
+    /// False unless every leaf block of the document that does not start on a line of the change, such as a
+    /// paragraph, a heading or a code block, has the same kind, the same text, the same classes and properties
+    /// of its attributes and the same containers around it as before, and every container that does not start
+    /// there, such as a list or a quote, is still a container of its own with the same classes and properties.
+    /// Link reference definitions and the id of a block are not compared.
+    /// </returns>
+    internal static bool HasSameDocument(MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit)
     {
         var oldBlocks = DescribeDocumentBlocks(before, edit.Line, edit.RemovedLineCount);
         var newBlocks = DescribeDocumentBlocks(after, edit.Line, edit.InsertedLineCount);

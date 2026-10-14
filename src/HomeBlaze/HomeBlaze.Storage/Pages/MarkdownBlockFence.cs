@@ -13,4 +13,10 @@ internal static class MarkdownBlockFence
 
     /// <summary>Gets a fence of the given length.</summary>
     public static string Create(int length) => new(Character, length);
+
+    /// <summary>
+    /// Gets whether text after a fence that starts with <paramref name="character"/> makes the line a head line.
+    /// Other text, such as a time or a smiley, makes the line no fence line.
+    /// </summary>
+    public static bool StartsHeadLine(char character) => char.IsLetter(character) || character == '_' || character == '{';
 }

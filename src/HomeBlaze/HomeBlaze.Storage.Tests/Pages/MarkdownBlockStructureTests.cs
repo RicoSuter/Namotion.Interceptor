@@ -516,6 +516,78 @@ public class MarkdownBlockStructureTests
     }
 
     [Fact]
+    public void WhenBlockThatEndedBeforeTheRemovalGoesOnAfterIt_ThenTheWalkOverTheBlocksRefuses()
+    {
+        // Arrange: the first tile has no closing line and is ended by the head line of the second one, so it is
+        // neither the owner nor around it and takes the text after the removed tile.
+        const string source = ":: Demo.Panel\n::: Tile\none\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var result = MarkdownBlockWriter.RemoveBlock(source, before.Blocks[0].Children[1], out var edit);
+        var after = MarkdownPageParser.Parse(result);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryMapBlocks(before, after, edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+        Assert.True(after.Blocks[0].Children[0].EndLine > before.Blocks[0].Children[0].EndLine);
+    }
+
+    [Fact]
+    public void WhenInsertedBlockGoesOnAfterTheInsertedLines_ThenTheWalkOverTheBlocksRefuses()
+    {
+        // Arrange: the new tile has no closing line, so it takes the text after it up to the closing line of the board.
+        const string source = ":: Demo.Board\n::: Tile\n:::\ntext of the board\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var result = MarkdownBlockWriter.InsertLines(source, 4, "::: Tile", "\n", out var edit);
+        var after = MarkdownPageParser.Parse(result);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryMapBlocks(before, after, edit, 1, before.Blocks[0]);
+
+        // Assert
+        Assert.Null(map);
+        Assert.Equal(5, after.Blocks[0].Children[1].EndLine);
+    }
+
+    [Fact]
+    public void WhenRemovalLetsAStyleBlockTakeTextAfterIt_ThenTheWalkOverTheBlocksRefuses()
+    {
+        // Arrange: the style block has no closing line and is ended by the head line of the tile. It is in no
+        // index of the page, and the walk looks at it all the same.
+        const string source = ":: Demo.Panel\n::: {.note}\nstyled\n::: Tile\ntwo\n:::\ntext of the panel\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+        var after = MarkdownPageParser.Parse(result);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryMapBlocks(before, after, edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+        Assert.Equal(MarkdownBlockKind.Style, after.Blocks[0].Children.Single().Kind);
+    }
+
+    [Fact]
+    public void WhenOnlyTheTextOfALeafBlockOutsideTheChangeDiffers_ThenTheComparisonOfTheDocumentRefuses()
+    {
+        // Arrange: the blocks of the page and every head line are the same, only a paragraph after the removed
+        // tile has another text.
+        const string source = ":: Demo.Panel\n::: Tile\n:::\ntext of the panel\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var edit = new MarkdownLineEdit(2, 2, 0);
+        var after = MarkdownPageParser.Parse(":: Demo.Panel\nother text\n::\n");
+
+        // Act
+        var isSame = MarkdownBlockAlignment.HasSameDocument(before, after, edit);
+
+        // Assert
+        Assert.False(isSame);
+        Assert.Equal(new[] { 0, -1 }, MarkdownBlockAlignment.TryMapBlocks(before, after, edit, 0, owner: null));
+    }
+
+    [Fact]
     public void WhenRandomBlocksAreInsertedAndRemoved_ThenNothingElseChangesAndTheCheckAgreesWithTheBlocks()
     {
         // Arrange

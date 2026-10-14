@@ -218,8 +218,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var wasGraphAhead = _isGraphAheadOfSnapshot;
 
         var snapshot = _parseResult;
-        if (snapshot.Page is not { } page ||
-            FindBlock(snapshot.BlockSubjects, subject) is not (var blockIndex, _))
+        var blockIndex = FindBlock(snapshot.BlockSubjects, subject);
+        if (snapshot.Page is not { } page || blockIndex < 0)
         {
             return false;
         }
@@ -265,10 +265,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return true;
     }
 
-    private static (int BlockIndex, IInterceptorSubject Subject)? FindBlock(
-        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
+    // The index of the block whose subject is the subject or holds it in its configuration, or -1.
+    private static int FindBlock(IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
     {
-        // The edited subject can be nested in the configuration of a block subject, for example a grid cell.
+        // The edited subject can be nested in the configuration of a block subject, for example a new grid cell
+        // that has no block of its own yet.
         var blockIndex = -1;
         var blockSubject = subject.TryGetConfigurationOwner(candidate =>
         {
@@ -284,7 +285,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return false;
         });
 
-        return blockSubject is null ? null : (blockIndex, blockSubject);
+        return blockSubject is null ? -1 : blockIndex;
     }
 
     private static string FormatFilename(string name)

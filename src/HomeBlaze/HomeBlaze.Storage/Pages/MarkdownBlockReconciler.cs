@@ -179,20 +179,26 @@ internal static class MarkdownBlockReconciler
 
         // The text decides the order, and the reload gives the blocks of a slot to its values by position. A new
         // block goes after the last block of the slot, so a value without a block must not stand before a value
-        // that has one either.
+        // that has one either. A value that stands twice gets one block, so the reload would drop the second.
         private bool AreInTheOrderOfTheirBlocks(int ownerIndex, string slotName, List<IInterceptorSubject> values)
         {
             var blocks = GetSlotBlocks(ownerIndex, slotName);
             var lastPosition = -1;
             var hasValueWithoutBlock = false;
-            foreach (var value in values)
+            for (var index = 0; index < values.Count; index++)
             {
+                var value = values[index];
                 var position = FindPositionOfBlock(blocks, value);
                 if (position < 0)
                 {
+                    if (StandsBefore(values, index, value))
+                    {
+                        return false;
+                    }
+
                     hasValueWithoutBlock = true;
                 }
-                else if (hasValueWithoutBlock || position < lastPosition)
+                else if (hasValueWithoutBlock || position <= lastPosition)
                 {
                     return false;
                 }
@@ -362,6 +368,19 @@ internal static class MarkdownBlockReconciler
             foreach (var value in values)
             {
                 if (ReferenceEquals(value, subject))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool StandsBefore(List<IInterceptorSubject> values, int index, IInterceptorSubject subject)
+        {
+            for (var earlier = 0; earlier < index; earlier++)
+            {
+                if (ReferenceEquals(values[earlier], subject))
                 {
                     return true;
                 }

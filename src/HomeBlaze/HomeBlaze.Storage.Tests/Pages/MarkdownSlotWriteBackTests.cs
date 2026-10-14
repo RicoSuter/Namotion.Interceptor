@@ -366,6 +366,31 @@ public class MarkdownSlotWriteBackTests
             log);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenValueStandsTwiceInTheSlot_ThenNothingIsWritten(bool hasBlock)
+    {
+        // Arrange: the reload gives every block one value, so the second entry would be gone after it.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var content = $":: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        var value = hasBlock ? board.Tiles[0] : new TestTile { Position = 2 };
+        board.Tiles = hasBlock ? [value, value] : [board.Tiles[0], value, value];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal(content, page.Content);
+        AssertRefusal(
+            "The order of the 'Tile' values differs from the order of their blocks. The order is changed in the text of the page.",
+            log);
+    }
+
     [Fact]
     public async Task WhenNewValueHasAnotherTypeThanTheSlot_ThenNothingIsWritten()
     {
