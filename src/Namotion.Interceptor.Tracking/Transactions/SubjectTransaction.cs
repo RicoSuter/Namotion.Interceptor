@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Immutable;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Performance;
 
@@ -29,6 +30,7 @@ public sealed class SubjectTransaction : IDisposable
     private readonly TransactionRequirement _requirement;
     private readonly TimeSpan _commitTimeout;
     private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
+    private readonly ImmutableArray<ITransactionHandler> _handlers;
 
     /// <summary>
     /// Last write wins if the same property is written multiple times.
@@ -96,6 +98,11 @@ public sealed class SubjectTransaction : IDisposable
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
     /// </summary>
     internal SubjectTransactionInterceptor Interceptor { get; }
+
+    /// <summary>
+    /// Gets the transaction handlers resolved from the context when the transaction began.
+    /// </summary>
+    internal ImmutableArray<ITransactionHandler> Handlers => _handlers;
 
     /// <summary>
     /// Gets a snapshot of the pending changes as a read-only list, in insertion order.
@@ -282,6 +289,7 @@ public sealed class SubjectTransaction : IDisposable
         ValidationMode = validationMode;
         _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
+        _handlers = context.GetServices<ITransactionHandler>();
 
         Interlocked.Increment(ref _activeTransactionCount);
     }

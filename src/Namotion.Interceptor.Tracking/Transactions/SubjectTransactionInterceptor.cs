@@ -111,6 +111,8 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
         ValidateTransactionContext(context.Property, transaction);
 
+        InvokeCapturingHandlers(transaction, context.Property, context.NewValue, context.Origin);
+
         // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
         var resolvedOrigin = context.GetFinalOrigin();
         var changedTimestamp = context.WriteTimestampForPublishing;
@@ -146,6 +148,34 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         if (!isBoundToThisContext)
         {
             ThrowTransactionContextMismatch(property);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void InvokeCapturingHandlers<TProperty>(
+        SubjectTransaction transaction,
+        PropertyReference property,
+        TProperty newValue,
+        ChangeOrigin origin)
+    {
+        var handlers = transaction.Handlers;
+        if (!handlers.IsDefaultOrEmpty)
+        {
+            InvokeCapturingHandlersCore(handlers, transaction, property, newValue, origin);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void InvokeCapturingHandlersCore<TProperty>(
+        ImmutableArray<ITransactionHandler> handlers,
+        SubjectTransaction transaction,
+        PropertyReference property,
+        TProperty newValue,
+        ChangeOrigin origin)
+    {
+        foreach (var handler in handlers)
+        {
+            handler.OnCapturing(transaction, property, newValue, origin);
         }
     }
 
