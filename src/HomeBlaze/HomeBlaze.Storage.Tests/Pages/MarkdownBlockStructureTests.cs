@@ -244,6 +244,27 @@ public class MarkdownBlockStructureTests
     }
 
     [Fact]
+    public void WhenBlockBetweenATextAndAnIndentedFenceIsRemoved_ThenTheIndentedLineStaysCode()
+    {
+        // Arrange: four columns of indentation make the line code, and code continues a paragraph before it.
+        const string source = ":: Demo.Panel\na paragraph\n::: Tile\n:::\n    :: Demo.Leaf\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+        var after = MarkdownPageParser.Parse(result);
+        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
+
+        // Assert
+        Assert.NotNull(map);
+        var codeLine = result.Split('\n').ToList().IndexOf("    :: Demo.Leaf");
+        Assert.Contains(
+            after.Document.Descendants<CodeBlock>(),
+            code => code.Line == codeLine && code.Parent is MarkdownBlockContainer);
+    }
+
+    [Fact]
     public void WhenLinesAreInsertedBeforeTheJsonBlockOfTheOwner_ThenAlignmentFails()
     {
         // Arrange: the json block is the configuration of the board only while it is the first thing in it.

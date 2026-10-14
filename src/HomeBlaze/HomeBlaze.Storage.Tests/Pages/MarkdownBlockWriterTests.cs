@@ -500,6 +500,26 @@ public class MarkdownBlockWriterTests
         Assert.Equal(0, edit.InsertedLineCount);
     }
 
+    [Theory]
+    [InlineData("    :: Demo.Leaf", 1)]
+    [InlineData("\t:::", 1)]
+    [InlineData("   :: Demo.Leaf", 0)]
+    public void WhenLineAfterTheBlockIsAFenceAfterFourColumnsOfIndentation_ThenItIsTextAndAnEmptyLineStays(
+        string lineAfter, int expectedEmptyLineCount)
+    {
+        // Arrange: four columns of indentation make the line code, and code continues a paragraph before it.
+        var source = $":: Demo.Panel\na paragraph\n::: Tile\n:::\n{lineAfter}\n::\n";
+        var tile = OwnerOf(source).Children.First(child => child.Kind == MarkdownBlockKind.Slot);
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Assert
+        var emptyLine = expectedEmptyLineCount == 1 ? "\n" : string.Empty;
+        Assert.Equal($":: Demo.Panel\na paragraph\n{emptyLine}{lineAfter}\n::\n", result);
+        Assert.Equal(new MarkdownLineEdit(3, 2, expectedEmptyLineCount), edit);
+    }
+
     [Fact]
     public void WhenRemovalLeavesAnEmptyLineInTextWithWindowsLineEndings_ThenItHasThatLineEnding()
     {

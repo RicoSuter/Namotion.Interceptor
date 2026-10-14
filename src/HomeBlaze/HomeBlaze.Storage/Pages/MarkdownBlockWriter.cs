@@ -215,14 +215,21 @@ public static class MarkdownBlockWriter
     }
 
     // Whether the line between the two offsets has text that is no head line and no closing line of a block.
-    // Next to such a fence line, and next to an empty line, nothing is joined.
+    // Next to such a fence line, and next to an empty line, nothing is joined. A fence after four columns of
+    // indentation, which a tab always gives, is code, and code continues a paragraph before it like any text.
     private static bool IsTextLine(string source, int lineStart, int nextLineStart)
     {
-        var line = source.AsSpan(lineStart, nextLineStart - lineStart).Trim();
-        return line.Length > 0 &&
-               !(line.Length >= MarkdownBlockFence.MinimumLength &&
-                 line[0] == MarkdownBlockFence.Character &&
-                 line[1] == MarkdownBlockFence.Character);
+        var line = source.AsSpan(lineStart, nextLineStart - lineStart).TrimEnd();
+        var text = line.TrimStart();
+        var indentation = line[..^text.Length];
+        var isFenceLine =
+            text.Length >= MarkdownBlockFence.MinimumLength &&
+            text[0] == MarkdownBlockFence.Character &&
+            text[1] == MarkdownBlockFence.Character &&
+            indentation.Length < 4 &&
+            !indentation.Contains('\t');
+
+        return text.Length > 0 && !isFenceLine;
     }
 
     /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/>.</summary>
