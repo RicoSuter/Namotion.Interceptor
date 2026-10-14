@@ -31,10 +31,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private volatile MarkdownParseResult _parseResult;
 
     // A parse changes the subjects it reuses in place, so two reloads at once would leave the nested subjects
-    // from one parse and the snapshot from another. Only OnFileChangedAsync takes this. A write-back must not:
-    // the storage reloads the file as part of the write, and that reload would wait for the write-back that
-    // waits for the write.
+    // from one parse and the snapshot from another. A write-back compares the graph with the snapshot, so it
+    // computes its text under this lock as well. It must release it before it writes the file: the storage
+    // reloads the file as part of the write, and that reload would wait for the write-back that waits for the write.
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
+
+    // The reload that a flow runs in. A write-back from that flow would wait for the lock that the reload holds
+    // while the reload waits for it. That the flow carries a reload is not enough: work that a reload started
+    // keeps the flow of that reload after it has ended.
+    private readonly AsyncLocal<Reload?> _reloadOfFlow = new();
 
     // Each access reads the current snapshot. Code that needs two of these together must take
     // _parseResult into a local once and read both from that local.
@@ -109,6 +114,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public async Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
         await _reloadLock.WaitAsync(cancellationToken);
+        var reload = new Reload();
+        _reloadOfFlow.Value = reload;
         try
         {
             await using var stream = await Storage.ReadBlobAsync(FullPath, cancellationToken);
@@ -143,6 +150,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
         finally
         {
+            reload.Finish();
             _reloadLock.Release();
         }
     }
@@ -184,29 +192,58 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Writes the configuration of the block that contains the subject. For every slot of that block subject that
+    /// is a list of subjects of a type, a value without a block gets a new block and a block whose value is gone
+    /// is removed with its content. Returns false, and writes nothing, when the page has no block for the subject
+    /// or the text cannot be changed without losing content.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The call comes from inside a reload of this page.</exception>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
-        var snapshot = _parseResult;
-        if (snapshot.Page is not { } page ||
-            FindBlock(snapshot.BlockSubjects, subject) is not (var blockIndex, var blockSubject))
+        if (_reloadOfFlow.Value is { IsFinished: false })
         {
-            return false;
+            throw new InvalidOperationException("The page cannot be written from inside its own reload.");
         }
 
-        // The block spans index into the text the page was parsed from, which is the source of the
-        // page and not necessarily Content.
-        var json = _serializer.Serialize(blockSubject, ConfigurationNaming.CSharpProperty);
-        var content = MarkdownBlockWriter.WriteConfiguration(page.Source, page.AllBlocks[blockIndex], json);
+        string content;
+        await _reloadLock.WaitAsync(cancellationToken);
+        try
+        {
+            var snapshot = _parseResult;
+            if (snapshot.Page is not { } page ||
+                FindBlock(snapshot.BlockSubjects, subject) is not (var blockIndex, _))
+            {
+                return false;
+            }
 
-        // Before the write, because the storage reloads this file from inside WriteAsync. The reload
-        // must find the keys that are now in the file, or a value that became null would recreate the subject.
-        _parser.RememberConfiguration(blockSubject, json);
+            // The block spans index into the text the page was parsed from, which is the source of the
+            // page and not necessarily Content.
+            var write = MarkdownBlockReconciler.TryWrite(page, snapshot.BlockSubjects, blockIndex, _serializer, out var refusal);
+            if (write is null)
+            {
+                _parser.LogRefusedWrite(FullPath, refusal!);
+                return false;
+            }
 
-        // The spans moved, the block order did not, so the block subjects stay valid.
-        _parseResult = snapshot with { Page = MarkdownPageParser.Parse(content) };
-        Content = content;
+            // Before the write, because the storage reloads this file from inside WriteAsync. The reload
+            // must find the keys that are now in the file, or a value that became null would recreate the subject.
+            foreach (var (writtenSubject, configurationJson) in write.Configurations)
+            {
+                _parser.RememberConfiguration(writtenSubject, configurationJson);
+            }
+
+            _parseResult = snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects };
+            content = write.Page.Source;
+            Content = content;
+        }
+        finally
+        {
+            _reloadLock.Release();
+        }
 
         var bytes = Encoding.UTF8.GetBytes(content);
         using var stream = new MemoryStream(bytes);
@@ -244,5 +281,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             .Replace("_", " ")
             .Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Select(w => w.Length > 0 ? char.ToUpper(w[0]) + w[1..] : w));
+    }
+
+    private sealed class Reload
+    {
+        private volatile bool _isFinished;
+
+        /// <summary>True once the reload has ended, whether it succeeded or not.</summary>
+        public bool IsFinished => _isFinished;
+
+        public void Finish() => _isFinished = true;
     }
 }

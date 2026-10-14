@@ -178,6 +178,10 @@ public sealed partial class MarkdownContentParser
         _logger = logger;
     }
 
+    /// <summary>Logs why a change of a subject was not written to the text of its page.</summary>
+    internal void LogRefusedWrite(string path, string reason) =>
+        _logger?.LogWarning("A change was not written to the page {Path}: {Reason}", path, reason);
+
     /// <summary>
     /// Renders markdown content by replacing {{ path }} expressions with their resolved values in the format
     /// each one asks for. An expression with an unknown format stays as written.
