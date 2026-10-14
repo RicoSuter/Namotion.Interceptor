@@ -37,6 +37,9 @@
     <MudTextField @bind-Value="_hostAddress"
                   @bind-Value:after="ResetCheck"
                   Label="Host Address (IP or hostname)"
+                  HelperText="An IP address or host name, without http:// or a port"
+                  Error="@IsHostAddressRejected"
+                  ErrorText="@FritzBoxConnectionCheck.InvalidHostAddressMessage"
                   Immediate="true" />
 
     <MudTextField @bind-Value="_username"
@@ -54,7 +57,7 @@
     <MudButton Variant="Variant.Filled"
                Color="Color.Primary"
                OnClick="CheckAsync"
-               Disabled="@(_isChecking || string.IsNullOrWhiteSpace(_hostAddress))">
+               Disabled="@(_isChecking || !FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _))">
         @if (_isChecking)
         {
             <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
@@ -98,10 +101,6 @@
     private bool _isCertificateConfirmed;
     private FritzBoxConnectionCheckResult? _result;
 
-    // The username and password the successful check used; saved instead of the live fields.
-    private string? _checkedUsername;
-    private string? _checkedPassword;
-
     // Bumped by every edit and every check; a check that completes with an older version is discarded.
     private int _checkVersion;
 
@@ -134,6 +133,9 @@
         _hostAddress = _selectedRouter?.HostAddress;
         ResetCheck();
     }
+
+    private bool IsHostAddressRejected =>
+        !string.IsNullOrWhiteSpace(_hostAddress) && !FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _);
 
     private void ResetCheck()
     {
@@ -179,8 +181,6 @@
             }
 
             _result = result;
-            _checkedUsername = username;
-            _checkedPassword = password;
         }
         catch (OperationCanceledException) when (_cancellationTokenSource.IsCancellationRequested)
         {
@@ -216,9 +216,10 @@
     {
         if (RouterSubject != null && _result is { IsSuccess: true } result && _isCertificateConfirmed)
         {
+            // Every field edit calls ResetCheck, so a successful _result always matches the live fields below.
             RouterSubject.HostAddress = result.HostAddress;
-            RouterSubject.Username = _checkedUsername;
-            RouterSubject.Password = _checkedPassword;
+            RouterSubject.Username = string.IsNullOrWhiteSpace(_username) ? null : _username.Trim();
+            RouterSubject.Password = string.IsNullOrEmpty(_password) ? null : _password;
             RouterSubject.CertificatePin = result.CertificatePin;
         }
 
