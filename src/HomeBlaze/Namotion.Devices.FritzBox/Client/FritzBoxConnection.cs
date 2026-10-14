@@ -62,6 +62,12 @@ internal sealed class FritzBoxConnection : IDisposable
     /// </summary>
     internal async Task<UpnpSoapResponse> CheckLoginAsync(CancellationToken cancellationToken)
     {
+        // Without a password the login cannot succeed, and each failed attempt lengthens the router's lockout.
+        if (string.IsNullOrEmpty(_options.Password))
+        {
+            throw new FritzBoxLoginException("No password configured.");
+        }
+
         try
         {
             return await QueryAsync(Tr64Services.DeviceInfo, "GetInfo", null, cancellationToken);
@@ -185,7 +191,7 @@ internal sealed class FritzBoxConnection : IDisposable
     private bool IsTranslated(
         Exception exception, string request, CancellationTokenSource timeout, CancellationToken cancellationToken, out Exception translated)
     {
-        if (exception is HttpRequestException && _certificateValidator.IsRejected)
+        if (exception is HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError } && _certificateValidator.IsRejected)
         {
             translated = new FritzBoxCertificateException(PresentedCertificate, exception);
             return true;

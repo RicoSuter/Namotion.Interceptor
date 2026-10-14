@@ -9,6 +9,11 @@ public sealed class FritzBoxLoginException : Exception
         : base("Login failed: check user, password and the FRITZ!Box settings permission.", innerException)
     {
     }
+
+    internal FritzBoxLoginException(string message)
+        : base(message)
+    {
+    }
 }
 
 /// <summary>

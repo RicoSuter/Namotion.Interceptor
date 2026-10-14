@@ -28,8 +28,11 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     private const string Nonce = "4A3B2C1D0E0F1A2B";
 
     private readonly WebApplication _application;
+    private readonly ConcurrentDictionary<string, Hold> _holds = new(StringComparer.Ordinal);
     private int _failedLogins;
     private int _securityPortRequests;
+    private int _secureRequests;
+    private int _plainAuthorizationHeaders;
     private volatile bool _isGuestWlanEnabled;
     private Hold? _armedGuestWlanHold;
 
@@ -63,6 +66,11 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     internal ConcurrentDictionary<string, int> Faults { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// HTTP status codes by action name; an action listed here is answered with that status and no body.
+    /// </summary>
+    internal ConcurrentDictionary<string, int> HttpErrors { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// The authenticated actions received, in order.
     /// </summary>
     internal ConcurrentQueue<string> Actions { get; } = new();
@@ -70,6 +78,16 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     internal int FailedLogins => Volatile.Read(ref _failedLogins);
 
     internal int SecurityPortRequests => Volatile.Read(ref _securityPortRequests);
+
+    /// <summary>
+    /// The requests received over HTTPS, authenticated or not.
+    /// </summary>
+    internal int SecureRequests => Volatile.Read(ref _secureRequests);
+
+    /// <summary>
+    /// The requests received over plain HTTP that carried an <c>Authorization</c> header.
+    /// </summary>
+    internal int PlainAuthorizationHeaders => Volatile.Read(ref _plainAuthorizationHeaders);
 
     internal bool IsGuestWlanEnabled
     {
@@ -132,6 +150,17 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         return hold;
     }
 
+    /// <summary>
+    /// Holds the next request for a key until <see cref="Hold.Released"/> completes or the client gives up. The key is
+    /// the path of a plain GET, or <c>serviceType#action</c> of an authenticated action.
+    /// </summary>
+    internal Hold HoldNext(string key)
+    {
+        var hold = new Hold();
+        _holds[key] = hold;
+        return hold;
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _application.StopAsync();
@@ -147,6 +176,8 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             await HandlePlainAsync(context);
             return;
         }
+
+        Interlocked.Increment(ref _secureRequests);
 
         if (HttpMethods.IsGet(request.Method))
         {
@@ -188,6 +219,17 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         var (serviceType, action) = soapAction;
 
         Actions.Enqueue(action);
+        if (!await TryPassHoldAsync($"{serviceType}#{action}", context))
+        {
+            return;
+        }
+
+        if (HttpErrors.TryGetValue(action, out var statusCode))
+        {
+            context.Response.StatusCode = statusCode;
+            return;
+        }
+
         if (Faults.TryGetValue(action, out var errorCode))
         {
             await WriteAsync(context, StatusCodes.Status500InternalServerError, "text/xml", CreateFault(errorCode));
@@ -207,19 +249,49 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     private async Task HandlePlainAsync(HttpContext context)
     {
         var request = context.Request;
+        if (request.Headers.Authorization.Count > 0)
+        {
+            Interlocked.Increment(ref _plainAuthorizationHeaders);
+        }
+
         if (HttpMethods.IsGet(request.Method) && request.Path == Tr64Description.DescriptionPath)
         {
-            await WriteAsync(context, StatusCodes.Status200OK, "text/xml", Fixtures.Read("tr64desc.xml"));
+            if (await TryPassHoldAsync(Tr64Description.DescriptionPath, context))
+            {
+                await WriteAsync(context, StatusCodes.Status200OK, "text/xml", Fixtures.Read("tr64desc.xml"));
+            }
         }
         else if (HttpMethods.IsPost(request.Method) && GetAction(request) is (Tr64Services.DeviceInfo, "GetSecurityPort"))
         {
             Interlocked.Increment(ref _securityPortRequests);
-            await WriteAsync(context, StatusCodes.Status200OK, "text/xml",
-                CreateEnvelope(Tr64Services.DeviceInfo, "GetSecurityPort", $"<NewSecurityPort>{HttpsPort}</NewSecurityPort>"));
+            var values = Answers.TryGetValue($"{Tr64Services.DeviceInfo}#GetSecurityPort", out var answer)
+                ? answer
+                : $"<NewSecurityPort>{HttpsPort}</NewSecurityPort>";
+            await WriteAsync(context, StatusCodes.Status200OK, "text/xml", CreateEnvelope(Tr64Services.DeviceInfo, "GetSecurityPort", values));
         }
         else
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
+        }
+    }
+
+    /// <returns>False when the request was held and the client gave up waiting, so nothing must be answered.</returns>
+    private async Task<bool> TryPassHoldAsync(string key, HttpContext context)
+    {
+        if (!_holds.TryRemove(key, out var hold))
+        {
+            return true;
+        }
+
+        hold.Taken.TrySetResult();
+        try
+        {
+            await hold.Released.Task.WaitAsync(context.RequestAborted);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 

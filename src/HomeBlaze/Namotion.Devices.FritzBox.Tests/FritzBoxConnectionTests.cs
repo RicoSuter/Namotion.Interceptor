@@ -169,6 +169,129 @@ public class FritzBoxConnectionTests
         Assert.Equal(Tr64Services.WanIpConnection, connection.InternetServiceType);
     }
 
-    private static FritzBoxConnectionOptions Options(FakeFritzBox fake, string? password = null, string? pin = null) =>
-        new("127.0.0.1", fake.Username, password ?? fake.Password, pin) { DescriptionPort = fake.HttpPort };
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task WhenNoPasswordIsConfigured_ThenTheLoginCheckFailsWithoutARequest(string? password)
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var options = new FritzBoxConnectionOptions("127.0.0.1", fake.Username, password, null) { DescriptionPort = fake.HttpPort };
+        using var connection = await FritzBoxConnection.OpenAsync(options, NullLogger.Instance, CancellationToken.None);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<FritzBoxLoginException>(() => connection.CheckLoginAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Contains("No password configured", exception.Message);
+        Assert.Equal(0, fake.FailedLogins);
+        Assert.Equal(0, fake.SecureRequests);
+        Assert.Empty(fake.Actions);
+    }
+
+    [Fact]
+    public async Task WhenAPinWasRejected_ThenALaterUnrelatedFailureIsNotReportedAsACertificateFailure()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var trusted = FakeFritzBox.CreateCertificate();
+        using var connection = await FritzBoxConnection.OpenAsync(
+            Options(fake, pin: CertificateInfo.Create(trusted).Pin), NullLogger.Instance, CancellationToken.None);
+        await Assert.ThrowsAsync<FritzBoxCertificateException>(() => connection.CheckLoginAsync(CancellationToken.None));
+
+        using var rejected = fake.Certificate;
+        fake.Certificate = trusted;
+        fake.HttpErrors["GetInfo"] = 500;
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => connection.QueryAsync(Tr64Services.UserInterface, "GetInfo", null, CancellationToken.None));
+
+        // Assert
+        var httpException = Assert.IsType<HttpRequestException>(exception);
+        Assert.Equal(HttpStatusCode.InternalServerError, httpException.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(70000)]
+    public async Task WhenTheSecurityPortIsOutOfRange_ThenOpeningFails(int port)
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.Answers[$"{Tr64Services.DeviceInfo}#GetSecurityPort"] = $"<NewSecurityPort>{port}</NewSecurityPort>";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => FritzBoxConnection.OpenAsync(Options(fake), NullLogger.Instance, CancellationToken.None));
+
+        // Assert
+        Assert.Contains("HTTPS port", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenTheDescriptionDoesNotArriveInTime_ThenOpeningTimesOut()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.HoldNext(Tr64Description.DescriptionPath);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            FritzBoxConnection.OpenAsync(Options(fake, requestTimeout: ShortTimeout), NullLogger.Instance, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenAnAnswerDoesNotArriveInTime_ThenTheQueryTimesOut()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+
+        // Opened once with the default timeout first, so a slow first request cannot time out the open under test.
+        (await FritzBoxConnection.OpenAsync(Options(fake), NullLogger.Instance, CancellationToken.None)).Dispose();
+
+        using var connection = await FritzBoxConnection.OpenAsync(Options(fake, requestTimeout: ShortTimeout), NullLogger.Instance, CancellationToken.None);
+        fake.HoldNext($"{Tr64Services.UserInterface}#GetInfo");
+
+        // Act & Assert
+        await Assert.ThrowsAsync<TimeoutException>(() => connection.QueryAsync(Tr64Services.UserInterface, "GetInfo", null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenConnectingAndQuerying_ThenThePlainEndpointNeverReceivesCredentials()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+
+        // Act
+        using var connection = await FritzBoxConnection.OpenAsync(Options(fake), NullLogger.Instance, CancellationToken.None);
+        await connection.CheckLoginAsync(CancellationToken.None);
+        await connection.QueryAsync(Tr64Services.UserInterface, "GetInfo", null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, fake.SecurityPortRequests);
+        Assert.Equal(0, fake.PlainAuthorizationHeaders);
+    }
+
+    [Fact]
+    public async Task WhenACommandIsInvoked_ThenTheRouterAppliesIt()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        using var connection = await FritzBoxConnection.OpenAsync(Options(fake), NullLogger.Instance, CancellationToken.None);
+
+        // Act
+        await connection.InvokeAsync(FakeFritzBox.GuestWlanServiceType, "SetEnable", [("NewEnable", "1")], CancellationToken.None);
+
+        // Assert
+        Assert.True(fake.IsGuestWlanEnabled);
+    }
+
+    private static readonly TimeSpan ShortTimeout = TimeSpan.FromSeconds(1);
+
+    private static FritzBoxConnectionOptions Options(
+        FakeFritzBox fake, string? password = null, string? pin = null, TimeSpan? requestTimeout = null) =>
+        new("127.0.0.1", fake.Username, password ?? fake.Password, pin)
+        {
+            DescriptionPort = fake.HttpPort,
+            RequestTimeout = requestTimeout ?? TimeSpan.FromSeconds(5)
+        };
 }

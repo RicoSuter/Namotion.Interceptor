@@ -11,13 +11,14 @@ internal static class BoundedContent
     /// <returns>The content, positioned at its start.</returns>
     internal static async Task<MemoryStream> ReadAsync(HttpContent content, int maximumBytes, CancellationToken cancellationToken)
     {
-        if (content.Headers.ContentLength > maximumBytes)
+        var contentLength = content.Headers.ContentLength;
+        if (contentLength > maximumBytes)
         {
             throw CreateTooLargeException(maximumBytes);
         }
 
         await using var source = await content.ReadAsStreamAsync(cancellationToken);
-        var result = new MemoryStream();
+        var result = new MemoryStream((int)(contentLength ?? 0));
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
         {
