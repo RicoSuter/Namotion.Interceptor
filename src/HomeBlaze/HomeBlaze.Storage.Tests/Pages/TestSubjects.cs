@@ -567,6 +567,25 @@ public partial class TestBoard : IConfigurable
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
+/// <summary>A board with a configuration property whose name differs from the property of its slot only by case.</summary>
+[InterceptorSubject]
+public partial class TestCaseBoard : IConfigurable
+{
+    public TestCaseBoard()
+    {
+        TileList = [];
+    }
+
+    [Configuration, Slot("Tile")]
+    public partial TestTile[] TileList { get; set; }
+
+    // Differs only in the case of a letter that the camel case of a configuration file keeps.
+    [Configuration]
+    public partial int Tilelist { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
 /// <summary>One value of a <see cref="TestBoard"/>. Its child is a subject in a file and content on a page.</summary>
 [InterceptorSubject]
 public partial class TestTile : IConfigurable

@@ -324,6 +324,22 @@ public class MarkdownSlotWriteBackTests
     }
 
     [Fact]
+    public async Task WhenConfigurationPropertyDiffersFromASlotPropertyOnlyByCase_ThenItIsSerializedForTheBlock()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var serializer = fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>();
+        var board = new TestCaseBoard { Tilelist = 3 };
+
+        // Act
+        var json = MarkdownBlockConfiguration.Serialize(serializer, board);
+
+        // Assert
+        Assert.Contains("\"Tilelist\": 3", json);
+        Assert.DoesNotContain("\"TileList\"", json);
+    }
+
+    [Fact]
     public async Task WhenValuesAreReordered_ThenNothingIsWritten()
     {
         // Arrange

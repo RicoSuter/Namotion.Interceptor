@@ -23,10 +23,7 @@ internal static class MarkdownBlockAlignment
     /// <param name="edit">What the change did to the lines.</param>
     /// <param name="expectedInsertedBlockCount">How many blocks of every kind the inserted lines must hold.</param>
     /// <param name="owner">The block of <paramref name="before"/> that the lines were inserted into, or null for a removal.</param>
-    /// <returns>
-    /// Null when the change did more than insert or remove its blocks, that is when either
-    /// <see cref="TryMapBlocks"/> or <see cref="HasSameDocument"/> says no.
-    /// </returns>
+    /// <returns>Null when the change did more than insert or remove its blocks.</returns>
     public static int[]? TryAlign(
         MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
     {
@@ -50,8 +47,6 @@ internal static class MarkdownBlockAlignment
     {
         var oldBlocks = Flatten(before.Blocks);
         var newBlocks = Flatten(after.Blocks);
-        var removedEnd = edit.Line + edit.RemovedLineCount;
-        var insertedEnd = edit.Line + edit.InsertedLineCount;
         var blocksAroundOwner = FindBlocksAround(oldBlocks, owner);
 
         // The block of the page after the change for every block that stays.
@@ -65,7 +60,7 @@ internal static class MarkdownBlockAlignment
         {
             while (newPosition < newBlocks.Count &&
                    newBlocks[newPosition].Block.Line >= edit.Line &&
-                   newBlocks[newPosition].Block.Line < insertedEnd)
+                   newBlocks[newPosition].Block.Line < edit.InsertedEnd)
             {
                 var (block, parent) = newBlocks[newPosition++];
                 var isInsideInsertedBlock = parent is not null && insertedBlocks.Contains(parent);
@@ -76,7 +71,7 @@ internal static class MarkdownBlockAlignment
                     ReferenceEquals(parent, newOwner);
 
                 // A block that goes on after the inserted lines has taken over what follows it.
-                if (block.EndLine >= insertedEnd || (!isInsideInsertedBlock && !isSlotBlockOfOwner))
+                if (block.EndLine >= edit.InsertedEnd || (!isInsideInsertedBlock && !isSlotBlockOfOwner))
                 {
                     return false;
                 }
@@ -89,7 +84,7 @@ internal static class MarkdownBlockAlignment
 
         foreach (var (oldBlock, oldParent) in oldBlocks)
         {
-            if (oldBlock.Line >= edit.Line && oldBlock.Line < removedEnd)
+            if (oldBlock.Line >= edit.Line && oldBlock.Line < edit.RemovedEnd)
             {
                 continue;
             }
@@ -125,10 +120,10 @@ internal static class MarkdownBlockAlignment
     }
 
     // The kind of a block of the document, the containers around it from the document inwards, the classes and
-    // the properties of its attributes, whether it is a loose list or definition, and for a leaf block where its
-    // text is.
+    // the properties of its attributes, whether it is a loose list or definition, and for a leaf block its text
+    // without white space at the end, which is empty for a container.
     private readonly record struct DocumentBlockDescription(
-        Type Kind, string Containers, string Attributes, bool IsLoose, int Start, int Length);
+        Type Kind, string Containers, string Attributes, bool IsLoose, string Text);
 
     /// <summary>
     /// The comparison of the Markdig document outside the change: gets whether every block of the document that
@@ -145,44 +140,18 @@ internal static class MarkdownBlockAlignment
     /// </returns>
     internal static bool HasSameDocument(MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit)
     {
-        // Markdig gives the attributes of such a line to the next block, also after empty lines, which the change
-        // replaces: removed lines pass them on to what follows, and inserted lines take them. The rule is about the
-        // line and not about the ids that move, because ids are not compared: Markdig gives every heading an id of
-        // its own, which changes when a heading with the same text is inserted or removed before it.
-        if (FollowsAttributeLine(before.Source, edit.Line))
-        {
-            return false;
-        }
-
-        var oldBlocks = DescribeDocumentBlocks(before, edit.Line, edit.RemovedLineCount);
-        var newBlocks = DescribeDocumentBlocks(after, edit.Line, edit.InsertedLineCount);
-        if (oldBlocks.Count != newBlocks.Count)
-        {
-            return false;
-        }
-
-        for (var index = 0; index < oldBlocks.Count; index++)
-        {
-            var oldBlock = oldBlocks[index];
-            var newBlock = newBlocks[index];
-            if (oldBlock.Kind != newBlock.Kind ||
-                oldBlock.IsLoose != newBlock.IsLoose ||
-                !string.Equals(oldBlock.Containers, newBlock.Containers, StringComparison.Ordinal) ||
-                !string.Equals(oldBlock.Attributes, newBlock.Attributes, StringComparison.Ordinal) ||
-                !before.Source.AsSpan(oldBlock.Start, oldBlock.Length).SequenceEqual(after.Source.AsSpan(newBlock.Start, newBlock.Length)))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        // Markdig gives the attributes of such a line to the next block, also across empty lines, so a change after
+        // it changes which block takes them.
+        return !FollowsAttributeLine(before.Source, edit.Line) &&
+               DescribeDocumentBlocks(before, edit.Line, edit.RemovedEnd)
+                   .SequenceEqual(DescribeDocumentBlocks(after, edit.Line, edit.InsertedEnd));
     }
 
     // Every block of the Markdig document that does not start on the given lines, in the order of the document:
     // its kind, the containers around it and its attributes, and for a leaf block its text. A change that only
     // inserts or removes its own lines leaves this list as it was. The containers are listed themselves, because
     // two lists that become one keep every leaf block as it is.
-    private static List<DocumentBlockDescription> DescribeDocumentBlocks(MarkdownPage page, int skippedLine, int skippedLineCount)
+    private static List<DocumentBlockDescription> DescribeDocumentBlocks(MarkdownPage page, int skippedLine, int skippedEnd)
     {
         var source = page.Source;
         var result = new List<DocumentBlockDescription>();
@@ -201,14 +170,14 @@ internal static class MarkdownBlockAlignment
                 }
 
                 var line = child.Line + 1;
-                var isSkipped = line >= skippedLine && line < skippedLine + skippedLineCount;
+                var isSkipped = line >= skippedLine && line < skippedEnd;
 
                 if (child is ContainerBlock inner)
                 {
                     // The group of the footnotes has no line of its own. Its footnotes are listed.
                     if (!isSkipped && child is not FootnoteGroup)
                     {
-                        result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), IsLoose(inner), 0, 0));
+                        result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), IsLoose(inner), string.Empty));
                     }
 
                     // A block of the page is named by its head line, so that text which moves into the block
@@ -221,8 +190,8 @@ internal static class MarkdownBlockAlignment
                     // Without white space at the end: the span of an indented code block takes the empty lines after it.
                     var start = Math.Clamp(child.Span.Start, 0, source.Length);
                     var end = Math.Clamp(child.Span.End + 1, start, source.Length);
-                    var length = source.AsSpan(start, end - start).TrimEnd().Length;
-                    result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), false, start, length));
+                    var text = source.AsSpan(start, end - start).TrimEnd().ToString();
+                    result.Add(new DocumentBlockDescription(child.GetType(), containers, DescribeAttributes(child), false, text));
                 }
             }
         }
@@ -230,8 +199,7 @@ internal static class MarkdownBlockAlignment
 
     // A loose list renders the text of its items as paragraphs. A definition is loose when Markdig kept an empty
     // line in it, which it does for an empty line at the end of the page as well, and renders its text as a
-    // paragraph then. Any empty line in it counts, also one the renderer would show no difference for, which is
-    // on the safe side: it only refuses more.
+    // paragraph then. Any empty line in a definition counts.
     private static bool IsLoose(ContainerBlock container)
     {
         if (container is ListBlock list)
@@ -348,7 +316,6 @@ internal static class MarkdownBlockAlignment
         }
 
         var delta = edit.InsertedLineCount - edit.RemovedLineCount;
-        var removedEnd = edit.Line + edit.RemovedLineCount;
 
         // After the change: the block moved as a whole.
         if (oldBlock.Line >= edit.Line)
@@ -366,11 +333,11 @@ internal static class MarkdownBlockAlignment
         if (oldBlock.EndLine < edit.Line)
         {
             return newBlock.EndLine == oldBlock.EndLine ||
-                   (isOwnerOrAroundIt && !oldBlock.HasClosingLine && newBlock.EndLine == edit.Line + edit.InsertedLineCount - 1);
+                   (isOwnerOrAroundIt && !oldBlock.HasClosingLine && newBlock.EndLine == edit.InsertedEnd - 1);
         }
 
         // Around the change, with its last line after it.
-        if (oldBlock.EndLine >= removedEnd)
+        if (oldBlock.EndLine >= edit.RemovedEnd)
         {
             return newBlock.EndLine == oldBlock.EndLine + delta;
         }
@@ -400,25 +367,20 @@ internal static class MarkdownBlockAlignment
         }
     }
 
-    // The block itself and every block around it.
+    // The block itself and every block around it. The list is in pre-order, so a block around another one
+    // stands before it.
     private static HashSet<MarkdownBlock> FindBlocksAround(
         List<(MarkdownBlock Block, MarkdownBlock? Parent)> blocks, MarkdownBlock? target)
     {
         var result = new HashSet<MarkdownBlock>(ReferenceEqualityComparer.Instance);
-        if (target is null)
+        var current = target;
+        for (var index = blocks.Count - 1; index >= 0 && current is not null; index--)
         {
-            return result;
-        }
-
-        var parents = new Dictionary<MarkdownBlock, MarkdownBlock?>(ReferenceEqualityComparer.Instance);
-        foreach (var (block, parent) in blocks)
-        {
-            parents[block] = parent;
-        }
-
-        for (var current = target; current is not null; current = parents.GetValueOrDefault(current))
-        {
-            result.Add(current);
+            if (ReferenceEquals(blocks[index].Block, current))
+            {
+                result.Add(current);
+                current = blocks[index].Parent;
+            }
         }
 
         return result;

@@ -17,6 +17,6 @@ public static class MarkdownBlockConfiguration
         return slots.Named.Count == 0
             ? serializer.Serialize(subject, ConfigurationNaming.CSharpProperty)
             : serializer.Serialize(
-                subject, name => slots.FindByPropertyName(name) is not null, ConfigurationNaming.CSharpProperty);
+                subject, slots.IsSlotProperty, ConfigurationNaming.CSharpProperty);
     }
 }

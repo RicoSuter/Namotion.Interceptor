@@ -1,7 +1,7 @@
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Services;
+using Markdig.Helpers;
 
 namespace HomeBlaze.Storage.Pages;
 
@@ -134,17 +134,7 @@ public static class MarkdownBlockWriter
     internal static MarkdownBlockPlacement GetSlotBlockPlacement(MarkdownPage page, MarkdownBlock owner, string slotName)
     {
         var source = page.Source;
-
-        MarkdownBlock? lastSibling = null;
-        foreach (var child in owner.Children)
-        {
-            if (child.Kind == MarkdownBlockKind.Slot && child.Head!.Name == slotName && (lastSibling is null || child.Line > lastSibling.Line))
-            {
-                lastSibling = child;
-            }
-        }
-
-        if (lastSibling is not null)
+        if (GetSlotBlocks(owner, slotName).LastOrDefault() is { } lastSibling)
         {
             return new MarkdownBlockPlacement(
                 lastSibling.EndLine + 1,
@@ -154,15 +144,8 @@ public static class MarkdownBlockWriter
                 GetLineEnding(source, lastSibling.HeadSpan.End));
         }
 
-        var hasClosingLine = true;
-        foreach (var block in page.AllBlocks)
-        {
-            if (block.Kind is (MarkdownBlockKind.Widget or MarkdownBlockKind.Slot) && !block.HasClosingLine)
-            {
-                hasClosingLine = false;
-                break;
-            }
-        }
+        var hasClosingLine = !page.AllBlocks.Any(
+            block => block.Kind is (MarkdownBlockKind.Widget or MarkdownBlockKind.Slot) && !block.HasClosingLine);
 
         // Before the closing line of the owner, or after its last line of content.
         var line = owner.HasClosingLine ? owner.EndLine : owner.EndLine + 1;
@@ -170,9 +153,20 @@ public static class MarkdownBlockWriter
             line, owner.FenceLength + 1, hasClosingLine, GetIndentation(source, owner), GetLineEnding(source, owner.HeadSpan.End));
     }
 
+    /// <summary>
+    /// Gets the slot blocks of <paramref name="owner"/> with the name <paramref name="slotName"/>, in the order of
+    /// their lines.
+    /// </summary>
+    /// <remarks>
+    /// A block is a slot block only directly inside a widget or slot block, and the parser lists the blocks
+    /// directly inside a block in the order of the text.
+    /// </remarks>
+    internal static IEnumerable<MarkdownBlock> GetSlotBlocks(MarkdownBlock owner, string slotName) =>
+        owner.Children.Where(child => child.Kind == MarkdownBlockKind.Slot && child.Head!.Name == slotName);
+
     // The white space before the head line of the block on its line.
     private static string GetIndentation(string source, MarkdownBlock block) =>
-        source[GetLineStart(source, block.Line)..block.HeadSpan.Start];
+        source[(source.AsSpan(0, block.HeadSpan.Start).LastIndexOf('\n') + 1)..block.HeadSpan.Start];
 
     /// <summary>
     /// Inserts <paramref name="text"/> as lines of their own before the 1-based <paramref name="line"/>. A line
@@ -251,9 +245,10 @@ public static class MarkdownBlockWriter
             return true;
         }
 
+        // The white space that StringSlice.Trim takes off in TryReadFence, which is not that of char.IsWhiteSpace.
         foreach (var character in text[fenceLength..])
         {
-            if (!IsMarkdownWhiteSpace(character))
+            if (!CharHelper.IsWhitespace(character))
             {
                 return !MarkdownBlockFence.StartsHeadLine(character);
             }
@@ -261,11 +256,6 @@ public static class MarkdownBlockWriter
 
         return false;
     }
-
-    // What Markdig trims off the text after a fence: the white space of CommonMark, which has no vertical tab.
-    private static bool IsMarkdownWhiteSpace(char character) =>
-        character is ' ' or '\t' or '\f' or '\r' or '\n' ||
-        char.GetUnicodeCategory(character) == UnicodeCategory.SpaceSeparator;
 
     /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/>.</summary>
     internal static string Indent(string text, string indentation, string lineEnding) =>

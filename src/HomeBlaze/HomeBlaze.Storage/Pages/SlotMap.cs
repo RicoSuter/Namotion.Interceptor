@@ -57,6 +57,20 @@ internal sealed class SlotMap
         return null;
     }
 
+    /// <summary>Gets whether the property with exactly this name declares a slot.</summary>
+    public bool IsSlotProperty(string propertyName)
+    {
+        foreach (var slot in Named.Values)
+        {
+            if (slot.PropertyName == propertyName)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static SlotMap For(Type type) => Cache.GetOrAdd(type, Create);
 
     private static SlotMap Create(Type type)

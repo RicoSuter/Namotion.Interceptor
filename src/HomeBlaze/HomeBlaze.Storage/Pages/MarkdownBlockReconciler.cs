@@ -1,4 +1,3 @@
-using System.Collections;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
@@ -15,7 +14,7 @@ namespace HomeBlaze.Storage.Pages;
 internal sealed record MarkdownBlockWrite(
     MarkdownPage Page,
     IReadOnlyDictionary<int, IInterceptorSubject> BlockSubjects,
-    IReadOnlyList<KeyValuePair<IInterceptorSubject, string>> Configurations,
+    IReadOnlyList<(IInterceptorSubject Subject, string ConfigurationJson)> Configurations,
     bool HasInsertedOrRemovedBlocks);
 
 /// <summary>
@@ -27,8 +26,36 @@ internal sealed record MarkdownBlockWrite(
 /// The block of a value that stays is not written. A value is a block subject, so a change of it is written
 /// when the value itself is saved.
 /// </remarks>
-internal static class MarkdownBlockReconciler
+internal sealed class MarkdownBlockReconciler
 {
+    private readonly IInterceptorSubject _owner;
+
+    // Stays the same throughout: every change is after the head line of the owner.
+    private readonly int _ownerIndex;
+
+    private readonly ConfigurableSubjectSerializer _serializer;
+    private readonly List<(IInterceptorSubject Subject, string ConfigurationJson)> _configurations;
+    private MarkdownPage _page;
+    private Dictionary<int, IInterceptorSubject> _subjects;
+    private string? _refusal;
+    private bool _hasInsertedOrRemovedBlocks;
+
+    private MarkdownBlockReconciler(
+        IInterceptorSubject owner,
+        int ownerIndex,
+        ConfigurableSubjectSerializer serializer,
+        MarkdownPage page,
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
+        string configurationJson)
+    {
+        _owner = owner;
+        _ownerIndex = ownerIndex;
+        _serializer = serializer;
+        _page = page;
+        _subjects = new Dictionary<int, IInterceptorSubject>(blockSubjects);
+        _configurations = [(owner, configurationJson)];
+    }
+
     /// <summary>
     /// Writes the subject of the block <paramref name="blockIndex"/>.
     /// </summary>
@@ -52,25 +79,28 @@ internal static class MarkdownBlockReconciler
             return null;
         }
 
-        var state = new WriteState(page, blockSubjects, serializer);
-
         // Changes lines but neither the blocks nor their order, so the block table stays valid.
         var configurationJson = MarkdownBlockConfiguration.Serialize(serializer, owner);
-        state.Configurations.Add(new KeyValuePair<IInterceptorSubject, string>(owner, configurationJson));
-        state.Page = MarkdownPageParser.Parse(
-            MarkdownBlockWriter.WriteConfiguration(page.Source, page.AllBlocks[blockIndex], configurationJson));
+        var reconciler = new MarkdownBlockReconciler(
+            owner,
+            blockIndex,
+            serializer,
+            MarkdownPageParser.Parse(MarkdownBlockWriter.WriteConfiguration(page.Source, page.AllBlocks[blockIndex], configurationJson)),
+            blockSubjects,
+            configurationJson);
 
         foreach (var slot in SlotMap.For(owner.GetType()).Named.Values)
         {
-            if (slot is { IsList: true, IsOpen: false } && !state.TryReconcile(owner, blockIndex, slot))
+            if (slot is { IsList: true, IsOpen: false } && !reconciler.TryReconcile(slot))
             {
-                refusal = state.Refusal;
+                refusal = reconciler._refusal;
                 return null;
             }
         }
 
         refusal = null;
-        return new MarkdownBlockWrite(state.Page, state.Subjects, state.Configurations, state.HasInsertedOrRemovedBlocks);
+        return new MarkdownBlockWrite(
+            reconciler._page, reconciler._subjects, reconciler._configurations, reconciler._hasInsertedOrRemovedBlocks);
     }
 
     // A slot that takes content holds what the page parsed from the text of its block. A subject that was set
@@ -106,339 +136,284 @@ internal static class MarkdownBlockReconciler
         return true;
     }
 
-    private sealed class WriteState(
-        MarkdownPage page,
-        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
-        ConfigurableSubjectSerializer serializer)
+    private bool TryReconcile(SlotDefinition slot)
     {
-        public MarkdownPage Page { get; set; } = page;
-
-        public Dictionary<int, IInterceptorSubject> Subjects { get; private set; } = new(blockSubjects);
-
-        public List<KeyValuePair<IInterceptorSubject, string>> Configurations { get; } = [];
-
-        public string? Refusal { get; private set; }
-
-        public bool HasInsertedOrRemovedBlocks { get; private set; }
-
-        // The index of the owner stays the same throughout: every change is after its head line.
-        public bool TryReconcile(IInterceptorSubject owner, int ownerIndex, SlotDefinition slot)
+        var values = GetValues(slot);
+        var blocks = GetSlotBlocks(slot.Name);
+        if (!AreInTheOrderOfTheirBlocks(blocks, values))
         {
-            var values = GetValues(owner, slot);
-            if (!AreInTheOrderOfTheirBlocks(ownerIndex, slot.Name, values))
-            {
-                Refusal = $"The order of the '{slot.Name}' values differs from the order of their blocks. The order is changed in the text of the page.";
-                return false;
-            }
-
-            if (FindNewValueOfAnotherType(ownerIndex, slot, values) is { } valueOfAnotherType)
-            {
-                Refusal =
-                    $"A new '{slot.Name}' block cannot be written for a subject of the type {valueOfAnotherType.GetType().Name}, " +
-                    $"because the slot holds subjects of the type {slot.ValueType.Name}.";
-                return false;
-            }
-
-            while (FindBlockWithoutValue(ownerIndex, slot.Name, values) is { } block)
-            {
-                if (!CanInsertOrRemoveBlocks())
-                {
-                    return false;
-                }
-
-                var source = MarkdownBlockWriter.RemoveBlock(Page.Source, block, out var edit);
-                if (!TryApply(source, edit, expectedInsertedBlockCount: 0, owner: null))
-                {
-                    Refusal = $"Removing the '{slot.Name}' block at line {block.Line} would change other blocks of the page.";
-                    return false;
-                }
-            }
-
-            foreach (var value in values)
-            {
-                if (!HasBlock(ownerIndex, slot.Name, value) && !TryInsert(ownerIndex, slot, value))
-                {
-                    return false;
-                }
-            }
-
-            return true;
+            _refusal = $"The order of the '{slot.Name}' values differs from the order of their blocks. The order is changed in the text of the page.";
+            return false;
         }
 
-        private static List<IInterceptorSubject> GetValues(IInterceptorSubject owner, SlotDefinition slot)
+        if (FindNewValueOfAnotherType(slot, blocks, values) is { } valueOfAnotherType)
         {
-            var values = new List<IInterceptorSubject>();
-            if (slot.GetValue(owner) is IEnumerable enumerable)
-            {
-                foreach (var value in enumerable)
-                {
-                    if (value is IInterceptorSubject subject)
-                    {
-                        values.Add(subject);
-                    }
-                }
-            }
-
-            return values;
+            _refusal =
+                $"A new '{slot.Name}' block cannot be written for a subject of the type {valueOfAnotherType.GetType().Name}, " +
+                $"because the slot holds subjects of the type {slot.ValueType.Name}.";
+            return false;
         }
 
-        // The text decides the order, and the reload gives the blocks of a slot to its values by position. A new
-        // block goes after the last block of the slot, so a value without a block must not stand before a value
-        // that has one either. A value that stands twice gets one block, so the reload would drop the second.
-        private bool AreInTheOrderOfTheirBlocks(int ownerIndex, string slotName, List<IInterceptorSubject> values)
+        while (FindBlockWithoutValue(blocks, values) is { } block)
         {
-            var blocks = GetSlotBlocks(ownerIndex, slotName);
-            var lastPosition = -1;
-            var hasValueWithoutBlock = false;
-            for (var index = 0; index < values.Count; index++)
-            {
-                var value = values[index];
-                var position = FindPositionOfBlock(blocks, value);
-                if (position < 0)
-                {
-                    if (StandsBefore(values, index, value))
-                    {
-                        return false;
-                    }
-
-                    hasValueWithoutBlock = true;
-                }
-                else if (hasValueWithoutBlock || position <= lastPosition)
-                {
-                    return false;
-                }
-                else
-                {
-                    lastPosition = position;
-                }
-            }
-
-            return true;
-        }
-
-        // The reload creates the type of the slot for every block, and the arguments of another type are unknown to it.
-        private IInterceptorSubject? FindNewValueOfAnotherType(int ownerIndex, SlotDefinition slot, List<IInterceptorSubject> values)
-        {
-            var blocks = GetSlotBlocks(ownerIndex, slot.Name);
-            foreach (var value in values)
-            {
-                if (value.GetType() != slot.ValueType && FindPositionOfBlock(blocks, value) < 0)
-                {
-                    return value;
-                }
-            }
-
-            return null;
-        }
-
-        private bool TryInsert(int ownerIndex, SlotDefinition slot, IInterceptorSubject value)
-        {
-            if (value is not IConfigurable)
-            {
-                Refusal = $"A new '{slot.Name}' block cannot be written for a subject of the type {value.GetType().Name}, which is not configurable.";
-                return false;
-            }
-
             if (!CanInsertOrRemoveBlocks())
             {
                 return false;
             }
 
-            var ownerBlock = Page.AllBlocks[ownerIndex];
-            var placement = MarkdownBlockWriter.GetSlotBlockPlacement(Page, ownerBlock, slot.Name);
-            var fenceLength = placement.FenceLength;
-
-            string? content = null;
-            var blockCount = 1;
-            foreach (var valueSlot in SlotMap.For(value.GetType()).Named.Values)
+            var source = MarkdownBlockWriter.RemoveBlock(_page.Source, block, out var edit);
+            if (!TryApply(source, edit, expectedInsertedBlockCount: 0, owner: null))
             {
-                var slotValue = valueSlot.GetValue(value);
-                if (IsEmpty(slotValue))
-                {
-                    continue;
-                }
-
-                // Anything else came from the text of a page, and the text is the only place it can be written from.
-                if (!valueSlot.IsDefault || slotValue is not IConfigurable || slotValue is not IInterceptorSubject child || HasSlotContent(child))
-                {
-                    Refusal =
-                        $"The new '{slot.Name}' block cannot be written, because its slot '{valueSlot.Name}' holds " +
-                        "content of a page or more than one new subject.";
-                    return false;
-                }
-
-                if (!CanBeNamedOnAPage(child.GetType()))
-                {
-                    Refusal =
-                        $"The new '{slot.Name}' block cannot be written, because the type {child.GetType().Name} " +
-                        "of the subject in it cannot be named on a page.";
-                    return false;
-                }
-
-                var childJson = MarkdownBlockConfiguration.Serialize(serializer, child);
-                content = MarkdownBlockWriter.CreateBlock(
-                    child.GetType().FullName!, null, childJson, fenceLength + 1, placement.LineEnding, placement.HasClosingLine);
-                blockCount++;
-            }
-
-            var configurationJson = MarkdownBlockConfiguration.Serialize(serializer, value);
-            var text = MarkdownBlockWriter.Indent(
-                MarkdownBlockWriter.CreateBlock(
-                    slot.Name, null, configurationJson, fenceLength, placement.LineEnding, placement.HasClosingLine, content),
-                placement.Indentation,
-                placement.LineEnding);
-
-            var source = MarkdownBlockWriter.InsertLines(Page.Source, placement.Line, text, placement.LineEnding, out var edit);
-            if (!TryApply(source, edit, blockCount, ownerBlock))
-            {
-                Refusal = $"Inserting a '{slot.Name}' block at line {placement.Line} would change other blocks of the page.";
+                _refusal = $"Removing the '{slot.Name}' block at line {block.Line} would change other blocks of the page.";
                 return false;
             }
 
-            var slotBlocks = GetSlotBlocks(ownerIndex, slot.Name);
-            Subjects[slotBlocks[^1].Index] = value;
-            Configurations.Add(new KeyValuePair<IInterceptorSubject, string>(value, configurationJson));
+            blocks = GetSlotBlocks(slot.Name);
+        }
+
+        foreach (var value in values)
+        {
+            if (FindPositionOfBlock(blocks, value) < 0)
+            {
+                if (!TryInsert(slot, value))
+                {
+                    return false;
+                }
+
+                blocks = GetSlotBlocks(slot.Name);
+            }
+        }
+
+        return true;
+    }
+
+    private List<IInterceptorSubject> GetValues(SlotDefinition slot) =>
+        slot.GetValue(_owner) is IInterceptorSubject[] values ? [.. values.OfType<IInterceptorSubject>()] : [];
+
+    // The text decides the order, and the reload gives the blocks of a slot to its values by position. A new
+    // block goes after the last block of the slot, so a value without a block must not stand before a value
+    // that has one either. A value that stands twice gets one block, so the reload would drop the second.
+    private bool AreInTheOrderOfTheirBlocks(List<MarkdownBlock> blocks, List<IInterceptorSubject> values)
+    {
+        var lastPosition = -1;
+        var hasValueWithoutBlock = false;
+        for (var index = 0; index < values.Count; index++)
+        {
+            var value = values[index];
+            var position = FindPositionOfBlock(blocks, value);
+            if (position < 0)
+            {
+                if (IndexOf(values, value) < index)
+                {
+                    return false;
+                }
+
+                hasValueWithoutBlock = true;
+            }
+            else if (hasValueWithoutBlock || position <= lastPosition)
+            {
+                return false;
+            }
+            else
+            {
+                lastPosition = position;
+            }
+        }
+
+        return true;
+    }
+
+    // The reload creates the type of the slot for every block, and the arguments of another type are unknown to it.
+    private IInterceptorSubject? FindNewValueOfAnotherType(SlotDefinition slot, List<MarkdownBlock> blocks, List<IInterceptorSubject> values)
+    {
+        foreach (var value in values)
+        {
+            if (value.GetType() != slot.ValueType && FindPositionOfBlock(blocks, value) < 0)
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private bool TryInsert(SlotDefinition slot, IInterceptorSubject value)
+    {
+        if (value is not IConfigurable)
+        {
+            _refusal = $"A new '{slot.Name}' block cannot be written for a subject of the type {value.GetType().Name}, which is not configurable.";
+            return false;
+        }
+
+        if (!CanInsertOrRemoveBlocks())
+        {
+            return false;
+        }
+
+        var ownerBlock = _page.AllBlocks[_ownerIndex];
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(_page, ownerBlock, slot.Name);
+        var fenceLength = placement.FenceLength;
+
+        string? content = null;
+        var blockCount = 1;
+        foreach (var valueSlot in SlotMap.For(value.GetType()).Named.Values)
+        {
+            var slotValue = valueSlot.GetValue(value);
+            if (IsEmpty(slotValue))
+            {
+                continue;
+            }
+
+            // Anything else came from the text of a page, and the text is the only place it can be written from.
+            if (!valueSlot.IsDefault || slotValue is not IConfigurable || slotValue is not IInterceptorSubject child || HasSlotContent(child))
+            {
+                _refusal =
+                    $"The new '{slot.Name}' block cannot be written, because its slot '{valueSlot.Name}' holds " +
+                    "content of a page or more than one new subject.";
+                return false;
+            }
+
+            if (!CanBeNamedOnAPage(child.GetType()))
+            {
+                _refusal =
+                    $"The new '{slot.Name}' block cannot be written, because the type {child.GetType().Name} " +
+                    "of the subject in it cannot be named on a page.";
+                return false;
+            }
+
+            var childJson = MarkdownBlockConfiguration.Serialize(_serializer, child);
+            content = MarkdownBlockWriter.CreateBlock(
+                child.GetType().FullName!, null, childJson, fenceLength + 1, placement.LineEnding, placement.HasClosingLine);
+            blockCount++;
+        }
+
+        var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, value);
+        var text = MarkdownBlockWriter.Indent(
+            MarkdownBlockWriter.CreateBlock(
+                slot.Name, null, configurationJson, fenceLength, placement.LineEnding, placement.HasClosingLine, content),
+            placement.Indentation,
+            placement.LineEnding);
+
+        var source = MarkdownBlockWriter.InsertLines(_page.Source, placement.Line, text, placement.LineEnding, out var edit);
+        if (!TryApply(source, edit, blockCount, ownerBlock))
+        {
+            _refusal = $"Inserting a '{slot.Name}' block at line {placement.Line} would change other blocks of the page.";
+            return false;
+        }
+
+        _subjects[MarkdownBlockWriter.GetSlotBlocks(_page.AllBlocks[_ownerIndex], slot.Name).Last().Index] = value;
+        _configurations.Add((value, configurationJson));
+        return true;
+    }
+
+    // The text functions count lines by line feeds, and Markdig ends a line at a lone carriage return as well,
+    // so the lines of the blocks would point at other lines of the text. The head line is written by offsets.
+    private bool CanInsertOrRemoveBlocks()
+    {
+        if (!MarkdownBlockWriter.HasLoneCarriageReturn(_page.Source))
+        {
             return true;
         }
 
-        // The text functions count lines by line feeds, and Markdig ends a line at a lone carriage return as well,
-        // so the lines of the blocks would point at other lines of the text. The head line is written by offsets.
-        private bool CanInsertOrRemoveBlocks()
+        _refusal = "Blocks cannot be inserted or removed on a page with a line ending that is a carriage return alone.";
+        return false;
+    }
+
+    // Takes the new text only when every block that the change did not touch is still the same block.
+    private bool TryApply(string source, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
+    {
+        var after = MarkdownPageParser.Parse(source);
+        var map = MarkdownBlockAlignment.TryAlign(_page, after, edit, expectedInsertedBlockCount, owner);
+        if (map is null)
         {
-            if (!MarkdownBlockWriter.HasLoneCarriageReturn(Page.Source))
+            return false;
+        }
+
+        var subjects = new Dictionary<int, IInterceptorSubject>(_subjects.Count);
+        foreach (var (index, subject) in _subjects)
+        {
+            if (map[index] >= 0)
+            {
+                subjects[map[index]] = subject;
+            }
+        }
+
+        _subjects = subjects;
+        _page = after;
+        _hasInsertedOrRemovedBlocks = true;
+        return true;
+    }
+
+    // Only a block that has a subject is looked at, so a block that is shown as an error is never removed.
+    private MarkdownBlock? FindBlockWithoutValue(List<MarkdownBlock> blocks, List<IInterceptorSubject> values)
+    {
+        foreach (var block in blocks)
+        {
+            if (_subjects.TryGetValue(block.Index, out var subject) && IndexOf(values, subject) < 0)
+            {
+                return block;
+            }
+        }
+
+        return null;
+    }
+
+    // The position in the blocks of the slot of the block that has the value as its subject, or -1.
+    private int FindPositionOfBlock(List<MarkdownBlock> slotBlocks, IInterceptorSubject value)
+    {
+        for (var position = 0; position < slotBlocks.Count; position++)
+        {
+            if (_subjects.TryGetValue(slotBlocks[position].Index, out var subject) && ReferenceEquals(subject, value))
+            {
+                return position;
+            }
+        }
+
+        return -1;
+    }
+
+    private List<MarkdownBlock> GetSlotBlocks(string slotName) =>
+        [.. MarkdownBlockWriter.GetSlotBlocks(_page.AllBlocks[_ownerIndex], slotName)];
+
+    private static int IndexOf(List<IInterceptorSubject> values, IInterceptorSubject subject)
+    {
+        for (var index = 0; index < values.Count; index++)
+        {
+            if (ReferenceEquals(values[index], subject))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool HasSlotContent(IInterceptorSubject subject)
+    {
+        foreach (var slot in SlotMap.For(subject.GetType()).Named.Values)
+        {
+            if (!IsEmpty(slot.GetValue(subject)))
             {
                 return true;
             }
+        }
 
-            Refusal = "Blocks cannot be inserted or removed on a page with a line ending that is a carriage return alone.";
+        return false;
+    }
+
+    private static bool IsEmpty(object? slotValue) => slotValue is null or Array { Length: 0 };
+
+    // A widget block names its type with the full name of the type. A name without a dot is read as the name
+    // of a slot, and the '+' of a nested type or generic arguments are not read as a name at all, so the
+    // head line is read back the way a reload reads it.
+    private static bool CanBeNamedOnAPage(Type type)
+    {
+        if (type.FullName is not { } name)
+        {
             return false;
         }
 
-        // Takes the new text only when every block that the change did not touch is still the same block.
-        private bool TryApply(string source, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
-        {
-            var after = MarkdownPageParser.Parse(source);
-            var map = MarkdownBlockAlignment.TryAlign(Page, after, edit, expectedInsertedBlockCount, owner);
-            if (map is null)
-            {
-                return false;
-            }
-
-            var subjects = new Dictionary<int, IInterceptorSubject>(Subjects.Count);
-            foreach (var (index, subject) in Subjects)
-            {
-                if (map[index] >= 0)
-                {
-                    subjects[map[index]] = subject;
-                }
-            }
-
-            Subjects = subjects;
-            Page = after;
-            HasInsertedOrRemovedBlocks = true;
-            return true;
-        }
-
-        // Only a block that has a subject is looked at, so a block that is shown as an error is never removed.
-        private MarkdownBlock? FindBlockWithoutValue(int ownerIndex, string slotName, List<IInterceptorSubject> values)
-        {
-            foreach (var block in GetSlotBlocks(ownerIndex, slotName))
-            {
-                if (Subjects.TryGetValue(block.Index, out var subject) && !Contains(values, subject))
-                {
-                    return block;
-                }
-            }
-
-            return null;
-        }
-
-        private bool HasBlock(int ownerIndex, string slotName, IInterceptorSubject value) =>
-            FindPositionOfBlock(GetSlotBlocks(ownerIndex, slotName), value) >= 0;
-
-        // The position in the blocks of the slot of the block that has the value as its subject, or -1.
-        private int FindPositionOfBlock(List<MarkdownBlock> slotBlocks, IInterceptorSubject value)
-        {
-            for (var position = 0; position < slotBlocks.Count; position++)
-            {
-                if (Subjects.TryGetValue(slotBlocks[position].Index, out var subject) && ReferenceEquals(subject, value))
-                {
-                    return position;
-                }
-            }
-
-            return -1;
-        }
-
-        // The blocks of the slot directly inside the owner, in the order of their lines.
-        private List<MarkdownBlock> GetSlotBlocks(int ownerIndex, string slotName)
-        {
-            var blocks = new List<MarkdownBlock>();
-            foreach (var child in Page.AllBlocks[ownerIndex].Children)
-            {
-                if (child.Kind == MarkdownBlockKind.Slot && child.Head!.Name == slotName)
-                {
-                    blocks.Add(child);
-                }
-            }
-
-            blocks.Sort(static (left, right) => left.Line.CompareTo(right.Line));
-            return blocks;
-        }
-
-        private static bool Contains(List<IInterceptorSubject> values, IInterceptorSubject subject)
-        {
-            foreach (var value in values)
-            {
-                if (ReferenceEquals(value, subject))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool StandsBefore(List<IInterceptorSubject> values, int index, IInterceptorSubject subject)
-        {
-            for (var earlier = 0; earlier < index; earlier++)
-            {
-                if (ReferenceEquals(values[earlier], subject))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool HasSlotContent(IInterceptorSubject subject)
-        {
-            foreach (var slot in SlotMap.For(subject.GetType()).Named.Values)
-            {
-                if (!IsEmpty(slot.GetValue(subject)))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool IsEmpty(object? slotValue) => slotValue is null or Array { Length: 0 };
-
-        // A widget block names its type with the full name of the type. A name without a dot is read as the name
-        // of a slot, and the '+' of a nested type or generic arguments are not read as a name at all, so the
-        // head line is read back the way a reload reads it.
-        private static bool CanBeNamedOnAPage(Type type)
-        {
-            if (type.FullName is not { } name)
-            {
-                return false;
-            }
-
-            var headLine = new MarkdownBlockHead(MarkdownBlockFence.MinimumLength, name, null, []).Format();
-            return MarkdownBlockHead.TryParse(headLine, out var head, out _) && head.IsWidget && head.Name == name;
-        }
+        var headLine = new MarkdownBlockHead(MarkdownBlockFence.MinimumLength, name, null, []).Format();
+        return MarkdownBlockHead.TryParse(headLine, out var head, out _) && head.IsWidget && head.Name == name;
     }
 }

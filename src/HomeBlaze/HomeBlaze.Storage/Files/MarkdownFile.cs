@@ -39,9 +39,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // A reload changes the subjects it reuses before it publishes its snapshot, and it reuses the values of a
     // slot by their position. Between the two, and after a reload that failed once it had begun, the slot
     // values of the graph do not belong to the blocks of the snapshot, so a write-back must not insert or
-    // remove a block then. The count tells a write-back that a reload began while it worked. The flag is also
-    // set when a reload throws before it changed anything, which only costs refused inserts and removals until
-    // the next reload.
+    // remove a block then. The count tells a write-back that a reload began while it worked.
     private int _reloadCount;
     private volatile bool _isGraphAheadOfSnapshot;
 
@@ -249,11 +247,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             _parser.RememberConfiguration(writtenSubject, configurationJson);
         }
 
-        // Only over the snapshot that the text was computed from. A reload that published since then made the
-        // graph agree with its own snapshot, and the blocks of this write-back belong to the text before it:
-        // published over that snapshot they would stand beside the new graph without the flag or the count
-        // telling a later write-back. The text is written all the same, and the reload inside the write settles
-        // the page.
+        // Only over the snapshot the text was computed from: a reload that published since then owns the graph,
+        // and the reload inside the write settles the page.
         Interlocked.CompareExchange(
             ref _parseResult, snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects }, snapshot);
         var content = write.Page.Source;
@@ -265,13 +260,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return true;
     }
 
-    // The index of the block whose subject is the subject or holds it in its configuration, or -1.
+    // The index of the block whose subject is the subject or holds it in its configuration, for example a new grid
+    // cell that has no block of its own yet, or -1.
     private static int FindBlock(IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
     {
-        // The edited subject can be nested in the configuration of a block subject, for example a new grid cell
-        // that has no block of its own yet.
         var blockIndex = -1;
-        var blockSubject = subject.TryGetConfigurationOwner(candidate =>
+        subject.TryGetConfigurationOwner(candidate =>
         {
             foreach (var (index, candidateBlockSubject) in blockSubjects)
             {
@@ -285,7 +279,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return false;
         });
 
-        return blockSubject is null ? -1 : blockIndex;
+        return blockIndex;
     }
 
     private static string FormatFilename(string name)
