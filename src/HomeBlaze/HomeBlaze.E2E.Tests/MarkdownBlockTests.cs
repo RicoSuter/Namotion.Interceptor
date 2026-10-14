@@ -731,7 +731,7 @@ public class MarkdownBlockTests
             """);
         Assert.Equal([1, 1], decorationCounts);
 
-        var written = (await _fixture.ReadFileAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n");
+        var written = (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(ScratchPage))).Replace("\r\n", "\n");
         Assert.Equal(source.Replace("TargetSpeed=1200", "TargetSpeed=1500"), written);
     }
 

@@ -390,10 +390,11 @@ else
         IsDirtyChanged?.Invoke(false);
     }
 
-    // Called only on the synchronization context of the circuit, which makes the fields safe without a lock. A refresh
-    // that is requested while one runs is one more run after it, never a second one at the same time: the editor keeps
-    // its decoration ids in a list that is not thread-safe, and overlapping DeltaDecorations calls break that list for
-    // every later call. The returned task completes after a run that started after the call.
+    // Called only on the synchronization context of the circuit: the editor keeps its decoration ids in a list that is
+    // not thread-safe, and calls from two threads break it for every later call. A refresh that is requested while one
+    // runs is one more run after it, never a second one at the same time, because both would remove the same old
+    // decorations and the one whose ids are overwritten in _currentDecorationIds would stay in the editor for good.
+    // The returned task completes after a run that started after the call, unless a run fails before.
     private Task RefreshDecorationsAsync()
     {
         if (_decorationRefresh is { IsCompleted: false } runningRefresh)
