@@ -234,13 +234,19 @@ public partial class FritzBox
     }
 
     private static bool IsTolerated(Exception exception, CancellationToken stoppingToken) =>
-        exception is not (FritzBoxCertificateException or FritzBoxFirmwareException) &&
+        exception is not (FritzBoxLoginException or FritzBoxCertificateException or FritzBoxFirmwareException) &&
         !(exception is OperationCanceledException && stoppingToken.IsCancellationRequested);
 
     private async Task TrustCertificateAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
     {
         PresentedCertificatePin = null;
-        if (StringValues.NullIfBlank(CertificatePin) is not null || connection.PresentedCertificate is not { } presented)
+        if (StringValues.NullIfBlank(CertificatePin) is not null)
+        {
+            await RetryUnsavedCertificateAsync(cancellationToken);
+            return;
+        }
+
+        if (connection.PresentedCertificate is not { } presented)
         {
             return;
         }
@@ -253,6 +259,22 @@ public partial class FritzBox
         if (!isWritten)
         {
             _logger.LogWarning("The trusted certificate key of FRITZ!Box {HostAddress} could not be saved.", HostAddress);
+        }
+    }
+
+    /// <summary>
+    /// Saves a key trusted earlier that could not be saved then, so the warning ends once a writer stores it.
+    /// </summary>
+    private async Task RetryUnsavedCertificateAsync(CancellationToken cancellationToken)
+    {
+        if (_unsavedCertificatePin is null)
+        {
+            return;
+        }
+
+        if (_unsavedCertificatePin != CertificatePin || await TryWriteConfigurationAsync(cancellationToken))
+        {
+            _unsavedCertificatePin = null;
         }
     }
 
@@ -269,7 +291,7 @@ public partial class FritzBox
         {
             return await writer.WriteConfigurationAsync(this, cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(exception, "Writing the configuration of FRITZ!Box {HostAddress} failed.", HostAddress);
             return false;

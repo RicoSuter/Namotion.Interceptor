@@ -68,6 +68,20 @@ public class FritzBoxPollerTests
         Assert.Contains("FRITZ!OS", exception.Message);
     }
 
+    [Theory]
+    [InlineData(401)]
+    [InlineData(403)]
+    public async Task WhenTheHostListIsRefusedAfterLogin_ThenThePollFailsAsALoginFailure(int statusCode)
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.HttpErrors["X_AVM-DE_GetHostListPath"] = statusCode;
+        using var connection = await OpenAsync(fake);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<FritzBoxLoginException>(() => FritzBoxPoller.PollAsync(connection, CancellationToken.None));
+    }
+
     [Fact]
     public async Task WhenTheHostListPathIsMissing_ThenAnInvalidDataExceptionIsThrown()
     {

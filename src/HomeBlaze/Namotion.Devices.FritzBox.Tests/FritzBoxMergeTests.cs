@@ -226,6 +226,104 @@ public class FritzBoxMergeTests
         Assert.Equal("FRITZ!Box 7590", router.Model);
     }
 
+    [Fact]
+    public void WhenAWlanIsNewAndACommandRanDuringThePoll_ThenItsSwitchStateIsStillWritten()
+    {
+        // Arrange
+        var router = CreateRouter();
+        var generationAtPollStart = router.WlanCommandGeneration;
+        router.AdvanceWlanCommandGeneration();
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(wlans: Snapshots.Wlans(isGuestEnabled: true)), generationAtPollStart);
+
+        // Assert
+        Assert.True(router.Wlans[FritzBoxWlanRoles.Guest].IsOn);
+        Assert.True(router.Wlans[FritzBoxWlanRoles.Band24].IsOn);
+    }
+
+    [Fact]
+    public void WhenAClientBecomesPresent_ThenThePresentCountChangesWithoutReplacingTheClients()
+    {
+        // Arrange
+        var router = CreateRouter();
+        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        var clients = router.Clients;
+        var hosts = Snapshots.Hosts().Select(host => host.MacAddress == Snapshots.Phone ? host with { IsActive = true } : host).ToList();
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+
+        // Assert
+        Assert.Same(clients, router.Clients);
+        Assert.Equal(3, router.PresentClientCount);
+        Assert.Equal(3, router.ClientCount);
+    }
+
+    [Fact]
+    public void WhenOnlyAnInterfaceAddressOfAnAccessPointIsListed_ThenItsIpAddressIsFound()
+    {
+        // Arrange
+        var router = CreateRouter();
+        var hosts = Snapshots.Hosts()
+            .Select(host => host.MacAddress == Snapshots.RepeaterAccessPoint ? host with { MacAddress = "BB:BB:BB:00:00:12", IpAddress = "192.168.178.31" } : host)
+            .ToList();
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+
+        // Assert
+        Assert.Equal("192.168.178.31", router.AccessPoints[Snapshots.RepeaterAccessPoint].IpAddress);
+        Assert.False(router.Clients.ContainsKey("BB:BB:BB:00:00:12"));
+    }
+
+    [Fact]
+    public void WhenAnAccessPointDisappears_ThenItIsRemovedAndDetached()
+    {
+        // Arrange
+        var router = CreateRouter();
+        var mesh = Snapshots.Mesh();
+        router.ApplySnapshot(Snapshots.Create(mesh: mesh), router.WlanCommandGeneration);
+        var repeater = router.AccessPoints[Snapshots.RepeaterAccessPoint];
+        var laptop = router.Clients[Snapshots.Laptop];
+        var reducedMesh = mesh with
+        {
+            AccessPoints = mesh.AccessPoints.Where(accessPoint => accessPoint.MacAddress != Snapshots.RepeaterAccessPoint).ToList(),
+            ClientPositions = mesh.ClientPositions.Where(position => position.Key != Snapshots.Laptop).ToDictionary()
+        };
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(mesh: reducedMesh), router.WlanCommandGeneration);
+
+        // Assert
+        Assert.False(router.AccessPoints.ContainsKey(Snapshots.RepeaterAccessPoint));
+        Assert.Null(repeater.TryGetRegisteredSubject());
+        Assert.Same(laptop, router.Clients[Snapshots.Laptop]);
+        Assert.Single(laptop.TryGetRegisteredSubject()!.Parents);
+    }
+
+    [Fact]
+    public void WhenTheSerialNumberChanges_ThenThePreviousSubjectsAreDetachedAndThePresentedKeyIsCleared()
+    {
+        // Arrange
+        var router = CreateRouter();
+        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.PresentedCertificatePin = "presented";
+        var laptop = router.Clients[Snapshots.Laptop];
+        var repeater = router.AccessPoints[Snapshots.RepeaterAccessPoint];
+        var guest = router.Wlans[FritzBoxWlanRoles.Guest];
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(router: Snapshots.Router("SERIAL0002")), router.WlanCommandGeneration);
+
+        // Assert
+        Assert.Null(laptop.TryGetRegisteredSubject());
+        Assert.Null(repeater.TryGetRegisteredSubject());
+        Assert.Null(guest.TryGetRegisteredSubject());
+        Assert.Null(router.PresentedCertificatePin);
+        Assert.NotSame(guest, router.Wlans[FritzBoxWlanRoles.Guest]);
+    }
+
     private static FritzBox CreateRouter()
     {
         var router = new FritzBox(NullLogger<FritzBox>.Instance);

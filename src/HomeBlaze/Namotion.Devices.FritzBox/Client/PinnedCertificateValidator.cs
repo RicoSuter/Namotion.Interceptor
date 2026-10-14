@@ -7,9 +7,10 @@ namespace Namotion.Devices.FritzBox.Client;
 /// Accepts the router's certificate by its public key pin instead of its chain, and records each certificate the
 /// router presents. Thread-safe.
 /// </summary>
-/// <param name="pin">The pinned key, or null to accept any key.</param>
+/// <param name="pin">The pinned key, or null to trust the key of the first handshake and only that key after it.</param>
 internal sealed class PinnedCertificateValidator(string? pin)
 {
+    private string? _pin = pin;
     private CertificateInfo? _presented;
     private volatile bool _isRejected;
 
@@ -36,7 +37,9 @@ internal sealed class PinnedCertificateValidator(string? pin)
 
         var presented = CertificateInfo.Create(certificate);
         Volatile.Write(ref _presented, presented);
-        var isAccepted = pin is null || string.Equals(presented.Pin, pin, StringComparison.Ordinal);
+        // Without a configured pin the first key wins, so a later handshake of the same connection cannot switch it.
+        var expectedPin = Interlocked.CompareExchange(ref _pin, presented.Pin, null) ?? presented.Pin;
+        var isAccepted = string.Equals(presented.Pin, expectedPin, StringComparison.Ordinal);
         if (!isAccepted)
         {
             _isRejected = true;

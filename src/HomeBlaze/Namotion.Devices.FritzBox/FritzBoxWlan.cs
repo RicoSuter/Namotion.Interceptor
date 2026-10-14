@@ -61,14 +61,12 @@ public partial class FritzBoxWlan : ISwitchState, ITitleProvider
         return Ssid is null ? $"WLAN {Role}" : $"WLAN {Role} {Ssid}";
     }
 
-    internal void Update(WlanInfo info, bool isSwitchStateCurrent)
+    /// <summary>
+    /// Writes every value but <see cref="IsOn"/>, which the router writes only while no later command made it stale.
+    /// </summary>
+    internal void Update(WlanInfo info)
     {
         ServiceType = info.ServiceType;
-        if (isSwitchStateCurrent)
-        {
-            IsOn = info.IsEnabled;
-        }
-
         Ssid = info.Ssid;
         Band = info.Band;
         Channel = info.Channel;

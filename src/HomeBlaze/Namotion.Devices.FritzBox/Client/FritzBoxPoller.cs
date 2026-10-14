@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using Namotion.Devices.FritzBox.Model;
 using Namotion.Devices.FritzBox.Parsing;
@@ -16,7 +17,8 @@ internal static class FritzBoxPoller
 
     /// <summary>
     /// Reads one snapshot. Optional values the router does not offer are null. Throws
-    /// <see cref="FritzBoxFirmwareException"/> when the router offers no host list, and any transport failure as is.
+    /// <see cref="FritzBoxFirmwareException"/> when the router offers no host list, <see cref="FritzBoxLoginException"/>
+    /// when it refuses the host list to this user, and any transport failure as is.
     /// </summary>
     internal static async Task<FritzBoxSnapshot> PollAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
     {
@@ -206,6 +208,11 @@ internal static class FritzBoxPoller
         {
             throw new FritzBoxFirmwareException(
                 "The FRITZ!Box does not offer its host list (X_AVM-DE_GetHostListPath). Update FRITZ!OS.", exception);
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            // The required list refused after a successful login means the password or permission changed since.
+            throw new FritzBoxLoginException(exception);
         }
 
         var path = answer.GetString("NewX_AVM-DE_HostListPath")

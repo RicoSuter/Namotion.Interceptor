@@ -244,28 +244,36 @@ public partial class FritzBox
         var isChanged = !HasSameKeys(current, infos);
         var next = isChanged ? new Dictionary<string, FritzBoxWlan>(infos.Count, StringComparer.Ordinal) : current;
 
-        // A command raises the generation under this lock, so it cannot complete between the check and the write
-        // and have its new switch state overwritten by this older poll.
-        lock (_wlanSwitchStateLock)
+        foreach (var (role, info) in infos)
         {
-            var isSwitchStateCurrent = wlanCommandGeneration == WlanCommandGeneration;
-            foreach (var (role, info) in infos)
+            var isNew = !current.TryGetValue(role, out var wlan);
+            wlan ??= role == FritzBoxWlanRoles.Guest
+                ? new FritzBoxGuestWlan(this, info.ServiceType)
+                : new FritzBoxWlan(role, info.ServiceType);
+            wlan.Update(info);
+            ApplySwitchState(wlan, info.IsEnabled, isNew, wlanCommandGeneration);
+            if (isChanged)
             {
-                var isNew = !current.TryGetValue(role, out var wlan);
-                wlan ??= role == FritzBoxWlanRoles.Guest
-                    ? new FritzBoxGuestWlan(this, info.ServiceType)
-                    : new FritzBoxWlan(role, info.ServiceType);
-                wlan.Update(info, isSwitchStateCurrent || isNew);
-                if (isChanged)
-                {
-                    next[role] = wlan;
-                }
+                next[role] = wlan;
             }
         }
 
         if (isChanged)
         {
             Wlans = next;
+        }
+    }
+
+    private void ApplySwitchState(FritzBoxWlan wlan, bool? isEnabled, bool isNew, long wlanCommandGeneration)
+    {
+        // A command raises the generation under this lock, so it cannot complete between the check and the write
+        // and have its new switch state overwritten by this older poll.
+        lock (_wlanSwitchStateLock)
+        {
+            if (isNew || wlanCommandGeneration == WlanCommandGeneration)
+            {
+                wlan.IsOn = isEnabled;
+            }
         }
     }
 
