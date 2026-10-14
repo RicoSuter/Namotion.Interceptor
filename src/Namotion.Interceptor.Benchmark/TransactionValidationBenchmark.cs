@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,7 +34,8 @@ public class TransactionValidationBenchmark
             .WithFullPropertyTracking()
             .WithRegistry()
             .WithTransactions()
-            .WithDataAnnotationValidation();
+            .WithDataAnnotationValidation()
+            .WithService<IPropertyValidator>(() => new NonNegativeDecimalValidator());
 
         _car = new Car(_context);
         _tires = Enumerable.Range(0, PropertyCount).Select(_ => new Tire()).ToArray();
@@ -61,5 +64,19 @@ public class TransactionValidationBenchmark
         }
 
         await transaction.CommitAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Rejects negative decimals. The benchmark only writes positive values, so it always passes but still reads
+    /// the value on every validation.
+    /// </summary>
+    private sealed class NonNegativeDecimalValidator : IPropertyValidator
+    {
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            return context.Value is decimal value && value < 0
+                ? [new ValidationResult($"{context.Property.Name} must not be negative.")]
+                : [];
+        }
     }
 }
