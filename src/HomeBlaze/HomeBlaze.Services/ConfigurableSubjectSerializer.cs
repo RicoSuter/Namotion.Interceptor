@@ -57,6 +57,13 @@ public class ConfigurableSubjectSerializer
     private JsonSerializerOptions GetOptions(ConfigurationNaming naming) =>
         naming == ConfigurationNaming.JsonProperty ? _jsonPropertyOptions : _cSharpPropertyOptions;
 
+    private static IConfigurable GetConfigurable(IInterceptorSubject subject)
+    {
+        return subject as IConfigurable ?? throw new ArgumentException(
+            $"Subject must implement IConfigurable. Type: {subject.GetType().FullName}",
+            nameof(subject));
+    }
+
     // The configuration properties of the subject itself are matched by this name and not by the options.
     private static string GetJsonName(string propertyName, ConfigurationNaming naming) =>
         naming == ConfigurationNaming.JsonProperty ? JsonNamingPolicy.CamelCase.ConvertName(propertyName) : propertyName;
@@ -66,14 +73,7 @@ public class ConfigurableSubjectSerializer
     /// </summary>
     public string Serialize(IInterceptorSubject subject, ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
     {
-        if (subject is not IConfigurable configurableSubject)
-        {
-            throw new ArgumentException(
-                $"Subject must implement IConfigurable. Type: {subject.GetType().FullName}",
-                nameof(subject));
-        }
-
-        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurable), GetOptions(naming));
+        return JsonSerializer.Serialize(GetConfigurable(subject), typeof(IConfigurable), GetOptions(naming));
     }
 
     /// <summary>
@@ -92,12 +92,7 @@ public class ConfigurableSubjectSerializer
         Func<string, bool> isExcluded,
         ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
     {
-        if (subject is not IConfigurable)
-        {
-            throw new ArgumentException(
-                $"Subject must implement IConfigurable. Type: {subject.GetType().FullName}",
-                nameof(subject));
-        }
+        _ = GetConfigurable(subject);
 
         var options = GetOptions(naming);
         var type = subject.GetType();

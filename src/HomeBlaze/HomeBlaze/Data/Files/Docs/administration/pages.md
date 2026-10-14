@@ -485,7 +485,7 @@ What to write:
 
 - **Layouts in the short form**: Write a `FlowLayout`, a `TabLayout`, a `GridLayout`, a `CanvasLayout` and the cards and widgets in them without closing lines.
 - **A closing line after text**: Write the closing line whenever a block contains text and something follows that belongs further out, like the text of the page after a card.
-- **Every closing line stays valid**: A page with all its closing lines means the same as the page in the short form. The "Create" button of the page editor writes a closing line for every block that it creates. A `Cell` or a `Node` that is added to a `GridLayout` or a `CanvasLayout` while the page is in edit mode is written like the cells or nodes beside it, without a closing line where they have none.
+- **Every closing line stays valid**: A page with all its closing lines means the same as the page in the short form. The "Create" button of the page editor writes a closing line for every block that it creates. A cell or a node that is added in edit mode is written like those beside it, see [Editing in the Page Editor](#editing-in-the-page-editor).
 
 #### What a Wrong Number of Colons Does
 
@@ -757,7 +757,7 @@ Line 4: The slot 'Footer' holds content only and takes no arguments, name or jso
 
 A list, an object, a subject or a text with a line break does not fit on the head line. Write such configuration as a JSON object in a fenced code block with the language `json` that is the first thing inside the block. This page calls it the `json` block.
 
-On a page, no widget that ships with HomeBlaze takes a list, an object or a subject as configuration, so the only configuration of these widgets that needs a `json` block is a text with a line break. The `json` block is there for every other type with such values, for example a device whose configuration has a list. The cells of a `GridLayout` and the nodes of a `CanvasLayout` are not written here but as blocks, see [GridLayout](page-widgets.md#gridlayout) and [CanvasLayout](page-widgets.md#canvaslayout).
+On a page, no widget that ships with HomeBlaze takes a list, an object or a subject as configuration, so the only configuration of these widgets that needs a `json` block is a text with a line break. The `json` block is there for every other type with such values, for example a device whose configuration has a list.
 
 The `Subtitle` of a `Card` is text. Here it has a line break, which an argument cannot hold:
 
@@ -769,7 +769,7 @@ The `Subtitle` of a `Card` is text. Here it has a line break, which an argument 
 ::
 ~~~~
 
-The `json` block itself is not shown. The sample shows how such a value is written and not how it looks: a card shows its subtitle as running text, so the line break is a space there.
+The `json` block itself is not shown, and a card shows its subtitle as running text, so the line break is a space there.
 
 - **Where**: The `json` block is the first thing inside its block. Empty lines before it do not count. It is written with three or more backticks or tildes and the language `json` in lower case. A fenced code block with `json` anywhere else is ordinary content and is shown as code.
 - **Which blocks**: A widget block can have a `json` block, and so can a slot block that creates a subject, like a `Tab`.
@@ -903,7 +903,7 @@ A block that cannot be shown is replaced by a red box with the line number of th
 
 - **One box per block**: The box replaces the block with everything in it. The blocks inside it are not created, and they are created again once the error is fixed.
 - **A block without a closing line**: For such a block, "everything in it" is everything up to the line that ends it: the next head line with as many colons or fewer, the closing line of a block around it, or the end of the page.
-- **Errors in slots**: An error in a slot block, such as a `Tab`, a `Footer` or an `Item`, is shown in a box that names the line of the slot block. The box replaces the whole widget around it. One case differs: when the colon lines or the head line of the slot block are wrong and the widget has a default slot that takes loose content, like a `Card`, the widget is still shown and the box stands in its content where the block was. A widget without a place for loose content has no place for the box, so it is replaced, with one box for each such block in it. That is a `FlowLayout`, a `TabLayout`, a `GridLayout`, a `CanvasLayout`, and also a `Card` whose body stands in a `Content` block.
+- **Errors in slots**: An error in a slot block, such as a `Tab`, a `Footer` or an `Item`, is shown in a box that names the line of the slot block. The box replaces the whole widget around it. One case differs: when the colon lines or the head line of the slot block are wrong and the widget has a default slot that takes loose content, like a `Card`, the widget is still shown and the box stands in its content where the block was. A widget without a place for loose content has no place for the box, so it is replaced, with one box for each such block in it. That is every widget without a default slot, like the layouts, and also a `Card` whose body stands in a `Content` block.
 - **Failures of a subject**: When the subject of a block fails while it is created or configured, the box shows the message of that failure, and the log of HomeBlaze has the details.
 
 [Page Errors](page-errors.md) lists every message with its cause and its fix.
@@ -931,8 +931,7 @@ The page knows a block by its key. The key is the `#name` of the block. A block 
 - **Removed arguments**: When an argument, or a name at the top level of the `json` block, is removed, the subject is created again, so that the property gets its default value like after a restart.
 - **Nested blocks**: A subject inside another block is kept only when the block around it is kept. A named motor inside a card without a name is created again when the card is.
 - **Subjects in the `json` block**: A subject nested in a value of the `json` block is created again on every reload of the page. The block itself is kept, but its configuration is applied again, and that creates the subjects in it anew.
-- **Tabs**: A `Tab` with a name keeps itself and everything inside it when tabs are added, removed or moved. Tabs without a name are matched by their position among the tabs without a name. Adding, renaming or removing the name of a tab creates the tab again once.
-- **Cells and nodes**: A `Cell` of a `GridLayout` and a `Node` of a `CanvasLayout` behave like a `Tab`: with a name they keep themselves and everything inside them, without a name they are matched by their position among those without a name.
+- **Tabs, cells and nodes**: A `Tab`, a `Cell` of a `GridLayout` or a `Node` of a `CanvasLayout` with a name keeps itself and everything inside it when others are added, removed or moved. Those without a name are matched by their position among those without a name. Adding, renaming or removing the name creates it again once.
 - **Flow items**: An `Item` cannot have a name, so items are matched by their position. A subject inside an item is created again when an item is added or removed before it, also when the subject has a name.
 - **Errors**: Everything inside a block that was shown as an error is created again once the error is fixed.
 
@@ -972,7 +971,7 @@ While the page is in edit mode, which is with "Split" or "Inline" in the menu at
 - **Add**: The click opens the dialog "Create subject". The new cell or node is a `Cell` or `Node` block after the last one of its layout, with the widget that you chose as a block inside it. It is written like the block before it: with as many colons, and with a closing line only when that block has one. In a layout without a cell or a node, the new block has one colon more than the layout. It then gets a closing line when every widget block and slot block of the page has one, and none otherwise.
 - **Edit and move**: Editing a cell or a node, or moving a node, writes the head line of its block again, with all its arguments. A node that had only `X` and `Y` has `Width` and `Height` on its head line afterwards. The content of the block stays as it is.
 - **Remove**: Removing a cell or a node removes its block with everything in it. Where the text before the block and the text after it would then stand directly below each other, one empty line stays between them.
-- **A change that the page cannot keep**: When the page cannot keep a change, nothing is written, and the notification "Configuration applied but not saved. It will be lost on restart." appears. The layout shows the change, but the text of the page does not have it, so it is lost when the page is read again, which every save of its text does, and at the latest when HomeBlaze restarts. Examples of when this happens: adding or removing the block would change another block or other text of the page; the cells or nodes were put into another order outside of the page, for example by a method or another tool; or the page is being read again at that moment, so a cell or a node cannot be added or removed until it has been read again. The order of cells and nodes is the order of their blocks, so change it in the text of the page.
+- **A change that the page cannot keep**: When the page cannot keep a change, nothing is written, and the notification "Configuration applied but not saved. It will be lost on restart." appears. The layout shows the change until the page is read again, which every save of its text and a restart do. Examples of when this happens: adding or removing the block would change another block or other text of the page; the cells or nodes were put into another order outside of the page, for example by a method or another tool; or the page is being read again at that moment. The order of cells and nodes is the order of their blocks, so change it in the text of the page.
 
 Use these buttons with "Inline". In "Split", the editor next to the page does not show what the buttons wrote until the page is opened again, so do not save the text of the editor after using them, because it would write its older text over theirs.
 
@@ -1028,10 +1027,8 @@ After:
 - Every entry of `Cells` becomes one `Cell` block inside the layout, and every entry of `Nodes` one `Node` block, in the order of the list.
 - The numbers of the entry become the arguments of that block: `Row`, `Column`, `RowSpan` and `ColumnSpan` for a cell, and `X`, `Y`, `Width` and `Height` for a node.
 - The `Child` of the entry becomes a block inside the `Cell` or `Node` block, with one colon more. The value of its `$type` becomes the type name, its single values become arguments, and every other value goes into a `json` block of that block. An entry without a `Child` becomes a block without content.
-- `Child` is not written on a page any more, because the content of the block is the child. As an argument or in the `json` block of a `Cell` or a `Node` it is an error box as well.
-- A cell and a node take any page content now, so text, expressions and several blocks can stand where one subject stood.
 - The earlier editors wrote `"Cells": []` or `"Nodes": []` into the `json` block of every layout that they saved, and an empty list is an error box as well. Remove it, together with the `json` block when nothing else is in it.
-- A layout that has a `*.json` configuration file of its own does not change. Its file keeps the list `cells` or `nodes`, with one subject as `child` in each entry.
+- A layout in a `*.json` configuration file of its own does not change.
 
 ---
 

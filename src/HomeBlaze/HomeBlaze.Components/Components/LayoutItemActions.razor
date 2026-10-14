@@ -14,10 +14,9 @@
 
 <style>
     /*
-     * The buttons of the item itself. They are at the bottom right: what the item shows starts at the top left,
-     * and it has its own edit button at the top right. The place is relative to the nearest positioned element,
-     * which the layout makes the item. The content of an item takes no pointer events while the layout is edited,
-     * and the buttons are inside it on a canvas.
+     * Bottom right, because the widget in the item has its edit button at the top right. Positioned against the
+     * item, which the layout makes position: relative. pointer-events: auto because the content of an edited
+     * layout takes none, and the buttons of a nested layout are inside such content.
      */
     .layout-item-actions {
         position: absolute;

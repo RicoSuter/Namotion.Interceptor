@@ -54,7 +54,7 @@ A type with a list or a subject in its configuration, for example a device, take
 
 ## Cells of a grid
 
-The cells of a `GridLayout` are no configuration and do not stand in a `json` block. Each cell is a `Cell` block inside the grid: its arguments say where the cell is, and its content is what the cell shows. The grid below has one row and two columns. The first cell shows the value motor from the top of this page with a `Widget` block, and the second cell holds text with expressions.
+Each cell of a `GridLayout` is a `Cell` block inside the grid: its arguments say where the cell is, and its content is what the cell shows. The grid below has one row and two columns. The first cell shows the value motor from the top of this page with a `Widget` block, and the second cell holds text with expressions.
 
 ~~~~markdown
 :: HomeBlaze.Components.GridLayout#cellgrid Rows=1 Columns=2
@@ -72,7 +72,7 @@ The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ va
 The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ valuemotor/CurrentSpeed }} RPM.
 ::
 
-The second cell has the name `speed`. A cell with a name keeps itself and everything in it when cells are added or removed before it. The nodes of a `CanvasLayout` are written the same way, as `Node` blocks with `X`, `Y`, `Width` and `Height`. With "Split" or "Inline" in the menu with the eye icon, a grid shows a plus in every free place, which adds a cell there, and each cell has buttons to edit and remove it. All of them write these blocks for you. Use them with "Inline": in "Split", the editor next to the page does not show what they wrote until the page is opened again, so do not save the text of the editor after using them.
+The second cell has the name `speed`. A cell with a name keeps itself and everything in it when cells are added or removed before it. The nodes of a `CanvasLayout` are written the same way, as `Node` blocks with `X`, `Y`, `Width` and `Height`. In edit mode the grid has buttons that write these blocks for you, see [Editing in the Page Editor](../Docs/administration/pages.md#editing-in-the-page-editor).
 
 ## Style blocks
 

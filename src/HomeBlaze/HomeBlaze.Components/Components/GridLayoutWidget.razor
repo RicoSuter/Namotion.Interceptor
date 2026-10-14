@@ -30,23 +30,20 @@
     }
 
     @* Render cells *@
-    @if (Grid != null)
+    @foreach (var cell in Cells)
     {
-        foreach (var cell in Grid.Cells ?? [])
-        {
-            <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
-                @if (IsEditing)
-                {
-                    <LayoutItemActions EditTitle="Edit Cell"
-                                       OnEdit="() => EditCell(cell)"
-                                       OnDelete="() => DeleteCell(cell)" />
-                }
-                <div class="grid-cell-content">
-                    <SubjectComponent Subject="@cell.Child"
-                                      Type="SubjectComponentType.Widget" />
-                </div>
+        <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
+            @if (IsEditing)
+            {
+                <LayoutItemActions EditTitle="Edit Cell"
+                                   OnEdit="() => EditCell(cell)"
+                                   OnDelete="() => DeleteCell(cell)" />
+            }
+            <div class="grid-cell-content">
+                <SubjectComponent Subject="@cell.Child"
+                                  Type="SubjectComponentType.Widget" />
             </div>
-        }
+        </div>
     }
 
     @* Render empty cells for adding in edit mode *@
@@ -124,6 +121,8 @@
 
     private GridLayout? Grid => Subject as GridLayout;
 
+    private GridCell[] Cells => Grid?.Cells ?? [];
+
     private string GetCellStyle(GridCell cell)
     {
         var row = cell.Row.HasValue ? $"grid-row: {cell.Row.Value + 1} / span {cell.RowSpan}" : null;
@@ -145,7 +144,7 @@
         var occupied = new HashSet<(int, int)>();
 
         // Mark all occupied cells (accounting for spans)
-        foreach (var cell in Grid.Cells ?? [])
+        foreach (var cell in Cells)
         {
             if (!cell.Row.HasValue || !cell.Column.HasValue) continue;
 
@@ -182,8 +181,7 @@
                 cell.Column = column;
                 cell.Child = subject;
 
-                // Replace the array to trigger the property setter and parent tracking
-                Grid.Cells = [.. Grid.Cells ?? [], cell];
+                Grid.Cells = [.. Cells, cell];
             }
         });
     }
@@ -211,8 +209,7 @@
 
         if (confirmed == true)
         {
-            // Replace the array to trigger the property setter and parent tracking
-            Grid.Cells = (Grid.Cells ?? []).Where(existing => existing != cell).ToArray();
+            Grid.Cells = Cells.Where(existing => existing != cell).ToArray();
 
             await RootManager.WriteConfigurationOrWarnAsync(Grid, Snackbar, CancellationToken.None);
         }

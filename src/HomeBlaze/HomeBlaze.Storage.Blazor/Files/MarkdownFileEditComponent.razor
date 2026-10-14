@@ -211,8 +211,8 @@ else
             return;
         }
 
-        // Only the head line and the json block of the block, which is all that the dialogs of the widgets change
-        // today. A dialog that added or removed slot blocks would need the text of the saved page for the whole block.
+        // Writes the head line and the json block only. A dialog that added or removed slot values would need the
+        // write-back of the saved page instead.
         _currentContent = MarkdownBlockWriter.WriteConfiguration(
             _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject));
 

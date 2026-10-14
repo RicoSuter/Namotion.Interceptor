@@ -1249,7 +1249,7 @@ What a page author cannot do with each kind:
 - **Content slots take no arguments**: A block for a slot of the type `IInterceptorSubject` takes no arguments, no `#name` and no `json` block. The page shows an error for them.
 - **Typed slots are configured like widget blocks**: A block for a slot with a class of your own takes the `[Configuration]` properties of that class as arguments and in a `json` block, with the same checks as a widget block.
 - **One block for a single value**: A second block for a slot that is no array is an error on the page.
-- **A slot is not set as configuration**: The property of a slot cannot be set by an argument or in the `json` block of a page. The page shows an error that says how the slot is filled. This holds for a property that is configuration too, like `Cells` of `GridLayout`: it is configuration in a `*.json` file and a slot on a page.
+- **A slot is not set as configuration**: The property of a slot cannot be set by an argument or in the `json` block of a page. The page shows an error that says how the slot is filled.
 
 **An editor for a list of typed values.** To add or remove a value, the editor of a widget replaces the array with a new one and saves the owner, as the editors of `GridLayout` and `CanvasLayout` do with `RootManager.WriteConfigurationOrWarnAsync`. To change a value, it saves that value, which writes the head line and the `json` block of its block. A new value is written as a block after the last block of the slot. The order of the values is never written, because the text decides it: a save with the values in another order than their blocks is refused, and so is a save with one value twice.
 

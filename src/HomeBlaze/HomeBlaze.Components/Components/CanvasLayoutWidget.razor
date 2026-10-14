@@ -30,37 +30,34 @@
         <NavigationSettings DisableZooming="@(!IsEditing)" DisablePanning="@(!IsEditing)" OriginChanged="@(_ => _ignoreNextClick = true)" />
         <Links />
         <Nodes OnModified="OnNodeModified">
-            @if (Canvas != null)
+            @foreach (var node in Nodes)
             {
-                @foreach (var node in Canvas.Nodes ?? [])
-                {
-                    <Node @key="node"
-                          Id="@GetNodeId(node)"
-                          X="@((double)node.X)"
-                          Y="@((double)node.Y)"
-                          Movable="@IsEditing"
-                          XChanged="@(x => OnNodePositionChanged(node, x, node.Y))"
-                          YChanged="@(y => OnNodePositionChanged(node, node.X, y))"
-                          ContentStyle="@($"width: {node.Width}px; height: {node.Height}px;")">
-                        <div class="canvas-node @(IsEditing ? "editing" : "")"
-                             @onwheel:stopPropagation="@(!IsEditing)"
-                             @onmousedown:stopPropagation="@(!IsEditing)"
-                             @onmouseup:stopPropagation="@(!IsEditing)"
-                             @onmousemove:stopPropagation="@(!IsEditing)"
-                             @onkeydown:stopPropagation="@(!IsEditing)">
-                            <div class="canvas-node-content">
-                                @if (IsEditing)
-                                {
-                                    <LayoutItemActions EditTitle="Edit Node"
-                                                       OnEdit="() => EditNode(node)"
-                                                       OnDelete="() => DeleteNode(node)" />
-                                }
-                                <SubjectComponent Subject="@node.Child"
-                                                  Type="SubjectComponentType.Widget" />
-                            </div>
+                <Node @key="node"
+                      Id="@GetNodeId(node)"
+                      X="@((double)node.X)"
+                      Y="@((double)node.Y)"
+                      Movable="@IsEditing"
+                      XChanged="@(x => OnNodePositionChanged(node, x, node.Y))"
+                      YChanged="@(y => OnNodePositionChanged(node, node.X, y))"
+                      ContentStyle="@($"width: {node.Width}px; height: {node.Height}px;")">
+                    <div class="canvas-node @(IsEditing ? "editing" : "")"
+                         @onwheel:stopPropagation="@(!IsEditing)"
+                         @onmousedown:stopPropagation="@(!IsEditing)"
+                         @onmouseup:stopPropagation="@(!IsEditing)"
+                         @onmousemove:stopPropagation="@(!IsEditing)"
+                         @onkeydown:stopPropagation="@(!IsEditing)">
+                        @if (IsEditing)
+                        {
+                            <LayoutItemActions EditTitle="Edit Node"
+                                               OnEdit="() => EditNode(node)"
+                                               OnDelete="() => DeleteNode(node)" />
+                        }
+                        <div class="canvas-node-content">
+                            <SubjectComponent Subject="@node.Child"
+                                              Type="SubjectComponentType.Widget" />
                         </div>
-                    </Node>
-                }
+                    </div>
+                </Node>
             }
         </Nodes>
     </Diagram>
@@ -118,6 +115,7 @@
         overflow: hidden;
         width: 100%;
         height: 100%;
+        position: relative;
     }
 
     /* In edit mode: disable widget interaction, show drag cursor */
@@ -133,7 +131,6 @@
     .canvas-node-content {
         width: 100%;
         height: 100%;
-        position: relative;
     }
 </style>
 
@@ -151,6 +148,8 @@
     public bool IsEditing { get; set; }
 
     private CanvasLayout? Canvas => Subject as CanvasLayout;
+
+    private CanvasNode[] Nodes => Canvas?.Nodes ?? [];
 
     private string GetNodeId(CanvasNode node) => node.GetOrAddSubjectId();
 
@@ -182,16 +181,8 @@
         _ignoreNextClick = true;
 
         // The moved node is saved and not the canvas: on a page a node is a block of its own, and only its
-        // line changes. In a configuration file the node is written with the file that contains it.
-        IInterceptorSubject moved = canvas;
-        foreach (var node in canvas.Nodes ?? [])
-        {
-            if (GetNodeId(node) == modifiedNode.Id)
-            {
-                moved = node;
-                break;
-            }
-        }
+        // line changes.
+        IInterceptorSubject moved = Nodes.FirstOrDefault(node => GetNodeId(node) == modifiedNode.Id) ?? (IInterceptorSubject)canvas;
 
         _ = InvokeAsync(async () =>
         {
@@ -247,8 +238,7 @@
                 node.Y = y;
                 node.Child = subject;
 
-                // Replace the array to trigger the property setter and parent tracking
-                Canvas.Nodes = [.. Canvas.Nodes ?? [], node];
+                Canvas.Nodes = [.. Nodes, node];
             }
         });
     }
@@ -276,8 +266,7 @@
 
         if (confirmed == true)
         {
-            // Replace the array to trigger the property setter and parent tracking
-            Canvas.Nodes = (Canvas.Nodes ?? []).Where(existing => existing != node).ToArray();
+            Canvas.Nodes = Nodes.Where(existing => existing != node).ToArray();
 
             await RootManager.WriteConfigurationOrWarnAsync(Canvas, Snackbar, CancellationToken.None);
         }
