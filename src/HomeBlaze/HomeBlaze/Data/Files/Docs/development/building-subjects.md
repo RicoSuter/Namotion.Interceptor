@@ -1203,6 +1203,7 @@ What a page author cannot do with each kind:
 - **Content slots take no arguments**: A block for a slot of the type `IInterceptorSubject` takes no arguments, no `#name` and no `json` block. The page shows an error for them.
 - **Typed slots are configured like widget blocks**: A block for a slot with a class of your own takes the `[Configuration]` properties of that class as arguments and in a `json` block, with the same checks as a widget block.
 - **One block for a single value**: A second block for a slot that is no array is an error on the page.
+- **A slot is not set as configuration**: The property of a slot cannot be set by an argument or in the `json` block of a page. The page shows an error that names the block to write in its place. This also holds for a property that has `[Configuration]` as well, like `Cells` of `GridLayout`: it is configuration in a `*.json` file and a slot on a page.
 
 #### Rules for a Slot Property
 
@@ -1326,7 +1327,7 @@ What a widget author must know about the life of a subject that a page creates. 
 - **Kept across reloads**: The page is read again with every change of its text. While the block stays, the page keeps the instance and updates it in place: it sets every `[Configuration]` property that the block names again, also when the value did not change, calls `ApplyConfigurationAsync`, and assigns the slots again. Expect all of this to run often.
 - **A new instance**: The page creates a new instance when the name, the position or the type of the block changes, when an argument is removed from the block, and when the block around it gets a new instance. The section "What an Edit of the Page Keeps" of [Markdown Pages](../administration/pages.md#what-an-edit-of-the-page-keeps) has the rules as a page author sees them.
 - **Slot values**: A content slot keeps its value while its block stays, and a list slot gets a new array on every reload. A slot whose block was removed is set to `null`, or to an empty array.
-- **Subjects in the configuration**: A subject that is a value of a `[Configuration]` property, like the child of a grid cell, is created again on every reload, because the configuration is applied again.
+- **Subjects in the configuration**: A subject that the `json` block holds as a value of a `[Configuration]` property is created again on every reload, because the configuration is applied again. A property that is a slot as well, like the `Child` of a grid cell, is filled from the content of its block and follows the rule for slot values.
 - **Release after an error**: The subject of a block that ends as an error box is released again. This also holds for the typed slot values and nested subjects that were created for it. A hosted subject can therefore get `StopAsync` without a preceding `StartAsync`.
 - **Failures are shown**: An exception from the constructor, from a property setter or from `ApplyConfigurationAsync` does not take the page down. The block shows an error box with the message of the exception, and the log has the stack trace.
 - **Never wait for the own page**: A subject must not wait for a write or a reload of its own page from its constructor, from a property setter or from `ApplyConfigurationAsync`. The reloads of one page run one after the other, so such a wait would never end.
