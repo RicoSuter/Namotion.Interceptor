@@ -9,10 +9,14 @@ namespace HomeBlaze.Storage.Pages;
 /// <param name="Page">The page with the new text.</param>
 /// <param name="BlockSubjects">The subject of every block of <paramref name="Page"/> that had one, and of every new block.</param>
 /// <param name="Configurations">The configuration that was written for a subject, in the naming of a page.</param>
+/// <param name="HasInsertedOrRemovedBlocks">
+/// Whether a block was inserted or removed. Otherwise only the head line and the json block of one block changed.
+/// </param>
 internal sealed record MarkdownBlockWrite(
     MarkdownPage Page,
     IReadOnlyDictionary<int, IInterceptorSubject> BlockSubjects,
-    IReadOnlyList<KeyValuePair<IInterceptorSubject, string>> Configurations);
+    IReadOnlyList<KeyValuePair<IInterceptorSubject, string>> Configurations,
+    bool HasInsertedOrRemovedBlocks);
 
 /// <summary>
 /// Writes a block subject back into the text of its page: its configuration, and for every slot that is a
@@ -33,7 +37,7 @@ internal static class MarkdownBlockReconciler
     /// <param name="blockIndex">The index of the block to write, which has a subject.</param>
     /// <param name="serializer">Serializes the configuration.</param>
     /// <param name="refusal">Why nothing can be written, when the result is null.</param>
-    /// <returns>Null when the text cannot be changed without losing content or changing other blocks.</returns>
+    /// <returns>Null when the page cannot keep the change or the change cannot be made without touching other content.</returns>
     public static MarkdownBlockWrite? TryWrite(
         MarkdownPage page,
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
@@ -66,7 +70,7 @@ internal static class MarkdownBlockReconciler
         }
 
         refusal = null;
-        return new MarkdownBlockWrite(state.Page, state.Subjects, state.Configurations);
+        return new MarkdownBlockWrite(state.Page, state.Subjects, state.Configurations, state.HasInsertedOrRemovedBlocks);
     }
 
     // A slot that takes content holds what the page parsed from the text of its block. A subject that was set
@@ -114,6 +118,8 @@ internal static class MarkdownBlockReconciler
         public List<KeyValuePair<IInterceptorSubject, string>> Configurations { get; } = [];
 
         public string? Refusal { get; private set; }
+
+        public bool HasInsertedOrRemovedBlocks { get; private set; }
 
         // The index of the owner stays the same throughout: every change is after its head line.
         public bool TryReconcile(IInterceptorSubject owner, int ownerIndex, SlotDefinition slot)
@@ -300,6 +306,7 @@ internal static class MarkdownBlockReconciler
 
             Subjects = subjects;
             Page = after;
+            HasInsertedOrRemovedBlocks = true;
             return true;
         }
 

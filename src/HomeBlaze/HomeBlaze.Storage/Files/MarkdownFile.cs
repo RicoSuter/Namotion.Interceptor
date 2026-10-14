@@ -36,6 +36,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // reloads the file as part of the write, which would wait for the write-back that waits for the write.
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
 
+    // A reload changes the subjects it reuses before it publishes its snapshot, and it reuses the values of a
+    // slot by their position. Between the two, and after a reload that failed once it had begun, the slot
+    // values of the graph do not belong to the blocks of the snapshot, so a write-back must not insert or
+    // remove a block then. The count tells a write-back that a reload began while it worked.
+    private int _reloadCount;
+    private volatile bool _isGraphAheadOfSnapshot;
+
     // Each access reads the current snapshot. Code that needs two of these together must take
     // _parseResult into a local once and read both from that local.
     private IReadOnlyDictionary<int, IInterceptorSubject> _blockSubjects => _parseResult.BlockSubjects;
@@ -121,6 +128,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             await reading.WithStorageTimeoutAsync("reading", FullPath, timeProvider, cancellationToken);
             var content = await reading;
             var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
+
+            // The flag before the count: a write-back reads the count first, and one that reads the count of
+            // this reload must find the flag set as well, or it would take this reload for one that is over.
+            _isGraphAheadOfSnapshot = true;
+            Interlocked.Increment(ref _reloadCount);
             var result = await _parser.ParseAsync(content, this, Children, cancellationToken);
 
             // The page itself is assigned only after the parse succeeded, so a failed reload leaves its content,
@@ -131,6 +143,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             // the derived values again that looked a name up (see TryGetNamedSubject), and they must find
             // the new names then.
             _parseResult = result;
+            _isGraphAheadOfSnapshot = false;
             Content = content;
             Frontmatter = frontmatter;
 
@@ -188,13 +201,19 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <remarks>
     /// Writes the configuration of the block that contains the subject. For every slot of that block subject that
     /// is a list of subjects of a type, a value without a block gets a new block and a block whose value is gone
-    /// is removed with its content. Returns false, and writes nothing, when the page has no block for the subject
-    /// or the text cannot be changed without losing content.
+    /// is removed with its content. Returns false, and writes nothing, when the page has no block for the subject,
+    /// when the page cannot keep the change or the change cannot be made without touching other content, or when
+    /// blocks would be inserted or removed while the page is read again.
     /// </remarks>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
+        // Before the snapshot, see _reloadCount: a reload that began earlier and is not over is seen by the flag,
+        // and one that begins later by the count.
+        var reloadCount = Volatile.Read(ref _reloadCount);
+        var wasGraphAhead = _isGraphAheadOfSnapshot;
+
         var snapshot = _parseResult;
         if (snapshot.Page is not { } page ||
             FindBlock(snapshot.BlockSubjects, subject) is not (var blockIndex, _))
@@ -208,6 +227,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         if (write is null)
         {
             _parser.LogRefusedWrite(FullPath, refusal!);
+            return false;
+        }
+
+        // After the graph was read and before anything is published: the blocks were compared with slot values
+        // that a reload may have changed since the snapshot was parsed.
+        if (write.HasInsertedOrRemovedBlocks &&
+            (wasGraphAhead || _isGraphAheadOfSnapshot || Volatile.Read(ref _reloadCount) != reloadCount))
+        {
+            _parser.LogRefusedWrite(FullPath, "Blocks cannot be inserted or removed while the page is read again.");
             return false;
         }
 

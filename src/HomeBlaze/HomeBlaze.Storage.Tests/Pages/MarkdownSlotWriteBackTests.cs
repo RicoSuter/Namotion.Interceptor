@@ -508,6 +508,91 @@ public class MarkdownSlotWriteBackTests
         Assert.Equal(expected.Replace("\n", "\r\n"), written);
     }
 
+    [Fact]
+    public async Task WhenOwnerIsSavedWhileAReloadHasDroppedAValue_ThenNoBlockIsRemoved()
+    {
+        // Arrange: the file loses its first tile from outside. The reload keeps the first instance for the text
+        // of the second tile and drops the second instance, and it stops in the block after the board.
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var callbackBlock = $"\n:: {Namespace}.TestCallback#callback Label={{0}}\n::\n";
+        var content =
+            $":: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n::: Tile Position=2\ntwo\n:::\n::\n" +
+            string.Format(callbackBlock, "a");
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        var callback = (TestCallback)page.Children["callback"];
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        callback.OnApply = async () =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+        };
+
+        var edited =
+            $":: {BoardType}#board Columns=2\n::: Tile Position=2\ntwo\n:::\n::\n" + string.Format(callbackBlock, "b");
+        var reload = fixture.UpdatePageAsync(page, edited);
+        await entered.Task.WaitAsync(DeadlockTimeout);
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None).WaitAsync(DeadlockTimeout);
+        var written = await fixture.ReadAsync("page.md");
+        release.SetResult();
+        await reload.WaitAsync(DeadlockTimeout);
+
+        // Assert: the text that the edit kept is still in the file.
+        Assert.False(handled);
+        Assert.Equal(edited, written);
+        Assert.Single(board.Tiles);
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsSavedAfterAReloadFailedWhileItAppliedTheText_ThenNoBlockIsRemoved()
+    {
+        // Arrange: the file loses its first tile from outside. The reload applies the board, which drops the
+        // second instance, and is cancelled in the block after it, so the page keeps the snapshot of the old text.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var callbackBlock = $"\n:: {Namespace}.TestCallback#callback Label={{0}}\n::\n";
+        var content =
+            $":: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n::: Tile Position=2\ntwo\n:::\n::\n" +
+            string.Format(callbackBlock, "a");
+        var page = await fixture.AddPageAsync("page.md", content);
+        var board = (TestBoard)page.Children["board"];
+        var callback = (TestCallback)page.Children["callback"];
+        using var cancellation = new CancellationTokenSource();
+        callback.OnApply = () =>
+        {
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellation.Token);
+        };
+
+        var edited =
+            $":: {BoardType}#board Columns=2\n::: Tile Position=2\ntwo\n:::\n::\n" + string.Format(callbackBlock, "b");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => fixture.UpdatePageAsync(page, edited, cancellation.Token));
+        callback.OnApply = null;
+        var tileCountAfterFailedReload = board.Tiles.Length;
+        var contentAfterFailedReload = page.Content;
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+        var written = await fixture.ReadAsync("page.md");
+        await page.OnFileChangedAsync(CancellationToken.None);
+        board.Tiles = [];
+        var handledAfterReload = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert: the graph was ahead of the snapshot, and the next reload that succeeds ends that.
+        Assert.Equal(1, tileCountAfterFailedReload);
+        Assert.Equal(content, contentAfterFailedReload);
+        Assert.False(handled);
+        Assert.Equal(edited, written);
+        AssertRefusal("Blocks cannot be inserted or removed while the page is read again.", log);
+        Assert.True(handledAfterReload);
+        Assert.Equal(
+            $":: {BoardType}#board Columns=2\n::\n" + string.Format(callbackBlock, "b"),
+            await fixture.ReadAsync("page.md"));
+    }
+
     private static async Task<(MarkdownPageFixture Fixture, RecordingLogger<MarkdownContentParser> Log)> CreateFixtureWithLogAsync()
     {
         var log = new RecordingLogger<MarkdownContentParser>();
