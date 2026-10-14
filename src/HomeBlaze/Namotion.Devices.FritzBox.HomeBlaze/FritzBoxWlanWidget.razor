@@ -9,7 +9,8 @@
             <MudSpacer />
             @if (Wlan is FritzBoxGuestWlan guest)
             {
-                <MudSwitch T="bool"
+                <MudSwitch @key="_switchKey"
+                           T="bool"
                            Value="@(guest.IsOn == true)"
                            ValueChanged="isOn => SetGuestWlanAsync(guest, isOn)"
                            Disabled="_isSwitching"
@@ -50,6 +51,11 @@
     private bool _isSwitching;
     private string? _errorMessage;
 
+    // MudSwitch caches the last Value it was given and skips re-reading it when a render passes the same value
+    // again, so after a failed toggle it keeps showing the optimistic (wrong) position even though Value reverted
+    // to the real one. Changing @key forces a fresh switch instance that reads Value from scratch.
+    private int _switchKey;
+
     private async Task SetGuestWlanAsync(FritzBoxGuestWlan guest, bool isOn)
     {
         _isSwitching = true;
@@ -73,6 +79,11 @@
         }
         finally
         {
+            if (guest.IsOn != isOn)
+            {
+                _switchKey++;
+            }
+
             _isSwitching = false;
         }
     }

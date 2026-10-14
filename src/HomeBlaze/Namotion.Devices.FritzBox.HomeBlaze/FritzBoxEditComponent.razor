@@ -146,15 +146,19 @@
             _username = RouterSubject.Username;
             _certificatePin = RouterSubject.CertificatePin;
 
-            // Clamps a value a previous, looser version of the library (or a hand-edited configuration file) could
-            // have stored outside the current range, so the dialog does not open already stuck on IsValid's range
-            // check with no field that explains why.
-            _pollingIntervalSeconds = ClampInterval((int)RouterSubject.PollingInterval.TotalSeconds);
-            _retryIntervalSeconds = ClampInterval((int)RouterSubject.RetryInterval.TotalSeconds);
+            // Maps zero or below to the library's own default (FritzBox.GetEffectiveInterval does the same for the
+            // polling loop) and then clamps, so a value a previous, looser version of the library (or a hand-edited
+            // configuration file) could have stored outside the current range does not leave the dialog stuck on
+            // IsValid's range check with no field that explains why.
+            _pollingIntervalSeconds = LoadInterval((int)RouterSubject.PollingInterval.TotalSeconds, FritzBox.DefaultPollingIntervalSeconds);
+            _retryIntervalSeconds = LoadInterval((int)RouterSubject.RetryInterval.TotalSeconds, FritzBox.DefaultRetryIntervalSeconds);
         }
 
         RememberOriginals();
     }
+
+    private static int LoadInterval(int storedSeconds, int defaultSeconds) =>
+        ClampInterval(storedSeconds <= 0 ? defaultSeconds : storedSeconds);
 
     private static int ClampInterval(int seconds) =>
         Math.Clamp(seconds, FritzBox.MinimumIntervalSeconds, FritzBox.MaximumIntervalSeconds);
