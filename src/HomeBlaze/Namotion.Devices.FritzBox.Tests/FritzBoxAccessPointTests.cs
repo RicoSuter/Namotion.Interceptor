@@ -30,25 +30,27 @@ public class FritzBoxAccessPointTests
     }
 
     [Theory]
-    [InlineData("WLAN", true)]
-    [InlineData("LAN", false)]
-    [InlineData(null, null)]
-    public void WhenTheAccessPointIsASlave_ThenItsUplinkTypeDecidesWhetherItIsWireless(string? uplinkType, bool? expectedIsWireless)
+    [InlineData("WLAN", true, true)]
+    [InlineData("LAN", false, true)]
+    [InlineData(null, null, false)]
+    public void WhenTheAccessPointIsASlave_ThenItsUplinkTypeDecidesWhetherItIsWireless(string? uplinkType, bool? expectedIsWireless, bool isConnected)
     {
         // Arrange
         var accessPoint = new FritzBoxAccessPoint(MacAddress);
         decimal? uplinkSpeed = uplinkType is null ? null : 144m;
 
         // Act
-        accessPoint.Update(CreateInfo(isMaster: false, uplinkType, uplinkSpeed), null);
+        accessPoint.Update(CreateInfo(isMaster: false, uplinkType, uplinkSpeed, isConnected), null);
 
         // Assert
         Assert.Equal(FritzBoxMeshRole.Slave, accessPoint.MeshRole);
         Assert.Equal(expectedIsWireless, accessPoint.IsWireless);
         Assert.Equal(uplinkType, accessPoint.UplinkType);
         Assert.Equal(uplinkSpeed, accessPoint.UplinkSpeed);
+        Assert.Equal(isConnected, accessPoint.IsConnected);
     }
 
-    private static AccessPointInfo CreateInfo(bool isMaster, string? uplinkType = null, decimal? uplinkSpeed = null) =>
-        new(MacAddress, new HashSet<string> { MacAddress }, "FRITZ!Box 7590", "7590", "AVM", "7.57", isMaster, true, uplinkType, uplinkSpeed);
+    private static AccessPointInfo CreateInfo(
+        bool isMaster, string? uplinkType = null, decimal? uplinkSpeed = null, bool isConnected = true) =>
+        new(MacAddress, new HashSet<string> { MacAddress }, "FRITZ!Box 7590", "7590", "AVM", "7.57", isMaster, isConnected, uplinkType, uplinkSpeed);
 }
