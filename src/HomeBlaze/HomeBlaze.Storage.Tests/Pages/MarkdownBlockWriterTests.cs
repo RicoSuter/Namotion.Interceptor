@@ -366,4 +366,202 @@ public class MarkdownBlockWriterTests
         // Assert
         Assert.Equal(expected, lineEnding);
     }
+
+    private const string Board =
+        "intro\n\n:: Demo.Board#board Columns=2\n::: Tile Position=1\none\n:::\n::: Tile Position=2\ntwo\n:::\n::\n\noutro\n";
+
+    private const string ShortBoard =
+        "intro\n\n:: Demo.Board#board Columns=2\n::: Tile Position=1\none\n::: Tile Position=2\ntwo\n::\n\noutro\n";
+
+    private static MarkdownBlock OwnerOf(string source) => MarkdownPageParser.Parse(source).Blocks[0];
+
+    [Fact]
+    public void WhenBlockWithClosingLineIsRemoved_ThenItsLinesAreGoneAndTheRestIsUnchanged()
+    {
+        // Arrange
+        var first = OwnerOf(Board).Children[0];
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(Board, first, out var edit);
+
+        // Assert
+        Assert.Equal("intro\n\n:: Demo.Board#board Columns=2\n::: Tile Position=2\ntwo\n:::\n::\n\noutro\n", result);
+        Assert.Equal(new MarkdownLineEdit(4, 3, 0), edit);
+    }
+
+    [Fact]
+    public void WhenBlockWithoutClosingLineIsRemoved_ThenItsHeadAndContentAreGone()
+    {
+        // Arrange
+        var second = OwnerOf(ShortBoard).Children[1];
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(ShortBoard, second, out var edit);
+
+        // Assert
+        Assert.Equal("intro\n\n:: Demo.Board#board Columns=2\n::: Tile Position=1\none\n::\n\noutro\n", result);
+        Assert.Equal(new MarkdownLineEdit(6, 2, 0), edit);
+    }
+
+    [Fact]
+    public void WhenRemovedBlockHoldsOtherBlocks_ThenTheyAreRemovedWithIt()
+    {
+        // Arrange
+        const string source = ":: Demo.Board\n::: Tile\n:::: Demo.Leaf Count=1\n::::\ntext\n:::\n::: Tile\n:::\n::\n";
+        var first = OwnerOf(source).Children[0];
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, first, out _);
+
+        // Assert
+        Assert.Equal(":: Demo.Board\n::: Tile\n:::\n::\n", result);
+    }
+
+    [Fact]
+    public void WhenRemovedBlockEndsTheTextWithoutLineEnding_ThenTheTextEndsBeforeIt()
+    {
+        // Arrange
+        const string source = "intro\n:: Demo.Board\n::: Tile\none";
+        var tile = OwnerOf(source).Children[0];
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out _);
+
+        // Assert
+        Assert.Equal("intro\n:: Demo.Board\n", result);
+    }
+
+    [Fact]
+    public void WhenBlockIsRemovedFromTextWithWindowsLineEndings_ThenTheOtherLineEndingsStay()
+    {
+        // Arrange
+        var source = Board.Replace("\n", "\r\n");
+        var first = OwnerOf(source).Children[0];
+
+        // Act
+        var result = MarkdownBlockWriter.RemoveBlock(source, first, out _);
+
+        // Assert
+        Assert.Equal(
+            "intro\r\n\r\n:: Demo.Board#board Columns=2\r\n::: Tile Position=2\r\ntwo\r\n:::\r\n::\r\n\r\noutro\r\n", result);
+    }
+
+    [Fact]
+    public void WhenSiblingHasClosingLine_ThenPlacementIsAfterItWithClosingLine()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(Board);
+
+        // Act
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
+
+        // Assert
+        Assert.Equal(new MarkdownBlockPlacement(10, true, string.Empty, "\n"), placement);
+    }
+
+    [Fact]
+    public void WhenSiblingHasNoClosingLine_ThenPlacementIsAfterItsContentWithoutClosingLine()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(ShortBoard);
+
+        // Act
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
+
+        // Assert
+        Assert.Equal(new MarkdownBlockPlacement(8, false, string.Empty, "\n"), placement);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Board Columns=2\n::\n", 2, true)]
+    [InlineData(":: Demo.Board Columns=2\n```json\n{ \"Tags\": [1] }\n```\n::\n", 5, true)]
+    [InlineData(":: Demo.Board Columns=2\n", 2, false)]
+    [InlineData(":: Demo.Board Columns=2\n```json\n{ \"Tags\": [1] }\n```\n\n:: Demo.Other\n", 5, false)]
+    [InlineData(":: Demo.Card\n::: Demo.Leaf\n::\n\n:: Demo.Board Columns=2\n::\n", 6, false)]
+    public void WhenOwnerHasNoBlockOfTheSlot_ThenPlacementIsAtTheEndOfItsContentInTheStyleOfThePage(
+        string source, int expectedLine, bool expectedClosingLine)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+        var owner = page.Blocks.Single(block => block.Head!.Name == "Demo.Board");
+
+        // Act
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, owner, "Tile");
+
+        // Assert
+        Assert.Equal(expectedLine, placement.Line);
+        Assert.Equal(expectedClosingLine, placement.HasClosingLine);
+    }
+
+    [Fact]
+    public void WhenOwnerIsIndentedAndUsesWindowsLineEndings_ThenPlacementCarriesBoth()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("  :: Demo.Board\r\n  ::\r\n");
+
+        // Act
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, page.Blocks[0], "Tile");
+
+        // Assert
+        Assert.Equal(new MarkdownBlockPlacement(2, true, "  ", "\r\n"), placement);
+    }
+
+    [Fact]
+    public void WhenLinesAreInsertedBeforeALine_ThenTheyStandThereWithALineEnding()
+    {
+        // Act
+        var result = MarkdownBlockWriter.InsertLines("a\nb\n", 2, "x\ny", "\n", out var edit);
+
+        // Assert
+        Assert.Equal("a\nx\ny\nb\n", result);
+        Assert.Equal(new MarkdownLineEdit(2, 0, 2), edit);
+    }
+
+    [Theory]
+    [InlineData("a\nb\n", 3, "a\nb\nx\n", 3)]
+    [InlineData("a\nb", 3, "a\nb\nx", 3)]
+    [InlineData("a\nb", 9, "a\nb\nx", 3)]
+    [InlineData("", 1, "x\n", 1)]
+    public void WhenLinesAreInsertedAfterTheLastLine_ThenTheyAreAppended(
+        string source, int line, string expected, int expectedLine)
+    {
+        // Act
+        var result = MarkdownBlockWriter.InsertLines(source, line, "x", "\n", out var edit);
+
+        // Assert
+        Assert.Equal(expected, result);
+        Assert.Equal(new MarkdownLineEdit(expectedLine, 0, 1), edit);
+    }
+
+    [Fact]
+    public void WhenBlockIsCreatedWithoutClosingLineAndWithContent_ThenItEndsWithItsContent()
+    {
+        // Act
+        var block = MarkdownBlockWriter.CreateBlock(
+            "Tile", null, """{ "Position": 3 }""", fenceLength: 3, hasClosingLine: false, content: ":::: Demo.Leaf Count=1");
+
+        // Assert
+        Assert.Equal("::: Tile Position=3\n:::: Demo.Leaf Count=1", block);
+    }
+
+    [Fact]
+    public void WhenBlockIsCreatedWithJsonAndContent_ThenTheJsonStandsBeforeTheContent()
+    {
+        // Act
+        var block = MarkdownBlockWriter.CreateBlock(
+            "Tile", null, """{ "Position": 3, "Tags": [1] }""", fenceLength: 3, content: "text");
+
+        // Assert
+        Assert.Equal("::: Tile Position=3\n```json\n{\n  \"Tags\": [\n    1\n  ]\n}\n```\ntext\n:::", block);
+    }
+
+    [Fact]
+    public void WhenTextIsIndented_ThenEveryLineStartsWithTheIndentation()
+    {
+        // Act
+        var result = MarkdownBlockWriter.Indent("a\r\nb", "  ", "\r\n");
+
+        // Assert
+        Assert.Equal("  a\r\n  b", result);
+    }
 }

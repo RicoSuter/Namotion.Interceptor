@@ -74,21 +74,144 @@ public static class MarkdownBlockWriter
     }
 
     /// <summary>
-    /// Creates the text of a new, empty widget block with a fence of <paramref name="fenceLength"/> characters
-    /// from a configuration like the one <see cref="WriteConfiguration"/> takes.
+    /// Creates the text of a new block with a fence of <paramref name="fenceLength"/> characters from a
+    /// configuration like the one <see cref="WriteConfiguration"/> takes.
     /// Its lines end with <paramref name="lineEnding"/>, except the last one, which has no line ending.
     /// </summary>
+    /// <param name="name">The full type name of a widget block, or the name of a slot block.</param>
+    /// <param name="id">The name of the block after <c>#</c>, or null.</param>
+    /// <param name="configurationJson">The configuration as a JSON object.</param>
+    /// <param name="fenceLength">The number of fence characters.</param>
+    /// <param name="lineEnding">The line ending between the lines.</param>
+    /// <param name="hasClosingLine">Whether the block ends with a closing line. Without one, what follows it must end it.</param>
+    /// <param name="content">Lines that stand inside the block after its json block, or null.</param>
     public static string CreateBlock(
-        string typeName, string? id, string configurationJson, int fenceLength, string lineEnding = UnixLineEnding)
+        string name,
+        string? id,
+        string configurationJson,
+        int fenceLength,
+        string lineEnding = UnixLineEnding,
+        bool hasClosingLine = true,
+        string? content = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(fenceLength, MarkdownBlockFence.MinimumLength);
 
         var (arguments, remainder) = SplitConfiguration(configurationJson);
-        var head = new MarkdownBlockHead(fenceLength, typeName, id, arguments).Format();
-        var closingLine = MarkdownBlockFence.Create(fenceLength);
-        return remainder is null
-            ? $"{head}{lineEnding}{closingLine}"
-            : $"{head}{lineEnding}{FormatFence(remainder, lineEnding)}{lineEnding}{closingLine}";
+        var lines = new List<string> { new MarkdownBlockHead(fenceLength, name, id, arguments).Format() };
+        if (remainder is not null)
+        {
+            lines.Add(FormatFence(remainder, lineEnding));
+        }
+
+        if (!string.IsNullOrEmpty(content))
+        {
+            lines.Add(content);
+        }
+
+        if (hasClosingLine)
+        {
+            lines.Add(MarkdownBlockFence.Create(fenceLength));
+        }
+
+        return string.Join(lineEnding, lines);
+    }
+
+    /// <summary>
+    /// Gets where a new block of the slot <paramref name="slotName"/> of <paramref name="owner"/> goes: after
+    /// the last block of that slot, in its style, or without one at the end of the content of the owner, in
+    /// the style of the page.
+    /// </summary>
+    /// <remarks>
+    /// The style of the page is without closing lines when any widget or slot block of it has none. A block
+    /// without a closing line is valid at the returned line, because what follows that line ends it.
+    /// </remarks>
+    public static MarkdownBlockPlacement GetSlotBlockPlacement(MarkdownPage page, MarkdownBlock owner, string slotName)
+    {
+        var source = page.Source;
+        var indentation = source[GetLineStart(source, owner.Line)..owner.HeadSpan.Start];
+
+        MarkdownBlock? lastSibling = null;
+        foreach (var child in owner.Children)
+        {
+            if (child.Kind == MarkdownBlockKind.Slot && child.Head!.Name == slotName && (lastSibling is null || child.Line > lastSibling.Line))
+            {
+                lastSibling = child;
+            }
+        }
+
+        if (lastSibling is not null)
+        {
+            return new MarkdownBlockPlacement(
+                lastSibling.EndLine + 1, lastSibling.HasClosingLine, indentation, GetLineEnding(source, lastSibling.HeadSpan.End));
+        }
+
+        var hasClosingLine = true;
+        foreach (var block in page.AllBlocks)
+        {
+            if (block.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot && !block.HasClosingLine)
+            {
+                hasClosingLine = false;
+                break;
+            }
+        }
+
+        // Before the closing line of the owner, or after its last line of content.
+        var line = owner.HasClosingLine ? owner.EndLine : owner.EndLine + 1;
+        return new MarkdownBlockPlacement(line, hasClosingLine, indentation, GetLineEnding(source, owner.HeadSpan.End));
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="text"/> as lines of their own before the 1-based <paramref name="line"/>. A line
+    /// after the last line of the text appends them. The text has no line ending after its last line.
+    /// </summary>
+    public static string InsertLines(string source, int line, string text, string lineEnding, out MarkdownLineEdit edit)
+    {
+        var offset = GetLineStart(source, line);
+        var insertedLineCount = text.AsSpan().Count('\n') + 1;
+
+        // The last line has no line ending, so the new lines get one before them instead of after them.
+        if (offset == source.Length && source.Length > 0 && source[^1] != '\n')
+        {
+            edit = new MarkdownLineEdit(source.AsSpan().Count('\n') + 2, 0, insertedLineCount);
+            return source + lineEnding + text;
+        }
+
+        edit = new MarkdownLineEdit(source.AsSpan(0, offset).Count('\n') + 1, 0, insertedLineCount);
+        return source.Insert(offset, text + lineEnding);
+    }
+
+    /// <summary>
+    /// Removes the block with everything in it: the lines from its head line to its last line, which is its
+    /// closing line or, without one, the last line of its content that is not empty.
+    /// </summary>
+    public static string RemoveBlock(string source, MarkdownBlock block, out MarkdownLineEdit edit)
+    {
+        var start = GetLineStart(source, block.Line);
+        var end = GetLineStart(source, block.EndLine + 1);
+        edit = new MarkdownLineEdit(block.Line, block.EndLine - block.Line + 1, 0);
+        return source.Remove(start, end - start);
+    }
+
+    /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/>.</summary>
+    public static string Indent(string text, string indentation, string lineEnding) =>
+        indentation.Length == 0 ? text : indentation + text.Replace(lineEnding, lineEnding + indentation);
+
+    // The offset of the first character of the 1-based line, or the length of the text for a line after the last one.
+    private static int GetLineStart(string source, int line)
+    {
+        var offset = 0;
+        for (var current = 1; current < line; current++)
+        {
+            var lineFeed = source.IndexOf('\n', offset);
+            if (lineFeed < 0)
+            {
+                return source.Length;
+            }
+
+            offset = lineFeed + 1;
+        }
+
+        return offset;
     }
 
     /// <summary>
