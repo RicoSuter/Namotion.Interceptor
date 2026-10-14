@@ -34,9 +34,7 @@ A yes or no is written as `true` or `false`. The block below is a `CanvasLayout`
 
 ## Configuration in a json block
 
-A list, an object, a subject or a text with a line break does not fit on the head line. Such a value is written in a JSON object in a `json` block: a fenced code block with the language `json` that is the first thing inside the block. The names in the `json` block are property names like the keys on the head line. The `Subtitle` of the `Card` below is a text with a line break, which is the only kind of value that a widget that ships with HomeBlaze needs a `json` block for. The `json` block itself is not shown on the page, and the card shows its subtitle as running text, so the line break is a space there.
-
-A type with a list or a subject in its configuration, for example a device, takes those in the `json` block as well. [The json Block](../Docs/administration/pages.md#the-json-block) has the rules for them.
+A list, an object, a subject or a text with a line break does not fit on the head line. Such a value is written in a JSON object in a `json` block: a fenced code block with the language `json` that is the first thing inside the block. The names in the `json` block are property names like the keys on the head line. The `Subtitle` of the `Card` below is a text with a line break. No widget that ships with HomeBlaze needs a `json` block for anything else. The `json` block itself is not shown on the page, and the card shows its subtitle as running text, so the line break is a space there.
 
 ~~~~markdown
 :: HomeBlaze.Components.Card#note Title="Note"
@@ -51,6 +49,8 @@ A type with a list or a subject in its configuration, for example a device, take
 { "Subtitle": "First line\nSecond line" }
 ```
 ::
+
+A type with a list or a subject in its configuration, for example a device, takes those in the `json` block as well. [The json Block](../Docs/administration/pages.md#the-json-block) has the rules for them.
 
 ## Cells of a grid
 
@@ -72,7 +72,7 @@ The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ va
 The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ valuemotor/CurrentSpeed }} RPM.
 ::
 
-The second cell has the name `speed`. A cell with a name keeps itself and everything in it when cells are added or removed before it. The nodes of a `CanvasLayout` are written the same way, as `Node` blocks with `X`, `Y`, `Width` and `Height`. With "Split" or "Inline" in the menu with the eye icon, a grid shows buttons to edit and remove each cell and a plus in every free place, and they write these blocks for you.
+The second cell has the name `speed`. A cell with a name keeps itself and everything in it when cells are added or removed before it. The nodes of a `CanvasLayout` are written the same way, as `Node` blocks with `X`, `Y`, `Width` and `Height`. With "Split" or "Inline" in the menu with the eye icon, a grid shows a plus in every free place, which adds a cell there, and each cell has buttons to edit and remove it. All of them write these blocks for you.
 
 ## Style blocks
 

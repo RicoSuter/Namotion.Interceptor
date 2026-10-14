@@ -492,7 +492,7 @@ The pump is set to **{{ pump/TargetSpeed }}** and the fan to **{{ fan/TargetSpee
 - The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
 - A cell with a `#name` keeps itself and everything in it when cells are added or removed. Cells without a name are matched by their position among the cells without a name, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps).
 - The cells cannot be written as `Cells` in the `json` block of a page, see [Cells and Nodes From the json Block](pages.md#cells-and-nodes-from-the-json-block). In a configuration file of its own, a `GridLayout` has its cells as the list `cells`, and each cell holds one subject as `child`.
-- While the page is in edit mode, the grid has its own buttons to add, edit and remove cells. They write the `Cell` blocks for you: a new cell is a block after the last one with the widget that you chose inside, and removing a cell removes its block with everything in it. [Editing in the Page Editor](pages.md#editing-in-the-page-editor) says how such a block is written and when a change is not saved.
+- While the page is in edit mode, the grid shows a plus in every free place, which adds a cell there, and each cell has buttons to edit and remove it. They write the `Cell` blocks for you: a new cell is a block after the last one with the widget that you chose inside, and removing a cell removes its block with everything in it. [Editing in the Page Editor](pages.md#editing-in-the-page-editor) says how such a block is written and when a change is not saved.
 
 ## CanvasLayout
 
@@ -536,7 +536,7 @@ A canvas with two nodes that show the sample motors by name. A canvas does not a
 :::: HomeBlaze.Components.Widget Path=fan
 ::
 
-- While the page is in edit mode, the nodes can be moved with the mouse, and the canvas has its own buttons to add, edit and remove nodes. They write the `Node` blocks for you: a move writes the head line of its node again with the new `X` and `Y` and with every other argument of the node, so `Width` and `Height` stand there as well when they were not written before.
+- While the page is in edit mode, the nodes can be moved with the mouse, a click on a free place of the canvas adds a node there, and each node has buttons to edit and remove it. They write the `Node` blocks for you: a move writes the head line of its node again with the new `X` and `Y` and with every other argument of the node, so `Width` and `Height` stand there as well when they were not written before.
 - A canvas can be zoomed with the mouse wheel and moved by dragging its background only while the page is edited. While the page is viewed, the canvas itself cannot be zoomed or moved, the wheel scrolls the page, and the widgets in its nodes work as anywhere else on the page. While the page is edited, the widgets in the nodes do not react to the mouse, so that a node can be moved without triggering what it shows. No line can be drawn between nodes in either mode.
 - A node has a fixed size and cuts off content that needs more room. What holds for the cells of a `GridLayout` holds for nodes as well: the names, what an edit of the page keeps, and the list `nodes` in a configuration file.
 

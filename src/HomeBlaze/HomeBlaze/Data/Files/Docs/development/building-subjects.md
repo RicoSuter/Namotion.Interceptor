@@ -1203,7 +1203,7 @@ What a page author cannot do with each kind:
 - **Content slots take no arguments**: A block for a slot of the type `IInterceptorSubject` takes no arguments, no `#name` and no `json` block. The page shows an error for them.
 - **Typed slots are configured like widget blocks**: A block for a slot with a class of your own takes the `[Configuration]` properties of that class as arguments and in a `json` block, with the same checks as a widget block.
 - **One block for a single value**: A second block for a slot that is no array is an error on the page.
-- **A slot is not set as configuration**: The property of a slot cannot be set by an argument or in the `json` block of a page. The page shows an error that names the block to write in its place. This also holds for a property that has `[Configuration]` as well, like `Cells` of `GridLayout`: it is configuration in a `*.json` file and a slot on a page.
+- **A slot is not set as configuration**: The property of a slot cannot be set by an argument or in the `json` block of a page. The page shows an error that says how the slot is filled. This holds for a property that is configuration too, like `Cells` of `GridLayout`: it is configuration in a `*.json` file and a slot on a page.
 
 #### Rules for a Slot Property
 
