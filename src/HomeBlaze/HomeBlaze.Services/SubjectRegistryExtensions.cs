@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor;
@@ -93,34 +92,6 @@ public static class SubjectRegistryExtensions
     public static int GetDisplayPosition(this RegisteredSubjectProperty property)
     {
         return property.GetStateMetadata()?.Position ?? int.MaxValue;
-    }
-
-    /// <summary>
-    /// Gets the category that the UI groups a state property under, from its <see cref="CategoryAttribute"/>.
-    /// The attribute of the class property wins over the one of an interface property, also when its name is empty.
-    /// </summary>
-    /// <returns>The trimmed name, or null when the property has no category.</returns>
-    /// <remarks>
-    /// Not for the registry property of a method: read <see cref="MethodMetadata.Category"/> instead.
-    /// </remarks>
-    public static string? GetCategory(this RegisteredSubjectProperty property)
-    {
-        var attributes = property.ReflectionAttributes;
-        if (attributes is not Attribute[] array)
-        {
-            return attributes.OfType<CategoryAttribute>().FirstOrDefault().GetNormalizedCategory();
-        }
-
-        // Runs for every value of a subject on each render, and enumerating the collection would allocate.
-        foreach (var attribute in array)
-        {
-            if (attribute is CategoryAttribute category)
-            {
-                return category.GetNormalizedCategory();
-            }
-        }
-
-        return null;
     }
 
     /// <summary>

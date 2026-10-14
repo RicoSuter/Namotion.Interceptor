@@ -365,8 +365,8 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => 
-                p.GetStateMetadata() != null 
+            .Where(p =>
+                p.GetStateMetadata() != null
                 && p is { IsAttribute: false, CanContainSubjects: false }
                 && p.GetConfigurationMetadata()?.IsSecret != true)
             .OrderBy(p => p.GetDisplayPosition());
@@ -582,7 +582,7 @@
     private SubjectMemberGroups<RegisteredSubjectProperty, MethodMetadata> GetMemberGroups() =>
         SubjectMemberGrouping.Group(
             GetPrimitiveProperties().ToList(),
-            static property => property.GetCategory(),
+            static property => property.GetStateMetadata()?.Category,
             static property => property.GetDisplayPosition(),
             _registeredSubject?.GetAllMethods() ?? [],
             static method => method.Category,

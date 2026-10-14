@@ -322,84 +322,84 @@ public class SubjectRegistryExtensionsTests
     }
 
     [Fact]
-    public void WhenAPropertyHasACategory_ThenGetCategoryReturnsIt()
+    public void WhenAPropertyHasACategory_ThenTheStateMetadataHasIt()
     {
         // Arrange
         var subject = new CategorizedTestSubject(CreateContext());
         var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Bass))!;
 
         // Act
-        var category = property.GetCategory();
+        var category = property.GetStateMetadata()?.Category;
 
         // Assert
         Assert.Equal("Sound", category);
     }
 
     [Fact]
-    public void WhenAPropertyHasNoCategory_ThenGetCategoryReturnsNull()
+    public void WhenAPropertyHasNoCategory_ThenTheStateMetadataHasNone()
     {
         // Arrange
         var subject = new CategorizedTestSubject(CreateContext());
         var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Status))!;
 
         // Act
-        var category = property.GetCategory();
+        var category = property.GetStateMetadata()?.Category;
 
         // Assert
         Assert.Null(category);
     }
 
     [Fact]
-    public void WhenOnlyTheInterfacePropertyHasACategory_ThenGetCategoryReturnsIt()
+    public void WhenOnlyTheInterfacePropertyHasACategory_ThenTheStateMetadataHasIt()
     {
         // Arrange
         var subject = new CategorizedTestSubject(CreateContext());
         var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Volume))!;
 
         // Act
-        var category = property.GetCategory();
+        var category = property.GetStateMetadata()?.Category;
 
         // Assert
         Assert.Equal("Volume", category);
     }
 
     [Fact]
-    public void WhenTheClassAndTheInterfacePropertyHaveACategory_ThenGetCategoryReturnsTheOneOfTheClass()
+    public void WhenTheClassAndTheInterfacePropertyHaveACategory_ThenTheStateMetadataHasTheOneOfTheClass()
     {
         // Arrange
         var subject = new CategorizedTestSubject(CreateContext());
         var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.IsMuted))!;
 
         // Act
-        var category = property.GetCategory();
+        var category = property.GetStateMetadata()?.Category;
 
         // Assert
         Assert.Equal("Sound", category);
     }
 
     [Fact]
-    public void WhenTheClassPropertyHasAnEmptyCategory_ThenGetCategoryReturnsNullInsteadOfTheOneOfTheInterfaceProperty()
+    public void WhenTheClassPropertyHasAnEmptyCategory_ThenTheStateMetadataHasNoneInsteadOfTheOneOfTheInterfaceProperty()
     {
         // Arrange
         var subject = new CategorizedTestSubject(CreateContext());
         var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Balance))!;
 
         // Act
-        var category = property.GetCategory();
+        var category = property.GetStateMetadata()?.Category;
 
         // Assert
         Assert.Null(category);
     }
 
     [Fact]
-    public void WhenACategoryHasSurroundingWhitespace_ThenGetCategoryReturnsTheTrimmedName()
+    public void WhenACategoryHasSurroundingWhitespace_ThenTheStateMetadataHasTheTrimmedName()
     {
         // Arrange
         var subject = new CategorizedTestSubject(CreateContext());
         var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Treble))!;
 
         // Act
-        var category = property.GetCategory();
+        var category = property.GetStateMetadata()?.Category;
 
         // Assert
         Assert.Equal("Sound", category);
