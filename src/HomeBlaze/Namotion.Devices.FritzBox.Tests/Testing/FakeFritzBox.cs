@@ -404,8 +404,11 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
                 "<NewExternalIPAddress>203.0.113.7</NewExternalIPAddress>",
             (Tr64Services.WanIpConnection, "GetStatusInfo") =>
                 "<NewConnectionStatus>Unconfigured</NewConnectionStatus><NewUptime>0</NewUptime>",
-            (Tr64Services.WanIpConnection, "X_AVM-DE_GetExternalIPv6Address") =>
-                "<NewExternalIPv6Address>2001:db8::7</NewExternalIPv6Address><NewPrefixLength>64</NewPrefixLength>",
+            (Tr64Services.AppSetup, "GetAppRemoteInfo") =>
+                "<NewSubnetMask>255.255.255.0</NewSubnetMask><NewIPAddress>192.168.178.1</NewIPAddress>" +
+                "<NewExternalIPAddress>203.0.113.7</NewExternalIPAddress><NewExternalIPv6Address>2001:db8::7</NewExternalIPv6Address>" +
+                "<NewRemoteAccessDDNSEnabled>0</NewRemoteAccessDDNSEnabled><NewRemoteAccessDDNSDomain></NewRemoteAccessDDNSDomain>" +
+                "<NewMyFritzEnabled>0</NewMyFritzEnabled><NewMyFritzDynDNSName></NewMyFritzDynDNSName>",
             ("urn:dslforum-org:service:WLANConfiguration:1", "GetInfo") =>
                 "<NewEnable>1</NewEnable><NewSSID>Home</NewSSID><NewChannel>6</NewChannel><NewX_AVM-DE_FrequencyBand>2400</NewX_AVM-DE_FrequencyBand>",
             ("urn:dslforum-org:service:WLANConfiguration:2", "GetInfo") =>

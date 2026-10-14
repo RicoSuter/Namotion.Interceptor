@@ -11,6 +11,7 @@
     <serviceList>
       <service><serviceType>urn:dslforum-org:service:DeviceInfo:1</serviceType><serviceId>urn:DeviceInfo-com:serviceId:DeviceInfo1</serviceId><controlURL>/upnp/control/deviceinfo</controlURL><eventSubURL>/upnp/control/deviceinfo</eventSubURL><SCPDURL>/deviceinfoSCPD.xml</SCPDURL></service>
       <service><serviceType>urn:dslforum-org:service:Layer3Forwarding:1</serviceType><serviceId>urn:Layer3Forwarding-com:serviceId:Layer3Forwarding1</serviceId><controlURL>/upnp/control/layer3forwarding</controlURL><eventSubURL>/upnp/control/layer3forwarding</eventSubURL><SCPDURL>/layer3forwardingSCPD.xml</SCPDURL></service>
+      <service><serviceType>urn:dslforum-org:service:X_AVM-DE_AppSetup:1</serviceType><serviceId>urn:X_AVM-DE_AppSetup-com:serviceId:X_AVM-DE_AppSetup1</serviceId><controlURL>/upnp/control/x_appsetup</controlURL><eventSubURL>/upnp/control/x_appsetup</eventSubURL><SCPDURL>/x_appsetupSCPD.xml</SCPDURL></service>
       <service><serviceType>urn:dslforum-org:service:UserInterface:1</serviceType><serviceId>urn:UserInterface-com:serviceId:UserInterface1</serviceId><controlURL>/upnp/control/userif</controlURL><eventSubURL>/upnp/control/userif</eventSubURL><SCPDURL>/userifSCPD.xml</SCPDURL></service>
     </serviceList>
     <deviceList>

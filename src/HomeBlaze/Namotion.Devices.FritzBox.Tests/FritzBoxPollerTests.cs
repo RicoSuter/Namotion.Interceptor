@@ -193,7 +193,7 @@ public class FritzBoxPollerTests
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        fake.Faults["X_AVM-DE_GetExternalIPv6Address"] = 401;
+        fake.Faults["GetAppRemoteInfo"] = 401;
         using var connection = await OpenAsync(fake);
 
         // Act
@@ -214,7 +214,7 @@ public class FritzBoxPollerTests
         fake.Faults["GetCommonLinkProperties"] = 401;
         fake.Faults["GetStatusInfo"] = 401;
         fake.Faults["GetExternalIPAddress"] = 401;
-        fake.Faults["X_AVM-DE_GetExternalIPv6Address"] = 401;
+        fake.Faults["GetAppRemoteInfo"] = 401;
         using var connection = await OpenAsync(fake);
 
         // Act

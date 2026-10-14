@@ -104,8 +104,8 @@ internal static class FritzBoxPoller
         var linkTask = connection.ReadOrDefaultAsync(Tr64Services.WanCommonInterfaceConfig, "GetCommonLinkProperties", null, cancellationToken);
         var statusTask = ReadInternetServiceAnswerAsync(connection, serviceType, "GetStatusInfo", cancellationToken);
         var addressTask = ReadInternetServiceAnswerAsync(connection, serviceType, "GetExternalIPAddress", cancellationToken);
-        var ipv6Task = connection.HasService(Tr64Services.WanIpConnection)
-            ? connection.ReadOrDefaultAsync(Tr64Services.WanIpConnection, "X_AVM-DE_GetExternalIPv6Address", null, cancellationToken)
+        var ipv6Task = connection.HasService(Tr64Services.AppSetup)
+            ? connection.ReadOrDefaultAsync(Tr64Services.AppSetup, "GetAppRemoteInfo", null, cancellationToken)
             : NoAnswer;
         await Task.WhenAll(linkTask, statusTask, addressTask, ipv6Task);
 
