@@ -269,7 +269,7 @@ A subject may be held by several collections, for example a light in a bridge's 
 - **The owning collection adds the subject first and sits at the shallowest level, because the canonical path is the shallowest, then earliest attached.** It creates the subject and adds it to its own collection before any other collection refers to it. A subject with several parents has one path per parent; paths are ordered by depth, with attach order deciding between equally deep ones, and history records values under the first. The other collections only refer to it and are replaced when their members change.
 - **The subject stays attached until the last collection drops it,** not the first: a subject with several parents detaches only once every collection holding it has dropped it. When the owner drops it, drop it from every other collection in the same update, or it stays attached, referenced by them but orphaned from its owner.
 - **Relative paths from a shared subject do not resolve.** A `../` path starting at a subject with several parents resolves to nothing, because its parent is ambiguous.
-- **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. A reference to a parent makes it a child of its own child: the two hold each other attached after their owner drops them, the parent gets a second, deeper path, and whatever walks the tree goes around in a circle. Keep a back-reference to an owner in a field.
+- **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. The parent would become a child of its own child, and the two keep each other attached. Keep a back-reference to an owner in a field.
 
 ## Display Interfaces
 
@@ -970,7 +970,7 @@ public partial string? Map { get; set; }
 
 The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.
 
-On a `[State]` property with a type, the property panel shows the subject at the path instead of the path, with its title and a button that opens it. Use it to point at a subject that lives elsewhere in the tree, such as the device behind a network client: a subject reference held in an intercepted property would attach that subject a second time, see [Shared Child Subjects](#shared-child-subjects). The path must be canonical, and a path that does not lead to a subject of the type shows as text:
+On a `[State]` property with a type, the property panel shows the subject at the path with a button that opens it. Use it to point at a subject elsewhere in the tree without attaching it, see [Shared Child Subjects](#shared-child-subjects):
 
 ```csharp
 [State("Device")]

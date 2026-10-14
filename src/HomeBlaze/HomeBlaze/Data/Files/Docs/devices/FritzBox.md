@@ -117,7 +117,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 | `AccessPointName`, `AccessPointMacAddress` | | Where it is connected, empty while absent or unplaced |
 | `Band`, `Port` | | WLAN band or LAN port, empty while absent; a client the mesh list does not place has no band but can have the host list's port, see [How It Works](#how-it-works) |
 | `LinkSpeed` | Mbit/s | Current link speed; a client the mesh list does not place falls back to the host list's speed while present |
-| `DevicePath` | | Path of the subject of this device, shown as "Device" with a link to it, see [Linked Devices](#linked-devices) |
+| `DevicePath` | | Path of the subject of this device, see [Linked Devices](#linked-devices) |
 
 ### FritzBoxAccessPoint
 
@@ -149,15 +149,7 @@ The router is polled every `PollingInterval`, read only. Each poll starts with i
 
 ### Linked Devices
 
-After each poll every client's `DevicePath` is set to the path of the HomeBlaze subject of the same device, so that the property panel links from the client to that device:
-
-- A subject that reports the MAC address of a client (`INetworkAdapter`, such as Shelly, myStrom, Ecowitt or Sonos) matches that client, in any notation.
-- Any other subject matches by its IP address or its configured host address (`INetworkHost`, such as SunSpec or Luxtronik), as an IP address or as a host name compared with the client's name. This also covers a device with several interfaces that reports the MAC address of another one than the router sees.
-- A match by host needs the subject to be connected (`IConnectionState`), as the host list keeps the last address of absent devices and DHCP can give it to another one. Only a single client may have the address, a present one before absent ones.
-- A client that several subjects match gets none, and a match by MAC address wins over one by host.
-- Subjects of this library are never matched, so a client is not linked to a `FritzBoxAccessPoint` or to the `FritzBox` subject of another router.
-
-The link is a path, not a subject reference: the device stays where it is in the tree, and a deleted or moved device is unlinked or relinked with the next poll. A failure while linking is logged once and does not fail the poll.
+After each poll, a client's `DevicePath` points to the subject of the same device: by MAC address (`INetworkAdapter`), otherwise by IP address or host name (`INetworkHost`) while that subject is connected. A client that several subjects match is not linked.
 
 ### Certificate Trust
 
