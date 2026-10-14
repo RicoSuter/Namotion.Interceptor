@@ -262,6 +262,15 @@ public partial GpioPin[] Pins { get; set; }
 
 Good key sources: API resource IDs (GUIDs), hardware serial numbers, MAC addresses. Bad key sources: user-assignable names, discovery order, timestamps.
 
+### Shared Child Subjects
+
+A subject may be held by several collections, for example a light in a bridge's `Lights` and in a room's `Lights`, or a network client in a router's `Clients` and in an access point's `Clients`. Rules:
+
+- **One collection owns the subject.** It creates the subject, and the subject is detached when that collection drops it. The other collections only refer to it and are replaced when their members change.
+- **The canonical path is the shallowest one.** A subject with several parents has one path per parent; paths are ordered by depth, with attach order deciding between equally deep ones, and history records values under the first. Put the owning collection at the shallowest level.
+- **Relative paths from a shared subject do not resolve.** A `../` path starting at a subject with several parents resolves to nothing, because its parent is ambiguous.
+- **Do not reference a parent through a property.** A subject reference in a property attaches the referenced subject under the referencing one. Keep a back-reference to an owner in a field.
+
 ## Display Interfaces
 
 Implement these interfaces for UI integration:
@@ -728,6 +737,7 @@ The subject project should only depend on `Namotion.Interceptor` and optionally 
 ```
 
 **Why separate?**
+- Subject libraries must work in a plain .NET host without HomeBlaze, registered through their `Add...` service collection extension
 - Subjects can be used in headless scenarios (APIs, console apps, background services)
 - No dependency on Blazor, MudBlazor, or any UI framework
 - Easier testing without UI dependencies
