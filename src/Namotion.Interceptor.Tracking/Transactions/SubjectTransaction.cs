@@ -70,6 +70,20 @@ public sealed class SubjectTransaction : IDisposable
     public static bool ValidateWriterContract { get; set; }
 
     /// <summary>
+    /// Returns true when the current write is a commit applying the value of <paramref name="property"/> that
+    /// <paramref name="handler"/> checked in <see cref="ITransactionHandler.OnCommitting"/>, or a rollback restoring
+    /// it. Consumes the mark, so it returns true at most once per applied value.
+    /// </summary>
+    /// <typeparam name="TProperty">The type of the written value.</typeparam>
+    /// <param name="handler">The handler asking whether it already checked the write.</param>
+    /// <param name="property">The property being written.</param>
+    /// <param name="value">The value being written.</param>
+    public static bool TryConsumeCommitWrite<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
+    {
+        return CommitWriteMarker.TryConsume(handler, property, value);
+    }
+
+    /// <summary>
     /// Sets the current transaction in this execution context.
     /// This is needed for async patterns where AsyncLocal must be set in the caller's context.
     /// </summary>
@@ -113,6 +127,9 @@ public sealed class SubjectTransaction : IDisposable
     /// Gets the transaction handlers resolved from the context when the transaction began.
     /// </summary>
     internal ImmutableArray<ITransactionHandler> Handlers => _handlers;
+
+    // Applies carry the commit write mark only when handlers checked the final set.
+    private SubjectTransaction? MarkingTransaction => _handlers.IsDefaultOrEmpty ? null : this;
 
     /// <summary>
     /// Gets a snapshot of the pending changes as a read-only list, in insertion order.
@@ -472,13 +489,13 @@ public sealed class SubjectTransaction : IDisposable
             {
                 ThrowIfConflictsDetected(changes.Span);
 
-                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null);
+                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null, MarkingTransaction);
 
                 if (applyFailed.Count > 0)
                 {
                     if (_failureHandling == TransactionFailureHandling.Rollback)
                     {
-                        var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
+                        var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied, MarkingTransaction);
                         failure = CreateFailureException([], SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed), SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
                     }
                     else
@@ -597,10 +614,10 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<Exception> revertErrors = [];
         using (EnterCommitModelAccess())
         {
-            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude);
+            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude, MarkingTransaction);
             if (applyFailed.Count > 0 && _failureHandling == TransactionFailureHandling.Rollback)
             {
-                (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
+                (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied, MarkingTransaction);
             }
         }
 

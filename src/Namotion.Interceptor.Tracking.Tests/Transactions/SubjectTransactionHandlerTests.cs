@@ -341,6 +341,99 @@ public class SubjectTransactionHandlerTests
         Assert.Equal(0, writer.WriteCalls);
     }
 
+    [Fact]
+    public async Task WhenCommitAppliesCheckedValue_ThenCommitWriteIsConsumedOnce()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var probe = new CommitWriteProbe(handler);
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService(probe);
+        var person = new Person(context) { FirstName = "Ann" };
+        probe.Writes.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        var applied = Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName));
+        Assert.Equal("Bob", applied.Value);
+        Assert.True(applied.Consumed);
+        Assert.False(applied.ConsumedAgain);
+        Assert.All(
+            probe.Writes.Where(write => write.Property != nameof(Person.FirstName)),
+            derivedWrite => Assert.False(derivedWrite.Consumed));
+    }
+
+    [Fact]
+    public async Task WhenHandlerDidNotCheckTheCommit_ThenCommitWriteIsNotConsumed()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var otherHandler = new RecordingHandler();
+        var probe = new CommitWriteProbe(otherHandler);
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService(probe);
+        var person = new Person(context);
+        probe.Writes.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
+    }
+
+    [Fact]
+    public async Task WhenNoHandlerIsRegistered_ThenCommitWriteIsNotConsumed()
+    {
+        // Arrange
+        var unregisteredHandler = new RecordingHandler();
+        var probe = new CommitWriteProbe(unregisteredHandler);
+        var context = CreateContext();
+        context.AddService(probe);
+        var person = new Person(context);
+        probe.Writes.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
+    }
+
+    [Fact]
+    public async Task WhenRollbackRestoresValue_ThenRestoreIsConsumedAsCommitWrite()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) };
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService(probe);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        probe.Writes.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal("Ann", person.FirstName);
+        var restore = Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName) && Equals(write.Value, "Ann"));
+        Assert.True(restore.Consumed);
+    }
+
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
     {
         // An async method does not leak the transaction it begins into the caller's flow.
@@ -394,6 +487,28 @@ public class SubjectTransactionHandlerTests
         {
             CommittingCalls++;
             OnCommittingAction?.Invoke(transaction, changes.ToArray());
+        }
+    }
+
+    [RunsAfter(typeof(SubjectTransactionInterceptor))]
+    private sealed class CommitWriteProbe(ITransactionHandler handler) : IWriteInterceptor
+    {
+        public List<(string Property, object? Value, bool Consumed, bool ConsumedAgain)> Writes { get; } = [];
+
+        public string? ThrowOnConsumedProperty { get; set; }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            var consumed = SubjectTransaction.TryConsumeCommitWrite(handler, context.Property, context.NewValue);
+            var consumedAgain = SubjectTransaction.TryConsumeCommitWrite(handler, context.Property, context.NewValue);
+            Writes.Add((context.Property.Name, context.NewValue, consumed, consumedAgain));
+
+            if (consumed && context.Property.Name == ThrowOnConsumedProperty)
+            {
+                throw new InvalidOperationException("apply failed");
+            }
+
+            next(ref context);
         }
     }
 }
