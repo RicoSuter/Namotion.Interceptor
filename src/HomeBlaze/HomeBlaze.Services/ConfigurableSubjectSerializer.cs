@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -73,6 +74,55 @@ public class ConfigurableSubjectSerializer
         }
 
         return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurable), GetOptions(naming));
+    }
+
+    /// <summary>
+    /// Serializes like <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/>, without the configuration
+    /// properties of the subject itself for which <paramref name="isExcluded"/> returns true.
+    /// </summary>
+    /// <param name="subject">The subject to serialize.</param>
+    /// <param name="isExcluded">Gets the declared name of a property of the subject and decides whether it is left out.</param>
+    /// <param name="naming">The naming of the JSON.</param>
+    /// <remarks>
+    /// The value of an excluded property is not read. A subject that is nested in another property is written
+    /// in full, also when it has a property with an excluded name.
+    /// </remarks>
+    public string Serialize(
+        IInterceptorSubject subject,
+        Func<string, bool> isExcluded,
+        ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
+    {
+        if (subject is not IConfigurable)
+        {
+            throw new ArgumentException(
+                $"Subject must implement IConfigurable. Type: {subject.GetType().FullName}",
+                nameof(subject));
+        }
+
+        var options = GetOptions(naming);
+        var type = subject.GetType();
+        var result = new JsonObject { [TypeDiscriminatorPropertyName] = type.FullName };
+
+        // The properties, their names and their filter are those of the serializer, so that the result
+        // equals Serialize apart from what is excluded.
+        foreach (var property in options.GetTypeInfo(type).Properties)
+        {
+            var declaredName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
+            if (property.Get is not { } getValue || isExcluded(declaredName))
+            {
+                continue;
+            }
+
+            var value = getValue(subject);
+            if (property.ShouldSerialize is { } shouldSerialize && !shouldSerialize(subject, value))
+            {
+                continue;
+            }
+
+            result[property.Name] = JsonSerializer.SerializeToNode(value, property.PropertyType, options);
+        }
+
+        return result.ToJsonString(options);
     }
 
     /// <summary>

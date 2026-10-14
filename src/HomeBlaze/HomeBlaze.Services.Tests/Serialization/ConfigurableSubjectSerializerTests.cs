@@ -244,6 +244,76 @@ public class ConfigurableSubjectSerializerTests
         Assert.DoesNotContain("stateTwo", json);
     }
 
+    [Theory]
+    [InlineData(ConfigurationNaming.JsonProperty)]
+    [InlineData(ConfigurationNaming.CSharpProperty)]
+    public void WhenNoPropertyIsExcluded_ThenTheJsonEqualsThatOfSerialize(ConfigurationNaming naming)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var subject = new SubjectWithList(context)
+        {
+            Items = [new ChildSubject(context) { ChildConfig = "a", ChildState = "s" }, new ChildSubject(context) { ChildConfig = "b" }]
+        };
+        var mixed = new SubjectWithMixedProperties(context) { ConfigOne = "one \"quoted\"", ConfigTwo = 2, StateOne = "state" };
+
+        // Act
+        var list = _serializer.Serialize(subject, static _ => false, naming);
+        var scalars = _serializer.Serialize(mixed, static _ => false, naming);
+
+        // Assert
+        Assert.Equal(_serializer.Serialize(subject, naming), list);
+        Assert.Equal(_serializer.Serialize(mixed, naming), scalars);
+    }
+
+    [Fact]
+    public void WhenPropertyIsExcluded_ThenItIsNotWrittenAndTheOthersAre()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var subject = new SubjectWithMixedProperties(context) { ConfigOne = "one", ConfigTwo = 2 };
+
+        // Act
+        var json = _serializer.Serialize(
+            subject, static name => name == nameof(SubjectWithMixedProperties.ConfigOne), ConfigurationNaming.CSharpProperty);
+
+        // Assert
+        Assert.DoesNotContain("ConfigOne", json);
+        Assert.Contains("\"ConfigTwo\": 2", json);
+        Assert.Contains($"\"$type\": \"{typeof(SubjectWithMixedProperties).FullName}\"", json);
+    }
+
+    [Fact]
+    public void WhenExcludedPropertyHoldsASubjectThatCannotBeWritten_ThenItsValueIsNotRead()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var subject = new SubjectWithAnyChild(context) { Child = new PlainSubject(context) };
+
+        // Act
+        var json = _serializer.Serialize(subject, static name => name == nameof(SubjectWithAnyChild.Child));
+
+        // Assert
+        Assert.DoesNotContain("child", json);
+        Assert.ThrowsAny<Exception>(() => _serializer.Serialize(subject));
+    }
+
+    [Fact]
+    public void WhenExclusionNamesAPropertyOfANestedSubject_ThenTheNestedSubjectIsWrittenInFull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var subject = new ParentWithChildSubject(context) { Name = "parent", Child = new ChildSubject(context) { ChildConfig = "kept" } };
+
+        // Act
+        var json = _serializer.Serialize(
+            subject, static name => name is nameof(ParentWithChildSubject.Name) or nameof(ChildSubject.ChildConfig), ConfigurationNaming.CSharpProperty);
+
+        // Assert
+        Assert.DoesNotContain("\"Name\"", json);
+        Assert.Contains("\"ChildConfig\": \"kept\"", json);
+    }
+
     #endregion
 
     #region Deserialize Tests
