@@ -15,8 +15,10 @@ The Philips Hue integration connects to a Hue Bridge on the local network and ex
 |----------|------|---------|-------------|
 | `BridgeId` | string? | null | Bridge identifier from discovery |
 | `AppKey` | string? | null | Authentication key from Link button registration (secret) |
-| `PollingInterval` | TimeSpan | 60s | Interval of the device set reconciliation poll. Clamped to 5 s through 1 h; zero or less uses the default. |
-| `RetryInterval` | TimeSpan | 30s | Retry interval on connection failure. Clamped to 5 s through 1 h; zero or less uses the default. |
+| `PollingInterval` | TimeSpan | 60s | Interval of the device set reconciliation poll |
+| `RetryInterval` | TimeSpan | 30s | Retry interval on connection failure |
+
+Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped, and zero or less uses the default.
 
 ### JSON Configuration
 

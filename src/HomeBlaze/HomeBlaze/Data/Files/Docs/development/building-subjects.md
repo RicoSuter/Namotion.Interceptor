@@ -266,9 +266,8 @@ Good key sources: API resource IDs (GUIDs), hardware serial numbers, MAC address
 
 A subject may be held by several collections, for example a light in a bridge's `Lights` and in a room's `Lights`, or a network client in a router's `Clients` and in an access point's `Clients`. Rules:
 
-- **One collection owns the subject and adds it first.** It creates the subject and adds it to its own collection before any other collection refers to it, because a descendant's path follows attach order. The other collections only refer to it and are replaced when their members change.
+- **The owning collection adds the subject first and sits at the shallowest level, because the canonical path is the shallowest, then earliest attached.** It creates the subject and adds it to its own collection before any other collection refers to it. A subject with several parents has one path per parent; paths are ordered by depth, with attach order deciding between equally deep ones, and history records values under the first. The other collections only refer to it and are replaced when their members change.
 - **The subject stays attached until the last collection drops it,** not the first: a subject with several parents detaches only once every collection holding it has dropped it. When the owner drops it, drop it from every other collection in the same update, or it stays attached, referenced by them but orphaned from its owner.
-- **The canonical path is the shallowest one.** A subject with several parents has one path per parent; paths are ordered by depth, with attach order deciding between equally deep ones, and history records values under the first. Put the owning collection at the shallowest level.
 - **Relative paths from a shared subject do not resolve.** A `../` path starting at a subject with several parents resolves to nothing, because its parent is ambiguous.
 - **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. Keep a back-reference to an owner in a field.
 

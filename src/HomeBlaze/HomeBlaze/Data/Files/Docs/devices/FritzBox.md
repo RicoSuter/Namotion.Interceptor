@@ -18,9 +18,10 @@ Connects to an AVM FRITZ!Box router over its documented local TR-064 interface, 
 1. In the FRITZ!Box web UI, enable **Home Network > Network > Network Settings > Allow access for applications**.
 2. Create a FRITZ!Box user under **System > FRITZ!Box Users** with the **FRITZ!Box settings** permission. A dedicated user is recommended.
 3. In HomeBlaze, create a **FRITZ!Box**. The setup searches the network for routers and also tries `fritz.box`; select the one found or enter its address by hand. The address field accepts an IPv4 address, an IPv6 address, or a host name, without a scheme or a port.
-4. Enter the user and password and select **Test Connection**. The router's certificate is self-signed, so your browser normally warns about it; open `https://<router address>` once and read the certificate details from that warning page or the padlock. They show the same SHA-256 fingerprint HomeBlaze shows here. A match proves HomeBlaze reached the same device your browser did; tick the confirmation box only once they match, then save.
+4. Enter the user and password and select **Test Connection**.
+5. The router's certificate is self-signed, so your browser normally warns about it; open `https://<router address>` once and read the certificate details from that warning page or the padlock. Compare that SHA-256 fingerprint with the one HomeBlaze shows here, and tick the confirmation box only once they match, then save.
 
-The router's certificate key is pinned. When it changes, the FRITZ!Box subject shows an error, and the edit dialog offers **Accept New Certificate**, showing the new fingerprint to compare again; accepting it takes effect once the edit dialog is saved.
+The router's certificate key is pinned on first connection; see [Certificate Trust](#certificate-trust) for how it is trusted and how to accept a new one.
 
 ## Configuration
 
@@ -55,7 +56,7 @@ Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped
 |---|---|---|
 | Stopped | `HostAddress` empty | "No host address configured" |
 | Starting | Connecting | "Connecting..." |
-| Running | Polling | Empty; "Data may be stale (n of 3): ..." after failed polls; a warning when the trusted certificate could not be saved |
+| Running | Polling | Empty, or a warning when the trusted certificate could not be saved |
 | Error | No password configured, connection failed, login failed, certificate changed, or firmware too old | The cause |
 
 ## Subject Model
@@ -70,7 +71,7 @@ FritzBox
 
 Clients and access points are keyed by MAC address in upper case, so their paths stay stable across restarts. A client that moves to another access point keeps its subject; only the two access point lists change. History records a client under `FritzBox.Clients`, wherever it is connected. See [Shared Child Subjects](../development/building-subjects.md#shared-child-subjects) for the general rule.
 
-A WLAN is keyed by the band it reports or, failing that, by its position (first `2.4GHz`, second `5GHz`, third `6GHz`), otherwise `WLAN<n>`; a key that would collide gets its position as a suffix, such as `5GHz-3`. Of several WLANs, the last is `Guest`.
+WLANs are keyed `2.4GHz`, `5GHz` and `6GHz` for the radios, and `Guest` for the guest network. Any other position, or a key that would collide, falls back to a generated key.
 
 ## Widgets
 
@@ -143,11 +144,7 @@ A WLAN is keyed by the band it reports or, failing that, by its position (first 
 
 ## How It Works
 
-1. The subject reads the router's TR-064 description without authentication, then asks for its HTTPS port over the same unauthenticated connection.
-2. It logs in once over HTTPS with HTTP Digest and checks the certificate key, then asks the router which internet connection is active. Without a configured password, the subject does not contact the router at all and waits for a configuration change, so a missing password never adds to the router's login lockout.
-3. Every poll first reads the device information on its own, which checks the login again, so a password changed on the router while connected costs one failed login, not one per request. Then it reads, in parallel: firmware updates, the internet connection, the online monitor, every WLAN, the host list and the mesh list. An action the firmware does not offer only leaves its value empty.
-4. The mesh list places each present client at an access point with its band or LAN port and link speed. A client the mesh list does not place, for example because the router offers no mesh list or the client sits behind a third-party access point, falls back to the LAN port and link speed the host list itself reports while the client is present, and has no access point.
-5. Existing subjects are updated in place. A collection is replaced only when clients, access points or WLANs appear or disappear.
+The router is polled every `PollingInterval`, read only. Each poll starts with its own login check, so a password changed on the router costs one failed login, not one per request. The mesh list places each present client at an access point with its band or LAN port and link speed; a client it does not place, for example because the router offers no mesh list or the client sits behind a third-party access point, falls back to the host list's port and link speed while present. Existing subjects are updated in place.
 
 ### Certificate Trust
 
@@ -167,9 +164,10 @@ HomeBlaze connects to the router on TCP port 49000 (description, unauthenticated
 | The FRITZ!Box did not answer, or setup finds no router | The address is wrong, "Allow access for applications" is off, or port 49000 is blocked by a firewall; check those first. Enter the address by hand when discovery cannot reach the router, for example in a container on a bridge network. |
 | "No password configured." | `Password` is empty, so the router is not contacted. Saving a password connects at once. |
 | "Login failed: check user, password and the FRITZ!Box settings permission." | Wrong user or password, or the user lacks the permission. Shown the same way when a later poll is refused, for example after the password or permission changed while the connection was running. The next attempt waits 15 minutes, doubling up to 2 hours, because every failed login lengthens the router's lockout; saving the configuration retries at once. |
-| "The FRITZ!Box presented a certificate other than the trusted one..." | The router's certificate key changed. Check why, then use **Accept New Certificate** in the edit dialog and save it. |
+| "The FRITZ!Box presented a certificate other than the trusted one..." | The router's certificate key changed; see [Certificate Trust](#certificate-trust). |
+| Certificate error right after changing `HostAddress` | After changing the address to another router, accept its certificate (the pinned key belongs to the previous router). |
 | "The FRITZ!Box does not offer its host list..." | The firmware is too old. Update FRITZ!OS, then save the configuration or restart HomeBlaze, since the subject only reconnects on a configuration change. |
-| Clients have no access point | The router does not offer the mesh list, the mesh list failed to download or was malformed (treated the same as a missing one, without failing the poll), or the client is connected through a third-party access point. |
+| Clients have no access point | The router does not offer the mesh list, the mesh list failed to download or was malformed, or the client is connected through a third-party access point. |
 | "Data may be stale (n of 3)" | A poll failed; after three in a row the connection is reset and retried after `RetryInterval`. |
 
 ## Limitations
