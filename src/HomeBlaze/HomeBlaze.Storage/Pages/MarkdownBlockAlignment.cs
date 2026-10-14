@@ -1,10 +1,11 @@
+using Markdig.Extensions.Footnotes;
 using Markdig.Syntax;
 
 namespace HomeBlaze.Storage.Pages;
 
 /// <summary>
 /// Maps the blocks of a page to the blocks of the page after one change of its lines, and checks that the
-/// change did nothing to the blocks that it did not insert or remove.
+/// change did nothing to the blocks and the text that it did not insert or remove.
 /// </summary>
 internal static class MarkdownBlockAlignment
 {
@@ -23,7 +24,8 @@ internal static class MarkdownBlockAlignment
     /// explains, and the same block around it. The first inserted block must be a slot block directly inside
     /// <paramref name="owner"/>, and every inserted block must end on the inserted lines. Every leaf block of the
     /// document that does not start on a line of the change, such as a paragraph, a heading or a code block,
-    /// must have the same kind, the same text and the same containers around it as before.
+    /// must have the same kind, the same text and the same containers around it as before, and every container
+    /// that does not start there, such as a list or a quote, must still be a container of its own.
     /// </returns>
     public static int[]? TryAlign(
         MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
@@ -100,30 +102,31 @@ internal static class MarkdownBlockAlignment
         return TakeInsertedBlocks() &&
                newPosition == newBlocks.Count &&
                insertedBlocks.Count == expectedInsertedBlockCount &&
-               HasSameLeafBlocks(before, after, edit)
+               HasSameDocumentBlocks(before, after, edit)
             ? map
             : null;
     }
 
-    // The kind of a leaf block, the containers around it from the document inwards, and where its text is.
-    private readonly record struct LeafDescription(Type Kind, string Containers, int Start, int Length);
+    // The kind of a block of the document, the containers around it from the document inwards, and for a leaf
+    // block where its text is.
+    private readonly record struct DocumentBlockDescription(Type Kind, string Containers, int Start, int Length);
 
-    private static bool HasSameLeafBlocks(MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit)
+    private static bool HasSameDocumentBlocks(MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit)
     {
-        var oldLeaves = DescribeLeafBlocks(before, edit.Line, edit.RemovedLineCount);
-        var newLeaves = DescribeLeafBlocks(after, edit.Line, edit.InsertedLineCount);
-        if (oldLeaves.Count != newLeaves.Count)
+        var oldBlocks = DescribeDocumentBlocks(before, edit.Line, edit.RemovedLineCount);
+        var newBlocks = DescribeDocumentBlocks(after, edit.Line, edit.InsertedLineCount);
+        if (oldBlocks.Count != newBlocks.Count)
         {
             return false;
         }
 
-        for (var index = 0; index < oldLeaves.Count; index++)
+        for (var index = 0; index < oldBlocks.Count; index++)
         {
-            var oldLeaf = oldLeaves[index];
-            var newLeaf = newLeaves[index];
-            if (oldLeaf.Kind != newLeaf.Kind ||
-                !string.Equals(oldLeaf.Containers, newLeaf.Containers, StringComparison.Ordinal) ||
-                !before.Source.AsSpan(oldLeaf.Start, oldLeaf.Length).SequenceEqual(after.Source.AsSpan(newLeaf.Start, newLeaf.Length)))
+            var oldBlock = oldBlocks[index];
+            var newBlock = newBlocks[index];
+            if (oldBlock.Kind != newBlock.Kind ||
+                !string.Equals(oldBlock.Containers, newBlock.Containers, StringComparison.Ordinal) ||
+                !before.Source.AsSpan(oldBlock.Start, oldBlock.Length).SequenceEqual(after.Source.AsSpan(newBlock.Start, newBlock.Length)))
             {
                 return false;
             }
@@ -132,12 +135,14 @@ internal static class MarkdownBlockAlignment
         return true;
     }
 
-    // Every leaf block that does not start on the given lines: its kind, the containers around it and its
-    // text. A change that only inserts or removes its own lines leaves this list as it was.
-    private static List<LeafDescription> DescribeLeafBlocks(MarkdownPage page, int skippedLine, int skippedLineCount)
+    // Every block of the Markdig document that does not start on the given lines, in the order of the document:
+    // its kind and the containers around it, and for a leaf block its text. A change that only inserts or removes
+    // its own lines leaves this list as it was. The containers are listed themselves, because two lists that
+    // become one keep every leaf block as it is.
+    private static List<DocumentBlockDescription> DescribeDocumentBlocks(MarkdownPage page, int skippedLine, int skippedLineCount)
     {
         var source = page.Source;
-        var result = new List<LeafDescription>();
+        var result = new List<DocumentBlockDescription>();
         Add(page.Document, string.Empty);
         return result;
 
@@ -145,28 +150,37 @@ internal static class MarkdownBlockAlignment
         {
             foreach (var child in container)
             {
+                // Link reference definitions are no text of the page, and Markdig lists their group where the
+                // first definition or heading of the page made it, which a change can move.
+                if (child is LinkReferenceDefinitionGroup)
+                {
+                    continue;
+                }
+
+                var line = child.Line + 1;
+                var isSkipped = line >= skippedLine && line < skippedLine + skippedLineCount;
+
                 if (child is ContainerBlock inner)
                 {
+                    // The group of the footnotes has no line of its own. Its footnotes are listed.
+                    if (!isSkipped && child is not FootnoteGroup)
+                    {
+                        result.Add(new DocumentBlockDescription(child.GetType(), containers, 0, 0));
+                    }
+
                     // A block of the page is named by its head line, so that text which moves into the block
                     // beside it is seen. Every other container is named by its type.
                     var name = inner is MarkdownBlockContainer ? GetLine(source, inner.Span.Start).ToString() : inner.GetType().Name;
                     Add(inner, $"{containers}\n{name}");
-                    continue;
                 }
-
-                // A link reference definition is no text of the page, and Markdig lists it where the first
-                // definition or heading of the page made the group for them, which a change can move.
-                var line = child.Line + 1;
-                if (child is not LeafBlock or LinkReferenceDefinition || (line >= skippedLine && line < skippedLine + skippedLineCount))
+                else if (child is LeafBlock && !isSkipped)
                 {
-                    continue;
+                    // Without white space at the end: the span of an indented code block takes the empty lines after it.
+                    var start = Math.Clamp(child.Span.Start, 0, source.Length);
+                    var end = Math.Clamp(child.Span.End + 1, start, source.Length);
+                    var length = source.AsSpan(start, end - start).TrimEnd().Length;
+                    result.Add(new DocumentBlockDescription(child.GetType(), containers, start, length));
                 }
-
-                // Without white space at the end: the span of an indented code block takes the empty lines after it.
-                var start = Math.Clamp(child.Span.Start, 0, source.Length);
-                var end = Math.Clamp(child.Span.End + 1, start, source.Length);
-                var length = source.AsSpan(start, end - start).TrimEnd().Length;
-                result.Add(new LeafDescription(child.GetType(), containers, start, length));
             }
         }
     }

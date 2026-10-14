@@ -1,4 +1,5 @@
 using HomeBlaze.Storage.Pages;
+using Markdig.Extensions.Footnotes;
 using Markdig.Syntax;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -284,8 +285,46 @@ public class MarkdownBlockStructureTests
     }
 
     [Theory]
+    [InlineData("- first", "- second")]
+    [InlineData("1. first", "2. second")]
+    [InlineData("a term\n:   a definition", "another term\n:   another definition")]
+    public void WhenRemovalMakesOneListOfTheListsBeforeAndAfterTheBlock_ThenAlignmentFails(string listBefore, string listAfter)
+    {
+        // Arrange: every text keeps its kind and its containers by name, but the two lists become one, also
+        // across the empty line that the removal leaves, and a list with an empty line between its items is
+        // rendered with paragraphs.
+        var source = $":: Demo.Panel\n{listBefore}\n::: Tile\ntwo\n:::\n{listAfter}\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+    }
+
+    [Fact]
+    public void WhenInsertedBlockMakesTwoListsOfOne_ThenAlignmentFails()
+    {
+        // Arrange
+        const string source = ":: Demo.Board\n- first\n- second\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var result = MarkdownBlockWriter.InsertLines(source, 3, "::: Tile\n:::", "\n", out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 1, before.Blocks[0]);
+
+        // Assert
+        Assert.Null(map);
+    }
+
+    [Theory]
     [InlineData("a paragraph", "another paragraph")]
     [InlineData("- first\n- second", "text of the panel")]
+    [InlineData("- first", "* a list of another kind")]
+    [InlineData("> a quote", "> another quote")]
     [InlineData("> a quote", "text of the panel")]
     [InlineData("# A heading", "text of the panel")]
     [InlineData("```\ncode\n```", "```\nmore code\n```")]
@@ -396,14 +435,14 @@ public class MarkdownBlockStructureTests
                     var context = $"Round {round}, step {step}, removal at line {edit.Line}:\n{source}\n--- became ---\n{result}";
 
                     // Assert: the check says yes exactly when every other block has its text and its place, and
-                    // every text outside the block is what it was.
+                    // every text and every container outside the block is what it was.
                     AssertOnlyTheEditedLinesChanged(source, result, edit, context);
                     AssertRemovalLeavesNothingButOneEmptyLine(result, edit, lineEnding, context);
                     var hasSameBlocks = Describe(before, edit.Line, edit.RemovedLineCount).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount));
-                    var hasSameLeaves = DescribeLeaves(before, edit.Line, edit.RemovedLineCount).SequenceEqual(DescribeLeaves(after, edit.Line, edit.InsertedLineCount));
+                    var hasSameDocument = DescribeDocument(before, edit.Line, edit.RemovedLineCount).SequenceEqual(DescribeDocument(after, edit.Line, edit.InsertedLineCount));
                     Assert.True(
-                        (hasSameBlocks && hasSameLeaves) == (map is not null),
-                        $"Same blocks: {hasSameBlocks}, same leaves: {hasSameLeaves}, map: {map is not null}.\n{context}");
+                        (hasSameBlocks && hasSameDocument) == (map is not null),
+                        $"Same blocks: {hasSameBlocks}, same document: {hasSameDocument}, map: {map is not null}.\n{context}");
                     if (map is null)
                     {
                         refusedRemovals++;
@@ -434,7 +473,7 @@ public class MarkdownBlockStructureTests
                     AssertInsertedLinesEndLikeThePage(result, edit, placement.LineEnding, context);
                     AssertAppendGivesTheLastLineTheLineEndingOfThePage(source, result, edit, placement.LineEnding, context);
                     Assert.True(Describe(before, 0, 0).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount)), context);
-                    Assert.True(DescribeLeaves(before, 0, 0).SequenceEqual(DescribeLeaves(after, edit.Line, edit.InsertedLineCount)), $"A leaf changed.\n{context}");
+                    Assert.True(DescribeDocument(before, 0, 0).SequenceEqual(DescribeDocument(after, edit.Line, edit.InsertedLineCount)), $"The document changed.\n{context}");
                     Assert.True(map is not null, $"The insert was refused.\n{context}");
                     AssertMapKeepsHeadLines(before, after, map!, context);
                     Assert.Equal(tiles.Count + 1, after.AllBlocks[map![owner.Index]].Children.Count(child => child.Kind == MarkdownBlockKind.Slot));
@@ -483,34 +522,37 @@ public class MarkdownBlockStructureTests
         }
     }
 
-    // Every leaf block of the document that does not start on the given lines, in the order of the document: its
-    // kind, the containers around it from the leaf outwards, and its text. A block of the page is named by its
-    // head line. Equal lists before and after a change mean that every text outside the change is what it was.
-    // Written apart from the check on purpose, so that the two must agree.
-    private static List<string> DescribeLeaves(MarkdownPage page, int skippedLine, int skippedLineCount)
+    // Every block of the Markdig document that does not start on the given lines, in the order of the document:
+    // its kind, the containers around it from the block outwards, and for a leaf block its text. A block of the
+    // page is named by its head line. Equal lists before and after a change mean that every text outside the
+    // change is what it was and that no list or quote was joined or split. Written apart from the check on
+    // purpose, so that the two must agree.
+    private static List<string> DescribeDocument(MarkdownPage page, int skippedLine, int skippedLineCount)
     {
         var lines = page.Source.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
         var result = new List<string>();
-        foreach (var leaf in page.Document.Descendants<LeafBlock>())
+        foreach (var block in page.Document.Descendants<Block>())
         {
-            // A link reference definition is no text, and Markdig lists it where the first one of the page stands.
-            var line = leaf.Line + 1;
-            if (leaf is LinkReferenceDefinition || (line >= skippedLine && line < skippedLine + skippedLineCount))
+            // Link reference definitions are no text, and Markdig lists them where the first one of the page
+            // stands. The group of the footnotes and an empty line in a list item have no line of their own.
+            var line = block.Line + 1;
+            if (block is LinkReferenceDefinition or LinkReferenceDefinitionGroup or FootnoteGroup or BlankLineBlock ||
+                (line >= skippedLine && line < skippedLine + skippedLineCount))
             {
                 continue;
             }
 
             var containers = new List<string>();
-            for (var parent = leaf.Parent; parent is not null; parent = parent.Parent)
+            for (var parent = block.Parent; parent is not null; parent = parent.Parent)
             {
-                containers.Add(parent is MarkdownBlockContainer block ? lines[block.Line] : parent.GetType().Name);
+                containers.Add(parent is MarkdownBlockContainer container ? lines[container.Line] : parent.GetType().Name);
             }
 
             // White space at the end is no text: the span of an indented code block takes the empty lines after it.
-            var text = leaf.Span.End >= leaf.Span.Start
-                ? page.Source[leaf.Span.Start..Math.Min(leaf.Span.End + 1, page.Source.Length)]
+            var text = block is LeafBlock && block.Span.End >= block.Span.Start
+                ? page.Source[block.Span.Start..Math.Min(block.Span.End + 1, page.Source.Length)]
                 : string.Empty;
-            result.Add($"{leaf.GetType().Name} in {string.Join(" < ", containers)}\n{text.Replace("\r", string.Empty).TrimEnd()}");
+            result.Add($"{block.GetType().Name} in {string.Join(" < ", containers)}\n{text.Replace("\r", string.Empty).TrimEnd()}");
         }
 
         return result;
@@ -659,9 +701,9 @@ public class MarkdownBlockStructureTests
             var tileFence = Fence(random.Next(3) == 0 ? 4 : 3);
             lastTileFence = tileFence;
 
-            // A tile between two lines of which the second joins the first when the tile is removed. The lines
-            // above meet like this too rarely for the check to say no often.
-            var joiningLines = random.Next(6) == 0 ? random.Next(3) : -1;
+            // A tile between two lines of which the second joins the first when the tile is removed, as text or
+            // as an item of the same list. The lines above meet like this too rarely for the check to say no often.
+            var joiningLines = random.Next(6) == 0 ? random.Next(4) : -1;
             if (joiningLines >= 0)
             {
                 Add(joiningLines == 2 ? "a term before a tile" : "- an item before a tile");
@@ -693,7 +735,8 @@ public class MarkdownBlockStructureTests
                 {
                     0 => "  text after two spaces",
                     1 => "    text after four spaces",
-                    _ => ":   a definition"
+                    2 => ":   a definition",
+                    _ => "- an item of the same list"
                 });
             }
 
