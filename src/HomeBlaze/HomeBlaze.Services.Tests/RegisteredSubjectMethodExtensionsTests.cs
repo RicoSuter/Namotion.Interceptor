@@ -184,6 +184,38 @@ public class RegisteredSubjectMethodExtensionsTests
         // Assert
         Assert.True(isEnabled);
     }
+
+    [Fact]
+    public void WhenAPropertyHoldsAMethod_ThenTryGetMethodMetadataReturnsIt()
+    {
+        // Arrange
+        var registered = new MethodExtTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("First")!;
+
+        // Act
+        var metadata = property.TryGetMethodMetadata();
+
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Equal("First", metadata.Title);
+    }
+
+    [Fact]
+    public void WhenAPropertyTypeCannotHoldAMethod_ThenTryGetMethodMetadataReturnsNullWithoutReadingTheValue()
+    {
+        // Arrange
+        var registered = new MethodDiscoveryGetterSubject(CreateContext()).TryGetRegisteredSubject()!;
+        var unavailable = registered.TryGetProperty(nameof(MethodDiscoveryGetterSubject.UnavailableValue))!;
+        var objectMethod = registered.TryGetProperty(nameof(MethodDiscoveryGetterSubject.ObjectMethod))!;
+
+        // Act
+        var unavailableMetadata = unavailable.TryGetMethodMetadata();
+        var objectMetadata = objectMethod.TryGetMethodMetadata();
+
+        // Assert
+        Assert.Null(unavailableMetadata);
+        Assert.Equal("Object", objectMetadata?.Title);
+    }
 }
 
 [InterceptorSubject]

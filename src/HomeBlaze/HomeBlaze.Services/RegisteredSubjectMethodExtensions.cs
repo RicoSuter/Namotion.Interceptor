@@ -59,6 +59,15 @@ public static class RegisteredSubjectMethodExtensions
         return methodProperty.TryGetAttribute(KnownAttributes.IsEnabled)?.GetValue() as bool? ?? true;
     }
 
+    /// <summary>
+    /// Gets the operation or query that the property holds, or null when it holds none. The value of a property whose
+    /// type cannot hold a <see cref="MethodMetadata"/> is not read.
+    /// </summary>
+    public static MethodMetadata? TryGetMethodMetadata(this RegisteredSubjectProperty property)
+    {
+        return CanContainMethodMetadata(property) ? property.GetValue() as MethodMetadata : null;
+    }
+
     private static bool CanContainMethodMetadata(RegisteredSubjectProperty property)
     {
         // A metadata subclass may implement an interface not implemented by MethodMetadata itself.
