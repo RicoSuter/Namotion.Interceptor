@@ -33,6 +33,11 @@ public partial class FritzBox : BackgroundService,
     ILastUpdatedProvider
 {
     /// <summary>
+    /// The default <see cref="Name"/>, also the <see cref="Title"/> when neither a name nor the model is known.
+    /// </summary>
+    public const string DefaultName = "FRITZ!Box";
+
+    /// <summary>
     /// The default <see cref="PollingInterval"/>, in seconds.
     /// </summary>
     public const int DefaultPollingIntervalSeconds = 15;
@@ -59,7 +64,7 @@ public partial class FritzBox : BackgroundService,
     {
         _logger = logger;
 
-        Name = "FRITZ!Box";
+        Name = DefaultName;
         HostAddress = null;
         Username = null;
         Password = null;
@@ -212,7 +217,7 @@ public partial class FritzBox : BackgroundService,
     }
 
     [Derived]
-    public string? Title => string.IsNullOrWhiteSpace(Name) ? Model ?? "FRITZ!Box" : Name;
+    public string? Title => string.IsNullOrWhiteSpace(Name) ? Model ?? DefaultName : Name;
 
     [Derived]
     public string IconName => "Router";

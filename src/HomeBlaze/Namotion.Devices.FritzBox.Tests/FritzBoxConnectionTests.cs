@@ -308,6 +308,21 @@ public class FritzBoxConnectionTests
         Assert.True(fake.IsGuestWlanEnabled);
     }
 
+    [Fact]
+    public void WhenTheOptionsAreFormatted_ThenThePasswordIsLeftOut()
+    {
+        // Arrange
+        var options = new FritzBoxConnectionOptions("fritz.box", "homeblaze", "top-secret-password", "pin");
+
+        // Act
+        var text = options.ToString();
+
+        // Assert
+        Assert.DoesNotContain("top-secret-password", text);
+        Assert.Contains("fritz.box", text);
+        Assert.Contains("homeblaze", text);
+    }
+
     private static readonly TimeSpan ShortTimeout = TimeSpan.FromSeconds(1);
 
     private static FritzBoxConnectionOptions Options(

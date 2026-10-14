@@ -101,19 +101,19 @@ internal static class FritzBoxPoller
     private static async Task<InternetInfo?> ReadInternetAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
     {
         var serviceType = connection.InternetServiceType;
-        var statusTask = ReadInternetServiceAnswerAsync(connection, serviceType, "GetStatusInfo", cancellationToken);
-        var addressTask = ReadInternetServiceAnswerAsync(connection, serviceType, "GetExternalIPAddress", cancellationToken);
-        var ipv6Task = connection.HasService(Tr64Services.AppSetup)
-            ? connection.ReadOrDefaultAsync(Tr64Services.AppSetup, "GetAppRemoteInfo", null, cancellationToken)
-            : NoAnswer;
+        var statusTask = ReadIfOfferedAsync(connection, serviceType, "GetStatusInfo", cancellationToken);
+        var addressTask = ReadIfOfferedAsync(connection, serviceType, "GetExternalIPAddress", cancellationToken);
+        var ipv6Task = ReadIfOfferedAsync(connection, Tr64Services.AppSetup, "GetAppRemoteInfo", cancellationToken);
         await Task.WhenAll(statusTask, addressTask, ipv6Task);
 
         return ToInternetInfo(await statusTask, await addressTask, await ipv6Task);
     }
 
-    private static Task<UpnpSoapResponse?> ReadInternetServiceAnswerAsync(
+    private static Task<UpnpSoapResponse?> ReadIfOfferedAsync(
         FritzBoxConnection connection, string? serviceType, string action, CancellationToken cancellationToken) =>
-        serviceType is null ? NoAnswer : connection.ReadOrDefaultAsync(serviceType, action, null, cancellationToken);
+        serviceType is null || !connection.HasService(serviceType)
+            ? NoAnswer
+            : connection.ReadOrDefaultAsync(serviceType, action, null, cancellationToken);
 
     private static InternetInfo? ToInternetInfo(UpnpSoapResponse? status, UpnpSoapResponse? address, UpnpSoapResponse? ipv6)
     {

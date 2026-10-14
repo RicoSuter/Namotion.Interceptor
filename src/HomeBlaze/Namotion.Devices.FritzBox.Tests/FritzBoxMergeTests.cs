@@ -37,6 +37,7 @@ public class FritzBoxMergeTests
         Assert.Equal("AVM", router.Manufacturer);
         Assert.True(router.IsInternetConnected);
         Assert.Equal(5m, router.UploadRate);
+        Assert.Equal(40m, router.MaximumUploadRate);
         Assert.Equal(250m, router.MaximumDownloadRate);
     }
 
@@ -209,6 +210,8 @@ public class FritzBoxMergeTests
         // Assert
         Assert.Null(router.UploadRate);
         Assert.Null(router.DownloadRate);
+        Assert.Null(router.MaximumUploadRate);
+        Assert.Null(router.MaximumDownloadRate);
         Assert.Equal("FRITZ!Box 7590", router.Model);
     }
 

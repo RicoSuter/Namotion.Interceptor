@@ -206,6 +206,25 @@ public class FritzBoxPollerTests
     }
 
     [Fact]
+    public async Task WhenTheAppSetupServiceIsNotOffered_ThenOnlyTheIpv6AddressIsNullAndItIsNotAskedFor()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var appSetupService = fake.DescriptionXml.Split('\n').Single(line => line.Contains(Tr64Services.AppSetup, StringComparison.Ordinal));
+        fake.DescriptionXml = fake.DescriptionXml.Replace(appSetupService, string.Empty, StringComparison.Ordinal);
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Null(snapshot.Internet!.ExternalIpv6Address);
+        Assert.True(snapshot.Internet.IsConnected);
+        Assert.Equal("203.0.113.7", snapshot.Internet.ExternalIpAddress);
+        Assert.DoesNotContain("GetAppRemoteInfo", fake.Actions);
+    }
+
+    [Fact]
     public async Task WhenEveryInternetActionFaults_ThenInternetIsNull()
     {
         // Arrange
