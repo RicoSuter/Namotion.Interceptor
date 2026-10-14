@@ -14,20 +14,9 @@ Every other type that can be configured works as a block as well, see [Widgets](
 
 ## Sample Motors
 
-Several samples need a subject to show. This page creates two sample motors for them, and the samples refer to the motors by their names `pump` and `fan`, in a `Path` and in expressions. A sample that you copy to a page of your own needs the name or the path of one of your subjects in their place.
+Several samples need a subject to show. They use two sample motors, the subject files `Pump.json` and `Fan.json` in the folder `widgets` next to this page. A path that starts with `../` starts at the folder of this page, so the samples refer to the motors as `../widgets/Pump` and `../widgets/Fan`, in a `Path` and in expressions. A sample that you copy to a page of your own needs the path of one of your subjects in their place.
 
-<!-- sample: live -->
-~~~~markdown
-:: HomeBlaze.Samples.Motor#pump Name="Pump" TargetSpeed=1200
-:: HomeBlaze.Samples.Motor#fan Name="Fan" TargetSpeed=800
-::
-~~~~
-
-:: HomeBlaze.Samples.Motor#pump Name="Pump" TargetSpeed=1200
-:: HomeBlaze.Samples.Motor#fan Name="Fan" TargetSpeed=800
-::
-
-The head line of the second motor ends the first motor, and the closing line ends the second one, so that the text of the page goes on below it. All samples on this page are written in this short form, see [Closing and Nesting](pages.md#closing-and-nesting). A name is unique on a page, so every other name on this page, like the name of a tab, belongs to one sample only.
+All samples on this page are written in the short form, where the closing line of the last block ends the sample and the text of the page goes on below it, see [Closing and Nesting](pages.md#closing-and-nesting). A name is unique on a page, so every name on this page, like the name of a tab, belongs to one sample only.
 
 ## Card
 
@@ -55,22 +44,22 @@ A card with a title, an icon and a footer. Its body is text with an expression a
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 
-::: HomeBlaze.Components.Widget Path=pump
+::: HomeBlaze.Components.Widget Path=../widgets/Pump
 
 ::: Footer
-Target speed: {{ pump/TargetSpeed }} RPM
+Target speed: {{ ../widgets/Pump/TargetSpeed }} RPM
 ::
 ~~~~
 
 :: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 
-::: HomeBlaze.Components.Widget Path=pump
+::: HomeBlaze.Components.Widget Path=../widgets/Pump
 
 ::: Footer
-Target speed: {{ pump/TargetSpeed }} RPM
+Target speed: {{ ../widgets/Pump/TargetSpeed }} RPM
 ::
 
 A card without arguments and without a footer. It has a border and no shadow, because a card is outlined unless `Outlined=false` is set:
@@ -91,18 +80,18 @@ A card with a subtitle, a coloured icon and a title that leads to the guide for 
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.Card Title="Pump" Subtitle="Sample motor" Icon=WaterDrop IconColor=Primary Href="pages.md" Outlined=false Elevation=6
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 
 ::: HeaderRight
-{{ pump/Status }}
+{{ ../widgets/Pump/Status }}
 ::
 ~~~~
 
 :: HomeBlaze.Components.Card Title="Pump" Subtitle="Sample motor" Icon=WaterDrop IconColor=Primary Href="pages.md" Outlined=false Elevation=6
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 
 ::: HeaderRight
-{{ pump/Status }}
+{{ ../widgets/Pump/Status }}
 ::
 
 - The header is shown when the card has a title, a subtitle, an icon or a `HeaderRight`.
@@ -132,30 +121,30 @@ A `FlowLayout` without arguments gives every cell at least 320 pixels. The three
 :: HomeBlaze.Components.FlowLayout
 ::: Item
 :::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-::::: HomeBlaze.Components.Widget Path=pump
+::::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Item
 :::: HomeBlaze.Components.Card Title="Fan" Icon=Air
-::::: HomeBlaze.Components.Widget Path=fan
+::::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Item
 :::: HomeBlaze.Components.Card Title="Notes"
 A cell can hold any page content, not only widgets.
 
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 ::
 ~~~~
 
 :: HomeBlaze.Components.FlowLayout
 ::: Item
 :::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-::::: HomeBlaze.Components.Widget Path=pump
+::::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Item
 :::: HomeBlaze.Components.Card Title="Fan" Icon=Air
-::::: HomeBlaze.Components.Widget Path=fan
+::::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Item
 :::: HomeBlaze.Components.Card Title="Notes"
 A cell can hold any page content, not only widgets.
 
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 ::
 
 With `MinWidth=120` a cell may get as narrow as 120 pixels, so many cells fit into one row. The six cards stand in one row while the page is at least 800 pixels wide, and wrap below that:
@@ -212,20 +201,20 @@ With `MinWidth=600` a cell is never narrower than 600 pixels, as long as the pag
 :: HomeBlaze.Components.FlowLayout MinWidth=600
 ::: Item
 :::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-The pump is {{ pump/Status }} and runs at {{ pump/CurrentSpeed }} of {{ pump/TargetSpeed }} RPM.
+The pump is {{ ../widgets/Pump/Status }} and runs at {{ ../widgets/Pump/CurrentSpeed }} of {{ ../widgets/Pump/TargetSpeed }} RPM.
 ::: Item
 :::: HomeBlaze.Components.Card Title="Fan" Icon=Air
-The fan is {{ fan/Status }} and runs at {{ fan/CurrentSpeed }} of {{ fan/TargetSpeed }} RPM.
+The fan is {{ ../widgets/Fan/Status }} and runs at {{ ../widgets/Fan/CurrentSpeed }} of {{ ../widgets/Fan/TargetSpeed }} RPM.
 ::
 ~~~~
 
 :: HomeBlaze.Components.FlowLayout MinWidth=600
 ::: Item
 :::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-The pump is {{ pump/Status }} and runs at {{ pump/CurrentSpeed }} of {{ pump/TargetSpeed }} RPM.
+The pump is {{ ../widgets/Pump/Status }} and runs at {{ ../widgets/Pump/CurrentSpeed }} of {{ ../widgets/Pump/TargetSpeed }} RPM.
 ::: Item
 :::: HomeBlaze.Components.Card Title="Fan" Icon=Air
-The fan is {{ fan/Status }} and runs at {{ fan/CurrentSpeed }} of {{ fan/TargetSpeed }} RPM.
+The fan is {{ ../widgets/Fan/Status }} and runs at {{ ../widgets/Fan/CurrentSpeed }} of {{ ../widgets/Fan/TargetSpeed }} RPM.
 ::
 
 How `MinWidth` works and how to choose it:
@@ -267,13 +256,13 @@ Two tabs with a name and an icon, and a third tab without a name and without an 
 ~~~~markdown
 :: HomeBlaze.Components.TabLayout
 ::: Tab#pumptab Title="Pump" Icon=WaterDrop
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 
-:::: HomeBlaze.Components.Widget Path=pump
+:::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Tab#fantab Title="Fan" Icon=Air
-The fan runs at {{ fan/CurrentSpeed }} RPM.
+The fan runs at {{ ../widgets/Fan/CurrentSpeed }} RPM.
 
-:::: HomeBlaze.Components.Widget Path=fan
+:::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Tab Title="Notes"
 A tab can hold any page content, not only widgets.
 ::
@@ -281,13 +270,13 @@ A tab can hold any page content, not only widgets.
 
 :: HomeBlaze.Components.TabLayout
 ::: Tab#pumptab Title="Pump" Icon=WaterDrop
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 
-:::: HomeBlaze.Components.Widget Path=pump
+:::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Tab#fantab Title="Fan" Icon=Air
-The fan runs at {{ fan/CurrentSpeed }} RPM.
+The fan runs at {{ ../widgets/Fan/CurrentSpeed }} RPM.
 
-:::: HomeBlaze.Components.Widget Path=fan
+:::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Tab Title="Notes"
 A tab can hold any page content, not only widgets.
 ::
@@ -300,9 +289,9 @@ Tabs inside tabs. The first tab holds a tab layout of its own, which has four co
 ::: Tab#motorstab Title="Motors" Icon=Settings
 :::: HomeBlaze.Components.TabLayout
 ::::: Tab#innerpump Title="Pump" Icon=WaterDrop
-:::::: HomeBlaze.Components.Widget Path=pump
+:::::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::::: Tab#innerfan Title="Fan" Icon=Air
-:::::: HomeBlaze.Components.Widget Path=fan
+:::::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Tab#abouttab Title="About" Icon=Info
 The inner tabs keep their selection while you switch between the outer tabs.
 ::
@@ -312,9 +301,9 @@ The inner tabs keep their selection while you switch between the outer tabs.
 ::: Tab#motorstab Title="Motors" Icon=Settings
 :::: HomeBlaze.Components.TabLayout
 ::::: Tab#innerpump Title="Pump" Icon=WaterDrop
-:::::: HomeBlaze.Components.Widget Path=pump
+:::::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::::: Tab#innerfan Title="Fan" Icon=Air
-:::::: HomeBlaze.Components.Widget Path=fan
+:::::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Tab#abouttab Title="About" Icon=Info
 The inner tabs keep their selection while you switch between the outer tabs.
 ::
@@ -328,12 +317,12 @@ Cards in a flow inside a tab. The colons count up from two to seven here: the ta
 :::: HomeBlaze.Components.FlowLayout MinWidth=320
 ::::: Item
 :::::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-::::::: HomeBlaze.Components.Widget Path=pump
+::::::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::::: Item
 :::::: HomeBlaze.Components.Card Title="Fan" Icon=Air
-::::::: HomeBlaze.Components.Widget Path=fan
+::::::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Tab#texttab Title="Text" Icon=Notes
-The pump runs at {{ pump/CurrentSpeed }} RPM and the fan at {{ fan/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM and the fan at {{ ../widgets/Fan/CurrentSpeed }} RPM.
 ::
 ~~~~
 
@@ -342,12 +331,12 @@ The pump runs at {{ pump/CurrentSpeed }} RPM and the fan at {{ fan/CurrentSpeed 
 :::: HomeBlaze.Components.FlowLayout MinWidth=320
 ::::: Item
 :::::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-::::::: HomeBlaze.Components.Widget Path=pump
+::::::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::::: Item
 :::::: HomeBlaze.Components.Card Title="Fan" Icon=Air
-::::::: HomeBlaze.Components.Widget Path=fan
+::::::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Tab#texttab Title="Text" Icon=Notes
-The pump runs at {{ pump/CurrentSpeed }} RPM and the fan at {{ fan/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM and the fan at {{ ../widgets/Fan/CurrentSpeed }} RPM.
 ::
 
 A tab layout inside a card. The tab layout is the body of the card, and the footer of the card stays below the tabs whichever tab is selected. The head line of the footer has three colons like the tab layout, so it ends the tab layout:
@@ -357,24 +346,24 @@ A tab layout inside a card. The tab layout is the body of the card, and the foot
 :: HomeBlaze.Components.Card Title="Motors" Icon=Settings
 ::: HomeBlaze.Components.TabLayout
 :::: Tab#cardpump Title="Pump"
-::::: HomeBlaze.Components.Widget Path=pump
+::::: HomeBlaze.Components.Widget Path=../widgets/Pump
 :::: Tab#cardfan Title="Fan"
-::::: HomeBlaze.Components.Widget Path=fan
+::::: HomeBlaze.Components.Widget Path=../widgets/Fan
 
 ::: Footer
-Both motors are shown by name, so they are the same motors as in the samples above.
+Both tabs show the sample motors, the same motors as in the samples above.
 ::
 ~~~~
 
 :: HomeBlaze.Components.Card Title="Motors" Icon=Settings
 ::: HomeBlaze.Components.TabLayout
 :::: Tab#cardpump Title="Pump"
-::::: HomeBlaze.Components.Widget Path=pump
+::::: HomeBlaze.Components.Widget Path=../widgets/Pump
 :::: Tab#cardfan Title="Fan"
-::::: HomeBlaze.Components.Widget Path=fan
+::::: HomeBlaze.Components.Widget Path=../widgets/Fan
 
 ::: Footer
-Both motors are shown by name, so they are the same motors as in the samples above.
+Both tabs show the sample motors, the same motors as in the samples above.
 ::
 
 The tab bar at the left of the content:
@@ -383,17 +372,17 @@ The tab bar at the left of the content:
 ~~~~markdown
 :: HomeBlaze.Components.TabLayout Position=Left
 ::: Tab#sidepump Title="Pump" Icon=WaterDrop
-:::: HomeBlaze.Components.Widget Path=pump
+:::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Tab#sidefan Title="Fan" Icon=Air
-:::: HomeBlaze.Components.Widget Path=fan
+:::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::
 ~~~~
 
 :: HomeBlaze.Components.TabLayout Position=Left
 ::: Tab#sidepump Title="Pump" Icon=WaterDrop
-:::: HomeBlaze.Components.Widget Path=pump
+:::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Tab#sidefan Title="Fan" Icon=Air
-:::: HomeBlaze.Components.Widget Path=fan
+:::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::
 
 - **Tabs at a side need a wide window**: With `Position=Left` or `Position=Right` the tab bar is at the top while the browser window is narrower than 600 pixels, because the content would have too little room beside it. The width of the window counts, not that of the place the layout stands in. Content that cannot get as narrow as the room beside the tab bar, like a wide table, scrolls inside the tab.
@@ -412,19 +401,19 @@ Shows the widget of a subject that exists somewhere else: in a file of its own, 
 
 The three ways to refer to a subject:
 
-- **By the name of a block**: `Path=pump` leads to the block with that `#name` on the same page.
+- **By the name of a block**: `Path=mymotor` leads to the block with the name `#mymotor` on the same page.
 - **By a relative path**: `Path=../Conveyor` starts at the page, so it leads to the file `Conveyor.json` next to the page.
 - **By an absolute path**: `Path=/Demo/Conveyor` leads to the same subject from every page.
 
-By the name of a block on this page, here one of the [sample motors](#sample-motors):
+By a relative path, here to one of the [sample motors](#sample-motors):
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.Widget Path=pump
+:: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::
 ~~~~
 
-:: HomeBlaze.Components.Widget Path=pump
+:: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::
 
 A path that leads nowhere shows a message in place of a widget. Nothing exists at this path:
@@ -465,27 +454,27 @@ The arguments of a `Cell` block:
 | `RowSpan` | Whole number | `1` | How many rows the cell covers |
 | `ColumnSpan` | Whole number | `1` | How many columns the cell covers |
 
-A grid of two rows and two columns. The two cells of the first row show the sample motors by name. The cell of the second row spans both columns and holds text with expressions:
+A grid of two rows and two columns. The two cells of the first row show the two sample motors. The cell of the second row spans both columns and holds text with expressions:
 
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.GridLayout#motorgrid Rows=2 Columns=2
 ::: Cell Row=0 Column=0
-:::: HomeBlaze.Components.Widget Path=pump
+:::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Cell Row=0 Column=1
-:::: HomeBlaze.Components.Widget Path=fan
+:::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Cell Row=1 Column=0 ColumnSpan=2
-The pump is set to **{{ pump/TargetSpeed }}** and the fan to **{{ fan/TargetSpeed }}**.
+The pump is set to **{{ ../widgets/Pump/TargetSpeed }}** and the fan to **{{ ../widgets/Fan/TargetSpeed }}**.
 ::
 ~~~~
 
 :: HomeBlaze.Components.GridLayout#motorgrid Rows=2 Columns=2
 ::: Cell Row=0 Column=0
-:::: HomeBlaze.Components.Widget Path=pump
+:::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Cell Row=0 Column=1
-:::: HomeBlaze.Components.Widget Path=fan
+:::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::: Cell Row=1 Column=0 ColumnSpan=2
-The pump is set to **{{ pump/TargetSpeed }}** and the fan to **{{ fan/TargetSpeed }}**.
+The pump is set to **{{ ../widgets/Pump/TargetSpeed }}** and the fan to **{{ ../widgets/Fan/TargetSpeed }}**.
 ::
 
 - All rows have the same height and all columns the same width, and the grid is at least 400 pixels high.
@@ -517,23 +506,23 @@ The arguments of a `Node` block:
 | `Width` | Whole number | `200` | The width in pixels |
 | `Height` | Whole number | `150` | The height in pixels |
 
-A canvas with two nodes that show the sample motors by name. A canvas does not adapt to the width of the screen: every node keeps its position and its size in pixels. The two nodes here are placed below each other, so that a narrow window shows both:
+A canvas with two nodes that show the two sample motors. A canvas does not adapt to the width of the screen: every node keeps its position and its size in pixels. The two nodes here are placed below each other, so that a narrow window shows both:
 
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.CanvasLayout#plan MinHeight=620 IsSnapToGridEnabled=true GridSize=20
 ::: Node X=20 Y=20 Width=300 Height=280
-:::: HomeBlaze.Components.Widget Path=pump
+:::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Node X=40 Y=320 Width=300 Height=280
-:::: HomeBlaze.Components.Widget Path=fan
+:::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::
 ~~~~
 
 :: HomeBlaze.Components.CanvasLayout#plan MinHeight=620 IsSnapToGridEnabled=true GridSize=20
 ::: Node X=20 Y=20 Width=300 Height=280
-:::: HomeBlaze.Components.Widget Path=pump
+:::: HomeBlaze.Components.Widget Path=../widgets/Pump
 ::: Node X=40 Y=320 Width=300 Height=280
-:::: HomeBlaze.Components.Widget Path=fan
+:::: HomeBlaze.Components.Widget Path=../widgets/Fan
 ::
 
 - While the page is in edit mode, the nodes can be moved with the mouse, a click on a free place adds a node there, and each node has buttons to edit and remove it, see [Editing in the Page Editor](pages.md#editing-in-the-page-editor).
@@ -616,16 +605,16 @@ Rows with a label and an icon. The first two rows have an icon, so the third row
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.ValueList
-::: Value Path=pump/CurrentSpeed Label="Current speed" Icon=Speed
-::: Value Path=pump/Temperature Label="Motor temperature" Icon=Thermostat
-::: Value Path=pump/IsAtTargetSpeed Label="At target speed"
+::: Value Path=../widgets/Pump/CurrentSpeed Label="Current speed" Icon=Speed
+::: Value Path=../widgets/Pump/Temperature Label="Motor temperature" Icon=Thermostat
+::: Value Path=../widgets/Pump/IsAtTargetSpeed Label="At target speed"
 ::
 ~~~~
 
 :: HomeBlaze.Components.ValueList
-::: Value Path=pump/CurrentSpeed Label="Current speed" Icon=Speed
-::: Value Path=pump/Temperature Label="Motor temperature" Icon=Thermostat
-::: Value Path=pump/IsAtTargetSpeed Label="At target speed"
+::: Value Path=../widgets/Pump/CurrentSpeed Label="Current speed" Icon=Speed
+::: Value Path=../widgets/Pump/Temperature Label="Motor temperature" Icon=Thermostat
+::: Value Path=../widgets/Pump/IsAtTargetSpeed Label="At target speed"
 ::
 
 Rows without a label, the last one with a map. A label is the title that the property declares, or its name when it declares none: "Speed" and "Target" are titles that the motor declares, and "Status" is the name of its property. The status is shown with the text, the colour and the icon of its case:
@@ -633,16 +622,16 @@ Rows without a label, the last one with a map. A label is the title that the pro
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.ValueList
-::: Value Path=pump/CurrentSpeed
-::: Value Path=pump/TargetSpeed
-::: Value Path=pump/Status Map=motorstate
+::: Value Path=../widgets/Pump/CurrentSpeed
+::: Value Path=../widgets/Pump/TargetSpeed
+::: Value Path=../widgets/Pump/Status Map=motorstate
 ::
 ~~~~
 
 :: HomeBlaze.Components.ValueList
-::: Value Path=pump/CurrentSpeed
-::: Value Path=pump/TargetSpeed
-::: Value Path=pump/Status Map=motorstate
+::: Value Path=../widgets/Pump/CurrentSpeed
+::: Value Path=../widgets/Pump/TargetSpeed
+::: Value Path=../widgets/Pump/Status Map=motorstate
 ::
 
 A row with content and without a path, and a row with a `Progress` as content. The content stands between the label and the value. The first row has no path and no value of its own: its content is a text with two expressions. The second row has a path and a bar:
@@ -651,17 +640,17 @@ A row with content and without a path, and a row with a `Progress` as content. T
 ~~~~markdown
 :: HomeBlaze.Components.ValueList
 ::: Value Label="Pump" Icon=WaterDrop
-{{ pump/CurrentSpeed }} of {{ pump/TargetSpeed }} RPM
-::: Value Path=fan/CurrentSpeed Label="Fan" Icon=Air
-:::: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Minimum=0 Maximum=3000
+{{ ../widgets/Pump/CurrentSpeed }} of {{ ../widgets/Pump/TargetSpeed }} RPM
+::: Value Path=../widgets/Fan/CurrentSpeed Label="Fan" Icon=Air
+:::: HomeBlaze.Components.Progress Path=../widgets/Fan/CurrentSpeed Minimum=0 Maximum=3000
 ::
 ~~~~
 
 :: HomeBlaze.Components.ValueList
 ::: Value Label="Pump" Icon=WaterDrop
-{{ pump/CurrentSpeed }} of {{ pump/TargetSpeed }} RPM
-::: Value Path=fan/CurrentSpeed Label="Fan" Icon=Air
-:::: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Minimum=0 Maximum=3000
+{{ ../widgets/Pump/CurrentSpeed }} of {{ ../widgets/Pump/TargetSpeed }} RPM
+::: Value Path=../widgets/Fan/CurrentSpeed Label="Fan" Icon=Air
+:::: HomeBlaze.Components.Progress Path=../widgets/Fan/CurrentSpeed Minimum=0 Maximum=3000
 ::
 
 - **Aligned labels**: When at least one row has an icon, the rows without one keep the room of an icon, so that all labels line up. An icon that comes from a case of a map counts as well. In a card with an icon, a list in which at least one row has an icon lines up the icons of its rows with the icon of the header and its labels with the title.
@@ -686,21 +675,21 @@ Three tiles in a `FlowLayout`. The first has a label of its own and an icon, the
 ~~~~markdown
 :: HomeBlaze.Components.FlowLayout MinWidth=140
 ::: Item
-:::: HomeBlaze.Components.ValueTile Path=pump/CurrentSpeed Label="Pump speed" Icon=Speed
+:::: HomeBlaze.Components.ValueTile Path=../widgets/Pump/CurrentSpeed Label="Pump speed" Icon=Speed
 ::: Item
-:::: HomeBlaze.Components.ValueTile Path=pump/Temperature
+:::: HomeBlaze.Components.ValueTile Path=../widgets/Pump/Temperature
 ::: Item
-:::: HomeBlaze.Components.ValueTile Path=pump/Status Map=motorstate
+:::: HomeBlaze.Components.ValueTile Path=../widgets/Pump/Status Map=motorstate
 ::
 ~~~~
 
 :: HomeBlaze.Components.FlowLayout MinWidth=140
 ::: Item
-:::: HomeBlaze.Components.ValueTile Path=pump/CurrentSpeed Label="Pump speed" Icon=Speed
+:::: HomeBlaze.Components.ValueTile Path=../widgets/Pump/CurrentSpeed Label="Pump speed" Icon=Speed
 ::: Item
-:::: HomeBlaze.Components.ValueTile Path=pump/Temperature
+:::: HomeBlaze.Components.ValueTile Path=../widgets/Pump/Temperature
 ::: Item
-:::: HomeBlaze.Components.ValueTile Path=pump/Status Map=motorstate
+:::: HomeBlaze.Components.ValueTile Path=../widgets/Pump/Status Map=motorstate
 ::
 
 - **Colour and icon of a case**: A matching case gives the value its colour and the tile its icon, see [ValueMap](#valuemap).
@@ -722,33 +711,33 @@ A chip with the map:
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.Indicator Path=pump/Status Map=motorstate
+:: HomeBlaze.Components.Indicator Path=../widgets/Pump/Status Map=motorstate
 ::
 ~~~~
 
-:: HomeBlaze.Components.Indicator Path=pump/Status Map=motorstate
+:: HomeBlaze.Components.Indicator Path=../widgets/Pump/Status Map=motorstate
 ::
 
 The same status as an icon alone. The icon is the one of the matching case, and the tooltip has the text of the case:
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.Indicator Path=pump/Status Map=motorstate Kind=Icon
+:: HomeBlaze.Components.Indicator Path=../widgets/Pump/Status Map=motorstate Kind=Icon
 ::
 ~~~~
 
-:: HomeBlaze.Components.Indicator Path=pump/Status Map=motorstate Kind=Icon
+:: HomeBlaze.Components.Indicator Path=../widgets/Pump/Status Map=motorstate Kind=Icon
 ::
 
 An indicator without a map, for a boolean. It has the primary colour while the value is true and the default colour otherwise. The icon comes from `Icon`:
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.Indicator Path=pump/IsAtTargetSpeed Kind=Icon Icon=Speed
+:: HomeBlaze.Components.Indicator Path=../widgets/Pump/IsAtTargetSpeed Kind=Icon Icon=Speed
 ::
 ~~~~
 
-:: HomeBlaze.Components.Indicator Path=pump/IsAtTargetSpeed Kind=Icon Icon=Speed
+:: HomeBlaze.Components.Indicator Path=../widgets/Pump/IsAtTargetSpeed Kind=Icon Icon=Speed
 ::
 
 An indicator in the `HeaderRight` of a card:
@@ -756,18 +745,18 @@ An indicator in the `HeaderRight` of a card:
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 
 ::: HeaderRight
-:::: HomeBlaze.Components.Indicator Path=pump/Status Map=motorstate
+:::: HomeBlaze.Components.Indicator Path=../widgets/Pump/Status Map=motorstate
 ::
 ~~~~
 
 :: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 
 ::: HeaderRight
-:::: HomeBlaze.Components.Indicator Path=pump/Status Map=motorstate
+:::: HomeBlaze.Components.Indicator Path=../widgets/Pump/Status Map=motorstate
 ::
 
 - **Text, colour and icon**: They come from the matching case of the map, see [ValueMap](#valuemap). `Icon` is the icon that stays when no case gives one.
@@ -791,17 +780,17 @@ Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.Progress Path=pump/CurrentSpeed Minimum=0 Maximum=3000
+:: HomeBlaze.Components.Progress Path=../widgets/Pump/CurrentSpeed Minimum=0 Maximum=3000
 ::
 
-:: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Minimum=0 Maximum=3000 Color=Success
+:: HomeBlaze.Components.Progress Path=../widgets/Fan/CurrentSpeed Minimum=0 Maximum=3000 Color=Success
 ::
 ~~~~
 
-:: HomeBlaze.Components.Progress Path=pump/CurrentSpeed Minimum=0 Maximum=3000
+:: HomeBlaze.Components.Progress Path=../widgets/Pump/CurrentSpeed Minimum=0 Maximum=3000
 ::
 
-:: HomeBlaze.Components.Progress Path=fan/CurrentSpeed Minimum=0 Maximum=3000 Color=Success
+:: HomeBlaze.Components.Progress Path=../widgets/Fan/CurrentSpeed Minimum=0 Maximum=3000 Color=Success
 ::
 
 - **The range**: The bar is empty at `Minimum` and full at `Maximum`. A value outside the range gives an empty or a full bar. The default range from 0 to 1 is what a property with the unit percent holds. A value from 0 to 100 needs `Max=100`.
@@ -835,17 +824,17 @@ Two panels, the first of them open. The second one opens with a click:
 ~~~~markdown
 :: HomeBlaze.Components.ExpansionPanels
 ::: Panel Title="Pump" Icon=WaterDrop Expanded=true
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 ::: Panel Title="Fan" Icon=Air
-The fan runs at {{ fan/CurrentSpeed }} RPM.
+The fan runs at {{ ../widgets/Fan/CurrentSpeed }} RPM.
 ::
 ~~~~
 
 :: HomeBlaze.Components.ExpansionPanels
 ::: Panel Title="Pump" Icon=WaterDrop Expanded=true
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 ::: Panel Title="Fan" Icon=Air
-The fan runs at {{ fan/CurrentSpeed }} RPM.
+The fan runs at {{ ../widgets/Fan/CurrentSpeed }} RPM.
 ::
 
 With `Single=true` only one panel is open at a time. Each panel holds a value list, and the first one is open when the page loads:
@@ -855,24 +844,24 @@ With `Single=true` only one panel is open at a time. Each panel holds a value li
 :: HomeBlaze.Components.ExpansionPanels Single=true
 ::: Panel Title="Pump" Icon=WaterDrop Expanded=true
 :::: HomeBlaze.Components.ValueList
-::::: Value Path=pump/CurrentSpeed
-::::: Value Path=pump/Status Map=motorstate
+::::: Value Path=../widgets/Pump/CurrentSpeed
+::::: Value Path=../widgets/Pump/Status Map=motorstate
 ::: Panel Title="Fan" Icon=Air
 :::: HomeBlaze.Components.ValueList
-::::: Value Path=fan/CurrentSpeed
-::::: Value Path=fan/Status Map=motorstate
+::::: Value Path=../widgets/Fan/CurrentSpeed
+::::: Value Path=../widgets/Fan/Status Map=motorstate
 ::
 ~~~~
 
 :: HomeBlaze.Components.ExpansionPanels Single=true
 ::: Panel Title="Pump" Icon=WaterDrop Expanded=true
 :::: HomeBlaze.Components.ValueList
-::::: Value Path=pump/CurrentSpeed
-::::: Value Path=pump/Status Map=motorstate
+::::: Value Path=../widgets/Pump/CurrentSpeed
+::::: Value Path=../widgets/Pump/Status Map=motorstate
 ::: Panel Title="Fan" Icon=Air
 :::: HomeBlaze.Components.ValueList
-::::: Value Path=fan/CurrentSpeed
-::::: Value Path=fan/Status Map=motorstate
+::::: Value Path=../widgets/Fan/CurrentSpeed
+::::: Value Path=../widgets/Fan/Status Map=motorstate
 ::
 
 - **All panels are rendered**: The content of a closed panel is rendered and kept up to date as well, so a value in a closed panel is current when the panel opens.
@@ -898,12 +887,12 @@ An alert without arguments has the severity `Info`:
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.Alert
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 ::
 ~~~~
 
 :: HomeBlaze.Components.Alert
-The pump runs at {{ pump/CurrentSpeed }} RPM.
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 ::
 
 A warning with a border:
@@ -911,12 +900,12 @@ A warning with a border:
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.Alert Severity=Warning Variant=Outlined
-The fan is {{ fan/Status }}. Check it when it stays below its target of {{ fan/TargetSpeed }} RPM.
+The fan is {{ ../widgets/Fan/Status }}. Check it when it stays below its target of {{ ../widgets/Fan/TargetSpeed }} RPM.
 ::
 ~~~~
 
 :: HomeBlaze.Components.Alert Severity=Warning Variant=Outlined
-The fan is {{ fan/Status }}. Check it when it stays below its target of {{ fan/TargetSpeed }} RPM.
+The fan is {{ ../widgets/Fan/Status }}. Check it when it stays below its target of {{ ../widgets/Fan/TargetSpeed }} RPM.
 ::
 
 - **One-line text**: An alert removes the distance above its first paragraph and below its last one, so that a text of one line is centred next to the icon. Paragraphs in between keep their distance.

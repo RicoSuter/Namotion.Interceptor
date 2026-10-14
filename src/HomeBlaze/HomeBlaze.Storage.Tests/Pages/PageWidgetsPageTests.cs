@@ -11,18 +11,21 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Storage.Tests.Pages;
 
 /// <summary>
-/// Loads the reference page of the built-in page widgets as a whole with the widget types that ship.
-/// Its samples are live and the page is part of an installation, so it must show what its samples
-/// promise with nothing but the subjects that it creates itself.
+/// Loads the reference page of the built-in page widgets with the folder around it, as the application loads it,
+/// and with the widget types that ship. Its samples are live and the page is part of an installation, so it must
+/// show what its samples promise with nothing but itself and the sample motors of the widgets folder.
 /// </summary>
 [Collection(MarkdownPageFixture.StorageCollection)]
 public class PageWidgetsPageTests
 {
-    private const string PagePath = "src/HomeBlaze/HomeBlaze/Data/Files/Docs/administration/page-widgets.md";
+    private const string Folder = "administration";
+    private const string PagePath = "/administration/page-widgets.md";
 
-    // The two motors that the page creates for its samples.
-    private const string PumpName = "pump";
-    private const string FanName = "fan";
+    // The two sample motors of the widgets folder, as the samples write them and as they are found from the root.
+    private const string PumpPath = "../widgets/Pump";
+    private const string FanPath = "../widgets/Fan";
+    private const string PumpAbsolutePath = "/administration/widgets/Pump";
+    private const string FanAbsolutePath = "/administration/widgets/Fan";
 
     // The only path of the page that leads to nothing, in the sample that shows the message for it.
     private const string PathToNothing = "/Missing/Motor";
@@ -31,67 +34,70 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenNoBlockIsShownAsError()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
         Assert.Empty(PageErrorBoxes.FindSortedByLine(page));
     }
 
     [Fact]
-    public async Task WhenPageIsLoaded_ThenItsOnlyMotorsAreTheTwoThatTheSamplesShowByName()
+    public async Task WhenPageIsLoaded_ThenItCreatesNoMotorAndTheSamplesUseTheTwoMotorsOfTheWidgetsFolder()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
-        var pump = FindMotor(page, PumpName);
-        var fan = FindMotor(page, FanName);
+        var pump = Assert.IsType<Motor>(fixture.FindSubject(PumpAbsolutePath));
+        var fan = Assert.IsType<Motor>(fixture.FindSubject(FanAbsolutePath));
         Assert.Equal(("Pump", 1200), (pump.Name, pump.TargetSpeed));
         Assert.Equal(("Fan", 800), (fan.Name, fan.TargetSpeed));
 
         // A motor is a running background service, so no sample creates one of its own.
-        Assert.Equal([pump, fan], FindSubjects(page).OfType<Motor>());
+        Assert.Empty(DocumentationFolderFixture.FindSubjects(page).OfType<Motor>());
     }
 
     [Fact]
-    public async Task WhenPageIsLoaded_ThenEveryWidgetShowsAMotorOfThePageExceptThePathThatLeadsNowhere()
+    public async Task WhenPageIsLoaded_ThenEveryWidgetShowsASampleMotorExceptThePathThatLeadsNowhere()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
-        var widgets = FindSubjects(page).OfType<Widget>().ToList();
+        var widgets = DocumentationFolderFixture.FindSubjects(page).OfType<Widget>().ToList();
         Assert.Equal([PathToNothing], widgets.Where(widget => widget.ResolvedSubject is null).Select(widget => widget.Path));
 
         var shown = widgets.Where(widget => widget.Path != PathToNothing).ToList();
-        Assert.Equal([FanName, PumpName], shown.Select(widget => widget.Path).Distinct().Order());
-        Assert.All(shown, widget => Assert.Same(FindMotor(page, widget.Path), widget.ResolvedSubject));
+        Assert.Equal([FanPath, PumpPath], shown.Select(widget => widget.Path).Distinct().Order());
+        Assert.All(shown, widget => Assert.Same(FindMotor(fixture, widget.Path), widget.ResolvedSubject));
     }
 
     [Fact]
-    public async Task WhenPageIsLoaded_ThenEveryExpressionReadsFromAMotorOfThePage()
+    public async Task WhenPageIsLoaded_ThenEveryExpressionReadsFromASampleMotor()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
-        var expressions = FindSubjects(page).OfType<RenderExpression>().ToList();
+        var expressions = DocumentationFolderFixture.FindSubjects(page).OfType<RenderExpression>().ToList();
         Assert.NotEmpty(expressions);
         Assert.All(expressions, expression =>
         {
-            Assert.Contains(expression.Path.Split('/')[0], new[] { PumpName, FanName });
+            Assert.True(
+                expression.Path.StartsWith(PumpPath + "/", StringComparison.Ordinal) ||
+                expression.Path.StartsWith(FanPath + "/", StringComparison.Ordinal),
+                expression.Path);
             Assert.NotNull(expression.Value);
         });
     }
@@ -100,13 +106,13 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenTheCardsAreThoseOfTheSamples()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
-        var cards = FindSubjects(page).OfType<Card>().ToList();
+        var cards = DocumentationFolderFixture.FindSubjects(page).OfType<Card>().ToList();
         Assert.Equal(18, cards.Count);
 
         // The two samples of the card itself are the first cards of the page: one with everything, one plain.
@@ -127,33 +133,33 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenOneCardUsesEveryNewOptionAndTheHeaderSlot()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
-        var card = Assert.Single(FindSubjects(page).OfType<Card>(), card => card.Subtitle is not null);
+        var card = Assert.Single(DocumentationFolderFixture.FindSubjects(page).OfType<Card>(), card => card.Subtitle is not null);
         Assert.Equal(("Sample motor", "pages.md", MudBlazor.Color.Primary, false, 6), (card.Subtitle, card.Href, card.IconColor, card.Outlined, card.Elevation));
         var headerRight = Assert.IsType<MarkdownFragment>(card.HeaderRight);
-        Assert.Contains(headerRight.Children.Values, child => child is RenderExpression { Path: "pump/Status" });
+        Assert.Contains(headerRight.Children.Values, child => child is RenderExpression { Path: PumpPath + "/Status" });
     }
 
     [Fact]
     public async Task WhenPageIsLoaded_ThenTheMapHasACasePerMotorStatusAndEveryWidgetRefersToIt()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        IPathScope page = await AddPageAsync(fixture);
+        IPathScope page = fixture.FindPage(PagePath);
 
         // Assert
         var map = Assert.IsType<ValueMap>(page.TryGetNamedSubject("motorstate"));
         Assert.Equal(Enum.GetNames<MotorStatus>(), map.Cases.Select(valueCase => valueCase.Value));
         Assert.All(map.Cases, valueCase => Assert.False(string.IsNullOrEmpty(valueCase.Text)));
 
-        var subjects = FindSubjects((MarkdownFile)page);
+        var subjects = DocumentationFolderFixture.FindSubjects((MarkdownFile)page);
         var maps = subjects.OfType<ValueRow>().Select(row => row.Map)
             .Concat(subjects.OfType<ValueTile>().Select(tile => tile.Map))
             .Concat(subjects.OfType<Indicator>().Select(indicator => indicator.Map))
@@ -164,17 +170,17 @@ public class PageWidgetsPageTests
     }
 
     [Fact]
-    public async Task WhenPageIsLoaded_ThenEveryValueWidgetReadsAPropertyOfAMotorOfThePage()
+    public async Task WhenPageIsLoaded_ThenEveryValueWidgetReadsAPropertyOfASampleMotor()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
         var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
-        var subjects = FindSubjects(page);
+        var subjects = DocumentationFolderFixture.FindSubjects(page);
         var widgetPaths = subjects.OfType<ValueRow>().Select(row => (Subject: (IInterceptorSubject)row, row.Path))
             .Concat(subjects.OfType<ValueTile>().Select(tile => (Subject: (IInterceptorSubject)tile, tile.Path)))
             .Concat(subjects.OfType<Indicator>().Select(indicator => (Subject: (IInterceptorSubject)indicator, indicator.Path)))
@@ -190,13 +196,13 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenEachNewWidgetTypeHasTheSamplesOfItsSection()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
-        var subjects = FindSubjects(page);
+        var subjects = DocumentationFolderFixture.FindSubjects(page);
         (Type Type, int Count)[] expectedCounts =
         [
             (typeof(ValueMap), 1), (typeof(ValueList), 5), (typeof(ValueTile), 3), (typeof(Indicator), 4),
@@ -216,13 +222,13 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenTheFlowLayoutsHaveTheWidthsAndTheCellsOfTheirSamples()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
-        var flows = FindSubjects(page).OfType<FlowLayout>().Select(flow => (flow.MinWidth, flow.Items.Length));
+        var flows = DocumentationFolderFixture.FindSubjects(page).OfType<FlowLayout>().Select(flow => (flow.MinWidth, flow.Items.Length));
         Assert.Equal([(320, 3), (120, 6), (600, 2), (320, 2), (140, 3)], flows);
     }
 
@@ -230,13 +236,13 @@ public class PageWidgetsPageTests
     public async Task WhenPageIsLoaded_ThenTheTabLayoutsHaveTheTabsAndThePositionsOfTheirSamples()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        var page = await AddPageAsync(fixture);
+        var page = fixture.FindPage(PagePath);
 
         // Assert
-        var layouts = FindSubjects(page).OfType<TabLayout>().ToList();
+        var layouts = DocumentationFolderFixture.FindSubjects(page).OfType<TabLayout>().ToList();
         string[] expectedTitles =
         [
             "Pump (WaterDrop), Fan (Air), Notes ()",
@@ -256,7 +262,7 @@ public class PageWidgetsPageTests
         Assert.All(flow.Items, item => Assert.Single(Assert.IsType<MarkdownFragment>(item).Children.Values.OfType<Card>()));
 
         // A tab layout inside a card with a footer.
-        var card = Assert.Single(FindSubjects(page).OfType<Card>(), card => card.Title == "Motors");
+        var card = Assert.Single(DocumentationFolderFixture.FindSubjects(page).OfType<Card>(), card => card.Title == "Motors");
         Assert.Contains(layouts[4], Assert.IsType<MarkdownFragment>(card.Content).Children.Values);
         Assert.NotNull(card.Footer);
 
@@ -278,13 +284,13 @@ public class PageWidgetsPageTests
     }
 
     [Fact]
-    public async Task WhenPageIsLoaded_ThenTheGridShowsTheMotorsByNameAndItsLastCellSpansTwoColumns()
+    public async Task WhenPageIsLoaded_ThenTheGridShowsTheSampleMotorsAndItsLastCellSpansTwoColumns()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        IPathScope page = await AddPageAsync(fixture);
+        IPathScope page = fixture.FindPage(PagePath);
 
         // Assert
         var grid = Assert.IsType<GridLayout>(page.TryGetNamedSubject("motorgrid"));
@@ -293,31 +299,31 @@ public class PageWidgetsPageTests
             new (int?, int?, int)[] { (0, 0, 1), (0, 1, 1), (1, 0, 2) },
             grid.Cells.Select(cell => (cell.Row, cell.Column, cell.ColumnSpan)));
         Assert.Equal(
-            [PumpName, FanName],
+            [PumpPath, FanPath],
             grid.Cells.Take(2).Select(cell => Assert.IsType<MarkdownFragment>(cell.Child).Children.Values.OfType<Widget>().Single().Path));
 
         // The last cell holds text with an expression per motor and no widget.
         var lastCell = Assert.IsType<MarkdownFragment>(grid.Cells[2].Child).Children.Values;
         Assert.Empty(lastCell.OfType<Widget>());
         Assert.Equal(
-            [$"{PumpName}/TargetSpeed", $"{FanName}/TargetSpeed"],
+            [$"{PumpPath}/TargetSpeed", $"{FanPath}/TargetSpeed"],
             lastCell.OfType<RenderExpression>().Select(expression => expression.Path));
         Assert.Contains("The pump is set to", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(grid.Cells[2].Child).Children));
     }
 
     [Fact]
-    public async Task WhenPageIsLoaded_ThenTheCanvasShowsTheMotorsByNameInNodesThatFitANarrowWindow()
+    public async Task WhenPageIsLoaded_ThenTheCanvasShowsTheSampleMotorsInNodesThatFitANarrowWindow()
     {
         // Arrange
-        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
 
         // Act
-        IPathScope page = await AddPageAsync(fixture);
+        IPathScope page = fixture.FindPage(PagePath);
 
         // Assert
         var canvas = Assert.IsType<CanvasLayout>(page.TryGetNamedSubject("plan"));
         Assert.Equal(
-            [PumpName, FanName],
+            [PumpPath, FanPath],
             canvas.Nodes.Select(node => Assert.IsType<MarkdownFragment>(node.Child).Children.Values.OfType<Widget>().Single().Path));
 
         // The content of a page is this wide in a window of 390 pixels.
@@ -326,15 +332,6 @@ public class PageWidgetsPageTests
         Assert.All(canvas.Nodes, node => Assert.InRange(node.Y + node.Height, 0, canvas.MinHeight!.Value));
     }
 
-    private static Task<MarkdownFile> AddPageAsync(MarkdownPageFixture fixture) =>
-        fixture.AddPageAsync("page-widgets.md", RepositoryPagesTests.ReadPage(PagePath));
-
-    private static Motor FindMotor(IPathScope page, string name) => Assert.IsType<Motor>(page.TryGetNamedSubject(name));
-
-    /// <summary>
-    /// Gets the subjects of the page at every depth in the order of the page. What the cells of its grids
-    /// and the nodes of its canvases hold is among them, because cells and nodes are slots.
-    /// </summary>
-    private static List<IInterceptorSubject> FindSubjects(MarkdownFile page) =>
-        PageErrorBoxes.Flatten(page.Children.Values).ToList();
+    private static Motor FindMotor(DocumentationFolderFixture fixture, string samplePath) =>
+        Assert.IsType<Motor>(fixture.FindSubject(samplePath == PumpPath ? PumpAbsolutePath : FanAbsolutePath));
 }
