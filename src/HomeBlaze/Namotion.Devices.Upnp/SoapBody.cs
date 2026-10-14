@@ -104,8 +104,14 @@ internal sealed record SoapBody(string? Name, List<(string Name, string? Value)>
             }
             else if (IsElement(reader, "errorCode") && reader.NamespaceURI == ControlNamespace)
             {
-                // Normally at detail/UPnPError/errorCode, but taken at any depth.
-                errorCode ??= int.TryParse(ReadText(reader), NumberStyles.Integer, CultureInfo.InvariantCulture, out var code) ? code : null;
+                // Normally at detail/UPnPError/errorCode, but taken at any depth. ReadText must run even once
+                // errorCode is already set, or the reader never advances past a second errorCode and the loop
+                // above spins on it forever.
+                var codeText = ReadText(reader);
+                if (errorCode is null && int.TryParse(codeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var code))
+                {
+                    errorCode = code;
+                }
             }
             else
             {
