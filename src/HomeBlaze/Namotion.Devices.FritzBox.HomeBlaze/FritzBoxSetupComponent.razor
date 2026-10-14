@@ -1,0 +1,176 @@
+@attribute [SubjectComponent(SubjectComponentType.Setup, typeof(FritzBox))]
+@implements ISubjectEditComponent
+
+<MudStack Spacing="3">
+    @if (_routers == null)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            <MudText>Searching for FRITZ!Box routers...</MudText>
+        </MudStack>
+    }
+    else if (_routers.Count > 0)
+    {
+        <MudText Typo="Typo.body1">Select a router or enter its address below.</MudText>
+        <MudList T="FritzBoxDiscoveryResult"
+                 @bind-SelectedValue="_selectedRouter"
+                 @bind-SelectedValue:after="OnRouterSelected"
+                 SelectionMode="SelectionMode.SingleSelection">
+            @foreach (var router in _routers)
+            {
+                <MudListItem T="FritzBoxDiscoveryResult" Value="router">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudIcon Icon="@Icons.Material.Filled.Router" />
+                        <MudText>@(router.FriendlyName ?? router.Model ?? "FRITZ!Box")</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">(@router.HostAddress)</MudText>
+                    </MudStack>
+                </MudListItem>
+            }
+        </MudList>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Info">No FRITZ!Box was found automatically. Enter its address below.</MudAlert>
+    }
+
+    <MudTextField @bind-Value="_hostAddress"
+                  Label="Host Address (IP or hostname)"
+                  Immediate="true"
+                  OnKeyUp="OnConnectionFieldChanged" />
+
+    <MudTextField @bind-Value="_username"
+                  Label="Username"
+                  HelperText="A FRITZ!Box user with the FRITZ!Box settings permission"
+                  Immediate="true"
+                  OnKeyUp="OnConnectionFieldChanged" />
+
+    <MudTextField @bind-Value="_password"
+                  Label="Password"
+                  InputType="InputType.Password"
+                  Immediate="true"
+                  OnKeyUp="OnConnectionFieldChanged" />
+
+    <MudButton Variant="Variant.Filled"
+               Color="Color.Primary"
+               OnClick="CheckAsync"
+               Disabled="@(_isChecking || string.IsNullOrWhiteSpace(_hostAddress))">
+        @if (_isChecking)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+        }
+        Test Connection
+    </MudButton>
+
+    @if (_result is { IsSuccess: false })
+    {
+        <MudAlert Severity="Severity.Error">@_result.ErrorMessage</MudAlert>
+    }
+    else if (_result is { IsSuccess: true })
+    {
+        <MudAlert Severity="Severity.Success">Connected to @(_result.Model ?? "the FRITZ!Box").</MudAlert>
+        <MudText Typo="Typo.body2">Certificate fingerprint (SHA-256). Compare it with the fingerprint your browser shows for this router's web UI before you confirm:</MudText>
+        <MudText Typo="Typo.caption" Style="font-family: monospace; word-break: break-all;">@_result.CertificateFingerprint</MudText>
+        <MudCheckBox T="bool"
+                     Value="_isCertificateConfirmed"
+                     ValueChanged="OnCertificateConfirmedChanged"
+                     Label="The fingerprint matches the one my browser shows for this FRITZ!Box" />
+    }
+</MudStack>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private FritzBox? RouterSubject => Subject as FritzBox;
+
+    private List<FritzBoxDiscoveryResult>? _routers;
+    private FritzBoxDiscoveryResult? _selectedRouter;
+    private string? _hostAddress;
+    private string? _username;
+    private string? _password;
+    private bool _isChecking;
+    private bool _isCertificateConfirmed;
+    private FritzBoxConnectionCheckResult? _result;
+
+    public bool IsValid => _result is { IsSuccess: true } && _isCertificateConfirmed;
+
+    public bool IsDirty => IsValid;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _routers = (await FritzBoxDiscovery.DiscoverAsync(TimeSpan.FromSeconds(3), CancellationToken.None)).ToList();
+    }
+
+    private void OnRouterSelected()
+    {
+        _hostAddress = _selectedRouter?.HostAddress;
+        ResetCheck();
+    }
+
+    private void OnConnectionFieldChanged() => ResetCheck();
+
+    private void ResetCheck()
+    {
+        if (_result is null && !_isCertificateConfirmed)
+        {
+            return;
+        }
+
+        _result = null;
+        _isCertificateConfirmed = false;
+        NotifyValidity();
+    }
+
+    private async Task CheckAsync()
+    {
+        var hostAddress = _hostAddress;
+        if (string.IsNullOrWhiteSpace(hostAddress))
+        {
+            return;
+        }
+
+        _isChecking = true;
+        _result = null;
+        _isCertificateConfirmed = false;
+        NotifyValidity();
+        try
+        {
+            _result = await FritzBoxConnectionCheck.CheckAsync(hostAddress, _username, _password, CancellationToken.None);
+        }
+        finally
+        {
+            _isChecking = false;
+        }
+    }
+
+    private void OnCertificateConfirmedChanged(bool isConfirmed)
+    {
+        _isCertificateConfirmed = isConfirmed;
+        NotifyValidity();
+    }
+
+    private void NotifyValidity()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (RouterSubject != null && _result is { IsSuccess: true } result && _isCertificateConfirmed)
+        {
+            RouterSubject.HostAddress = result.HostAddress;
+            RouterSubject.Username = _username;
+            RouterSubject.Password = _password;
+            RouterSubject.CertificatePin = result.CertificatePin;
+        }
+
+        return Task.CompletedTask;
+    }
+}

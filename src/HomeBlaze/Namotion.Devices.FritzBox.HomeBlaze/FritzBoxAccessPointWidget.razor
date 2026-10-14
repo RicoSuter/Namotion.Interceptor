@@ -1,0 +1,37 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FritzBoxAccessPoint))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Router" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(AccessPoint?.Title ?? "Access point")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(AccessPoint?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(AccessPoint?.IsConnected == true ? "In mesh" : "Not in mesh")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        @if (AccessPoint?.Model != null)
+        {
+            <MudText Typo="Typo.body2">@AccessPoint.Model</MudText>
+        }
+        @if (AccessPoint?.UplinkType != null)
+        {
+            <MudText Typo="Typo.body2">Uplink: @AccessPoint.UplinkType @(AccessPoint.UplinkSpeed?.ToString("F0")) Mbit/s</MudText>
+        }
+        <MudText Typo="Typo.body2">Connected clients: @(AccessPoint?.ClientCount ?? 0)</MudText>
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private FritzBoxAccessPoint? AccessPoint => Subject as FritzBoxAccessPoint;
+}

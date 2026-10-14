@@ -1,0 +1,194 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(FritzBox))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_hostAddress"
+                  Label="Host Address (IP or hostname)"
+                  Required="true"
+                  RequiredError="Host address is required"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudTextField @bind-Value="_username"
+                  Label="Username"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudTextField @bind-Value="_password"
+                  Label="Password (leave empty to keep the current one)"
+                  InputType="InputType.Password"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Polling Interval (seconds)"
+                     Min="FritzBox.MinimumIntervalSeconds"
+                     Max="FritzBox.MaximumIntervalSeconds"
+                     Class="mt-4" />
+
+    <MudNumericField @bind-Value="_retryIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Retry Interval (seconds)"
+                     Min="FritzBox.MinimumIntervalSeconds"
+                     Max="FritzBox.MaximumIntervalSeconds"
+                     Class="mt-4" />
+
+    <MudText Typo="Typo.subtitle2" Class="mt-4">Trusted certificate key</MudText>
+    <MudText Typo="Typo.caption" Style="font-family: monospace; word-break: break-all;">
+        @(_certificatePin ?? "None yet: the next connection trusts the key the router presents.")
+    </MudText>
+
+    @if (RouterSubject?.PresentedCertificatePin is { } presentedPin && presentedPin != _certificatePin)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mt-2">
+            The router presents a different certificate key: @presentedPin. Accept it only if you know why the router's certificate changed.
+        </MudAlert>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="() => AcceptPresentedCertificate(presentedPin)" Class="mt-2">
+            Accept New Certificate
+        </MudButton>
+    }
+
+    @if (!IsCreating)
+    {
+        <MudDivider Class="my-4" />
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+            <MudText>Connection:</MudText>
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(RouterSubject?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(RouterSubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+        @if (RouterSubject?.StatusMessage != null)
+        {
+            <MudText Class="mt-1">@RouterSubject.StatusMessage</MudText>
+        }
+        @if (RouterSubject?.Model != null)
+        {
+            <MudText Class="mt-1">Model: @RouterSubject.Model</MudText>
+        }
+        @if (RouterSubject?.SoftwareVersion != null)
+        {
+            <MudText>FRITZ!OS: @RouterSubject.SoftwareVersion</MudText>
+        }
+        @if (RouterSubject?.AvailableSoftwareUpdate != null)
+        {
+            <MudAlert Severity="Severity.Info" Class="mt-2">Update available: @RouterSubject.AvailableSoftwareUpdate</MudAlert>
+        }
+        @if (RouterSubject != null)
+        {
+            <MudText>Clients: @RouterSubject.PresentClientCount present of @RouterSubject.ClientCount</MudText>
+        }
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private FritzBox? RouterSubject => Subject as FritzBox;
+
+    private string _name = string.Empty;
+    private string? _hostAddress;
+    private string? _username;
+    private string? _password;
+    private string? _certificatePin;
+    private int _pollingIntervalSeconds = FritzBox.DefaultPollingIntervalSeconds;
+    private int _retryIntervalSeconds = FritzBox.DefaultRetryIntervalSeconds;
+
+    private string _originalName = string.Empty;
+    private string? _originalHostAddress;
+    private string? _originalUsername;
+    private string? _originalCertificatePin;
+    private int _originalPollingIntervalSeconds = FritzBox.DefaultPollingIntervalSeconds;
+    private int _originalRetryIntervalSeconds = FritzBox.DefaultRetryIntervalSeconds;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
+                           _pollingIntervalSeconds is >= FritzBox.MinimumIntervalSeconds and <= FritzBox.MaximumIntervalSeconds &&
+                           _retryIntervalSeconds is >= FritzBox.MinimumIntervalSeconds and <= FritzBox.MaximumIntervalSeconds;
+
+    public bool IsDirty => _name != _originalName ||
+                           _hostAddress != _originalHostAddress ||
+                           _username != _originalUsername ||
+                           !string.IsNullOrEmpty(_password) ||
+                           _certificatePin != _originalCertificatePin ||
+                           _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
+                           _retryIntervalSeconds != _originalRetryIntervalSeconds;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (RouterSubject != null)
+        {
+            _name = RouterSubject.Name;
+            _hostAddress = RouterSubject.HostAddress;
+            _username = RouterSubject.Username;
+            _certificatePin = RouterSubject.CertificatePin;
+            _pollingIntervalSeconds = (int)RouterSubject.PollingInterval.TotalSeconds;
+            _retryIntervalSeconds = (int)RouterSubject.RetryInterval.TotalSeconds;
+        }
+
+        RememberOriginals();
+    }
+
+    private void RememberOriginals()
+    {
+        _originalName = _name;
+        _originalHostAddress = _hostAddress;
+        _originalUsername = _username;
+        _originalCertificatePin = _certificatePin;
+        _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+        _originalRetryIntervalSeconds = _retryIntervalSeconds;
+    }
+
+    private void AcceptPresentedCertificate(string presentedPin)
+    {
+        _certificatePin = presentedPin;
+        OnFieldChanged();
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (RouterSubject != null && IsValid)
+        {
+            RouterSubject.Name = _name;
+            RouterSubject.HostAddress = _hostAddress?.Trim();
+            RouterSubject.Username = _username;
+            if (!string.IsNullOrEmpty(_password))
+            {
+                RouterSubject.Password = _password;
+            }
+
+            RouterSubject.CertificatePin = _certificatePin;
+            RouterSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+            RouterSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
+
+            _password = null;
+            RememberOriginals();
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}

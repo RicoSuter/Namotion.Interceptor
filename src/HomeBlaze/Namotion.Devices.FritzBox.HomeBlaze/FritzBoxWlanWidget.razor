@@ -1,0 +1,77 @@
+@using Namotion.Devices.Upnp
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FritzBoxWlan))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Wifi" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Wlan?.Title ?? "WLAN")</MudText>
+            <MudSpacer />
+            @if (Wlan is FritzBoxGuestWlan guest)
+            {
+                <MudSwitch T="bool"
+                           Value="@(guest.IsOn == true)"
+                           ValueChanged="isOn => SetGuestWlanAsync(guest, isOn)"
+                           Disabled="_isSwitching"
+                           Color="Color.Primary" />
+            }
+            else
+            {
+                <MudChip T="string"
+                         Size="Size.Small"
+                         Color="@(Wlan?.IsOn == true ? Color.Success : Color.Default)"
+                         Variant="Variant.Filled">
+                    @(Wlan?.IsOn == true ? "On" : "Off")
+                </MudChip>
+            }
+        </MudStack>
+
+        <MudDivider />
+
+        <MudText Typo="Typo.body2">
+            @(Wlan?.Band ?? string.Empty) @(Wlan?.Channel != null ? $"channel {Wlan.Channel}" : string.Empty)
+        </MudText>
+        <MudText Typo="Typo.body2">Clients: @(Wlan?.ClientCount?.ToString() ?? "—")</MudText>
+
+        @if (_errorMessage != null)
+        {
+            <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private FritzBoxWlan? Wlan => Subject as FritzBoxWlan;
+
+    private bool _isSwitching;
+    private string? _errorMessage;
+
+    private async Task SetGuestWlanAsync(FritzBoxGuestWlan guest, bool isOn)
+    {
+        _isSwitching = true;
+        _errorMessage = null;
+        try
+        {
+            if (isOn)
+            {
+                await guest.TurnOnAsync(CancellationToken.None);
+            }
+            else
+            {
+                await guest.TurnOffAsync(CancellationToken.None);
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or HttpRequestException or TimeoutException or UpnpFaultException)
+        {
+            _errorMessage = exception.Message;
+        }
+        finally
+        {
+            _isSwitching = false;
+        }
+    }
+}

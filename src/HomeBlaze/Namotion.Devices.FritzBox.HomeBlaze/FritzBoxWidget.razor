@@ -1,0 +1,63 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FritzBox))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Router" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(RouterSubject?.Title ?? "FRITZ!Box")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(RouterSubject?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(RouterSubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        <MudStack Row="true" Spacing="4">
+            <MudStack>
+                <MudText Typo="Typo.caption">Internet</MudText>
+                <MudText Typo="Typo.h6">@(RouterSubject?.IsInternetConnected switch { true => "Online", false => "Offline", _ => "—" })</MudText>
+            </MudStack>
+            <MudStack>
+                <MudText Typo="Typo.caption">Clients</MudText>
+                <MudText Typo="Typo.h6">@(RouterSubject?.PresentClientCount ?? 0) / @(RouterSubject?.ClientCount ?? 0)</MudText>
+            </MudStack>
+            <MudStack>
+                <MudText Typo="Typo.caption">Download</MudText>
+                <MudText Typo="Typo.h6">@(RouterSubject?.DownloadRate?.ToString("F0") ?? "—") kB/s</MudText>
+            </MudStack>
+            <MudStack>
+                <MudText Typo="Typo.caption">Upload</MudText>
+                <MudText Typo="Typo.h6">@(RouterSubject?.UploadRate?.ToString("F0") ?? "—") kB/s</MudText>
+            </MudStack>
+        </MudStack>
+
+        @if (RouterSubject?.ExternalIpAddress != null)
+        {
+            <MudText Typo="Typo.caption">External IP: @RouterSubject.ExternalIpAddress</MudText>
+        }
+
+        @if (RouterSubject?.HostAddress != null)
+        {
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.OpenInNew"
+                       Href="@($"https://{RouterSubject.HostAddress}")"
+                       Target="_blank"
+                       Size="Size.Small">
+                Open Web UI
+            </MudButton>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private FritzBox? RouterSubject => Subject as FritzBox;
+}
