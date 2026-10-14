@@ -9,6 +9,7 @@ namespace Namotion.Devices.FritzBox;
 public partial class FritzBox
 {
     private const int MaximumConsecutivePollFailures = 3;
+    private const string NoPasswordMessage = "No password configured.";
     private const string UnsavedCertificateWarning = "The trusted certificate could not be saved and is trusted anew after a restart.";
 
     // A command holds the gate while it uses the connection, so the loop disposes a connection only after it.
@@ -72,6 +73,15 @@ public partial class FritzBox
                 IsConnected = false;
                 Status = ServiceStatus.Stopped;
                 StatusMessage = "No host address configured";
+                await WaitForConfigurationChangeAsync(Timeout.InfiniteTimeSpan, stoppingToken);
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(Password))
+            {
+                // A login without a password cannot succeed, and every failed one lengthens the router's lockout.
+                _logger.LogWarning("FRITZ!Box {HostAddress} has no password configured.", hostAddress);
+                SetError(NoPasswordMessage);
                 await WaitForConfigurationChangeAsync(Timeout.InfiniteTimeSpan, stoppingToken);
                 continue;
             }

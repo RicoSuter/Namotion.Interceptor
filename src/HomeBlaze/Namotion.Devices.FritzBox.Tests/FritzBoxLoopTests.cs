@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.FritzBox.Client;
 using Namotion.Devices.FritzBox.Tests.Testing;
@@ -57,11 +58,12 @@ public class FritzBoxLoopTests
     }
 
     [Fact]
-    public async Task WhenNoPasswordIsConfigured_ThenNoLoginIsAttempted()
+    public async Task WhenNoPasswordIsConfigured_ThenTheRouterIsNotContactedUntilTheConfigurationChanges()
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        var router = CreateRouter(fake);
+        var logger = new RecordingLogger<FritzBox>();
+        var router = CreateRouter(fake, logger: logger);
         router.Password = null;
 
         // Act
@@ -69,8 +71,17 @@ public class FritzBoxLoopTests
         await WaitForErrorAsync(router, "No password configured");
 
         // Assert
-        Assert.Equal(0, fake.FailedLogins);
+        Assert.Equal(0, fake.SecurityPortRequests);
         Assert.Equal(0, fake.SecureRequests);
+        Assert.DoesNotContain(logger.Warnings, warning => warning.Contains("refused the login", StringComparison.Ordinal));
+
+        // Act
+        router.Password = fake.Password;
+        await router.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect once a password is configured.");
+        Assert.Equal(0, fake.FailedLogins);
     }
 
     [Fact]
@@ -374,8 +385,8 @@ public class FritzBoxLoopTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => guest.TurnOnAsync(CancellationToken.None));
     }
 
-    private static FritzBox CreateRouter(FakeFritzBox fake, string? password = null, string? pin = null) =>
-        new(NullLogger<FritzBox>.Instance)
+    private static FritzBox CreateRouter(FakeFritzBox fake, string? password = null, string? pin = null, ILogger<FritzBox>? logger = null) =>
+        new(logger ?? NullLogger<FritzBox>.Instance)
         {
             HostAddress = "127.0.0.1",
             Username = fake.Username,

@@ -56,7 +56,7 @@ Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped
 | Stopped | `HostAddress` empty | "No host address configured" |
 | Starting | Connecting | "Connecting..." |
 | Running | Polling | Empty; "Data may be stale (n of 3): ..." after failed polls; a warning when the trusted certificate could not be saved |
-| Error | Connection failed (including "No password configured."), login failed, certificate changed, or firmware too old | The cause |
+| Error | No password configured, connection failed, login failed, certificate changed, or firmware too old | The cause |
 
 ## Subject Model
 
@@ -144,7 +144,7 @@ A WLAN is keyed by the band it reports or, failing that, by its position (first 
 ## How It Works
 
 1. The subject reads the router's TR-064 description without authentication, then asks for its HTTPS port over the same unauthenticated connection.
-2. It logs in once over HTTPS with HTTP Digest and checks the certificate key, then asks the router which internet connection is active. Without a configured password, the connection fails before any login attempt, so a missing password never adds to the router's login lockout.
+2. It logs in once over HTTPS with HTTP Digest and checks the certificate key, then asks the router which internet connection is active. Without a configured password, the subject does not contact the router at all and waits for a configuration change, so a missing password never adds to the router's login lockout.
 3. Every poll first reads the device information on its own, which checks the login again, so a password changed on the router while connected costs one failed login, not one per request. Then it reads, in parallel: firmware updates, the internet connection, the online monitor, every WLAN, the host list and the mesh list. An action the firmware does not offer only leaves its value empty.
 4. The mesh list places each present client at an access point with its band or LAN port and link speed. A client the mesh list does not place, for example because the router offers no mesh list or the client sits behind a third-party access point, falls back to the LAN port and link speed the host list itself reports while the client is present, and has no access point.
 5. Existing subjects are updated in place. A collection is replaced only when clients, access points or WLANs appear or disappear.
@@ -165,7 +165,7 @@ HomeBlaze connects to the router on TCP port 49000 (description, unauthenticated
 | Symptom | Cause and fix |
 |---|---|
 | The FRITZ!Box did not answer, or setup finds no router | The address is wrong, "Allow access for applications" is off, or port 49000 is blocked by a firewall; check those first. Enter the address by hand when discovery cannot reach the router, for example in a container on a bridge network. |
-| "No password configured" | `Password` is empty, so no login is attempted. |
+| "No password configured." | `Password` is empty, so the router is not contacted. Saving a password connects at once. |
 | "Login failed: check user, password and the FRITZ!Box settings permission." | Wrong user or password, or the user lacks the permission. Shown the same way when a later poll is refused, for example after the password or permission changed while the connection was running. The next attempt waits 15 minutes, doubling up to 2 hours, because every failed login lengthens the router's lockout; saving the configuration retries at once. |
 | "The FRITZ!Box presented a certificate other than the trusted one..." | The router's certificate key changed. Check why, then use **Accept New Certificate** in the edit dialog and save it. |
 | "The FRITZ!Box does not offer its host list..." | The firmware is too old. Update FRITZ!OS, then save the configuration or restart HomeBlaze, since the subject only reconnects on a configuration change. |
