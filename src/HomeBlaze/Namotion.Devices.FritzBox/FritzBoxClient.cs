@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Networking;
@@ -50,9 +51,11 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     public int? SignalStrength => null;
 
     [State(Position = 401)]
+    [Category("Network")]
     public partial FritzBoxInterfaceType InterfaceType { get; internal set; }
 
     [State(Position = 402)]
+    [Category("Network")]
     public partial bool? IsGuest { get; internal set; }
 
     /// <summary>
@@ -60,15 +63,18 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     /// does not place it.
     /// </summary>
     [State(Position = 403)]
+    [Category("Network")]
     public partial string? AccessPointName { get; internal set; }
 
     [State(Position = 404)]
+    [Category("Network")]
     public partial string? AccessPointMacAddress { get; internal set; }
 
     /// <summary>
     /// The WLAN band, null for a wired device, or while the device is absent or the mesh list does not place it.
     /// </summary>
     [State(Position = 405)]
+    [Category("Network")]
     public partial string? Band { get; internal set; }
 
     /// <summary>
@@ -77,9 +83,11 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     /// device or when neither source reports one.
     /// </summary>
     [State(Position = 406)]
+    [Category("Network")]
     public partial int? Port { get; internal set; }
 
     [State(Position = 407, Unit = StateUnit.MegabitPerSecond)]
+    [Category("Network")]
     public partial decimal? LinkSpeed { get; internal set; }
 
     [Derived]

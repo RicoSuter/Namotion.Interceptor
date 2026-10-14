@@ -139,27 +139,35 @@ public partial class FritzBox : BackgroundService,
     public partial TimeSpan? Uptime { get; internal set; }
 
     [State(Position = 110, IsDiscrete = true)]
+    [Category("Internet")]
     public partial bool? IsInternetConnected { get; internal set; }
 
     [State(Position = 111)]
+    [Category("Internet")]
     public partial string? ExternalIpAddress { get; internal set; }
 
     [State(Position = 112)]
+    [Category("Internet")]
     public partial string? ExternalIpv6Address { get; internal set; }
 
     [State(Position = 113)]
+    [Category("Internet")]
     public partial TimeSpan? InternetConnectionUptime { get; internal set; }
 
     [State(Position = 120, Unit = StateUnit.MegabitPerSecond)]
+    [Category("Internet")]
     public partial decimal? MaximumUploadRate { get; internal set; }
 
     [State(Position = 121, Unit = StateUnit.MegabitPerSecond)]
+    [Category("Internet")]
     public partial decimal? MaximumDownloadRate { get; internal set; }
 
     [State(Position = 122, Unit = StateUnit.KilobytePerSecond)]
+    [Category("Internet")]
     public partial decimal? UploadRate { get; internal set; }
 
     [State(Position = 123, Unit = StateUnit.KilobytePerSecond)]
+    [Category("Internet")]
     public partial decimal? DownloadRate { get; internal set; }
 
     /// <summary>
@@ -184,6 +192,7 @@ public partial class FritzBox : BackgroundService,
     /// The key the router presents while it is not the trusted one; setting it as <see cref="CertificatePin"/> trusts it.
     /// </summary>
     [State(Position = 940)]
+    [Category("Certificate")]
     public partial string? PresentedCertificatePin { get; internal set; }
 
     /// <summary>
@@ -191,6 +200,7 @@ public partial class FritzBox : BackgroundService,
     /// the user to compare before trusting the key.
     /// </summary>
     [State(Position = 941)]
+    [Category("Certificate")]
     public partial string? PresentedCertificateFingerprint { get; internal set; }
 
     [Derived]

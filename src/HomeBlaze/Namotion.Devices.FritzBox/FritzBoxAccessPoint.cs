@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -69,12 +70,15 @@ public partial class FritzBoxAccessPoint : IDeviceInfo, ISoftwareState, INetwork
     public partial bool IsConnected { get; internal set; }
 
     [State(Position = 401)]
+    [Category("Mesh")]
     public partial FritzBoxMeshRole MeshRole { get; internal set; }
 
     [State(Position = 402)]
+    [Category("Mesh")]
     public partial string? UplinkType { get; internal set; }
 
     [State(Position = 403, Unit = StateUnit.MegabitPerSecond)]
+    [Category("Mesh")]
     public partial decimal? UplinkSpeed { get; internal set; }
 
     /// <summary>
