@@ -177,6 +177,23 @@ Controls value-based conflict detection in both locking modes; `BestEffort` writ
 
 Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
 
+### Validation Mode
+
+Controls when transaction handlers, such as property validation, validate the written values.
+
+```csharp
+using var tx = await context.BeginTransactionAsync(
+    TransactionFailureHandling.Rollback,
+    validationMode: TransactionValidationMode.Deferred);
+```
+
+| Value | Description |
+|-------|-------------|
+| `Immediate` | Each write is validated when it is written, and the final set of values again at commit. (default) |
+| `Deferred` | Only the final set of values is validated, at commit. Write order and intermediate values do not matter. |
+
+See [Validation in transactions](validation.md#transactions) for details.
+
 ### Requirements
 
 Enforces constraints on transaction scope, useful for protocols like OPC UA.
@@ -222,9 +239,10 @@ When `CommitAsync()` is called, changes are processed in stages. The exact flow 
 
 When only `WithTransactions()` is configured (no external sources):
 
-1. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
-2. If any apply fails and `Rollback` mode: revert successful applies
-3. Fire change notifications
+1. **Check the final set**: registered transaction handlers check the pending values (see [Transaction Handlers](#transaction-handlers))
+2. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
+3. If any apply fails and `Rollback` mode: revert successful applies
+4. Fire change notifications
 
 ### With Source Transactions
 
@@ -246,12 +264,15 @@ Stage 2 applies source-bound changes marked with a `Confirmed` origin carrying t
 
 Stage 1 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
 
+Registered transaction handlers check the final set of values before stage 1, and again between the stages, right before the local apply, with only the changes that will be applied, because inbound updates can change what they read while the sources are written. A change rejected between the stages is handled like a failed local apply: its source write is reverted.
+
 **Rollback behavior on failure:**
 
 | Failure Stage | BestEffort | Rollback |
 |---------------|------------|----------|
 | Source write fails | Successful sources written and applied | All sources reverted, nothing applied |
 | Local apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
+| Second check rejects a change (between the stages) | Other changes applied, rejected changes' sources reverted | All sources reverted, nothing applied |
 
 Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
 
@@ -320,13 +341,14 @@ catch (SubjectTransactionConflictException ex)
 | `InvalidOperationException` | Nested transactions, already committed, transactions not enabled, committing from a different async flow |
 | `ObjectDisposedException` | Using a disposed transaction |
 | `OperationCanceledException` | Commit timeout during source revert (source-write timeouts are reported via `SubjectTransactionException`) |
+| `SubjectTransactionValidationException` | The final set of values is invalid (validation package). Thrown before anything is written, so the transaction is retryable |
 
 ### Failure Flows and Consistency
 
 A commit attempt ends in one of three states:
 
 - **Committed**: the commit succeeded. The transaction is finished and must be disposed.
-- **Failed, retryable**: the commit aborted before the local model was touched, either before anything was written at all (conflict detected, optimistic lock not acquired) or because a commit timeout interrupted it. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
+- **Failed, retryable**: the commit aborted before the local model was touched, either before anything was written at all (conflict detected, invalid values rejected by a transaction handler, optimistic lock not acquired) or because a commit timeout interrupted it. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
 - **Failed, terminal**: the commit got past the source-write stage, so writes may have reached sources or the local model, and compensation (reverts) already ran once. The pending changes are cleared, a second `CommitAsync` throws `InvalidOperationException`, and the transaction must be disposed and replaced with a new one. Retrying would replay the snapshot onto state that has already moved, for example re-pushing values to a source that already accepted them.
 
 Note that "terminal" describes the transaction, not the result: a successful commit is also terminal. Transactions are one-shot once anything has moved.
@@ -444,47 +466,24 @@ public partial class Motor
 }
 ```
 
-**During the transaction (capture phase):**
+**During the transaction (capture phase):** each write is captured and stops the write chain: no field write, no notifications. Transaction handlers see the write first. In `Immediate` mode the validation handler validates it, and a read of `motor.MaxAllowedSpeed` inside the validator returns the pending value. In `Deferred` mode nothing is validated yet.
 
-```
-motor.MaxAllowedSpeed = 200;
-    → ValidationInterceptor: validates 200 for MaxAllowedSpeed → OK
-    → TransactionInterceptor: captures in pending[MaxAllowedSpeed] = 200, stops chain
-    (no field write, no notifications)
+**On commit:** the transaction handlers check the final set first, while reads still return the pending values, so `MotorSpeed = 150` is checked against `MaxAllowedSpeed = 200` regardless of which was written first. Then conflicts are detected, sources are written, and the values are replayed in insertion order through the full interceptor chain, which writes the fields and fires notifications. The replayed values are not validated again.
 
-motor.MotorSpeed = 150;
-    → ValidationInterceptor: validates 150 for MotorSpeed
-        reads MaxAllowedSpeed → TransactionInterceptor returns pending value 200
-        150 <= 200 → OK
-    → TransactionInterceptor: captures in pending[MotorSpeed] = 150, stops chain
-    (no field write, no notifications)
-```
+**Insertion order:** only the final value per property is stored (last write wins), and the replay position is determined by the first write to each property. Writing a property back to its landed value cancels its pending change, so a later write to it counts as a first write: it takes the then-landed value as its old value and moves to the end of the replay order.
 
-**On commit (replay phase):**
+### Transaction Handlers
 
-Changes are replayed in insertion order through the full interceptor chain against the real model:
+An `ITransactionHandler` registered on the context participates in its transactions; property validation uses one. Handlers are resolved when the transaction begins and are called in the context's service order.
 
-```
-await transaction.CommitAsync(cancellationToken);
+- `OnCapturing` is called for every write the transaction captures, before it is captured. Throwing rejects the write at the setter.
+- `OnCommitting` is called with the final set of changes before any source write or local apply, while reads still return the transaction's values. Throwing aborts the commit without writing anything and leaves the transaction retryable.
+- With source transactions, `OnCommitting` is called again after the source writes, right before the local apply, with only the changes that will be applied and their captured origins. Reads return the pending values of those changes and the landed model otherwise. Throwing there fails the affected changes: a `SubjectTransactionException` with matching failed changes fails only those, any other exception fails every checked change. This is handled like a failed local apply, and the transaction is terminal. The second call is skipped when nothing will be applied or the transaction was disposed before it.
+- Handlers must not write properties: a write during either check throws `InvalidOperationException`. A handler may be called from another thread when the transaction is used from several threads, for example a child task writing while the commit checks.
 
-Apply pending[MaxAllowedSpeed] = 200:
-    → ValidationInterceptor: validates 200 → OK
-    → TransactionInterceptor: IsCommitting=true → calls next (no capture)
-    → Field write: MaxAllowedSpeed = 200
-    → Notifications fired
+A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the replay of a value it already checked, or a rollback restoring one.
 
-Apply pending[MotorSpeed] = 150:
-    → ValidationInterceptor: validates 150
-        reads MaxAllowedSpeed from real model → 200 (already committed above)
-        150 <= 200 → OK
-    → TransactionInterceptor: IsCommitting=true → calls next (no capture)
-    → Field write: MotorSpeed = 150
-    → Notifications fired
-```
-
-**Why insertion order matters:** If `MotorSpeed` were committed before `MaxAllowedSpeed`, the validator would read `MaxAllowedSpeed = 100` from the real model and reject the write.
-
-**Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions. Writing a property back to its landed value cancels its pending change, so a later write to it counts as a first write: it takes the then-landed value as its old value and moves to the end of the commit order.
+Writes outside transactions are not blocked by a commit, so a property a handler reads can change between its check and the local apply. The check before the local apply narrows that window to the synchronous apply itself; transactional writes cannot interleave, because every commit holds the context's transaction lock.
 
 ### Retry After Conflict Detection
 
@@ -527,6 +526,7 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected: o
 - Commit-owned synchronous local replay remains allowed, including property hooks, change handlers, and derived cascades initiated by that replay. This authorization does not extend into custom writer callbacks or child tasks.
 - A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws
 - Concurrent `CommitAsync` calls on the same transaction instance are rejected
+- While transaction handlers check a commit, writes captured by that transaction throw `InvalidOperationException`; reads return the pending values.
 
 ## Best Practices
 
@@ -545,6 +545,7 @@ TransactionAwaitable BeginTransactionAsync(
     TransactionLocking locking = TransactionLocking.Exclusive,
     TransactionRequirement requirement = TransactionRequirement.None,
     TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
+    TransactionValidationMode validationMode = TransactionValidationMode.Immediate,
     TimeSpan? commitTimeout = null, // default: 30 seconds
     CancellationToken cancellationToken = default)
 ```
@@ -559,6 +560,7 @@ TransactionAwaitable BeginTransactionAsync(
 | `Context` | The context this transaction is bound to |
 | `Locking` | The locking mode |
 | `ConflictBehavior` | The conflict detection behavior |
+| `ValidationMode` | When transaction handlers validate the written values |
 
 ### Enums
 
@@ -577,6 +579,10 @@ TransactionAwaitable BeginTransactionAsync(
 **TransactionConflictBehavior:**
 - `FailOnConflict` - Throw on concurrent changes
 - `Ignore` - Overwrite without checking
+
+**TransactionValidationMode:**
+- `Immediate` - Validate each write and the final set at commit
+- `Deferred` - Validate only the final set at commit
 
 ## Limitations
 
