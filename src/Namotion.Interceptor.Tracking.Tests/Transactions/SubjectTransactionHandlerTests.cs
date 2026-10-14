@@ -751,6 +751,92 @@ public class SubjectTransactionHandlerTests
             writer.Reverted.Select(change => change.Property.Name).Order());
     }
 
+    [Fact]
+    public async Task WhenSourceWriteFails_ThenSecondCheckSeesOnlyLandingChangesAndLandedValueOfFailedProperty()
+    {
+        // Arrange
+        var person = default(Person)!;
+        var calls = new List<(string[] Changes, string? FirstName, string? LastName)>();
+        var handler = new RecordingHandler
+        {
+            OnCommittingAction = (_, changes) =>
+            {
+                calls.Add((changes.Select(change => change.Property.Name).ToArray(), person.FirstName, person.LastName));
+                if (person.FirstName == person.LastName)
+                {
+                    throw new InvalidOperationException("first and last name must differ");
+                }
+            }
+        };
+        var writer = new CountingTransactionWriter { FailedPropertyName = nameof(Person.LastName) };
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService<ITransactionWriter>(writer);
+        person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Lee";
+        person.LastName = "Ann";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(2, calls.Count);
+        Assert.Equal([nameof(Person.FirstName), nameof(Person.LastName)], calls[0].Changes);
+        Assert.Equal(("Lee", "Ann"), (calls[0].FirstName, calls[0].LastName));
+        Assert.Equal([nameof(Person.FirstName)], calls[1].Changes);
+        Assert.Equal(("Lee", "Lee"), (calls[1].FirstName, calls[1].LastName));
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Lee", person.LastName);
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName)],
+            exception.FailedChanges.Select(change => change.Property.Name).Order());
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(writer.Reverted).Property.Name);
+    }
+
+    [Fact]
+    public async Task WhenSecondCheckRejectsUncheckedChange_ThenEveryCheckedChangeFails()
+    {
+        // Arrange
+        var calls = 0;
+        var person = default(Person)!;
+        var handler = new RecordingHandler
+        {
+            OnCommittingAction = (_, _) =>
+            {
+                if (++calls == 2)
+                {
+                    var uncheckedChange = SubjectPropertyChange.Create(
+                        new PropertyReference(person, nameof(Person.LastName)),
+                        ChangeOrigin.Local,
+                        DateTimeOffset.UtcNow,
+                        null,
+                        "Lee",
+                        "Kim");
+                    throw new SubjectTransactionException(
+                        "invalid", [], [uncheckedChange], [new InvalidOperationException("invalid last name")]);
+                }
+            }
+        };
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService<ITransactionWriter>(writer);
+        person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Lee", person.LastName);
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.IsType<SubjectTransactionException>(Assert.Single(exception.Errors));
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(writer.Reverted).Property.Name);
+    }
+
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
     {
         // An async method does not leak the transaction it begins into the caller's flow.
@@ -771,6 +857,8 @@ public class SubjectTransactionHandlerTests
 
         public Action? DuringWrite { get; set; }
 
+        public string? FailedPropertyName { get; set; }
+
         public List<SubjectPropertyChange> Reverted { get; } = [];
 
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
@@ -780,7 +868,10 @@ public class SubjectTransactionHandlerTests
         {
             WriteCalls++;
             DuringWrite?.Invoke();
-            return new(new SourceWriteResult(changes.ToArray(), [], [], RevertState: null));
+            var all = changes.ToArray();
+            var failed = all.Where(change => change.Property.Name == FailedPropertyName).ToArray();
+            Exception[] errors = failed.Length > 0 ? [new InvalidOperationException("source write failed")] : [];
+            return new(new SourceWriteResult(all.Except(failed).ToArray(), failed, errors, RevertState: null));
         }
 
         public ValueTask<SourceRevertResult> RevertSourceWritesAsync(

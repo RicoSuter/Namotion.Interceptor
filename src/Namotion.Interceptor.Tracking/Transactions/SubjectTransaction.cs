@@ -60,6 +60,10 @@ public sealed class SubjectTransaction : IDisposable
     // the one that commits. Written only under _pendingChangesLock.
     private bool _isValidating;
 
+    // The changes whose source write failed, set only while the handlers check the set right before the local apply.
+    // Read only by the committing thread inside its commit validation scope, so it needs no lock.
+    private IReadOnlyList<SubjectPropertyChange>? _commitValidationExcludedChanges;
+
     /// <summary>
     /// Gets the current transaction in this execution context, or null if none is active.
     /// </summary>
@@ -182,20 +186,42 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Reads a pending value for the handlers that run right before the local apply, while the transaction is
-    /// committing. Returns false when the property is not part of the transaction.
+    /// committing. Returns false when the property is not part of the transaction or its source write failed.
     /// </summary>
     internal bool TryGetCommitValidationValue<TProperty>(PropertyReference property, out TProperty value)
     {
-        lock (_pendingChangesLock)
+        if (!IsExcludedFromCommitValidation(property))
         {
-            if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out var change))
+            lock (_pendingChangesLock)
             {
-                value = change.GetNewValue<TProperty>();
-                return true;
+                if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out var change))
+                {
+                    value = change.GetNewValue<TProperty>();
+                    return true;
+                }
             }
         }
 
         value = default!;
+        return false;
+    }
+
+    private bool IsExcludedFromCommitValidation(PropertyReference property)
+    {
+        var excludedChanges = _commitValidationExcludedChanges;
+        if (excludedChanges is null)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < excludedChanges.Count; index++)
+        {
+            if (PropertyReference.Comparer.Equals(excludedChanges[index].Property, property))
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -980,9 +1006,9 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Calls the handlers again right before the local apply, with reads returning the transaction's values. Returns
-    /// the changes they rejected: the failed changes of a <see cref="SubjectTransactionException"/>, or every change
-    /// for any other exception, excluding changes whose source write already failed.
+    /// Calls the handlers again right before the local apply with the changes that will be applied, with reads
+    /// returning the transaction's values for them. Returns the changes they rejected: the failed changes of a
+    /// <see cref="SubjectTransactionException"/> that match checked changes, or every checked change otherwise.
     /// </summary>
     private (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) CheckBeforeLocalApply(
         ReadOnlySpan<SubjectPropertyChange> changes,
@@ -994,25 +1020,61 @@ public sealed class SubjectTransaction : IDisposable
             return ([], []);
         }
 
+        // Changes whose source write failed do not land, so the handlers neither receive them nor read their values.
+        var landingChanges = failedSource.Count == 0 ? null : ExcludeFailedSourceChanges(changes, failedSource);
+        var checkedChanges = landingChanges is null ? changes : new ReadOnlySpan<SubjectPropertyChange>(landingChanges);
+        if (checkedChanges.IsEmpty)
+        {
+            return ([], []);
+        }
+
+        _commitValidationExcludedChanges = landingChanges is null ? null : failedSource;
         try
         {
             using (EnterCommitValidationAccess())
             {
-                InvokeCommitHandlers(changes);
+                InvokeCommitHandlers(checkedChanges);
             }
 
             return ([], []);
         }
-        catch (SubjectTransactionException exception) when (exception.FailedChanges.Count > 0)
-        {
-            var candidates = SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []);
-            IReadOnlyList<Exception> errors = exception.Errors.Count > 0 ? exception.Errors : [exception];
-            return (SubjectPropertyChangeOperations.IntersectByProperty(exception.FailedChanges, candidates), errors);
-        }
         catch (Exception exception)
         {
-            return (SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []), [exception]);
+            return GetRejectedChanges(exception, landingChanges ?? checkedChanges.ToArray());
         }
+        finally
+        {
+            _commitValidationExcludedChanges = null;
+        }
+    }
+
+    private static SubjectPropertyChange[] ExcludeFailedSourceChanges(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> failedSource)
+    {
+        var landingChanges = SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []);
+        return landingChanges as SubjectPropertyChange[] ?? [.. landingChanges];
+    }
+
+    /// <summary>
+    /// Returns the checked changes a handler exception rejects. A <see cref="SubjectTransactionException"/> rejects
+    /// its failed changes; when none of them was checked, the rejection fails closed like any other exception and
+    /// rejects every checked change.
+    /// </summary>
+    private static (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) GetRejectedChanges(
+        Exception exception,
+        IReadOnlyList<SubjectPropertyChange> checkedChanges)
+    {
+        if (exception is SubjectTransactionException { FailedChanges.Count: > 0 } transactionException)
+        {
+            var rejected = SubjectPropertyChangeOperations.IntersectByProperty(transactionException.FailedChanges, checkedChanges);
+            if (rejected.Count > 0)
+            {
+                return (rejected, transactionException.Errors.Count > 0 ? transactionException.Errors : [exception]);
+            }
+        }
+
+        return (checkedChanges, [exception]);
     }
 
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
