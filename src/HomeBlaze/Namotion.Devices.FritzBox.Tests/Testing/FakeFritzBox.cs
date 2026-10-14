@@ -56,6 +56,11 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
 
     internal int HttpsPort { get; private set; }
 
+    /// <summary>
+    /// The body served for <see cref="Tr64Description.DescriptionPath"/> over plain HTTP.
+    /// </summary>
+    internal string DescriptionXml { get; set; } = Fixtures.Read("tr64desc.xml");
+
     internal string HostListXml { get; set; } = Fixtures.Read("hostlist.xml");
 
     internal string MeshListJson { get; set; } = Fixtures.Read("meshlist.json");
@@ -297,7 +302,7 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         {
             if (await TryPassHoldAsync(Tr64Description.DescriptionPath, context))
             {
-                await WriteAsync(context, StatusCodes.Status200OK, "text/xml", Fixtures.Read("tr64desc.xml"));
+                await WriteAsync(context, StatusCodes.Status200OK, "text/xml", DescriptionXml);
             }
         }
         else if (HttpMethods.IsPost(request.Method) && GetAction(request) is (Tr64Services.DeviceInfo, "GetSecurityPort"))

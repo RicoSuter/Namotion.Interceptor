@@ -53,6 +53,38 @@ public class FritzBoxConnectionCheckTests
         Assert.NotNull(result.ErrorMessage);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("http://fritz.box")]
+    [InlineData("192.168.178.1:49000")]
+    [InlineData("fritz box")]
+    public async Task WhenTheHostAddressIsInvalid_ThenTheCheckSaysSoWithoutAnyRequest(string hostAddress)
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+
+        // Act
+        var result = await FritzBoxConnectionCheck.CheckAsync(hostAddress, fake.Username, fake.Password, CancellationToken.None);
+
+        // Assert
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Enter the router's IP address or host name without http:// or a port.", result.ErrorMessage);
+        Assert.Equal(0, fake.SecurityPortRequests);
+    }
+
+    [Fact]
+    public async Task WhenTheTokenIsAlreadyCancelled_ThenCheckAsyncThrows()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        using var cancellationTokenSource = new CancellationTokenSource();
+        await cancellationTokenSource.CancelAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            FritzBoxConnectionCheck.CheckAsync(Options(fake, fake.Password), cancellationTokenSource.Token));
+    }
+
     private static FritzBoxConnectionOptions Options(FakeFritzBox fake, string password) =>
         new("127.0.0.1", fake.Username, password, null) { DescriptionPort = fake.HttpPort };
 }

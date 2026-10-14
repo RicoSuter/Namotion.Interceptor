@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Xml;
 using Namotion.Devices.FritzBox.Client;
 using Rssdp;
@@ -19,45 +20,62 @@ public sealed record FritzBoxDiscoveryResult(string HostAddress, string? Friendl
 public static class FritzBoxDiscovery
 {
     private const string SearchTarget = "urn:dslforum-org:device:InternetGatewayDevice:1";
-
-    private static readonly Uri WellKnownLocation =
-        new UriBuilder(Uri.UriSchemeHttp, "fritz.box", Tr64Description.DescriptionPort, Tr64Description.DescriptionPath).Uri;
+    private const string WellKnownHost = "fritz.box";
 
     /// <summary>
-    /// Searches every IPv4 adapter and asks <c>fritz.box</c>, then describes each router found. A container on a
-    /// bridge network usually receives no multicast; enter the address by hand there. Never throws for a location
-    /// that does not answer: it is left out of the result. Cancellation still propagates.
+    /// The most locations described in one search, so that a hostile or malfunctioning answerer on the network
+    /// cannot make a search describe an unbounded number of hosts.
     /// </summary>
+    private const int MaximumLocations = 32;
+
+    /// <summary>
+    /// Searches every IPv4 adapter and asks <c>fritz.box</c>, then describes each router found in parallel. Never
+    /// throws for a location that does not answer or does not describe a FRITZ!Box: it is left out of the result.
+    /// Cancellation still propagates.
+    /// </summary>
+    /// <remarks>
+    /// A container on a bridge network usually receives no multicast; enter the address by hand in that case instead
+    /// of relying on this search.
+    /// </remarks>
     /// <param name="timeout">How long to wait for SSDP answers and for each description request.</param>
     /// <param name="cancellationToken">Cancels the search and every description request.</param>
-    /// <returns>The routers found, de-duplicated by unique device name, or by host address when that is absent.</returns>
+    /// <returns>
+    /// The routers found, de-duplicated by unique device name, or by host address when that is absent. A router
+    /// found by both SSDP and the <c>fritz.box</c> fallback is kept once, under its SSDP host address.
+    /// </returns>
     public static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
-        var locations = new List<Uri>();
+        var hosts = new List<string>();
         try
         {
             using var locator = new AggregateSsdpDeviceLocator(includeIpv4: true, includeIpv6: false, adapterFilter: null, logger: null);
             var devices = await locator.SearchAsync(SearchTarget, timeout, cancellationToken);
             foreach (var device in devices)
             {
-                if (device.DescriptionLocation is { } location)
+                // Other UPnP devices can answer a search with any notification type; only a genuine answer for the
+                // target, with an absolute location to describe, is usable.
+                if (device.NotificationType == SearchTarget && device.DescriptionLocation is { IsAbsoluteUri: true } location)
                 {
-                    locations.Add(location);
+                    hosts.Add(location.Host);
                 }
             }
         }
-        catch (ArgumentException)
+        catch (Exception exception) when (exception is ArgumentException or SocketException or AggregateException)
         {
-            // No IPv4 adapter usable for multicast exists.
+            // No IPv4 adapter usable for multicast exists, or the search itself failed; fritz.box is still tried.
         }
 
-        locations.Add(WellKnownLocation);
+        hosts.Add(WellKnownHost);
 
-        using var httpClient = new HttpClient { Timeout = timeout, MaxResponseContentBufferSize = Tr64Description.MaximumBytes };
+        using var httpClient = FritzBoxHttpClient.CreatePlain(timeout, Tr64Description.MaximumBytes);
+        var distinctHosts = hosts.Distinct(StringComparer.OrdinalIgnoreCase).Take(MaximumLocations).ToArray();
+        var descriptions = await Task.WhenAll(
+            distinctHosts.Select(host => DescribeAsync(httpClient, host, Tr64Description.DescriptionPort, cancellationToken)));
+
         var results = new Dictionary<string, FritzBoxDiscoveryResult>(StringComparer.OrdinalIgnoreCase);
-        foreach (var location in locations.DistinctBy(location => location.Host, StringComparer.OrdinalIgnoreCase))
+        foreach (var result in descriptions)
         {
-            if (await DescribeAsync(httpClient, location, cancellationToken) is { } result)
+            if (result is not null)
             {
                 results.TryAdd(result.Udn ?? result.HostAddress, result);
             }
@@ -66,13 +84,27 @@ public static class FritzBoxDiscovery
         return results.Values.ToArray();
     }
 
-    /// <returns>The router at a description location, or null when none answers there.</returns>
-    internal static async Task<FritzBoxDiscoveryResult?> DescribeAsync(HttpClient httpClient, Uri location, CancellationToken cancellationToken)
+    /// <summary>
+    /// Describes the router at a host, ignoring whatever scheme, port or path an SSDP answer advertised: the
+    /// description is always fetched the way an opened connection fetches it, plain HTTP on <paramref name="port"/>
+    /// at the fixed TR-064 path.
+    /// </summary>
+    /// <returns>
+    /// The router at the host, or null when it does not answer, answers with something unparseable or oversized, or
+    /// lists no <c>DeviceInfo</c> service.
+    /// </returns>
+    internal static async Task<FritzBoxDiscoveryResult?> DescribeAsync(HttpClient httpClient, string host, int port, CancellationToken cancellationToken)
     {
         try
         {
+            var location = new UriBuilder(Uri.UriSchemeHttp, host, port, Tr64Description.DescriptionPath).Uri;
             var description = Tr64Description.Parse(await httpClient.GetStringAsync(location, cancellationToken));
-            return new FritzBoxDiscoveryResult(location.Host, description.FriendlyName, description.ModelName, description.Udn);
+            if (description.TryGetService(Tr64Services.DeviceInfo) is null)
+            {
+                return null;
+            }
+
+            return new FritzBoxDiscoveryResult(host, description.FriendlyName, description.ModelName, description.Udn);
         }
         catch (Exception exception) when ((exception is HttpRequestException or XmlException or TaskCanceledException) && !cancellationToken.IsCancellationRequested)
         {

@@ -16,11 +16,7 @@ internal static class Tr64Discovery
         FritzBoxConnectionOptions options, CancellationToken cancellationToken)
     {
         var descriptionUri = new UriBuilder(Uri.UriSchemeHttp, options.HostAddress, options.DescriptionPort, Tr64Description.DescriptionPath).Uri;
-        using var plainClient = new HttpClient
-        {
-            Timeout = Timeout.InfiniteTimeSpan,
-            MaxResponseContentBufferSize = Tr64Description.MaximumBytes
-        };
+        using var plainClient = FritzBoxHttpClient.CreatePlain(Timeout.InfiniteTimeSpan, Tr64Description.MaximumBytes);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(options.RequestTimeout);

@@ -27,4 +27,18 @@ internal static class FritzBoxHttpClient
             MaxResponseContentBufferSize = maximumAnswerBytes
         };
     }
+
+    /// <summary>
+    /// Creates a client for an unauthenticated plain HTTP request against a router on the local network: no
+    /// redirects and no proxy, since a redirect or a proxied route could point away from the router that was asked.
+    /// </summary>
+    internal static HttpClient CreatePlain(TimeSpan timeout, int maximumResponseBytes)
+    {
+        var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false };
+        return new HttpClient(handler)
+        {
+            Timeout = timeout,
+            MaxResponseContentBufferSize = maximumResponseBytes
+        };
+    }
 }
