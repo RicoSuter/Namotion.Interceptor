@@ -86,6 +86,7 @@ public partial class FritzBox : BackgroundService,
         UploadRate = null;
         DownloadRate = null;
         PresentedCertificatePin = null;
+        PresentedCertificateFingerprint = null;
         Clients = new Dictionary<string, FritzBoxClient>(StringComparer.Ordinal);
         AccessPoints = new Dictionary<string, FritzBoxAccessPoint>(StringComparer.Ordinal);
         Wlans = new Dictionary<string, FritzBoxWlan>(StringComparer.Ordinal);
@@ -198,6 +199,13 @@ public partial class FritzBox : BackgroundService,
     /// </summary>
     [State(Position = 940)]
     public partial string? PresentedCertificatePin { get; internal set; }
+
+    /// <summary>
+    /// The SHA-256 fingerprint of <see cref="PresentedCertificatePin"/>'s certificate, the form browsers show, for
+    /// the user to compare before accepting the key in the edit dialog.
+    /// </summary>
+    [State(Position = 941)]
+    public partial string? PresentedCertificateFingerprint { get; internal set; }
 
     [Derived]
     [State(Position = 130)]

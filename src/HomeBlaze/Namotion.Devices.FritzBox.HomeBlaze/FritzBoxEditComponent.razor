@@ -50,6 +50,12 @@
         <MudAlert Severity="Severity.Warning" Class="mt-2">
             The router presents a different certificate key: @presentedPin. Accept it only if you know why the router's certificate changed.
         </MudAlert>
+        @if (RouterSubject?.PresentedCertificateFingerprint is { } presentedFingerprint)
+        {
+            <MudText Typo="Typo.caption" Style="font-family: monospace; word-break: break-all;" Class="mt-1">
+                Fingerprint (compare it with the one your browser shows for this router's web UI): @presentedFingerprint
+            </MudText>
+        }
         <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="() => AcceptPresentedCertificate(presentedPin)" Class="mt-2">
             Accept New Certificate
         </MudButton>

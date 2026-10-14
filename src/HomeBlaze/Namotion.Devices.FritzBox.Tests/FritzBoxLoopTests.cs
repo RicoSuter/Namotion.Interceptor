@@ -213,6 +213,7 @@ public class FritzBoxLoopTests
 
         // Assert
         Assert.Equal(fake.CertificatePin, router.PresentedCertificatePin);
+        Assert.Equal(CertificateInfo.Create(fake.Certificate).Fingerprint, router.PresentedCertificateFingerprint);
         Assert.Equal(otherPin, router.CertificatePin);
         Assert.Empty(fake.Actions);
     }

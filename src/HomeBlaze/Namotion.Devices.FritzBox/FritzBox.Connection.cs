@@ -178,6 +178,7 @@ public partial class FritzBox
         var presentedPin = exception.Presented?.Pin;
         _logger.LogWarning("FRITZ!Box {HostAddress} presented the untrusted certificate key {CertificatePin}.", hostAddress, presentedPin);
         PresentedCertificatePin = presentedPin;
+        PresentedCertificateFingerprint = exception.Presented?.Fingerprint;
         SetError(exception.Message);
     }
 
@@ -240,6 +241,7 @@ public partial class FritzBox
     private async Task TrustCertificateAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
     {
         PresentedCertificatePin = null;
+        PresentedCertificateFingerprint = null;
         if (StringValues.NullIfBlank(CertificatePin) is not null)
         {
             await RetryUnsavedCertificateAsync(cancellationToken);
