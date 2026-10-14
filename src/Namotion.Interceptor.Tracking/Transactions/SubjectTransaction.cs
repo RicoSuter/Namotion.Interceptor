@@ -256,6 +256,11 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public TransactionLocking Locking { get; }
 
+    /// <summary>
+    /// Gets the validation mode for this transaction.
+    /// </summary>
+    public TransactionValidationMode ValidationMode { get; }
+
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the transaction context, policies and acquired lock ownership as one coherent state.")]
     private SubjectTransaction(
         IInterceptorSubjectContext context,
@@ -264,6 +269,7 @@ public sealed class SubjectTransaction : IDisposable
         TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
+        TransactionValidationMode validationMode,
         TimeSpan commitTimeout,
         IDisposable? lockReleaser)
     {
@@ -273,6 +279,7 @@ public sealed class SubjectTransaction : IDisposable
         Locking = locking;
         _requirement = requirement;
         ConflictBehavior = conflictBehavior;
+        ValidationMode = validationMode;
         _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
 
@@ -289,16 +296,19 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="locking">The locking mode controlling transaction synchronization.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="conflictBehavior">The conflict detection behavior.</param>
+    /// <param name="validationMode">The validation mode.</param>
     /// <param name="commitTimeout">Timeout for commit operations. User cancellation is ignored during commit and only timeout-based cancellation is used. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.</param>
     /// <param name="cancellationToken">The cancellation token (used before commit starts, ignored during commit).</param>
     /// <returns>A new SubjectTransaction instance.</returns>
     /// <exception cref="InvalidOperationException">Thrown when transactions are not enabled or when nested transaction is attempted.</exception>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The factory forwards the complete set of transaction policies to the private constructor as one coherent state.")]
     internal static async ValueTask<SubjectTransaction> BeginTransactionAsync(
         IInterceptorSubjectContext context,
         TransactionFailureHandling failureHandling,
         TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
+        TransactionValidationMode validationMode,
         TimeSpan commitTimeout,
         CancellationToken cancellationToken)
     {
@@ -327,6 +337,7 @@ public sealed class SubjectTransaction : IDisposable
             locking,
             requirement,
             conflictBehavior,
+            validationMode,
             commitTimeout,
             transactionLock);
     }
