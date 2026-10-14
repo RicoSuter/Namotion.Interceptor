@@ -390,6 +390,33 @@ public class MarkdownBlockStructureTests
         Assert.Equal(new[] { 0 }, insertMap);
     }
 
+    [Theory]
+    // The list item starts before the indentation of the tile, so a line with that indentation is a part of it.
+    [InlineData("  :: Demo.Board\n  ::: Tile\n- an item\n  text of the item\n")]
+    // After a definition that holds a quote, Markdig counts the indentation of a list item as a part of its
+    // marker, so a line with that indentation after it is a part of the item.
+    [InlineData("  :: Demo.Board\n  ::: Tile\n  a term\n  :   a definition\n  > a quote\n  - an item\n")]
+    public void WhenPlacementIsInsideAListItem_ThenTheNewBlockIsNoSlotBlockAndAlignmentFails(string source)
+    {
+        // Arrange
+        var before = MarkdownPageParser.Parse(source);
+        var owner = before.Blocks[0];
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
+        var text = MarkdownBlockWriter.Indent(
+            MarkdownBlockWriter.CreateBlock("Tile", null, "{}", placement.FenceLength, placement.LineEnding, placement.HasClosingLine),
+            placement.Indentation,
+            placement.LineEnding);
+        var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
+
+        // Act
+        var after = MarkdownPageParser.Parse(result);
+        var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 1, owner);
+
+        // Assert
+        Assert.Null(map);
+        Assert.Equal(MarkdownBlockKind.Invalid, after.AllBlocks.Single(block => block.Line == edit.Line).Kind);
+    }
+
     [Fact]
     public void WhenLinesAreInsertedBeforeTheJsonBlockOfTheOwner_ThenAlignmentFails()
     {
