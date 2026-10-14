@@ -264,6 +264,93 @@ public class MarkdownBlockStructureTests
             code => code.Line == codeLine && code.Parent is MarkdownBlockContainer);
     }
 
+    [Theory]
+    [InlineData(":: Demo.Panel\n- first\n::: Tile\ntwo\n:::\n  text of the panel\n::\n")]
+    [InlineData(":: Demo.Panel\n- first\n::: Tile\ntwo\n:::\n    text of the panel\n::\n")]
+    [InlineData(":: Demo.Panel\na term\n::: Tile\ntwo\n:::\n:   text of the panel\n::\n")]
+    [InlineData(":: Demo.Panel\na term\n\n::: Tile\ntwo\n:::\n:   text of the panel\n::\n")]
+    public void WhenRemovalChangesWhatTheTextAfterTheBlockIs_ThenAlignmentFails(string source)
+    {
+        // Arrange: the text becomes a part of the list item or the definition of the term, also after an empty line.
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+
+        // Assert
+        Assert.Null(map);
+    }
+
+    [Theory]
+    [InlineData("a paragraph", "another paragraph")]
+    [InlineData("- first\n- second", "text of the panel")]
+    [InlineData("> a quote", "text of the panel")]
+    [InlineData("# A heading", "text of the panel")]
+    [InlineData("```\ncode\n```", "```\nmore code\n```")]
+    [InlineData("    indented code", "text of the panel")]
+    [InlineData("| a | b |\n|---|---|\n| 1 | 2 |", "| 3 | 4 |")]
+    public void WhenRemovalLeavesTheTextAroundTheBlockAsItIs_ThenAlignmentSucceeds(string textBefore, string textAfter)
+    {
+        // Arrange
+        var source = $":: Demo.Panel\n{textBefore}\n::: Tile\ntwo\n:::\n{textAfter}\n::\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+
+        // Assert
+        Assert.Equal(new[] { 0, -1 }, map);
+    }
+
+    [Theory]
+    // The heading in the tile is the first of the page, so Markdig lists the link definition after the panel
+    // before the removal and at the end of the page after it.
+    [InlineData("intro\n\n:: Demo.Panel\n::: Tile\n# A heading\n:::\n::\n\ntext with [a link]\n\n:: Demo.Other\n::\n\n[a link]: http://example.com\n")]
+    // The span of the indented code takes the empty line after it once the tile is gone.
+    [InlineData(":: Demo.Panel\n    indented code\n::: Tile\n\n::\n")]
+    public void WhenRemovalChangesOnlyWhereMarkdigListsOrEndsOtherText_ThenAlignmentSucceeds(string source)
+    {
+        // Arrange
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+        var result = MarkdownBlockWriter.RemoveBlock(source, tile, out var edit);
+
+        // Act
+        var map = MarkdownBlockAlignment.TryAlign(before, MarkdownPageParser.Parse(result), edit, 0, owner: null);
+
+        // Assert
+        Assert.NotNull(map);
+    }
+
+    [Fact]
+    public void WhenBlockWithMarkdownOfManyKindsIsRemovedAndInsertedAgain_ThenBothAreAligned()
+    {
+        // Arrange: nothing in the tile may count as text outside of it, wherever Markdig lists it.
+        const string content =
+            "# A heading\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\na term\n:   a definition\n\n[a link]: http://example.com\n\n" +
+            "- [ ] a task\n- an item\n\n1. one\n2. two\n\n> a quote\n\n```\ncode\n```\n\n    indented code\n\n<div>\nhtml\n</div>\n\n" +
+            "A heading\n=========\n\n***\n\ntext with [a link]";
+        var source = $"intro with [a link]\n\n:: Demo.Panel\ntext before\n::: Tile\n{content}\n:::\n# Another heading\ntext after\n::\n\noutro\n";
+        var before = MarkdownPageParser.Parse(source);
+        var tile = before.Blocks[0].Children.Single(child => child.Kind == MarkdownBlockKind.Slot);
+
+        // Act
+        var removed = MarkdownBlockWriter.RemoveBlock(source, tile, out var removal);
+        var without = MarkdownPageParser.Parse(removed);
+        var removalMap = MarkdownBlockAlignment.TryAlign(before, without, removal, 0, owner: null);
+
+        var inserted = MarkdownBlockWriter.InsertLines(removed, removal.Line, $"::: Tile\n{content}\n:::", "\n", out var insert);
+        var insertMap = MarkdownBlockAlignment.TryAlign(without, MarkdownPageParser.Parse(inserted), insert, 1, without.Blocks[0]);
+
+        // Assert
+        Assert.Equal(new[] { 0, -1 }, removalMap);
+        Assert.Equal(new[] { 0 }, insertMap);
+    }
+
     [Fact]
     public void WhenLinesAreInsertedBeforeTheJsonBlockOfTheOwner_ThenAlignmentFails()
     {
@@ -308,11 +395,15 @@ public class MarkdownBlockStructureTests
                     var map = MarkdownBlockAlignment.TryAlign(before, after, edit, 0, owner: null);
                     var context = $"Round {round}, step {step}, removal at line {edit.Line}:\n{source}\n--- became ---\n{result}";
 
-                    // Assert: the check says yes exactly when every other block has its text and its place.
+                    // Assert: the check says yes exactly when every other block has its text and its place, and
+                    // every text outside the block is what it was.
                     AssertOnlyTheEditedLinesChanged(source, result, edit, context);
                     AssertRemovalLeavesNothingButOneEmptyLine(result, edit, lineEnding, context);
-                    var isClean = Describe(before, edit.Line, edit.RemovedLineCount).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount));
-                    Assert.True(isClean == (map is not null), context);
+                    var hasSameBlocks = Describe(before, edit.Line, edit.RemovedLineCount).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount));
+                    var hasSameLeaves = DescribeLeaves(before, edit.Line, edit.RemovedLineCount).SequenceEqual(DescribeLeaves(after, edit.Line, edit.InsertedLineCount));
+                    Assert.True(
+                        (hasSameBlocks && hasSameLeaves) == (map is not null),
+                        $"Same blocks: {hasSameBlocks}, same leaves: {hasSameLeaves}, map: {map is not null}.\n{context}");
                     if (map is null)
                     {
                         refusedRemovals++;
@@ -343,7 +434,8 @@ public class MarkdownBlockStructureTests
                     AssertInsertedLinesEndLikeThePage(result, edit, placement.LineEnding, context);
                     AssertAppendGivesTheLastLineTheLineEndingOfThePage(source, result, edit, placement.LineEnding, context);
                     Assert.True(Describe(before, 0, 0).SequenceEqual(Describe(after, edit.Line, edit.InsertedLineCount)), context);
-                    Assert.True(map is not null, context);
+                    Assert.True(DescribeLeaves(before, 0, 0).SequenceEqual(DescribeLeaves(after, edit.Line, edit.InsertedLineCount)), $"A leaf changed.\n{context}");
+                    Assert.True(map is not null, $"The insert was refused.\n{context}");
                     AssertMapKeepsHeadLines(before, after, map!, context);
                     Assert.Equal(tiles.Count + 1, after.AllBlocks[map![owner.Index]].Children.Count(child => child.Kind == MarkdownBlockKind.Slot));
                     inserts++;
@@ -389,6 +481,39 @@ public class MarkdownBlockStructureTests
                 Add(block.Children, head);
             }
         }
+    }
+
+    // Every leaf block of the document that does not start on the given lines, in the order of the document: its
+    // kind, the containers around it from the leaf outwards, and its text. A block of the page is named by its
+    // head line. Equal lists before and after a change mean that every text outside the change is what it was.
+    // Written apart from the check on purpose, so that the two must agree.
+    private static List<string> DescribeLeaves(MarkdownPage page, int skippedLine, int skippedLineCount)
+    {
+        var lines = page.Source.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+        var result = new List<string>();
+        foreach (var leaf in page.Document.Descendants<LeafBlock>())
+        {
+            // A link reference definition is no text, and Markdig lists it where the first one of the page stands.
+            var line = leaf.Line + 1;
+            if (leaf is LinkReferenceDefinition || (line >= skippedLine && line < skippedLine + skippedLineCount))
+            {
+                continue;
+            }
+
+            var containers = new List<string>();
+            for (var parent = leaf.Parent; parent is not null; parent = parent.Parent)
+            {
+                containers.Add(parent is MarkdownBlockContainer block ? lines[block.Line] : parent.GetType().Name);
+            }
+
+            // White space at the end is no text: the span of an indented code block takes the empty lines after it.
+            var text = leaf.Span.End >= leaf.Span.Start
+                ? page.Source[leaf.Span.Start..Math.Min(leaf.Span.End + 1, page.Source.Length)]
+                : string.Empty;
+            result.Add($"{leaf.GetType().Name} in {string.Join(" < ", containers)}\n{text.Replace("\r", string.Empty).TrimEnd()}");
+        }
+
+        return result;
     }
 
     private static void AssertMapKeepsHeadLines(MarkdownPage before, MarkdownPage after, int[] map, string context)
@@ -480,8 +605,9 @@ public class MarkdownBlockStructureTests
     // Boards with tiles, in three styles: every block with a closing line, none, or each one by chance. Each tile
     // has one or two fence characters more than its board, so a tile can stand inside the tile before it. A board
     // can be indented, can stand inside an open block, can start with a line of text and can end with a widget
-    // block after its tiles. Style blocks and text stand between the tiles. An indented board after a board that
-    // ends with a list item stands inside that item, where it is an invalid block and no owner.
+    // block after its tiles. Style blocks, text and lines that join what stands before them when a tile between
+    // them is removed stand between the tiles. An indented board after a board that ends with a list item stands
+    // inside that item, where it is an invalid block and no owner.
     private static string CreateRandomPage(Random random, int closingLineChance, string lineEnding)
     {
         var lines = new List<string> { "intro", string.Empty };
@@ -533,6 +659,14 @@ public class MarkdownBlockStructureTests
             var tileFence = Fence(random.Next(3) == 0 ? 4 : 3);
             lastTileFence = tileFence;
 
+            // A tile between two lines of which the second joins the first when the tile is removed. The lines
+            // above meet like this too rarely for the check to say no often.
+            var joiningLines = random.Next(6) == 0 ? random.Next(3) : -1;
+            if (joiningLines >= 0)
+            {
+                Add(joiningLines == 2 ? "a term before a tile" : "- an item before a tile");
+            }
+
             Add($"{tileFence} Tile Position={tile}");
             if (random.Next(2) == 0)
             {
@@ -553,6 +687,16 @@ public class MarkdownBlockStructureTests
                 Add(tileFence);
             }
 
+            if (joiningLines >= 0)
+            {
+                Add(joiningLines switch
+                {
+                    0 => "  text after two spaces",
+                    1 => "    text after four spaces",
+                    _ => ":   a definition"
+                });
+            }
+
             if (random.Next(4) == 0)
             {
                 Add($"{Fence(3)} {{.note}}");
@@ -566,6 +710,19 @@ public class MarkdownBlockStructureTests
             if (random.Next(4) == 0)
             {
                 Add("text after a tile");
+            }
+
+            // Lines that an empty line does not keep apart from what stands before a removed tile.
+            if (random.Next(5) == 0)
+            {
+                Add(random.Next(5) switch
+                {
+                    0 => "  text after two spaces",
+                    1 => "    text after four spaces",
+                    2 => ":   a definition",
+                    3 => "> a quote after a tile",
+                    _ => "- an item after a tile"
+                });
             }
         }
 

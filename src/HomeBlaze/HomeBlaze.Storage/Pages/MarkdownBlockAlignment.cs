@@ -1,3 +1,5 @@
+using Markdig.Syntax;
+
 namespace HomeBlaze.Storage.Pages;
 
 /// <summary>
@@ -19,7 +21,9 @@ internal static class MarkdownBlockAlignment
     /// Null when the change did more than insert or remove its blocks. Every other block, of every kind, must
     /// have the same kind, fence, head line, closing line and json block as before, the lines that the change
     /// explains, and the same block around it. The first inserted block must be a slot block directly inside
-    /// <paramref name="owner"/>, and every inserted block must end on the inserted lines.
+    /// <paramref name="owner"/>, and every inserted block must end on the inserted lines. Every leaf block of the
+    /// document that does not start on a line of the change, such as a paragraph, a heading or a code block,
+    /// must have the same kind, the same text and the same containers around it as before.
     /// </returns>
     public static int[]? TryAlign(
         MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
@@ -93,9 +97,85 @@ internal static class MarkdownBlockAlignment
             }
         }
 
-        return TakeInsertedBlocks() && newPosition == newBlocks.Count && insertedBlocks.Count == expectedInsertedBlockCount
+        return TakeInsertedBlocks() &&
+               newPosition == newBlocks.Count &&
+               insertedBlocks.Count == expectedInsertedBlockCount &&
+               HasSameLeafBlocks(before, after, edit)
             ? map
             : null;
+    }
+
+    // The kind of a leaf block, the containers around it from the document inwards, and where its text is.
+    private readonly record struct LeafDescription(Type Kind, string Containers, int Start, int Length);
+
+    private static bool HasSameLeafBlocks(MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit)
+    {
+        var oldLeaves = DescribeLeafBlocks(before, edit.Line, edit.RemovedLineCount);
+        var newLeaves = DescribeLeafBlocks(after, edit.Line, edit.InsertedLineCount);
+        if (oldLeaves.Count != newLeaves.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < oldLeaves.Count; index++)
+        {
+            var oldLeaf = oldLeaves[index];
+            var newLeaf = newLeaves[index];
+            if (oldLeaf.Kind != newLeaf.Kind ||
+                !string.Equals(oldLeaf.Containers, newLeaf.Containers, StringComparison.Ordinal) ||
+                !before.Source.AsSpan(oldLeaf.Start, oldLeaf.Length).SequenceEqual(after.Source.AsSpan(newLeaf.Start, newLeaf.Length)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Every leaf block that does not start on the given lines: its kind, the containers around it and its
+    // text. A change that only inserts or removes its own lines leaves this list as it was.
+    private static List<LeafDescription> DescribeLeafBlocks(MarkdownPage page, int skippedLine, int skippedLineCount)
+    {
+        var source = page.Source;
+        var result = new List<LeafDescription>();
+        Add(page.Document, string.Empty);
+        return result;
+
+        void Add(ContainerBlock container, string containers)
+        {
+            foreach (var child in container)
+            {
+                if (child is ContainerBlock inner)
+                {
+                    // A block of the page is named by its head line, so that text which moves into the block
+                    // beside it is seen. Every other container is named by its type.
+                    var name = inner is MarkdownBlockContainer ? GetLine(source, inner.Span.Start).ToString() : inner.GetType().Name;
+                    Add(inner, $"{containers}\n{name}");
+                    continue;
+                }
+
+                // A link reference definition is no text of the page, and Markdig lists it where the first
+                // definition or heading of the page made the group for them, which a change can move.
+                var line = child.Line + 1;
+                if (child is not LeafBlock or LinkReferenceDefinition || (line >= skippedLine && line < skippedLine + skippedLineCount))
+                {
+                    continue;
+                }
+
+                // Without white space at the end: the span of an indented code block takes the empty lines after it.
+                var start = Math.Clamp(child.Span.Start, 0, source.Length);
+                var end = Math.Clamp(child.Span.End + 1, start, source.Length);
+                var length = source.AsSpan(start, end - start).TrimEnd().Length;
+                result.Add(new LeafDescription(child.GetType(), containers, start, length));
+            }
+        }
+    }
+
+    private static ReadOnlySpan<char> GetLine(string source, int offset)
+    {
+        var start = Math.Clamp(offset, 0, source.Length);
+        var length = source.AsSpan(start).IndexOfAny('\r', '\n');
+        return length < 0 ? source.AsSpan(start) : source.AsSpan(start, length);
     }
 
     private static bool IsSameBlock(
