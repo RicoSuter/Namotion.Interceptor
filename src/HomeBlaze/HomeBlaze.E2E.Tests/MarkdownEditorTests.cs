@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
 
@@ -11,6 +12,9 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class MarkdownEditorTests
 {
+    // The page that tests overwrite. Each of them writes its own content before it opens the page.
+    private const string ScratchPage = "Scratch.md";
+
     private readonly PlaywrightFixture _fixture;
 
     public MarkdownEditorTests(PlaywrightFixture fixture)
@@ -140,5 +144,71 @@ public class MarkdownEditorTests
         // counting once.
         var decorations = page.Locator(".subject-block-decoration");
         await Assertions.Expect(decorations.First).ToBeVisibleAsync(new() { Timeout = 30000 });
+    }
+
+    [Fact]
+    public async Task WhenBlockIsSavedInItsDialogAndThenThePageIsSaved_ThenTheSaveSucceedsAndEachRegionHasOneDecoration()
+    {
+        // Arrange
+        const string source =
+            "---\ntitle: Scratch\n---\n\n# Scratch\n\n" +
+            ":: HomeBlaze.Samples.Motor#scratchmotor Name=ScratchMotor TargetSpeed=1200 SimulationInterval=00:00:01\n" +
+            "::\n\nSpeed {{ scratchmotor/TargetSpeed }}\n";
+        await _fixture.WriteDemoPageAsync(ScratchPage, source);
+
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // The edit menu is prerendered, and a click before the circuit is connected is lost.
+        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await page.GetByTestId("edit-mode-menu").ClickAsync();
+        await page.Locator(".mud-popover-open").GetByText("Split", new() { Exact = true }).ClickAsync();
+
+        // The editor only knows its block regions once the decorations are applied.
+        await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+        var headLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "HomeBlaze.Samples.Motor#scratchmotor" });
+        await Assertions.Expect(headLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await headLine.ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit scratchmotor" }).ClickAsync();
+
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await dialog.GetByLabel("Target Speed (RPM)").FillAsync("1500");
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+
+        var writtenHeadLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "TargetSpeed=1500" });
+        await Assertions.Expect(writtenHeadLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // The notification of the dialog is closed, because a notification with the same text is not shown twice.
+        var savedNotification = page.Locator(".mud-snackbar").Filter(new() { HasText = "Configuration saved." });
+        await Assertions.Expect(savedNotification).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await savedNotification.GetByRole(AriaRole.Button).ClickAsync();
+        await Assertions.Expect(savedNotification).ToHaveCountAsync(0, new() { Timeout = 30000 });
+
+        // Act
+        await page.Locator("[data-testid='save-button'] button").ClickAsync();
+
+        // Assert: the notification comes after the last refresh of the decorations. Refreshes that overlapped
+        // would each have added their decorations, and one of them would have stayed besides the later ones.
+        await Assertions.Expect(savedNotification).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(page.GetByText("Error saving configuration")).ToHaveCountAsync(0);
+
+        var decorationCounts = await page.EvaluateAsync<int[]>(
+            """
+            () => {
+                const decorations = blazorMonaco.editor.getEditor('markdown-editor').getModel().getAllDecorations();
+                return ['subject-block-decoration', 'expression-decoration']
+                    .map(className => decorations.filter(decoration => decoration.options.className === className).length);
+            }
+            """);
+        Assert.Equal([1, 1], decorationCounts);
+
+        var written = (await _fixture.ReadFileAsync(GetDemoPagePath(ScratchPage))).Replace("\r\n", "\n");
+        Assert.Equal(source.Replace("TargetSpeed=1200", "TargetSpeed=1500"), written);
+    }
+
+    private static string GetDemoPagePath(string name)
+    {
+        return Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", name);
     }
 }
