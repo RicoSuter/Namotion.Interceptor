@@ -53,7 +53,7 @@ public sealed class SubjectTransaction : IDisposable
     private bool _disposeRequestedDuringCommit;
 
     // Set while commit handlers check the snapshot, before _isCommitting: captures throw so the checked snapshot is
-    // the one that commits. Accessed only under _pendingChangesLock.
+    // the one that commits. Written only under _pendingChangesLock.
     private bool _isValidating;
 
     /// <summary>
@@ -82,6 +82,12 @@ public sealed class SubjectTransaction : IDisposable
     /// Gets a value indicating whether the transaction is currently committing changes.
     /// </summary>
     internal bool IsCommitting => _isCommitting;
+
+    /// <summary>
+    /// Gets a value indicating whether commit handlers are checking the snapshot.
+    /// </summary>
+    // Lock-free early check; the authoritative check stays in TryCaptureChange under the lock.
+    internal bool IsValidating => Volatile.Read(ref _isValidating);
 
     /// <summary>
     /// Gets a value indicating whether the transaction has reached a terminal committed state.
@@ -162,7 +168,9 @@ public sealed class SubjectTransaction : IDisposable
     /// True when the new value equals the landed value; an existing pending change for the property is
     /// then cancelled instead of updated.
     /// </param>
-    /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown if a concurrent commit is in progress (TOCTOU race) or commit handlers are checking the snapshot.
+    /// </exception>
     internal bool TryCaptureChange<TProperty>(
         PropertyReference property,
         ChangeOrigin origin,
@@ -256,11 +264,12 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    private static void ThrowCaptureDuringCommitValidation()
+    internal static void ThrowCaptureDuringCommitValidation()
     {
         throw new InvalidOperationException(
             "Cannot write a transactional property while transaction handlers check the commit. " +
-            "Transaction handlers must not write properties.");
+            "Transaction handlers must not write properties. " +
+            "This is also reported when the transaction is used from another thread.");
     }
 
     /// <summary>

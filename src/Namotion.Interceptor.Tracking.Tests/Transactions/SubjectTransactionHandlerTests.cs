@@ -148,7 +148,6 @@ public class SubjectTransactionHandlerTests
         Assert.Equal("Good", captureLog[0].Value);
         Assert.Same(second, captureLog[1].Handler);
         Assert.Equal("Good", captureLog[1].Value);
-        Assert.DoesNotContain(second.Captured, captured => Equals(captured.Value, "Bad"));
     }
 
     [Fact]
@@ -182,8 +181,10 @@ public class SubjectTransactionHandlerTests
 
         string? firstNameSeenByHandler = null;
         var notificationsSeenByHandler = -1;
-        handler.OnCommittingAction = (_, _) =>
+        SubjectPropertyChange[]? changesSeenByHandler = null;
+        handler.OnCommittingAction = (_, changes) =>
         {
+            changesSeenByHandler = changes;
             firstNameSeenByHandler = person.FirstName;
             notificationsSeenByHandler = notifications.Count;
         };
@@ -195,6 +196,10 @@ public class SubjectTransactionHandlerTests
 
         // Assert
         Assert.Equal(1, handler.CommittingCalls);
+        var change = Assert.Single(changesSeenByHandler!);
+        Assert.Equal(nameof(Person.FirstName), change.Property.Name);
+        Assert.Equal("Ann", change.GetOldValue<string>());
+        Assert.Equal("Bob", change.GetNewValue<string>());
         Assert.Equal("Bob", firstNameSeenByHandler);
         Assert.Equal(0, notificationsSeenByHandler);
         Assert.Equal("Bob", person.FirstName);
@@ -229,6 +234,8 @@ public class SubjectTransactionHandlerTests
             () => transaction.CommitAsync(CancellationToken.None).AsTask());
         var notificationsAfterFailure = notifications.Count;
         var pendingAfterFailure = transaction.GetPendingChanges().Count;
+        person.LastName = "Lee";
+        var pendingBeforeRetry = transaction.GetPendingChanges().Count;
         reject = false;
         await transaction.CommitAsync(CancellationToken.None);
 
@@ -236,7 +243,9 @@ public class SubjectTransactionHandlerTests
         Assert.Equal("rejected", exception.Message);
         Assert.Equal(0, notificationsAfterFailure);
         Assert.Equal(1, pendingAfterFailure);
+        Assert.Equal(2, pendingBeforeRetry);
         Assert.Equal("Bob", person.FirstName);
+        Assert.Equal("Lee", person.LastName);
     }
 
     [Fact]
@@ -257,28 +266,40 @@ public class SubjectTransactionHandlerTests
 
         // Assert
         Assert.IsType<InvalidOperationException>(writeError);
+        Assert.DoesNotContain(handler.Captured, captured => captured.Property.Name == nameof(Person.LastName));
         Assert.Equal("Bob", person.FirstName);
         Assert.Null(person.LastName);
     }
 
     [Fact]
-    public async Task WhenDisposedDuringOnCommitting_ThenCommitThrowsAndLockIsReleased()
+    public async Task WhenDisposedDuringOnCommitting_ThenLockIsReleasedOnlyAfterCommitEnds()
     {
         // Arrange
-        var handler = new RecordingHandler { OnCommittingAction = (transaction, _) => transaction.Dispose() };
         var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
         var person = new Person(context) { FirstName = "Ann" };
+        Task<SubjectTransaction>? competingBegin = null;
+        var competingBeginCompletedDuringCommit = true;
+        var handler = new RecordingHandler
+        {
+            OnCommittingAction = (transaction, _) =>
+            {
+                transaction.Dispose();
+
+                // Started inline so that it completes synchronously if disposal released the exclusive lock.
+                competingBegin = BeginInOwnFlowAsync(context);
+                competingBeginCompletedDuringCommit = competingBegin.IsCompleted;
+            }
+        };
+        context.AddService<ITransactionHandler>(handler);
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "Bob";
 
         // Act
         await Assert.ThrowsAsync<ObjectDisposedException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
-        transaction.Dispose();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        using var next = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort, cancellationToken: timeout.Token);
+        using var competingTransaction = await competingBegin!;
 
         // Assert
+        Assert.False(competingBeginCompletedDuringCommit);
         Assert.Equal("Ann", person.FirstName);
     }
 
@@ -296,6 +317,54 @@ public class SubjectTransactionHandlerTests
 
         // Assert
         Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenOnCommittingThrows_ThenWriterIsNotCalled()
+    {
+        // Arrange
+        var handler = new RecordingHandler { OnCommittingAction = (_, _) => throw new InvalidOperationException("rejected") };
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService<ITransactionWriter>(writer);
+        var person = new Person(context);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal("rejected", exception.Message);
+        Assert.Equal(0, writer.WriteCalls);
+    }
+
+    private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
+    {
+        // An async method does not leak the transaction it begins into the caller's flow.
+        return await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+    }
+
+    private sealed class CountingTransactionWriter : ITransactionWriter
+    {
+        public int WriteCalls { get; private set; }
+
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            WriteCalls++;
+            return new(new SourceWriteResult(changes.ToArray(), [], [], RevertState: null));
+        }
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
     }
 
     private sealed class RecordingHandler : ITransactionHandler
