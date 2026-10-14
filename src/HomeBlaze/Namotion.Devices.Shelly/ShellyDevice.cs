@@ -27,8 +27,10 @@ public partial class ShellyDevice : BackgroundService,
     ILastUpdatedProvider,
     IConnectionState,
     INetworkAdapter,
+    INetworkHost,
     ISoftwareState,
-    IDeviceInfo
+    IDeviceInfo,
+    IUptimeState
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ShellyDevice> _logger;
@@ -87,6 +89,7 @@ public partial class ShellyDevice : BackgroundService,
     public partial ShellyEnergyMeter? EnergyMeter { get; internal set; }
 
     [State(Position = 402)]
+    [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
     
     [Derived]
@@ -151,6 +154,7 @@ public partial class ShellyDevice : BackgroundService,
 
     [Derived]
     [State(Position = 401)]
+    [Category("Device")]
     public int? Generation => _deviceInfo?.Generation;
 
     public ShellyDevice(IHttpClientFactory httpClientFactory, ILogger<ShellyDevice> logger)

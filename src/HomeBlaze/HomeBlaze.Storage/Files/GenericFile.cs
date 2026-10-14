@@ -30,7 +30,7 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
     /// <summary>
     /// File size in bytes.
     /// </summary>
-    [State("Size", Position = 2)]
+    [State("Size", Unit = StateUnit.Byte, Position = 2)]
     public partial long FileSize { get; set; }
 
     /// <summary>

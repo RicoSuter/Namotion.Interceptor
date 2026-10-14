@@ -101,18 +101,21 @@ public partial class InMemoryHistoryStoreSubject :
     /// Total number of samples recorded since start.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long RecordedCount { get; set; }
 
     /// <summary>
     /// Number of oversize string values replaced with a placeholder.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long OversizeCount { get; set; }
 
     /// <summary>
     /// Cumulative number of samples evicted by age or capacity.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long EvictedCount { get; set; }
 
     /// <summary>
@@ -137,12 +140,14 @@ public partial class InMemoryHistoryStoreSubject :
     /// Average incoming changes per second (eligible [State] changes observed).
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double IncomingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Average recorded changes per second (samples written to the engine).
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double RecordedChangesPerSecond { get; set; }
 
     // IHistoryStore

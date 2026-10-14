@@ -14,35 +14,41 @@ public interface IMediaPlaybackController
     /// Starts or resumes playback.
     /// </summary>
     [Operation]
+    [Category("Playback")]
     Task PlayAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Pauses playback.
     /// </summary>
     [Operation]
+    [Category("Playback")]
     Task PauseAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Stops playback.
     /// </summary>
     [Operation]
+    [Category("Playback")]
     Task StopAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Skips to the next track.
     /// </summary>
     [Operation]
+    [Category("Playback")]
     Task NextAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Returns to the previous track.
     /// </summary>
     [Operation]
+    [Category("Playback")]
     Task PreviousAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Seeks to a specific position.
     /// </summary>
     [Operation]
+    [Category("Playback")]
     Task SeekAsync(TimeSpan position, CancellationToken cancellationToken);
 }

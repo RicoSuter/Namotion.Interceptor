@@ -14,12 +14,14 @@ public interface ISoftwareState
     /// The currently running software or firmware version.
     /// </summary>
     [State(Position = 850)]
+    [Category("Device")]
     string? SoftwareVersion { get; }
 
     /// <summary>
     /// The available software update version, or null if up to date.
     /// </summary>
     [State(Position = 851)]
+    [Category("Device")]
     string? AvailableSoftwareUpdate { get; }
 
     /// <summary>

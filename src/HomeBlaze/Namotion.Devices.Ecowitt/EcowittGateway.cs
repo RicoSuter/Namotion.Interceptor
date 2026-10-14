@@ -27,6 +27,7 @@ public partial class EcowittGateway : BackgroundService,
     ILastUpdatedProvider,
     IConnectionState,
     INetworkAdapter,
+    INetworkHost,
     ISoftwareState,
     IDeviceInfo,
     IHubDevice
