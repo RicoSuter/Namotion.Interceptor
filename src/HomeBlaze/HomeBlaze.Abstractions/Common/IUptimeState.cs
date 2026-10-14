@@ -14,6 +14,5 @@ public interface IUptimeState
     /// The time since the last start, or null when unknown.
     /// </summary>
     [State(Position = 400)]
-    [Category("Device")]
     TimeSpan? Uptime { get; }
 }

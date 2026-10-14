@@ -64,7 +64,6 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     public partial int? ThreadCount { get; internal set; }
 
     [State(Position = 416)]
-    [Category("")]
     public partial TimeSpan? Uptime { get; internal set; }
 
     internal HostProcess(Action collectGarbage, Action collected)

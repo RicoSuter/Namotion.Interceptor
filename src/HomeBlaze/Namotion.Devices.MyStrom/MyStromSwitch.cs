@@ -80,6 +80,7 @@ public partial class MyStromSwitch : BackgroundService,
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
+    [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
 
     [Derived]

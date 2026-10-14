@@ -88,6 +88,7 @@ public partial class ShellyDevice : BackgroundService,
     public partial ShellyEnergyMeter? EnergyMeter { get; internal set; }
 
     [State(Position = 402)]
+    [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
     
     [Derived]
