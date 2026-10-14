@@ -1,0 +1,10 @@
+{
+  "$type": "Namotion.Devices.FritzBox.FritzBox",
+  "name": "FRITZ!Box",
+  "hostAddress": "",
+  "username": "",
+  "password": "",
+  "certificatePin": null,
+  "pollingInterval": "00:00:15",
+  "retryInterval": "00:00:30"
+}
