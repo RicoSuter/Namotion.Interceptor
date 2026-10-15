@@ -24,6 +24,20 @@ public class UpdateScheduleTests
     }
 
     [Theory]
+    [InlineData(-1, 24)]
+    [InlineData(1, 24)]
+    [InlineData(48, 48)]
+    [InlineData(24 * 400, 24 * 365)]
+    public void WhenAnIntervalIsClamped_ThenItIsBetweenADayAndAYear(int intervalHours, int expectedHours)
+    {
+        // Act
+        var interval = UpdateSchedule.ClampInterval(TimeSpan.FromHours(intervalHours));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromHours(expectedHours), interval);
+    }
+
+    [Theory]
     [InlineData(1, 24)]
     [InlineData(48, 48)]
     public void WhenACheckSucceeds_ThenTheNextIsAfterTheIntervalButAtLeastADay(int intervalHours, int expectedHours)

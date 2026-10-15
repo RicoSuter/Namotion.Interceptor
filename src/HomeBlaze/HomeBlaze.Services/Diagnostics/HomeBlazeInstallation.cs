@@ -34,6 +34,10 @@ public partial class HomeBlazeInstallation : BackgroundService,
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
 
+    // Guards every read-check-write of Status and StatusMessage. The message is written before the status so an
+    // observer that sees Error also sees its message.
+    private readonly Lock _statusLock = new();
+
     [Configuration]
     public partial string Name { get; set; }
 
@@ -321,10 +325,9 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        if (!UpdateCheckEnabled && Status == ServiceStatus.Error)
+        if (!UpdateCheckEnabled)
         {
-            StatusMessage = null;
-            Status = ServiceStatus.Running;
+            ClearUpdateCheckError();
         }
 
         Release(_pollSignal);
@@ -340,8 +343,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
             _developerModeService.OnChange += OnDeveloperModeChanged;
             Interlocked.Exchange(ref _isInventoryOutdated, 1);
             IsDeveloperMode = _developerModeService.IsEnabled;
-            StatusMessage = null;
-            Status = ServiceStatus.Running;
+            SetStatus(ServiceStatus.Running, null);
 
             await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken));
         }
@@ -349,8 +351,28 @@ public partial class HomeBlazeInstallation : BackgroundService,
         {
             AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
             _developerModeService.OnChange -= OnDeveloperModeChanged;
-            Status = ServiceStatus.Stopped;
-            StatusMessage = null;
+            SetStatus(ServiceStatus.Stopped, null);
+        }
+    }
+
+    private void SetStatus(ServiceStatus status, string? message)
+    {
+        lock (_statusLock)
+        {
+            StatusMessage = message;
+            Status = status;
+        }
+    }
+
+    private void ClearUpdateCheckError()
+    {
+        lock (_statusLock)
+        {
+            if (Status == ServiceStatus.Error)
+            {
+                StatusMessage = null;
+                Status = ServiceStatus.Running;
+            }
         }
     }
 

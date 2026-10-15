@@ -1,7 +1,6 @@
 using System.Net;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Diagnostics;
-using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
 using static HomeBlaze.Services.Tests.Diagnostics.HomeBlazeInstallationTests;
@@ -195,9 +194,8 @@ public class HomeBlazeInstallationUpdateTests
         var handler = new FakeHttpMessageHandler(_ => Interlocked.Increment(ref callCount) == 1
             ? throw new InvalidCastException("The first request fails")
             : FakeHttpMessageHandler.Json(ReleaseJson));
-        var timeProvider = new SettableTimeProvider(DateTimeOffset.UtcNow);
-        var installation = new HomeBlazeInstallation(
-            CreateBuild(), "Production", () => new HttpClient(handler), new DeveloperModeService(), null, timeProvider, NullLogger.Instance);
+        var timeProvider = new TestTimeProvider(DateTimeOffset.UtcNow);
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
 
         // Act
         await installation.StartAsync(CancellationToken.None);
@@ -207,7 +205,7 @@ public class HomeBlazeInstallationUpdateTests
             await AsyncTestHelpers.WaitUntilAsync(
                 () => installation.UpdateCheckStatus == "The first request fails", message: "The failing check did not run");
 
-            timeProvider.UtcNow += UpdateSchedule.ManualCheckThrottle;
+            timeProvider.Advance(UpdateSchedule.ManualCheckThrottle);
             installation.CheckForUpdates();
             await AsyncTestHelpers.WaitUntilAsync(
                 () => installation.UpdateAvailable is not null, message: "The update loop stopped after the failure");
@@ -222,16 +220,136 @@ public class HomeBlazeInstallationUpdateTests
         Assert.Null(installation.UpdateCheckStatus);
     }
 
-    private sealed class SettableTimeProvider(DateTimeOffset now) : TimeProvider
+    [Fact]
+    public void WhenCheckForUpdatesIsCalledForARepositoryOutsideGitHub_ThenTheReasonIsThrown()
     {
-        private long _utcTicks = now.UtcTicks;
+        // Arrange
+        var installation = CreateInstallation(CreateBuild(repositoryUrl: "https://gitlab.com/owner/repo"), () => new HttpClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson))));
 
-        public DateTimeOffset UtcNow
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
+        Assert.Equal("Not supported for gitlab.com", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenTheAnswerBreaksOffWhileReading_ThenTheFailureIsReported()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new BrokenStream()) });
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
+
+        // Act
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(BrokenStream.Message, installation.UpdateCheckStatus);
+    }
+
+    [Fact]
+    public async Task WhenTheCheckIsDisabledAfterAFailedCheckWhileRunning_ThenTheStatusReturnsToRunning()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
+        installation.UpdateCheckEnabled = true;
+
+        await installation.StartAsync(CancellationToken.None);
+        try
         {
-            get => new(Interlocked.Read(ref _utcTicks), TimeSpan.Zero);
-            set => Interlocked.Exchange(ref _utcTicks, value.UtcTicks);
-        }
+            installation.CheckForUpdates();
+            await AsyncTestHelpers.WaitUntilAsync(() => installation.Status == ServiceStatus.Error, message: "The failed check did not set Error");
 
-        public override DateTimeOffset GetUtcNow() => UtcNow;
+            // Act
+            installation.UpdateCheckEnabled = false;
+            await installation.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(ServiceStatus.Running, installation.Status);
+            Assert.Null(installation.StatusMessage);
+        }
+        finally
+        {
+            await installation.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheIntervalIsShortenedAfterACheck_ThenTheNextCheckFollowsTheNewInterval()
+    {
+        // Arrange
+        var requestCount = 0;
+        var handler = new FakeHttpMessageHandler(_ =>
+        {
+            Interlocked.Increment(ref requestCount);
+            return FakeHttpMessageHandler.Json(ReleaseJson);
+        });
+        var timeProvider = new TestTimeProvider(DateTimeOffset.UtcNow);
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
+        installation.UpdateCheckEnabled = true;
+        installation.UpdateCheckInterval = TimeSpan.FromHours(48);
+
+        await installation.StartAsync(CancellationToken.None);
+        try
+        {
+            installation.CheckForUpdates();
+            await AsyncTestHelpers.WaitUntilAsync(() => installation.UpdateAvailable is not null, message: "The first check did not run");
+
+            // Act
+            timeProvider.Advance(TimeSpan.FromHours(25));
+            installation.UpdateCheckInterval = TimeSpan.FromHours(24);
+            await installation.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref requestCount) == 2, message: "The shorter interval was not applied");
+        }
+        finally
+        {
+            await installation.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheWallClockJumpsBack_ThenTheScheduledCheckStillRuns()
+    {
+        // Arrange
+        var requestCount = 0;
+        var handler = new FakeHttpMessageHandler(_ =>
+        {
+            Interlocked.Increment(ref requestCount);
+            return FakeHttpMessageHandler.Json(ReleaseJson);
+        });
+        var timeProvider = new TestTimeProvider(DateTimeOffset.UtcNow);
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
+        installation.UpdateCheckEnabled = true;
+
+        await installation.StartAsync(CancellationToken.None);
+        try
+        {
+            installation.CheckForUpdates();
+            await AsyncTestHelpers.WaitUntilAsync(() => installation.UpdateAvailable is not null, message: "The first check did not run");
+
+            // Act
+            timeProvider.UtcNow -= TimeSpan.FromDays(365);
+            timeProvider.Advance(TimeSpan.FromHours(25));
+            await installation.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref requestCount) == 2, message: "The check did not run after the wall clock jumped back");
+        }
+        finally
+        {
+            await installation.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private sealed class BrokenStream : MemoryStream
+    {
+        public const string Message = "The response ended prematurely.";
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new IOException(Message);
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => throw new IOException(Message);
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => throw new IOException(Message);
     }
 }

@@ -33,7 +33,14 @@ internal sealed class UpdateSchedule
     public TimeSpan GetDelayAfterSuccess(TimeSpan configuredInterval)
     {
         _failureCount = 0;
+        return ClampInterval(configuredInterval);
+    }
 
+    /// <summary>
+    /// Returns the configured interval clamped to MinimumInterval..MaximumInterval.
+    /// </summary>
+    public static TimeSpan ClampInterval(TimeSpan configuredInterval)
+    {
         if (configuredInterval < MinimumInterval)
         {
             return MinimumInterval;

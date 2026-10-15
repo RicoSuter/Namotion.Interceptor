@@ -32,7 +32,15 @@ public class HomeBlazeInstallationTests
         Func<HttpClient>? createHttpClient = null,
         DeveloperModeService? developerMode = null,
         IListeningUrlsProvider? listeningUrlsProvider = null) =>
-        new(build, "Production", createHttpClient, developerMode ?? new DeveloperModeService(), listeningUrlsProvider, TimeProvider.System, NullLogger.Instance);
+        CreateInstallation(build, createHttpClient, TimeProvider.System, developerMode, listeningUrlsProvider);
+
+    internal static HomeBlazeInstallation CreateInstallation(
+        BuildInformation build,
+        Func<HttpClient>? createHttpClient,
+        TimeProvider timeProvider,
+        DeveloperModeService? developerMode = null,
+        IListeningUrlsProvider? listeningUrlsProvider = null) =>
+        new(build, "Production", createHttpClient, developerMode ?? new DeveloperModeService(), listeningUrlsProvider, timeProvider, NullLogger.Instance);
 
     [Theory]
     [InlineData("0.5.0", "v0.5.0", InstallationChannel.Release)]

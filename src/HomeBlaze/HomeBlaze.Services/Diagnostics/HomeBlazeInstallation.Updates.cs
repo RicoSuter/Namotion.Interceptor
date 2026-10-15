@@ -33,9 +33,10 @@ public partial class HomeBlazeInstallation
     }
 
     /// <summary>
-    /// Runs one update check, writes its result and returns when the next scheduled check is due.
+    /// Runs one update check, writes its result and returns the delay before the next attempt after a failure, or
+    /// null after a success, when the configured interval applies.
     /// </summary>
-    internal async Task<DateTimeOffset> CheckForUpdatesCoreAsync(CancellationToken cancellationToken)
+    internal async Task<TimeSpan?> CheckForUpdatesCoreAsync(CancellationToken cancellationToken)
     {
         var (owner, name) = _gitHubRepository!.Value;
         try
@@ -53,42 +54,46 @@ public partial class HomeBlazeInstallation
             ChangesUrl = state.ChangesUrl;
             UpdateAvailable = state.UpdateAvailable;
 
-            var now = _timeProvider.GetUtcNow();
-            LastUpdateCheck = now;
+            LastUpdateCheck = _timeProvider.GetUtcNow();
             UpdateCheckStatus = null;
-            if (Status == ServiceStatus.Error)
-            {
-                StatusMessage = null;
-                Status = ServiceStatus.Running;
-            }
+            ClearUpdateCheckError();
 
-            return now + _updateSchedule.GetDelayAfterSuccess(UpdateCheckInterval);
+            // Only resets the backoff; the loop reads the interval on every wake so a changed interval applies at once.
+            _updateSchedule.GetDelayAfterSuccess(UpdateCheckInterval);
+            return null;
         }
-        catch (Exception exception) when (
-            exception is HttpRequestException or GitHubRequestException or JsonException ||
-            (exception is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        catch (GitHubRequestException exception)
+        {
+            _logger.LogWarning("Checking for updates failed: {Message}", exception.Message);
+            return ReportUpdateCheckFailure(exception.Message, exception.RetryAfter);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             // Not stopping, so the cancellation is the request timeout of the client.
-            var message = exception is OperationCanceledException ? TimeoutMessage : exception.Message;
-            return ReportUpdateCheckFailure(exception, message, (exception as GitHubRequestException)?.RetryAfter);
+            _logger.LogWarning("Checking for updates failed: {Message}", TimeoutMessage);
+            return ReportUpdateCheckFailure(TimeoutMessage, retryAfter: null);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException)
+        {
+            _logger.LogWarning(exception, "Checking for updates failed");
+            return ReportUpdateCheckFailure(exception.Message, retryAfter: null);
         }
     }
 
-    private DateTimeOffset ReportUpdateCheckFailure(Exception exception, string message, TimeSpan? retryAfter)
+    private TimeSpan ReportUpdateCheckFailure(string message, TimeSpan? retryAfter)
     {
-        _logger.LogWarning(exception, "Checking for updates failed");
-
-        var now = _timeProvider.GetUtcNow();
-        LastUpdateCheck = now;
+        LastUpdateCheck = _timeProvider.GetUtcNow();
         UpdateCheckStatus = message;
-        if (UpdateCheckEnabled)
+        lock (_statusLock)
         {
-            // The message is written first so an observer that sees Error also sees its message.
-            StatusMessage = message;
-            Status = ServiceStatus.Error;
+            if (UpdateCheckEnabled)
+            {
+                StatusMessage = message;
+                Status = ServiceStatus.Error;
+            }
         }
 
-        return now + _updateSchedule.GetDelayAfterFailure(retryAfter);
+        return _updateSchedule.GetDelayAfterFailure(retryAfter);
     }
 
     private string? GetUpdateCheckUnavailableReason()
@@ -115,12 +120,23 @@ public partial class HomeBlazeInstallation
 
     private async Task RunUpdateChecksAsync(CancellationToken stoppingToken)
     {
-        var nextCheckAt = _timeProvider.GetUtcNow() + UpdateSchedule.GetFirstCheckDelay(Random.Shared);
+        // The due time is measured on the monotonic clock, so a wall clock that jumps does not move it.
+        var lastCheckTimestamp = _timeProvider.GetTimestamp();
+
+        // Null after a success, when the configured interval applies; the first check is delayed like a retry.
+        TimeSpan? retryDelay = UpdateSchedule.GetFirstCheckDelay(Random.Shared);
+
+        TimeSpan GetRemainingDelay() =>
+            (retryDelay ?? UpdateSchedule.ClampInterval(UpdateCheckInterval)) - _timeProvider.GetElapsedTime(lastCheckTimestamp);
+
         while (!stoppingToken.IsCancellationRequested)
         {
-            var isScheduled = UpdateCheckEnabled && GetUpdateCheckUnavailableReason() is null;
-            var remaining = nextCheckAt - _timeProvider.GetUtcNow();
-            var delay = !isScheduled ? Timeout.InfiniteTimeSpan : remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+            var delay = Timeout.InfiniteTimeSpan;
+            if (UpdateCheckEnabled && GetUpdateCheckUnavailableReason() is null)
+            {
+                var remaining = GetRemainingDelay();
+                delay = remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+            }
 
             var isSignaled = await WaitAsync(_updateSignal, delay, stoppingToken);
             if (stoppingToken.IsCancellationRequested)
@@ -129,23 +145,31 @@ public partial class HomeBlazeInstallation
             }
 
             var isManual = Interlocked.Exchange(ref _isManualCheckRequested, 0) == 1;
-            if (isSignaled && !isManual)
+            if (!isManual)
             {
-                // The configuration changed; the delay is computed again.
-                continue;
+                if (!UpdateCheckEnabled)
+                {
+                    ClearUpdateCheckError();
+                    continue;
+                }
+
+                // A configuration change, or a wait capped below a long interval, computes the delay again.
+                if (isSignaled || GetRemainingDelay() > TimeSpan.Zero)
+                {
+                    continue;
+                }
             }
 
-            if (isManual || UpdateCheckEnabled)
+            lastCheckTimestamp = _timeProvider.GetTimestamp();
+            try
             {
-                try
-                {
-                    nextCheckAt = await CheckForUpdatesCoreAsync(stoppingToken);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
-                {
-                    // The host never observes ExecuteTask, so an escaping exception would silently end the checks.
-                    nextCheckAt = ReportUpdateCheckFailure(exception, exception.Message, retryAfter: null);
-                }
+                retryDelay = await CheckForUpdatesCoreAsync(stoppingToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
+            {
+                // The host never observes ExecuteTask, so an escaping exception would silently end the checks.
+                _logger.LogError(exception, "Checking for updates failed unexpectedly");
+                retryDelay = ReportUpdateCheckFailure(exception.Message, retryAfter: null);
             }
         }
     }

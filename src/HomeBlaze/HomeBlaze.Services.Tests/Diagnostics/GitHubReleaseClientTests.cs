@@ -13,13 +13,8 @@ public class GitHubReleaseClientTests
 
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
 
-    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => now;
-    }
-
     private static GitHubReleaseClient CreateClient(FakeHttpMessageHandler handler) =>
-        new(() => new HttpClient(handler), "HomeBlaze/0.5.0", new FixedTimeProvider(Now));
+        new(() => new HttpClient(handler), "HomeBlaze/0.5.0", new TestTimeProvider(Now));
 
     [Theory]
     [InlineData("https://github.com/RicoSuter/Namotion.Interceptor", "RicoSuter", "Namotion.Interceptor")]
