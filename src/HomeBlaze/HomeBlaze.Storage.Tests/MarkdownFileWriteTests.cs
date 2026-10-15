@@ -860,6 +860,7 @@ public class MarkdownFileWriteTests : IDisposable
 
     [Theory]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Widget Path=missing\n::", "leads to no existing subject")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.ValueTile Path=motor/CurrentSpeed Map=missing\n::", "leads to no existing subject")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Samples.Motor#other Name=Other\n::", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Storage.FluentStorageContainer#store StorageType=inmemory\n::", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card\n```json\n{ \"Title\": { \"$type\": \"HomeBlaze.Samples.Motor\" } }\n```\n::", "With the permission to edit page layout")]

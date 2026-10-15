@@ -52,7 +52,7 @@ public partial class Card : IConfigurable, ITitleProvider
     /// a route of the application, or a web address. It has no effect on a card without a title.
     /// </summary>
     [Configuration]
-    [PageLayoutLink]
+    [LinkAddress]
     public partial string? Href { get; set; }
 
     /// <summary>
@@ -71,7 +71,7 @@ public partial class Card : IConfigurable, ITitleProvider
     /// Address of a picture shown between the header and the body. Written like <see cref="Href"/>.
     /// </summary>
     [Configuration]
-    [PageLayoutMedia]
+    [MediaAddress]
     public partial string? Image { get; set; }
 
     /// <summary>

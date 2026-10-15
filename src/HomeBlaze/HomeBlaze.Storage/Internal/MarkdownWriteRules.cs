@@ -298,7 +298,7 @@ internal static partial class MarkdownWriteRules
 
             foreach (var path in MarkdownPageLayout.GetReferencePaths(block, type, layout.FindType))
             {
-                if (string.IsNullOrWhiteSpace(path) || !layout.ResolvesToSubject(path))
+                if (!layout.ResolvesToSubject(path))
                 {
                     throw new ArgumentException(
                         $"The {head.Name} block at line {block.Line} refers to '{path}', which leads to no existing subject.",

@@ -34,16 +34,13 @@ internal static class MarkdownPageLayout
 
         return new LayoutType(
             properties.ToDictionary(property => property.Name, property => property.PropertyType, StringComparer.Ordinal),
-            GetNamesWith<PageLayoutReferenceAttribute>(properties),
-            GetNamesWith<PageLayoutLinkAttribute>(properties),
-            GetNamesWith<PageLayoutMediaAttribute>(properties));
+            GetNames(properties, property => property.GetCustomAttribute<SubjectPathAttribute>(true) is { SubjectType: not null }),
+            GetNames(properties, property => property.IsDefined(typeof(LinkAddressAttribute), true)),
+            GetNames(properties, property => property.IsDefined(typeof(MediaAddressAttribute), true)));
     });
 
-    private static HashSet<string> GetNamesWith<TAttribute>(List<PropertyInfo> properties) where TAttribute : Attribute =>
-        properties
-            .Where(property => property.GetCustomAttribute<TAttribute>(true) is not null)
-            .Select(property => property.Name)
-            .ToHashSet(StringComparer.Ordinal);
+    private static HashSet<string> GetNames(List<PropertyInfo> properties, Func<PropertyInfo, bool> predicate) =>
+        properties.Where(predicate).Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Finds the layout blocks of the page. A block inside a block that is no layout block is never one: it belongs to
@@ -200,15 +197,15 @@ internal static class MarkdownPageLayout
         (!layoutType.LinkProperties.Contains(key) || value is null || MarkdownWriteRules.IsSafeUrl(value));
 
     /// <summary>
-    /// Gets the reference paths that a layout block configures: one per reference property of its type, null when the
-    /// block sets no path for it, and those of the subjects nested in its configuration.
+    /// Gets the subject paths that a layout block sets, its own and those of the subjects nested in its configuration.
+    /// A path that is not set is left out.
     /// </summary>
-    public static List<string?> GetReferencePaths(MarkdownBlock block, Type type, Func<string, Type?> findType)
+    public static List<string> GetReferencePaths(MarkdownBlock block, Type type, Func<string, Type?> findType)
     {
         var references = new List<string?>();
         if (GetLayoutType(type) is not { } layoutType)
         {
-            return references;
+            return [];
         }
 
         var configuration = block.ConfigurationJson is null ? null : ParseConfiguration(block);
@@ -224,7 +221,7 @@ internal static class MarkdownPageLayout
             IsLayoutObject(configuration, layoutType, findType, references);
         }
 
-        return references;
+        return references.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).ToList();
     }
 
     /// <summary>The non-secret configuration properties of a layout type and the names of its reference, link and media properties.</summary>

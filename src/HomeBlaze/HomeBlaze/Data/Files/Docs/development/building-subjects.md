@@ -1041,7 +1041,7 @@ Use this for internal subjects that are part of a parent subject's implementatio
 
 ### Page Layout Types
 
-A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks create no subject that acts on anything and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). Three attributes mark special properties of such a type: `[PageLayoutReference]` a property that holds the path of an existing subject, so the path is checked, `[PageLayoutLink]` one that holds a link, so only safe addresses are allowed, and `[PageLayoutMedia]` one that loads content from an address, such as a picture, so a block that sets it is no layout block:
+A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks create no subject that acts on anything and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). The property attributes that describe its values decide what such a block may hold: a path of a `[SubjectPath]` with a subject type must lead to an existing subject, a `[LinkAddress]` may only hold a relative address or one with http, https or mailto, and a block that sets a `[MediaAddress]`, such as the picture of a card, is no layout block:
 
 ```csharp
 [PageLayout]
@@ -1049,7 +1049,7 @@ A type whose blocks only lay out a page, such as a card or a tab layout, is mark
 public partial class Widget : ITitleProvider, IConfigurable
 {
     [Configuration]
-    [PageLayoutReference]
+    [SubjectPath(typeof(IInterceptorSubject))]
     public partial string Path { get; set; }
 }
 ```

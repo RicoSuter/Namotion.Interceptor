@@ -52,26 +52,30 @@ public class MarkdownPageLayoutTests
     private sealed class TwoReferenceLayout
     {
         [Configuration]
-        [PageLayoutReference]
+        [SubjectPath(typeof(object))]
         public string? Primary { get; set; }
 
         [Configuration]
-        [PageLayoutReference]
+        [SubjectPath(typeof(object))]
         public string? Secondary { get; set; }
 
         [Configuration]
-        [PageLayoutLink]
+        [LinkAddress]
         public string? Link { get; set; }
 
         [Configuration]
-        [PageLayoutMedia]
+        [SubjectPath]
+        public string? PropertyPath { get; set; }
+
+        [Configuration]
+        [MediaAddress]
         public string? Picture { get; set; }
     }
 
     private sealed class PlainType
     {
         [Configuration]
-        [PageLayoutReference]
+        [SubjectPath(typeof(object))]
         public string? Path { get; set; }
     }
 }
