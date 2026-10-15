@@ -815,7 +815,7 @@ public class SubjectSetupDialogTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 
@@ -866,7 +866,7 @@ public class SubjectSetupDialogTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 
@@ -976,7 +976,7 @@ public class SubjectSetupDialogTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 

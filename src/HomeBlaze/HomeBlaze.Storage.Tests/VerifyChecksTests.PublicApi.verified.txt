@@ -1,0 +1,403 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.E2E.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Storage.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Storage.Files
+{
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class GenericFile : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IStorageFile, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public GenericFile(HomeBlaze.Storage.Abstractions.IStorageContainer storage, string fullPath) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public string Extension { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State("Size", Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long FileSize { get; set; }
+        public string FullPath { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Modified", Position=3)]
+        public System.DateTime LastModified { get; set; }
+        public string Name { get; }
+        public HomeBlaze.Storage.Abstractions.IStorageContainer Storage { get; }
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        public System.Threading.Tasks.Task OnFileChangedAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class JsonFile : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IStorageFile, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public JsonFile(HomeBlaze.Storage.Abstractions.IStorageContainer storage, string fullPath) { }
+        [HomeBlaze.Abstractions.Attributes.State("Size", Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long FileSize { get; set; }
+        public string FullPath { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Modified", Position=2)]
+        public System.DateTime LastModified { get; set; }
+        public string Name { get; }
+        public HomeBlaze.Storage.Abstractions.IStorageContainer Storage { get; }
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        public System.Threading.Tasks.Task OnFileChangedAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Storage.Abstractions.Attributes.FileExtension(".markdown")]
+    [HomeBlaze.Storage.Abstractions.Attributes.FileExtension(".md")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class MarkdownFile : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ILinkScope, HomeBlaze.Abstractions.IPathScope, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Components.Abstractions.Pages.IPage, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IStorageFile, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public MarkdownFile(HomeBlaze.Storage.Abstractions.IStorageContainer storage, string fullPath, HomeBlaze.Storage.Internal.MarkdownContentParser parser, HomeBlaze.Services.ConfigurableSubjectSerializer serializer) { }
+        [Namotion.Interceptor.Attributes.Derived]
+        public HomeBlaze.Components.Abstractions.Pages.AppBarAlignment AppBarAlignment { get; }
+        [Namotion.Interceptor.Registry.Attributes.InlinePaths]
+        public System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; }
+        public string? Content { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Size", Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long FileSize { get; set; }
+        public HomeBlaze.Storage.Internal.MarkdownFrontmatter? Frontmatter { get; }
+        public string FullPath { get; }
+        public string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Modified", Position=2)]
+        public System.DateTime LastModified { get; set; }
+        public string Name { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? NavigationIconName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? NavigationTitle { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public HomeBlaze.Components.Abstractions.Pages.NavigationLocation PageLocation { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public int? PagePosition { get; }
+        public HomeBlaze.Storage.Abstractions.IStorageContainer Storage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public Namotion.Interceptor.IInterceptorSubject? GetBlockSubject(int blockIndex) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        public System.Threading.Tasks.Task OnFileChangedAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Query(Description="Returns the markdown content with {{ path }} expressions evaluated against the cu" +
+            "rrent object graph", Icon="Preview", Title="Read Evaluated Content")]
+        public string? ReadEvaluatedContent() { }
+        [HomeBlaze.Abstractions.Attributes.Query(Description="Returns the markdown file source, including unevaluated {{ path }} expressions", Icon="Description", Title="Read Raw Content")]
+        public string? ReadRawContent() { }
+        public string ResolveLink(string link) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+    }
+}
+namespace HomeBlaze.Storage
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Storage")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("System")]
+    [System.ComponentModel.Description("Mounts a storage location and loads the files in it as subjects")]
+    [System.ComponentModel.DisplayName("Storage")]
+    public class FluentStorageContainer : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public FluentStorageContainer(HomeBlaze.Services.SubjectTypeRegistry typeRegistry, HomeBlaze.Services.ConfigurableSubjectSerializer serializer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.FluentStorageContainer>? logger = null) { }
+        public System.Collections.Generic.IReadOnlyCollection<string> ChildNames { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Registry.Attributes.InlinePaths]
+        public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string ConnectionString { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? ContainerName { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool EnableFileWatching { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconColor { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int ReconcileIntervalSeconds { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public HomeBlaze.Storage.Abstractions.StorageStatus Status { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string StorageType { get; set; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task ConnectAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
+        public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class VirtualFolder : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public VirtualFolder(HomeBlaze.Storage.Abstractions.IStorageContainer storage, string relativePath) { }
+        public System.Collections.Generic.IReadOnlyCollection<string> ChildNames { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Registry.Attributes.InlinePaths]
+        public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; set; }
+        public string IconName { get; }
+        public string RelativePath { get; }
+        public HomeBlaze.Storage.Abstractions.StorageStatus Status { get; }
+        public HomeBlaze.Storage.Abstractions.IStorageContainer Storage { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
+        public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+    }
+}
+namespace HomeBlaze.Storage.Internal
+{
+    public static class FrontmatterParser
+    {
+        public static T? Parse<T>(string content)
+            where T :  class { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromBrowsing]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class HtmlSegment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public HtmlSegment(string html) { }
+        public string Html { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class MarkdownContentParser
+    {
+        public MarkdownContentParser(HomeBlaze.Services.ConfigurableSubjectSerializer serializer, HomeBlaze.Services.SubjectPathResolver pathResolver, HomeBlaze.Services.TypeProvider typeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.Internal.MarkdownContentParser>? logger = null) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownParseResult> ParseAsync(string? content, HomeBlaze.Storage.Files.MarkdownFile parent, System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject> existingChildren, System.Threading.CancellationToken cancellationToken) { }
+        public string? RenderContent(string? content, HomeBlaze.Storage.Files.MarkdownFile parent) { }
+        public string ResolveLink(string link, HomeBlaze.Storage.Files.MarkdownFile page) { }
+    }
+    public class MarkdownFrontmatter
+    {
+        public MarkdownFrontmatter() { }
+        [YamlDotNet.Serialization.YamlMember(Alias="alignment")]
+        public HomeBlaze.Components.Abstractions.Pages.AppBarAlignment? Alignment { get; set; }
+        [YamlDotNet.Serialization.YamlMember(Alias="icon")]
+        public string? Icon { get; set; }
+        [YamlDotNet.Serialization.YamlMember(Alias="location")]
+        public HomeBlaze.Components.Abstractions.Pages.NavigationLocation? Location { get; set; }
+        [YamlDotNet.Serialization.YamlMember(Alias="navTitle")]
+        public string? NavTitle { get; set; }
+        [YamlDotNet.Serialization.YamlMember(Alias="nav_title")]
+        public string? NavTitleSnakeCase { get; set; }
+        [YamlDotNet.Serialization.YamlMember(Alias="position")]
+        public int? Position { get; set; }
+        [YamlDotNet.Serialization.YamlMember(Alias="title")]
+        public string? Title { get; set; }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromBrowsing]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class RenderExpression : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public RenderExpression(string path, HomeBlaze.Storage.Pages.ExpressionFormat format, string? error, HomeBlaze.Storage.Files.MarkdownFile parent, HomeBlaze.Services.SubjectPathResolver pathResolver) { }
+        public string? Error { get; }
+        public HomeBlaze.Storage.Pages.ExpressionFormat Format { get; }
+        public HomeBlaze.Storage.Files.MarkdownFile Parent { get; }
+        public string Path { get; }
+        public string? Title { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public object? Value { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public string GetText(HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+}
+namespace HomeBlaze.Storage.Pages
+{
+    public sealed class BlockMarkdownSegment : HomeBlaze.Storage.Pages.MarkdownSegment, System.IEquatable<HomeBlaze.Storage.Pages.BlockMarkdownSegment>
+    {
+        public BlockMarkdownSegment(HomeBlaze.Storage.Pages.MarkdownBlock Block, System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownSegment> Content) { }
+        public HomeBlaze.Storage.Pages.MarkdownBlock Block { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownSegment> Content { get; init; }
+    }
+    public enum ExpressionFormat
+    {
+        Display = 0,
+        Raw = 1,
+    }
+    public sealed class ExpressionMarkdownSegment : HomeBlaze.Storage.Pages.MarkdownSegment, System.IEquatable<HomeBlaze.Storage.Pages.ExpressionMarkdownSegment>
+    {
+        public ExpressionMarkdownSegment(string Path, HomeBlaze.Storage.Pages.ExpressionFormat Format, string? Error) { }
+        public string? Error { get; init; }
+        public HomeBlaze.Storage.Pages.ExpressionFormat Format { get; init; }
+        public string Path { get; init; }
+    }
+    public sealed class HtmlMarkdownSegment : HomeBlaze.Storage.Pages.MarkdownSegment, System.IEquatable<HomeBlaze.Storage.Pages.HtmlMarkdownSegment>
+    {
+        public HtmlMarkdownSegment(string Html) { }
+        public string Html { get; init; }
+    }
+    public sealed class MarkdownBlock
+    {
+        public MarkdownBlock() { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownBlock> Children { get; }
+        public string? ConfigurationJson { get; init; }
+        public HomeBlaze.Storage.Pages.MarkdownSpan? ConfigurationSpan { get; init; }
+        public string? Error { get; init; }
+        public int FenceLength { get; init; }
+        public HomeBlaze.Storage.Pages.MarkdownBlockHead? Head { get; init; }
+        public HomeBlaze.Storage.Pages.MarkdownSpan HeadSpan { get; init; }
+        public int Index { get; }
+        public required HomeBlaze.Storage.Pages.MarkdownBlockKind Kind { get; init; }
+        public int Line { get; init; }
+    }
+    public sealed class MarkdownBlockArgument : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownBlockArgument>
+    {
+        public MarkdownBlockArgument(string Key, string Value, bool IsQuoted) { }
+        public bool IsQuoted { get; init; }
+        public string Key { get; init; }
+        public string Value { get; init; }
+    }
+    public sealed class MarkdownBlockHead : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownBlockHead>
+    {
+        public MarkdownBlockHead(int FenceLength, string Name, string? Id, System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownBlockArgument> Arguments) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownBlockArgument> Arguments { get; init; }
+        public int FenceLength { get; init; }
+        public string? Id { get; init; }
+        public bool IsWidget { get; }
+        public string Name { get; init; }
+        public string Format() { }
+        public static bool IsValidId(string id) { }
+        public static bool TryParse(string line, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Storage.Pages.MarkdownBlockHead? head, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+    }
+    public enum MarkdownBlockKind
+    {
+        Widget = 0,
+        Slot = 1,
+        Style = 2,
+        Invalid = 3,
+    }
+    public static class MarkdownBlockWriter
+    {
+        public static string CreateBlock(string typeName, string? id, string configurationJson, int fenceLength, string lineEnding = "
+") { }
+        public static string GetLineEnding(string source, int offset = 0) { }
+        public static string WriteConfiguration(string source, HomeBlaze.Storage.Pages.MarkdownBlock block, string configurationJson) { }
+    }
+    public static class MarkdownErrorBox
+    {
+        public static string Render(int line, string message) { }
+    }
+    public readonly struct MarkdownExpression : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownExpression>
+    {
+        public MarkdownExpression(HomeBlaze.Storage.Pages.MarkdownSpan Span, string Path, HomeBlaze.Storage.Pages.ExpressionFormat Format, string? Error) { }
+        public string? Error { get; init; }
+        public HomeBlaze.Storage.Pages.ExpressionFormat Format { get; init; }
+        public string Path { get; init; }
+        public HomeBlaze.Storage.Pages.MarkdownSpan Span { get; init; }
+    }
+    public readonly struct MarkdownExpressionText : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownExpressionText>
+    {
+        public MarkdownExpressionText(string Path, HomeBlaze.Storage.Pages.ExpressionFormat Format, string? Error) { }
+        public string? Error { get; init; }
+        public HomeBlaze.Storage.Pages.ExpressionFormat Format { get; init; }
+        public string Path { get; init; }
+        public static HomeBlaze.Storage.Pages.MarkdownExpressionText Parse(string text) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class MarkdownFragment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public MarkdownFragment() { }
+        public MarkdownFragment(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [Namotion.Interceptor.Registry.Attributes.InlinePaths]
+        public System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class MarkdownPage
+    {
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownBlock> AllBlocks { get; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownBlock> Blocks { get; }
+        public string Source { get; }
+        public int GetFenceLengthForNewBlock(int line, System.Func<string, System.Type?> findType) { }
+        public int GetLineForNewBlock(int line) { }
+        public bool IsInsideCode(int offset) { }
+    }
+    public static class MarkdownPageParser
+    {
+        public static HomeBlaze.Storage.Pages.MarkdownPage Parse(string source) { }
+    }
+    public sealed class MarkdownParseResult : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownParseResult>
+    {
+        public MarkdownParseResult(System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject> Children, HomeBlaze.Storage.Pages.MarkdownPage? Page, System.Collections.Generic.IReadOnlyDictionary<int, Namotion.Interceptor.IInterceptorSubject> BlockSubjects, System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.IInterceptorSubject> NamedSubjects) { }
+        public System.Collections.Generic.IReadOnlyDictionary<int, Namotion.Interceptor.IInterceptorSubject> BlockSubjects { get; init; }
+        public System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.IInterceptorSubject> NamedSubjects { get; init; }
+        public HomeBlaze.Storage.Pages.MarkdownPage? Page { get; init; }
+        public static HomeBlaze.Storage.Pages.MarkdownParseResult Empty { get; }
+    }
+    public abstract class MarkdownSegment : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownSegment>
+    {
+        protected MarkdownSegment() { }
+    }
+    public static class MarkdownSegmentBuilder
+    {
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownSegment> Build(HomeBlaze.Storage.Pages.MarkdownPage page, System.Func<string, string>? linkRewriter = null) { }
+        public static System.Collections.Generic.IEnumerable<HomeBlaze.Storage.Pages.MarkdownExpression> FindExpressions(HomeBlaze.Storage.Pages.MarkdownPage page) { }
+    }
+    public readonly struct MarkdownSpan : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownSpan>
+    {
+        public MarkdownSpan(int Start, int Length) { }
+        public int End { get; }
+        public int Length { get; init; }
+        public int Start { get; init; }
+    }
+}

@@ -429,7 +429,47 @@ public class SubjectBrowserLayoutTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Theory]
+    [InlineData("https://example.com/page", UriKind.Absolute, true)]
+    [InlineData("javascript:alert(1)", UriKind.Absolute, false)]
+    [InlineData("page", UriKind.Relative, false)]
+    public async Task WhenAStateValueIsAUri_ThenOnlyAWebAddressGetsALink(string address, UriKind kind, bool isLink)
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
+        try
+        {
+            subject.Website = new Uri(address, kind);
+
+            // Act
+            var page = await OpenAsync($"browser/{name}", 1280, 720, paneCount: 2);
+
+            // Assert
+            var row = ValueRow(LastPane(page), "Website");
+            await Assertions.Expect(row.Locator("[data-testid='subject-pane-value-text']"))
+                .ToHaveTextAsync(address, new() { Timeout = PageLoadTimeout });
+            var link = row.Locator("[data-testid='subject-pane-value-link']");
+            var copy = row.Locator("[data-testid='subject-pane-value-copy']");
+            if (isLink)
+            {
+                await Assertions.Expect(link).ToHaveAttributeAsync("href", address);
+                await Assertions.Expect(link).ToHaveAttributeAsync("target", "_blank");
+                await Assertions.Expect(link).ToHaveAttributeAsync("rel", "noopener noreferrer");
+                await Assertions.Expect(copy).ToHaveCountAsync(0);
+            }
+            else
+            {
+                await Assertions.Expect(link).ToHaveCountAsync(0);
+                await Assertions.Expect(copy).ToHaveCountAsync(1);
+            }
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 
@@ -468,7 +508,7 @@ public class SubjectBrowserLayoutTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
             developerMode.SetEnabled(wasDeveloperMode);
         }
     }
