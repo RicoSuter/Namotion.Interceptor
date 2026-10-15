@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Diagnostics;
@@ -108,11 +109,20 @@ public class HomeBlazeInstallationUpdateTests
     public async Task WhenGitHubDoesNotAnswerInTime_ThenTheTimeoutIsReported()
     {
         // Arrange
-        var handler = new FakeHttpMessageHandler(_ => throw new TaskCanceledException());
-        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
+        var handler = new FakeHttpMessageHandler(async (_, cancellationToken) =>
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new UnreachableException();
+        });
+
+        // The timeout of HttpClient is off, so only the request timeout of the release client can end the request.
+        var installation = CreateInstallation(
+            CreateBuild(),
+            () => new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan },
+            requestTimeout: TimeSpan.FromMilliseconds(50));
 
         // Act
-        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
 
         // Assert
         Assert.Equal("GitHub did not answer in time.", installation.UpdateCheckStatus);

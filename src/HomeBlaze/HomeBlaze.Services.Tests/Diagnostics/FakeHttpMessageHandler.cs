@@ -6,8 +6,13 @@ namespace HomeBlaze.Services.Tests.Diagnostics;
 /// <summary>
 /// Answers requests with the given function and keeps the requests it received.
 /// </summary>
-internal sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+internal sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
 {
+    public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
+        : this((request, _) => Task.FromResult(respond(request)))
+    {
+    }
+
     /// <summary>
     /// A latest release answer for version 0.6.0 of <c>owner/repo</c>.
     /// </summary>
@@ -23,6 +28,6 @@ internal sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpRespon
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Requests.Add(request);
-        return Task.FromResult(respond(request));
+        return respond(request, cancellationToken);
     }
 }

@@ -20,8 +20,9 @@ public class HomeBlazeInstallationTests
         BuildInformation build,
         Func<HttpClient>? createHttpClient = null,
         TimeProvider? timeProvider = null,
-        DeveloperModeService? developerMode = null) =>
-        new(build, "Production", createHttpClient ?? CreateNoReleaseClient, developerMode ?? new DeveloperModeService(), timeProvider ?? TimeProvider.System, NullLogger.Instance);
+        DeveloperModeService? developerMode = null,
+        TimeSpan? requestTimeout = null) =>
+        new(build, "Production", createHttpClient ?? CreateNoReleaseClient, developerMode ?? new DeveloperModeService(), timeProvider ?? TimeProvider.System, NullLogger.Instance, requestTimeout);
 
     private static HttpClient CreateNoReleaseClient() =>
         new(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));

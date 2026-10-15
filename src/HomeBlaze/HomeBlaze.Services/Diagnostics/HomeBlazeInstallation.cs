@@ -209,12 +209,13 @@ public partial class HomeBlazeInstallation : BackgroundService,
         Func<HttpClient> createHttpClient,
         DeveloperModeService developerModeService,
         TimeProvider timeProvider,
-        ILogger logger)
+        ILogger logger,
+        TimeSpan? requestTimeout = null)
     {
         _developerModeService = developerModeService;
         _timeProvider = timeProvider;
         _logger = logger;
-        _releaseClient = GitHubReleaseClient.TryCreate(build.RepositoryUrl, createHttpClient, $"HomeBlaze/{build.Version}", timeProvider);
+        _releaseClient = GitHubReleaseClient.TryCreate(build.RepositoryUrl, createHttpClient, $"HomeBlaze/{build.Version}", timeProvider, requestTimeout);
 
         Name = string.Empty;
         PollingInterval = TimeSpan.FromSeconds(30);

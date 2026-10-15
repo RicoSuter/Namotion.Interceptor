@@ -23,26 +23,34 @@ internal sealed class GitHubRequestException(string message, TimeSpan? retryAfte
 internal sealed class GitHubReleaseClient
 {
     private static readonly Uri ApiBaseAddress = new("https://api.github.com/");
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(30);
     private static readonly long MaximumUnixTimeSeconds = DateTimeOffset.MaxValue.ToUnixTimeSeconds();
 
     private readonly Uri _latestReleaseUri;
     private readonly Func<HttpClient> _createHttpClient;
     private readonly string _userAgent;
     private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _requestTimeout;
 
-    private GitHubReleaseClient(Uri latestReleaseUri, Func<HttpClient> createHttpClient, string userAgent, TimeProvider timeProvider)
+    private GitHubReleaseClient(Uri latestReleaseUri, Func<HttpClient> createHttpClient, string userAgent, TimeProvider timeProvider, TimeSpan requestTimeout)
     {
         _latestReleaseUri = latestReleaseUri;
         _createHttpClient = createHttpClient;
         _userAgent = userAgent;
         _timeProvider = timeProvider;
+        _requestTimeout = requestTimeout;
     }
 
     /// <summary>
-    /// Creates a client for a <c>https://github.com/owner/name</c> repository, or returns null for any other URL.
+    /// Creates a client for a <c>https://github.com/owner/name</c> repository, or returns null for any other URL. A
+    /// request is canceled after <paramref name="requestTimeout"/>, 30 seconds by default.
     /// </summary>
-    public static GitHubReleaseClient? TryCreate(string? repositoryUrl, Func<HttpClient> createHttpClient, string userAgent, TimeProvider timeProvider)
+    public static GitHubReleaseClient? TryCreate(
+        string? repositoryUrl,
+        Func<HttpClient> createHttpClient,
+        string userAgent,
+        TimeProvider timeProvider,
+        TimeSpan? requestTimeout = null)
     {
         if (!Uri.TryCreate(repositoryUrl, UriKind.Absolute, out var uri) ||
             !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
@@ -52,7 +60,7 @@ internal sealed class GitHubReleaseClient
         }
 
         var latestReleaseUri = new Uri(ApiBaseAddress, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/releases/latest");
-        return new GitHubReleaseClient(latestReleaseUri, createHttpClient, userAgent, timeProvider);
+        return new GitHubReleaseClient(latestReleaseUri, createHttpClient, userAgent, timeProvider, requestTimeout ?? DefaultRequestTimeout);
     }
 
     /// <summary>
@@ -61,7 +69,7 @@ internal sealed class GitHubReleaseClient
     public async Task<LatestRelease?> GetLatestReleaseAsync(CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(RequestTimeout);
+        timeoutCts.CancelAfter(_requestTimeout);
         var requestToken = timeoutCts.Token;
 
         using var request = new HttpRequestMessage(HttpMethod.Get, _latestReleaseUri);
