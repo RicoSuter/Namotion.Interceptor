@@ -491,7 +491,7 @@ The pump is set to **{{ pump/TargetSpeed }}** and the fan to **{{ fan/TargetSpee
 - All rows have the same height and all columns the same width, and the grid is at least 400 pixels high.
 - The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
 - Give a cell a `#name` to keep it and everything in it when cells are added or removed, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps).
-- In a configuration file of its own, a `GridLayout` has its cells as the list `cells`, each with one subject as `child`. On a page they are always blocks, see [Cells and Nodes From the `json` Block](pages.md#cells-and-nodes-from-the-json-block).
+- In a configuration file of its own, a `GridLayout` has its cells as the list `cells`, each with one subject as `child`. On a page they are always `Cell` blocks as above, and the [`json` block](pages.md#the-json-block) cannot set them.
 - While the page is in edit mode, the grid shows a plus in every free place, which adds a cell there, and each cell has buttons to edit and remove it, see [Editing in the Page Editor](pages.md#editing-in-the-page-editor).
 
 ## CanvasLayout
