@@ -61,6 +61,7 @@ public class HistoryRefreshThrottleTests
             calls++;
             throttle!.Arm(Window);
         });
+        // The callback needs the variable before the throttle exists, and a using variable cannot be assigned later.
         using var disposable = throttle;
         throttle.Arm(Window);
 
@@ -107,6 +108,23 @@ public class HistoryRefreshThrottleTests
         // Assert
         Assert.Equal(0, calls);
         Assert.False(armedAfterDispose);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void WhenTheWindowIsNotPositive_ThenArmingThrows(int windowSeconds)
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var calls = 0;
+        using var throttle = new HistoryRefreshThrottle(timeProvider, () => calls++);
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => throttle.Arm(TimeSpan.FromSeconds(windowSeconds)));
+        Assert.True(throttle.Arm(Window));
+        timeProvider.Advance(Window);
+        Assert.Equal(1, calls);
     }
 
     [Theory]

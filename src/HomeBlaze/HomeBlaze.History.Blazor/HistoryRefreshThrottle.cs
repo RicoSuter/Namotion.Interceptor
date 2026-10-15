@@ -6,8 +6,9 @@ namespace HomeBlaze.History.Blazor;
 /// </summary>
 /// <remarks>
 /// The callback runs on a timer thread while the throttle holds its lock, so it never starts after
-/// <see cref="Dispose"/> returned. It must return quickly and must not wait for another thread that arms or
-/// disposes the throttle.
+/// <see cref="Dispose"/> returned. It must return quickly. Posting to a dispatcher, for example with
+/// <c>InvokeAsync</c>, is fine even when the dispatcher runs the work inline on the timer thread, but the callback
+/// must never block waiting for the dispatcher or for another thread that arms or disposes the throttle.
 /// </remarks>
 public sealed class HistoryRefreshThrottle : IDisposable
 {
@@ -39,9 +40,14 @@ public sealed class HistoryRefreshThrottle : IDisposable
     }
 
     /// <summary>Starts a window unless one is running or the throttle is disposed.</summary>
+    /// <param name="window">The length of the window. Must be positive.</param>
     /// <returns>Whether this call started a window.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="window"/> is zero or negative.</exception>
     public bool Arm(TimeSpan window)
     {
+        // A zero due time fires inside CreateTimer, before _timer is assigned, which would leave the throttle armed forever.
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(window, TimeSpan.Zero);
+
         lock (_lock)
         {
             if (_isDisposed || _timer is not null)
