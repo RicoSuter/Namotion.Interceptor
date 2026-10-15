@@ -1,10 +1,10 @@
 ---
-title: Version and updates
+title: Version and Updates
 navTitle: Updates
 position: 9
 ---
 
-# Version and updates
+# Version and Updates
 
 The `Installation` subject shows which HomeBlaze version runs, how it was built, its environment and whether a newer release exists. A new installation has one in `Servers/Installation.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
 
@@ -15,14 +15,14 @@ The `Installation` subject shows which HomeBlaze version runs, how it was built,
 | `RepositoryUrl`, `VersionUrl`, `CommitUrl`, `BuildRunUrl` | Links to the repository, to the release or commit, and to the CI run |
 | `EnvironmentName`, `IsDeveloperMode` | The hosting environment and whether developer mode is on |
 | `DataDirectory`, `DataVolumeFreeSpace`, `DataVolumeTotalSize`, `DataVolumeUsage` | The data folder and the free space, total size and usage of its volume, refreshed every `PollingInterval` (30 seconds by default) |
-| `UpdateAvailable`, `LatestVersion`, `LatestReleaseDate`, `LatestReleaseUrl` | The latest release and whether it is newer than the running version; empty until the first successful check |
+| `UpdateAvailable`, `LatestVersion`, `LatestReleaseDate`, `LatestReleaseUrl` | The latest release and whether it is newer than the running version; empty until the first successful check, and `UpdateAvailable` stays empty when the running version is not a semantic version |
 | `LastUpdateCheck`, `UpdateCheckStatus` | When the last check finished, and why it failed or cannot run |
 
 The installation widget shows the version, channel and build, an available update, the update check status, the data volume and the environment on a page.
 
 ## Update check
 
-The update check is on by default, but only release builds can check. For an edge or development build, or a repository that is not on GitHub, `UpdateCheckStatus` says why no check is possible.
+The update check is on by default, but only release builds can check. For an edge or development build, or a missing or non-GitHub repository URL, `UpdateCheckStatus` says why no check is possible. To install an update, pull the new image as described in [Installation](installation.md#docker).
 
 A check asks the GitHub API for the latest release. It sends nothing about the installation except the version in the user agent; GitHub sees the IP address the request comes from. Set `UpdateCheckEnabled` to false for an installation that must not connect to the internet on its own.
 

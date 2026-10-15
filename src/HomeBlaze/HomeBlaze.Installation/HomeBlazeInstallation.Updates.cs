@@ -78,7 +78,7 @@ public partial class HomeBlazeInstallation
         }
         catch (GitHubRequestException exception)
         {
-            _logger.LogWarning(exception, "Checking for updates failed");
+            _logger.LogWarning(exception, "Checking for updates failed: {Message}", exception.Message);
             return ReportUpdateCheckFailure(exception.Message, exception.RetryAfter);
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
@@ -89,7 +89,7 @@ public partial class HomeBlazeInstallation
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException)
         {
-            _logger.LogWarning(exception, "Checking for updates failed");
+            _logger.LogWarning(exception, "Checking for updates failed: {Message}", exception.Message);
             return ReportUpdateCheckFailure(exception.Message, retryAfter: null);
         }
     }

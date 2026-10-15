@@ -36,7 +36,7 @@ Setup, deployment, and runtime configuration for operators and administrators.
 - [Page Errors](administration/page-errors.md): Every error message of a markdown page with its cause and its fix
 - [Paths](administration/paths.md): Path syntax for referencing subjects
 - [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
-- [Version and updates](administration/updates.md): Running version, build and update check
+- [Version and Updates](administration/updates.md): Running version, build and update check
 
 ### Development
 

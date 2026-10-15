@@ -10,7 +10,7 @@ HomeBlaze reports its health over HTTP and exports logs, metrics and traces with
 
 See [Observability Design](../architecture/design/observability.md) for the architectural design.
 
-The running version, its build and the update check are described in [Version and updates](updates.md).
+The running version, its build and the update check are described in [Version and Updates](updates.md).
 
 ## Host system
 
