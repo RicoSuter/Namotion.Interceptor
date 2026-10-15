@@ -189,23 +189,23 @@ public partial class WallboxCharger : BackgroundService,
     public string? IconColor =>
         IsCharging == true ? "Success" : IsPluggedIn == true ? "Warning" : null;
 
-    // Operation enable conditions
+    // Operation enable conditions. An operation is registered without the Async of its method name.
 
     [Derived]
-    [PropertyAttribute("LockAsync", KnownAttributes.IsEnabled)]
-    public bool LockAsync_IsEnabled => IsConnected && IsLocked != true;
+    [PropertyAttribute("Lock", KnownAttributes.IsEnabled)]
+    public bool Lock_IsEnabled => IsConnected && IsLocked != true;
 
     [Derived]
-    [PropertyAttribute("UnlockAsync", KnownAttributes.IsEnabled)]
-    public bool UnlockAsync_IsEnabled => IsConnected && IsLocked == true;
+    [PropertyAttribute("Unlock", KnownAttributes.IsEnabled)]
+    public bool Unlock_IsEnabled => IsConnected && IsLocked == true;
 
     [Derived]
-    [PropertyAttribute("PauseChargingAsync", KnownAttributes.IsEnabled)]
-    public bool PauseChargingAsync_IsEnabled => IsConnected && IsCharging == true;
+    [PropertyAttribute("PauseCharging", KnownAttributes.IsEnabled)]
+    public bool PauseCharging_IsEnabled => IsConnected && IsCharging == true;
 
     [Derived]
-    [PropertyAttribute("ResumeChargingAsync", KnownAttributes.IsEnabled)]
-    public bool ResumeChargingAsync_IsEnabled => IsConnected && ChargerStatus == WallboxChargerStatus.Paused;
+    [PropertyAttribute("ResumeCharging", KnownAttributes.IsEnabled)]
+    public bool ResumeCharging_IsEnabled => IsConnected && ChargerStatus == WallboxChargerStatus.Paused;
 
     // Constructor
 
