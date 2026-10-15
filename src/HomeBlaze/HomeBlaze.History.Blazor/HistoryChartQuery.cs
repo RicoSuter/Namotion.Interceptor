@@ -12,7 +12,7 @@ namespace HomeBlaze.History.Blazor;
 /// <param name="IsBand">Whether the series is drawn as a state band rather than a line.</param>
 /// <param name="Aggregation">The aggregation of a line query; lines with the same aggregation share one batch. Ignored for a band, which is always queried as raw samples.</param>
 /// <param name="Color">The CSS colour of a line, or null for the next of <see cref="HistoryChartPalette.LineColors"/>.</param>
-/// <param name="Unit">The unit of the property. A line in <see cref="StateUnit.Percent"/> is drawn times 100, except a count of samples.</param>
+/// <param name="Unit">The unit of the property. A line in <see cref="StateUnit.Percent"/> is drawn in percent, except a count of samples.</param>
 public sealed record HistoryChartSeriesRequest(
     string PropertyPath,
     string Label,
@@ -171,7 +171,7 @@ public static class HistoryChartQuery
                 var isPercent = request.Unit == StateUnit.Percent &&
                     (bucket is null || request.Aggregation != HistoryAggregations.Count);
                 var runs = HasNumber(result)
-                    ? PropertyHistoryChartModel.SplitIntoGapRuns(isPercent ? ToPercent(result.Points) : result.Points, bucket, to)
+                    ? PropertyHistoryChartModel.SplitIntoGapRuns(result.Points, bucket, to)
                     : [];
                 lines.Add(new HistoryChartLine(
                     request.Label, request.Color ?? HistoryChartPalette.GetLineColor(lines.Count), runs, isPercent));
@@ -216,22 +216,6 @@ public static class HistoryChartQuery
         }
 
         return groups;
-    }
-
-    private static HistoryPoint[] ToPercent(IReadOnlyList<HistoryPoint> points)
-    {
-        var scaled = new HistoryPoint[points.Count];
-        for (var index = 0; index < scaled.Length; index++)
-        {
-            var point = points[index];
-
-            // Rounded, so that a fraction of 0.57 is drawn and shown as 57 rather than 56.99999999999999.
-            scaled[index] = point.Number is { } number
-                ? point with { Number = Math.Round(number * HistoryChartAxis.FullPercent, 10) }
-                : point;
-        }
-
-        return scaled;
     }
 
     private static bool HasNumber(HistorySeries series)

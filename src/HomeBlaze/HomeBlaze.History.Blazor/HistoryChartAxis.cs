@@ -99,6 +99,13 @@ public static class HistoryChartAxis
     }
 
     /// <summary>
+    /// Converts a fraction to the percent a line draws: times <see cref="FullPercent"/>, rounded to 10 decimals so that
+    /// the binary error of the multiplication does not show, for example 0.57 is 57 rather than 56.99999999999999.
+    /// </summary>
+    /// <param name="fraction">The recorded fraction.</param>
+    public static double ToPercent(double fraction) => Math.Round(fraction * FullPercent, 10);
+
+    /// <summary>
     /// Gets the value axis of lines in percent, whose values reach from <paramref name="minimum"/> to
     /// <paramref name="maximum"/>: from 0 to <see cref="FullPercent"/>, and further only where the values leave that range.
     /// </summary>

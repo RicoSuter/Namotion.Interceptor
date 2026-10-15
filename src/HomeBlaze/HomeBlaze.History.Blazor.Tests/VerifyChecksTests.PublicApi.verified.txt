@@ -44,6 +44,7 @@ namespace HomeBlaze.History.Blazor
         public static System.TimeSpan GetTimeLabelSpacing(System.TimeSpan range, System.TimeSpan? bucket, double width) { }
         public static HomeBlaze.History.Blazor.HistoryChartValueAxis GetValueAxis(double minimum, double maximum, double height) { }
         public static int GetValueLabelCount(double height) { }
+        public static double ToPercent(double fraction) { }
     }
     public sealed class HistoryChartBand : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartBand>
     {

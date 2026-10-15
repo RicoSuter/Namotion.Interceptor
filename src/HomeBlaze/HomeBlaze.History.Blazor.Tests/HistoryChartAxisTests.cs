@@ -122,6 +122,21 @@ public class HistoryChartAxisTests
     }
 
     [Theory]
+    [InlineData(0.23, 23)]
+    [InlineData(0.57, 57)]
+    [InlineData(1.2, 120)]
+    [InlineData(-0.5, -50)]
+    [InlineData(0.123456, 12.3456)]
+    public void WhenAFractionIsDrawnInPercent_ThenItIsTimesHundredWithoutBinaryError(double fraction, double expected)
+    {
+        // Act
+        var percent = HistoryChartAxis.ToPercent(fraction);
+
+        // Assert
+        Assert.Equal(expected, percent);
+    }
+
+    [Theory]
     [InlineData(0.23, 0.8, 300, 0, 100)]
     [InlineData(0.23, 0.8, 184, 0, 100)]
     [InlineData(0.5, 0.5, 300, 0, 100)]

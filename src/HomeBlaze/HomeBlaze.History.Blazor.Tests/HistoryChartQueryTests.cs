@@ -107,7 +107,7 @@ public class HistoryChartQueryTests
     [InlineData(HistoryAggregations.StandardDeviation)]
     [InlineData(HistoryAggregations.First)]
     [InlineData(HistoryAggregations.Last)]
-    public async Task WhenALineIsInPercent_ThenItsPointsAreTimesHundred(string aggregation)
+    public async Task WhenALineIsInPercent_ThenItIsDrawnInPercentFromItsRecordedFractions(string aggregation)
     {
         // Arrange
         var store = CreateStore()
@@ -122,12 +122,11 @@ public class HistoryChartQueryTests
         // Assert
         var line = Assert.Single(result.Data.Lines);
         Assert.True(line.IsPercent);
-        Assert.Equal([23d, 57d], Assert.Single(line.Runs).Select(point => point.Number!.Value));
-        Assert.Equal([0.23, 0.57], Assert.Single(result.Series).Points.Select(point => point.Number).OfType<double>());
+        Assert.Equal([0.23, 0.57], Assert.Single(line.Runs).Select(point => point.Number!.Value));
     }
 
     [Fact]
-    public async Task WhenAPercentLineCountsSamples_ThenItsPointsAreNotScaled()
+    public async Task WhenAPercentLineCountsSamples_ThenItIsNotDrawnInPercent()
     {
         // Arrange
         var store = CreateStore()
@@ -146,7 +145,7 @@ public class HistoryChartQueryTests
     }
 
     [Fact]
-    public async Task WhenAPercentLineIsQueriedRaw_ThenItsSamplesAreTimesHundredWhateverTheAggregation()
+    public async Task WhenAPercentLineIsQueriedRaw_ThenItIsDrawnInPercentWhateverTheAggregation()
     {
         // Arrange
         var store = CreateStore()
@@ -161,11 +160,11 @@ public class HistoryChartQueryTests
         // Assert
         var line = Assert.Single(result.Data.Lines);
         Assert.True(line.IsPercent);
-        Assert.Equal([23d, 120d], Assert.Single(line.Runs).Select(point => point.Number!.Value));
+        Assert.Equal([0.23, 1.2], Assert.Single(line.Runs).Select(point => point.Number!.Value));
     }
 
     [Fact]
-    public async Task WhenALineHasAnotherUnit_ThenItsPointsAreUnchanged()
+    public async Task WhenALineHasAnotherUnit_ThenItIsNotDrawnInPercent()
     {
         // Arrange
         var store = CreateStore()

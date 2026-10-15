@@ -267,11 +267,16 @@
             isPercent &= line.IsPercent || line.Runs.Count == 0;
             foreach (var run in line.Runs)
             {
-                anchorValue ??= run[0].Number!.Value;
                 var points = new List<(DateTime, double)>(run.Count);
                 for (var index = 0; index < run.Count; index++)
                 {
                     var number = run[index].Number!.Value;
+                    if (line.IsPercent)
+                    {
+                        number = HistoryChartAxis.ToPercent(number);
+                    }
+
+                    anchorValue ??= number;
                     minimum = Math.Min(minimum, number);
                     maximum = Math.Max(maximum, number);
                     points.Add((TimeZone.ToZoned(run[index].Timestamp), number));
@@ -281,7 +286,8 @@
                 {
                     Name = line.Label,
                     Visible = true,
-                    Data = new ChartData<double>(points)
+                    Data = new ChartData<double>(points),
+                    TooltipYValueFormat = "0.###"
                 });
                 palette.Add(line.Color);
             }

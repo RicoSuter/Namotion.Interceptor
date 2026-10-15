@@ -47,7 +47,7 @@ public sealed record HistoryChartData(
 /// <param name="Label">The name of the series.</param>
 /// <param name="Color">The CSS colour of the line.</param>
 /// <param name="Runs">The gap-free runs of points in time order.</param>
-/// <param name="IsPercent">Whether the points are in percent, the recorded fraction times 100.</param>
+/// <param name="IsPercent">Whether the points are fractions that are drawn in percent, see <see cref="HistoryChartAxis.ToPercent"/>.</param>
 public sealed record HistoryChartLine(
     string Label, string Color, IReadOnlyList<IReadOnlyList<HistoryPoint>> Runs, bool IsPercent = false);
 
