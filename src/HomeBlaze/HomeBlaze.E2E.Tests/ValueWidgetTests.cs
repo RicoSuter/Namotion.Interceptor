@@ -676,7 +676,7 @@ public class ValueWidgetTests
         Assert.True(boxes[0].Width < 280, $"The card is {boxes[0].Width} pixels wide");
         Assert.All(overflow, scrollOverflow => Assert.Equal(0, scrollOverflow));
         Assert.True(boxes[1].Right <= boxes[0].Right, $"The value ends at {boxes[1].Right}, the card at {boxes[0].Right}");
-        Assert.Equal(boxes[3].Right - 16, boxes[1].Right, PositionTolerance);
+        Assert.Equal(boxes[3].Right - 12, boxes[1].Right, PositionTolerance);
         Assert.True(boxes[2].Width >= 40, $"The bar is {boxes[2].Width} pixels wide");
     }
 

@@ -379,7 +379,7 @@ The body of the card.
 ~~~~
 
 ~~~~text
-Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.
+Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Available: AspectRatio, Elevation, Height, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.
 ~~~~
 
 ### Closing and Nesting

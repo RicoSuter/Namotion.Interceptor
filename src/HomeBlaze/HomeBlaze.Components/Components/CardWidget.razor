@@ -7,83 +7,75 @@
 
 @if (card is not null)
 {
-    var hasTitle = !string.IsNullOrEmpty(card.Title);
-    var hasSubtitle = !string.IsNullOrEmpty(card.Subtitle);
-    var hasIcon = !string.IsNullOrEmpty(card.Icon);
-    var headerRight = card.HeaderRight;
-    var hasHeader = hasTitle || hasSubtitle || hasIcon || headerRight is not null;
+    var sizeStyle = CardSize.GetStyle(card.Height, card.AspectRatio, out var sizeError);
+    if (sizeError is not null)
+    {
+        <WidgetArgumentError Message="@sizeError" />
+    }
+    else
+    {
+        var hasTitle = !string.IsNullOrEmpty(card.Title);
+        var hasSubtitle = !string.IsNullOrEmpty(card.Subtitle);
+        var hasIcon = !string.IsNullOrEmpty(card.Icon);
+        var headerRight = card.HeaderRight;
+        var hasHeader = hasTitle || hasSubtitle || hasIcon || headerRight is not null;
 
-    // The title and the body sit close together, as the lines of a paragraph. A picture between them, or a missing body or header, leaves the full padding.
-    var hasPicture = !string.IsNullOrEmpty(card.Image);
-    var isTight = hasHeader && card.Content is not null && !hasPicture;
+        // The paddings, and the closer distance between a header and a body that follows it directly, are in widget-selection.css.
+        // MudCardHeader gives its actions area a margin of -8 pixels at the top and at the end, because it is made for icon buttons with a padding of their own. me-1 and mt-2 cancel 4 of them and the 4 pixels that an indicator has around itself the rest, so that its visible edge ends where the content of the card ends, as the header and the body have the same padding. mb-n1 takes back the bottom margin of the indicator, which would make the header 4 pixels taller than the title.
+        // The 4 pixels of top margin of the indicator are also what centres one line of content, 24 pixels high, on the 32 pixel title line. Text that stands here has no margin and ends 4 pixels further out than the content of the card. A button in the slot has a padding of its own and needs no me-1 and no mt-2.
+        // The header aligns its parts at the top, so that the icon stands on the title line like the content of HeaderRight, also when the subtitle takes several lines. mt-1 centres the icon, 24 pixels high, on the 32 pixel title line. d-block keeps the icon out of a line box, which would add the room below a baseline to the height of the header.
+        // A part of the header that is not set is passed as null, because the header keeps room for a part that is an empty fragment.
+        RenderFragment? avatar = hasIcon
+            ? @<MudIcon Icon="@MudBlazorIconResolver.Resolve(card.Icon!)" Color="@card.IconColor" Class="d-block mt-1" data-testid="card-icon" />
+            : null;
+        RenderFragment? actions = headerRight is not null
+            ? @<div class="mt-2 me-1 mb-n1" data-testid="card-header-right"><SubjectComponent Subject="@headerRight" Type="SubjectComponentType.Widget" /></div>
+            : null;
 
-    // MudCardHeader gives its actions area a margin of -8 pixels at the top and at the end, because it is made for icon buttons with a padding of their own. me-1 and mt-2 cancel 4 of them and the 4 pixels that an indicator has around itself the rest, so that its visible edge ends where the content of the card ends. mb-n1 takes back the bottom margin of the indicator, which would make the header 4 pixels taller than the title.
-    // The 4 pixels of top margin of the indicator are also what centres one line of content, 24 pixels high, on the 32 pixel title line. Text that stands here has no margin and ends 4 pixels further out than the content of the card. A button in the slot has a padding of its own and needs no me-1 and no mt-2.
-    // The header aligns its parts at the top, so that the icon stands on the title line like the content of HeaderRight, also when the subtitle takes several lines. mt-1 centres the icon, 24 pixels high, on the 32 pixel title line. d-block keeps the icon out of a line box, which would add the room below a baseline to the height of the header.
-    // A part of the header that is not set is passed as null, because the header keeps room for a part that is an empty fragment.
-    RenderFragment? avatar = hasIcon
-        ? @<MudIcon Icon="@MudBlazorIconResolver.Resolve(card.Icon!)" Color="@card.IconColor" Class="d-block mt-1" data-testid="card-icon" />
-        : null;
-    RenderFragment? actions = headerRight is not null
-        ? @<div class="mt-2 me-1 mb-n1" data-testid="card-header-right"><SubjectComponent Subject="@headerRight" Type="SubjectComponentType.Widget" /></div>
-        : null;
+        <MudCard Class="@(sizeStyle is null ? "card-widget" : "card-widget card-widget-sized")" Style="@sizeStyle" Elevation="@(card.Outlined ? 0 : card.Elevation)" Outlined="@card.Outlined" data-testid="card">
+            @if (hasHeader)
+            {
+                <MudCardHeader Class="align-start" CardHeaderAvatar="@avatar" CardHeaderActions="@actions">
+                    <CardHeaderContent>
+                        @if (hasTitle && !string.IsNullOrEmpty(card.Href))
+                        {
+                            <MudLink Href="@card.ResolveScopedLink(card.Href)" Typo="Typo.h6" Color="Color.Inherit" data-testid="card-title">@card.Title</MudLink>
+                        }
+                        else if (hasTitle)
+                        {
+                            <MudText Typo="Typo.h6" data-testid="card-title">@card.Title</MudText>
+                        }
 
-    <MudCard Class="card-widget" Elevation="@(card.Outlined ? 0 : card.Elevation)" Outlined="@card.Outlined" data-testid="card">
-        @if (hasHeader)
-        {
-            <MudCardHeader Class="@(isTight ? "align-start pb-2" : "align-start")" CardHeaderAvatar="@avatar" CardHeaderActions="@actions">
-                <CardHeaderContent>
-                    @if (hasTitle && !string.IsNullOrEmpty(card.Href))
-                    {
-                        <MudLink Href="@card.ResolveScopedLink(card.Href)" Typo="Typo.h6" Color="Color.Inherit" data-testid="card-title">@card.Title</MudLink>
-                    }
-                    else if (hasTitle)
-                    {
-                        <MudText Typo="Typo.h6" data-testid="card-title">@card.Title</MudText>
-                    }
+                        @if (hasSubtitle)
+                        {
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary ma-0" data-testid="card-subtitle">@card.Subtitle</MudText>
+                        }
+                    </CardHeaderContent>
+                </MudCardHeader>
+            }
 
-                    @if (hasSubtitle)
-                    {
-                        <MudText Typo="Typo.body2" Class="mud-text-secondary ma-0" data-testid="card-subtitle">@card.Subtitle</MudText>
-                    }
-                </CardHeaderContent>
-            </MudCardHeader>
-        }
+            @if (!string.IsNullOrEmpty(card.Image))
+            {
+                <MudCardMedia Image="@card.ResolveScopedLink(card.Image)" Height="200" />
+            }
 
-        @if (hasPicture)
-        {
-            <MudCardMedia Image="@card.ResolveScopedLink(card.Image)" Height="200" />
-        }
+            @if (card.Content is not null)
+            {
+                <MudCardContent data-testid="card-content">
+                    <SubjectComponent Subject="@card.Content" Type="SubjectComponentType.Widget" />
+                </MudCardContent>
+            }
 
-        @if (card.Content is not null)
-        {
-            <MudCardContent Class="@(isTight ? "pt-0" : null)">
-                <SubjectComponent Subject="@card.Content" Type="SubjectComponentType.Widget" />
-            </MudCardContent>
-        }
-
-        @if (card.Footer is not null)
-        {
-            <MudDivider />
-            <MudCardActions Class="pa-4" data-testid="card-footer">
-                <SubjectComponent Subject="@card.Footer" Type="SubjectComponentType.Widget" />
-            </MudCardActions>
-        }
-    </MudCard>
+            @if (card.Footer is not null)
+            {
+                <MudDivider />
+                <MudCardActions data-testid="card-footer">
+                    <SubjectComponent Subject="@card.Footer" Type="SubjectComponentType.Widget" />
+                </MudCardActions>
+            }
+        </MudCard>
+    }
 }
-
-<style>
-    /* The distance between two paragraphs of a page, so that cards below each other do not touch. */
-    .card-widget {
-        margin-bottom: 0.75rem;
-    }
-
-    /* A layout cell spaces its content itself, so the card that ends the cell adds nothing below.
-       The two wrappers are those of SubjectComponent, for the content of the cell and for the card. */
-    .layout-cell > .subject-component-wrapper > .subject-component-wrapper:last-of-type > .card-widget {
-        margin-bottom: 0;
-    }
-</style>
 
 @code {
     [Parameter]
