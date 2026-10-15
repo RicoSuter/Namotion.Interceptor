@@ -10,11 +10,12 @@
     outline-offset: 1px;
 }
 
-/* A selectable widget that is a direct child of another one keeps the pointer. */
-.subject-component-wrapper.selectable > :not(.subject-component-wrapper.selectable) {
+.subject-component-wrapper.selectable > * {
     pointer-events: none;
 }
 
+/* A selectable widget that is a direct child of another one, such as the subject of a Widget block, keeps the pointer. */
+.subject-component-wrapper.selectable > .subject-component-wrapper.selectable,
 .subject-component-wrapper.selectable .edit-mode-interactive,
 .subject-component-wrapper.selected .edit-mode-selected-interactive {
     pointer-events: auto;
