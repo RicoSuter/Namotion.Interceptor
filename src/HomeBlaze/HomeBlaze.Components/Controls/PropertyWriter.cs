@@ -45,7 +45,13 @@ public sealed class PropertyWriter : IDisposable
     /// </summary>
     public static bool IsWritable(RegisteredSubjectProperty? property)
     {
-        return property is not null && property.HasPublicSetter && property.GetValue() is not MethodMetadata;
+        return property is not null && IsWritable(property, property.GetValue());
+    }
+
+    /// <summary>Gets whether the property is writable, given its already read current value.</summary>
+    private static bool IsWritable(RegisteredSubjectProperty property, object? currentValue)
+    {
+        return property.HasPublicSetter && currentValue is not MethodMetadata;
     }
 
     /// <summary>
@@ -62,7 +68,7 @@ public sealed class PropertyWriter : IDisposable
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
         var currentValue = property.GetValue();
-        if (!property.HasPublicSetter || currentValue is MethodMetadata)
+        if (!IsWritable(property, currentValue))
         {
             ShowWriteError(property, "The property cannot be written.");
             return false;
@@ -117,8 +123,12 @@ public sealed class PropertyWriter : IDisposable
             save = StartSave(owner, out previousSave);
         }
 
-        _ = Task.Run(() => PersistAsync(owner, previousSave, save, isShown: false));
+        SaveInBackground(owner, previousSave, save);
     }
+
+    /// <summary>Starts the save on the thread pool, isolated so the reschedule path allocates no closure.</summary>
+    private void SaveInBackground(IInterceptorSubject owner, Task? previousSave, TaskCompletionSource save) =>
+        _ = Task.Run(() => PersistAsync(owner, previousSave, save, isShown: false));
 
     private void OnPersistDue(object? state)
     {

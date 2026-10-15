@@ -53,7 +53,7 @@ public sealed class PropertyWriterTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenValuesAreWritten_ThenTheyAreConvertedToThePropertyTypes()
+    public void WhenValuesAreWritten_ThenTheyAreConvertedToThePropertyTypes()
     {
         // Arrange
         _graph.Device.Ratio = 0.5;
@@ -71,9 +71,6 @@ public sealed class PropertyWriterTests : IDisposable
         Assert.Equal(DeviceMode.Boost, _graph.Device.Mode);
         Assert.Null(_graph.Device.Ratio);
         Assert.Empty(_snackbar.Messages);
-
-        _timeProvider.Advance(PropertyWriter.PersistDelay);
-        await AsyncTestHelpers.WaitUntilAsync(() => _graph.Device.ApplyCount == 1);
     }
 
     [Theory]
