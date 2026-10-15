@@ -14,6 +14,9 @@ internal sealed class UpdateSchedule
     public static readonly TimeSpan MaximumBackoff = TimeSpan.FromHours(24);
     public static readonly TimeSpan ManualCheckThrottle = TimeSpan.FromMinutes(1);
 
+    // Configuration written without ApplyConfigurationAsync, such as through MCP, wakes no one.
+    public static readonly TimeSpan ConfigurationRecheckInterval = TimeSpan.FromHours(1);
+
     private readonly Lock _manualCheckLock = new();
     private int _failureCount;
     private DateTimeOffset? _lastManualCheck;
@@ -44,6 +47,21 @@ internal sealed class UpdateSchedule
         }
 
         return configuredInterval > MaximumInterval ? MaximumInterval : configuredInterval;
+    }
+
+    /// <summary>
+    /// Returns how long the update loop waits: the time until the next check is due, rounded up to whole
+    /// milliseconds and at most ConfigurationRecheckInterval, or ConfigurationRecheckInterval when no check is due.
+    /// </summary>
+    public static TimeSpan GetWaitDelay(TimeSpan? remainingUntilDue)
+    {
+        if (remainingUntilDue is not { } remaining || remaining >= ConfigurationRecheckInterval)
+        {
+            return ConfigurationRecheckInterval;
+        }
+
+        // Rounded up so a timer that fires a fraction of a millisecond early waits again instead of spinning.
+        return remaining > TimeSpan.Zero ? TimeSpan.FromMilliseconds(Math.Ceiling(remaining.TotalMilliseconds)) : TimeSpan.Zero;
     }
 
     /// <summary>

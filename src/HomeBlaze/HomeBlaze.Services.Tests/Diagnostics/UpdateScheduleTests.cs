@@ -37,6 +37,30 @@ public class UpdateScheduleTests
         Assert.Equal(TimeSpan.FromHours(expectedHours), interval);
     }
 
+    [Theory]
+    [InlineData(null, 60)]
+    [InlineData(30.0, 30)]
+    [InlineData(24.0 * 60, 60)]
+    [InlineData(-5.0, 0)]
+    public void WhenTheUpdateLoopWaits_ThenItWakesAtLeastHourly(double? remainingMinutes, double expectedMinutes)
+    {
+        // Act
+        var delay = UpdateSchedule.GetWaitDelay(remainingMinutes is { } minutes ? TimeSpan.FromMinutes(minutes) : null);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(expectedMinutes), delay);
+    }
+
+    [Fact]
+    public void WhenLessThanAMillisecondRemains_ThenTheWaitIsRoundedUp()
+    {
+        // Act
+        var delay = UpdateSchedule.GetWaitDelay(TimeSpan.FromTicks(1));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMilliseconds(1), delay);
+    }
+
     [Fact]
     public void WhenChecksKeepFailing_ThenTheBackoffDoublesUpToADay()
     {

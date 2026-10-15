@@ -135,14 +135,8 @@ public partial class HomeBlazeInstallation
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var delay = Timeout.InfiniteTimeSpan;
-            if (UpdateCheckEnabled && GetUpdateCheckUnavailableReason() is null)
-            {
-                // Rounded up so a timer that fires a fraction of a millisecond early waits again instead of spinning.
-                var remaining = GetRemainingDelay();
-                delay = remaining > TimeSpan.Zero ? TimeSpan.FromMilliseconds(Math.Ceiling(remaining.TotalMilliseconds)) : TimeSpan.Zero;
-            }
-
+            var isScheduled = UpdateCheckEnabled && GetUpdateCheckUnavailableReason() is null;
+            var delay = UpdateSchedule.GetWaitDelay(isScheduled ? GetRemainingDelay() : null);
             var isSignaled = await WaitAsync(_updateSignal, delay, stoppingToken);
             if (stoppingToken.IsCancellationRequested)
             {
@@ -157,8 +151,8 @@ public partial class HomeBlazeInstallation
                     continue;
                 }
 
-                // A configuration change, or a wait capped below a long interval, computes the delay again.
-                if (isSignaled || GetRemainingDelay() > TimeSpan.Zero)
+                // A configuration change, or a wait shortened to the hourly re-read, computes the delay again.
+                if (isSignaled || GetUpdateCheckUnavailableReason() is not null || GetRemainingDelay() > TimeSpan.Zero)
                 {
                     continue;
                 }
