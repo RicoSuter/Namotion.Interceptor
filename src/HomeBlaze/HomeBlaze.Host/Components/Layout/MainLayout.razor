@@ -139,8 +139,24 @@
         _isDarkMode = !_isDarkMode;
     }
 
-    private readonly PaletteLight _lightPalette = new();
-    private readonly PaletteDark _darkPalette = new();
+    // Three levels with equal steps in lightness: the drawer, the page background and the surfaces of cards,
+    // tiles and tab bars. The secondary text of the light palette is darker than the default, which is below
+    // 4.5:1 on the page background.
+    private readonly PaletteLight _lightPalette = new()
+    {
+        Background = "#e9eaee",
+        BackgroundGray = "#d5d5dc",
+        DrawerBackground = "#d5d5dc",
+        TextSecondary = "rgba(0,0,0,0.6)"
+    };
+
+    private readonly PaletteDark _darkPalette = new()
+    {
+        Background = "#2a2b32",
+        BackgroundGray = "#1f1f25",
+        AppbarBackground = "#1f1f25",
+        DrawerBackground = "#1f1f25"
+    };
 
     public string DarkLightModeButtonIcon => _isDarkMode switch
     {
