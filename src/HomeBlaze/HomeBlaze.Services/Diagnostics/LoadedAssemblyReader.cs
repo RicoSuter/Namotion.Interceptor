@@ -36,8 +36,8 @@ internal static class LoadedAssemblyReader
         var name = assembly.GetName().Name ?? assembly.FullName ?? string.Empty;
         try
         {
-            var build = BuildInformation.FromAssembly(assembly);
-            return new LoadedAssembly(name, contextName, build.Version, build.Commit, build.RepositoryUrl);
+            var (version, commit) = BuildInformation.ParseInformationalVersion(BuildInformation.ReadInformationalVersion(assembly));
+            return new LoadedAssembly(name, contextName, version, commit, BuildInformation.ReadRepositoryUrl(assembly));
         }
         catch (Exception exception) when (exception is TypeLoadException or FileNotFoundException or FileLoadException or BadImageFormatException or CustomAttributeFormatException or AmbiguousMatchException)
         {

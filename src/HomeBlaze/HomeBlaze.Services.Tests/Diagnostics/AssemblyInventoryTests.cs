@@ -73,7 +73,9 @@ public class AssemblyInventoryTests
         var assemblies = LoadedAssemblyReader.Read();
 
         // Assert
-        Assert.Contains(assemblies, assembly => assembly.Name == "HomeBlaze.Services" && assembly.LoadContext == "Default");
+        var services = Assert.Single(assemblies, assembly => assembly.Name == "HomeBlaze.Services");
+        Assert.Equal("Default", services.LoadContext);
+        Assert.Equal(OwnRepositoryUrl, services.RepositoryUrl);
         Assert.DoesNotContain(assemblies, assembly => assembly.Name == "System.Private.CoreLib");
     }
 
