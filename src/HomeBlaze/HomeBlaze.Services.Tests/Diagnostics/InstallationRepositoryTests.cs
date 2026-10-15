@@ -1,6 +1,9 @@
+using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using HomeBlaze.Services.Diagnostics;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Xunit;
 
 namespace HomeBlaze.Services.Tests.Diagnostics;
@@ -124,16 +127,28 @@ public class InstallationRepositoryTests
     [Fact]
     public void WhenTrackedAndAChildAssemblyHasAMismatch_ThenIconColorIsWarning()
     {
-        // Arrange
+        // Arrange: attach to a context that tracks derived property dependencies across subjects,
+        // then apply once so the IconColor getter runs while the assembly is attached and records
+        // a dependency on its HasMismatch, rather than only on the un-dereferenced dictionary.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var repository = new InstallationRepository("repo", null);
         ((IInterceptorSubject)repository).Context.AddFallbackContext(context);
+        repository.Apply(CreateEntry(false, CreateAssembly("A")));
 
-        // Act
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == nameof(InstallationRepository.IconColor) &&
+                              ReferenceEquals(change.Property.Subject, repository))
+            .Subscribe(change => changes.Add(change));
+
+        // Act: the in-place path only writes the child assembly's HasMismatch; the repository's own
+        // HasMismatch stays false, so a passing IconColor change can only come from dependency tracking
+        // picking up the child write, not from the repository's own property changing.
         repository.Apply(CreateEntry(false, CreateAssembly("A", hasMismatch: true)));
 
         // Assert
         Assert.False(repository.HasMismatch);
-        Assert.Equal("Warning", repository.IconColor);
+        var change = Assert.Single(changes);
+        Assert.Equal("Warning", change.GetNewValue<string?>());
     }
 }
