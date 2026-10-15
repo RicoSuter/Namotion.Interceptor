@@ -96,6 +96,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(arguments => { receivedArguments = arguments; return null; })
         {
             Title = "Set Speed",
+            RequiresConfirmation = true,
             Parameters = [InputParameter("speed", typeof(int))]
         };
 
@@ -325,5 +326,28 @@ public class OperationInvokerTests
         // Assert
         Assert.Equal(OperationOutcome.Failed, outcome);
         dialogService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task WhenResultDialogThrows_ThenTheExceptionPropagates()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        dialogService
+            .Setup(service => service.ShowAsync<MethodResultDialog>(It.IsAny<string>(), It.IsAny<DialogParameters>(), It.IsAny<DialogOptions>()))
+            .ThrowsAsync(new InvalidOperationException("Dialog failed"));
+        var invocationCount = 0;
+        var method = new MethodMetadata(_ =>
+        {
+            invocationCount++;
+            return "42";
+        })
+        { Kind = MethodKind.Query, Title = "Get Answer" };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None));
+        Assert.Equal(1, invocationCount);
+        VerifyShown<MethodErrorDialog>(dialogService, Times.Never());
     }
 }

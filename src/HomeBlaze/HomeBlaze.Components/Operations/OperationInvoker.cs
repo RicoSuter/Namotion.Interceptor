@@ -31,6 +31,9 @@ public static class OperationInvoker
     /// Shows the prompt of the method, invokes it with <see cref="CancellationToken.None"/>, and shows the result
     /// dialog for a result that is not null or the error dialog for an exception. Never throws for a failing method.
     /// </summary>
+    /// <remarks>
+    /// Exceptions thrown by the dialog service itself propagate to the caller.
+    /// </remarks>
     /// <param name="dialogService">The dialog service of the caller.</param>
     /// <param name="serviceProvider">Resolves the parameters of the method that come from services.</param>
     /// <param name="method">The operation or query.</param>
@@ -49,49 +52,44 @@ public static class OperationInvoker
             return OperationOutcome.Cancelled;
         }
 
+        object?[]? parameters = null;
+        switch (GetPrompt(method))
+        {
+            case OperationPrompt.Parameters:
+            {
+                var dialog = await MethodParameterDialog.ShowAsync(dialogService, method);
+                var dialogResult = await dialog.Result;
+                if (dialogResult is null || dialogResult.Canceled)
+                {
+                    return OperationOutcome.Cancelled;
+                }
+
+                parameters = dialogResult.Data as object?[];
+                break;
+            }
+            case OperationPrompt.Confirmation:
+            {
+                var dialog = await MethodConfirmationDialog.ShowAsync(dialogService, method);
+                var dialogResult = await dialog.Result;
+                if (dialogResult is null || dialogResult.Canceled)
+                {
+                    return OperationOutcome.Cancelled;
+                }
+
+                break;
+            }
+        }
+
+        if (lifetime.IsCancellationRequested)
+        {
+            return OperationOutcome.Cancelled;
+        }
+
+        object? result;
         try
         {
-            object?[]? parameters = null;
-            switch (GetPrompt(method))
-            {
-                case OperationPrompt.Parameters:
-                {
-                    var dialog = await MethodParameterDialog.ShowAsync(dialogService, method);
-                    var dialogResult = await dialog.Result;
-                    if (dialogResult is null || dialogResult.Canceled)
-                    {
-                        return OperationOutcome.Cancelled;
-                    }
-
-                    parameters = dialogResult.Data as object?[];
-                    break;
-                }
-                case OperationPrompt.Confirmation:
-                {
-                    var dialog = await MethodConfirmationDialog.ShowAsync(dialogService, method);
-                    var dialogResult = await dialog.Result;
-                    if (dialogResult is null || dialogResult.Canceled)
-                    {
-                        return OperationOutcome.Cancelled;
-                    }
-
-                    break;
-                }
-            }
-
-            if (lifetime.IsCancellationRequested)
-            {
-                return OperationOutcome.Cancelled;
-            }
-
             // Navigating away must not abort an operation that a device has already started.
-            var result = await method.InvokeAsync(parameters, serviceProvider, CancellationToken.None);
-            if (result is not null && !lifetime.IsCancellationRequested)
-            {
-                await MethodResultDialog.ShowAsync(dialogService, method.Title, result);
-            }
-
-            return OperationOutcome.Succeeded;
+            result = await method.InvokeAsync(parameters, serviceProvider, CancellationToken.None);
         }
         catch (OperationCanceledException)
         {
@@ -106,5 +104,12 @@ public static class OperationInvoker
 
             return OperationOutcome.Failed;
         }
+
+        if (result is not null && !lifetime.IsCancellationRequested)
+        {
+            await MethodResultDialog.ShowAsync(dialogService, method.Title, result);
+        }
+
+        return OperationOutcome.Succeeded;
     }
 }
