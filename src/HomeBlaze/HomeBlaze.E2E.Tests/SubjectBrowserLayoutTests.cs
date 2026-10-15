@@ -434,15 +434,16 @@ public class SubjectBrowserLayoutTests
     }
 
     [Theory]
-    [InlineData("https://example.com/page", true)]
-    [InlineData("javascript:alert(1)", false)]
-    public async Task WhenAStateValueIsAUri_ThenOnlyAWebAddressGetsALink(string address, bool isLink)
+    [InlineData("https://example.com/page", UriKind.Absolute, true)]
+    [InlineData("javascript:alert(1)", UriKind.Absolute, false)]
+    [InlineData("page", UriKind.Relative, false)]
+    public async Task WhenAStateValueIsAUri_ThenOnlyAWebAddressGetsALink(string address, UriKind kind, bool isLink)
     {
         // Arrange
         var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
         try
         {
-            subject.Website = new Uri(address);
+            subject.Website = new Uri(address, kind);
 
             // Act
             var page = await OpenAsync($"browser/{name}", 1280, 720, paneCount: 2);

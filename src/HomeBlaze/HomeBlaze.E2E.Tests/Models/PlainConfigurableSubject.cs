@@ -46,6 +46,7 @@ public partial class PlainConfigurableSubject : IConfigurable
     [SubjectPath(typeof(IInterceptorSubject))]
     public partial string? LinkedPath { get; set; }
 
+    /// <summary>A web address, which the property pane links to.</summary>
     [State]
     public partial Uri? Website { get; set; }
 
