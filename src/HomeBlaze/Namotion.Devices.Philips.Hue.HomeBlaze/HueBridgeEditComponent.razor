@@ -2,31 +2,23 @@
 @implements ISubjectEditComponent
 
 <MudForm>
-    <MudTextField @bind-Value="_bridgeId"
+    <MudTextField @bind-Value="_bridgeId" @bind-Value:after="OnFieldChanged"
                   Label="Bridge ID"
-                  Immediate="true"
-                  OnKeyUp="OnFieldChanged" />
+                  Immediate="true" />
 
-    <MudTextField @bind-Value="_appKey"
+    <MudTextField @bind-Value="_appKey" @bind-Value:after="OnFieldChanged"
                   Label="App Key"
                   Required="true"
                   RequiredError="App Key is required"
                   InputType="InputType.Password"
                   Immediate="true"
-                  OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
-    <MudNumericField @bind-Value="_pollingIntervalMs"
-                     Label="Polling Interval (ms)"
-                     Min="100"
-                     Max="60000"
-                     Class="mt-4" />
+    <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Polling Interval (seconds)" Min="HueBridge.MinimumIntervalSeconds" Max="HueBridge.MaximumIntervalSeconds" Class="mt-4" />
 
-    <MudNumericField @bind-Value="_retryIntervalSeconds"
-                     Label="Retry Interval (seconds)"
-                     Min="5"
-                     Max="300"
-                     Class="mt-4" />
+    <MudNumericField @bind-Value="_retryIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Retry Interval (seconds)" Min="HueBridge.MinimumIntervalSeconds" Max="HueBridge.MaximumIntervalSeconds" Class="mt-4" />
 
     <MudDivider Class="my-4" />
 
@@ -56,18 +48,21 @@
 
     private string? _bridgeId;
     private string? _appKey;
-    private int _pollingIntervalMs;
-    private int _retryIntervalSeconds;
+    private int _pollingIntervalSeconds = HueBridge.DefaultPollingIntervalSeconds;
+    private int _retryIntervalSeconds = HueBridge.DefaultRetryIntervalSeconds;
 
     private string? _originalBridgeId;
     private string? _originalAppKey;
-    private int _originalPollingIntervalMs;
-    private int _originalRetryIntervalSeconds;
+    private int _originalPollingIntervalSeconds = HueBridge.DefaultPollingIntervalSeconds;
+    private int _originalRetryIntervalSeconds = HueBridge.DefaultRetryIntervalSeconds;
 
-    public bool IsValid => !string.IsNullOrWhiteSpace(_appKey);
+    public bool IsValid => !string.IsNullOrWhiteSpace(_appKey) &&
+                           _pollingIntervalSeconds is >= HueBridge.MinimumIntervalSeconds and <= HueBridge.MaximumIntervalSeconds &&
+                           _retryIntervalSeconds is >= HueBridge.MinimumIntervalSeconds and <= HueBridge.MaximumIntervalSeconds;
+
     public bool IsDirty => _bridgeId != _originalBridgeId ||
                            _appKey != _originalAppKey ||
-                           _pollingIntervalMs != _originalPollingIntervalMs ||
+                           _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
                            _retryIntervalSeconds != _originalRetryIntervalSeconds;
 
     public event Action<bool>? IsValidChanged;
@@ -79,23 +74,18 @@
         {
             _bridgeId = BridgeSubject.BridgeId;
             _appKey = BridgeSubject.AppKey;
-            _pollingIntervalMs = (int)BridgeSubject.PollingInterval.TotalMilliseconds;
-            _retryIntervalSeconds = (int)BridgeSubject.RetryInterval.TotalSeconds;
-
-            _originalBridgeId = _bridgeId;
-            _originalAppKey = _appKey;
-            _originalPollingIntervalMs = _pollingIntervalMs;
-            _originalRetryIntervalSeconds = _retryIntervalSeconds;
+            _pollingIntervalSeconds = LoadInterval(BridgeSubject.PollingInterval, HueBridge.DefaultPollingIntervalSeconds);
+            _retryIntervalSeconds = LoadInterval(BridgeSubject.RetryInterval, HueBridge.DefaultRetryIntervalSeconds);
         }
-        else
-        {
-            _pollingIntervalMs = 500;
-            _retryIntervalSeconds = 30;
 
-            _originalPollingIntervalMs = _pollingIntervalMs;
-            _originalRetryIntervalSeconds = _retryIntervalSeconds;
-        }
+        _originalBridgeId = _bridgeId;
+        _originalAppKey = _appKey;
+        _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+        _originalRetryIntervalSeconds = _retryIntervalSeconds;
     }
+
+    private static int LoadInterval(TimeSpan stored, int defaultSeconds) =>
+        (int)HueBridge.GetEffectiveInterval(stored, defaultSeconds).TotalSeconds;
 
     private void OnFieldChanged()
     {
@@ -109,12 +99,12 @@
         {
             BridgeSubject.BridgeId = _bridgeId;
             BridgeSubject.AppKey = _appKey;
-            BridgeSubject.PollingInterval = TimeSpan.FromMilliseconds(_pollingIntervalMs);
+            BridgeSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
             BridgeSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
 
             _originalBridgeId = _bridgeId;
             _originalAppKey = _appKey;
-            _originalPollingIntervalMs = _pollingIntervalMs;
+            _originalPollingIntervalSeconds = _pollingIntervalSeconds;
             _originalRetryIntervalSeconds = _retryIntervalSeconds;
 
             IsDirtyChanged?.Invoke(false);

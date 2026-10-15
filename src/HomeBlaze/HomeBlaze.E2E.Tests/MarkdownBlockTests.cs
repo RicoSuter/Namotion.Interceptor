@@ -678,6 +678,64 @@ public class MarkdownBlockTests
     }
 
     [Fact]
+    public async Task WhenBlockIsSavedInItsDialogAndThenThePageIsSaved_ThenTheSaveSucceedsAndEachRegionHasOneDecoration()
+    {
+        // Arrange
+        const string source =
+            "---\ntitle: Scratch\n---\n\n# Scratch\n\n" +
+            ":: HomeBlaze.Samples.Motor#scratchmotor Name=ScratchMotor TargetSpeed=1200 SimulationInterval=00:00:01\n" +
+            "::\n\nSpeed {{ scratchmotor/TargetSpeed }}\n";
+        await WriteScratchPageAsync(source);
+
+        var page = await OpenPageAsync(ScratchPage);
+
+        // The edit menu is prerendered, and a click before the circuit is connected is lost.
+        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await SelectEditModeAsync(page, "Split");
+
+        // The editor only knows its block regions once the decorations are applied.
+        await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+        var headLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "HomeBlaze.Samples.Motor#scratchmotor" });
+        await Assertions.Expect(headLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await headLine.ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit scratchmotor" }).ClickAsync();
+
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await dialog.GetByLabel("Target Speed (RPM)").FillAsync("1500");
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+
+        var writtenHeadLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "TargetSpeed=1500" });
+        await Assertions.Expect(writtenHeadLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // The notification of the dialog is closed, because a notification with the same text is not shown twice.
+        var savedNotification = page.Locator(".mud-snackbar").Filter(new() { HasText = "Configuration saved." });
+        await Assertions.Expect(savedNotification).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await savedNotification.GetByRole(AriaRole.Button).ClickAsync();
+        await Assertions.Expect(savedNotification).ToHaveCountAsync(0, new() { Timeout = 30000 });
+
+        // Act
+        await page.Locator("[data-testid='save-button'] button").ClickAsync();
+
+        // Assert: the notification comes after the last refresh of the decorations. Refreshes that overlapped
+        // would each have added their decorations, and one of them would have stayed beside the later ones.
+        await Assertions.Expect(savedNotification).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(page.GetByText("Error saving configuration")).ToHaveCountAsync(0);
+
+        var decorationCounts = await page.EvaluateAsync<int[]>(
+            """
+            () => {
+                const decorations = blazorMonaco.editor.getEditor('markdown-editor').getModel().getAllDecorations();
+                return ['subject-block-decoration', 'expression-decoration']
+                    .map(className => decorations.filter(decoration => decoration.options.className === className).length);
+            }
+            """);
+        Assert.Equal([1, 1], decorationCounts);
+
+        var written = (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(ScratchPage))).Replace("\r\n", "\n");
+        Assert.Equal(source.Replace("TargetSpeed=1200", "TargetSpeed=1500"), written);
+    }
+
+    [Fact]
     public async Task WhenNameInTheCreateDialogIsNoValidBlockName_ThenCreateStaysDisabledUntilTheNameIsCorrected()
     {
         // Arrange

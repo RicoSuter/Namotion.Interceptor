@@ -29,7 +29,9 @@ public partial class MyStromSwitch : BackgroundService,
     IPowerRelay,
     IPowerMeter,
     ITemperatureSensor,
-    INetworkAdapter
+    INetworkAdapter,
+    INetworkHost,
+    IUptimeState
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MyStromSwitch> _logger;
@@ -79,7 +81,6 @@ public partial class MyStromSwitch : BackgroundService,
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    [State(Position = 400)]
     [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
 
