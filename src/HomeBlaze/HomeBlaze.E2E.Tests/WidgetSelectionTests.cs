@@ -137,6 +137,20 @@ public class WidgetSelectionTests
         await Assertions.Expect(page.GetWidgetActionBar()).ToHaveCountAsync(0);
     }
 
+    [Fact]
+    public async Task WhenAWidgetShowsNothing_ThenItTakesNoRoomAndNoFocus()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+
+        // Act
+        var wrapper = page.Locator(".subject-component-wrapper.selectable[aria-label='Value map']");
+
+        // Assert: a hidden element is no tab stop.
+        await Assertions.Expect(wrapper).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(wrapper).ToHaveCSSAsync("display", "none");
+    }
+
     [Theory]
     [InlineData("switch")]
     [InlineData("slider")]

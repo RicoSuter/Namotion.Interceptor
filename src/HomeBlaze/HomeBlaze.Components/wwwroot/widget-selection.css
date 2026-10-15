@@ -10,6 +10,11 @@
     outline-offset: 1px;
 }
 
+/* A widget that shows nothing, such as a ValueMap, would otherwise be an invisible tab stop. */
+.subject-component-wrapper.selectable:empty {
+    display: none;
+}
+
 .subject-component-wrapper.selectable > * {
     pointer-events: none;
 }
