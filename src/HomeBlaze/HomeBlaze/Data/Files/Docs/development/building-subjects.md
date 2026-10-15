@@ -1142,7 +1142,7 @@ public bool IsEditing { get; set; }
 
 ### Auto Edit Button
 
-In the Inline and Split modes of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. Every widget block of a page can be selected. When the widget has an Edit component or configuration properties, the bar has an edit button. A widget without either, such as a `ValueList`, gets only the outline, and the bar when it has a parent to select:
+In the Inline and Split modes of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. Every widget block of a page that shows something can be selected. A block that shows nothing, such as a `ValueMap`, is hidden while the page is edited inline and is edited in the [page editor](../administration/pages.md#editing-in-the-page-editor). When the widget has an Edit component or configuration properties, the bar has an edit button. A widget without either, such as a `ValueList`, gets only the outline, and the bar when it has a parent to select:
 
 - Clicking it opens the `SubjectEditDialog` with the Edit component, or with the generated properties editor without one
 - A widget inside another one has an arrow up button that selects the widget around it, and Escape or a click on the page clears the selection
