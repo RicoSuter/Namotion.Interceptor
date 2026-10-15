@@ -46,7 +46,17 @@ public partial class InstallationAssembly : ITitleProvider, IIconProvider
 
     internal InstallationAssembly(InventoryAssembly entry)
     {
+        // The key never changes for a reused instance (it is the dictionary key in InstallationRepository.Assemblies),
+        // so it is only ever set here, not in Apply.
         _title = entry.Key;
+        Apply(entry);
+    }
+
+    /// <summary>
+    /// Refreshes the values of a reused instance from a newly built inventory entry with the same key.
+    /// </summary>
+    internal void Apply(InventoryAssembly entry)
+    {
         Name = entry.Name;
         Version = entry.Version;
         Commit = entry.Commit;

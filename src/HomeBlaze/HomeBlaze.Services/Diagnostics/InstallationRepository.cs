@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -20,7 +21,26 @@ public partial class InstallationRepository : ITitleProvider, IIconProvider
     public string IconName => "Source";
 
     [Derived]
-    public string? IconColor => HasMismatch || Assemblies.Values.Any(assembly => assembly.HasMismatch) ? "Warning" : null;
+    public string? IconColor
+    {
+        get
+        {
+            if (HasMismatch)
+            {
+                return "Warning";
+            }
+
+            foreach (var assembly in Assemblies.Values)
+            {
+                if (assembly.HasMismatch)
+                {
+                    return "Warning";
+                }
+            }
+
+            return null;
+        }
+    }
 
     [State(Position = 400)]
     public partial string Name { get; internal set; }
@@ -53,26 +73,51 @@ public partial class InstallationRepository : ITitleProvider, IIconProvider
         HasMismatch = entry.HasMismatch;
 
         var current = Assemblies;
+        if (HasSameKeys(current, entry.Assemblies))
+        {
+            // No key change: update the existing subjects in place instead of allocating a replacement dictionary.
+            foreach (var item in entry.Assemblies)
+            {
+                current[item.Key].Apply(item);
+            }
+
+            return;
+        }
+
         var assemblies = new Dictionary<string, InstallationAssembly>(entry.Assemblies.Length, StringComparer.Ordinal);
-        var isChanged = entry.Assemblies.Length != current.Count;
         foreach (var item in entry.Assemblies)
         {
             if (current.TryGetValue(item.Key, out var assembly))
             {
-                assembly.HasMismatch = item.HasMismatch;
+                assembly.Apply(item);
             }
             else
             {
                 assembly = new InstallationAssembly(item);
-                isChanged = true;
             }
 
             assemblies[item.Key] = assembly;
         }
 
-        if (isChanged)
+        // The published dictionary is read concurrently, so it is replaced, never mutated.
+        Assemblies = assemblies;
+    }
+
+    private static bool HasSameKeys(Dictionary<string, InstallationAssembly> current, ImmutableArray<InventoryAssembly> entries)
+    {
+        if (current.Count != entries.Length)
         {
-            Assemblies = assemblies;
+            return false;
         }
+
+        foreach (var item in entries)
+        {
+            if (!current.ContainsKey(item.Key))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

@@ -1,13 +1,14 @@
-using System.Collections.Immutable;
 using HomeBlaze.Services.Diagnostics;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace HomeBlaze.Services.Tests.Diagnostics;
 
 public class InstallationRepositoryTests
 {
-    private static InventoryAssembly CreateAssembly(string name, bool hasMismatch = false) =>
-        new(name, name, "Default", "1.0.0", null, hasMismatch);
+    private static InventoryAssembly CreateAssembly(string name, bool hasMismatch = false, string version = "1.0.0", string? commit = null) =>
+        new(name, name, "Default", version, commit, hasMismatch);
 
     private static InventoryRepository CreateEntry(bool hasMismatch, params InventoryAssembly[] assemblies) =>
         new("repo", "https://github.com/owner/repo", hasMismatch, [.. assemblies]);
@@ -69,5 +70,70 @@ public class InstallationRepositoryTests
         // Assert
         Assert.Equal("Lib (Plugin)", assembly.Title);
         Assert.Equal("Plugin", assembly.LoadContext);
+    }
+
+    [Fact]
+    public void WhenAnAssemblyVersionChanges_ThenTheReusedSubjectShowsTheNewVersion()
+    {
+        // Arrange
+        var repository = new InstallationRepository("repo", null);
+        repository.Apply(CreateEntry(false, CreateAssembly("A")));
+        var first = repository.Assemblies["A"];
+
+        // Act
+        repository.Apply(CreateEntry(false, CreateAssembly("A", version: "2.0.0", commit: "abcdef0")));
+
+        // Assert
+        Assert.Same(first, repository.Assemblies["A"]);
+        Assert.Equal("2.0.0", first.Version);
+        Assert.Equal("abcdef0", first.Commit);
+    }
+
+    [Fact]
+    public void WhenAnAssemblyIsRemoved_ThenReplacesTheDictionary()
+    {
+        // Arrange
+        var repository = new InstallationRepository("repo", null);
+        repository.Apply(CreateEntry(false, CreateAssembly("A"), CreateAssembly("B")));
+        var assemblies = repository.Assemblies;
+
+        // Act
+        repository.Apply(CreateEntry(false, CreateAssembly("A")));
+
+        // Assert
+        Assert.NotSame(assemblies, repository.Assemblies);
+        Assert.Equal(new[] { "A" }, repository.Assemblies.Keys);
+    }
+
+    [Fact]
+    public void WhenKeysChangeWithTheSameCount_ThenReplacesTheDictionary()
+    {
+        // Arrange
+        var repository = new InstallationRepository("repo", null);
+        repository.Apply(CreateEntry(false, CreateAssembly("A"), CreateAssembly("B")));
+        var assemblies = repository.Assemblies;
+
+        // Act
+        repository.Apply(CreateEntry(false, CreateAssembly("A"), CreateAssembly("C")));
+
+        // Assert
+        Assert.NotSame(assemblies, repository.Assemblies);
+        Assert.Equal(new[] { "A", "C" }, repository.Assemblies.Keys);
+    }
+
+    [Fact]
+    public void WhenTrackedAndAChildAssemblyHasAMismatch_ThenIconColorIsWarning()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var repository = new InstallationRepository("repo", null);
+        ((IInterceptorSubject)repository).Context.AddFallbackContext(context);
+
+        // Act
+        repository.Apply(CreateEntry(false, CreateAssembly("A", hasMismatch: true)));
+
+        // Assert
+        Assert.False(repository.HasMismatch);
+        Assert.Equal("Warning", repository.IconColor);
     }
 }
