@@ -22,7 +22,7 @@ internal static class MarkdownPageLayout
     /// <summary>Gets the layout description of a type, or null when it is no layout type.</summary>
     public static LayoutType? GetLayoutType(Type type) => LayoutTypes.GetOrAdd(type, static key =>
     {
-        if (key.GetCustomAttribute<PageLayoutAttribute>(inherit: false) is not { } attribute)
+        if (key.GetCustomAttribute<PageLayoutAttribute>(inherit: false) is null)
         {
             return null;
         }
@@ -30,14 +30,20 @@ internal static class MarkdownPageLayout
         var properties = key
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is { IsSecret: false })
-            .ToDictionary(property => property.Name, property => property.PropertyType, StringComparer.Ordinal);
+            .ToList();
 
         return new LayoutType(
-            properties,
-            attribute.ReferencePathProperty,
-            (attribute.LinkProperties ?? []).ToHashSet(StringComparer.Ordinal),
-            (attribute.MediaProperties ?? []).ToHashSet(StringComparer.Ordinal));
+            properties.ToDictionary(property => property.Name, property => property.PropertyType, StringComparer.Ordinal),
+            GetNamesWith<PageLayoutReferenceAttribute>(properties),
+            GetNamesWith<PageLayoutLinkAttribute>(properties),
+            GetNamesWith<PageLayoutMediaAttribute>(properties));
     });
+
+    private static HashSet<string> GetNamesWith<TAttribute>(List<PropertyInfo> properties) where TAttribute : Attribute =>
+        properties
+            .Where(property => property.GetCustomAttribute<TAttribute>(true) is not null)
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Finds the layout blocks of the page. A block inside a block that is no layout block is never one: it belongs to
@@ -165,7 +171,7 @@ internal static class MarkdownPageLayout
             return false;
         }
 
-        if (layoutType.ReferencePathProperty is { } property)
+        foreach (var property in layoutType.ReferenceProperties)
         {
             references?.Add(subject[property] is JsonValue path && path.TryGetValue<string>(out var text) ? text : null);
         }
@@ -194,8 +200,8 @@ internal static class MarkdownPageLayout
         (!layoutType.LinkProperties.Contains(key) || value is null || MarkdownWriteRules.IsSafeUrl(value));
 
     /// <summary>
-    /// Gets the reference paths that a layout block configures: its own, null when its type has a reference path
-    /// property and the block sets no path, and those of the subjects nested in its configuration.
+    /// Gets the reference paths that a layout block configures: one per reference property of its type, null when the
+    /// block sets no path for it, and those of the subjects nested in its configuration.
     /// </summary>
     public static List<string?> GetReferencePaths(MarkdownBlock block, Type type, Func<string, Type?> findType)
     {
@@ -206,7 +212,7 @@ internal static class MarkdownPageLayout
         }
 
         var configuration = block.ConfigurationJson is null ? null : ParseConfiguration(block);
-        if (layoutType.ReferencePathProperty is { } property)
+        foreach (var property in layoutType.ReferenceProperties)
         {
             references.Add(
                 block.Head?.Arguments.FirstOrDefault(argument => argument.Key == property) is { } argument ? argument.Value :
@@ -221,10 +227,10 @@ internal static class MarkdownPageLayout
         return references;
     }
 
-    /// <summary>The non-secret configuration properties of a layout type, its reference path property and its link and media properties.</summary>
+    /// <summary>The non-secret configuration properties of a layout type and the names of its reference, link and media properties.</summary>
     internal sealed record LayoutType(
         IReadOnlyDictionary<string, Type> ConfigurationProperties,
-        string? ReferencePathProperty,
+        IReadOnlySet<string> ReferenceProperties,
         IReadOnlySet<string> LinkProperties,
         IReadOnlySet<string> MediaProperties);
 }

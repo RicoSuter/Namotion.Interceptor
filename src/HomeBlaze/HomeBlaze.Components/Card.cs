@@ -13,7 +13,7 @@ namespace HomeBlaze.Components;
 [Description("A titled card that wraps page content")]
 [DisplayName("Card")]
 [SubjectIcon("WebAsset")]
-[PageLayout(LinkProperties = [nameof(Href)], MediaProperties = [nameof(Image)])]
+[PageLayout]
 [InterceptorSubject]
 public partial class Card : IConfigurable, ITitleProvider
 {
@@ -52,6 +52,7 @@ public partial class Card : IConfigurable, ITitleProvider
     /// a route of the application, or a web address. It has no effect on a card without a title.
     /// </summary>
     [Configuration]
+    [PageLayoutLink]
     public partial string? Href { get; set; }
 
     /// <summary>
@@ -70,6 +71,7 @@ public partial class Card : IConfigurable, ITitleProvider
     /// Address of a picture shown between the header and the body. Written like <see cref="Href"/>.
     /// </summary>
     [Configuration]
+    [PageLayoutMedia]
     public partial string? Image { get; set; }
 
     /// <summary>

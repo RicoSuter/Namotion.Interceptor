@@ -1041,15 +1041,20 @@ Use this for internal subjects that are part of a parent subject's implementatio
 
 ### Page Layout Types
 
-A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks create no subject that acts on anything and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). A type that refers to an existing subject names the property of that path, so the path is checked:
+A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks create no subject that acts on anything and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). Three attributes mark special properties of such a type: `[PageLayoutReference]` a property that holds the path of an existing subject, so the path is checked, `[PageLayoutLink]` one that holds a link, so only safe addresses are allowed, and `[PageLayoutMedia]` one that loads content from an address, such as a picture, so a block that sets it is no layout block:
 
 ```csharp
-[PageLayout(ReferencePathProperty = nameof(Path))]
+[PageLayout]
 [InterceptorSubject]
 public partial class Widget : ITitleProvider, IConfigurable
+{
+    [Configuration]
+    [PageLayoutReference]
+    public partial string Path { get; set; }
+}
 ```
 
-Name the properties that hold a link with `LinkProperties`, so only safe addresses are allowed, and those that load content from an address, such as a picture, with `MediaProperties`, so a block that sets one is no layout block. Mark only types whose configuration is plain values and that do nothing but show content.
+Mark only types whose configuration is plain values and that do nothing but show content.
 
 ### Properties Shown on Pages
 

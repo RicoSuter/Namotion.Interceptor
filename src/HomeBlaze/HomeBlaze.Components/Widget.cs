@@ -16,7 +16,7 @@ namespace HomeBlaze.Components;
 [Description("References another subject by path and renders its widget")]
 [DisplayName("Widget")]
 [SubjectIcon("Widgets")]
-[PageLayout(ReferencePathProperty = nameof(Path))]
+[PageLayout]
 [InterceptorSubject]
 public partial class Widget : ITitleProvider, IConfigurable
 {
@@ -31,6 +31,7 @@ public partial class Widget : ITitleProvider, IConfigurable
     /// the name of a block on that page, or from the widget itself when it is not on a page.
     /// </summary>
     [Configuration]
+    [PageLayoutReference]
     public partial string Path { get; set; }
 
     public string? Title => null;
