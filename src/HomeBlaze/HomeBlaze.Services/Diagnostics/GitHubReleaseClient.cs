@@ -15,13 +15,14 @@ internal sealed class GitHubRequestException(string message, HttpStatusCode stat
 }
 
 /// <summary>
-/// Reads the latest release and branch comparisons from the unauthenticated GitHub REST API. Requests repeat the last
-/// ETag, and GitHub does not count a <c>304 Not Modified</c> answer against the rate limit. Not thread-safe; the update
-/// loop is its only caller.
+/// Reads the latest release and branch comparisons from the unauthenticated GitHub REST API. Requests repeat the
+/// last ETag so an unchanged answer is not downloaded and parsed again. Not thread-safe; the update loop is its
+/// only caller.
 /// </summary>
 internal sealed class GitHubReleaseClient
 {
     private static readonly Uri ApiBaseAddress = new("https://api.github.com/");
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
     private readonly Func<HttpClient> _createHttpClient;
     private readonly string _userAgent;
@@ -59,10 +60,14 @@ internal sealed class GitHubReleaseClient
     /// </summary>
     public async Task<LatestRelease?> GetLatestReleaseAsync(string owner, string name, CancellationToken cancellationToken)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(RequestTimeout);
+        var requestToken = timeoutCts.Token;
+
         var requestUri = new Uri(ApiBaseAddress, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/releases/latest");
         var cached = _release is { } release && release.RequestUri == requestUri ? release : null;
 
-        using var response = await SendAsync(requestUri, cached?.ETag, cancellationToken);
+        using var response = await SendAsync(requestUri, cached?.ETag, requestToken);
         if (response.StatusCode == HttpStatusCode.NotModified && cached is not null)
         {
             return cached.Value;
@@ -74,10 +79,15 @@ internal sealed class GitHubReleaseClient
             return null;
         }
 
-        using var document = await ReadJsonAsync(response, cancellationToken);
+        using var document = await ReadJsonAsync(response, requestToken);
         var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("The GitHub release answer is not a JSON object.");
+        }
+
         var value = new LatestRelease(
-            GetRequiredString(root, "tag_name").TrimStart('v', 'V'),
+            NormalizeVersion(GetRequiredString(root, "tag_name")),
             root.TryGetProperty("published_at", out var publishedAt) &&
             publishedAt.ValueKind == JsonValueKind.String &&
             publishedAt.TryGetDateTimeOffset(out var date) ? date : null,
@@ -92,20 +102,29 @@ internal sealed class GitHubReleaseClient
     /// </summary>
     public async Task<BranchComparison> CompareWithBranchAsync(string owner, string name, string commit, string branch, CancellationToken cancellationToken)
     {
-        // per_page=1 keeps the commit list short; ahead_by still counts all commits.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(RequestTimeout);
+        var requestToken = timeoutCts.Token;
+
+        // The files list is only on the first page; page 2 keeps the answer small and still has ahead_by.
         var requestUri = new Uri(ApiBaseAddress,
-            $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/compare/{Uri.EscapeDataString(commit)}...{Uri.EscapeDataString(branch)}?per_page=1");
+            $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/compare/{Uri.EscapeDataString(commit)}...{Uri.EscapeDataString(branch)}?page=2&per_page=1");
         var cached = _comparison is { } comparison && comparison.RequestUri == requestUri ? comparison : null;
 
-        using var response = await SendAsync(requestUri, cached?.ETag, cancellationToken);
+        using var response = await SendAsync(requestUri, cached?.ETag, requestToken);
         if (response.StatusCode == HttpStatusCode.NotModified && cached is not null)
         {
             return cached.Value;
         }
 
-        using var document = await ReadJsonAsync(response, cancellationToken);
+        using var document = await ReadJsonAsync(response, requestToken);
         var root = document.RootElement;
-        if (!root.TryGetProperty("ahead_by", out var aheadBy) || !aheadBy.TryGetInt32(out var commitsBehind))
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("The GitHub comparison answer is not a JSON object.");
+        }
+
+        if (!root.TryGetProperty("ahead_by", out var aheadBy) || aheadBy.ValueKind != JsonValueKind.Number || !aheadBy.TryGetInt32(out var commitsBehind))
         {
             throw new JsonException("The GitHub comparison has no ahead_by count.");
         }
@@ -133,12 +152,36 @@ internal sealed class GitHubReleaseClient
     {
         if (!response.IsSuccessStatusCode)
         {
-            throw new GitHubRequestException(
-                $"GitHub answered {(int)response.StatusCode} {response.ReasonPhrase}.", response.StatusCode, GetRetryAfter(response));
+            throw new GitHubRequestException(BuildErrorMessage(response), response.StatusCode, GetRetryAfter(response));
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Describes a failed answer for display. GitHub's rate limit is reported distinctly from other failures
+    /// because the status code and reason phrase alone do not explain it to a person reading the message.
+    /// </summary>
+    private static string BuildErrorMessage(HttpResponseMessage response)
+    {
+        if (IsRateLimited(response))
+        {
+            return "GitHub rate limit reached.";
+        }
+
+        return response.ReasonPhrase is { Length: > 0 } reason
+            ? $"GitHub answered {(int)response.StatusCode} {reason}."
+            : $"GitHub answered {(int)response.StatusCode}.";
+    }
+
+    private static bool IsRateLimited(HttpResponseMessage response)
+    {
+        var remainingIsZero = response.Headers.TryGetValues("x-ratelimit-remaining", out var remaining) && remaining.FirstOrDefault() == "0";
+        var retryAfterOnLimitStatus = response.Headers.RetryAfter is not null &&
+            (response.StatusCode == HttpStatusCode.Forbidden || response.StatusCode == HttpStatusCode.TooManyRequests);
+
+        return remainingIsZero || retryAfterOnLimitStatus;
     }
 
     private TimeSpan? GetRetryAfter(HttpResponseMessage response)
@@ -164,6 +207,15 @@ internal sealed class GitHubReleaseClient
 
         return retryAfter > TimeSpan.Zero ? retryAfter : null;
     }
+
+    /// <summary>
+    /// Strips a single leading <c>v</c> or <c>V</c> from a tag name, but only when it is immediately followed by a
+    /// digit, so a tag such as <c>version-1</c> is left untouched.
+    /// </summary>
+    private static string NormalizeVersion(string tagName) =>
+        tagName.Length > 1 && (tagName[0] == 'v' || tagName[0] == 'V') && char.IsAsciiDigit(tagName[1])
+            ? tagName[1..]
+            : tagName;
 
     private static string GetRequiredString(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String &&
