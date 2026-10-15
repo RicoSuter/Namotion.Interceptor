@@ -19,15 +19,9 @@ public class HomeBlazeInstallationTests
     internal static HomeBlazeInstallation CreateInstallation(
         BuildInformation build,
         Func<HttpClient>? createHttpClient = null,
+        TimeProvider? timeProvider = null,
         DeveloperModeService? developerMode = null) =>
-        CreateInstallation(build, createHttpClient, TimeProvider.System, developerMode);
-
-    internal static HomeBlazeInstallation CreateInstallation(
-        BuildInformation build,
-        Func<HttpClient>? createHttpClient,
-        TimeProvider timeProvider,
-        DeveloperModeService? developerMode = null) =>
-        new(build, "Production", createHttpClient ?? CreateNoReleaseClient, developerMode ?? new DeveloperModeService(), timeProvider, NullLogger.Instance);
+        new(build, "Production", createHttpClient ?? CreateNoReleaseClient, developerMode ?? new DeveloperModeService(), timeProvider ?? TimeProvider.System, NullLogger.Instance);
 
     private static HttpClient CreateNoReleaseClient() =>
         new(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
@@ -46,7 +40,7 @@ public class HomeBlazeInstallationTests
     }
 
     [Fact]
-    public void WhenAReleaseIsCreated_ThenLinksPointToTheReleaseAndTheCommit()
+    public void WhenAReleaseIsCreated_ThenTheDefaultsAndLinksAreSet()
     {
         // Act
         var installation = CreateInstallation(CreateBuild());

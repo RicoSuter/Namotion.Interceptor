@@ -3,15 +3,12 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using HomeBlaze.Services.Diagnostics;
 using Xunit;
+using static HomeBlaze.Services.Tests.Diagnostics.FakeHttpMessageHandler;
 
 namespace HomeBlaze.Services.Tests.Diagnostics;
 
 public class GitHubReleaseClientTests
 {
-    private const string ReleaseJson = """
-        { "tag_name": "v0.6.0", "published_at": "2026-10-20T08:00:00Z", "html_url": "https://github.com/owner/repo/releases/tag/v0.6.0" }
-        """;
-
     private const string RateLimitMessage = "GitHub rate limit reached.";
 
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);

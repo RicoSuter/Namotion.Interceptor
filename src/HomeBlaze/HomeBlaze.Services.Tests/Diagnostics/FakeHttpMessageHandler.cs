@@ -8,6 +8,13 @@ namespace HomeBlaze.Services.Tests.Diagnostics;
 /// </summary>
 internal sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
 {
+    /// <summary>
+    /// A latest release answer for version 0.6.0 of <c>owner/repo</c>.
+    /// </summary>
+    public const string ReleaseJson = """
+        { "tag_name": "v0.6.0", "published_at": "2026-10-20T08:00:00Z", "html_url": "https://github.com/owner/repo/releases/tag/v0.6.0" }
+        """;
+
     public List<HttpRequestMessage> Requests { get; } = [];
 
     public static HttpResponseMessage Json(string json) =>

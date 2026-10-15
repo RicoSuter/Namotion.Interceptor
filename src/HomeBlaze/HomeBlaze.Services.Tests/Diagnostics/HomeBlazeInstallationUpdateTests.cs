@@ -3,16 +3,13 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Diagnostics;
 using Namotion.Interceptor.Testing;
 using Xunit;
+using static HomeBlaze.Services.Tests.Diagnostics.FakeHttpMessageHandler;
 using static HomeBlaze.Services.Tests.Diagnostics.HomeBlazeInstallationTests;
 
 namespace HomeBlaze.Services.Tests.Diagnostics;
 
 public class HomeBlazeInstallationUpdateTests
 {
-    private const string ReleaseJson = """
-        { "tag_name": "v0.6.0", "published_at": "2026-10-20T08:00:00Z", "html_url": "https://github.com/owner/repo/releases/tag/v0.6.0" }
-        """;
-
     [Fact]
     public async Task WhenANewerReleaseExists_ThenTheUpdateIsReported()
     {
@@ -93,7 +90,6 @@ public class HomeBlazeInstallationUpdateTests
         // Arrange
         var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
-        installation.UpdateCheckEnabled = true;
         installation.Status = ServiceStatus.Running;
 
         // Act
@@ -130,7 +126,6 @@ public class HomeBlazeInstallationUpdateTests
         ]);
         var handler = new FakeHttpMessageHandler(_ => responses.Dequeue());
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
-        installation.UpdateCheckEnabled = true;
         await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
 
         // Act
@@ -246,7 +241,6 @@ public class HomeBlazeInstallationUpdateTests
         });
         var timeProvider = new TestTimeProvider(DateTimeOffset.UtcNow);
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
-        installation.UpdateCheckEnabled = true;
         installation.UpdateCheckInterval = TimeSpan.FromHours(48);
 
         await StartAndWaitUntilRunningAsync(installation);
@@ -281,7 +275,6 @@ public class HomeBlazeInstallationUpdateTests
         });
         var timeProvider = new TestTimeProvider(DateTimeOffset.UtcNow);
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
-        installation.UpdateCheckEnabled = true;
 
         await StartAndWaitUntilRunningAsync(installation);
         try
@@ -358,10 +351,10 @@ public class HomeBlazeInstallationUpdateTests
         timeProvider.Advance(TimeSpan.FromMinutes(30));
 
         // Act
-        installation.CheckForUpdates();
+        var exception = Record.Exception(installation.CheckForUpdates);
 
         // Assert
-        Assert.True(installation.HasPendingUpdateWakeUp);
+        Assert.Null(exception);
     }
 
     [Fact]
@@ -379,10 +372,10 @@ public class HomeBlazeInstallationUpdateTests
         installation.Status = ServiceStatus.Running;
 
         // Act
-        installation.CheckForUpdates();
+        var exception = Record.Exception(installation.CheckForUpdates);
 
         // Assert
-        Assert.True(installation.HasPendingUpdateWakeUp);
+        Assert.Null(exception);
     }
 
     private static HttpResponseMessage CreateTooManyRequests(TimeSpan retryAfter)
