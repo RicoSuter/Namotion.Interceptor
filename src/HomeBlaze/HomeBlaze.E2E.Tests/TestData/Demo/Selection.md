@@ -31,6 +31,9 @@ Body of the selection card.
 ::: Value Path=selectionmotor/TargetSpeed Label="Top Level Row"
 ::
 
+:: HomeBlaze.Components.Widget Path=selectionmotor
+::
+
 :: HomeBlaze.Components.ValueMap#selectionmap
 ::: Case Value=Stopped Text="Off"
 ::

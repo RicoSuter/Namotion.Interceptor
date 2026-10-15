@@ -1,5 +1,6 @@
-// MudBlazor renders the action bar of the selected widget at the end of the page, where Tab would reach it last. These
-// handlers put it into the focus order right after the widget, and keep the focus on a widget while the bar goes away.
+// Keyboard support of the selectable widgets in edit mode. MudBlazor renders the action bar of the selected widget at the end
+// of the page, where Tab would reach it last. The handlers below put it into the focus order right after the widget, and keep
+// the focus on a widget while the bar goes away.
 (() => {
     const tabbableSelector =
         'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), ' +
@@ -20,6 +21,19 @@
         const widget = bar && document.querySelector('.subject-component-wrapper.selected');
         return widget ? { bar, widget } : null;
     };
+
+    // Space on a focused widget acts as Enter, as on a button. The server cannot tell the widget from an input inside it, so
+    // only a Space whose target is the widget itself is replaced, before it scrolls the page or reaches the server.
+    document.addEventListener('keydown', event => {
+        if (event.key !== ' ' || !(event.target instanceof Element) ||
+            !event.target.matches('.subject-component-wrapper.selectable')) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+    }, true);
 
     // Capturing, so that the focus has moved before the page handles Escape and removes the bar that holds it.
     document.addEventListener('keydown', event => {

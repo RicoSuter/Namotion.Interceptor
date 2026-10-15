@@ -1,3 +1,4 @@
+@using System.Runtime.CompilerServices
 @using HomeBlaze.Components.Dialogs
 
 @inject SubjectComponentRegistry ComponentRegistry
@@ -16,8 +17,9 @@
         <div class="@(isSelected ? "subject-component-wrapper selectable selected" : isSelectable ? "subject-component-wrapper selectable" : "subject-component-wrapper")"
              style="position: relative;"
              tabindex="@(isSelectable ? "0" : null)"
-             role="@(isSelectable ? "button" : null)"
-             aria-pressed="@(isSelectable ? (isSelected ? "true" : "false") : null)"
+             role="@(isSelectable ? "group" : null)"
+             aria-roledescription="@(isSelectable ? "widget" : null)"
+             aria-current="@(isSelected ? "true" : null)"
              aria-label="@(isSelectable ? GetAccessibleName() : null)"
              @onpointerdown="@(isSelectable ? _pointerDownCallback : default)"
              @onclick="@(isSelectable ? _clickCallback : default)"
@@ -152,8 +154,12 @@
         Selection != null &&
         (Subject is IConfigurable || HasEditComponent);
 
-    // The name of the type, which names a selectable widget without a title, looked up once per subject.
-    private string? _typeDisplayName;
+    // Keyed weakly, because the type of a widget can come from a plugin that is unloaded again.
+    private static readonly ConditionalWeakTable<Type, string> TypeDisplayNames = new();
+
+    // The properties that name a selectable widget without a title, looked up once per subject.
+    private RegisteredSubjectProperty? _labelProperty;
+    private RegisteredSubjectProperty? _pathProperty;
 
     private string GetAccessibleName()
     {
@@ -162,8 +168,21 @@
             return title;
         }
 
-        return _typeDisplayName ??= SubjectTypeCatalog.Describe(Subject!.GetType()).DisplayName;
+        if (_labelProperty?.GetValue() is string { Length: > 0 } label)
+        {
+            return label;
+        }
+
+        if (_pathProperty?.GetValue() is string { Length: > 0 } path)
+        {
+            return path;
+        }
+
+        return TypeDisplayNames.GetValue(Subject!.GetType(), static type => SubjectTypeCatalog.Describe(type).DisplayName);
     }
+
+    private static RegisteredSubjectProperty? TryGetTextProperty(RegisteredSubject? subject, string propertyName) =>
+        subject?.TryGetProperty(propertyName) is { } property && property.Type == typeof(string) ? property : null;
 
     private SubjectComponent? SelectableParent
     {
@@ -219,6 +238,8 @@
         Selection?.Select(this);
     }
 
+    // A Space on the focused widget itself arrives here as Enter, see widget-selection.js, so that a Space in an input
+    // inside the widget stays with the input.
     private async Task OnKeyDown(KeyboardEventArgs args)
     {
         if (args.Key != "Enter" || Selection == null)
@@ -240,8 +261,14 @@
     {
         if (Subject != _previousSubject || AdditionalParameters != _previousAdditionalParameters)
         {
+            if (Subject != _previousSubject)
+            {
+                var registeredSubject = Subject?.TryGetRegisteredSubject();
+                _labelProperty = TryGetTextProperty(registeredSubject, "Label");
+                _pathProperty = TryGetTextProperty(registeredSubject, "Path");
+            }
+
             _previousSubject = Subject;
-            _typeDisplayName = null;
             _previousAdditionalParameters = AdditionalParameters;
             _cachedParameters = BuildComponentParameters();
         }

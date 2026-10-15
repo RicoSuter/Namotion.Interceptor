@@ -138,17 +138,58 @@ public class WidgetSelectionTests
     }
 
     [Fact]
-    public async Task WhenAWidgetShowsNothing_ThenItTakesNoRoomAndNoFocus()
+    public async Task WhenAWidgetShowsNothing_ThenItIsHiddenInEditMode()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync();
+        var page = await OpenPageAsync();
+        var wrapper = page.Locator(".subject-component-wrapper.selectable[aria-label='Value map']");
 
         // Act
-        var wrapper = page.Locator(".subject-component-wrapper.selectable[aria-label='Value map']");
+        await SwitchToInlineModeAsync(page);
 
         // Assert: a hidden element is no tab stop.
         await Assertions.Expect(wrapper).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Assertions.Expect(wrapper).ToHaveCSSAsync("display", "none");
+    }
+
+    [Fact]
+    public async Task WhenTheSubjectOfAWidgetBlockIsClicked_ThenItIsSelectedAndItsParentIsTheWidgetBlock()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var widgetBlock = page.GetByRole(AriaRole.Group, new() { Name = "selectionmotor", Exact = true });
+        var innerSubject = widgetBlock.GetByRole(AriaRole.Group, new() { Name = "SelectionMotor", Exact = true });
+
+        // Act
+        var actionBar = await innerSubject.GetByText("SelectionMotor", new() { Exact = true }).SelectWidgetAsync();
+
+        // Assert
+        await Assertions.Expect(innerSubject).ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
+        await Assertions.Expect(widgetBlock).Not.ToHaveAttributeAsync("aria-current", "true");
+
+        // Act
+        await actionBar.GetByTestId("select-parent-button").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(widgetBlock).ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
+        await Assertions.Expect(innerSubject).Not.ToHaveAttributeAsync("aria-current", "true");
+    }
+
+    [Fact]
+    public async Task WhenSpaceIsPressedOnAFocusedWidget_ThenItIsSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var wrapper = GetWrapperOf(page, "switch");
+        await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await wrapper.FocusAsync();
+
+        // Act
+        await page.Keyboard.PressAsync("Space");
+
+        // Assert
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar()).ToBeVisibleAsync();
     }
 
     [Theory]
@@ -175,8 +216,9 @@ public class WidgetSelectionTests
         await Assertions.Expect(page.GetWidgetActionBar()).ToBeVisibleAsync(new() { Timeout = Timeout });
         var wrapper = GetWrapperOf(page, testId);
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"));
-        await Assertions.Expect(wrapper).ToHaveAttributeAsync("role", "button");
-        await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-pressed", "true");
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("role", "group");
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-roledescription", "widget");
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-current", "true");
         await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-label", new Regex(@"\S"));
         await Assertions.Expect(page.GetByRole(AriaRole.Toolbar, new() { Name = "Widget actions" })
             .GetByRole(AriaRole.Button, new() { Name = "Edit", Exact = true })).ToBeVisibleAsync();
@@ -212,6 +254,13 @@ public class WidgetSelectionTests
 
     private async Task<IPage> OpenPageInInlineModeAsync()
     {
+        var page = await OpenPageAsync();
+        await SwitchToInlineModeAsync(page);
+        return page;
+    }
+
+    private async Task<IPage> OpenPageAsync()
+    {
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
@@ -219,13 +268,16 @@ public class WidgetSelectionTests
         // The edit menu is prerendered, and a click before the circuit is connected is lost.
         await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
             .ToBeVisibleAsync(new() { Timeout = Timeout });
+        return page;
+    }
 
+    private static async Task SwitchToInlineModeAsync(IPage page)
+    {
         var editMenu = page.Locator("[data-testid='edit-mode-menu']");
         await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = Timeout });
         await editMenu.ClickAsync();
         await page.GetByText("Inline").ClickAsync();
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
-        return page;
     }
 
     // The innermost widget around the element with the test id.
