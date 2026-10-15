@@ -57,8 +57,7 @@ internal sealed class UpdateSchedule
 
         if (retryAfter is { } requested && requested > backoff)
         {
-            // Devices without an RTC can report a clock far in the past, making the server's Retry-After
-            // header look like months away; capping it keeps a single bad clock from stalling checks for good.
+            // A clock far in the past on a device without a real-time clock would otherwise stall checks for months.
             return requested > MaximumBackoff ? MaximumBackoff : requested;
         }
 
@@ -76,8 +75,7 @@ internal sealed class UpdateSchedule
             {
                 var elapsed = now - last;
 
-                // A backward clock jump is treated as allowed rather than blocked for the throttle window,
-                // since a negative elapsed time means no real minute has actually passed.
+                // After the wall clock jumped back, waiting for it to catch up could block manual checks for hours.
                 if (elapsed >= TimeSpan.Zero && elapsed < ManualCheckThrottle)
                 {
                     return false;
