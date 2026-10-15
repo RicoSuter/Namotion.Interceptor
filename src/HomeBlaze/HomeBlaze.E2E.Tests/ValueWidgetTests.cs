@@ -22,7 +22,7 @@ public class ValueWidgetTests
         _fixture = fixture;
     }
 
-    private async Task<IPage> OpenPageAsync(int? viewportWidth = null)
+    private async Task<IPage> OpenPageAsync(int? viewportWidth = null, string pageName = "Values.md")
     {
         var page = await _fixture.CreatePageAsync();
         if (viewportWidth is not null)
@@ -30,7 +30,7 @@ public class ValueWidgetTests
             await page.SetViewportSizeAsync(viewportWidth.Value, 800);
         }
 
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Values.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{pageName}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The circuit replaces the prerendered elements when it connects. A box measured across that moment belongs
@@ -902,6 +902,32 @@ public class ValueWidgetTests
         var text = content.GetByText("Closed panel temperature");
         await Assertions.Expect(text).ToHaveTextAsync(new Regex(@"^Closed panel temperature -?\d+(\.\d+)?°C$"), new() { Timeout = Timeout });
         await ExpectTextToKeepChangingAsync(page, text);
+    }
+
+    [Fact]
+    public async Task WhenValueIsInAGridCell_ThenItUpdatesLive()
+    {
+        // Arrange & Act: the motor of the page changes its temperature by itself.
+        var page = await OpenPageAsync(pageName: "LiveLayouts.md");
+        var text = page.Locator(".grid-cell").GetByTestId("value-tile").GetByTestId("value-text");
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern, new() { Timeout = Timeout });
+
+        // Assert
+        await ExpectTextToKeepChangingAsync(page, text);
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern);
+    }
+
+    [Fact]
+    public async Task WhenValueIsInACanvasNode_ThenItUpdatesLive()
+    {
+        // Arrange & Act: the motor of the page changes its temperature by itself.
+        var page = await OpenPageAsync(pageName: "LiveLayouts.md");
+        var text = page.Locator(".canvas-node").GetByTestId("value-tile").GetByTestId("value-text");
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern, new() { Timeout = Timeout });
+
+        // Assert
+        await ExpectTextToKeepChangingAsync(page, text);
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern);
     }
 
     [Fact]
