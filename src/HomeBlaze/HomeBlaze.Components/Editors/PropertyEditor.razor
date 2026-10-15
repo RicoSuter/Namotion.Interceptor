@@ -135,7 +135,9 @@ else
         if (Property.ReflectionAttributes.OfType<SubjectPathAttribute>().FirstOrDefault() is { } subjectPath)
         {
             var subjectType = subjectPath.SubjectType;
-            _canSelectProperty = property => SubjectPathSelection.CanSelectProperty(property, subjectType);
+            var kind = subjectPath.Kind;
+            var writable = subjectPath.Writable;
+            _canSelectProperty = property => SubjectPathSelection.CanSelectProperty(property, subjectType, kind, writable);
             _canSelectSubject = subject => SubjectPathSelection.CanSelectSubject(subject, subjectType);
         }
     }
