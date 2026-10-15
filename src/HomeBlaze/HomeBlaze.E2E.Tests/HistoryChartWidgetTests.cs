@@ -118,20 +118,30 @@ public class HistoryChartWidgetTests
         var chart = lines.Locator("svg").First;
         await Assertions.Expect(chart).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        var box = await lines.BoundingBoxAsync() ?? throw new InvalidOperationException("The lines have no box");
-        var axes = $"{HistoryChartAxis.GetValueLabelCount(box.Height)}x{HistoryChartAxis.GetTimeLabelCount(box.Width)}";
-        await Assertions.Expect(lines).ToHaveAttributeAsync("data-axes-labels", axes, new() { Timeout = Timeout });
+        // The label counts follow the rule of HistoryChartAxis and are computed from the live box, so a box that changes
+        // while the chart settles, for example when a scrollbar appears, is waited for rather than timed out on.
         await widget.Page.WaitForFunctionAsync(
             """
-            lines => {
+            ([lines, valueLabelPixels, timeLabelPixels, maximumTimeLabels]) => {
                 const chart = lines.querySelector("svg");
                 const box = lines.getBoundingClientRect();
-                return chart.getAttribute("viewBox") === `0 0 ${Math.round(box.width)} ${Math.round(box.height)}` &&
+                const valueLabels = box.height >= 2 * valueLabelPixels ? Math.floor(box.height / valueLabelPixels) : 2;
+                const timeLabels = Math.floor(Math.min(Math.max(box.width / timeLabelPixels, 2), maximumTimeLabels));
+                return lines.getAttribute("data-axes-labels") === `${valueLabels}x${timeLabels}` &&
+                    chart.getAttribute("viewBox") === `0 0 ${Math.round(box.width)} ${Math.round(box.height)}` &&
                     chart.querySelector(".mud-charts-timeseries-series path") !== null;
             }
             """,
-            await lines.ElementHandleAsync(),
+            new object[]
+            {
+                await lines.ElementHandleAsync(),
+                HistoryChartAxis.PixelsPerValueLabel,
+                HistoryChartAxis.PixelsPerTimeLabel,
+                HistoryChartAxis.MaximumTimeLabelCount
+            },
             new() { Timeout = Timeout });
+
+        var box = await lines.BoundingBoxAsync() ?? throw new InvalidOperationException("The lines have no box");
 
         var drawn = await lines.EvaluateAsync<JsonElement>(
             """

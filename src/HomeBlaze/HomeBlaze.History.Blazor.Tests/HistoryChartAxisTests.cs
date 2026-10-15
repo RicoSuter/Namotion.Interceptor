@@ -172,7 +172,7 @@ public class HistoryChartAxisTests
         double[] widths = [100, 368, 600, 1128, 1352];
 
         // Act & Assert
-        for (var range = TimeSpan.FromSeconds(30); range <= TimeSpan.FromDays(60); range *= 1.3)
+        for (var range = TimeSpan.FromSeconds(30); range <= TimeSpan.FromDays(730); range *= 1.3)
         {
             foreach (var width in widths)
             {
@@ -197,14 +197,33 @@ public class HistoryChartAxisTests
         Assert.Equal(TimeSpan.FromDays(expectedDays), spacing);
     }
 
-    [Fact]
-    public void WhenTheBucketIsLongerThanTheSpacing_ThenTheSpacingIsTheBucket()
+    [Theory]
+    [InlineData(120, 30, 30)]
+    [InlineData(1440, 240, 240)]
+    public void WhenTheBucketIsLongerThanTheSpacing_ThenTheSpacingIsTheBucket(int rangeMinutes, int bucketMinutes, int expectedMinutes)
     {
         // Act
-        var spacing = HistoryChartAxis.GetTimeLabelSpacing(TimeSpan.FromHours(1), TimeSpan.FromHours(1), 1352);
+        var spacing = HistoryChartAxis.GetTimeLabelSpacing(
+            TimeSpan.FromMinutes(rangeMinutes), TimeSpan.FromMinutes(bucketMinutes), 1352);
 
         // Assert
-        Assert.Equal(TimeSpan.FromHours(1), spacing);
+        Assert.Equal(TimeSpan.FromMinutes(expectedMinutes), spacing);
+    }
+
+    [Theory]
+    [InlineData(60, 30)]
+    [InlineData(60, 720)]
+    public void WhenTheBucketIsAtLeastHalfTheRange_ThenTheSpacingIgnoresIt(int rangeMinutes, int bucketMinutes)
+    {
+        // Arrange
+        var range = TimeSpan.FromMinutes(rangeMinutes);
+
+        // Act
+        var spacing = HistoryChartAxis.GetTimeLabelSpacing(range, TimeSpan.FromMinutes(bucketMinutes), 1352);
+
+        // Assert
+        Assert.Equal(HistoryChartAxis.GetTimeLabelSpacing(range, null, 1352), spacing);
+        Assert.True(range / spacing >= 2, $"{range} is split every {spacing}");
     }
 
     [Fact]
@@ -230,12 +249,27 @@ public class HistoryChartAxisTests
     }
 
     [Theory]
+    [InlineData(365, 400, 182)]
+    [InlineData(365, 1352, 60)]
+    [InlineData(730, 100, 365)]
+    public void WhenTheRangeIsAYearOrLonger_ThenTheSpacingIsMonthsLong(int rangeDays, double width, int expectedDays)
+    {
+        // Act
+        var spacing = HistoryChartAxis.GetTimeLabelSpacing(TimeSpan.FromDays(rangeDays), null, width);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromDays(expectedDays), spacing);
+    }
+
+    [Theory]
     [InlineData(10, 0.5, "HH:mm:ss")]
     [InlineData(60, 10, "HH:mm")]
     [InlineData(1439, 180, "HH:mm")]
     [InlineData(1440, 180, "ddd HH:mm")]
     [InlineData(4320, 720, "ddd HH:mm")]
     [InlineData(10080, 1440, "MM-dd")]
+    [InlineData(86400, 43200, "MM-dd")]
+    [InlineData(525600, 86400, "yyyy-MM")]
     public void WhenRangeAndSpacingHaveALength_ThenTheTimeLabelsTellEveryLabelApart(int rangeMinutes, double spacingMinutes, string expected)
     {
         // Act

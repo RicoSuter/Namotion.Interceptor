@@ -30,9 +30,10 @@ public static class HistoryChartAxis
         TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10),
         TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2),
         TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(30),
-        TimeSpan.FromHours(1), TimeSpan.FromHours(2), TimeSpan.FromHours(3), TimeSpan.FromHours(6),
+        TimeSpan.FromHours(1), TimeSpan.FromHours(2), TimeSpan.FromHours(3), TimeSpan.FromHours(4), TimeSpan.FromHours(6),
         TimeSpan.FromHours(12), TimeSpan.FromDays(1), TimeSpan.FromDays(2), TimeSpan.FromDays(3), TimeSpan.FromDays(7),
-        TimeSpan.FromDays(14), TimeSpan.FromDays(30)
+        TimeSpan.FromDays(14), TimeSpan.FromDays(30), TimeSpan.FromDays(60), TimeSpan.FromDays(91), TimeSpan.FromDays(182),
+        TimeSpan.FromDays(365)
     ];
 
     /// <summary>
@@ -104,29 +105,31 @@ public static class HistoryChartAxis
 
     /// <summary>
     /// Gets the format of the time labels, which tells every label apart: seconds for a spacing under a minute, the
-    /// date for a spacing of whole days, the time of day for a range under a day, and the weekday with the time
-    /// otherwise.
+    /// month for a spacing of more than 30 days, the date for a spacing of whole days, the time of day for a range under
+    /// a day, and the weekday with the time otherwise.
     /// </summary>
     /// <param name="range">The time span the lines show.</param>
     /// <param name="spacing">The time between two time labels.</param>
     public static string GetTimeLabelFormat(TimeSpan range, TimeSpan spacing) =>
         spacing < TimeSpan.FromMinutes(1) ? "HH:mm:ss" :
+        spacing > TimeSpan.FromDays(30) ? "yyyy-MM" :
         spacing >= TimeSpan.FromDays(1) ? "MM-dd" :
         range < TimeSpan.FromDays(1) ? "HH:mm" :
         "ddd HH:mm";
 
     /// <summary>
     /// Gets the time between two time labels: the smallest round step of <see cref="TimeLabelSteps"/> that splits the
-    /// range into no more parts than the width holds labels, never shorter than the bucket. When that step leaves
-    /// less than two parts, the largest step that still splits the range in two is taken, so a narrow chart keeps more
-    /// than one label. With the label rounding of the chart the labels then fall on round times.
+    /// range into no more parts than the width holds labels, never shorter than a bucket under half the range. When
+    /// that step leaves less than two parts, the largest step that still splits the range in two is taken, so a narrow
+    /// chart keeps more than one label. With the label rounding of the chart the labels then fall on round times.
     /// </summary>
     /// <param name="range">The time span the lines show.</param>
     /// <param name="bucket">The interval one point stands for, or null for raw samples.</param>
     /// <param name="width">The width of the lines in pixels.</param>
     public static TimeSpan GetTimeLabelSpacing(TimeSpan range, TimeSpan? bucket, double width)
     {
-        var minimum = bucket ?? TimeSpan.Zero;
+        // A spacing of a bucket that long would leave the range with one label or none.
+        var minimum = bucket is { } length && 2 * length < range ? length : TimeSpan.Zero;
         var spacing = range > TimeSpan.Zero ? range / (GetTimeLabelCount(width) - 1) : TimeSpan.Zero;
         TimeSpan? halving = null;
         foreach (var step in TimeLabelSteps)
