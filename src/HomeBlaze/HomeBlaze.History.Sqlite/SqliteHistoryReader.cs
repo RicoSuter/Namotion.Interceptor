@@ -286,7 +286,7 @@ internal static class SqliteHistoryReader
     // so scanning in that order let an arbitrary partition answer: after a property's type changed, the
     // reader could pick up the superseded column kind and route a numeric read at the wrong column.
     // Newest-first also means the common case opens one partition instead of every one of them.
-    private static ColumnMeta? ResolveColumnMetaForPath(SqliteReadContext context, string propertyPath)
+    internal static ColumnMeta? ResolveColumnMetaForPath(SqliteReadContext context, string propertyPath)
     {
         foreach (var key in context.EnumeratePartitionFileKeys().OrderByDescending(key => key, StringComparer.Ordinal))
         {

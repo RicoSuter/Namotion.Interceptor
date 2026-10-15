@@ -276,6 +276,148 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
+    /// <summary>
+    /// Writes historical samples of one property straight into the partition files, routed and stored
+    /// exactly like recorded samples of <paramref name="propertyType"/>. Each sample is stored under the
+    /// path the property had at its instant according to the recorded moves, so it is read back through
+    /// <paramref name="propertyPath"/> like a recorded one.
+    /// </summary>
+    /// <remarks>
+    /// A sample at an instant the store already holds a row for is ignored, so an import can be repeated
+    /// and never replaces recorded data. Each partition commits on its own, so a failed call may leave
+    /// earlier partitions written; repeating it completes them. Imported rows are only served inside
+    /// coverage: call <see cref="AddCoverage"/> once every path inside the range has been imported, and
+    /// keep the range within the retention window or the next <see cref="Sweep"/> deletes it. Throws,
+    /// before writing anything, when a target path is already stored under another column kind than
+    /// <paramref name="propertyType"/> maps to; the check also runs for an empty sample set.
+    /// </remarks>
+    public HistoryImportResult Import(
+        string propertyPath, Type propertyType, IEnumerable<HistoryImportSample> samples)
+    {
+        var column = HistoryColumns.GetValueColumnFor(propertyType);
+        var isUlong = HistoryColumns.IsUlongProperty(propertyType);
+
+        // Routed before taking the lock, so neither the serialization nor a lazily produced sample
+        // sequence holds up queries and flushes.
+        var routedRows = new List<(DateTimeOffset Timestamp, Row Row)>();
+        var oversizeCount = 0L;
+        foreach (var sample in samples)
+        {
+            var routed = SqliteValueRouting.CreateRow(sample.Value, column, isUlong, _maxJsonSize);
+            if (routed.IsOversized)
+            {
+                oversizeCount++;
+            }
+
+            routedRows.Add((sample.Timestamp, routed.Row));
+        }
+
+        lock (_connectionLock)
+        {
+            var chain = SqliteHistoryReader.ResolveChain(_readContext, propertyPath);
+            var byTarget = new Dictionary<(string Path, string PartitionKey), List<(long Ticks, Row Row)>>();
+            foreach (var (timestamp, row) in routedRows)
+            {
+                var target = (LegPathAt(chain, timestamp), SqlitePartition.PartitionKey(timestamp, _partitionInterval));
+                if (!byTarget.TryGetValue(target, out var rows))
+                {
+                    rows = [];
+                    byTarget[target] = rows;
+                }
+
+                rows.Add((EpochTicks.ToEpochTicks(timestamp), row));
+            }
+
+            EnsureStoredKind(propertyPath, propertyType, column, isUlong);
+            foreach (var path in byTarget.Keys.Select(target => target.Path).Distinct(StringComparer.Ordinal))
+            {
+                EnsureStoredKind(path, propertyType, column, isUlong);
+            }
+
+            var insertedCount = 0L;
+            foreach (var ((path, key), rows) in byTarget)
+            {
+                insertedCount += SqliteHistoryWriter.ImportPartition(OpenPartition(key), path, column, isUlong, rows);
+            }
+
+            return new HistoryImportResult(insertedCount, routedRows.Count - insertedCount, oversizeCount);
+        }
+    }
+
+    /// <summary>
+    /// Returns the paths the property at <paramref name="propertyPath"/> occupied according to the
+    /// recorded moves, newest first. A property that never moved has a single unbounded leg.
+    /// </summary>
+    public IReadOnlyList<HistoryChainLeg> GetMoveChain(string propertyPath)
+    {
+        lock (_connectionLock)
+        {
+            return SqliteHistoryReader.ResolveChain(_readContext, propertyPath);
+        }
+    }
+
+    // The legs are newest first and contiguous, so the first one starting at or before the instant holds it.
+    private static string LegPathAt(List<HistoryChainLeg> chain, DateTimeOffset timestamp)
+    {
+        foreach (var leg in chain)
+        {
+            if (leg.ValidFrom <= timestamp)
+            {
+                return leg.Path;
+            }
+        }
+
+        return chain[^1].Path;
+    }
+
+    // The reader takes a path's kind from the newest partition that knows it and applies it to every
+    // partition, so rows imported under another kind would be read through the wrong column.
+    private void EnsureStoredKind(string path, Type propertyType, ValueColumn column, bool isUlong)
+    {
+        if (SqliteHistoryReader.ResolveColumnMetaForPath(_readContext, path) is { } stored &&
+            (stored.Column != column || stored.IsUlong != isUlong))
+        {
+            throw new InvalidOperationException(
+                $"The path '{path}' is stored as {stored.Column}{(stored.IsUlong ? " (ulong)" : "")}, " +
+                $"but {propertyType} maps to {column}{(isUlong ? " (ulong)" : "")}.");
+        }
+    }
+
+    /// <summary>
+    /// Persists <paramref name="range"/> as durable coverage, claiming that the store holds every sample
+    /// inside it. Does nothing when the range is already covered.
+    /// </summary>
+    /// <remarks>
+    /// Coverage is store-wide: inside it a query is answered by this store alone, so add it only after
+    /// every property inside the range has been imported.
+    /// </remarks>
+    public void AddCoverage(HistoryCoverage range)
+    {
+        if (range.From >= range.To)
+        {
+            throw new ArgumentException("The coverage range must not be empty.", nameof(range));
+        }
+
+        lock (_connectionLock)
+        {
+            if (_reloadCoverageAfterFailure)
+            {
+                _coverageStore.Reload();
+                _reloadCoverageAfterFailure = false;
+            }
+
+            foreach (var existing in _coverageStore.Snapshot)
+            {
+                if (existing.Contains(range))
+                {
+                    return;
+                }
+            }
+
+            _coverageStore.Add(EpochTicks.ToEpochTicks(range.From), EpochTicks.ToEpochTicks(range.To));
+        }
+    }
+
     public Task FlushAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

@@ -1,0 +1,6 @@
+enabled,confidence,measurement,field,path,type,divisor,values,note
+true,high,00000000-0000-0000-0000-000000000001,TotalConsumedEnergy,/Devices/HeatPump/Energy/TotalElectricalEnergy,decimal,,,
+true,high,00000000-0000-0000-0000-000000000001,TotalHeatPumpOperatingTime,/Devices/HeatPump/OperatingStatus/TotalOperatingHours,decimal,3600,,seconds to hours
+true,high,00000000-0000-0000-0000-000000000001/temperatures/flow,Temperature,/Devices/HeatPump/Temperatures/Flow/Temperature,decimal,,,
+true,high,00000000-0000-0000-0000-000000000002/cover,State,/Devices/Shutter/Covers[0]/ShutterState,string,,Open=Open;Closed=Closed;*=Unknown,
+false,medium,00000000-0000-0000-0000-000000000003,AudioVolume,/Devices/Speaker/Volume,decimal,100,,v1 0 to 100; check the scale before enabling
