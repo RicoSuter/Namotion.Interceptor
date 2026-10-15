@@ -78,6 +78,15 @@ public static class MarkdownBlockWriter
     }
 
     /// <summary>
+    /// Creates the text of a new, empty widget block with a fence of <paramref name="fenceLength"/> characters
+    /// from a configuration like the one <see cref="WriteConfiguration"/> takes.
+    /// Its lines end with <paramref name="lineEnding"/>, except the last one, which has no line ending.
+    /// </summary>
+    public static string CreateBlock(
+        string typeName, string? id, string configurationJson, int fenceLength, string lineEnding = UnixLineEnding) =>
+        CreateBlock(typeName, id, configurationJson, fenceLength, lineEnding, hasClosingLine: true);
+
+    /// <summary>
     /// Creates the text of a new block with a fence of <paramref name="fenceLength"/> characters from a
     /// configuration like the one <see cref="WriteConfiguration"/> takes.
     /// Its lines end with <paramref name="lineEnding"/>, except the last one, which has no line ending.
@@ -89,13 +98,13 @@ public static class MarkdownBlockWriter
     /// <param name="lineEnding">The line ending between the lines.</param>
     /// <param name="hasClosingLine">Whether the block ends with a closing line. Without one, what follows it must end it.</param>
     /// <param name="content">Lines that stand inside the block after its json block, or null.</param>
-    public static string CreateBlock(
+    internal static string CreateBlock(
         string name,
         string? id,
         string configurationJson,
         int fenceLength,
-        string lineEnding = UnixLineEnding,
-        bool hasClosingLine = true,
+        string lineEnding,
+        bool hasClosingLine,
         string? content = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(fenceLength, MarkdownBlockFence.MinimumLength);

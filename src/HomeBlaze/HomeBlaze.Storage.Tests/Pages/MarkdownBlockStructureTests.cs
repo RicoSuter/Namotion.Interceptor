@@ -50,8 +50,8 @@ public class MarkdownBlockStructureTests
         var owner = before.Blocks[0];
         var placement = MarkdownBlockWriter.GetSlotBlockPlacement(before, owner, "Tile");
         var text = MarkdownBlockWriter.CreateBlock(
-            "Tile", null, """{ "Position": 3 }""", placement.FenceLength, hasClosingLine: placement.HasClosingLine,
-            content: MarkdownBlockWriter.CreateBlock("Demo.Leaf", null, "{}", placement.FenceLength + 1, hasClosingLine: placement.HasClosingLine));
+            "Tile", null, """{ "Position": 3 }""", placement.FenceLength, "\n", placement.HasClosingLine,
+            content: MarkdownBlockWriter.CreateBlock("Demo.Leaf", null, "{}", placement.FenceLength + 1, "\n", placement.HasClosingLine));
         var result = MarkdownBlockWriter.InsertLines(source, placement.Line, text, placement.LineEnding, out var edit);
 
         // Act
