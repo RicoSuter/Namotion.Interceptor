@@ -45,7 +45,7 @@
     }
     else
     {
-        var reading = ValueReader.Read(PathResolver, control, path, map, TimeZone);
+        var reading = ValueReader.Read(PathResolver, control, property, map, TimeZone);
         <div class="d-flex align-center gap-2" data-testid="control-value">
             <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="value-label">@ValueReader.GetControlLabel(reading.Property, label, path)</MudText>
             @if (kind == ControlKind.Indicator)

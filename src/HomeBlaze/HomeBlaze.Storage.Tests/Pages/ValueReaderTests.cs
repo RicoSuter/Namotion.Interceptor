@@ -4,6 +4,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
+using Namotion.Interceptor.Registry.Abstractions;
 using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -179,6 +180,91 @@ public class ValueReaderTests
 
         // Assert
         Assert.Null(value);
+    }
+
+    [Fact]
+    public async Task WhenPropertyOfASubjectIsRead_ThenTextIsTheDisplayValue()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+
+        // Act
+        var reading = ValueReader.ReadProperty(resolver, page, meter, nameof(TestMeter.Power), null, null);
+
+        // Assert
+        Assert.False(reading.IsMissing);
+        Assert.Equal("1.23 kW", reading.Text);
+        Assert.Equal(nameof(TestMeter.Power), reading.Property?.Name);
+        Assert.Null(reading.MapError);
+    }
+
+    [Fact]
+    public async Task WhenPropertyOfASubjectIsReadWithAMap_ThenTheCaseApplies()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+
+        // Act
+        var reading = ValueReader.ReadProperty(resolver, page, meter, nameof(TestMeter.IsOn), "onoff", null);
+
+        // Assert
+        Assert.Equal("an", reading.Text);
+        Assert.Equal(Color.Success, reading.Color);
+        Assert.Equal("Lightbulb", reading.Icon);
+    }
+
+    [Theory]
+    [InlineData("Temperature")]
+    [InlineData("Missing")]
+    [InlineData("")]
+    [InlineData(null)]
+    public async Task WhenPropertyOfASubjectIsNotSetOrUnknown_ThenReadingIsMissing(string? propertyName)
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+
+        // Act
+        var reading = ValueReader.ReadProperty(resolver, page, meter, propertyName, null, null);
+
+        // Assert
+        Assert.True(reading.IsMissing);
+        Assert.Equal(ValueReader.MissingText, reading.Text);
+        Assert.Null(reading.MapError);
+    }
+
+    [Fact]
+    public async Task WhenMapOfAPropertyReadIsNoValueMap_ThenReadingHasAMapError()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+
+        // Act
+        var reading = ValueReader.ReadProperty(resolver, page, meter, nameof(TestMeter.Power), "nomap", null);
+
+        // Assert
+        Assert.Equal("Cannot resolve map: nomap", reading.MapError);
+    }
+
+    [Fact]
+    public async Task WhenResolvedPropertyIsRead_ThenReadingEqualsThatOfThePath()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var property = ValueReader.ResolveProperty(resolver, page, "meter/IsOn");
+
+        // Act
+        var fromProperty = ValueReader.Read(resolver, page, property, "onoff", null);
+        var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+        var withoutProperty = ValueReader.Read(resolver, page, (RegisteredSubjectProperty?)null, "nomap", null);
+
+        // Assert
+        Assert.Equal(fromPath, fromProperty);
+        Assert.True(withoutProperty.IsMissing);
+        Assert.Equal("Cannot resolve map: nomap", withoutProperty.MapError);
     }
 
     [Fact]

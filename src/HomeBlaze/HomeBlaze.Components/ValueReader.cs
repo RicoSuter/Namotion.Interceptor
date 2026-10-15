@@ -5,6 +5,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using MudBlazor;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Components;
@@ -35,8 +36,58 @@ public static class ValueReader
         ITimeZoneDisplay? timeZone)
     {
         var valueMap = ResolveMap(resolver, widget, map, out var mapError);
+        return ReadCore(ResolveProperty(resolver, widget, path), valueMap, mapError, timeZone);
+    }
 
-        var property = ResolveProperty(resolver, widget, path);
+    /// <summary>
+    /// Reads a property that <see cref="ResolveProperty"/> already resolved and applies the map, with the same
+    /// text, colour and missing value as <see cref="Read(SubjectPathResolver, IInterceptorSubject, string?, string?, ITimeZoneDisplay?)"/> gives for its path.
+    /// </summary>
+    /// <param name="resolver">The resolver of the map.</param>
+    /// <param name="widget">The subject the map is relative to, usually the widget itself.</param>
+    /// <param name="property">The property, or null for a missing reading.</param>
+    /// <param name="map">The name or path of a <see cref="ValueMap"/>, or null or empty for none.</param>
+    /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    public static ValueReading Read(
+        SubjectPathResolver resolver,
+        IInterceptorSubject widget,
+        RegisteredSubjectProperty? property,
+        string? map,
+        ITimeZoneDisplay? timeZone)
+    {
+        var valueMap = ResolveMap(resolver, widget, map, out var mapError);
+        return ReadCore(property, valueMap, mapError, timeZone);
+    }
+
+    /// <summary>
+    /// Reads the property with the name on a subject and applies the map, with the same text, colour and
+    /// missing value as <see cref="Read(SubjectPathResolver, IInterceptorSubject, string?, string?, ITimeZoneDisplay?)"/> gives for a path.
+    /// </summary>
+    /// <param name="resolver">The resolver of the map.</param>
+    /// <param name="widget">The subject the map is relative to, usually the widget or its slot block.</param>
+    /// <param name="subject">The subject that has the property, for example a row of a table.</param>
+    /// <param name="propertyName">The name of the property. Null, empty or unknown gives a missing reading.</param>
+    /// <param name="map">The name or path of a <see cref="ValueMap"/>, or null or empty for none.</param>
+    /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    public static ValueReading ReadProperty(
+        SubjectPathResolver resolver,
+        IInterceptorSubject widget,
+        IInterceptorSubject subject,
+        string? propertyName,
+        string? map,
+        ITimeZoneDisplay? timeZone)
+    {
+        var valueMap = ResolveMap(resolver, widget, map, out var mapError);
+        var property = string.IsNullOrEmpty(propertyName) ? null : subject.TryGetRegisteredProperty(propertyName);
+        return ReadCore(property, valueMap, mapError, timeZone);
+    }
+
+    private static ValueReading ReadCore(
+        RegisteredSubjectProperty? property,
+        ValueMap? valueMap,
+        string? mapError,
+        ITimeZoneDisplay? timeZone)
+    {
         var value = property?.GetValue();
         if (property is null || value is null)
         {
@@ -166,7 +217,7 @@ public static class ValueReader
 
     // The path of a property and that of a map are written by the author of a page, and a malformed one
     // must not take the page down. This holds for ResolveProperty above as well.
-    private static IInterceptorSubject? ResolveSubject(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
+    internal static IInterceptorSubject? ResolveSubject(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
     {
         try
         {
