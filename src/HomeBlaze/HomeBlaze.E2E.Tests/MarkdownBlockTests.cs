@@ -887,6 +887,64 @@ public class MarkdownBlockTests
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
     }
 
+    [Fact]
+    public async Task WhenThemeIsLight_ThenALinkHasThePrimaryColourOfTheTheme()
+    {
+        // Arrange
+        var page = await OpenScratchPageWithLinkAsync();
+        var link = page.Locator(".markdown-content a", new() { HasTextString = "Theme link" });
+
+        // Act
+        await page.GetByTitle("Toggle Dark Mode").ClickAsync();
+
+        // Assert: #3f2ddd, the primary colour of the light palette.
+        await Assertions.Expect(link).ToHaveCSSAsync("color", "rgb(63, 45, 221)");
+        Assert.Equal("rgb(63, 45, 221)", await ResolveColourAsync(page, "var(--mud-palette-primary)"));
+    }
+
+    [Fact]
+    public async Task WhenThemeIsDark_ThenALinkHasTheLightenedPrimaryColourOfTheTheme()
+    {
+        // Arrange & Act: the app starts in the dark theme.
+        var page = await OpenScratchPageWithLinkAsync();
+        var link = page.Locator(".markdown-content a", new() { HasTextString = "Theme link" });
+        await Assertions.Expect(page.Locator(".homeblaze-dark-mode")).ToHaveCountAsync(1);
+
+        // Assert
+        var expected = await ResolveColourAsync(page, "var(--mud-palette-primary-lighten)");
+        Assert.NotEqual(await ResolveColourAsync(page, "var(--mud-palette-primary)"), expected);
+        await Assertions.Expect(link).ToHaveCSSAsync("color", expected);
+    }
+
+    private async Task<IPage> OpenScratchPageWithLinkAsync()
+    {
+        await WriteScratchPageAsync("# Scratch\n\nText with a [Theme link](https://example.com).\n");
+        var page = await OpenPageAsync(ScratchPage);
+        await Assertions.Expect(page.GetByText("Theme link")).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // The theme button is prerendered, and a click before the circuit is connected is lost. The automatic time
+        // zone resolves through JS after interactive rendering, so its title tells that the circuit is connected.
+        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = 30000 });
+        return page;
+    }
+
+    // The computed colour of a CSS colour value, in the form the browser reports for an element.
+    private static Task<string> ResolveColourAsync(IPage page, string value)
+    {
+        return page.EvaluateAsync<string>(
+            """
+            value => {
+                const probe = document.createElement('span');
+                probe.style.color = value;
+                document.body.appendChild(probe);
+                const colour = getComputedStyle(probe).color;
+                probe.remove();
+                return colour;
+            }
+            """,
+            value);
+    }
+
     private static ILocator GetTab(ILocator tabLayout, string title)
     {
         return tabLayout.GetByRole(AriaRole.Tab, new() { Name = title, Exact = true });
