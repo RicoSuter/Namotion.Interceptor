@@ -57,8 +57,6 @@ public partial class HomeBlazeInstallation
     {
         var context = ((IInterceptorSubject)this).Context;
 
-        IsDeveloperMode = _developerModeService.IsEnabled;
-
         var dataDirectory = context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
         DataDirectory = dataDirectory;
         (DataVolumeFreeSpace, DataVolumeTotalSize) = ReadVolume(dataDirectory);

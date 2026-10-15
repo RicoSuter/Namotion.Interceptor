@@ -346,7 +346,15 @@ public partial class HomeBlazeInstallation : BackgroundService,
             AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoad;
             _developerModeService.OnChange += OnDeveloperModeChanged;
             Interlocked.Exchange(ref _isInventoryOutdated, 1);
-            IsDeveloperMode = _developerModeService.IsEnabled;
+
+            // The handler may run between the read and the write, so a second read repairs a stale write.
+            var isDeveloperMode = _developerModeService.IsEnabled;
+            IsDeveloperMode = isDeveloperMode;
+            if (isDeveloperMode != _developerModeService.IsEnabled)
+            {
+                IsDeveloperMode = _developerModeService.IsEnabled;
+            }
+
             SetStatus(ServiceStatus.Running, null);
 
             await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken));
