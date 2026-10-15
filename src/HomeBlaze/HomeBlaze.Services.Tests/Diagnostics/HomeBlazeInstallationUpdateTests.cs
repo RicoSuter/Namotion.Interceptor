@@ -340,6 +340,26 @@ public class HomeBlazeInstallationUpdateTests
     }
 
     [Fact]
+    public async Task WhenGitHubAsksToWaitAfterAManualCheckWasAccepted_ThenTheUpdateLoopDoesNotRunIt()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => CreateTooManyRequests(TimeSpan.FromMinutes(30)));
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), new TestTimeProvider(DateTimeOffset.UtcNow));
+        installation.Status = ServiceStatus.Running;
+        installation.CheckForUpdates();
+
+        // The check that was in flight when the manual check was accepted finishes with a wait.
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Act
+        var mayRun = installation.TryTakeManualCheckRequest();
+
+        // Assert
+        Assert.False(mayRun);
+        Assert.Equal("GitHub rate limit reached.", installation.UpdateCheckStatus);
+    }
+
+    [Fact]
     public async Task WhenTheWaitGitHubAskedForHasPassed_ThenAManualCheckIsAccepted()
     {
         // Arrange

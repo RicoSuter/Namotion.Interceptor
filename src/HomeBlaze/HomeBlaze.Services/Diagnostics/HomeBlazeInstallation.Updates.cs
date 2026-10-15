@@ -40,15 +40,12 @@ public partial class HomeBlazeInstallation
             throw new InvalidOperationException("The installation is not running.");
         }
 
-        if (Volatile.Read(ref _gitHubWait) is { } wait)
+        var remainingWait = GetRemainingGitHubWait();
+        if (remainingWait > TimeSpan.Zero)
         {
-            var remaining = wait.Duration - _timeProvider.GetElapsedTime(wait.StartTimestamp);
-            if (remaining > TimeSpan.Zero)
-            {
-                var minutes = (int)Math.Ceiling(remaining.TotalMinutes);
-                throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-                    $"GitHub asked to wait {minutes} more {(minutes == 1 ? "minute" : "minutes")}."));
-            }
+            var minutes = (int)Math.Ceiling(remainingWait.TotalMinutes);
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"GitHub asked to wait {minutes} more {(minutes == 1 ? "minute" : "minutes")}."));
         }
 
         if (!_updateSchedule.TryStartManualCheck(_timeProvider))
@@ -113,6 +110,19 @@ public partial class HomeBlazeInstallation
         NuGetVersion.TryParse(current, out var currentVersion) &&
         VersionComparer.VersionRelease.Compare(candidateVersion, currentVersion) > 0;
 
+    // A request accepted while a check was in flight would otherwise bypass a wait that check recorded.
+    /// <summary>
+    /// Clears a pending manual check request and returns whether it may run, which it may not while GitHub asked to
+    /// wait. Only the update loop calls it.
+    /// </summary>
+    internal bool TryTakeManualCheckRequest() =>
+        Interlocked.Exchange(ref _isManualCheckRequested, 0) == 1 && GetRemainingGitHubWait() <= TimeSpan.Zero;
+
+    private TimeSpan GetRemainingGitHubWait() =>
+        Volatile.Read(ref _gitHubWait) is { } wait
+            ? wait.Duration - _timeProvider.GetElapsedTime(wait.StartTimestamp)
+            : TimeSpan.Zero;
+
     private TimeSpan ReportUpdateCheckFailure(string message, TimeSpan? retryAfter)
     {
         LastUpdateCheck = _timeProvider.GetUtcNow();
@@ -159,7 +169,7 @@ public partial class HomeBlazeInstallation
             }
 
             // A configuration change, or a wait shortened to the hourly re-read, computes the delay again.
-            var isManual = Interlocked.Exchange(ref _isManualCheckRequested, 0) == 1;
+            var isManual = TryTakeManualCheckRequest();
             if (!isManual && (!UpdateCheckEnabled || isSignaled || GetRemainingDelay() > TimeSpan.Zero))
             {
                 continue;
