@@ -3,6 +3,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Logging;
+using NuGet.Versioning;
 
 namespace HomeBlaze.Services.Diagnostics;
 
@@ -72,7 +73,10 @@ public partial class HomeBlazeInstallation
             LatestVersion = release?.Version;
             LatestReleaseDate = release?.PublishedAt;
             LatestReleaseUrl = release?.Url;
-            UpdateAvailable = UpdateEvaluator.IsUpdateAvailable(Version, release);
+            UpdateAvailable =
+                release is null ? false :
+                NuGetVersion.TryParse(Version, out _) ? IsNewer(release.Version, Version) :
+                null;
 
             LastUpdateCheck = _timeProvider.GetUtcNow();
             UpdateCheckStatus = null;
@@ -99,6 +103,15 @@ public partial class HomeBlazeInstallation
             return ReportUpdateCheckFailure(exception.Message, retryAfter: null);
         }
     }
+
+    /// <summary>
+    /// Returns whether <paramref name="candidate"/> is a greater semantic version than <paramref name="current"/>,
+    /// ignoring build metadata. Versions that do not parse are never newer.
+    /// </summary>
+    internal static bool IsNewer(string candidate, string current) =>
+        NuGetVersion.TryParse(candidate, out var candidateVersion) &&
+        NuGetVersion.TryParse(current, out var currentVersion) &&
+        VersionComparer.VersionRelease.Compare(candidateVersion, currentVersion) > 0;
 
     private TimeSpan ReportUpdateCheckFailure(string message, TimeSpan? retryAfter)
     {

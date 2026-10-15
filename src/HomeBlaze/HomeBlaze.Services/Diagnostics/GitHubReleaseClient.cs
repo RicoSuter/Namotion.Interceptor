@@ -5,6 +5,11 @@ using System.Text.Json;
 namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
+/// The newest published release, with the version without its <c>v</c> prefix.
+/// </summary>
+internal sealed record LatestRelease(string Version, DateTimeOffset? PublishedAt, Uri? Url);
+
+/// <summary>
 /// A GitHub answer other than success, with the time GitHub asks to wait before the next request.
 /// </summary>
 internal sealed class GitHubRequestException(string message, TimeSpan? retryAfter) : Exception(message)

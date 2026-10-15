@@ -32,6 +32,44 @@ public class HomeBlazeInstallationUpdateTests
         Assert.Equal("Warning", installation.IconColor);
     }
 
+    [Theory]
+    [InlineData("0.5.0", true, true)]
+    [InlineData("0.6.0", true, false)]
+    [InlineData("0.5.0", false, false)]
+    [InlineData("not a version", true, null)]
+    public async Task WhenChecked_ThenUpdateAvailableComparesTheRunningVersionWithTheLatestRelease(string version, bool hasRelease, bool? expected)
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => hasRelease
+            ? FakeHttpMessageHandler.Json(ReleaseJson)
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+        var installation = CreateInstallation(CreateBuild(version), () => new HttpClient(handler));
+
+        // Act
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expected, installation.UpdateAvailable);
+    }
+
+    [Theory]
+    [InlineData("0.6.0", "0.5.0", true)]
+    [InlineData("0.5.0", "0.5.0", false)]
+    [InlineData("0.5.0", "0.6.0-beta.1", false)]
+    [InlineData("0.6.0", "0.6.0-beta.1", true)]
+    [InlineData("1.0.0.1", "1.0.0", true)]
+    [InlineData("not a version", "0.5.0", false)]
+    [InlineData("0.6.0+abc", "0.6.0", false)]
+    [InlineData("0.4.0", "0.5.0", false)]
+    public void WhenVersionsAreCompared_ThenSemanticVersionOrderingApplies(string candidate, string current, bool expected)
+    {
+        // Act
+        var isNewer = HomeBlazeInstallation.IsNewer(candidate, current);
+
+        // Assert
+        Assert.Equal(expected, isNewer);
+    }
+
     [Fact]
     public void WhenCheckForUpdatesIsCalledOnAnEdgeBuild_ThenTheReasonIsThrown()
     {
