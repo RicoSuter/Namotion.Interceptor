@@ -160,11 +160,11 @@ internal sealed class GitHubReleaseClient
     }
 
     /// <summary>
-    /// Describes a failed answer for display. GitHub's rate limit is reported distinctly from other failures
-    /// because the status code and reason phrase alone do not explain it to a person reading the message.
+    /// Describes a failed answer for display.
     /// </summary>
     private static string BuildErrorMessage(HttpResponseMessage response)
     {
+        // A rate limit answers 403 or 429, which alone does not tell a person why the check failed.
         if (IsRateLimited(response))
         {
             return "GitHub rate limit reached.";

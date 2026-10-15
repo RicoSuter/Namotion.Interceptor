@@ -21,9 +21,7 @@ internal sealed class UpdateSchedule
     /// <summary>
     /// Returns a uniformly random delay from FirstCheckMinimumDelay (inclusive) to FirstCheckMaximumDelay (exclusive).
     /// </summary>
-    /// <remarks>
-    /// The randomness keeps a container stuck in a restart loop from calling GitHub on every start.
-    /// </remarks>
+    // Random so a container stuck in a restart loop does not call GitHub on every start.
     public static TimeSpan GetFirstCheckDelay(Random random) =>
         FirstCheckMinimumDelay + (FirstCheckMaximumDelay - FirstCheckMinimumDelay) * random.NextDouble();
 
