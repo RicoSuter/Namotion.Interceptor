@@ -1,0 +1,247 @@
+@using HomeBlaze.History.Abstractions
+@using HomeBlaze.Components.Abstractions.TimeZones
+@inject ITimeZoneDisplay TimeZone
+@implements IDisposable
+
+@if (Data is { } data)
+{
+    <div data-testid="history-chart-view"
+         style="@($"width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; {Style}")">
+        @if (data.IsEmpty)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="history-chart-empty">No data in this range.</MudText>
+        }
+        else
+        {
+            @if (_chartSeries is not null)
+            {
+                @* MatchBoundsToSize sizes the SVG viewBox to the rendered box, so labels and strokes
+                   keep their own size instead of being scaled by a fixed 700x350 viewBox. The chart
+                   then derives its height from its width at 2:1, so the box carries that ratio:
+                   without it the SVG is taller than its box and the x-axis labels and the lowest
+                   part of the plot are clipped. *@
+                <div data-testid="history-chart-lines" style="@ChartStyle">
+                    <MudChart ChartType="ChartType.Timeseries"
+                              T="double"
+                              ChartSeries="_chartSeries"
+                              ChartOptions="_chartOptions"
+                              MatchBoundsToSize="true"
+                              Width="100%" Height="100%" />
+                </div>
+            }
+
+            @if (data.Bands.Count > 0)
+            {
+                @for (var index = 0; index < data.Bands.Count; index++)
+                {
+                    var band = data.Bands[index];
+                    @if (ShowBandLabels)
+                    {
+                        <MudText Typo="Typo.caption" Style="width:100%;">@band.Label</MudText>
+                    }
+
+                    @* The band is decorative: the legend names its states, and the state table lists every run. *@
+                    <div aria-hidden="true"
+                         data-testid="history-chart-band"
+                         style="@($"flex:0 0 {BandHeight}px; width:100%; border-radius:4px; background:{band.Background};")"></div>
+                }
+
+                <div style="width:100%; display:flex; justify-content:space-between;">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.ToZoned(data.From).ToString("g")</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.ToZoned(data.To).ToString("g")</MudText>
+                </div>
+
+                <div style="width:100%; display:flex; gap:16px; flex-wrap:wrap;">
+                    @for (var index = 0; index < data.StateLegend.Count; index++)
+                    {
+                        var entry = data.StateLegend[index];
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span style="@($"width:12px; height:12px; border-radius:2px; background:{entry.Fill};")"></span>
+                            <MudText Typo="Typo.caption">@entry.Label</MudText>
+                        </div>
+                    }
+                </div>
+
+                @if (ShowStateTable)
+                {
+                    var showSeries = data.Bands.Count > 1;
+                    <MudSimpleTable Dense="true" Style="width:100%; flex:1 1 auto; min-height:0; overflow:auto;">
+                        <thead>
+                            <tr>
+                                @if (showSeries)
+                                {
+                                    <th>Series</th>
+                                }
+                                <th>Time</th><th>Value</th><th>Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @for (var index = 0; index < _stateRows.Length; index++)
+                        {
+                            var row = _stateRows[index];
+                            <tr>
+                                @if (showSeries)
+                                {
+                                    <td>@row.Band</td>
+                                }
+                                <td>@TimeZone.ToZoned(row.Segment.Start).ToString("g")</td>
+                                <td>@HistoryChartPalette.DescribeSegment(row.Segment)</td>
+                                <td>@FormatDuration(row.Segment.Duration)</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            }
+        }
+    </div>
+}
+
+@code {
+    private HistoryChartData? _builtData;
+    private string? _renderedChartStyle;
+    private bool _shouldRender = true;
+    private List<ChartSeries<double>>? _chartSeries;
+    private TimeSeriesChartOptions _chartOptions = new();
+    private (string Band, PropertyHistoryChartModel.StateSegment Segment)[] _stateRows = [];
+
+    /// <summary>
+    /// The data to draw. The view draws again only when it gets another instance, so its parent may render
+    /// often without redrawing the chart.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public HistoryChartData? Data { get; set; }
+
+    /// <summary>The CSS style of the box of the lines. The chart keeps a 2:1 ratio inside it.</summary>
+    [Parameter]
+    public string ChartStyle { get; set; } = "height:100%; aspect-ratio:2 / 1; max-width:100%;";
+
+    /// <summary>More CSS style of the root element.</summary>
+    [Parameter]
+    public string? Style { get; set; }
+
+    /// <summary>The height of a band in pixels.</summary>
+    [Parameter]
+    public int BandHeight { get; set; } = 24;
+
+    /// <summary>Whether each band shows its label above it.</summary>
+    [Parameter]
+    public bool ShowBandLabels { get; set; }
+
+    /// <summary>Whether the runs of the bands are listed in a table below the legend, newest first.</summary>
+    [Parameter]
+    public bool ShowStateTable { get; set; }
+
+    protected override void OnInitialized() => TimeZone.Changed += OnTimeZoneChanged;
+
+    protected override void OnParametersSet()
+    {
+        var dataChanged = !ReferenceEquals(Data, _builtData);
+        if (dataChanged)
+        {
+            Build();
+        }
+
+        _shouldRender = dataChanged || ChartStyle != _renderedChartStyle;
+        _renderedChartStyle = ChartStyle;
+    }
+
+    protected override bool ShouldRender() => _shouldRender;
+
+    protected override void OnAfterRender(bool firstRender) => _shouldRender = false;
+
+    private void Build()
+    {
+        _builtData = Data;
+        _chartSeries = null;
+        _stateRows = [];
+        if (Data is not { } data)
+        {
+            return;
+        }
+
+        var chartSeries = new List<ChartSeries<double>>();
+        var palette = new List<string>();
+        double? anchorValue = null;
+        foreach (var line in data.Lines)
+        {
+            foreach (var run in line.Runs)
+            {
+                anchorValue ??= run[0].Number!.Value;
+                var points = new List<(DateTime, double)>(run.Count);
+                for (var index = 0; index < run.Count; index++)
+                {
+                    points.Add((TimeZone.ToZoned(run[index].Timestamp), run[index].Number!.Value));
+                }
+
+                chartSeries.Add(new ChartSeries<double>
+                {
+                    Name = line.Label,
+                    Visible = true,
+                    Data = new ChartData<double>(points)
+                });
+                palette.Add(line.Color);
+            }
+        }
+
+        if (anchorValue is { } value)
+        {
+            // The time axis is derived from the series extent, so fifteen minutes of data in a six hour
+            // range would otherwise stretch across the full width and read as six hours of recording.
+            // An invisible series pinned to the window ends holds the axis to the range that was asked
+            // for. Its value is taken from the data so it cannot widen the value axis.
+            chartSeries.Add(new ChartSeries<double>
+            {
+                Name = string.Empty,
+                Visible = true,
+                Data = new ChartData<double>(
+                [
+                    (TimeZone.ToZoned(data.From), value),
+                    (TimeZone.ToZoned(data.To), value)
+                ])
+            });
+            palette.Add("transparent");
+
+            var range = data.To - data.From;
+            var rangeSpacingTicks = range.Ticks / 8;
+            _chartOptions = new TimeSeriesChartOptions
+            {
+                ChartPalette = palette.ToArray(),
+                LineDisplayType = LineDisplayType.Line,
+                // The series are named outside the chart: the dialog by its title, the widget by its own legend.
+                ShowLegend = false,
+                TimeLabelFormat = range <= TimeSpan.FromHours(24) ? "HH:mm" : "MM-dd",
+                // A raw query has no aggregation interval, so its labels are spaced by the range alone.
+                TimeLabelSpacing = TimeSpan.FromTicks(
+                    data.Bucket is { } bucket ? Math.Max(rangeSpacingTicks, bucket.Ticks) : rangeSpacingTicks)
+            };
+            _chartSeries = chartSeries;
+        }
+
+        if (ShowStateTable && data.Bands.Count > 0)
+        {
+            _stateRows = data.Bands
+                .SelectMany(band => band.Segments.Select(segment => (Band: band.Label, Segment: segment)))
+                .OrderByDescending(row => row.Segment.Start)
+                .ToArray();
+        }
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalMinutes < 1) return $"{duration.TotalSeconds:0}s";
+        if (duration.TotalHours < 1) return $"{duration.TotalMinutes:0}m";
+        if (duration.TotalDays < 1) return $"{duration.TotalHours:0.#}h";
+        return $"{duration.TotalDays:0.#}d";
+    }
+
+    // The chart holds zoned times, so another time zone needs another build even without new data.
+    private void OnTimeZoneChanged() => InvokeAsync(() =>
+    {
+        Build();
+        _shouldRender = true;
+        StateHasChanged();
+    });
+
+    public void Dispose() => TimeZone.Changed -= OnTimeZoneChanged;
+}

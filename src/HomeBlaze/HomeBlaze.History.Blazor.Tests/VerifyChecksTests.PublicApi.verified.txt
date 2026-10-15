@@ -67,6 +67,29 @@ namespace HomeBlaze.History.Blazor
         public string PropertyPath { get; init; }
         public System.Type PropertyType { get; init; }
     }
+    public class HistoryChartView : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public HistoryChartView() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int BandHeight { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string ChartStyle { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.History.Blazor.HistoryChartData? Data { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool ShowBandLabels { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool ShowStateTable { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Style { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnAfterRender(bool firstRender) { }
+        protected override void OnInitialized() { }
+        protected override void OnParametersSet() { }
+        protected override bool ShouldRender() { }
+    }
     public sealed class HistoryStatePalette
     {
         public HistoryStatePalette() { }
