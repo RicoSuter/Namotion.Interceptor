@@ -105,11 +105,11 @@ Each browser session has isolated tracking. Server-side Blazor with multiple con
 
 ## Limitations
 
-### Excessive Re-renders for Child Subject Changes
+### Content Rendered Outside the Scope's Render Pass
 
-Due to Blazor's architecture, `AsyncLocal` values are lost when RenderFragments are invoked in a different async context (e.g., virtualized DataGrid cells, deferred rendering).
+Recording covers property reads that happen during the scope's own render pass: the content directly inside `<TrackingScope>` and any descendant that renders as part of that same pass. See [Data Flow](#data-flow) for exactly when that pass starts and ends. Content that a component renders later, in a render pass of its own, for example a virtualized grid cell or a canvas node that defers rendering until after a JavaScript callback, falls outside the scope's pass. Reads inside such deferred content are recorded only the next time that content renders as part of the scope, not when it renders on its own.
 
-To work around this, TrackingScope tracks **subjects** (not just properties) and re-renders when any descendant of a tracked subject changes. This means:
+To keep the guarantee "at least once" even for this deferred content, TrackingScope tracks the **subjects** whose properties were read, not just the individual properties, and re-renders when any descendant of a tracked subject changes:
 
 ```razor
 <TrackingScope Context="@context">
@@ -118,18 +118,9 @@ To work around this, TrackingScope tracks **subjects** (not just properties) and
 </TrackingScope>
 ```
 
-If `motor.Temperature` changes (even though it's not displayed), the component still re-renders because `motor` was accessed.
+If `motor.Temperature` changes, even though only `motor.Speed` was read, the component still re-renders because `motor` was read.
 
-**Impact**: More re-renders than strictly necessary in some scenarios. The guarantee is "at-least-once" not "exactly-once".
-
-### Ideal Solution (Pending Blazor API)
-
-The ideal solution would be for Blazor to preserve `ExecutionContext`/`AsyncLocal` through RenderFragment invocations. This would allow tracking **specific properties** instead of entire subjects.
-
-We have proposed this enhancement to the Blazor team:
-- [Feature Request: Preserve AsyncLocal/ExecutionContext Through RenderFragment Invocations](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/issues/BlazorTrackingApi_GitHub.md)
-
-If Blazor adds support for ambient render context (either via ExecutionContext preservation or a `RenderTreeBuilder.PushAmbientValue<T>()` API), this library can be updated to provide true fine-grained reactivity like Vue.js or MobX.
+**Impact**: more re-renders than strictly necessary in some scenarios, and content that renders outside the scope's pass is only ever captured by this subject-level fallback. In practice, the content that layout containers render for a cell or a node runs inside the scope's own pass, so it does not need a nested scope; a component found to defer its content to a later pass of its own can wrap that content in its own nested `<TrackingScope>` to bring it back into a recorded pass.
 
 ---
 
@@ -143,45 +134,39 @@ The tracking system consists of three core components:
 |-----------|---------|
 | `TrackingScope` | Blazor component that wraps content and triggers re-renders |
 | `ReadPropertyRecorder` | Interceptor that records property reads using `AsyncLocal<T>` |
-| `ReadPropertyRecorderScope` | Disposable scope that collects property references during render |
+| `ReadPropertyRecorderScope` | Disposable scope that collects property references during render, and removes itself from the list it was added to on `Dispose`, even when that runs on a different async flow than `Start` |
 
 ## Data Flow
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Render Cycle                                 │
-│                                                                 │
-│  ShouldRender()              OnAfterRender()                    │
-│       │                            │                            │
-│       ▼                            ▼                            │
-│  StartRecording()            StopRecording()                    │
-│       │                            │                            │
-│       ▼                            ▼                            │
-│  AsyncLocal<Scopes>          Swap collecting ↔ active           │
-│  push scope                  Extract tracked subjects           │
-│       │                      Clear ancestor cache               │
-│       ▼                            │                            │
-│  Property reads ─────────────────► _collectingProperties        │
-│  via interceptor                                                │
-└─────────────────────────────────────────────────────────────────┘
+Recording starts inside the scope's own render fragment, not in a lifecycle method such as `OnParametersSet` or `ShouldRender`. Blazor can invoke a component's render fragment in a different async flow than the one that called `StateHasChanged`, and an `AsyncLocal` scope opened in a lifecycle method would not be visible to reads that happen in that other flow. Opening the scope inside the fragment itself guarantees the recording runs in the same flow as the reads it needs to capture.
 
-┌─────────────────────────────────────────────────────────────────┐
-│                   Property Change Detection                      │
-│                                                                 │
-│  PropertyChangeInterceptor ─── Subscribe ──► TrackingScope      │
-│        │                                          │             │
-│        ▼                                          ▼             │
-│   change.Property              1. Check _properties directly    │
-│                                2. Check IsDescendantOfTracked   │
-│                                          │                      │
-│                                          ▼                      │
-│                                   BFS Parent Walk               │
-│                                   (all branches)                │
-│                                          │                      │
-│                                          ▼                      │
-│                                   TriggerRerender()             │
-│                                   (coalesced)                   │
-└─────────────────────────────────────────────────────────────────┘
+Each time Blazor invokes the fragment, it closes any scope left open by an earlier invocation (so nothing is lost if the fragment runs again before `OnAfterRender`, whether later in the same batch or in a new one) and opens a new `ReadPropertyRecorderScope` before rendering `ChildContent`. Blazor renders every descendant that is part of this render pass before it calls `OnAfterRender`, so property reads anywhere in that pass, in the scope's own content or in a descendant component rendered as part of it, are captured. `OnAfterRender` then stops the scope, swaps the collected properties into the active set, rebuilds the tracked-subjects snapshot used for descendant matching, and clears the ancestor cache.
+
+```
+Render fragment (invoked by Blazor)              OnAfterRender()
+       │                                                 │
+       ▼                                                 ▼
+ ReadPropertyRecorder.Start()                   scope.Dispose() (stop recording)
+       │                                                 │
+       ▼                                                 ▼
+ property reads during this render pass        swap _collectingProperties ↔ _properties
+ (ChildContent and its descendants) are         rebuild _trackedSubjects
+ added to _collectingProperties                 clear the ancestor cache
+```
+
+```
+Property Change Detection
+
+ PropertyChangeInterceptor ── Subscribe ──► TrackingScope
+        │
+        ▼
+  change.Property
+        │
+        ├─► 1. Is it one of _properties? ──────────────► TriggerRerender()
+        │
+        └─► 2. Is its subject a descendant of a
+               tracked subject (BFS parent walk,
+               all branches)? ────────────────────────► TriggerRerender()
 ```
 
 ## Design Decisions
@@ -198,7 +183,7 @@ private static readonly AsyncLocal<List<ReadPropertyRecorderScope>?> _activeScop
 
 ### Subject Descendant Tracking
 
-**Problem**: Properties read during deferred RenderFragment invocation (e.g., DataGrid virtualization) aren't captured by AsyncLocal because the async context is lost.
+**Problem**: Content that a component renders later, in a render pass of its own (for example virtualized DataGrid cells), falls outside the scope's own render pass, so the reads it makes are not recorded by that pass. See [Limitations](#limitations) for when this applies in practice.
 
 **Solution**: Track subjects whose properties are read. When any property changes, check if the changed subject is a descendant of any tracked subject using BFS parent traversal.
 
