@@ -26,6 +26,7 @@
     else
     {
         <CascadingValue Value="@IsEditing" Name="IsEditing">
+        <CascadingValue Value="_widgetSelection" IsFixed="true">
             @if (_editMode == PageEditMode.Split && CanEdit())
             {
                 <div data-testid="edit-splitter">
@@ -34,7 +35,7 @@
                                  EnableSlide="true"
                                  OnDoubleClicked="ResetSplitDimension">
                         <StartContent>
-                            <div style="width: 100%; height: 100%; overflow-y: auto;">
+                            <div style="width: 100%; height: 100%; overflow-y: auto;" @onclick="ClearSelectionCallback">
                                 <SubjectComponent @key="_componentKey"
                                                   Subject="@_subject"
                                                   Type="SubjectComponentType.Page"/>
@@ -99,11 +100,14 @@
                     </div>
                 }
 
-                @* View or Inline mode - show page component *@
-                <SubjectComponent @key="_componentKey"
-                                  Subject="@_subject"
-                                  Type="SubjectComponentType.Page"/>
+                @* View or Inline mode - show page component. A click that no widget took clears the selection. *@
+                <div style="@(IsEditing ? "min-height: calc(100vh - 160px);" : null)" @onclick="ClearSelectionCallback">
+                    <SubjectComponent @key="_componentKey"
+                                      Subject="@_subject"
+                                      Type="SubjectComponentType.Page"/>
+                </div>
             }
+        </CascadingValue>
         </CascadingValue>
     }
 </TrackingScope>
@@ -122,6 +126,8 @@
     private bool _isEditPanelValid;
 
     private HotKeysContext? _hotKeysContext;
+
+    private readonly WidgetSelection _widgetSelection = new();
 
     // How long the page waits after a change of the paths before it renders. Attaches and detaches come in bursts,
     // such as the subjects of a device that connects, and every one of them inside this time ends in the same render.
@@ -193,7 +199,8 @@
         if (firstRender)
         {
             _hotKeysContext = HotKeys.CreateContext()
-                .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None);
+                .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None)
+                .Add(Code.Escape, OnEscape);
         }
 
         return Task.CompletedTask;
@@ -249,9 +256,19 @@
         }
 
         _editMode = mode;
+        _widgetSelection.Clear();
 
         // Every mode with an editor has an edit panel of its own, which reports its validity once it is ready.
         _isEditPanelValid = false;
+    }
+
+    // Only an edited page has the handler, so that a click on a viewed page renders nothing.
+    private EventCallback<MouseEventArgs> ClearSelectionCallback
+        => IsEditing ? EventCallback.Factory.Create<MouseEventArgs>(this, _widgetSelection.Clear) : default;
+
+    private void OnEscape()
+    {
+        _widgetSelection.Clear();
     }
 
     private void OnEditPanelIsValidChanged(bool isValid)

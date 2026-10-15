@@ -100,9 +100,8 @@ public class PageSaveTests
             await editMenu.ClickAsync();
             await page.GetByText("Inline").ClickAsync();
 
-            var editButton = page.Locator("[data-testid='edit-subject-button']");
-            await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editButton.ClickAsync();
+            var actionBar = await page.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
+            await actionBar.GetByTestId("edit-subject-button").ClickAsync();
 
             var dialog = page.Locator(".mud-dialog");
             var nameField = dialog.GetByLabel("Name");

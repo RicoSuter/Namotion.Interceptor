@@ -18,17 +18,6 @@
             min-height: 400px;
             position: relative;">
 
-    @* Layout edit button - top right of container *@
-    @if (IsEditing)
-    {
-        <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                       Size="Size.Small"
-                       Color="Color.Primary"
-                       Class="layout-edit-button"
-                       title="Edit Layout"
-                       OnClick="EditLayout" />
-    }
-
     @* Render cells *@
     @foreach (var cell in Cells)
     {
@@ -51,7 +40,7 @@
     {
         @foreach (var (row, col) in GetEmptyCellPositions())
         {
-            <div class="grid-cell empty"
+            <div class="grid-cell empty edit-mode-selected-interactive"
                  style="grid-row: @(row + 1); grid-column: @(col + 1);"
                  @onclick="() => AddCellAt(row, col)">
                 <MudIcon Icon="@Icons.Material.Filled.Add"
@@ -63,15 +52,6 @@
 </div>
 
 <style>
-    .layout-edit-button {
-        position: absolute;
-        top: -36px;
-        right: 4px;
-        z-index: 20;
-        background: rgba(255,255,255,0.9);
-        border-radius: 4px;
-    }
-
     .grid-cell {
         background: var(--mud-palette-surface);
         border: 1px solid rgba(128,128,128,0.2);
@@ -184,12 +164,6 @@
                 Grid.Cells = [.. Cells, cell];
             }
         });
-    }
-
-    private async Task EditLayout()
-    {
-        if (Grid == null) return;
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Grid, "Edit Grid Layout");
     }
 
     private async Task EditCell(GridCell cell)

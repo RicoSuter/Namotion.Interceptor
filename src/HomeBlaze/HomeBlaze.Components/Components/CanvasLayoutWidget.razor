@@ -9,24 +9,13 @@
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
 
-<div class="canvas-layout-container @(IsEditing ? "editing" : "")"
+<div class="canvas-layout-container @(IsEditing ? "editing edit-mode-interactive" : "")"
      style="position: relative; width: 100%; min-height: @(Canvas?.MinHeight ?? 400)px;"
      @onmousedown="MouseDownCallback"
      @onclick="ClickCallback"
      @onclick:stopPropagation="@IsEditing">
 
-    @* Layout edit button - top right of container *@
-    @if (IsEditing)
-    {
-        <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                       Size="Size.Small"
-                       Color="Color.Primary"
-                       Class="layout-edit-button"
-                       title="Edit Layout"
-                       OnClick="EditLayout" />
-    }
-
-    <Diagram @ref="_diagram" class="canvas-diagram" style="@($"width: 100%; height: {Canvas?.MinHeight ?? 400}px;")">
+    <Diagram @ref="_diagram" SelectionChanged="OnDiagramSelectionChanged" class="canvas-diagram" style="@($"width: 100%; height: {Canvas?.MinHeight ?? 400}px;")">
         <NavigationSettings DisableZooming="@(!IsEditing)" DisablePanning="@(!IsEditing)" OriginChanged="@(_ => _ignoreNextClick = true)" />
         <Links />
         <Nodes OnModified="OnNodeModified">
@@ -53,7 +42,8 @@
                                                OnDelete="() => DeleteNode(node)" />
                         }
                         <div class="canvas-node-content">
-                            <SubjectComponent Subject="@node.Child"
+                            <SubjectComponent @ref="_nodeComponents[node]"
+                                              Subject="@node.Child"
                                               Type="SubjectComponentType.Widget" />
                         </div>
                     </div>
@@ -99,15 +89,6 @@
         border: 1px dashed rgba(128,128,128,0.3);
     }
 
-    .layout-edit-button {
-        position: absolute;
-        top: 4px;
-        right: 4px;
-        z-index: 20;
-        background: rgba(255,255,255,0.9);
-        border-radius: 4px;
-    }
-
     .canvas-node {
         background: var(--mud-palette-surface);
         border: 1px solid rgba(128,128,128,0.2);
@@ -124,8 +105,15 @@
         border: 2px dashed var(--mud-palette-primary);
     }
 
-    .canvas-node.editing .canvas-node-content {
-        pointer-events: none;  /* Disable all widget interaction */
+    /* The library moves a node only when the press is on the node itself, so the content, and every widget in it,
+       takes no pointer input. A click on the node selects its widget instead. */
+    .canvas-node.editing .canvas-node-content,
+    .canvas-node.editing .canvas-node-content .subject-component-wrapper.selectable {
+        pointer-events: none;
+    }
+
+    .canvas-node.editing:has(> .canvas-node-content > .subject-component-wrapper.selected) {
+        border-style: solid;
     }
 
     .canvas-node-content {
@@ -141,11 +129,18 @@
     // clears the flag, so that a move that ended without a click on the container does not swallow a later click.
     private bool _ignoreNextClick;
 
+    private CanvasNode? _pressedNode;
+
+    private readonly Dictionary<CanvasNode, SubjectComponent> _nodeComponents = new();
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
+
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
 
     private CanvasLayout? Canvas => Subject as CanvasLayout;
 
@@ -205,6 +200,28 @@
     private EventCallback<MouseEventArgs> ClickCallback
         => IsEditing ? EventCallback.Factory.Create<MouseEventArgs>(this, OnCanvasClick) : default;
 
+    protected override void OnAfterRender(bool firstRender)
+    {
+        var nodes = Nodes;
+        if (_nodeComponents.Count > nodes.Length)
+        {
+            foreach (var node in _nodeComponents.Keys.Where(node => !nodes.Contains(node)).ToList())
+            {
+                _nodeComponents.Remove(node);
+            }
+        }
+    }
+
+    // The diagram selects the node that a press is on, and none for a press on the empty canvas, which is how a click on
+    // the canvas knows whether it was on a node. The node stays selected in the diagram, which does not report a press
+    // on it again, so the node is kept until the selection of the diagram changes.
+    private void OnDiagramSelectionChanged(Group group)
+    {
+        _pressedNode = group.Nodes.Count == 1
+            ? Nodes.FirstOrDefault(node => GetNodeId(node) == group.Nodes[0].Id)
+            : null;
+    }
+
     private void OnCanvasMouseDown(MouseEventArgs e)
     {
         _ignoreNextClick = false;
@@ -215,6 +232,17 @@
         if (_ignoreNextClick)
         {
             _ignoreNextClick = false;
+            return;
+        }
+
+        // A click on a node selects its widget.
+        if (_pressedNode is { } node)
+        {
+            if (_nodeComponents.TryGetValue(node, out var component))
+            {
+                Selection?.Select(component);
+            }
+
             return;
         }
 
@@ -241,12 +269,6 @@
                 Canvas.Nodes = [.. Nodes, node];
             }
         });
-    }
-
-    private async Task EditLayout()
-    {
-        if (Canvas == null) return;
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Canvas, "Edit Canvas Layout");
     }
 
     private async Task EditNode(CanvasNode node)

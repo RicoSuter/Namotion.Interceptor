@@ -92,7 +92,7 @@ public class MarkdownEditorTests
     }
 
     [Fact]
-    public async Task WhenInlineModeIsEnabled_ThenWidgetEditButtonsAreVisible()
+    public async Task WhenAWidgetIsSelectedInInlineMode_ThenItsEditButtonIsVisible()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
@@ -107,11 +107,10 @@ public class MarkdownEditorTests
         await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
         await editMenu.ClickAsync();
         await page.GetByText("Inline").ClickAsync();
+        var actionBar = await page.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
 
         // Assert
-        // After enabling edit mode, edit buttons on widgets should be visible
-        var editButtonAfter = page.Locator("[data-testid='edit-subject-button']").First;
-        await Assertions.Expect(editButtonAfter).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToBeVisibleAsync(new() { Timeout = 10000 });
     }
 
     [Fact]
@@ -132,9 +131,8 @@ public class MarkdownEditorTests
         await editMenu.ClickAsync();
         await page.GetByText("Inline").ClickAsync();
 
-        var editButton = indicatorWrapper.GetByTestId("edit-subject-button");
-        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 10000 });
-        await editButton.ClickAsync();
+        var actionBar = await indicatorWrapper.SelectWidgetAsync();
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
 
         // Assert
         var dialog = page.GetByRole(AriaRole.Dialog);

@@ -3,26 +3,58 @@
 @inject SubjectComponentRegistry ComponentRegistry
 @inject IDialogService DialogService
 
+@implements IDisposable
+
 @if (Subject != null)
 {
     var registration = ComponentRegistry.GetComponent(Subject.GetType(), Type);
     if (registration?.ComponentType != null)
     {
-        <div class="subject-component-wrapper" style="position: relative;">
-            @if (IsEditing && Type == SubjectComponentType.Widget && HasEditComponent)
+        var isSelectable = IsSelectable;
+        var isSelected = isSelectable && ReferenceEquals(Selection?.Selected, this);
+        <div class="@(isSelected ? "subject-component-wrapper selectable selected" : isSelectable ? "subject-component-wrapper selectable" : "subject-component-wrapper")"
+             style="position: relative;"
+             tabindex="@(isSelectable ? "0" : null)"
+             @onpointerdown="PointerDownCallback"
+             @onclick="ClickCallback"
+             @onclick:stopPropagation="@isSelectable"
+             @onkeydown="KeyDownCallback"
+             @onkeydown:stopPropagation="@isSelectable">
+            @if (isSelected)
             {
-                <div class="subject-edit-overlay">
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit"
-                                   Size="Size.Small"
-                                   Color="Color.Primary"
-                                   title="Edit"
-                                   OnClick="OpenEditDialog"
-                                   data-testid="edit-subject-button" />
-                </div>
+                var selectableParent = SelectableParent;
+                <MudPopover Open="true"
+                            AnchorOrigin="Origin.TopRight"
+                            TransformOrigin="Origin.BottomRight"
+                            OverflowBehavior="OverflowBehavior.FlipAlways"
+                            Elevation="4"
+                            Class="subject-action-bar"
+                            data-testid="widget-action-bar">
+                    @if (selectableParent != null)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                                       Size="Size.Small"
+                                       title="Select parent"
+                                       OnClick="() => Selection!.Select(selectableParent)"
+                                       data-testid="select-parent-button" />
+                    }
+
+                    @if (HasEditComponent)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                       Size="Size.Small"
+                                       Color="Color.Primary"
+                                       title="Edit"
+                                       OnClick="OpenEditDialog"
+                                       data-testid="edit-subject-button" />
+                    }
+                </MudPopover>
             }
-            <DynamicComponent Type="registration.ComponentType"
-                              @ref="_dynamicComponent"
-                              Parameters="@GetComponentParameters()" />
+            <CascadingValue Value="this" Name="ParentSubjectComponent" IsFixed="true">
+                <DynamicComponent Type="registration.ComponentType"
+                                  @ref="_dynamicComponent"
+                                  Parameters="@GetComponentParameters()" />
+            </CascadingValue>
         </div>
     }
     else
@@ -34,24 +66,56 @@
 }
 
 <style>
-    .subject-edit-overlay {
-        position: absolute;
-        top: 4px;
-        right: 4px;
-        z-index: 10;
+    /* In edit mode a widget is selected with a click, which shows its actions. The content of a selectable widget takes no
+       pointer input, so that a click selects the widget instead of operating it. A nested widget takes the pointer again and
+       is selected on its own. A part of a widget that is meant to be used in edit mode, like the area of a canvas that moves
+       its nodes, takes the pointer back with the class edit-mode-interactive, and one that the widget offers only once it
+       is selected, like the empty cells of a grid that add a widget, with edit-mode-selected-interactive. */
+    .subject-component-wrapper.selectable {
+        pointer-events: auto;
+        cursor: pointer;
+        outline: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.35);
+        outline-offset: 1px;
+    }
+
+    .subject-component-wrapper.selectable > * {
+        pointer-events: none;
+    }
+
+    .subject-component-wrapper.selectable .edit-mode-interactive,
+    .subject-component-wrapper.selected .edit-mode-selected-interactive {
+        pointer-events: auto;
+    }
+
+    @@media (hover: hover) {
+        .subject-component-wrapper.selectable:not(.selected):hover:not(:has(.subject-component-wrapper.selectable:hover)) {
+            outline: 1px solid rgba(var(--mud-palette-primary-rgb), 0.7);
+        }
+    }
+
+    .subject-component-wrapper.selectable:focus-visible {
+        outline: 2px solid rgba(var(--mud-palette-primary-rgb), 0.7);
+    }
+
+    .subject-component-wrapper.selectable.selected {
+        outline: 2px solid var(--mud-palette-primary);
+    }
+
+    .subject-action-bar {
         display: flex;
-        background: rgba(255,255,255,0.95);
-        border-radius: 4px;
+        gap: 2px;
         padding: 2px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        opacity: 0.9;
-        pointer-events: auto;  /* Re-enable clicks even when parent has pointer-events: none */
+        margin: 4px 0;
     }
-    .subject-edit-overlay:hover {
-        opacity: 1;
-    }
-    .subject-edit-overlay .mud-icon-button {
+
+    .subject-action-bar .mud-icon-button {
         padding: 4px;
+    }
+
+    @@media (pointer: coarse) {
+        .subject-action-bar .mud-icon-button {
+            padding: 10px;
+        }
     }
 </style>
 
@@ -78,6 +142,21 @@
     public bool IsEditing { get; set; }
 
     /// <summary>
+    /// The selection of the page. Without one, no widget can be selected and no edit action is shown.
+    /// </summary>
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
+
+    [CascadingParameter(Name = "ParentSubjectComponent")]
+    private SubjectComponent? ParentComponent { get; set; }
+
+    // A pointer that moved further than this between press and click dragged something, such as a node of a canvas.
+    private const double MaximumClickDistance = 5;
+
+    private double _pointerDownX;
+    private double _pointerDownY;
+
+    /// <summary>
     /// Two-way binding for accessing the rendered component instance.
     /// Useful for edit panels that need to access ISubjectEditComponent methods.
     /// </summary>
@@ -95,6 +174,76 @@
     private bool HasEditComponent =>
         Subject != null &&
         (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit) || Subject.HasConfigurationProperties());
+
+    private bool IsSelectable =>
+        IsEditing &&
+        Type == SubjectComponentType.Widget &&
+        Selection != null &&
+        HasEditComponent;
+
+    private SubjectComponent? SelectableParent
+    {
+        get
+        {
+            var parent = ParentComponent;
+            while (parent != null && !parent.IsSelectable)
+            {
+                parent = parent.ParentComponent;
+            }
+
+            return parent;
+        }
+    }
+
+    // A widget that cannot be selected has no handlers, so that a click or a key in it renders nothing and is not hidden
+    // from the handlers above it.
+    private EventCallback<PointerEventArgs> PointerDownCallback
+        => IsSelectable ? EventCallback.Factory.Create<PointerEventArgs>(this, OnPointerDown) : default;
+
+    private EventCallback<MouseEventArgs> ClickCallback
+        => IsSelectable ? EventCallback.Factory.Create<MouseEventArgs>(this, OnClick) : default;
+
+    private EventCallback<KeyboardEventArgs> KeyDownCallback
+        => IsSelectable ? EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown) : default;
+
+    internal void OnSelectionChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnPointerDown(PointerEventArgs args)
+    {
+        _pointerDownX = args.ClientX;
+        _pointerDownY = args.ClientY;
+    }
+
+    private void OnClick(MouseEventArgs args)
+    {
+        if (Math.Abs(args.ClientX - _pointerDownX) > MaximumClickDistance ||
+            Math.Abs(args.ClientY - _pointerDownY) > MaximumClickDistance)
+        {
+            return;
+        }
+
+        Selection?.Select(this);
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key != "Enter" || Selection == null)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(Selection.Selected, this))
+        {
+            Selection.Select(this);
+        }
+        else if (HasEditComponent)
+        {
+            await OpenEditDialog();
+        }
+    }
 
     protected override void OnParametersSet()
     {
@@ -144,5 +293,10 @@
             return;
 
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, "Edit");
+    }
+
+    public void Dispose()
+    {
+        Selection?.Remove(this);
     }
 }

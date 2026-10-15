@@ -1205,6 +1205,9 @@ public class SubjectSetupDialogTests
             // The cell that the layout has holds a grid with empty cells of its own, so only the ones of the layout itself count.
             var emptyCell = page.Locator(".grid-layout-container").First.Locator(":scope > .grid-cell.empty").First;
             await Assertions.Expect(emptyCell).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+
+            // The empty cells of a grid add a widget once the grid is selected.
+            await emptyCell.SelectWidgetAsync();
             await emptyCell.ClickAsync();
 
             await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });

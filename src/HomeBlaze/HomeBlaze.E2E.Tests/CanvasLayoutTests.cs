@@ -239,9 +239,8 @@ public class CanvasLayoutTests
         // Act: a click on the title, which would follow its link while the page is viewed.
         await page.Mouse.ClickAsync((float)(titleBox.Left + 5), (float)(titleBox.Top + titleBox.Height / 2));
 
-        // Assert: the click is the click on a node, which offers to add a node at that place. Closing the dialog is the round trip
-        // after which the page would have navigated.
-        await page.GetByTestId("cancel-button").ClickAsync();
+        // Assert: the click selects the widget of the node. Its actions are the round trip after which the page would have navigated.
+        await Assertions.Expect(page.GetWidgetActionBar()).ToBeVisibleAsync(new() { Timeout = Timeout });
         Assert.Equal(urlBefore, page.Url);
     }
 

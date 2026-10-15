@@ -602,7 +602,8 @@ public class MarkdownBlockTests
 
         // Act
         await SelectEditModeAsync(page, "Inline");
-        await card.GetByTestId("edit-subject-button").ClickAsync();
+        var actionBar = await card.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
 
         var dialog = page.GetByRole(AriaRole.Dialog);
         await dialog.GetByLabel("Target Speed (RPM)").FillAsync("1500");
