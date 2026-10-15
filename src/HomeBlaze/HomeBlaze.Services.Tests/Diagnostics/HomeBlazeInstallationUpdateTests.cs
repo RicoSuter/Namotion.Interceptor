@@ -171,14 +171,46 @@ public class HomeBlazeInstallationUpdateTests
     }
 
     [Fact]
-    public void WhenCheckForUpdatesIsCalledTwiceQuickly_ThenTheSecondCallIsRejected()
+    public async Task WhenCheckForUpdatesIsCalledTwiceQuickly_ThenTheSecondCallIsRejected()
     {
         // Arrange
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson))));
-        installation.CheckForUpdates();
+        await StartAndWaitUntilRunningAsync(installation);
+        try
+        {
+            installation.CheckForUpdates();
+
+            // Act & Assert
+            Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
+        }
+        finally
+        {
+            await installation.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenCheckForUpdatesIsCalledWhileStopped_ThenItIsRejectedWithoutUsingTheThrottle()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson));
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
+        var exception = Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
+        Assert.Equal("The installation is not running.", exception.Message);
+
+        await StartAndWaitUntilRunningAsync(installation);
+        try
+        {
+            installation.CheckForUpdates();
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => installation.UpdateAvailable is not null, message: "The update check did not run after the start");
+        }
+        finally
+        {
+            await installation.StopAsync(CancellationToken.None);
+        }
     }
 
     [Fact]
@@ -200,7 +232,7 @@ public class HomeBlazeInstallationUpdateTests
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
 
         // Act
-        await installation.StartAsync(CancellationToken.None);
+        await StartAndWaitUntilRunningAsync(installation);
         try
         {
             installation.CheckForUpdates();
@@ -229,7 +261,7 @@ public class HomeBlazeInstallationUpdateTests
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
 
         // Act
-        await installation.StartAsync(CancellationToken.None);
+        await StartAndWaitUntilRunningAsync(installation);
         try
         {
             installation.CheckForUpdates();
@@ -284,7 +316,7 @@ public class HomeBlazeInstallationUpdateTests
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
         installation.UpdateCheckEnabled = true;
 
-        await installation.StartAsync(CancellationToken.None);
+        await StartAndWaitUntilRunningAsync(installation);
         try
         {
             installation.CheckForUpdates();
@@ -319,7 +351,7 @@ public class HomeBlazeInstallationUpdateTests
         installation.UpdateCheckEnabled = true;
         installation.UpdateCheckInterval = TimeSpan.FromHours(48);
 
-        await installation.StartAsync(CancellationToken.None);
+        await StartAndWaitUntilRunningAsync(installation);
         try
         {
             installation.CheckForUpdates();
@@ -353,7 +385,7 @@ public class HomeBlazeInstallationUpdateTests
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
         installation.UpdateCheckEnabled = true;
 
-        await installation.StartAsync(CancellationToken.None);
+        await StartAndWaitUntilRunningAsync(installation);
         try
         {
             installation.CheckForUpdates();
@@ -371,6 +403,14 @@ public class HomeBlazeInstallationUpdateTests
         {
             await installation.StopAsync(CancellationToken.None);
         }
+    }
+
+    // ExecuteAsync runs on the thread pool, so the status is still Stopped when StartAsync returns.
+    private static async Task StartAndWaitUntilRunningAsync(HomeBlazeInstallation installation)
+    {
+        await installation.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => installation.Status != ServiceStatus.Stopped, message: "The installation did not start");
     }
 
     private sealed class BrokenStream : MemoryStream

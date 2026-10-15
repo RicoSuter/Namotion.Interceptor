@@ -23,6 +23,11 @@ public partial class HomeBlazeInstallation
             throw new InvalidOperationException(reason);
         }
 
+        if (Status == ServiceStatus.Stopped)
+        {
+            throw new InvalidOperationException("The installation is not running.");
+        }
+
         if (!_updateSchedule.TryStartManualCheck(_timeProvider.GetUtcNow()))
         {
             throw new InvalidOperationException("Updates were checked less than a minute ago.");
