@@ -38,10 +38,18 @@ public partial class PersistedDevice : IConfigurable
 
     public int ApplyCount => Volatile.Read(ref _applyCount);
 
+    /// <summary>Called after a value of <see cref="Speed"/> is set, to act in the middle of a write.</summary>
+    public Action? SpeedChanged { get; set; }
+
     [Operation]
     public void Reset()
     {
         CurrentSpeed = 0;
+    }
+
+    partial void OnSpeedChanged(int newValue)
+    {
+        SpeedChanged?.Invoke();
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)

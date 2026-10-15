@@ -12,6 +12,7 @@ namespace HomeBlaze.Components.Tests.Models;
 public partial class RecordingConfigurationStore : IConfigurationWriter
 {
     private readonly ConcurrentQueue<IInterceptorSubject> _writtenSubjects = new();
+    private readonly ConcurrentQueue<int> _writtenSpeeds = new();
 
     public partial PersistedDevice? Device { get; set; }
 
@@ -23,16 +24,32 @@ public partial class RecordingConfigurationStore : IConfigurationWriter
     /// <summary>An exception that every write throws, to act as a writer that fails.</summary>
     public Exception? WriteException { get; set; }
 
+    /// <summary>A task that every write awaits after it started, to act as a writer that takes long.</summary>
+    public Task? WriteGate { get; set; }
+
     public IReadOnlyCollection<IInterceptorSubject> WrittenSubjects => _writtenSubjects;
 
-    public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    /// <summary>The speed of every device whose write started, read when the write starts.</summary>
+    public IReadOnlyCollection<int> WrittenSpeeds => _writtenSpeeds;
+
+    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
+        if (subject is PersistedDevice device)
+        {
+            _writtenSpeeds.Enqueue(device.Speed);
+        }
+
+        if (WriteGate is not null)
+        {
+            await WriteGate;
+        }
+
         if (WriteException is not null)
         {
             throw WriteException;
         }
 
         _writtenSubjects.Enqueue(subject);
-        return Task.FromResult(WritesConfiguration);
+        return WritesConfiguration;
     }
 }

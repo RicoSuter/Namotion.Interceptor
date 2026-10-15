@@ -53,7 +53,7 @@ public sealed class PropertyWriterTests : IDisposable
     }
 
     [Fact]
-    public void WhenValuesAreWritten_ThenTheyAreConvertedToThePropertyTypes()
+    public async Task WhenValuesAreWritten_ThenTheyAreConvertedToThePropertyTypes()
     {
         // Arrange
         _graph.Device.Ratio = 0.5;
@@ -71,10 +71,15 @@ public sealed class PropertyWriterTests : IDisposable
         Assert.Equal(DeviceMode.Boost, _graph.Device.Mode);
         Assert.Null(_graph.Device.Ratio);
         Assert.Empty(_snackbar.Messages);
+
+        _timeProvider.Advance(PropertyWriter.PersistDelay);
+        await AsyncTestHelpers.WaitUntilAsync(() => _graph.Device.ApplyCount == 1);
     }
 
     [Theory]
     [InlineData(nameof(PersistedDevice.Mode), "Turbo")]
+    [InlineData(nameof(PersistedDevice.Mode), "boost")]
+    [InlineData(nameof(PersistedDevice.Mode), "1")]
     [InlineData(nameof(PersistedDevice.Speed), 1e12)]
     [InlineData(nameof(PersistedDevice.Speed), null)]
     public void WhenValueCannotBeConverted_ThenFalseIsReturnedAndAnErrorIsShown(string propertyName, object? value)
@@ -261,8 +266,51 @@ public sealed class PropertyWriterTests : IDisposable
         Assert.Empty(_snackbar.Messages);
     }
 
+    [Fact]
+    public async Task WhenOwnerIsWrittenWhileItIsSaved_ThenTheNextSaveStartsAfterTheRunningOneWithTheLastValue()
+    {
+        // Arrange
+        var writeGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _graph.Store.WriteGate = writeGate.Task;
+        var speed = GetProperty(_graph.Device, nameof(PersistedDevice.Speed));
+        _writer.TryWrite(speed, 100);
+        _timeProvider.Advance(PropertyWriter.PersistDelay);
+        await AsyncTestHelpers.WaitUntilAsync(() => _graph.Store.WrittenSpeeds.Count == 1);
+
+        // Act
+        _writer.TryWrite(speed, 200);
+        _timeProvider.Advance(PropertyWriter.PersistDelay);
+        var startedWritesWhileFirstRuns = _graph.Store.WrittenSpeeds.Count;
+        writeGate.SetResult();
+
+        // Assert
+        Assert.Equal(1, startedWritesWhileFirstRuns);
+        await AsyncTestHelpers.WaitUntilAsync(() => _graph.Device.ApplyCount == 2);
+        Assert.Equal([100, 200], _graph.Store.WrittenSpeeds);
+        Assert.Equal(2, _graph.Store.WrittenSubjects.Count);
+        Assert.Empty(_snackbar.Messages);
+    }
+
+    [Fact]
+    public async Task WhenWriterIsDisposedDuringAWrite_ThenOwnerIsPersistedAtOnceAndNothingIsShown()
+    {
+        // Arrange
+        _graph.Device.SpeedChanged = _writer.Dispose;
+
+        // Act
+        var isWritten = _writer.TryWrite(GetProperty(_graph.Device, nameof(PersistedDevice.Speed)), 100);
+
+        // Assert
+        Assert.True(isWritten);
+        await AsyncTestHelpers.WaitUntilAsync(() => _graph.Device.ApplyCount == 1);
+        Assert.Same(_graph.Device, Assert.Single(_graph.Store.WrittenSubjects));
+        Assert.Empty(_snackbar.Messages);
+    }
+
     public void Dispose()
     {
+        // Runs the saves that a test left pending on this thread, so none of them outlives the graph.
+        _timeProvider.Advance(PropertyWriter.PersistDelay);
         _writer.Dispose();
         _graph.Dispose();
     }

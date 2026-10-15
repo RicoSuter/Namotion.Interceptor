@@ -96,8 +96,8 @@ public static class EditedPropertyValues
 
         if (underlyingType.IsEnum && value is string name)
         {
-            // Enum.Parse alone would also accept a number that names no value.
-            return Array.IndexOf(Enum.GetNames(underlyingType), name) >= 0
+            // Enum.Parse alone would also accept a number that names no value; IsDefined matches names only.
+            return Enum.IsDefined(underlyingType, name)
                 ? Enum.Parse(underlyingType, name)
                 : throw new FormatException($"'{name}' is no value of {underlyingType.Name}.");
         }

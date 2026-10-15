@@ -23,9 +23,13 @@ public sealed class PropertyWriter : IDisposable
     private readonly TimeProvider _timeProvider;
     private readonly TimerCallback _onPersistDue;
 
-    // Guards _pendingSaves and _isDisposed: writes come from the circuit, the timers fire on the thread pool.
+    // Guards the dictionaries and _isDisposed: writes come from the circuit, the timers fire on the thread pool.
     private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, ITimer> _pendingSaves = new(ReferenceEqualityComparer.Instance);
+
+    // The last started save per owner until it completes; the next save of the owner awaits it, so saves of one
+    // owner never overlap and run in the order they started.
+    private readonly Dictionary<IInterceptorSubject, Task> _runningSaves = new(ReferenceEqualityComparer.Instance);
     private volatile bool _isDisposed;
 
     public PropertyWriter(RootManager rootManager, ISnackbar snackbar, TimeProvider timeProvider)
@@ -57,7 +61,8 @@ public sealed class PropertyWriter : IDisposable
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        if (!IsWritable(property))
+        var currentValue = property.GetValue();
+        if (!property.HasPublicSetter || currentValue is MethodMetadata)
         {
             ShowWriteError(property, "The property cannot be written.");
             return false;
@@ -66,7 +71,7 @@ public sealed class PropertyWriter : IDisposable
         try
         {
             var convertedValue = EditedPropertyValues.ConvertTo(value, property.Type);
-            if (Equals(convertedValue, property.GetValue()))
+            if (Equals(convertedValue, currentValue))
             {
                 return true;
             }
@@ -90,27 +95,37 @@ public sealed class PropertyWriter : IDisposable
 
     private void SchedulePersist(IInterceptorSubject owner)
     {
+        Task? previousSave;
+        TaskCompletionSource save;
         lock (_lock)
         {
-            if (_isDisposed)
+            if (!_isDisposed)
             {
+                if (_pendingSaves.TryGetValue(owner, out var timer))
+                {
+                    timer.Change(PersistDelay, Timeout.InfiniteTimeSpan);
+                }
+                else
+                {
+                    _pendingSaves.Add(owner, _timeProvider.CreateTimer(_onPersistDue, owner, PersistDelay, Timeout.InfiniteTimeSpan));
+                }
+
                 return;
             }
 
-            if (_pendingSaves.TryGetValue(owner, out var timer))
-            {
-                timer.Change(PersistDelay, Timeout.InfiniteTimeSpan);
-                return;
-            }
-
-            _pendingSaves.Add(owner, _timeProvider.CreateTimer(_onPersistDue, owner, PersistDelay, Timeout.InfiniteTimeSpan));
+            // Disposed after this write passed its check: saved the way Dispose saves a pending owner.
+            save = StartSave(owner, out previousSave);
         }
+
+        _ = Task.Run(() => PersistAsync(owner, previousSave, save, isShown: false));
     }
 
     private void OnPersistDue(object? state)
     {
         var owner = (IInterceptorSubject)state!;
         ITimer? timer;
+        Task? previousSave;
+        TaskCompletionSource save;
         lock (_lock)
         {
             // Absent when Dispose has taken the save over.
@@ -118,31 +133,69 @@ public sealed class PropertyWriter : IDisposable
             {
                 return;
             }
+
+            save = StartSave(owner, out previousSave);
         }
 
         timer.Dispose();
-        _ = PersistAsync(owner, isShown: true);
+        _ = PersistAsync(owner, previousSave, save, isShown: true);
     }
 
-    private async Task PersistAsync(IInterceptorSubject owner, bool isShown)
+    /// <summary>Registers a save of the owner as its running one; the caller holds <see cref="_lock"/>.</summary>
+    private TaskCompletionSource StartSave(IInterceptorSubject owner, out Task? previousSave)
     {
-        // Runs on the thread pool and is not awaited, so every failure must end here. Saves of the same file
-        // can overlap (another owner, another circuit) and fail with an IOException, which is shown as an error.
+        _runningSaves.TryGetValue(owner, out previousSave);
+
+        // Asynchronous continuations, so the next save does not run inside the completion of this one.
+        var save = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _runningSaves[owner] = save.Task;
+        return save;
+    }
+
+    private async Task PersistAsync(IInterceptorSubject owner, Task? previousSave, TaskCompletionSource save, bool isShown)
+    {
         try
         {
-            var result = await ConfigurationPersistence.PersistOwnerAsync(_rootManager, owner, CancellationToken.None);
+            if (previousSave is not null)
+            {
+                // Never faults: it is completed with SetResult only.
+                await previousSave;
+            }
+
+            // Runs on the thread pool and is not awaited, so a failing save must end here. Saves of the same file
+            // can overlap (another owner, another circuit) and fail with an IOException, which is shown as an error.
+            ConfigurationPersistResult result;
+            try
+            {
+                result = await ConfigurationPersistence.PersistOwnerAsync(_rootManager, owner, CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                if (isShown)
+                {
+                    // ISnackbar is safe to call from any thread: its provider re-renders through InvokeAsync.
+                    _snackbar.Add($"Error saving configuration: {exception.Message}", Severity.Error);
+                }
+
+                return;
+            }
+
             if (isShown && result != ConfigurationPersistResult.Written)
             {
                 _snackbar.AddConfigurationNotSavedWarning();
             }
         }
-        catch (Exception exception)
+        finally
         {
-            if (isShown)
+            lock (_lock)
             {
-                // ISnackbar is safe to call from any thread: its provider re-renders through InvokeAsync.
-                _snackbar.Add($"Error saving configuration: {exception.Message}", Severity.Error);
+                if (_runningSaves.TryGetValue(owner, out var runningSave) && runningSave == save.Task)
+                {
+                    _runningSaves.Remove(owner);
+                }
             }
+
+            save.SetResult();
         }
     }
 
@@ -152,12 +205,12 @@ public sealed class PropertyWriter : IDisposable
     }
 
     /// <summary>
-    /// Persists the owners that wait for their delay at once, in the background and without snackbar, and stops
-    /// all timers.
+    /// Persists the owners that wait for their delay at once, each after its running save, in the background and
+    /// without snackbar, and stops all timers. A write in progress while the writer is disposed is saved the same way.
     /// </summary>
     public void Dispose()
     {
-        KeyValuePair<IInterceptorSubject, ITimer>[] pendingSaves;
+        (IInterceptorSubject Owner, ITimer Timer, Task? PreviousSave, TaskCompletionSource Save)[] pendingSaves;
         lock (_lock)
         {
             if (_isDisposed)
@@ -166,16 +219,23 @@ public sealed class PropertyWriter : IDisposable
             }
 
             _isDisposed = true;
-            pendingSaves = [.. _pendingSaves];
+            pendingSaves = new (IInterceptorSubject, ITimer, Task?, TaskCompletionSource)[_pendingSaves.Count];
+            var index = 0;
+            foreach (var (owner, timer) in _pendingSaves)
+            {
+                var save = StartSave(owner, out var previousSave);
+                pendingSaves[index++] = (owner, timer, previousSave, save);
+            }
+
             _pendingSaves.Clear();
         }
 
-        foreach (var (owner, timer) in pendingSaves)
+        foreach (var (owner, timer, previousSave, save) in pendingSaves)
         {
             timer.Dispose();
 
             // Off the disposing thread, which tears the circuit down; the circuit cannot show a snackbar anymore.
-            _ = Task.Run(() => PersistAsync(owner, isShown: false));
+            _ = Task.Run(() => PersistAsync(owner, previousSave, save, isShown: false));
         }
     }
 }
