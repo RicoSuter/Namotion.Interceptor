@@ -193,7 +193,11 @@ public partial class HomeBlazeInstallation
 
     private void OnAssemblyLoad(object? sender, AssemblyLoadEventArgs args)
     {
-        Interlocked.Exchange(ref _isInventoryOutdated, 1);
+        // The inventory leaves dynamic assemblies out, so emitting one does not change it.
+        if (!args.LoadedAssembly.IsDynamic)
+        {
+            Interlocked.Exchange(ref _isInventoryOutdated, 1);
+        }
     }
 
     private void OnDeveloperModeChanged()
