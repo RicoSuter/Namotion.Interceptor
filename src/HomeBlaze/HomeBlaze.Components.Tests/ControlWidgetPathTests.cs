@@ -13,6 +13,7 @@ public class ControlWidgetPathTests
     [InlineData(typeof(Slider), nameof(Slider.Path), SubjectPathKinds.Number, true)]
     [InlineData(typeof(Select), nameof(Select.Path), SubjectPathKinds.Enum, true)]
     [InlineData(typeof(OperationButton), nameof(OperationButton.Path), SubjectPathKinds.Operation, false)]
+    [InlineData(typeof(Control), nameof(Control.Path), SubjectPathKinds.Value | SubjectPathKinds.Operation, false)]
     public void WhenControlWidgetHasAPathArgument_ThenThePickerOffersOnlyTheTargetsItCanUse(
         Type widgetType, string propertyName, SubjectPathKinds expectedKind, bool expectedWritable)
     {

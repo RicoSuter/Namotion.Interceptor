@@ -89,7 +89,7 @@ A map that cannot be found, or an argument that a widget cannot use, does not ta
 
 | Message | Cause | Fix |
 |---------|-------|-----|
-| `Cannot resolve map: motorstat` | The `Map` of a `ValueList` row, a `ValueTile`, an `Indicator` or a `Select` leads to no subject, or to a subject that is no `ValueMap`. The message shows the map as written | Check the name or the path in `Map`. The name is that of the block of the map, and a map on another page is reached through that page, see [ValueMap](page-widgets.md#valuemap) |
+| `Cannot resolve map: motorstat` | The `Map` of a `ValueList` row, a `ValueTile`, an `Indicator`, a `Select` or a `Control` leads to no subject, or to a subject that is no `ValueMap`. The message shows the map as written | Check the name or the path in `Map`. The name is that of the block of the map, and a map on another page is reached through that page, see [ValueMap](page-widgets.md#valuemap) |
 | `Set both On and Off, or neither` | A `Switch` has only one of `On` and `Off` | Set both, so that the switch invokes an operation per state, or remove both, so that it writes its property, see [Switch](widgets/switch.md) |
 | `On needs an operation without input: pump/SetTargetSpeed` | `On` of a `Switch` leads to an operation with a parameter that needs input. `Off` gives the same message with its own name. The message shows the path as written | Use an operation whose parameters need no input, see [Switch](widgets/switch.md) |
 | `Needs a range: set Minimum and Maximum` | A `Slider` sets no `Minimum` and `Maximum`, and its property has neither the attributes `Minimum` and `Maximum` nor the unit percent | Set `Minimum` and `Maximum` on the block, see [Slider](widgets/slider.md) |

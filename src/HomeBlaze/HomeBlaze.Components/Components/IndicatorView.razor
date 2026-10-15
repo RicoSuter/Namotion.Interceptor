@@ -1,0 +1,54 @@
+@* The indicator of a value: a chip with icon and text, an icon alone, or the error of its map. *@
+
+@{
+    var color = ValueReader.GetIndicatorColor(Reading, Map);
+    var icon = MudBlazorIconResolver.ResolveOrNull(Reading.Icon ?? Icon);
+}
+
+@if (Reading.MapError is not null)
+{
+    @* The value text is the one place that shows the error of a map. *@
+    <ValueText Reading="@Reading" />
+}
+else if (Kind == IndicatorKind.Icon)
+{
+    <MudTooltip Text="@(Reading.IsMissing ? Path : Reading.Text)">
+        <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color" Class="ma-1" data-testid="indicator" />
+    </MudTooltip>
+}
+else if (Reading.IsMissing)
+{
+    <MudTooltip Text="@Path">
+        <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" data-testid="indicator">@Reading.Text</MudChip>
+    </MudTooltip>
+}
+else
+{
+    <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" data-testid="indicator">@Reading.Text</MudChip>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public ValueReading Reading { get; set; } = default!;
+
+    /// <summary>
+    /// The name or path of the map as written. Without one, a boolean that is true has the primary colour.
+    /// </summary>
+    [Parameter]
+    public string? Map { get; set; }
+
+    /// <summary>
+    /// The name of the icon that stays when no case of the map gives one.
+    /// </summary>
+    [Parameter]
+    public string? Icon { get; set; }
+
+    [Parameter]
+    public IndicatorKind Kind { get; set; }
+
+    /// <summary>
+    /// The path of the value, shown as tooltip when the value is missing.
+    /// </summary>
+    [Parameter]
+    public string? Path { get; set; }
+}

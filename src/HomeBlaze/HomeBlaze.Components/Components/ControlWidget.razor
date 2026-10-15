@@ -1,0 +1,66 @@
+@using HomeBlaze.Components.Controls
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Control))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    var control = Subject as Control;
+}
+
+@if (control is not null)
+{
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var path = control.Path;
+    var label = control.Label;
+    var minimum = control.Minimum;
+    var maximum = control.Maximum;
+    var map = control.Map;
+    var property = ValueReader.ResolveProperty(PathResolver, control, path);
+    var kind = ControlKindResolver.Resolve(property, minimum, maximum);
+
+    if (kind == ControlKind.OperationButton)
+    {
+        <OperationButtonView Property="@property" Path="@path" Label="@label" />
+    }
+    else if (kind == ControlKind.Switch)
+    {
+        <SwitchView Property="@property" Path="@path" Label="@label" />
+    }
+    else if (kind == ControlKind.Slider)
+    {
+        <SliderView Property="@property" Path="@path" Label="@label" Minimum="@minimum" Maximum="@maximum" Step="@control.Step" />
+    }
+    else if (kind == ControlKind.Select)
+    {
+        var valueMap = ValueReader.ResolveMap(PathResolver, control, map, out var mapError);
+        if (mapError is not null)
+        {
+            <WidgetArgumentError Message="@mapError" />
+        }
+        else
+        {
+            <SelectView Property="@property" Path="@path" Label="@label" Map="@valueMap" />
+        }
+    }
+    else
+    {
+        var reading = ValueReader.Read(PathResolver, control, path, map, TimeZone);
+        <div class="d-flex align-center gap-2" data-testid="control-value">
+            <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="value-label">@ValueReader.GetControlLabel(reading.Property, label, path)</MudText>
+            @if (kind == ControlKind.Indicator)
+            {
+                <IndicatorView Reading="@reading" Map="@map" Path="@path" />
+            }
+            else
+            {
+                <ValueText Reading="@reading" Path="@path" Typo="Typo.subtitle2" />
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

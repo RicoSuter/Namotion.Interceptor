@@ -75,3 +75,4 @@ A query with a label, an icon and a variant of its own. `GetDiagnostics` changes
 - [Basics](basics.md) - Paths, writes, what they save, and who can operate a control
 - [Overview](overview.md) - All widgets by group
 - [Switch](switch.md) - Invokes an operation per state of a boolean
+- [Control](control.md) - Chooses the control that fits its target

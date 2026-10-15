@@ -70,3 +70,4 @@ A slider with a range and a step of its own. They are in the unit of the propert
 
 - [Basics](basics.md) - Paths, writes, what they save, and who can operate a control
 - [Overview](overview.md) - All widgets by group
+- [Control](control.md) - Chooses the control that fits its target

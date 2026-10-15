@@ -65,3 +65,4 @@ A switch with an operation for each state. Turning it on invokes `PowerOn` of th
 
 - [Basics](basics.md) - Paths, writes, what they save, and who can operate a control
 - [Overview](overview.md) - All widgets by group
+- [Control](control.md) - Chooses the control that fits its target

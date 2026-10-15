@@ -72,3 +72,4 @@ A select with a map. Each value in the list gets the text and the icon of its ca
 
 - [Basics](basics.md) - Paths, writes, what they save, and who can operate a control
 - [Overview](overview.md) - All widgets by group
+- [Control](control.md) - Chooses the control that fits its target
