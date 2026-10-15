@@ -158,4 +158,27 @@ public class UpdateScheduleTests
         Assert.False(second);
         Assert.True(third);
     }
+
+    [Fact]
+    public void WhenTheWallClockJumps_ThenTheManualThrottleStillFollowsTheMonotonicClock()
+    {
+        // Arrange
+        var schedule = new UpdateSchedule();
+        var timeProvider = new TestTimeProvider(new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero));
+
+        // Act
+        var first = schedule.TryStartManualCheck(timeProvider);
+
+        // Only the wall clock moves, well past the throttle; the monotonic timestamp stays put.
+        timeProvider.UtcNow += TimeSpan.FromHours(2);
+        var second = schedule.TryStartManualCheck(timeProvider);
+
+        timeProvider.Advance(UpdateSchedule.ManualCheckThrottle);
+        var third = schedule.TryStartManualCheck(timeProvider);
+
+        // Assert
+        Assert.True(first);
+        Assert.False(second);
+        Assert.True(third);
+    }
 }

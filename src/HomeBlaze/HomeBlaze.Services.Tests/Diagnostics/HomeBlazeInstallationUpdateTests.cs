@@ -74,6 +74,7 @@ public class HomeBlazeInstallationUpdateTests
     [InlineData("1.0.0", null, RepositoryUrl, "Not available for development builds")]
     [InlineData("edge", null, RepositoryUrl, "Not available for edge builds")]
     [InlineData("0.5.0", "v0.5.0", "https://gitlab.com/owner/repo", "Not supported for gitlab.com")]
+    [InlineData("0.5.0", "v0.5.0", "https://github.com/owner", "Not available for this repository URL")]
     [InlineData("0.5.0", "v0.5.0", null, "Not available without a repository URL")]
     public void WhenNoCheckCanRunForTheBuild_ThenTheStatusAndCheckForUpdatesSayWhy(string version, string? tag, string? repositoryUrl, string expectedReason)
     {

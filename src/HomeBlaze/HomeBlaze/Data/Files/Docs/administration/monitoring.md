@@ -55,7 +55,7 @@ The `Installation` subject describes the running HomeBlaze installation: its bui
 
 ### Update check
 
-Only release builds can check for updates. For an edge or development build, or a repository outside GitHub, `UpdateCheckStatus` says why the check is not available.
+Only release builds can check for updates. For an edge or development build, a repository outside GitHub or not in the owner/name form, or no repository URL at all, `UpdateCheckStatus` says why the check is not available.
 
 The update check is off by default. With `UpdateCheckEnabled`, HomeBlaze asks the GitHub API for the latest release once every `UpdateCheckInterval` (24 hours by default, from 24 hours up to 365 days), starting 5 to 60 minutes after the start. The request sends nothing about the installation except the version in its user agent. A check is one request, plus the retries after a failure. GitHub allows 60 unauthenticated requests per hour per IP address, shared by everything behind that address. A request that takes longer than 30 seconds fails the check with "GitHub did not answer in time."
 

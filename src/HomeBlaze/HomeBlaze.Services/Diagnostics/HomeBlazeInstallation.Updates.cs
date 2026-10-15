@@ -129,8 +129,9 @@ public partial class HomeBlazeInstallation
         channel == InstallationChannel.Development ? "Not available for development builds" :
         channel == InstallationChannel.Edge ? "Not available for edge builds" :
         releaseClient is not null ? null :
-        repositoryUrl is not null ? $"Not supported for {repositoryUrl.Host}" :
-        "Not available without a repository URL";
+        repositoryUrl is null ? "Not available without a repository URL" :
+        string.Equals(repositoryUrl.Host, "github.com", StringComparison.OrdinalIgnoreCase) ? "Not available for this repository URL" :
+        $"Not supported for {repositoryUrl.Host}";
 
     private async Task RunUpdateChecksAsync(CancellationToken stoppingToken)
     {

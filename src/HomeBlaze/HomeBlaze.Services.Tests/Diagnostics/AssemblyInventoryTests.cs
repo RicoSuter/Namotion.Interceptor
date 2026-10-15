@@ -5,7 +5,7 @@ namespace HomeBlaze.Services.Tests.Diagnostics;
 
 public class AssemblyInventoryTests
 {
-    private const string OwnRepositoryUrl = "https://github.com/RicoSuter/Namotion.Interceptor";
+    private const string RepositoryUrl = "https://github.com/RicoSuter/Namotion.Interceptor";
     private const string Commit = "b1b7c2f4568b7a83baf8d041afaab8f2214fb6cd";
 
     [Fact]
@@ -15,8 +15,8 @@ public class AssemblyInventoryTests
         LoadedAssembly[] assemblies =
         [
             new("SomeLibrary", "Default", "1.2.0", null, null),
-            new("Namotion.Interceptor", "Default", "0.5.0", Commit, OwnRepositoryUrl),
-            new("HomeBlaze", "Default", "0.5.0", Commit, OwnRepositoryUrl),
+            new("Namotion.Interceptor", "Default", "0.5.0", Commit, RepositoryUrl),
+            new("HomeBlaze", "Default", "0.5.0", Commit, RepositoryUrl),
             new("MudBlazor", "Default", "9.2.0", null, "https://github.com/MudBlazor/MudBlazor"),
         ];
 
@@ -35,8 +35,8 @@ public class AssemblyInventoryTests
         // Arrange
         LoadedAssembly[] assemblies =
         [
-            new("Namotion.Interceptor", "MyPlugin", "0.4.2", null, OwnRepositoryUrl),
-            new("Namotion.Interceptor", "Default", "0.5.0", Commit, OwnRepositoryUrl),
+            new("Namotion.Interceptor", "MyPlugin", "0.4.2", null, RepositoryUrl),
+            new("Namotion.Interceptor", "Default", "0.5.0", Commit, RepositoryUrl),
         ];
 
         // Act
@@ -75,7 +75,7 @@ public class AssemblyInventoryTests
         // Assert
         var services = Assert.Single(assemblies, assembly => assembly.Name == "HomeBlaze.Services");
         Assert.Equal("Default", services.LoadContext);
-        Assert.Equal(OwnRepositoryUrl, services.RepositoryUrl);
+        Assert.Equal(RepositoryUrl, services.RepositoryUrl);
         Assert.DoesNotContain(assemblies, assembly => assembly.Name == "System.Private.CoreLib");
     }
 

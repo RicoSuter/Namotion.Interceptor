@@ -40,7 +40,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
     public partial bool UpdateCheckEnabled { get; set; }
 
     /// <summary>
-    /// Time between update checks, at least 24 hours.
+    /// Time between update checks, at least 24 hours and at most 365 days.
     /// </summary>
     [Configuration]
     public partial TimeSpan UpdateCheckInterval { get; set; }
@@ -135,7 +135,8 @@ public partial class HomeBlazeInstallation : BackgroundService,
     // Update
 
     /// <summary>
-    /// Whether a newer version exists, or null until the first successful check.
+    /// Whether a newer version exists, or null until the first successful check, and when the running version is
+    /// not a semantic version.
     /// </summary>
     [State(IsDiscrete = true, Position = 460)]
     [Category("Update")]
