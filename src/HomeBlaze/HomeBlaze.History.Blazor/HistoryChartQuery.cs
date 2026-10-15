@@ -9,7 +9,7 @@ namespace HomeBlaze.History.Blazor;
 /// <param name="Label">The label of the line or band.</param>
 /// <param name="PropertyType">The type of the property, used to name its states.</param>
 /// <param name="IsBand">Whether the series is drawn as a state band rather than a line.</param>
-/// <param name="Aggregation">The aggregation of the query. Series with the same aggregation share one batch.</param>
+/// <param name="Aggregation">The aggregation of a line query; lines with the same aggregation share one batch. Ignored for a band, which is always queried as raw samples.</param>
 /// <param name="Color">The CSS colour of a line, or null for the next of <see cref="HistoryChartPalette.LineColors"/>.</param>
 public sealed record HistoryChartSeriesRequest(
     string PropertyPath, string Label, Type PropertyType, bool IsBand, string Aggregation, string? Color = null);

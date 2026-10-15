@@ -226,12 +226,16 @@
             _rangeHint = range <= TimeSpan.FromHours(24)
                 ? $"{TimeZone.ToZoned(from):HH:mm} to {TimeZone.ToZoned(to):HH:mm}"
                 : $"{TimeZone.ToZoned(from):MMM d, HH:mm} to {TimeZone.ToZoned(to):MMM d, HH:mm}";
-            // A state timeline is always queried as raw samples, the period applies only to a line.
+            // A state timeline is always queried as raw samples, so neither its period nor Last or First
+            // changes it; only Count, which draws a line, uses both.
             var isRaw = bucket is null || UseStateTimeline;
-            _periodHint = UseStateTimeline && bucket is not null
+            var isBucketedState = UseStateTimeline && bucket is not null;
+            _periodHint = isBucketedState
                 ? "Not applicable to states."
                 : PropertyHistoryChartModel.DescribePeriod(PropertyHistoryChartModel.Periods[_periodIndex], bucket);
-            _aggregationHint = PropertyHistoryChartModel.DescribeAggregation(_aggregation);
+            _aggregationHint = isBucketedState
+                ? "Only Count applies to states."
+                : PropertyHistoryChartModel.DescribeAggregation(_aggregation);
 
             var request = new HistoryChartSeriesRequest(PropertyPath, DisplayName, PropertyType, UseStateTimeline, _aggregation);
             var result = await HistoryChartQuery.QueryAsync(stores, [request], from, to, bucket, cancellationToken);

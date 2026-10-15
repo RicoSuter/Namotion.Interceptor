@@ -316,7 +316,7 @@ A discrete property renders as a state timeline instead: a proportional band of 
 
 The reason is that a line chart misrepresents a discrete value three ways at once: the value axis auto-scales far past a 0/1 range, an averaging default reports fractions for a state that was never fractional, and joining the points implies the value passed through everything in between.
 
-Discrete properties default to the raw period, so transitions keep their exact times rather than being rounded to a bucket edge, and only `Last`, `First` and `Count` are offered. A state band is always queried as raw samples, also in a bucketed chart, because a bucket without a sample cannot tell an unknown value from one recorded as empty; the period applies to lines only.
+Discrete properties default to the raw period, so transitions keep their exact times rather than being rounded to a bucket edge, and only `Last`, `First` and `Count` are offered. A state band is always queried as raw samples, also in a bucketed chart, because a bucket without a sample cannot tell an unknown value from one recorded as empty; the period applies to lines only. Over a long range a band holds only the newest raw samples up to the point cap, and the span before the oldest of them shows as "No data".
 
 The band distinguishes three states, which is the distinction a line chart cannot draw at all:
 

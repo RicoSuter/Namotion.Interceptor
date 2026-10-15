@@ -210,6 +210,22 @@ public class HistoryChartQueryTests
     }
 
     [Fact]
+    public async Task WhenABandAsksForAnotherAggregationInABucketedChart_ThenItIsStillQueriedRawAsLast()
+    {
+        // Arrange
+        var store = CreateStore().Add("/pump/IsOn", At(10), 1);
+        var request = new HistoryChartSeriesRequest("/pump/IsOn", "On", typeof(bool), IsBand: true, HistoryAggregations.First);
+
+        // Act
+        await HistoryChartQuery.QueryAsync([store], [request], At(0), At(60), TimeSpan.FromMinutes(10), CancellationToken.None);
+
+        // Assert
+        var query = Assert.Single(store.ReceivedQueries);
+        Assert.Null(query.Bucket);
+        Assert.Equal(HistoryAggregations.Last, query.Aggregation);
+    }
+
+    [Fact]
     public async Task WhenTheTokenIsCancelled_ThenTheQueryIsCancelled()
     {
         // Arrange

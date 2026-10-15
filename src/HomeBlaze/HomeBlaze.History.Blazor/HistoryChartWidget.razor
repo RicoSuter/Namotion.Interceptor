@@ -248,51 +248,53 @@
             return;
         }
 
-        PropertyHistoryChartModel.TryGetRange(_resolvedRange, out var range);
-        PropertyHistoryChartModel.TryGetPeriod(_resolvedBucket, out var period);
-
-        var stores = RootContext.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
-        _hasStores = stores.Length > 0;
-        if (stores.Length == 0)
-        {
-            _skipNextArm = true;
-            StateHasChanged();
-            return;
-        }
-
-        var storeAggregations = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var store in stores)
-        {
-            storeAggregations.UnionWith(store.SupportedAggregations);
-        }
-
-        var series = _series;
-        var requests = new List<HistoryChartSeriesRequest>(series.Count);
-        for (var index = 0; index < series.Count; index++)
-        {
-            var entry = series[index];
-            if (entry.Property is not { } property || !entry.HasHistory || property.GetHistoryPath(PathResolver) is not { } path)
-            {
-                continue;
-            }
-
-            var isBand = entry.Kind == HistoryChartSeriesKind.Band;
-            var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
-                property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations);
-            requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index]));
-        }
-
         // A newer query supersedes this one, and disposing the widget cancels it.
         _queryCancellation?.Cancel();
         _queryCancellation?.Dispose();
         _queryCancellation = new CancellationTokenSource();
         var cancellationToken = _queryCancellation.Token;
 
-        var to = TimeProvider.GetUtcNow();
-        var from = to - range;
-        var bucket = PropertyHistoryChartModel.ResolveBucket(period, range, HistoryChartQuery.GetAvailableCoverage(stores, to));
+        // Everything that can throw is inside the try: this runs from a discarded task, so an exception that
+        // escapes is never observed and the widget would show nothing.
         try
         {
+            PropertyHistoryChartModel.TryGetRange(_resolvedRange, out var range);
+            PropertyHistoryChartModel.TryGetPeriod(_resolvedBucket, out var period);
+
+            var stores = RootContext.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
+            _hasStores = stores.Length > 0;
+            if (stores.Length == 0)
+            {
+                _skipNextArm = true;
+                StateHasChanged();
+                return;
+            }
+
+            var storeAggregations = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var store in stores)
+            {
+                storeAggregations.UnionWith(store.SupportedAggregations);
+            }
+
+            var series = _series;
+            var requests = new List<HistoryChartSeriesRequest>(series.Count);
+            for (var index = 0; index < series.Count; index++)
+            {
+                var entry = series[index];
+                if (entry.Property is not { } property || !entry.HasHistory || property.GetHistoryPath(PathResolver) is not { } path)
+                {
+                    continue;
+                }
+
+                var isBand = entry.Kind == HistoryChartSeriesKind.Band;
+                var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
+                    property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations);
+                requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index]));
+            }
+
+            var to = TimeProvider.GetUtcNow();
+            var from = to - range;
+            var bucket = PropertyHistoryChartModel.ResolveBucket(period, range, HistoryChartQuery.GetAvailableCoverage(stores, to));
             var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, cancellationToken);
             if (cancellationToken.IsCancellationRequested || _isDisposed)
             {

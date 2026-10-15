@@ -201,6 +201,45 @@ public class PropertyHistoryStateTimelineTests
     }
 
     [Fact]
+    public void WhenTheWindowStartIsNotCovered_ThenTheValueHeldBeforeItIsNotShown()
+    {
+        // Arrange
+        var coverageStart = From.AddMinutes(10);
+        ImmutableArray<HistoryCoverage> coverage = [new HistoryCoverage(coverageStart, To)];
+
+        // Act
+        var segments = Build([], valueAtStart: Bool(From.AddMinutes(-5), true), coverage: coverage);
+
+        // Assert
+        var single = Assert.Single(segments);
+        Assert.Equal((From, To, (string?)null, true), (single.Start, single.End, single.Label, single.IsUnknown));
+    }
+
+    [Fact]
+    public void WhenASampleIsAtTheStartOfTheNextCoverageRange_ThenItHoldsFromThatStart()
+    {
+        // Arrange
+        var gapStart = From.AddMinutes(20);
+        var gapEnd = From.AddMinutes(30);
+        ImmutableArray<HistoryCoverage> coverage =
+            [new HistoryCoverage(From, gapStart), new HistoryCoverage(gapEnd, To)];
+
+        // Act
+        var segments = Build(
+            [Bool(From.AddMinutes(5), true), Bool(gapEnd, false)],
+            valueAtStart: null,
+            coverage: coverage);
+
+        // Assert
+        Assert.Collection(
+            segments,
+            unknown => Assert.Equal((From, From.AddMinutes(5), true), (unknown.Start, unknown.End, unknown.IsUnknown)),
+            first => Assert.Equal((From.AddMinutes(5), gapStart, "Yes", false), (first.Start, first.End, first.Label, first.IsUnknown)),
+            gap => Assert.Equal((gapStart, gapEnd, true), (gap.Start, gap.End, gap.IsUnknown)),
+            next => Assert.Equal((gapEnd, To, "No", false), (next.Start, next.End, next.Label, next.IsUnknown)));
+    }
+
+    [Fact]
     public void WhenConsecutiveSamplesRepeatTheValue_ThenTheRunsAreMerged()
     {
         // Arrange & Act
