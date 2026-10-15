@@ -91,6 +91,9 @@
     private int[] _bandSeries = [];
     private bool[] _hasBand = [];
 
+    // One fragment per band of the shown data, built with it, so a render allocates none.
+    private RenderFragment[] _bandHeaders = [];
+
     private readonly RenderFragment _lineLegend;
     private readonly RenderFragment<int> _bandHeader;
 
@@ -109,7 +112,7 @@
     public HistoryChartWidget()
     {
         _lineLegend = RenderLineLegend;
-        _bandHeader = RenderBandHeader;
+        _bandHeader = GetBandHeader;
     }
 
     // Every series without a band in the shown data: the lines, and a band series that has no band, such as one
@@ -137,18 +140,20 @@
         }
     }
 
+    private RenderFragment GetBandHeader(int band) => _bandHeaders[band];
+
     // Until the series of a changed configuration are queried, a band cannot be matched to its series and shows its label.
-    private RenderFragment RenderBandHeader(int band) => __builder =>
+    private void RenderBandHeader(RenderTreeBuilder __builder, int band)
     {
-        if (ReferenceEquals(_dataSeries, _series) && band < _bandSeries.Length)
+        if (ReferenceEquals(_dataSeries, _series))
         {
             RenderLegendEntry(__builder, _bandSeries[band], isBand: true);
         }
-        else if (_data is { } data && band < data.Bands.Count)
+        else if (_data is { } data)
         {
             <MudText Typo="Typo.caption">@data.Bands[band].Label</MudText>
         }
-    };
+    }
 
     private void RenderLegendEntry(RenderTreeBuilder __builder, int index, bool isBand)
     {
@@ -248,18 +253,25 @@
         var error = HistoryChartSeriesResolver.FindArgumentError(range, bucket, series);
 
         // A change of the graph that leaves the series as they were, which is the common case, does not query again.
+        var seriesChanged = !series.SequenceEqual(_series);
         _isQueryOutdated |= error != _error ||
             range != _resolvedRange ||
             bucket != _resolvedBucket ||
-            !series.SequenceEqual(_series);
+            seriesChanged;
 
         _resolvedEntries = entries;
         _resolvedConfiguration = configurations;
         _resolvedRange = range;
         _resolvedBucket = bucket;
         _resolvedPathsVersion = pathsVersion;
-        _series = series;
         _error = error;
+        if (!seriesChanged)
+        {
+            // The same instance, so the bands of the shown data still match their series, see _dataSeries.
+            return;
+        }
+
+        _series = series;
         _colors = HistoryChartSeriesResolver.AssignLineColors(series);
         _swatchStyles = new string?[_colors.Length];
         for (var index = 0; index < _colors.Length; index++)
@@ -376,6 +388,13 @@
             _dataSeries = series;
             _bandSeries = bandSeries.ToArray();
             _hasBand = hasBand;
+            _bandHeaders = new RenderFragment[_bandSeries.Length];
+            for (var band = 0; band < _bandHeaders.Length; band++)
+            {
+                var captured = band;
+                _bandHeaders[band] = builder => RenderBandHeader(builder, captured);
+            }
+
             _bucket = bucket;
             _queryError = null;
         }

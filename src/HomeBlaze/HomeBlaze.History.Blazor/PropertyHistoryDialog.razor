@@ -62,7 +62,8 @@
             }
             else if (_chartData is not null)
             {
-                <HistoryChartView Data="_chartData" BandHeight="56" ShowStateTable="true" Style="height:100%;" />
+                @* The range select already names the range. *@
+                <HistoryChartView Data="_chartData" BandHeight="56" ShowRange="false" ShowStateTable="true" Style="height:100%;" />
             }
             else if (_tableRows is { Count: > 0 })
             {

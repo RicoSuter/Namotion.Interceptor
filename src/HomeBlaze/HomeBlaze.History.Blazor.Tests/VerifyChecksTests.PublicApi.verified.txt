@@ -184,6 +184,8 @@ namespace HomeBlaze.History.Blazor
         [Microsoft.AspNetCore.Components.Parameter]
         public bool ShowBandLabels { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool ShowRange { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public bool ShowStateTable { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Style { get; set; }

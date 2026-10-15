@@ -67,7 +67,7 @@
             </div>
         }
 
-        @if (_rangeText is not null)
+        @if (ShowRange && _rangeText is not null)
         {
             <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="align-self:stretch;" data-testid="history-chart-range">@_rangeText</MudText>
         }
@@ -118,6 +118,7 @@
     private string? _renderedStyle;
     private int _renderedBandHeight;
     private bool _renderedShowBandLabels;
+    private bool _renderedShowRange;
     private bool _renderedShowStateTable;
     private bool _shouldRender = true;
     private volatile bool _disposed;
@@ -150,8 +151,9 @@
     // HistoryChartPlot is internal, which markup cannot name.
     private readonly RenderFragment _plot;
 
-    private IJSObjectReference? _module;
+    private Task<IJSObjectReference>? _module;
     private IJSObjectReference? _plotAlignment;
+    private ElementReference? _alignedLines;
 
     /// <summary>
     /// The data to draw. The view draws again only when it gets another instance, so its parent may render
@@ -193,6 +195,10 @@
     /// </summary>
     [Parameter]
     public RenderFragment<int>? BandHeader { get; set; }
+
+    /// <summary>Whether bands without lines name their range below them, as they have no time axis.</summary>
+    [Parameter]
+    public bool ShowRange { get; set; } = true;
 
     /// <summary>Whether the runs of the bands are listed in a table below the legend, newest first.</summary>
     [Parameter]
@@ -250,12 +256,14 @@
             MaxHeight != _renderedMaxHeight ||
             Style != _renderedStyle ||
             BandHeight != _renderedBandHeight ||
-            ShowBandLabels != _renderedShowBandLabels;
+            ShowBandLabels != _renderedShowBandLabels ||
+            ShowRange != _renderedShowRange;
 
         _renderedMaxHeight = MaxHeight;
         _renderedStyle = Style;
         _renderedBandHeight = BandHeight;
         _renderedShowBandLabels = ShowBandLabels;
+        _renderedShowRange = ShowRange;
         _renderedShowStateTable = ShowStateTable;
     }
 
@@ -267,24 +275,28 @@
 
         // The lines are drawn in a new element whenever they reappear, so the observed element follows the rendered one.
         ElementReference? lines = Data is { IsEmpty: false } && _chartSeries is not null ? _linesBox : null;
-        if (lines?.Id == _observedLines?.Id || _disposed)
+        if (lines?.Id != _observedLines?.Id && !_disposed)
         {
-            return;
+            _resizeObserver ??= CreateResizeObserver();
+            if (_observedLines is { } observed)
+            {
+                await _resizeObserver.Unobserve(observed);
+            }
+
+            _observedLines = lines;
+            if (lines is { } element && await _resizeObserver.Observe(element) is { } size)
+            {
+                OnLinesResized(size.Width, size.Height);
+            }
         }
 
-        _resizeObserver ??= CreateResizeObserver();
-        if (_observedLines is { } observed)
+        // Only bands below lines follow the plot area.
+        ElementReference? alignedLines = Data is { Bands.Count: > 0 } ? lines : null;
+        if (alignedLines?.Id != _alignedLines?.Id && !_disposed)
         {
-            await _resizeObserver.Unobserve(observed);
+            _alignedLines = alignedLines;
+            await AlignBandsAsync(alignedLines);
         }
-
-        _observedLines = lines;
-        if (lines is { } element && await _resizeObserver.Observe(element) is { } size)
-        {
-            OnLinesResized(size.Width, size.Height);
-        }
-
-        await AlignBandsAsync(lines);
     }
 
     // Follows the plot area of the lines in the margins of the bands, see HistoryChartView.razor.js.
@@ -300,11 +312,20 @@
                 return;
             }
 
-            _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
-            var alignment = await _module.InvokeAsync<IJSObjectReference>("alignBands", element);
+            // One import for every call, which DisposeAsync disposes once it has completed.
+            _module ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
+            var module = await _module;
+            if (_disposed)
+            {
+                // Disposed while the import ran, so DisposeAsync may have found it incomplete.
+                await module.DisposeAsync();
+                return;
+            }
+
+            var alignment = await module.InvokeAsync<IJSObjectReference>("alignBands", element);
 
             // The view can be disposed or show other lines while the script ran.
-            if (_disposed || _observedLines?.Id != element.Id)
+            if (_disposed || _alignedLines?.Id != element.Id)
             {
                 await DisposeAlignmentAsync(alignment);
                 return;
@@ -312,9 +333,9 @@
 
             _plotAlignment = alignment;
         }
-        catch (JSDisconnectedException)
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
         {
-            // The circuit is gone, and the page with it.
+            // The alignment is only visual: without it the bands span the full width, which must not end the circuit.
         }
     }
 
@@ -565,14 +586,14 @@
         try
         {
             await DisposeAlignmentAsync(_plotAlignment);
-            if (_module is not null)
+            if (_module is { IsCompletedSuccessfully: true })
             {
-                await _module.DisposeAsync();
+                await _module.Result.DisposeAsync();
             }
         }
-        catch (JSDisconnectedException)
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
         {
-            // The circuit is gone, and the page with it.
+            // The circuit is gone, or the script already went with the page.
         }
     }
 }

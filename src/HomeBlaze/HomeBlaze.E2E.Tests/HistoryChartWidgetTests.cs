@@ -310,6 +310,50 @@ public class HistoryChartWidgetTests
         await Assertions.Expect(chart.GetByTestId("history-chart-range")).ToHaveCountAsync(0);
     }
 
+    [Fact]
+    public async Task WhenTheGraphChangesWithoutChangingTheSeries_ThenTheBandKeepsItsCurrentValueInItsHeader()
+    {
+        // Arrange
+        var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
+        var subjectFactory = _fixture.ServerServices.GetRequiredService<SubjectFactory>();
+        var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children[MotorName];
+        var originalTargetSpeed = motor.TargetSpeed;
+        var page = await OpenPageAsync(DesktopWidth);
+        var chart = GetChart(page, "Chart speed");
+        var bandEntry = chart.GetByTestId("history-chart-band-header").GetByTestId("history-chart-legend-entry");
+        await Assertions.Expect(bandEntry).ToContainTextAsync("Chart status", new() { Timeout = Timeout });
+
+        // See WhenValuesAreConstantNegativeLargeSmallOrBroken_ThenEveryAxisHasFewDistinctFiniteLabelsAndHoldsItsLines.
+        await root.ReconcileAsync();
+        var folder = _fixture.GetDemoFolder();
+        var originalChildren = folder.Children;
+        var subject = subjectFactory.CreateSubject<HistoryValuesSubject>();
+
+        try
+        {
+            // Act - a subject that comes and goes changes the paths of the graph but none of the series.
+            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren) { ["PathsChangedSubject"] = subject };
+            folder.Children = originalChildren;
+
+            // A new speed renders the chart after the change of the paths.
+            var speed = chart.GetByTestId("history-chart-legend").GetByTestId("history-chart-legend-value").First;
+            var speedBefore = await speed.TextContentAsync();
+            motor.TargetSpeed = originalTargetSpeed + 100;
+            await Assertions.Expect(speed).Not.ToHaveTextAsync(speedBefore ?? string.Empty, new() { Timeout = Timeout });
+
+            // Assert
+            await Assertions.Expect(bandEntry).ToContainTextAsync("Chart status");
+            await Assertions.Expect(bandEntry.GetByTestId("history-chart-legend-value")).Not.ToHaveTextAsync(MissingText);
+            await Assertions.Expect(chart.GetByTestId("history-chart-legend").GetByText("Chart status")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            folder.Children = originalChildren;
+            subjectFactory.DiscardSubject(subject);
+            motor.TargetSpeed = originalTargetSpeed;
+        }
+    }
+
     // Written one value after the other, each once the one before it is recorded, because the store keeps only the last
     // of the values written within its buffer time. Null is a value recorded as empty, which breaks a line, and the
     // boolean is written as 1 for true.
