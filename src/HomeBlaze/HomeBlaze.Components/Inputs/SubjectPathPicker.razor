@@ -1,3 +1,4 @@
+@using HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Attributes
 
 @inject RootManager RootManager
@@ -15,7 +16,7 @@
     @if (_previewValue != null || _isValidPath)
     {
         <MudText Typo="Typo.caption" Class="mt-1 mb-2">
-            Preview: @(_previewValue?.ToString() ?? "(subject)")
+            Preview: @(_previewValue is MethodMetadata method ? method.Title : _previewValue?.ToString() ?? "(subject)")
         </MudText>
     }
 
@@ -291,8 +292,10 @@
                     isExpandable = HasExpandableProperties(property.Children[0].Subject);
                 }
 
-                // Include if: has State attribute OR is expandable
-                if (!hasState && !isExpandable)
+                var method = property.TryGetMethodMetadata();
+
+                // Include if: has State attribute OR is expandable OR is an operation that can be selected
+                if (!hasState && !isExpandable && !IsListedMethod(property, method))
                     continue;
 
                 var propertyPath = $"{basePath.TrimEnd('/')}/{property.Name}";
@@ -308,7 +311,7 @@
                 {
                     DisplayName = property.Name,
                     Path = propertyPath,
-                    Icon = GetPropertyIcon(property),
+                    Icon = method is not null ? GetMethodIcon(method) : GetPropertyIcon(property),
                     Property = property,
                     IsExpandable = isExpandable,
                     IsEnabled = isEnabled,
@@ -419,6 +422,10 @@
             if (p.GetStateMetadata() != null)
                 return true;
 
+            // Operation that can be selected - will be shown
+            if (IsListedMethod(p, p.TryGetMethodMetadata()))
+                return true;
+
             // Collection/Dictionary with children - will be shown
             if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Length > 0)
                 return true;
@@ -440,6 +447,18 @@
         if (property.IsSubjectReference)
             return Icons.Material.Filled.Link;
         return Icons.Material.Filled.Label;
+    }
+
+    // Only a predicate that accepts an operation lists one, so the expression picker (no predicate) and the pickers
+    // for subjects never offer an operation.
+    private bool IsListedMethod(RegisteredSubjectProperty property, MethodMetadata? method)
+    {
+        return method is not null && CanSelectProperty is not null && CanSelectProperty(property);
+    }
+
+    private static string GetMethodIcon(MethodMetadata method)
+    {
+        return MudBlazorIconResolver.Resolve(method.Icon ?? (method.Kind == MethodKind.Query ? "Search" : "PlayArrow"));
     }
 
     private static string? GetItemClass(PathTreeItem? item)
