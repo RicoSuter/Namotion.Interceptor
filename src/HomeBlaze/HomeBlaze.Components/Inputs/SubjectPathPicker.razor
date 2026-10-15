@@ -292,10 +292,13 @@
                     isExpandable = HasExpandableProperties(property.Children[0].Subject);
                 }
 
-                var method = property.TryGetMethodMetadata();
+                // Only methods can be listed, and only when a predicate is set to accept them; skip the metadata
+                // lookup otherwise, as it evaluates getters for interface- and object-typed properties.
+                var method = CanSelectProperty is not null ? property.TryGetMethodMetadata() : null;
+                var isListedMethod = IsListedMethod(property, method);
 
                 // Include if: has State attribute OR is expandable OR is an operation that can be selected
-                if (!hasState && !isExpandable && !IsListedMethod(property, method))
+                if (!hasState && !isExpandable && !isListedMethod)
                     continue;
 
                 var propertyPath = $"{basePath.TrimEnd('/')}/{property.Name}";
@@ -304,8 +307,9 @@
                 var isEnabledAttribute = property.TryGetAttribute(KnownAttributes.IsEnabled);
                 var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
 
-                // Check if property can be selected
-                var canSelect = CanSelectProperty == null || CanSelectProperty(property);
+                // Check if property can be selected; reuse IsListedMethod's result instead of calling the
+                // predicate a second time for the same property.
+                var canSelect = isListedMethod || CanSelectProperty == null || CanSelectProperty(property);
 
                 var pathItem = new PathTreeItem
                 {
@@ -422,8 +426,10 @@
             if (p.GetStateMetadata() != null)
                 return true;
 
-            // Operation that can be selected - will be shown
-            if (IsListedMethod(p, p.TryGetMethodMetadata()))
+            // Operation that can be selected - will be shown; skip the metadata lookup when no predicate is
+            // set, as it evaluates getters for interface- and object-typed properties.
+            var method = CanSelectProperty is not null ? p.TryGetMethodMetadata() : null;
+            if (IsListedMethod(p, method))
                 return true;
 
             // Collection/Dictionary with children - will be shown
