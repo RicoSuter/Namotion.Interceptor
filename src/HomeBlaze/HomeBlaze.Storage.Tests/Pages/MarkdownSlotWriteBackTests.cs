@@ -381,6 +381,22 @@ public class MarkdownSlotWriteBackTests
     }
 
     [Fact]
+    public async Task WhenSubjectWithSlotsIsNotRegistered_ThenItsConfigurationIsSerializedForItsBlock()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var serializer = fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>();
+        var tile = new TestTile { Position = 1 };
+
+        // Act
+        var json = MarkdownBlockConfiguration.Serialize(serializer, tile);
+
+        // Assert
+        Assert.Contains("\"Position\": 1", json);
+        Assert.DoesNotContain("Child", json);
+    }
+
+    [Fact]
     public async Task WhenConfigurationPropertyDiffersFromASlotPropertyOnlyByCase_ThenItIsSerializedForTheBlock()
     {
         // Arrange
