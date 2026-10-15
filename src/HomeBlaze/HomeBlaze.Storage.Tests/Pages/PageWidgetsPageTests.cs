@@ -113,7 +113,7 @@ public class PageWidgetsPageTests
 
         // Assert
         var cards = DocumentationFolderFixture.FindSubjects(page).OfType<Card>().ToList();
-        Assert.Equal(18, cards.Count);
+        Assert.Equal(22, cards.Count);
 
         // The two samples of the card itself are the first cards of the page: one with everything, one plain.
         var fullCard = cards[0];
@@ -143,6 +143,25 @@ public class PageWidgetsPageTests
         Assert.Equal(("Sample motor", "pages.md", MudBlazor.Color.Primary, false, 6), (card.Subtitle, card.Href, card.IconColor, card.Outlined, card.Elevation));
         var headerRight = Assert.IsType<MarkdownFragment>(card.HeaderRight);
         Assert.Contains(headerRight.Children.Values, child => child is RenderExpression { Path: PumpPath + "/Status" });
+    }
+
+    [Fact]
+    public async Task WhenPageIsLoaded_ThenThreeCardsHaveAnAspectRatioAndOneHasAHeight()
+    {
+        // Arrange
+        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
+
+        // Act
+        var page = fixture.FindPage(PagePath);
+
+        // Assert
+        var cards = DocumentationFolderFixture.FindSubjects(page).OfType<Card>().ToList();
+        Assert.Equal(["Pump", "Fan", "Notes"], cards.Where(card => card.AspectRatio is not null).Select(card => card.Title));
+        Assert.All(cards.Where(card => card.AspectRatio is not null), card => Assert.Equal("4:3", card.AspectRatio));
+        var sized = Assert.Single(cards, card => card.Height is not null);
+        Assert.Equal(200, sized.Height);
+        Assert.Contains(Assert.IsType<MarkdownFragment>(sized.Content).Children.Values, child => child is Widget);
+        Assert.NotNull(sized.Footer);
     }
 
     [Fact]
@@ -229,7 +248,7 @@ public class PageWidgetsPageTests
 
         // Assert
         var flows = DocumentationFolderFixture.FindSubjects(page).OfType<FlowLayout>().Select(flow => (flow.MinWidth, flow.Items.Length));
-        Assert.Equal([(320, 3), (120, 6), (600, 2), (320, 2), (140, 3)], flows);
+        Assert.Equal([(200, 3), (320, 3), (120, 6), (600, 2), (320, 2), (140, 3)], flows);
     }
 
     [Fact]

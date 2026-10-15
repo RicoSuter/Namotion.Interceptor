@@ -32,6 +32,8 @@ A titled box around page content. Type name: `HomeBlaze.Components.Card`.
 | `Outlined` | Yes or no | `true` | A border around the card instead of a shadow. `false` gives a card with a shadow, see `Elevation` |
 | `Elevation` | Whole number | `2` | The depth of the shadow of a card that is not outlined. `0` is no shadow. An outlined card has no shadow, whatever the value is |
 | `Image` | Text | None | A picture between the header and the body, 200 pixels high. Written like `Href` |
+| `Height` | Whole number | None | The height of the whole card in pixels. Without it, and without `AspectRatio`, the card is as high as its content. `Height` wins when both are set |
+| `AspectRatio` | Text | None | The width and the height of the card in the form `W:H`, for example `4:3` or `1:1`, so that the height of the card follows its width. A value in another form shows an error in place of the card |
 
 | Slot | Blocks | Holds |
 |------|--------|-------|
@@ -94,10 +96,69 @@ The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 {{ ../widgets/Pump/Status }}
 ::
 
+Three cards in a flow layout with `AspectRatio="4:3"`. Each card is three quarters as high as it is wide, so the three cards are equally high whatever their text is, and they grow and shrink with the width of the window. The text of the third card does not fit, and its body scrolls:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.FlowLayout MinWidth=200
+::: Item
+:::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop AspectRatio="4:3"
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
+::: Item
+:::: HomeBlaze.Components.Card Title="Fan" Icon=Air AspectRatio="4:3"
+The fan runs at {{ ../widgets/Fan/CurrentSpeed }} RPM.
+::: Item
+:::: HomeBlaze.Components.Card Title="Notes" AspectRatio="4:3"
+The pump moves the water and the fan cools the room.
+
+Both are sample motors that run in every installation.
+
+Their speeds change while the page is open, so the values above are live.
+::
+~~~~
+
+:: HomeBlaze.Components.FlowLayout MinWidth=200
+::: Item
+:::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop AspectRatio="4:3"
+The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
+::: Item
+:::: HomeBlaze.Components.Card Title="Fan" Icon=Air AspectRatio="4:3"
+The fan runs at {{ ../widgets/Fan/CurrentSpeed }} RPM.
+::: Item
+:::: HomeBlaze.Components.Card Title="Notes" AspectRatio="4:3"
+The pump moves the water and the fan cools the room.
+
+Both are sample motors that run in every installation.
+
+Their speeds change while the page is open, so the values above are live.
+::
+
+A card that is 200 pixels high. The motor widget in its body is higher than the room that the header and the footer leave, so the body scrolls and the footer stays at the bottom of the card:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop Height=200
+::: HomeBlaze.Components.Widget Path=../widgets/Pump
+
+::: Footer
+Target speed: {{ ../widgets/Pump/TargetSpeed }} RPM
+::
+~~~~
+
+:: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop Height=200
+::: HomeBlaze.Components.Widget Path=../widgets/Pump
+
+::: Footer
+Target speed: {{ ../widgets/Pump/TargetSpeed }} RPM
+::
+
 - The header is shown when the card has a title, a subtitle, an icon or a `HeaderRight`.
 - The icon and the content of `HeaderRight` stand on the line of the title, also when the subtitle takes several lines.
 - The title of a card with `Href` looks like the title of any card and is underlined when the pointer is on it.
+- The header, the body and the footer have 12 pixels of room to the edge of the card, and a body right below the header starts close to the title, like the next line of a paragraph. The first and the last paragraph of the body and the footer add no room of their own.
 - A card is as wide as the place it stands in. Put cards into a `FlowLayout` to place them next to each other.
+- A card with a `Height` or an `AspectRatio` keeps the size of its header, its picture and its footer, and its body takes the rest of the height. A body that does not fit scrolls.
+- A card that is the subject of a [GridLayout](#gridlayout) cell is as high as the cell, unless it has a `Height` of its own, and its body scrolls like that of a card with a height.
 - A card has no other parts than the header, the picture, the body and the footer. It has no buttons.
 
 ## FlowLayout
@@ -221,7 +282,7 @@ How `MinWidth` works and how to choose it:
 
 - **A number of pixels**: `MinWidth` is a plain number, without a unit. The layout puts as many columns into a row as fit with at least that width each, and then makes all columns equally wide to fill the row. There are 16 pixels between two cells.
 - **Smaller means more columns**: With `MinWidth=120` many cells fit into one row. With `MinWidth=600` two cells stand next to each other only on a wide screen.
-- **At least as wide as the widest widget**: A cell can get as narrow as `MinWidth`, and a widget that needs more room then paints over the next cell. The sample motor widget needs 280 pixels, and 312 pixels inside a card, so 320 fits it.
+- **At least as wide as the widest widget**: A cell can get as narrow as `MinWidth`, and a widget that needs more room then paints over the next cell. The sample motor widget needs 280 pixels, and 304 pixels inside a card, so 320 fits it.
 - **Narrow screens**: On a screen that is narrower than `MinWidth` there is one column, as wide as the screen.
 
 Limits:
@@ -478,6 +539,7 @@ The pump is set to **{{ ../widgets/Pump/TargetSpeed }}** and the fan to **{{ ../
 ::
 
 - All rows have the same height and all columns the same width, and the grid is at least 400 pixels high.
+- A [Card](#card) in a cell is as high as the cell, and its body scrolls when its content does not fit.
 - The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
 - Give a cell a `#name` to keep it and everything in it when cells are added or removed, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps).
 - In a configuration file of its own, a `GridLayout` has its cells as the list `cells`, each with one subject as `child`. On a page they are always `Cell` blocks as above, and the [`json` block](pages.md#the-json-block) cannot set them.
