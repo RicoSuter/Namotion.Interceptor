@@ -1099,6 +1099,7 @@ Widgets are compact visual representations shown in dashboards and markdown page
     {
         <!-- Inline editing when page is in edit mode -->
         <MudSlider T="int"
+                   Class="edit-mode-interactive"
                    Value="@MotorSubject.TargetSpeed"
                    ValueChanged="@OnSpeedChanged"
                    Min="0" Max="3000" />
@@ -1141,10 +1142,11 @@ public bool IsEditing { get; set; }
 
 ### Auto Edit Button
 
-When a widget has a corresponding Edit component, the host automatically renders an edit button overlay when `IsEditing` is true:
+In the Inline mode of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. When the widget has an Edit component or configuration properties, the bar has an edit button:
 
-- The button appears in the top-right corner of the widget
-- Clicking opens the `SubjectEditDialog` with the Edit component
+- Clicking it opens the `SubjectEditDialog` with the Edit component, or with the generated properties editor without one
+- A widget inside another one has an arrow up button that selects the widget around it, and Escape or a click on the page clears the selection
+- The content of a widget takes no mouse input while the page is edited, so that a click selects the widget instead of operating it. A part that is meant to be used while the page is edited takes it back with the class `edit-mode-interactive`, as the slider above does, or with `edit-mode-selected-interactive` once its widget is selected
 - No boilerplate needed in widget components
 
 ### Content Slots
