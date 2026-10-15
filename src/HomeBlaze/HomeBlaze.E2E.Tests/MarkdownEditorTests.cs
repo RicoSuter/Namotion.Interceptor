@@ -115,6 +115,40 @@ public class MarkdownEditorTests
     }
 
     [Fact]
+    public async Task WhenInlineModeIsEnabled_ThenAWidgetWithoutItsOwnEditComponentOpensTheGeneratedEditor()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Values.md");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // A top-level indicator, not one in a card header, whose wrapper would also hold the card's button.
+        var indicatorWrapper = page.Locator(".subject-component-wrapper:has(> .mud-chip-container > [data-testid=indicator])").First;
+        await Assertions.Expect(indicatorWrapper).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Act
+        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editMenu.ClickAsync();
+        await page.GetByText("Inline").ClickAsync();
+
+        var editButton = indicatorWrapper.GetByTestId("edit-subject-button");
+        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await editButton.ClickAsync();
+
+        // Assert
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        var pathInput = dialog.GetByLabel("Path", new() { Exact = true });
+        await Assertions.Expect(pathInput).ToHaveValueAsync("valuemotor/Status", new() { Timeout = 10000 });
+        await Assertions.Expect(pathInput).ToHaveAttributeAsync("data-testid", "subject-path-field");
+
+        // The picker button is the adornment that shares the input's container.
+        await pathInput.Locator("xpath=..").Locator(".mud-input-adornment button").ClickAsync();
+        var pickerDialog = page.GetByTestId("subject-path-picker-dialog");
+        await Assertions.Expect(pickerDialog).ToBeVisibleAsync(new() { Timeout = 10000 });
+    }
+
+    [Fact]
     public async Task WhenSplitModeIsOpened_ThenBlocksAreHighlighted()
     {
         // Arrange

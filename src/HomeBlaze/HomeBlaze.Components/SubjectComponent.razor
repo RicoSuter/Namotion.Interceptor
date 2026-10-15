@@ -91,9 +91,10 @@
     [Parameter]
     public EventCallback<ISubjectComponent?> ComponentInstanceChanged { get; set; }
 
+    // Without an edit component, the edit dialog falls back to the generated properties editor.
     private bool HasEditComponent =>
         Subject != null &&
-        ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit);
+        (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit) || Subject.HasConfigurationProperties());
 
     protected override void OnParametersSet()
     {
