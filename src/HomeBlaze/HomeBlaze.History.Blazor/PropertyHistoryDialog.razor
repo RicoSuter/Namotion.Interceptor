@@ -1,4 +1,6 @@
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.History.Abstractions
+@using HomeBlaze.Services.Display
 @using Namotion.Interceptor.Registry.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
 @inject ITimeZoneDisplay TimeZone
@@ -95,6 +97,7 @@
     [Parameter] public Type PropertyType { get; set; } = typeof(double);
     [Parameter] public bool IsCumulative { get; set; }
     [Parameter] public bool IsDiscreteState { get; set; }
+    [Parameter] public StateUnit Unit { get; set; }
 
     // The entry after the presets; it shows the date pickers.
     private static readonly int CustomRangeIndex = PropertyHistoryChartModel.RangePresets.Count;
@@ -237,7 +240,7 @@
                 ? "Only Count applies to states."
                 : PropertyHistoryChartModel.DescribeAggregation(_aggregation);
 
-            var request = new HistoryChartSeriesRequest(PropertyPath, DisplayName, PropertyType, UseStateTimeline, _aggregation);
+            var request = new HistoryChartSeriesRequest(PropertyPath, DisplayName, PropertyType, UseStateTimeline, _aggregation, Unit: Unit);
             var result = await HistoryChartQuery.QueryAsync(stores, [request], from, to, bucket, cancellationToken);
 
             // Superseded by a newer load while this query ran; leave the newer result in place.
@@ -338,7 +341,7 @@
         string displayName,
         Type propertyType,
         bool isCumulative,
-        string? unit = null,
+        StateUnit unit = StateUnit.Default,
         bool isDiscreteState = false)
     {
         var parameters = new DialogParameters<PropertyHistoryDialog>
@@ -348,11 +351,13 @@
             { dialog => dialog.DisplayName, displayName },
             { dialog => dialog.PropertyType, propertyType },
             { dialog => dialog.IsCumulative, isCumulative },
-            { dialog => dialog.IsDiscreteState, isDiscreteState }
+            { dialog => dialog.IsDiscreteState, isDiscreteState },
+            { dialog => dialog.Unit, unit }
         };
 
         var options = new DialogOptions { FullScreen = true, CloseButton = true };
-        var title = string.IsNullOrEmpty(unit) ? $"History: {displayName}" : $"History: {displayName} ({unit})";
+        var suffix = StateUnitExtensions.GetUnitSuffix(unit);
+        var title = string.IsNullOrEmpty(suffix) ? $"History: {displayName}" : $"History: {displayName} ({suffix})";
         return dialogService.ShowAsync<PropertyHistoryDialog>(title, parameters, options);
     }
 }

@@ -33,10 +33,12 @@ namespace HomeBlaze.History.Blazor
     }
     public static class HistoryChartAxis
     {
+        public const double FullPercent = 100D;
         public const int MaximumTimeLabelCount = 9;
         public const double PixelsPerTimeLabel = 90D;
         public const double PixelsPerValueLabel = 55D;
         public static readonly System.Collections.Generic.IReadOnlyList<System.TimeSpan> TimeLabelSteps;
+        public static HomeBlaze.History.Blazor.HistoryChartValueAxis GetPercentValueAxis(double minimum, double maximum, double height) { }
         public static int GetTimeLabelCount(double width) { }
         public static string GetTimeLabelFormat(System.TimeSpan range, System.TimeSpan spacing) { }
         public static System.TimeSpan GetTimeLabelSpacing(System.TimeSpan range, System.TimeSpan? bucket, double width) { }
@@ -69,8 +71,9 @@ namespace HomeBlaze.History.Blazor
     }
     public sealed class HistoryChartLine : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartLine>
     {
-        public HistoryChartLine(string Label, string Color, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs) { }
+        public HistoryChartLine(string Label, string Color, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs, bool IsPercent = false) { }
         public string Color { get; init; }
+        public bool IsPercent { get; init; }
         public string Label { get; init; }
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs { get; init; }
     }
@@ -140,13 +143,14 @@ namespace HomeBlaze.History.Blazor
     }
     public sealed class HistoryChartSeriesRequest : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartSeriesRequest>
     {
-        public HistoryChartSeriesRequest(string PropertyPath, string Label, System.Type PropertyType, bool IsBand, string Aggregation, string? Color = null) { }
+        public HistoryChartSeriesRequest(string PropertyPath, string Label, System.Type PropertyType, bool IsBand, string Aggregation, string? Color = null, HomeBlaze.Abstractions.Attributes.StateUnit Unit = 0) { }
         public string Aggregation { get; init; }
         public string? Color { get; init; }
         public bool IsBand { get; init; }
         public string Label { get; init; }
         public string PropertyPath { get; init; }
         public System.Type PropertyType { get; init; }
+        public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; init; }
     }
     public static class HistoryChartSeriesResolver
     {
@@ -272,10 +276,12 @@ namespace HomeBlaze.History.Blazor
         public System.Type PropertyType { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry Registry { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, string propertyPath, string displayName, System.Type propertyType, bool isCumulative, string? unit = null, bool isDiscreteState = false) { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, string propertyPath, string displayName, System.Type propertyType, bool isCumulative, HomeBlaze.Abstractions.Attributes.StateUnit unit = 0, bool isDiscreteState = false) { }
     }
     public class _Imports
     {

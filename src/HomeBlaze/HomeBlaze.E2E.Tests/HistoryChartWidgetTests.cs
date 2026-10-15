@@ -212,11 +212,12 @@ public class HistoryChartWidgetTests
         (nameof(HistoryValuesSubject.Decimal), [40.25, 46.75, 43.5]),
         (nameof(HistoryValuesSubject.Gapped), [10, null, 20, 30]),
         (nameof(HistoryValuesSubject.Fraction), [0.2, 0.9, 0.4]),
+        (nameof(HistoryValuesSubject.Percent), [0.2, 0.9, 0.4]),
         (nameof(HistoryValuesSubject.IsOn), [1, 0, 1]),
     ];
 
     private static readonly string[] LineChartLabels =
-        ["Constant", "Single", "Crossing zero", "Negative", "Large", "Huge", "Small", "Decimal", "Gapped", "Fraction", "Two scales", "Bucketed"];
+        ["Constant", "Single", "Crossing zero", "Negative", "Large", "Huge", "Small", "Decimal", "Gapped", "Fraction", "Percent", "Two scales", "Bucketed"];
 
     // Values below one need a step of one, the smallest the chart takes; its default of 20 pinned them to the floor.
     private static readonly string[] ChartsBelowOne = ["Single", "Small", "Fraction"];
@@ -290,6 +291,12 @@ public class HistoryChartWidgetTests
                 if (ChartsBelowOne.Contains(label))
                 {
                     Assert.Equal("1", layout.ValueLabels[^1]);
+                }
+
+                // A fraction in percent is drawn times 100 on an axis from 0 to 100.
+                if (label == "Percent")
+                {
+                    Assert.Equal(["0", "100"], [layout.ValueLabels[0], layout.ValueLabels[^1]]);
                 }
 
                 if (label == "Fraction")

@@ -738,12 +738,9 @@
         }
 
         var metadata = property.GetStateMetadata();
-        var unit = metadata is null || metadata.Unit == StateUnit.Default
-            ? null
-            : StateUnitExtensions.GetUnitSuffix(metadata.Unit);
         await PropertyHistoryDialog.ShowAsync(
-            DialogService, SubjectRegistry, path, property.Name, property.Type, metadata?.IsCumulative ?? false, unit,
-            metadata?.IsDiscrete ?? false);
+            DialogService, SubjectRegistry, path, property.Name, property.Type, metadata?.IsCumulative ?? false,
+            metadata?.Unit ?? StateUnit.Default, metadata?.IsDiscrete ?? false);
     }
 
     private SubjectMemberGroups<RegisteredSubjectProperty, MethodMetadata> GetMemberGroups() =>

@@ -276,7 +276,7 @@
                 var isBand = entry.Kind == HistoryChartSeriesKind.Band;
                 var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
                     property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations);
-                requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index]));
+                requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index], entry.Unit));
             }
 
             var to = TimeProvider.GetUtcNow();

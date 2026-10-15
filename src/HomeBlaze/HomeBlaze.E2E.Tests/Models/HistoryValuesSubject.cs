@@ -41,6 +41,9 @@ public partial class HistoryValuesSubject : IConfigurable
     [State]
     public partial double? Fraction { get; set; }
 
+    [State(Unit = StateUnit.Percent)]
+    public partial double? Percent { get; set; }
+
     [State]
     public partial bool IsOn { get; set; }
 

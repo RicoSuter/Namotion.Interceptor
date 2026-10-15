@@ -22,6 +22,9 @@ public static class HistoryChartAxis
     /// <summary>The most time labels a chart shows, however wide it is.</summary>
     public const int MaximumTimeLabelCount = 9;
 
+    /// <summary>The value a line in percent reaches at full scale.</summary>
+    public const double FullPercent = 100;
+
     private const int LargestStep = 1_000_000_000;
 
     /// <summary>The round steps between two time labels, from the shortest to the longest.</summary>
@@ -94,6 +97,20 @@ public static class HistoryChartAxis
         int? Fits(long step) =>
             step <= int.MaxValue && Math.Ceiling(maximum / step) - Math.Floor(minimum / step) + 1 <= labelCount ? (int)step : null;
     }
+
+    /// <summary>
+    /// Gets the value axis of lines in percent, whose values reach from <paramref name="minimum"/> to
+    /// <paramref name="maximum"/>: from 0 to <see cref="FullPercent"/>, and further only where the values leave that range.
+    /// </summary>
+    /// <param name="minimum">The lowest value of the lines in percent.</param>
+    /// <param name="maximum">The highest value of the lines in percent.</param>
+    /// <param name="height">The height of the lines in pixels.</param>
+    public static HistoryChartValueAxis GetPercentValueAxis(double minimum, double maximum, double height) =>
+        GetValueAxis(Math.Min(minimum, 0), Math.Max(maximum, FullPercent), height) with
+        {
+            IncludesZero = true,
+            SuggestedMaximum = FullPercent
+        };
 
     /// <summary>
     /// Gets how many time labels fit into lines of the width: one per <see cref="PixelsPerTimeLabel"/>, at least two

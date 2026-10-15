@@ -22,6 +22,23 @@ public class HistoryChartAxisTests
         return (int)(Math.Ceiling(maximum / axis.Step) - Math.Floor(minimum / axis.Step) + 1);
     }
 
+    // As the chart bounds its axis: the lowest and the highest label.
+    private static (double Lowest, double Highest) GetBounds(double minimum, double maximum, HistoryChartValueAxis axis)
+    {
+        if (axis.IncludesZero)
+        {
+            minimum = Math.Min(minimum, 0);
+            maximum = Math.Max(maximum, 0);
+        }
+
+        if (axis.SuggestedMaximum is { } suggested)
+        {
+            maximum = Math.Max(maximum, suggested);
+        }
+
+        return (Math.Floor(minimum / axis.Step) * axis.Step, Math.Ceiling(maximum / axis.Step) * axis.Step);
+    }
+
     [Theory]
     [InlineData(300, 5)]
     [InlineData(184, 3)]
@@ -102,6 +119,27 @@ public class HistoryChartAxisTests
         // Assert
         Assert.Equal(new HistoryChartValueAxis(1, true, 1), axis);
         Assert.Equal(2, CountLabels(0, 0, axis));
+    }
+
+    [Theory]
+    [InlineData(0.23, 0.8, 300, 0, 100)]
+    [InlineData(0.23, 0.8, 184, 0, 100)]
+    [InlineData(0.5, 0.5, 300, 0, 100)]
+    [InlineData(0.2, 1.2, 300, 0, 150)]
+    [InlineData(-0.5, 0.8, 300, -50, 100)]
+    public void WhenLinesAreInPercent_ThenTheAxisRunsFromZeroToHundredAndGrowsOnlyWhereTheValuesLeaveIt(
+        double minimumFraction, double maximumFraction, double height, double expectedLowest, double expectedHighest)
+    {
+        // Arrange
+        var minimum = minimumFraction * 100;
+        var maximum = maximumFraction * 100;
+
+        // Act
+        var axis = HistoryChartAxis.GetPercentValueAxis(minimum, maximum, height);
+
+        // Assert
+        Assert.Equal((expectedLowest, expectedHighest), GetBounds(minimum, maximum, axis));
+        Assert.InRange(CountLabels(minimum, maximum, axis), 2, HistoryChartAxis.GetValueLabelCount(height));
     }
 
     [Fact]

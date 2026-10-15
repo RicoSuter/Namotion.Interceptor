@@ -112,6 +112,7 @@
     private string[] _palette = [];
     private double _valueMinimum;
     private double _valueMaximum;
+    private bool _isPercent;
 
     // The measured size of the lines, zero until they are measured, and the label counts the axes are spaced for.
     private double _linesWidth;
@@ -260,8 +261,10 @@
         double? anchorValue = null;
         var minimum = double.PositiveInfinity;
         var maximum = double.NegativeInfinity;
+        var isPercent = true;
         foreach (var line in data.Lines)
         {
+            isPercent &= line.IsPercent || line.Runs.Count == 0;
             foreach (var run in line.Runs)
             {
                 anchorValue ??= run[0].Number!.Value;
@@ -305,6 +308,7 @@
             _palette = palette.ToArray();
             _valueMinimum = minimum;
             _valueMaximum = maximum;
+            _isPercent = isPercent;
             _chartSeries = chartSeries;
             BuildOptions();
         }
@@ -323,7 +327,9 @@
         var width = _linesWidth > 0 ? _linesWidth : height * 2;
         _valueLabelCount = HistoryChartAxis.GetValueLabelCount(height);
         _timeLabelCount = HistoryChartAxis.GetTimeLabelCount(width);
-        var valueAxis = HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
+        var valueAxis = _isPercent
+            ? HistoryChartAxis.GetPercentValueAxis(_valueMinimum, _valueMaximum, height)
+            : HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
         var range = data.To - data.From;
         var timeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(range, data.Bucket, width);
         _chartOptions = new TimeSeriesChartOptions

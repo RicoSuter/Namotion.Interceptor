@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Blazor;
 using Xunit;
@@ -95,6 +96,91 @@ public class HistoryChartQueryTests
         Assert.Equal(2, Assert.Single(fan.Runs).Count);
         Assert.False(result.Data.IsEmpty);
         Assert.False(result.IsTruncated);
+    }
+
+    [Theory]
+    [InlineData(HistoryAggregations.TimeWeightedAverage)]
+    [InlineData(HistoryAggregations.SampleAverage)]
+    [InlineData(HistoryAggregations.Minimum)]
+    [InlineData(HistoryAggregations.Maximum)]
+    [InlineData(HistoryAggregations.Sum)]
+    [InlineData(HistoryAggregations.StandardDeviation)]
+    [InlineData(HistoryAggregations.First)]
+    [InlineData(HistoryAggregations.Last)]
+    public async Task WhenALineIsInPercent_ThenItsPointsAreTimesHundred(string aggregation)
+    {
+        // Arrange
+        var store = CreateStore()
+            .Add("/host/CpuUsage", At(10), 0.23)
+            .Add("/host/CpuUsage", At(20), 0.57);
+        var request = new HistoryChartSeriesRequest(
+            "/host/CpuUsage", "CPU", typeof(double), IsBand: false, aggregation, Unit: StateUnit.Percent);
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync([store], [request], At(0), At(60), TimeSpan.FromMinutes(10), CancellationToken.None);
+
+        // Assert
+        var line = Assert.Single(result.Data.Lines);
+        Assert.True(line.IsPercent);
+        Assert.Equal([23d, 57d], Assert.Single(line.Runs).Select(point => point.Number!.Value));
+        Assert.Equal([0.23, 0.57], Assert.Single(result.Series).Points.Select(point => point.Number).OfType<double>());
+    }
+
+    [Fact]
+    public async Task WhenAPercentLineCountsSamples_ThenItsPointsAreNotScaled()
+    {
+        // Arrange
+        var store = CreateStore()
+            .Add("/host/CpuUsage", At(10), 3)
+            .Add("/host/CpuUsage", At(20), 5);
+        var request = new HistoryChartSeriesRequest(
+            "/host/CpuUsage", "CPU", typeof(double), IsBand: false, HistoryAggregations.Count, Unit: StateUnit.Percent);
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync([store], [request], At(0), At(60), TimeSpan.FromMinutes(10), CancellationToken.None);
+
+        // Assert
+        var line = Assert.Single(result.Data.Lines);
+        Assert.False(line.IsPercent);
+        Assert.Equal([3d, 5d], Assert.Single(line.Runs).Select(point => point.Number!.Value));
+    }
+
+    [Fact]
+    public async Task WhenAPercentLineIsQueriedRaw_ThenItsSamplesAreTimesHundredWhateverTheAggregation()
+    {
+        // Arrange
+        var store = CreateStore()
+            .Add("/host/CpuUsage", At(10), 0.23)
+            .Add("/host/CpuUsage", At(20), 1.2);
+        var request = new HistoryChartSeriesRequest(
+            "/host/CpuUsage", "CPU", typeof(double), IsBand: false, HistoryAggregations.Count, Unit: StateUnit.Percent);
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync([store], [request], At(0), At(60), bucket: null, CancellationToken.None);
+
+        // Assert
+        var line = Assert.Single(result.Data.Lines);
+        Assert.True(line.IsPercent);
+        Assert.Equal([23d, 120d], Assert.Single(line.Runs).Select(point => point.Number!.Value));
+    }
+
+    [Fact]
+    public async Task WhenALineHasAnotherUnit_ThenItsPointsAreUnchanged()
+    {
+        // Arrange
+        var store = CreateStore()
+            .Add("/pump/Power", At(10), 0.23)
+            .Add("/pump/Power", At(20), 0.5);
+        var request = new HistoryChartSeriesRequest(
+            "/pump/Power", "Power", typeof(double), IsBand: false, HistoryAggregations.Last, Unit: StateUnit.Kilowatt);
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync([store], [request], At(0), At(60), bucket: null, CancellationToken.None);
+
+        // Assert
+        var line = Assert.Single(result.Data.Lines);
+        Assert.False(line.IsPercent);
+        Assert.Equal([0.23, 0.5], Assert.Single(line.Runs).Select(point => point.Number!.Value));
     }
 
     [Fact]
