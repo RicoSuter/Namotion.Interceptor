@@ -269,9 +269,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var content = write.Page.Source;
         Content = content;
 
-        var bytes = Encoding.UTF8.GetBytes(content);
-        using var stream = new MemoryStream(bytes);
-        await WriteAsync(stream, cancellationToken);
+        await Storage.WriteBlobAsync(FullPath, Encoding.UTF8.GetBytes(content), cancellationToken);
         return true;
     }
 
