@@ -33,6 +33,7 @@ public class PageWidgetCreationTests
     [InlineData(typeof(TabLayout), "Tab layout")]
     [InlineData(typeof(Switch), "Switch")]
     [InlineData(typeof(Slider), "Slider")]
+    [InlineData(typeof(Select), "Select")]
     public void WhenWidgetIsDescribed_ThenItIsInTheDashboardGroupWithAnIconOfItsOwn(Type type, string expectedDisplayName)
     {
         // Arrange
