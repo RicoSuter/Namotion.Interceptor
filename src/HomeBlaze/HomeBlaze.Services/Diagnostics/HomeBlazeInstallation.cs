@@ -33,6 +33,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
     private readonly NuGetVersion? _runningVersion;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
+    private readonly Lock _developerModeLock = new();
 
     [Configuration]
     public partial string Name { get; set; }
@@ -270,7 +271,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
             // A request accepted while the previous run stopped would otherwise skip the delay of the first check.
             // Cleared before the status is Running, which is when CheckForUpdates accepts requests again.
-            Interlocked.Exchange(ref _isManualCheckRequested, 0);
+            Volatile.Write(ref _isManualCheckRequested, 0);
             Drain(_updateSignal);
             Drain(_pollSignal);
             Status = ServiceStatus.Running;
@@ -291,6 +292,31 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     private static Uri? CreateUri(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri : null;
+
+    private void RefreshDeveloperMode()
+    {
+        // Reading and writing under one lock keeps a change event that races the start from being overwritten.
+        lock (_developerModeLock)
+        {
+            IsDeveloperMode = _developerModeService.IsEnabled;
+        }
+    }
+
+    /// <summary>
+    /// Waits for the signal or the delay, at most <see cref="int.MaxValue"/> milliseconds, and returns whether the
+    /// signal woke it; false also when stopping.
+    /// </summary>
+    private static async Task<bool> WaitAsync(SemaphoreSlim signal, TimeSpan delay, CancellationToken stoppingToken)
+    {
+        try
+        {
+            return await signal.WaitAsync(delay, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
 
     private static void Drain(SemaphoreSlim signal)
     {

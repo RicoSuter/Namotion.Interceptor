@@ -9,14 +9,12 @@ public partial class HomeBlazeInstallation
     private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(1);
 
     // SemaphoreSlim.WaitAsync(TimeSpan) throws above int.MaxValue milliseconds (about 24.8 days).
-    private static readonly TimeSpan MaximumDelay = TimeSpan.FromMilliseconds(int.MaxValue);
+    private static readonly TimeSpan MaximumPollingDelay = TimeSpan.FromMilliseconds(int.MaxValue);
 
     private readonly SemaphoreSlim _pollSignal = new(0, 1);
 
     // Only the polling loop reads and writes it.
     private bool _hasPollFailed;
-
-    private readonly Lock _developerModeLock = new();
 
     /// <summary>
     /// Refreshes the environment. Only the polling loop calls it.
@@ -51,9 +49,18 @@ public partial class HomeBlazeInstallation
                 }
             }
 
-            var delay = PollingInterval < MinimumPollingInterval ? MinimumPollingInterval : PollingInterval;
-            await WaitAsync(_pollSignal, delay, stoppingToken);
+            await WaitAsync(_pollSignal, GetPollingDelay(), stoppingToken);
         }
+    }
+
+    private TimeSpan GetPollingDelay()
+    {
+        if (PollingInterval < MinimumPollingInterval)
+        {
+            return MinimumPollingInterval;
+        }
+
+        return PollingInterval > MaximumPollingDelay ? MaximumPollingDelay : PollingInterval;
     }
 
     private static (long? FreeSpace, long? TotalSize) ReadVolume(string? directory)
@@ -72,35 +79,6 @@ public partial class HomeBlazeInstallation
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
             return (null, null);
-        }
-    }
-
-    /// <summary>
-    /// Waits for the signal or the delay and returns whether the signal woke it; false also when stopping.
-    /// </summary>
-    private static async Task<bool> WaitAsync(SemaphoreSlim signal, TimeSpan delay, CancellationToken stoppingToken)
-    {
-        if (delay != Timeout.InfiniteTimeSpan && delay > MaximumDelay)
-        {
-            delay = MaximumDelay;
-        }
-
-        try
-        {
-            return await signal.WaitAsync(delay, stoppingToken);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            return false;
-        }
-    }
-
-    private void RefreshDeveloperMode()
-    {
-        // Reading and writing under one lock keeps a change event that races the start from being overwritten.
-        lock (_developerModeLock)
-        {
-            IsDeveloperMode = _developerModeService.IsEnabled;
         }
     }
 }

@@ -53,7 +53,7 @@ public partial class HomeBlazeInstallation
             throw new InvalidOperationException("Updates were checked less than a minute ago.");
         }
 
-        Interlocked.Exchange(ref _isManualCheckRequested, 1);
+        Volatile.Write(ref _isManualCheckRequested, 1);
         Release(_updateSignal);
     }
 
