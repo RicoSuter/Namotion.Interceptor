@@ -492,7 +492,7 @@ jobs:
           echo "BUILD_TAG=$buildTag" >> $env:GITHUB_OUTPUT
           echo "SOURCE_BRANCH=$branch" >> $env:GITHUB_OUTPUT
           echo "SOURCE_COMMIT_DATE=$commitDate" >> $env:GITHUB_OUTPUT
-          echo "BUILD_TIME=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" >> $env:GITHUB_OUTPUT
+          echo "BUILD_TIME=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture))" >> $env:GITHUB_OUTPUT
           echo "BUILD_RUN_URL=$($env:GITHUB_SERVER_URL)/$($env:GITHUB_REPOSITORY)/actions/runs/$($env:GITHUB_RUN_ID)" >> $env:GITHUB_OUTPUT
 
       # Tags go through an environment variable because MSBuild splits semicolons on the command line.
@@ -539,7 +539,7 @@ jobs:
           $commitDate = git log -1 --format=%cI
           if ($LASTEXITCODE -ne 0) { throw "Could not read the commit date" }
           echo "SOURCE_COMMIT_DATE=$commitDate" >> $env:GITHUB_OUTPUT
-          echo "BUILD_TIME=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" >> $env:GITHUB_OUTPUT
+          echo "BUILD_TIME=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture))" >> $env:GITHUB_OUTPUT
 
       # AssemblyVersion stays unchanged so binding is unaffected; only the informational version carries the release.
       - run: |
