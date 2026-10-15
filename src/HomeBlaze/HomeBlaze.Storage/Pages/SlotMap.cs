@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
@@ -28,27 +29,34 @@ internal sealed class SlotMap
 
     private static readonly ConcurrentDictionary<Type, SlotMap> Cache = new();
 
-    private SlotMap(SlotDefinition? defaultSlot, IReadOnlyDictionary<string, SlotDefinition> named, string? error)
+    private readonly FrozenDictionary<string, SlotDefinition> _byPropertyName;
+
+    private SlotMap(SlotDefinition? defaultSlot, Dictionary<string, SlotDefinition> named, string? error)
     {
         Default = defaultSlot;
-        Named = named;
+        Named = named.ToFrozenDictionary();
+        _byPropertyName = named.Values.ToFrozenDictionary(slot => slot.PropertyName, StringComparer.Ordinal);
         Error = error;
     }
 
     public SlotDefinition? Default { get; }
 
     /// <summary>All slots by block name, including the default slot.</summary>
-    public IReadOnlyDictionary<string, SlotDefinition> Named { get; }
+    public FrozenDictionary<string, SlotDefinition> Named { get; }
 
     /// <summary>Set when the type declares its slots in a way that cannot be used.</summary>
     public string? Error { get; }
 
-    /// <summary>Gets the slot that the property with this name declares, or null.</summary>
-    public SlotDefinition? FindByPropertyName(string propertyName, StringComparison comparison)
+    /// <summary>Gets the slot that the property with exactly this name declares, or null.</summary>
+    public SlotDefinition? FindByPropertyName(string propertyName) =>
+        _byPropertyName.GetValueOrDefault(propertyName);
+
+    /// <summary>Gets the slot that the property with this name in any casing declares, or null.</summary>
+    public SlotDefinition? FindByPropertyNameIgnoringCase(string propertyName)
     {
         foreach (var slot in Named.Values)
         {
-            if (string.Equals(slot.PropertyName, propertyName, comparison))
+            if (string.Equals(slot.PropertyName, propertyName, StringComparison.OrdinalIgnoreCase))
             {
                 return slot;
             }

@@ -210,7 +210,7 @@ public sealed partial class MarkdownContentParser
 
             // Earlier versions wrote an empty list for the slot of a layout into every page they saved. It holds
             // nothing, and the next save of the block leaves it out.
-            if (value is JsonArray { Count: 0 } && SlotMap.For(type).FindByPropertyName(key, StringComparison.Ordinal) is { IsList: true })
+            if (value is JsonArray { Count: 0 } && SlotMap.For(type).FindByPropertyName(key) is { IsList: true })
             {
                 (emptySlotLists ??= []).Add(key);
                 continue;
@@ -233,7 +233,7 @@ public sealed partial class MarkdownContentParser
 
     private static string FormatUnknownProperty(Type type, string key, IReadOnlyDictionary<string, Type> properties)
     {
-        if (SlotMap.For(type).FindByPropertyName(key, StringComparison.OrdinalIgnoreCase) is { } slot)
+        if (SlotMap.For(type).FindByPropertyNameIgnoringCase(key) is { } slot)
         {
             if (slot.IsDefault)
             {
@@ -323,7 +323,7 @@ public sealed partial class MarkdownContentParser
             return key
                 .GetProperties(BindingFlags.Public | BindingFlags.Instance)
                 .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is not null &&
-                                   slots.FindByPropertyName(property.Name, StringComparison.Ordinal) is null)
+                                   slots.FindByPropertyName(property.Name) is null)
                 .ToDictionary(property => property.Name, property => property.PropertyType);
         });
 
