@@ -231,6 +231,35 @@ public class HistoryChartWidgetTests
         Assert.InRange(layout.ValueLabels.Length, 2, 4);
     }
 
+    [Theory]
+    [InlineData(PhoneWidth)]
+    [InlineData(DesktopWidth)]
+    public async Task WhenAChartIsInATabThatIsHiddenAtFirst_ThenItIsDrawnInsideItsBoxWhenTheTabIsShown(int width)
+    {
+        // Arrange
+        const int height = 200;
+        var page = await OpenPageAsync(width);
+        var chart = GetChart(page, "Tab speed");
+
+        // The chart has drawn its lines box while its tab is hidden.
+        await Assertions.Expect(chart.GetByTestId("history-chart-lines")).ToBeAttachedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(chart).ToBeHiddenAsync();
+
+        // Act
+        await page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Speed" }).ClickAsync();
+        var layout = await GetLayoutAsync(chart);
+        var legend = await chart.GetByTestId("history-chart-legend").BoundingBoxAsync()
+            ?? throw new InvalidOperationException("The legend has no box");
+
+        // Assert
+        var expectedHeight = Math.Min(height, layout.Lines.Width / 2);
+        Assert.InRange(layout.Lines.Height, expectedHeight - 2, expectedHeight + 2);
+        Assert.InRange(layout.Chart.Height, layout.Lines.Height - 1, layout.Lines.Height + 1);
+        Assert.InRange(layout.Chart.Y + layout.Chart.Height, layout.Lines.Y, layout.Lines.Y + layout.Lines.Height + 1);
+        Assert.True(layout.Chart.Y + layout.Chart.Height <= legend.Y + 1,
+            $"The chart ends at {layout.Chart.Y + layout.Chart.Height} px, below the top of the legend at {legend.Y} px");
+    }
+
     // Written one value after the other, each once the one before it is recorded, because the store keeps only the last
     // of the values written within its buffer time. Null is a value recorded as empty, which breaks a line, and the
     // boolean is written as 1 for true.

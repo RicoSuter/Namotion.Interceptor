@@ -20,14 +20,20 @@
                 @* MatchBoundsToSize sizes the SVG viewBox to the rendered box, so labels and strokes
                    keep their own size instead of being scaled by a fixed 700x350 viewBox. MudChart
                    fills the box only when it has a height or is a flex box with a max-height:
-                   otherwise it draws in a box of its own 350 px high, which is clipped or letterboxed. *@
+                   otherwise it draws in a box of its own 350 px high, which is clipped or letterboxed.
+                   It decides this once, when it first renders, and a box that is not displayed, like
+                   one in a hidden tab, has no height yet. So the chart renders only once the box was
+                   measured with a size. *@
                 <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@($"{_valueLabelCount}x{_timeLabelCount}")" style="@GetLinesStyle()">
-                    <MudChart ChartType="ChartType.Timeseries"
-                              T="double"
-                              ChartSeries="_chartSeries"
-                              ChartOptions="_chartOptions"
-                              MatchBoundsToSize="true"
-                              Width="100%" Height="100%" />
+                    @if (_linesWidth > 0)
+                    {
+                        <MudChart ChartType="ChartType.Timeseries"
+                                  T="double"
+                                  ChartSeries="_chartSeries"
+                                  ChartOptions="_chartOptions"
+                                  MatchBoundsToSize="true"
+                                  Width="100%" Height="100%" />
+                    }
                 </div>
             }
 
@@ -114,7 +120,7 @@
     private double _valueMaximum;
     private bool _isPercent;
 
-    // The measured size of the lines, zero until they are measured, and the label counts the axes are spaced for.
+    // The measured size of the lines, zero until the box of the lines is measured, and the label counts the axes are spaced for.
     private double _linesWidth;
     private double _linesHeight;
     private int _valueLabelCount;
@@ -227,7 +233,7 @@
         ? $"display:flex; width:100%; max-height:{maxHeight}px; min-height:0; aspect-ratio:2 / 1;"
         : "display:flex; width:100%; height:100%; min-height:0;";
 
-    // The label counts decide the whole spacing of both axes, so the options are built and drawn only when one changes.
+    // The label counts decide the whole spacing of both axes, so after the first size the options are built and drawn only when one changes.
     private void OnLinesResized(double width, double height)
     {
         if (_disposed || _chartSeries is null || width <= 0 || height <= 0)
@@ -235,9 +241,11 @@
             return;
         }
 
+        var isFirstSize = _linesWidth <= 0;
         _linesWidth = width;
         _linesHeight = height;
-        if (HistoryChartAxis.GetValueLabelCount(height) != _valueLabelCount ||
+        if (isFirstSize ||
+            HistoryChartAxis.GetValueLabelCount(height) != _valueLabelCount ||
             HistoryChartAxis.GetTimeLabelCount(width) != _timeLabelCount)
         {
             BuildOptions();
@@ -247,6 +255,17 @@
     }
 
     private void Build()
+    {
+        BuildChart();
+        if (_chartSeries is null)
+        {
+            // Without lines their box is removed, so a box that comes back is measured before the chart renders in it.
+            _linesWidth = 0;
+            _linesHeight = 0;
+        }
+    }
+
+    private void BuildChart()
     {
         _builtData = Data;
         _chartSeries = null;
