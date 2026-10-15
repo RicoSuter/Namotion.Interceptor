@@ -386,7 +386,7 @@ public class MarkdownSlotWriteBackTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var serializer = fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>();
-        var board = new TestCaseBoard { Tilelist = 3 };
+        var board = new TestCaseBoard(fixture.Services.GetRequiredService<IInterceptorSubjectContext>()) { Tilelist = 3 };
 
         // Act
         var json = MarkdownBlockConfiguration.Serialize(serializer, board);

@@ -41,6 +41,15 @@ public class ConfigurableSubjectSerializerTests
         _serializer = new ConfigurableSubjectSerializer(_typeProvider, serviceProvider);
     }
 
+    // The serializer finds the configuration properties of a registered subject by their attributes in the registry.
+    private static IInterceptorSubjectContext CreateContextWithConfigurationAttributes() =>
+        InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
+
     #region Serialize Tests
 
     [Fact]
@@ -250,7 +259,7 @@ public class ConfigurableSubjectSerializerTests
     public void WhenNoPropertyIsExcluded_ThenTheJsonEqualsThatOfSerialize(ConfigurationNaming naming)
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
+        var context = CreateContextWithConfigurationAttributes();
         var subject = new SubjectWithList(context)
         {
             Items = [new ChildSubject(context) { ChildConfig = "a", ChildState = "s" }, new ChildSubject(context) { ChildConfig = "b" }]
@@ -272,11 +281,11 @@ public class ConfigurableSubjectSerializerTests
     public void WhenPropertyIsExcludedByItsDeclaredName_ThenItIsNotWrittenAndTheOthersAre(ConfigurationNaming naming, string expectedOther)
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
+        var context = CreateContextWithConfigurationAttributes();
         var subject = new SubjectWithMixedProperties(context) { ConfigOne = "one", ConfigTwo = 2 };
 
         // Act
-        var json = _serializer.Serialize(subject, static name => name == nameof(SubjectWithMixedProperties.ConfigOne), naming);
+        var json = _serializer.Serialize(subject, static property => property.Name == nameof(SubjectWithMixedProperties.ConfigOne), naming);
 
         // Assert
         Assert.DoesNotContain("ConfigOne", json);
@@ -289,11 +298,11 @@ public class ConfigurableSubjectSerializerTests
     public void WhenExcludedPropertyHoldsASubjectThatCannotBeWritten_ThenItsValueIsNotRead()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
+        var context = CreateContextWithConfigurationAttributes();
         var subject = new SubjectWithAnyChild(context) { Child = new PlainSubject(context) };
 
         // Act
-        var json = _serializer.Serialize(subject, static name => name == nameof(SubjectWithAnyChild.Child));
+        var json = _serializer.Serialize(subject, static property => property.Name == nameof(SubjectWithAnyChild.Child));
 
         // Assert
         Assert.DoesNotContain("child", json);
@@ -305,16 +314,27 @@ public class ConfigurableSubjectSerializerTests
     public void WhenExclusionNamesAPropertyOfANestedSubject_ThenTheNestedSubjectIsWrittenInFull()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
+        var context = CreateContextWithConfigurationAttributes();
         var subject = new ParentWithChildSubject(context) { Name = "parent", Child = new ChildSubject(context) { ChildConfig = "kept" } };
 
         // Act
         var json = _serializer.Serialize(
-            subject, static name => name is nameof(ParentWithChildSubject.Name) or nameof(ChildSubject.ChildConfig), ConfigurationNaming.CSharpProperty);
+            subject, static property => property.Name is nameof(ParentWithChildSubject.Name) or nameof(ChildSubject.ChildConfig), ConfigurationNaming.CSharpProperty);
 
         // Assert
         Assert.DoesNotContain("\"Name\"", json);
         Assert.Contains("\"ChildConfig\": \"kept\"", json);
+    }
+
+    [Fact]
+    public void WhenSubjectIsNotRegistered_ThenSerializingWithAnExclusionThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var subject = new SubjectWithMixedProperties(context) { ConfigOne = "one" };
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => _serializer.Serialize(subject, static _ => false));
     }
 
     #endregion

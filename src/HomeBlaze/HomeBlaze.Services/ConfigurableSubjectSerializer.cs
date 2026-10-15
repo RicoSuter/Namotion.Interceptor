@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services;
@@ -80,31 +81,37 @@ public class ConfigurableSubjectSerializer
     /// Serializes like <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/>, without the configuration
     /// properties of the subject itself for which <paramref name="isExcluded"/> returns true.
     /// </summary>
-    /// <param name="subject">The subject to serialize.</param>
-    /// <param name="isExcluded">Receives the declared name of a property of the subject and returns true to leave it out.</param>
+    /// <param name="subject">The subject to serialize. It must be registered.</param>
+    /// <param name="isExcluded">Receives a registered property of the subject and returns true to leave it out.</param>
     /// <param name="naming">The naming of the JSON.</param>
+    /// <exception cref="InvalidOperationException">The subject is not registered.</exception>
     /// <remarks>
     /// The value of an excluded property is not read. A subject that is nested in another property is written
-    /// in full, also when it has a property with an excluded name.
+    /// in full, also when it has a property that would be excluded.
     /// </remarks>
     public string Serialize(
         IInterceptorSubject subject,
-        Func<string, bool> isExcluded,
+        Func<RegisteredSubjectProperty, bool> isExcluded,
         ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
     {
         _ = GetConfigurable(subject);
 
         var options = GetOptions(naming);
         var type = subject.GetType();
+        var registeredSubject = subject.TryGetRegisteredSubject() ?? throw new InvalidOperationException(
+            $"Subject must be registered to exclude its properties. Type: {type.FullName}");
         var result = new JsonObject { [TypeDiscriminatorPropertyName] = type.FullName };
 
         // The properties, their names and their filter are those of the serializer, so that the result
         // equals Serialize apart from what is excluded.
         foreach (var property in options.GetTypeInfo(type).Properties)
         {
-            // The resolver creates every property from a member of the type and adds none of its own.
+            // The resolver creates every property from a member of the type and adds none of its own. A property
+            // without a registered counterpart is skipped, as the filter of the serializer skips it.
             var declaredName = ((MemberInfo)property.AttributeProvider!).Name;
-            if (property.Get is not { } getValue || isExcluded(declaredName))
+            if (property.Get is not { } getValue ||
+                registeredSubject.TryGetProperty(declaredName) is not { } registeredProperty ||
+                isExcluded(registeredProperty))
             {
                 continue;
             }
