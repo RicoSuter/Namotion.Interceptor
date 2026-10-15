@@ -57,6 +57,7 @@ jobs:
               - 'src/HomeBlaze/**'
               - 'src/Directory.Packages.props'
               - 'src/Directory.Build.props'
+              - 'src/Directory.Build.targets'
               - '.github/workflows/build.yml'
             nugetplugins:
               - 'src/HomeBlaze/Namotion.NuGet.Plugins/**'
@@ -370,7 +371,8 @@ jobs:
           dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release -r linux-x64 /t:PublishContainer `
             -p:ContainerRuntimeIdentifiers= -p:ContainerImageTag=smoke `
             -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze.tar.gz `
-            -p:LibraryPackageVersion=9.9.9
+            -p:LibraryPackageVersion=9.9.9 `
+            -p:InformationalVersion=edge -p:BuildTime=2000-01-01T00:00:00Z
 
       - name: Smoke test image
         run: |
@@ -397,6 +399,17 @@ jobs:
             if (-not $historyCreated) { Start-Sleep -Seconds 1 }
           }
           if (-not $historyCreated) { throw "SQLite history folder was not created" }
+
+      - name: Check build metadata
+        run: |
+          docker cp homeblaze:/app/HomeBlaze.dll "${{ runner.temp }}/HomeBlaze.dll"
+          if ($LASTEXITCODE -ne 0) { throw "Could not copy HomeBlaze.dll from the container" }
+          # Attribute arguments are UTF-8 strings in the metadata blob heap, so a text search finds them.
+          $text = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes("${{ runner.temp }}/HomeBlaze.dll"))
+          if (-not $text.Contains("Namotion.Build.Time")) { throw "HomeBlaze.dll has no build time" }
+          if (-not $text.Contains("2000-01-01T00:00:00Z")) { throw "HomeBlaze.dll has another build time" }
+          if ($text -notmatch 'edge\+[0-9a-f]{40}') { throw "The informational version has no commit" }
+          if ($text -match 'edge\+[0-9a-f]+\.[0-9a-f]') { throw "The informational version has a doubled commit" }
 
       - name: Build arm64 image archive
         run: |
@@ -454,6 +467,8 @@ jobs:
             }
             $informationalVersion = $version
             $libraryVersion = $version
+            $buildTag = $env:RELEASE_TAG
+            $branch = ""
           } else {
             $short = $env:GITHUB_SHA.Substring(0, 7)
             $tags = "sha-$short"
@@ -462,13 +477,23 @@ jobs:
             if ($masterHead -and $masterHead.Split("`t")[0] -eq $env:GITHUB_SHA) {
               $tags = "edge;$tags"
             }
-            $informationalVersion = "edge+$short"
+            # The SDK appends +<commit> itself.
+            $informationalVersion = "edge"
             $libraryVersion = (gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName) -replace '^v', ''
             if ($LASTEXITCODE -ne 0) { throw "Could not read the latest release" }
+            $buildTag = ""
+            $branch = $env:GITHUB_REF_NAME
           }
+          $commitDate = git log -1 --format=%cI
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the commit date" }
           echo "TAGS=$tags" >> $env:GITHUB_OUTPUT
           echo "INFORMATIONAL_VERSION=$informationalVersion" >> $env:GITHUB_OUTPUT
           echo "LIBRARY_VERSION=$libraryVersion" >> $env:GITHUB_OUTPUT
+          echo "BUILD_TAG=$buildTag" >> $env:GITHUB_OUTPUT
+          echo "SOURCE_BRANCH=$branch" >> $env:GITHUB_OUTPUT
+          echo "SOURCE_COMMIT_DATE=$commitDate" >> $env:GITHUB_OUTPUT
+          echo "BUILD_TIME=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" >> $env:GITHUB_OUTPUT
+          echo "BUILD_RUN_URL=$($env:GITHUB_SERVER_URL)/$($env:GITHUB_REPOSITORY)/actions/runs/$($env:GITHUB_RUN_ID)" >> $env:GITHUB_OUTPUT
 
       # Tags go through an environment variable because MSBuild splits semicolons on the command line.
       # Version is not overridden: HomeBlaze pins it to 1.0.0 because plugins bind by assembly version.
@@ -480,7 +505,13 @@ jobs:
           dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release /t:PublishContainer `
             -p:ContainerRegistry=ghcr.io -p:ContainerRepository=ricosuter/homeblaze `
             -p:InformationalVersion=${{ steps.tags.outputs.INFORMATIONAL_VERSION }} `
-            -p:LibraryPackageVersion=${{ steps.tags.outputs.LIBRARY_VERSION }}
+            -p:LibraryPackageVersion=${{ steps.tags.outputs.LIBRARY_VERSION }} `
+            -p:BuildTag=${{ steps.tags.outputs.BUILD_TAG }} `
+            -p:SourceBranch=${{ steps.tags.outputs.SOURCE_BRANCH }} `
+            -p:SourceCommitDate=${{ steps.tags.outputs.SOURCE_COMMIT_DATE }} `
+            -p:BuildTime=${{ steps.tags.outputs.BUILD_TIME }} `
+            -p:BuildRunUrl=${{ steps.tags.outputs.BUILD_RUN_URL }} `
+            -p:ContinuousIntegrationBuild=true
 
   pack:
     timeout-minutes: 15
@@ -502,7 +533,23 @@ jobs:
           $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
 
-      - run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+      - name: Compute build metadata
+        id: build
+        run: |
+          $commitDate = git log -1 --format=%cI
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the commit date" }
+          echo "SOURCE_COMMIT_DATE=$commitDate" >> $env:GITHUB_OUTPUT
+          echo "BUILD_TIME=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" >> $env:GITHUB_OUTPUT
+
+      # AssemblyVersion stays unchanged so binding is unaffected; only the informational version carries the release.
+      - run: |
+          dotnet build src/Namotion.Interceptor.slnx --configuration Release `
+            -p:InformationalVersion=${{ steps.version.outputs.VERSION }} `
+            -p:BuildTag=${{ github.event.release.tag_name }} `
+            -p:SourceCommitDate=${{ steps.build.outputs.SOURCE_COMMIT_DATE }} `
+            -p:BuildTime=${{ steps.build.outputs.BUILD_TIME }} `
+            -p:BuildRunUrl=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} `
+            -p:ContinuousIntegrationBuild=true
 
       - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
 
