@@ -39,7 +39,7 @@ The `Collect garbage` operation on `Process` runs a full, compacting garbage col
 
 ## Installation
 
-The `Installation` subject describes the running HomeBlaze installation: its build, the assemblies it loaded, its environment and whether a newer release exists. A new installation has one in `Servers/Installation.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
+The `Installation` subject describes the running HomeBlaze installation: its build, its environment and whether a newer release exists. A new installation has one in `Servers/Installation.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
 
 | Property | Description |
 |----------|-------------|
@@ -48,10 +48,9 @@ The `Installation` subject describes the running HomeBlaze installation: its bui
 | `RepositoryUrl`, `VersionUrl`, `CommitUrl`, `BuildRunUrl` | Links to the repository, to the release or commit, and to the CI run |
 | `EnvironmentName`, `IsDeveloperMode` | The hosting environment and whether developer mode is on |
 | `DataDirectory`, `DataVolumeFreeSpace`, `DataVolumeTotalSize`, `DataVolumeUsage` | The data folder and the free space, total size and usage of its volume |
-| `Repositories` | The loaded assemblies grouped by the repository they were built from, each with version, commit and load context |
 | `UpdateAvailable`, `LatestVersion`, `LatestReleaseDate`, `LatestReleaseUrl`, `LastUpdateCheck`, `UpdateCheckStatus` | The result of the update check, see below |
 
-`Status` is `Running` while the installation runs and `Stopped` otherwise. The environment values refresh every `PollingInterval` (30 seconds by default, at least 1 second), and the inventory refreshes on the next poll after an assembly was loaded. The inventory leaves out dynamic assemblies and those of the shared .NET framework; an assembly in a plugin load context is listed with the context name in parentheses. A dashboard widget shows the version, channel and build, an available update, `UpdateCheckStatus` when it is set, the data volume usage and the environment.
+`Status` is `Running` while the installation runs and `Stopped` otherwise. The environment values refresh every `PollingInterval` (30 seconds by default, at least 1 second). A dashboard widget shows the version, channel and build, an available update, `UpdateCheckStatus` when it is set, the data volume usage and the environment.
 
 ### Update check
 
