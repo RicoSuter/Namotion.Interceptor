@@ -962,7 +962,7 @@ What the editor writes:
 - **All values**: Every configuration property that has a value is written, also one that the block did not set before. Values that are not set are left out.
 - **Colons**: The head line keeps its number of colons and its `#name` and gets one space after the colons. The arguments are written anew, so arguments that you wrote by hand can change their order.
 
-Editing a subject elsewhere in the UI, for example through "Edit" in the bar of its selected widget in the Inline mode of the page, writes its block in the same way.
+Editing a subject elsewhere in the UI, for example through "Edit" in the bar of its selected widget in the Inline or Split mode of the page, writes its block in the same way.
 
 While the page is in edit mode, which is with "Split" or "Inline" in the menu at the top right of the page, a `GridLayout` shows a plus in every free place, and once the grid itself is selected, a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas, and a click on a node selects the widget in it. Each cell and each node has buttons to edit and remove it, and a node can be moved with the mouse. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
 

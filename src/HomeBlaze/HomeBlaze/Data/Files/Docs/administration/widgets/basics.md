@@ -47,7 +47,7 @@ A subject file is a segment without its extension, so `Pump.json` is `Pump`. A p
 
 ## The Path Picker
 
-A widget's edit dialog lets you type a path or pick it in the tree of the subjects. Open it in the Inline mode of the page, where a click on the widget selects it and "Edit" in the bar above it opens the dialog, or with the "Edit" button of the page editor for its block, as [Editing in the Page Editor](../pages.md#editing-in-the-page-editor) describes. For a path to a property, the tree offers the properties that have a state, which are the values that the property panel of a subject shows, and the subjects on the way to them. A configuration property without a state, for example the `Name` of a motor, is not offered, so type its path. A typed path is not checked.
+A widget's edit dialog lets you type a path or pick it in the tree of the subjects. Open it in the Inline or Split mode of the page, where a click on the widget selects it and "Edit" in the bar above it opens the dialog, or with the "Edit" button of the page editor for its block, as [Editing in the Page Editor](../pages.md#editing-in-the-page-editor) describes. For a path to a property, the tree offers the properties that have a state, which are the values that the property panel of a subject shows, and the subjects on the way to them. A configuration property without a state, for example the `Name` of a motor, is not offered, so type its path. A typed path is not checked.
 
 Each path argument says what it can lead to, and the arguments table of each widget names it in brackets, for example `Path (Boolean)` or `Path (Number, writable)`:
 
