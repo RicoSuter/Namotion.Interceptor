@@ -4,6 +4,7 @@ using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.Services.Tests.Diagnostics;
@@ -26,8 +27,12 @@ public class HomeBlazeInstallationTests
     internal static BuildInformation CreateBuild(string version = "0.5.0", string? tag = "v0.5.0", string? commit = Commit, string? repositoryUrl = RepositoryUrl) =>
         new(version, commit, repositoryUrl, tag, Branch: "master", CommitDate: null, BuildTime: null, RunUrl: null, ImageTags: null);
 
-    internal static HomeBlazeInstallation CreateInstallation(BuildInformation build, Func<HttpClient>? createHttpClient = null, DeveloperModeService? developerMode = null) =>
-        new(build, "Production", createHttpClient, developerMode ?? new DeveloperModeService(), listeningUrlsProvider: null, TimeProvider.System, NullLogger.Instance);
+    internal static HomeBlazeInstallation CreateInstallation(
+        BuildInformation build,
+        Func<HttpClient>? createHttpClient = null,
+        DeveloperModeService? developerMode = null,
+        IListeningUrlsProvider? listeningUrlsProvider = null) =>
+        new(build, "Production", createHttpClient, developerMode ?? new DeveloperModeService(), listeningUrlsProvider, TimeProvider.System, NullLogger.Instance);
 
     [Theory]
     [InlineData("0.5.0", "v0.5.0", InstallationChannel.Release)]
@@ -116,22 +121,122 @@ public class HomeBlazeInstallationTests
     }
 
     [Fact]
-    public void WhenPolled_ThenTheInventoryListsThisLibraryAndIsKeptOnTheNextPoll()
+    public void WhenPolled_ThenTheInventoryListsThisLibrary()
     {
         // Arrange
         var installation = CreateInstallation(CreateBuild());
 
         // Act
         installation.Poll();
-        var repositories = installation.Repositories;
-        installation.Poll();
 
         // Assert
         Assert.Contains(
             installation.Repositories.Values.SelectMany(repository => repository.Assemblies.Values),
             assembly => assembly.Name == "HomeBlaze.Services");
-        Assert.Same(repositories, installation.Repositories);
         Assert.NotNull(installation.LastUpdated);
+    }
+
+    [Fact]
+    public void WhenTheSameInventoryIsAppliedTwice_ThenTheDictionaryAndSubjectsAreKept()
+    {
+        // Arrange
+        var installation = CreateInstallation(CreateBuild());
+        installation.ApplyInventory([CreateRepository("repo", RepositoryUrl)]);
+        var repositories = installation.Repositories;
+        var repository = repositories["repo"];
+
+        // Act
+        installation.ApplyInventory([CreateRepository("repo", RepositoryUrl)]);
+
+        // Assert
+        Assert.Same(repositories, installation.Repositories);
+        Assert.Same(repository, installation.Repositories["repo"]);
+    }
+
+    [Fact]
+    public void WhenARepositoryIsAdded_ThenANewDictionaryKeepsTheExistingSubject()
+    {
+        // Arrange
+        var installation = CreateInstallation(CreateBuild());
+        installation.ApplyInventory([CreateRepository("repo", RepositoryUrl)]);
+        var repositories = installation.Repositories;
+        var repository = repositories["repo"];
+
+        // Act
+        installation.ApplyInventory([CreateRepository("repo", RepositoryUrl), CreateRepository("other", "https://github.com/owner/other")]);
+
+        // Assert
+        Assert.NotSame(repositories, installation.Repositories);
+        Assert.Equal(2, installation.Repositories.Count);
+        Assert.Same(repository, installation.Repositories["repo"]);
+    }
+
+    [Fact]
+    public void WhenARepositoryNameMovesToAnotherUrl_ThenANewSubjectWithTheNewUrlIsCreated()
+    {
+        // Arrange
+        var installation = CreateInstallation(CreateBuild());
+        installation.ApplyInventory([CreateRepository("Lib", "https://github.com/first/Lib")]);
+        var repository = installation.Repositories["Lib"];
+
+        // Act
+        installation.ApplyInventory([CreateRepository("Lib", "https://github.com/second/Lib")]);
+
+        // Assert
+        Assert.NotSame(repository, installation.Repositories["Lib"]);
+        Assert.Equal(new Uri("https://github.com/second/Lib"), installation.Repositories["Lib"].RepositoryUrl);
+    }
+
+    [Fact]
+    public async Task WhenStartedAndStopped_ThenStatusAndDeveloperModeFollowTheLifecycle()
+    {
+        // Arrange
+        var developerMode = new DeveloperModeService();
+        var installation = CreateInstallation(CreateBuild(), developerMode: developerMode);
+
+        // Act
+        await installation.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => installation.Status == ServiceStatus.Running, message: "The installation did not start");
+            developerMode.SetEnabled(true);
+            await AsyncTestHelpers.WaitUntilAsync(() => installation.IsDeveloperMode, message: "Developer mode was not reported");
+        }
+        finally
+        {
+            await installation.StopAsync(CancellationToken.None);
+        }
+
+        developerMode.SetEnabled(false);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, installation.Status);
+        Assert.True(installation.IsDeveloperMode);
+    }
+
+    [Fact]
+    public async Task WhenAPollFails_ThenTheNextPollStillRuns()
+    {
+        // Arrange
+        var listeningUrlsProvider = new FailingOnceListeningUrlsProvider();
+        var installation = CreateInstallation(CreateBuild(), listeningUrlsProvider: listeningUrlsProvider);
+        installation.PollingInterval = TimeSpan.FromSeconds(1);
+
+        // Act
+        await installation.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => installation.LastUpdated is not null, message: "No poll succeeded after the failure");
+        }
+        finally
+        {
+            await installation.StopAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.True(listeningUrlsProvider.CallCount >= 2);
+        Assert.Equal(new[] { "http://localhost:5000" }, installation.ListeningUrls);
+        Assert.NotEmpty(installation.Repositories);
     }
 
     [Fact]
@@ -152,5 +257,25 @@ public class HomeBlazeInstallationTests
         Assert.True(installation.HasVersionMismatch);
         Assert.Equal(new[] { "repo" }, installation.MismatchedRepositories);
         Assert.Equal("Warning", installation.IconColor);
+    }
+
+    private static InventoryRepository CreateRepository(string name, string repositoryUrl) =>
+        new(name, repositoryUrl, false, [new InventoryAssembly(name, name, "Default", "1.0.0", Commit, false)]);
+
+    private sealed class FailingOnceListeningUrlsProvider : IListeningUrlsProvider
+    {
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public IReadOnlyList<string> GetListeningUrls()
+        {
+            if (Interlocked.Increment(ref _callCount) == 1)
+            {
+                throw new InvalidCastException("The first read fails");
+            }
+
+            return ["http://localhost:5000"];
+        }
     }
 }

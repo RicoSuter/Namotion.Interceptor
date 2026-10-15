@@ -295,10 +295,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         DataDirectory = null;
         DataVolumeFreeSpace = null;
         DataVolumeTotalSize = null;
-        using (var process = DiagnosticsProcess.GetCurrentProcess())
-        {
-            StartTime = new DateTimeOffset(process.StartTime.ToUniversalTime(), TimeSpan.Zero);
-        }
+        StartTime = ReadStartTime();
 
         SubjectCount = 0;
         MonitoredServiceCount = 0;
@@ -337,15 +334,15 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoad;
-        _developerModeService.OnChange += OnDeveloperModeChanged;
-        Interlocked.Exchange(ref _isInventoryOutdated, 1);
-        IsDeveloperMode = _developerModeService.IsEnabled;
-        StatusMessage = null;
-        Status = ServiceStatus.Running;
-
         try
         {
+            AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoad;
+            _developerModeService.OnChange += OnDeveloperModeChanged;
+            Interlocked.Exchange(ref _isInventoryOutdated, 1);
+            IsDeveloperMode = _developerModeService.IsEnabled;
+            StatusMessage = null;
+            Status = ServiceStatus.Running;
+
             await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken));
         }
         finally
@@ -365,6 +362,12 @@ public partial class HomeBlazeInstallation : BackgroundService,
     // Under a test host the entry assembly is the test runner, so the application is found by its name.
     private static Assembly FindApplicationAssembly(string applicationName)
     {
+        var entryAssembly = Assembly.GetEntryAssembly();
+        if (entryAssembly is not null && string.Equals(entryAssembly.GetName().Name, applicationName, StringComparison.Ordinal))
+        {
+            return entryAssembly;
+        }
+
         foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
             if (string.Equals(assembly.GetName().Name, applicationName, StringComparison.Ordinal))
@@ -373,7 +376,20 @@ public partial class HomeBlazeInstallation : BackgroundService,
             }
         }
 
-        return Assembly.GetEntryAssembly() ?? typeof(HomeBlazeInstallation).Assembly;
+        return entryAssembly ?? typeof(HomeBlazeInstallation).Assembly;
+    }
+
+    private static DateTimeOffset ReadStartTime()
+    {
+        try
+        {
+            using var process = DiagnosticsProcess.GetCurrentProcess();
+            return new DateTimeOffset(process.StartTime);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException)
+        {
+            return DateTimeOffset.UtcNow;
+        }
     }
 
     private static Uri? CreateUri(string? value) =>

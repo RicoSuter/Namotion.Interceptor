@@ -18,6 +18,9 @@ public partial class HomeBlazeInstallation
     // Set by AssemblyLoad on any thread and cleared by the poll that rebuilds the inventory.
     private int _isInventoryOutdated = 1;
 
+    // Only the polling loop reads and writes it.
+    private bool _hasPollFailed;
+
     /// <summary>
     /// Counts the subjects, the monitored services and those in <see cref="ServiceStatus.Error"/>. The repositories
     /// and assemblies of an installation are not counted.
@@ -54,6 +57,8 @@ public partial class HomeBlazeInstallation
     {
         var context = ((IInterceptorSubject)this).Context;
 
+        IsDeveloperMode = _developerModeService.IsEnabled;
+
         var dataDirectory = context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
         DataDirectory = dataDirectory;
         (DataVolumeFreeSpace, DataVolumeTotalSize) = ReadVolume(dataDirectory);
@@ -70,14 +75,23 @@ public partial class HomeBlazeInstallation
 
         if (Interlocked.Exchange(ref _isInventoryOutdated, 0) == 1)
         {
-            ApplyInventory(AssemblyInventory.Create(LoadedAssemblyReader.Read(), _build.RepositoryUrl));
+            try
+            {
+                ApplyInventory(AssemblyInventory.Create(LoadedAssemblyReader.Read(), _build.RepositoryUrl));
+            }
+            catch
+            {
+                Volatile.Write(ref _isInventoryOutdated, 1);
+                throw;
+            }
         }
 
         LastUpdated = _timeProvider.GetUtcNow();
     }
 
     /// <summary>
-    /// Applies an inventory. Repositories that stay keep their subject, so their paths and history stay.
+    /// Applies an inventory. Repositories that stay under the same name and URL keep their subject, so their paths
+    /// and history stay.
     /// </summary>
     internal void ApplyInventory(ImmutableArray<InventoryRepository> inventory)
     {
@@ -87,7 +101,7 @@ public partial class HomeBlazeInstallation
         var mismatched = new List<string>();
         foreach (var entry in inventory)
         {
-            if (!current.TryGetValue(entry.Name, out var repository))
+            if (!current.TryGetValue(entry.Name, out var repository) || !repository.HasRepositoryUrl(entry.RepositoryUrl))
             {
                 repository = new InstallationRepository(entry.Name, entry.RepositoryUrl);
                 isChanged = true;
@@ -121,10 +135,16 @@ public partial class HomeBlazeInstallation
             try
             {
                 Poll();
+                _hasPollFailed = false;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            catch (Exception exception) when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
             {
-                _logger.LogWarning(exception, "Reading the installation values failed");
+                // The host never observes ExecuteTask, so an escaping exception would silently end the polling.
+                if (!_hasPollFailed)
+                {
+                    _logger.LogWarning(exception, "Reading the installation values failed");
+                    _hasPollFailed = true;
+                }
             }
 
             var delay = PollingInterval < MinimumPollingInterval ? MinimumPollingInterval : PollingInterval;

@@ -14,6 +14,8 @@ namespace HomeBlaze.Services.Diagnostics;
 [InterceptorSubject]
 public partial class InstallationRepository : ITitleProvider, IIconProvider
 {
+    private readonly string? _repositoryUrl;
+
     [Derived]
     public string? Title => Name;
 
@@ -59,11 +61,18 @@ public partial class InstallationRepository : ITitleProvider, IIconProvider
 
     internal InstallationRepository(string name, string? repositoryUrl)
     {
+        _repositoryUrl = repositoryUrl;
         Name = name;
         RepositoryUrl = Uri.TryCreate(repositoryUrl, UriKind.Absolute, out var uri) ? uri : null;
         HasMismatch = false;
         Assemblies = new Dictionary<string, InstallationAssembly>(StringComparer.Ordinal);
     }
+
+    /// <summary>
+    /// Returns whether the subject was created for <paramref name="repositoryUrl"/>, compared case-insensitively.
+    /// </summary>
+    internal bool HasRepositoryUrl(string? repositoryUrl) =>
+        string.Equals(_repositoryUrl, repositoryUrl, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Applies an inventory entry. Assemblies that are still loaded keep their subject, so their paths and history stay.
