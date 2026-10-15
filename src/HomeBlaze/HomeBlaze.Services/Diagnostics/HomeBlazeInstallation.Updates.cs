@@ -83,7 +83,6 @@ public partial class HomeBlazeInstallation
 
             LastUpdateCheck = _timeProvider.GetUtcNow();
             UpdateCheckStatus = null;
-            ClearUpdateCheckError();
 
             Volatile.Write(ref _gitHubWait, null);
 
@@ -115,15 +114,6 @@ public partial class HomeBlazeInstallation
         if (retryAfter is { } requested)
         {
             Volatile.Write(ref _gitHubWait, new GitHubWait(_timeProvider.GetTimestamp(), UpdateSchedule.CapRetryAfter(requested)));
-        }
-
-        lock (_statusLock)
-        {
-            if (UpdateCheckEnabled)
-            {
-                StatusMessage = message;
-                Status = ServiceStatus.Error;
-            }
         }
 
         return _updateSchedule.GetDelayAfterFailure(retryAfter);
@@ -172,19 +162,12 @@ public partial class HomeBlazeInstallation
                 break;
             }
 
+            // A configuration change, or a wait shortened to the hourly re-read, computes the delay again.
             var isManual = Interlocked.Exchange(ref _isManualCheckRequested, 0) == 1;
-            if (!isManual)
+            if (!isManual &&
+                (!UpdateCheckEnabled || isSignaled || GetUpdateCheckUnavailableReason() is not null || GetRemainingDelay() > TimeSpan.Zero))
             {
-                if (ClearUpdateCheckErrorIfDisabled())
-                {
-                    continue;
-                }
-
-                // A configuration change, or a wait shortened to the hourly re-read, computes the delay again.
-                if (isSignaled || GetUpdateCheckUnavailableReason() is not null || GetRemainingDelay() > TimeSpan.Zero)
-                {
-                    continue;
-                }
+                continue;
             }
 
             lastCheckTimestamp = _timeProvider.GetTimestamp();

@@ -52,36 +52,22 @@ public class HomeBlazeInstallationUpdateTests
     }
 
     [Fact]
-    public async Task WhenTheCheckFailsWhileEnabled_ThenTheInstallationIsInError()
+    public async Task WhenTheCheckFails_ThenOnlyTheUpdateCheckStatusReportsIt()
     {
         // Arrange
         var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
         installation.UpdateCheckEnabled = true;
+        installation.Status = ServiceStatus.Running;
 
         // Act
         await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(ServiceStatus.Error, installation.Status);
-        Assert.StartsWith("GitHub answered 500", installation.StatusMessage);
-        Assert.Equal(installation.StatusMessage, installation.UpdateCheckStatus);
-        Assert.Equal("Error", installation.IconColor);
-    }
-
-    [Fact]
-    public async Task WhenTheCheckFailsWhileDisabled_ThenOnlyTheUpdateStatusShowsIt()
-    {
-        // Arrange
-        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
-        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
-
-        // Act
-        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
-
-        // Assert
-        Assert.NotEqual(ServiceStatus.Error, installation.Status);
         Assert.StartsWith("GitHub answered 500", installation.UpdateCheckStatus);
+        Assert.Equal(ServiceStatus.Running, installation.Status);
+        Assert.Null(installation.StatusMessage);
+        Assert.Null(installation.IconColor);
     }
 
     [Fact]
@@ -90,19 +76,16 @@ public class HomeBlazeInstallationUpdateTests
         // Arrange
         var handler = new FakeHttpMessageHandler(_ => throw new TaskCanceledException());
         var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
-        installation.UpdateCheckEnabled = true;
 
         // Act
         await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal("GitHub did not answer in time.", installation.UpdateCheckStatus);
-        Assert.Equal("GitHub did not answer in time.", installation.StatusMessage);
-        Assert.Equal(ServiceStatus.Error, installation.Status);
     }
 
     [Fact]
-    public async Task WhenACheckSucceedsAfterAnError_ThenTheErrorIsCleared()
+    public async Task WhenACheckSucceedsAfterAnError_ThenTheUpdateCheckStatusIsCleared()
     {
         // Arrange
         var responses = new Queue<HttpResponseMessage>([
@@ -118,25 +101,8 @@ public class HomeBlazeInstallationUpdateTests
         await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(ServiceStatus.Running, installation.Status);
-        Assert.Null(installation.StatusMessage);
-    }
-
-    [Fact]
-    public async Task WhenTheUpdateCheckIsDisabledAfterAnError_ThenTheErrorIsCleared()
-    {
-        // Arrange
-        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
-        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
-        installation.UpdateCheckEnabled = true;
-        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
-
-        // Act
-        installation.UpdateCheckEnabled = false;
-        await installation.ApplyConfigurationAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(ServiceStatus.Running, installation.Status);
+        Assert.Null(installation.UpdateCheckStatus);
+        Assert.True(installation.UpdateAvailable);
     }
 
     [Theory]
@@ -306,34 +272,6 @@ public class HomeBlazeInstallationUpdateTests
 
         // Assert
         Assert.Equal(BrokenStream.Message, installation.UpdateCheckStatus);
-    }
-
-    [Fact]
-    public async Task WhenTheCheckIsDisabledAfterAFailedCheckWhileRunning_ThenTheStatusReturnsToRunning()
-    {
-        // Arrange
-        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
-        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
-        installation.UpdateCheckEnabled = true;
-
-        await StartAndWaitUntilRunningAsync(installation);
-        try
-        {
-            installation.CheckForUpdates();
-            await AsyncTestHelpers.WaitUntilAsync(() => installation.Status == ServiceStatus.Error, message: "The failed check did not set Error");
-
-            // Act
-            installation.UpdateCheckEnabled = false;
-            await installation.ApplyConfigurationAsync(CancellationToken.None);
-
-            // Assert
-            Assert.Equal(ServiceStatus.Running, installation.Status);
-            Assert.Null(installation.StatusMessage);
-        }
-        finally
-        {
-            await installation.StopAsync(CancellationToken.None);
-        }
     }
 
     [Fact]

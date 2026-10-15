@@ -35,10 +35,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
 
-    // Guards every read-check-write of Status and StatusMessage. The message is written before the status so an
-    // observer that sees Error also sees its message.
-    private readonly Lock _statusLock = new();
-
     [Configuration]
     public partial string Name { get; set; }
 
@@ -237,10 +233,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
     public string IconName => "Info";
 
     [Derived]
-    public string? IconColor =>
-        Status == ServiceStatus.Error ? "Error" :
-        UpdateAvailable == true ? "Warning" :
-        null;
+    public string? IconColor => UpdateAvailable == true ? "Warning" : null;
 
     public HomeBlazeInstallation(
         IHostEnvironment hostEnvironment,
@@ -323,7 +316,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        ClearUpdateCheckErrorIfDisabled();
         Release(_pollSignal);
         Release(_updateSignal);
         return Task.CompletedTask;
@@ -350,7 +342,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
             Interlocked.Exchange(ref _isManualCheckRequested, 0);
             Drain(_updateSignal);
             Drain(_pollSignal);
-            SetStatus(ServiceStatus.Running, null);
+            Status = ServiceStatus.Running;
 
             await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken));
         }
@@ -358,45 +350,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         {
             AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
             _developerModeService.OnChange -= OnDeveloperModeChanged;
-            SetStatus(ServiceStatus.Stopped, null);
-        }
-    }
-
-    private void SetStatus(ServiceStatus status, string? message)
-    {
-        lock (_statusLock)
-        {
-            StatusMessage = message;
-            Status = status;
-        }
-    }
-
-    /// <summary>
-    /// Clears an update check error when the check is disabled and returns whether it is disabled.
-    /// </summary>
-    private bool ClearUpdateCheckErrorIfDisabled()
-    {
-        lock (_statusLock)
-        {
-            if (UpdateCheckEnabled)
-            {
-                return false;
-            }
-
-            ClearUpdateCheckError();
-            return true;
-        }
-    }
-
-    private void ClearUpdateCheckError()
-    {
-        lock (_statusLock)
-        {
-            if (Status == ServiceStatus.Error)
-            {
-                StatusMessage = null;
-                Status = ServiceStatus.Running;
-            }
+            Status = ServiceStatus.Stopped;
         }
     }
 
