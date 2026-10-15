@@ -546,7 +546,6 @@ jobs:
             -p:InformationalVersion=${{ steps.version.outputs.VERSION }} `
             -p:BuildTag=${{ github.event.release.tag_name }} `
             -p:SourceCommitDate=${{ steps.build.outputs.SOURCE_COMMIT_DATE }} `
-            -p:BuildRunUrl=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} `
             -p:ContinuousIntegrationBuild=true
 
       - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
