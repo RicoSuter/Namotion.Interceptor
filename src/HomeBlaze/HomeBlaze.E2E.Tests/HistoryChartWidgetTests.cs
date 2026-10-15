@@ -39,6 +39,7 @@ public class HistoryChartWidgetTests
     private const int DefaultHeight = 300;
     private const int PhoneWidth = 400;
     private const int DesktopWidth = 1400;
+    private const string MissingText = "–";
 
     private static readonly TimeSpan RecordingTimeout = TimeSpan.FromSeconds(20);
 
@@ -165,6 +166,39 @@ public class HistoryChartWidgetTests
             drawn.GetProperty("times").EnumerateArray().Select(text => text.GetString()!).ToArray(),
             drawn.GetProperty("top").GetDouble(),
             drawn.GetProperty("bottom").GetDouble());
+    }
+
+    [Fact]
+    public async Task WhenAPageHasAHistoryChart_ThenItDrawsTheLineTheBandAndTheCurrentValues()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync(DesktopWidth);
+        var chart = GetChart(page, "Chart speed");
+
+        // Assert
+        // MudChart renders more than one svg, so the first stands for the chart.
+        await Assertions.Expect(chart.GetByTestId("history-chart-lines").Locator("svg").First)
+            .ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(chart.GetByTestId("history-chart-band"))
+            .ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(chart.GetByTestId("history-chart-legend-entry"))
+            .ToHaveCountAsync(2, new() { Timeout = Timeout });
+        await Assertions.Expect(chart.GetByTestId("history-chart-legend-value").First)
+            .Not.ToHaveTextAsync(MissingText, new() { Timeout = Timeout });
+        await Assertions.Expect(chart.GetByTestId("history-chart-legend-note")).ToHaveCountAsync(0);
+        await Assertions.Expect(chart.GetByTestId("history-chart-query-error")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenAChartMixesUnits_ThenItShowsAnErrorThatNamesTheSeries()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync(DesktopWidth);
+        var error = page.GetByTestId("widget-argument-error");
+
+        // Assert
+        await Assertions.Expect(error).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(error).ToContainTextAsync("Mixed temperature");
     }
 
     [Fact]
