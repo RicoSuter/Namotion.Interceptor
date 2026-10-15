@@ -52,7 +52,7 @@ The `Installation` subject describes the running HomeBlaze installation: its bui
 | `Repositories` | The loaded assemblies grouped by the repository they were built from, each with version, commit and load context |
 | `HasVersionMismatch`, `MismatchedRepositories` | Whether the loaded assemblies are inconsistent, see below |
 
-The build, environment and health values refresh every `PollingInterval` (30 seconds by default, at least 1 second). The assembly inventory also refreshes on each poll, but only after a new assembly has been loaded since the last one. A dashboard widget shows the version, channel and build, an update or mismatch warning, service and subject counts, and data volume usage.
+The build, environment and health values refresh every `PollingInterval` (30 seconds by default, at least 1 second). The assembly inventory also refreshes on each poll, but only after a new assembly has been loaded since the last one. A dashboard widget shows the version, channel and build, an update or mismatch warning, the reason of a failed update check, service and subject counts, and data volume usage.
 
 ### Version mismatches
 

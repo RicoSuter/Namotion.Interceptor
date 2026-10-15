@@ -64,7 +64,7 @@
             }
             @if (installation.Status == ServiceStatus.Error)
             {
-                <MudText Typo="Typo.caption" Color="Color.Error">Update check failed</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Error">@FormatUpdateCheckFailure(installation.UpdateCheckStatus)</MudText>
             }
 
             <MudText Typo="Typo.caption">
@@ -107,6 +107,9 @@
         var unit = count == 1 ? "commit" : "commits";
         return $"{count} {unit} behind {branch}";
     }
+
+    private static string FormatUpdateCheckFailure(string? updateCheckStatus) =>
+        updateCheckStatus is { Length: > 0 } ? $"Update check failed: {updateCheckStatus}" : "Update check failed";
 
     private static string FormatDataVolume(HomeBlazeInstallation installation) =>
         installation.DataVolumeFreeSpace is { } free && installation.DataVolumeTotalSize is { } total
