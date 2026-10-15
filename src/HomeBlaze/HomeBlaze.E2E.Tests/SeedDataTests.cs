@@ -25,7 +25,7 @@ public class SeedDataTests
     public void WhenSeedFilesAreRead_ThenEveryTypeDiscriminatorResolves()
     {
         // Arrange
-        // The build output's Seed folder is what the image ships as /app/Seed, including the linked docs.
+        // The build output's Seed folder is what the image ships as /app/Seed.
         var seedDirectory = Path.Combine(AppContext.BaseDirectory, "Seed");
         var typeProvider = _fixture.ServerServices.GetRequiredService<TypeProvider>();
         var seedFiles = Directory.GetFiles(seedDirectory, "*.json", SearchOption.AllDirectories);
@@ -40,7 +40,7 @@ public class SeedDataTests
             {
                 checkedFiles.Add(Path.GetRelativePath(seedDirectory, seedFile));
 
-                // The loader only creates non-abstract configurable types; any other type leaves a plain JSON file.
+                // The loader only creates non-abstract configurable types.
                 var isLoadable = typeProvider.Types.Any(type =>
                     type.FullName == typeName &&
                     typeof(IConfigurable).IsAssignableFrom(type) &&
