@@ -432,6 +432,68 @@ public class HomeBlazeInstallationUpdateTests
         }
     }
 
+    [Fact]
+    public async Task WhenGitHubAskedToWait_ThenAManualCheckIsRejectedUntilThen()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => CreateTooManyRequests(TimeSpan.FromMinutes(30)));
+        var timeProvider = new TestTimeProvider(DateTimeOffset.UtcNow);
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+        installation.Status = ServiceStatus.Running;
+        timeProvider.Advance(TimeSpan.FromMinutes(10));
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
+        Assert.Equal("GitHub asked to wait 20 more minutes.", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenTheWaitGitHubAskedForHasPassed_ThenAManualCheckIsAccepted()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => CreateTooManyRequests(TimeSpan.FromMinutes(30)));
+        var timeProvider = new TestTimeProvider(DateTimeOffset.UtcNow);
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+        installation.Status = ServiceStatus.Running;
+        timeProvider.Advance(TimeSpan.FromMinutes(30));
+
+        // Act
+        installation.CheckForUpdates();
+
+        // Assert
+        Assert.True(installation.HasPendingUpdateWakeUp);
+    }
+
+    [Fact]
+    public async Task WhenACheckSucceedsAfterGitHubAskedToWait_ThenAManualCheckIsAccepted()
+    {
+        // Arrange
+        var responses = new Queue<HttpResponseMessage>([
+            CreateTooManyRequests(TimeSpan.FromMinutes(30)),
+            FakeHttpMessageHandler.Json(ReleaseJson),
+        ]);
+        var handler = new FakeHttpMessageHandler(_ => responses.Dequeue());
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), new TestTimeProvider(DateTimeOffset.UtcNow));
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+        installation.Status = ServiceStatus.Running;
+
+        // Act
+        installation.CheckForUpdates();
+
+        // Assert
+        Assert.True(installation.HasPendingUpdateWakeUp);
+    }
+
+    private static HttpResponseMessage CreateTooManyRequests(TimeSpan retryAfter)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(retryAfter);
+        return response;
+    }
+
     // ExecuteAsync runs on the thread pool, so the status is still Stopped when StartAsync returns.
     private static async Task StartAndWaitUntilRunningAsync(HomeBlazeInstallation installation)
     {

@@ -65,6 +65,13 @@ internal sealed class UpdateSchedule
     }
 
     /// <summary>
+    /// Returns the wait GitHub asked for, at most MaximumBackoff.
+    /// </summary>
+    // A clock far in the past on a device without a real-time clock would otherwise stall checks for months.
+    public static TimeSpan CapRetryAfter(TimeSpan retryAfter) =>
+        retryAfter > MaximumBackoff ? MaximumBackoff : retryAfter;
+
+    /// <summary>
     /// Advances the backoff and returns it, or a longer retryAfter up to MaximumBackoff.
     /// </summary>
     public TimeSpan GetDelayAfterFailure(TimeSpan? retryAfter)
@@ -79,8 +86,7 @@ internal sealed class UpdateSchedule
 
         if (retryAfter is { } requested && requested > backoff)
         {
-            // A clock far in the past on a device without a real-time clock would otherwise stall checks for months.
-            return requested > MaximumBackoff ? MaximumBackoff : requested;
+            return CapRetryAfter(requested);
         }
 
         return backoff;

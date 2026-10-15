@@ -61,6 +61,18 @@ public class UpdateScheduleTests
         Assert.Equal(TimeSpan.FromMilliseconds(1), delay);
     }
 
+    [Theory]
+    [InlineData(30, 30)]
+    [InlineData(24 * 60 * 30, 24 * 60)]
+    public void WhenGitHubAsksToWait_ThenTheWaitIsCappedAtADay(int requestedMinutes, int expectedMinutes)
+    {
+        // Act
+        var wait = UpdateSchedule.CapRetryAfter(TimeSpan.FromMinutes(requestedMinutes));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(expectedMinutes), wait);
+    }
+
     [Fact]
     public void WhenChecksKeepFailing_ThenTheBackoffDoublesUpToADay()
     {

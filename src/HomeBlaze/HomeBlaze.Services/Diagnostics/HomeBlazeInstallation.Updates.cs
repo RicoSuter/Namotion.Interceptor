@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -15,6 +16,11 @@ public partial class HomeBlazeInstallation
     // Set by CheckForUpdates on any thread and cleared by the update loop.
     private int _isManualCheckRequested;
 
+    // Written by the update loop and read by CheckForUpdates on any thread; null when GitHub asked for no wait.
+    private GitHubWait? _gitHubWait;
+
+    private sealed record GitHubWait(long StartTimestamp, TimeSpan Duration);
+
     /// <summary>
     /// Whether a manual check or a wake-up waits for the update loop.
     /// </summary>
@@ -31,6 +37,17 @@ public partial class HomeBlazeInstallation
         if (Status == ServiceStatus.Stopped)
         {
             throw new InvalidOperationException("The installation is not running.");
+        }
+
+        if (Volatile.Read(ref _gitHubWait) is { } wait)
+        {
+            var remaining = wait.Duration - _timeProvider.GetElapsedTime(wait.StartTimestamp);
+            if (remaining > TimeSpan.Zero)
+            {
+                var minutes = (int)Math.Ceiling(remaining.TotalMinutes);
+                throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                    $"GitHub asked to wait {minutes} more {(minutes == 1 ? "minute" : "minutes")}."));
+            }
         }
 
         if (!_updateSchedule.TryStartManualCheck(_timeProvider.GetUtcNow()))
@@ -68,6 +85,8 @@ public partial class HomeBlazeInstallation
             UpdateCheckStatus = null;
             ClearUpdateCheckError();
 
+            Volatile.Write(ref _gitHubWait, null);
+
             _updateSchedule.ResetBackoff();
             return null;
         }
@@ -93,6 +112,11 @@ public partial class HomeBlazeInstallation
     {
         LastUpdateCheck = _timeProvider.GetUtcNow();
         UpdateCheckStatus = message;
+        if (retryAfter is { } requested)
+        {
+            Volatile.Write(ref _gitHubWait, new GitHubWait(_timeProvider.GetTimestamp(), UpdateSchedule.CapRetryAfter(requested)));
+        }
+
         lock (_statusLock)
         {
             if (UpdateCheckEnabled)
