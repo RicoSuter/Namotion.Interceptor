@@ -264,16 +264,11 @@ public partial class HomeBlazeInstallation : BackgroundService,
         try
         {
             AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoad;
-            _developerModeService.OnChange += OnDeveloperModeChanged;
+            _developerModeService.OnChange += RefreshDeveloperMode;
             Interlocked.Exchange(ref _isInventoryOutdated, 1);
 
-            // The handler may run between the read and the write, so a second read repairs a stale write.
-            var isDeveloperMode = _developerModeService.IsEnabled;
-            IsDeveloperMode = isDeveloperMode;
-            if (isDeveloperMode != _developerModeService.IsEnabled)
-            {
-                IsDeveloperMode = _developerModeService.IsEnabled;
-            }
+            // Read after subscribing, so a change in between is not missed.
+            RefreshDeveloperMode();
 
             // A request accepted while the previous run stopped would otherwise skip the delay of the first check.
             // Cleared before the status is Running, which is when CheckForUpdates accepts requests again.
@@ -287,7 +282,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         finally
         {
             AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
-            _developerModeService.OnChange -= OnDeveloperModeChanged;
+            _developerModeService.OnChange -= RefreshDeveloperMode;
             Status = ServiceStatus.Stopped;
         }
     }

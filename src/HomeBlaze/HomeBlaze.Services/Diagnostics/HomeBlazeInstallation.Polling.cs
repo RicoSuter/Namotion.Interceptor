@@ -20,6 +20,8 @@ public partial class HomeBlazeInstallation
     // Only the polling loop reads and writes it.
     private bool _hasPollFailed;
 
+    private readonly Lock _developerModeLock = new();
+
     /// <summary>
     /// Refreshes the environment and, after an assembly was loaded, the inventory. Only the polling loop calls it.
     /// </summary>
@@ -146,8 +148,12 @@ public partial class HomeBlazeInstallation
         }
     }
 
-    private void OnDeveloperModeChanged()
+    private void RefreshDeveloperMode()
     {
-        IsDeveloperMode = _developerModeService.IsEnabled;
+        // Reading and writing under one lock keeps a change event that races the start from being overwritten.
+        lock (_developerModeLock)
+        {
+            IsDeveloperMode = _developerModeService.IsEnabled;
+        }
     }
 }
