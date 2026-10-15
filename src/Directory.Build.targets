@@ -1,0 +1,11 @@
+<Project>
+  <!-- Build metadata that CI passes as properties. Local builds set none, so their output stays deterministic. -->
+  <ItemGroup>
+    <AssemblyMetadata Include="Namotion.Build.Tag" Value="$(BuildTag)" Condition="'$(BuildTag)' != ''" />
+    <AssemblyMetadata Include="Namotion.Build.Branch" Value="$(SourceBranch)" Condition="'$(SourceBranch)' != ''" />
+    <AssemblyMetadata Include="Namotion.Build.CommitDate" Value="$(SourceCommitDate)" Condition="'$(SourceCommitDate)' != ''" />
+    <AssemblyMetadata Include="Namotion.Build.Time" Value="$(BuildTime)" Condition="'$(BuildTime)' != ''" />
+    <AssemblyMetadata Include="Namotion.Build.RunUrl" Value="$(BuildRunUrl)" Condition="'$(BuildRunUrl)' != ''" />
+    <AssemblyMetadata Include="Namotion.Build.ImageTags" Value="$(ContainerImageTags)" Condition="'$(ContainerImageTags)' != ''" />
+  </ItemGroup>
+</Project>
