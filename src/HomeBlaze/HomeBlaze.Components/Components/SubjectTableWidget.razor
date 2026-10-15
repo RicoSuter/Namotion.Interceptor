@@ -56,12 +56,21 @@
                         @for (var index = 0; index < columns.Length; index++)
                         {
                             var column = columns[index];
-                            var reading = ValueReader.ReadProperty(PathResolver, column, row.Subject, column.Property, column.Map, TimeZone);
+                            var reading = ValueReader.ReadProperty(row.Subject, column.Property, maps[index].Map, maps[index].Error, TimeZone);
 
                             <td data-testid="subject-table-cell">
                                 @if (index == 0 && reading.MapError is null)
                                 {
-                                    <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">@reading.Text</MudLink>
+                                    <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">
+                                        @if (reading.IsMissing)
+                                        {
+                                            @SubjectTableRows.GetTitle(row)
+                                        }
+                                        else
+                                        {
+                                            <ValueText Reading="@reading" Path="@column.Property" />
+                                        }
+                                    </MudLink>
                                 }
                                 else
                                 {
