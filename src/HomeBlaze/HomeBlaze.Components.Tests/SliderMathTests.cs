@@ -100,7 +100,7 @@ public class SliderMathTests
     public void WhenSliderStandsBetweenSteps_ThenTheValueIsTheNearestStepFromTheMinimumInsideTheRange(double sliderValue, double expected)
     {
         // Act
-        var value = SliderMath.ToPropertyValue(sliderValue, new ValueRange(1, 11), 2, 1);
+        var value = SliderMath.ToPropertyValue(sliderValue, new ValueRange(1, 11), 2, 1, typeof(double));
 
         // Assert
         Assert.Equal(expected, value);
@@ -110,10 +110,54 @@ public class SliderMathTests
     public void WhenStepIsAFraction_ThenTheValueKeepsNoBinaryRest()
     {
         // Act
-        var value = SliderMath.ToPropertyValue(0.3, new ValueRange(0, 1), 0.1, 1);
+        var value = SliderMath.ToPropertyValue(0.3, new ValueRange(0, 1), 0.1, 1, typeof(double));
 
         // Assert
         Assert.Equal(0.3, value);
+    }
+
+    [Theory]
+    [InlineData(0.5, 1)]
+    [InlineData(1.5, 2)]
+    [InlineData(2.9, 3)]
+    [InlineData(10.5, 10)]
+    public void WhenRangeEndHasAFractionForAWholeNumberProperty_ThenTheValueIsRoundedHalfAwayFromZeroInsideTheRange(double sliderValue, double expected)
+    {
+        // Act
+        var value = SliderMath.ToPropertyValue(sliderValue, new ValueRange(0.5, 10.5), 1, 1, typeof(int));
+
+        // Assert
+        Assert.Equal(expected, value);
+    }
+
+    [Fact]
+    public void WhenRangeEndHasAFractionForANegativeWholeNumberProperty_ThenTheValueIsRoundedAwayFromZero()
+    {
+        // Act
+        var value = SliderMath.ToPropertyValue(-2.5, new ValueRange(-10.5, 0), 1, 1, typeof(long?));
+
+        // Assert
+        Assert.Equal(-3, value);
+    }
+
+    [Fact]
+    public void WhenRangeEndHasAFractionForAFractionProperty_ThenTheValueStaysOnTheStep()
+    {
+        // Act
+        var value = SliderMath.ToPropertyValue(2.5, new ValueRange(0.5, 10.5), 1, 1, typeof(double));
+
+        // Assert
+        Assert.Equal(2.5, value);
+    }
+
+    [Fact]
+    public void WhenRangeIsScaled_ThenTheEndsKeepNoBinaryRest()
+    {
+        // Act
+        var scaled = SliderMath.ToSliderScale(0.29, 100);
+
+        // Assert
+        Assert.Equal(29, scaled);
     }
 
     [Fact]
@@ -127,7 +171,7 @@ public class SliderMathTests
         // Act
         var scale = SliderMath.GetScale(load);
         var shown = SliderMath.ToSliderValue(0.51, range, scale);
-        var written = SliderMath.ToPropertyValue(57, range, 0.01, scale);
+        var written = SliderMath.ToPropertyValue(57, range, 0.01, scale, load.Type);
 
         // Assert
         Assert.Equal(100, scale);

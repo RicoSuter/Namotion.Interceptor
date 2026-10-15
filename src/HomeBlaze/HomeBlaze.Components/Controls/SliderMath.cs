@@ -71,23 +71,41 @@ public static class SliderMath
             var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
             if (!double.IsNaN(number))
             {
-                return Math.Round(number * scale, MaximumDecimals);
+                return ToSliderScale(number, scale);
             }
         }
 
-        return Math.Round(range.Minimum * scale, MaximumDecimals);
+        return ToSliderScale(range.Minimum, scale);
     }
 
     /// <summary>
-    /// Gets the value to write for a position of the slider: divided by the scale, rounded to the nearest step from
-    /// the minimum and kept inside the range.
+    /// Gets a number in the unit of the property times the scale, without the rest of binary fractions
+    /// (0.29 * 100 is 28.999999999999996).
     /// </summary>
-    public static double ToPropertyValue(double sliderValue, ValueRange range, double step, double scale)
+    public static double ToSliderScale(double value, double scale) => Math.Round(value * scale, MaximumDecimals);
+
+    /// <summary>
+    /// Gets the value to write for a position of the slider: divided by the scale, rounded to the nearest step from
+    /// the minimum and kept inside the range. For a property that holds whole numbers it is then rounded to a whole
+    /// number, half away from zero, and kept inside the whole numbers of the range when there are any.
+    /// </summary>
+    public static double ToPropertyValue(double sliderValue, ValueRange range, double step, double scale, Type? propertyType)
     {
         var value = sliderValue / scale;
         var steps = Math.Round((value - range.Minimum) / step, MidpointRounding.AwayFromZero);
-        var rounded = Math.Clamp(range.Minimum + steps * step, range.Minimum, range.Maximum);
-        return Math.Round(rounded, GetDecimals(step));
+        var decimals = Math.Max(GetDecimals(step), GetDecimals(range.Minimum));
+        var rounded = Math.Round(Math.Clamp(range.Minimum + steps * step, range.Minimum, range.Maximum), decimals);
+        if (!IsWholeNumber(propertyType))
+        {
+            return rounded;
+        }
+
+        // A range end with a fraction puts the steps between whole numbers, which the conversion to the type would
+        // round half to even and so off the step.
+        var whole = Math.Round(rounded, MidpointRounding.AwayFromZero);
+        var lowest = Math.Ceiling(range.Minimum);
+        var highest = Math.Floor(range.Maximum);
+        return lowest <= highest ? Math.Clamp(whole, lowest, highest) : whole;
     }
 
     private static bool IsWholeNumber(Type? type)
@@ -100,10 +118,10 @@ public static class SliderMath
     }
 
     // A sum of steps keeps the rest of binary fractions (0.1 * 3 is 0.30000000000000004), which rounding to the
-    // decimals of the step removes.
-    private static int GetDecimals(double step)
+    // decimals of the step and the minimum removes.
+    private static int GetDecimals(double number)
     {
-        var scaled = step;
+        var scaled = number;
         for (var decimals = 0; decimals < MaximumDecimals; decimals++)
         {
             if (Math.Abs(scaled - Math.Round(scaled)) < WholeTolerance * Math.Max(1, Math.Abs(scaled)))

@@ -48,8 +48,10 @@ public sealed class PropertyWriter : IDisposable
         return property is not null && IsWritable(property, property.GetValue());
     }
 
-    /// <summary>Gets whether the property is writable, given its already read current value.</summary>
-    private static bool IsWritable(RegisteredSubjectProperty property, object? currentValue)
+    /// <summary>
+    /// Gets whether a control may write the property, given its current value that the caller has already read.
+    /// </summary>
+    public static bool IsWritable(RegisteredSubjectProperty property, object? currentValue)
     {
         return property.HasPublicSetter && currentValue is not MethodMetadata;
     }

@@ -19,12 +19,13 @@ else
 {
     var value = property?.GetValue();
     var canWrite = property is not null &&
-        PropertyWriter.IsWritable(property) &&
+        PropertyWriter.IsWritable(property, value) &&
         SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number);
     var label = ValueReader.GetControlLabel(property, Label, Path);
 
-    @* The input events of the range input bubble here, so the text follows the thumb while the slider writes only on release. *@
-    <div data-testid="slider" @oninput="_dragCallback" @onfocusout="_clearDragCallback">
+    @* The input events of the range input bubble here, so the text follows the thumb while the slider writes only on release.
+       A drag that ends where it started writes nothing, so the pointer up clears the drag text as well. *@
+    <div data-testid="slider" @oninput="_dragCallback" @onpointerup="_clearDragCallback" @onfocusout="_clearDragCallback">
         <div class="d-flex align-center gap-2">
             <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="slider-label">@label</MudText>
             <MudText Typo="Typo.subtitle2" Class="ma-0" data-testid="slider-value">@GetValueText(property, value, range, step, scale)</MudText>
@@ -33,9 +34,9 @@ else
                    @key="_resetKey"
                    Value="@SliderMath.ToSliderValue(value, range, scale)"
                    ValueChanged="_releaseCallback"
-                   Min="@(range.Minimum * scale)"
-                   Max="@(range.Maximum * scale)"
-                   Step="@(step * scale)"
+                   Min="@SliderMath.ToSliderScale(range.Minimum, scale)"
+                   Max="@SliderMath.ToSliderScale(range.Maximum, scale)"
+                   Step="@SliderMath.ToSliderScale(step, scale)"
                    Immediate="false"
                    Disabled="@(IsEditing || !canWrite)"
                    aria-label="@label" />
@@ -44,9 +45,10 @@ else
 
 @code {
     private double? _dragValue;
-    private int _resetKey;
+    // An object, not a counter: a boxed int as @key would allocate on every render.
+    private object _resetKey = new();
     private EventCallback<ChangeEventArgs> _dragCallback;
-    private EventCallback<FocusEventArgs> _clearDragCallback;
+    private EventCallback _clearDragCallback;
     private EventCallback<double> _releaseCallback;
 
     /// <summary>
@@ -92,7 +94,7 @@ else
     {
         // Created once: binding method groups or lambdas in the markup would allocate new delegates on every render.
         _dragCallback = EventCallback.Factory.Create<ChangeEventArgs>(this, OnDragged);
-        _clearDragCallback = EventCallback.Factory.Create<FocusEventArgs>(this, ClearDrag);
+        _clearDragCallback = EventCallback.Factory.Create(this, ClearDrag);
         _releaseCallback = EventCallback.Factory.Create<double>(this, Release);
     }
 
@@ -126,7 +128,7 @@ else
 
         if (_dragValue is { } dragValue)
         {
-            return property.GetPropertyDisplayValue(SliderMath.ToPropertyValue(dragValue, range, step, scale));
+            return property.GetPropertyDisplayValue(SliderMath.ToPropertyValue(dragValue, range, step, scale, property.Type));
         }
 
         return value is null ? ValueReader.MissingText : property.GetPropertyDisplayValue(value);
@@ -148,12 +150,12 @@ else
             return;
         }
 
-        Writer.TryWrite(property, SliderMath.ToPropertyValue(sliderValue, range, step, scale));
+        Writer.TryWrite(property, SliderMath.ToPropertyValue(sliderValue, range, step, scale, property.Type));
 
         // The slider keeps the position the user gave it, and only a new key makes it show the property again.
         if (Math.Abs(SliderMath.ToSliderValue(property.GetValue(), range, scale) - sliderValue) > step * scale / 2)
         {
-            _resetKey++;
+            _resetKey = new object();
         }
     }
 }

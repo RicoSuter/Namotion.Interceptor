@@ -47,9 +47,11 @@ public sealed class PropertyWriterTests : IDisposable
 
         // Act
         var isWritable = PropertyWriter.IsWritable(property);
+        var isWritableWithReadValue = PropertyWriter.IsWritable(property, property.GetValue());
 
         // Assert
         Assert.Equal(expected, isWritable);
+        Assert.Equal(expected, isWritableWithReadValue);
     }
 
     [Fact]

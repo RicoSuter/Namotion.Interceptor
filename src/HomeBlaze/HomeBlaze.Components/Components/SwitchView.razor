@@ -11,7 +11,8 @@
 @{
     // Read once per render and never kept: the reads are what the tracking scope records.
     var property = Property;
-    var isOn = property?.GetValue() as bool? ?? false;
+    var value = property?.GetValue();
+    var isOn = value as bool? ?? false;
     var canToggle = false;
     if (property is not null && SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Boolean))
     {
@@ -23,7 +24,7 @@
         }
         else
         {
-            canToggle = PropertyWriter.IsWritable(property);
+            canToggle = PropertyWriter.IsWritable(property, value);
         }
     }
 }
@@ -41,7 +42,8 @@
 @code {
     private readonly CancellationTokenSource _lifetime = new();
     private bool? _pending;
-    private int _resetKey;
+    // An object, not a counter: a boxed int as @key would allocate on every render.
+    private object _resetKey = new();
     private EventCallback<bool> _toggleCallback;
 
     /// <summary>
@@ -116,7 +118,7 @@
             // The switch keeps the state the user gave it, and only a new key makes it show the property again.
             if ((property.GetValue() as bool? ?? false) != requested)
             {
-                _resetKey++;
+                _resetKey = new object();
             }
         }
     }
