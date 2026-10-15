@@ -403,8 +403,8 @@ jobs:
 
       - name: Check build metadata
         run: |
-          # The Installation subject reads its build from HomeBlaze.Services.dll, not HomeBlaze.dll, so both carry the metadata.
-          foreach ($name in @("HomeBlaze.dll", "HomeBlaze.Services.dll")) {
+          # The Installation subject reads its build from HomeBlaze.Installation.dll, not HomeBlaze.dll, so both carry the metadata.
+          foreach ($name in @("HomeBlaze.dll", "HomeBlaze.Installation.dll")) {
             docker cp "homeblaze:/app/$name" "${{ runner.temp }}/$name"
             if ($LASTEXITCODE -ne 0) { throw "Could not copy $name from the container" }
             # Attribute arguments are UTF-8 strings in the metadata blob heap, so a text search finds them.
