@@ -244,7 +244,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         LatestReleaseDate = null;
         LatestReleaseUrl = null;
         LastUpdateCheck = null;
-        _updateCheckUnavailableReason = GetUpdateCheckUnavailableReason(Channel, RepositoryUrl, _releaseClient);
+        _updateCheckUnavailableReason = GetUpdateCheckUnavailableReason(Channel, build.RepositoryUrl);
         UpdateCheckStatus = _updateCheckUnavailableReason;
 
         Status = ServiceStatus.Stopped;

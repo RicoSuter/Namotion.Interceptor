@@ -36,16 +36,19 @@ public class GitHubReleaseClientTests
     }
 
     [Theory]
-    [InlineData("https://gitlab.com/owner/repo")]
-    [InlineData("https://github.com/owner")]
-    [InlineData(null)]
-    public void WhenTheUrlIsNotAGitHubRepository_ThenNoClientIsCreated(string? repositoryUrl)
+    [InlineData("https://gitlab.com/owner/repo", "Not supported for gitlab.com")]
+    [InlineData("https://github.com/owner", "Not available for this repository URL")]
+    [InlineData("not a URL", "Not available without a repository URL")]
+    [InlineData(null, "Not available without a repository URL")]
+    public void WhenTheUrlIsNotAGitHubRepository_ThenNoClientIsCreatedAndTheReasonIsReported(string? repositoryUrl, string expectedReason)
     {
         // Act
         var client = GitHubReleaseClient.TryCreate(repositoryUrl, () => throw new InvalidOperationException(), "HomeBlaze/0.5.0", TimeProvider.System);
+        var reason = GitHubReleaseClient.GetUnsupportedReason(repositoryUrl);
 
         // Assert
         Assert.Null(client);
+        Assert.Equal(expectedReason, reason);
     }
 
     [Fact]

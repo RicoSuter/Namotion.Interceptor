@@ -50,17 +50,19 @@ internal sealed class GitHubReleaseClient
         Func<HttpClient> createHttpClient,
         string userAgent,
         TimeProvider timeProvider,
-        TimeSpan? requestTimeout = null)
-    {
-        if (!Uri.TryCreate(repositoryUrl, UriKind.Absolute, out var uri) ||
-            !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
-            uri.AbsolutePath.Trim('/').Split('/') is not [{ Length: > 0 } owner, { Length: > 0 } name])
-        {
-            return null;
-        }
+        TimeSpan? requestTimeout = null) =>
+        GetLatestReleaseUri(repositoryUrl, out _) is { } latestReleaseUri
+            ? new GitHubReleaseClient(latestReleaseUri, createHttpClient, userAgent, timeProvider, requestTimeout ?? DefaultRequestTimeout)
+            : null;
 
-        var latestReleaseUri = new Uri(ApiBaseAddress, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/releases/latest");
-        return new GitHubReleaseClient(latestReleaseUri, createHttpClient, userAgent, timeProvider, requestTimeout ?? DefaultRequestTimeout);
+    /// <summary>
+    /// Returns why no client can be created for <paramref name="repositoryUrl"/>, or null when
+    /// <see cref="TryCreate"/> creates one.
+    /// </summary>
+    public static string? GetUnsupportedReason(string? repositoryUrl)
+    {
+        GetLatestReleaseUri(repositoryUrl, out var unsupportedReason);
+        return unsupportedReason;
     }
 
     /// <summary>
@@ -101,6 +103,30 @@ internal sealed class GitHubReleaseClient
             publishedAt.ValueKind == JsonValueKind.String &&
             publishedAt.TryGetDateTimeOffset(out var date) ? date : null,
             GetUri(root, "html_url"));
+    }
+
+    private static Uri? GetLatestReleaseUri(string? repositoryUrl, out string? unsupportedReason)
+    {
+        if (!Uri.TryCreate(repositoryUrl, UriKind.Absolute, out var uri))
+        {
+            unsupportedReason = "Not available without a repository URL";
+            return null;
+        }
+
+        if (!string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            unsupportedReason = $"Not supported for {uri.Host}";
+            return null;
+        }
+
+        if (uri.AbsolutePath.Trim('/').Split('/') is not [{ Length: > 0 } owner, { Length: > 0 } name])
+        {
+            unsupportedReason = "Not available for this repository URL";
+            return null;
+        }
+
+        unsupportedReason = null;
+        return new Uri(ApiBaseAddress, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/releases/latest");
     }
 
     private GitHubRequestException CreateRequestException(HttpResponseMessage response)

@@ -134,13 +134,10 @@ public partial class HomeBlazeInstallation
         return _updateSchedule.GetDelayAfterFailure(retryAfter);
     }
 
-    private static string? GetUpdateCheckUnavailableReason(InstallationChannel channel, Uri? repositoryUrl, GitHubReleaseClient? releaseClient) =>
+    private static string? GetUpdateCheckUnavailableReason(InstallationChannel channel, string? repositoryUrl) =>
         channel == InstallationChannel.Development ? "Not available for development builds" :
         channel == InstallationChannel.Edge ? "Not available for edge builds" :
-        releaseClient is not null ? null :
-        repositoryUrl is null ? "Not available without a repository URL" :
-        string.Equals(repositoryUrl.Host, "github.com", StringComparison.OrdinalIgnoreCase) ? "Not available for this repository URL" :
-        $"Not supported for {repositoryUrl.Host}";
+        GitHubReleaseClient.GetUnsupportedReason(repositoryUrl);
 
     private async Task RunUpdateChecksAsync(CancellationToken stoppingToken)
     {
