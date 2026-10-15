@@ -139,6 +139,37 @@ public class HomeBlazeInstallationUpdateTests
         Assert.Equal(ServiceStatus.Running, installation.Status);
     }
 
+    [Theory]
+    [InlineData("develop", "develop")]
+    [InlineData(null, "master")]
+    public void WhenCreated_ThenTheComparedBranchIsTheBuildBranchOrMaster(string? branch, string expected)
+    {
+        // Arrange
+        var build = CreateBuild("edge", tag: null) with { Branch = branch };
+
+        // Act
+        var installation = CreateInstallation(build);
+
+        // Assert
+        Assert.Equal(expected, installation.ComparedBranch);
+    }
+
+    [Fact]
+    public async Task WhenAnEdgeBuildHasNoBranch_ThenItIsComparedWithMaster()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(request => request.RequestUri!.AbsolutePath.Contains("/compare/")
+            ? FakeHttpMessageHandler.Json("""{ "ahead_by": 0, "html_url": "https://github.com/owner/repo/compare/x...master" }""")
+            : FakeHttpMessageHandler.Json(ReleaseJson));
+        var installation = CreateInstallation(CreateBuild("edge", tag: null) with { Branch = null }, () => new HttpClient(handler));
+
+        // Act
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(handler.Requests, request => request.RequestUri!.AbsolutePath.EndsWith($"/compare/{Commit}...master"));
+    }
+
     [Fact]
     public void WhenCheckForUpdatesIsCalledTwiceQuickly_ThenTheSecondCallIsRejected()
     {

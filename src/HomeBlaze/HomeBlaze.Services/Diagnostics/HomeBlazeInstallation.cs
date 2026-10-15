@@ -26,6 +26,8 @@ public partial class HomeBlazeInstallation : BackgroundService,
     IIconProvider,
     ILastUpdatedProvider
 {
+    private const string DefaultBranch = "master";
+
     private readonly BuildInformation _build;
     private readonly DeveloperModeService _developerModeService;
     private readonly IListeningUrlsProvider? _listeningUrlsProvider;
@@ -74,6 +76,12 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [State(Position = 404)]
     [Category("Build")]
     public partial string? Branch { get; internal set; }
+
+    /// <summary>
+    /// The branch an edge build is compared with for updates: the build branch, or master without one.
+    /// </summary>
+    [Derived]
+    public string ComparedBranch => Branch ?? DefaultBranch;
 
     [State(Position = 405)]
     [Category("Build")]

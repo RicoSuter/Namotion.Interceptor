@@ -43,7 +43,7 @@ public partial class HomeBlazeInstallation
         {
             var release = await _releaseClient!.GetLatestReleaseAsync(owner, name, cancellationToken);
             var comparison = Channel == InstallationChannel.Edge && Commit is { } commit
-                ? await _releaseClient.CompareWithBranchAsync(owner, name, commit, Branch ?? "master", cancellationToken)
+                ? await _releaseClient.CompareWithBranchAsync(owner, name, commit, ComparedBranch, cancellationToken)
                 : null;
             var state = UpdateEvaluator.Evaluate(Channel, Version, release, comparison);
 

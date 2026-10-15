@@ -46,7 +46,7 @@
                     <MudIcon Icon="@Icons.Material.Filled.Update" Color="Color.Warning" Size="Size.Small" />
                     @if (installation.Channel == InstallationChannel.Edge)
                     {
-                        <MudText Typo="Typo.caption">@FormatCommitsBehind(installation.CommitsBehind, installation.Branch)</MudText>
+                        <MudText Typo="Typo.caption">@FormatCommitsBehind(installation.CommitsBehind, installation.ComparedBranch)</MudText>
                         @if (installation.ChangesUrl is { } changesUrl)
                         {
                             <MudLink Href="@changesUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Changes</MudLink>
@@ -101,11 +101,11 @@
     private static string FormatDate(DateTimeOffset? date) =>
         date is { } value ? $"({value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)})" : string.Empty;
 
-    private static string FormatCommitsBehind(int? commitsBehind, string? branch)
+    private static string FormatCommitsBehind(int? commitsBehind, string branch)
     {
         var count = commitsBehind ?? 0;
         var unit = count == 1 ? "commit" : "commits";
-        return $"{count} {unit} behind {branch ?? "master"}";
+        return $"{count} {unit} behind {branch}";
     }
 
     private static string FormatDataVolume(HomeBlazeInstallation installation) =>
