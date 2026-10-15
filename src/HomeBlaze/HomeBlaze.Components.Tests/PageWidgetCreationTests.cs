@@ -36,6 +36,7 @@ public class PageWidgetCreationTests
     [InlineData(typeof(Select), "Select")]
     [InlineData(typeof(OperationButton), "Operation button")]
     [InlineData(typeof(Control), "Control")]
+    [InlineData(typeof(Gauge), "Gauge")]
     public void WhenWidgetIsDescribed_ThenItIsInTheDashboardGroupWithAnIconOfItsOwn(Type type, string expectedDisplayName)
     {
         // Arrange

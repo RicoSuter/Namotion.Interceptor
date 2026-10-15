@@ -39,6 +39,7 @@ The reference of each widget has its arguments, its slots and its samples. Some 
 | [ValueTile](../page-widgets.md#valuetile) | A small box with a label and one large value |
 | [Indicator](../page-widgets.md#indicator) | Shows a state as a coloured chip, or as an icon alone |
 | [Progress](../page-widgets.md#progress) | A bar that shows where a number stands between a minimum and a maximum |
+| [Gauge](gauge.md) | A ring that shows where a number stands between a minimum and a maximum |
 
 ## Controls
 
