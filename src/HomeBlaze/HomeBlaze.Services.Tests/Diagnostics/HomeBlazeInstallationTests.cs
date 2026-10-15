@@ -1,3 +1,4 @@
+using System.Net;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -26,7 +27,10 @@ public class HomeBlazeInstallationTests
         Func<HttpClient>? createHttpClient,
         TimeProvider timeProvider,
         DeveloperModeService? developerMode = null) =>
-        new(build, "Production", createHttpClient, developerMode ?? new DeveloperModeService(), timeProvider, NullLogger.Instance);
+        new(build, "Production", createHttpClient ?? CreateNoReleaseClient, developerMode ?? new DeveloperModeService(), timeProvider, NullLogger.Instance);
+
+    private static HttpClient CreateNoReleaseClient() =>
+        new(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
 
     [Theory]
     [InlineData("0.5.0", "v0.5.0", InstallationChannel.Release)]
@@ -45,7 +49,7 @@ public class HomeBlazeInstallationTests
     public void WhenAReleaseIsCreated_ThenLinksPointToTheReleaseAndTheCommit()
     {
         // Act
-        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage())));
+        var installation = CreateInstallation(CreateBuild());
 
         // Assert
         Assert.Equal("Installation", installation.Title);

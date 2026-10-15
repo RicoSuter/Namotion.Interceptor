@@ -27,7 +27,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
 {
     private readonly DeveloperModeService _developerModeService;
     private readonly GitHubReleaseClient? _releaseClient;
-    private readonly (string Owner, string Name)? _gitHubRepository;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
 
@@ -206,7 +205,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
     internal HomeBlazeInstallation(
         BuildInformation build,
         string environmentName,
-        Func<HttpClient>? createHttpClient,
+        Func<HttpClient> createHttpClient,
         DeveloperModeService developerModeService,
         TimeProvider timeProvider,
         ILogger logger)
@@ -214,10 +213,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         _developerModeService = developerModeService;
         _timeProvider = timeProvider;
         _logger = logger;
-        _gitHubRepository = GitHubReleaseClient.TryParseRepository(build.RepositoryUrl);
-        _releaseClient = createHttpClient is not null && _gitHubRepository is not null
-            ? new GitHubReleaseClient(createHttpClient, $"HomeBlaze/{build.Version}", timeProvider)
-            : null;
+        _releaseClient = GitHubReleaseClient.TryCreate(build.RepositoryUrl, createHttpClient, $"HomeBlaze/{build.Version}", timeProvider);
 
         Name = string.Empty;
         PollingInterval = TimeSpan.FromSeconds(30);

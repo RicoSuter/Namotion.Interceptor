@@ -7,15 +7,13 @@ namespace HomeBlaze.Services.Diagnostics;
 /// <summary>
 /// A GitHub answer other than success, with the time GitHub asks to wait before the next request.
 /// </summary>
-internal sealed class GitHubRequestException(string message, HttpStatusCode statusCode, TimeSpan? retryAfter) : Exception(message)
+internal sealed class GitHubRequestException(string message, TimeSpan? retryAfter) : Exception(message)
 {
-    public HttpStatusCode StatusCode { get; } = statusCode;
-
     public TimeSpan? RetryAfter { get; } = retryAfter;
 }
 
 /// <summary>
-/// Reads the latest release from the unauthenticated GitHub REST API.
+/// Reads the latest release of one GitHub repository from the unauthenticated GitHub REST API.
 /// </summary>
 internal sealed class GitHubReleaseClient
 {
@@ -23,49 +21,61 @@ internal sealed class GitHubReleaseClient
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
     private static readonly long MaximumUnixTimeSeconds = DateTimeOffset.MaxValue.ToUnixTimeSeconds();
 
+    private readonly Uri _latestReleaseUri;
     private readonly Func<HttpClient> _createHttpClient;
     private readonly string _userAgent;
     private readonly TimeProvider _timeProvider;
 
-    public GitHubReleaseClient(Func<HttpClient> createHttpClient, string userAgent, TimeProvider timeProvider)
+    private GitHubReleaseClient(Uri latestReleaseUri, Func<HttpClient> createHttpClient, string userAgent, TimeProvider timeProvider)
     {
+        _latestReleaseUri = latestReleaseUri;
         _createHttpClient = createHttpClient;
         _userAgent = userAgent;
         _timeProvider = timeProvider;
     }
 
     /// <summary>
-    /// Returns the owner and name of a <c>https://github.com/owner/name</c> URL, or null for any other URL.
+    /// Creates a client for a <c>https://github.com/owner/name</c> repository, or returns null for any other URL.
     /// </summary>
-    public static (string Owner, string Name)? TryParseRepository(string? repositoryUrl)
+    public static GitHubReleaseClient? TryCreate(string? repositoryUrl, Func<HttpClient> createHttpClient, string userAgent, TimeProvider timeProvider)
     {
         if (!Uri.TryCreate(repositoryUrl, UriKind.Absolute, out var uri) ||
-            !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
+            !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
+            uri.AbsolutePath.Trim('/').Split('/') is not [{ Length: > 0 } owner, { Length: > 0 } name])
         {
             return null;
         }
 
-        var segments = uri.AbsolutePath.Trim('/').Split('/');
-        return segments is [{ Length: > 0 } owner, { Length: > 0 } name] ? (owner, name) : null;
+        var latestReleaseUri = new Uri(ApiBaseAddress, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/releases/latest");
+        return new GitHubReleaseClient(latestReleaseUri, createHttpClient, userAgent, timeProvider);
     }
 
     /// <summary>
     /// Returns the latest published release, excluding drafts and pre-releases, or null when there is none.
     /// </summary>
-    public async Task<LatestRelease?> GetLatestReleaseAsync(string owner, string name, CancellationToken cancellationToken)
+    public async Task<LatestRelease?> GetLatestReleaseAsync(CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(RequestTimeout);
         var requestToken = timeoutCts.Token;
 
-        var requestUri = new Uri(ApiBaseAddress, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/releases/latest");
-        using var response = await SendAsync(requestUri, requestToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, _latestReleaseUri);
+        request.Headers.TryAddWithoutValidation("User-Agent", _userAgent);
+        request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
+        request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
+        using var response = await _createHttpClient().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             return null;
         }
 
-        using var document = await ReadJsonAsync(response, requestToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw CreateRequestException(response);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(requestToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: requestToken);
         var root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object)
         {
@@ -80,53 +90,9 @@ internal sealed class GitHubReleaseClient
             GetUri(root, "html_url"));
     }
 
-    private async Task<HttpResponseMessage> SendAsync(Uri requestUri, CancellationToken cancellationToken)
+    private GitHubRequestException CreateRequestException(HttpResponseMessage response)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-        request.Headers.TryAddWithoutValidation("User-Agent", _userAgent);
-        request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
-        request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
-        return await _createHttpClient().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-    }
-
-    private async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new GitHubRequestException(BuildErrorMessage(response), response.StatusCode, GetRetryAfter(response));
-        }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-    }
-
-    /// <summary>
-    /// Describes a failed answer for display.
-    /// </summary>
-    private static string BuildErrorMessage(HttpResponseMessage response)
-    {
-        // A rate limit answers 403 or 429, which alone does not tell a person why the check failed.
-        if (IsRateLimited(response))
-        {
-            return "GitHub rate limit reached.";
-        }
-
-        return response.ReasonPhrase is { Length: > 0 } reason
-            ? $"GitHub answered {(int)response.StatusCode} {reason}."
-            : $"GitHub answered {(int)response.StatusCode}.";
-    }
-
-    private static bool IsRateLimited(HttpResponseMessage response)
-    {
-        var remainingIsZero = response.Headers.TryGetValues("x-ratelimit-remaining", out var remaining) && remaining.FirstOrDefault() == "0";
-        var retryAfterOnLimitStatus = response.Headers.RetryAfter is not null &&
-            (response.StatusCode == HttpStatusCode.Forbidden || response.StatusCode == HttpStatusCode.TooManyRequests);
-
-        return remainingIsZero || retryAfterOnLimitStatus;
-    }
-
-    private TimeSpan? GetRetryAfter(HttpResponseMessage response)
-    {
+        var isRemainingZero = response.Headers.TryGetValues("x-ratelimit-remaining", out var remaining) && remaining.FirstOrDefault() == "0";
         var now = _timeProvider.GetUtcNow();
         TimeSpan? retryAfter = response.Headers.RetryAfter switch
         {
@@ -135,7 +101,7 @@ internal sealed class GitHubReleaseClient
             _ => null
         };
 
-        if (response.Headers.TryGetValues("x-ratelimit-remaining", out var remaining) && remaining.FirstOrDefault() == "0" &&
+        if (isRemainingZero &&
             response.Headers.TryGetValues("x-ratelimit-reset", out var reset) &&
             long.TryParse(reset.FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out var resetSeconds) &&
             resetSeconds <= MaximumUnixTimeSeconds)
@@ -147,7 +113,15 @@ internal sealed class GitHubReleaseClient
             }
         }
 
-        return retryAfter > TimeSpan.Zero ? retryAfter : null;
+        // A rate limit answers 403 or 429, which alone does not tell a person why the check failed.
+        var isRateLimited = isRemainingZero || (response.Headers.RetryAfter is not null &&
+            response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests);
+        var message =
+            isRateLimited ? "GitHub rate limit reached." :
+            response.ReasonPhrase is { Length: > 0 } reason ? $"GitHub answered {(int)response.StatusCode} {reason}." :
+            $"GitHub answered {(int)response.StatusCode}.";
+
+        return new GitHubRequestException(message, retryAfter > TimeSpan.Zero ? retryAfter : null);
     }
 
     /// <summary>

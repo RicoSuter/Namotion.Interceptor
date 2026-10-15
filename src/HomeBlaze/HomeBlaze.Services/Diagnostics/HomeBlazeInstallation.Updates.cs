@@ -65,10 +65,9 @@ public partial class HomeBlazeInstallation
     /// </summary>
     internal async Task<TimeSpan?> CheckForUpdatesCoreAsync(CancellationToken cancellationToken)
     {
-        var (owner, name) = _gitHubRepository!.Value;
         try
         {
-            var release = await _releaseClient!.GetLatestReleaseAsync(owner, name, cancellationToken);
+            var release = await _releaseClient!.GetLatestReleaseAsync(cancellationToken);
 
             LatestVersion = release?.Version;
             LatestReleaseDate = release?.PublishedAt;
@@ -125,14 +124,14 @@ public partial class HomeBlazeInstallation
             return "Not available for edge builds";
         }
 
-        if (_gitHubRepository is null)
+        if (_releaseClient is null)
         {
             return RepositoryUrl is { } repositoryUrl
                 ? $"Not supported for {repositoryUrl.Host}"
                 : "Not available without a repository URL";
         }
 
-        return _releaseClient is null ? "Not available without an HTTP client" : null;
+        return null;
     }
 
     private async Task RunUpdateChecksAsync(CancellationToken stoppingToken)
