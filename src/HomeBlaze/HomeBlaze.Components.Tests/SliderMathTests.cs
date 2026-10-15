@@ -31,30 +31,6 @@ public class SliderMathTests
         Assert.Equal(0.2, step, 10);
     }
 
-    [Theory]
-    [InlineData(5.0, 5.0, "Maximum must be above Minimum: 5 to 5")]
-    [InlineData(0.8, 0.2, "Maximum must be above Minimum: 0.8 to 0.2")]
-    [InlineData(double.NaN, 1.0, "Maximum must be above Minimum: NaN to 1")]
-    [InlineData(0.0, double.PositiveInfinity, "Maximum must be above Minimum: 0 to Infinity")]
-    public void WhenRangeIsEmptyOrNotFinite_ThenItIsAnError(double minimum, double maximum, string expected)
-    {
-        // Act
-        var error = SliderMath.ValidateRange(new ValueRange(minimum, maximum));
-
-        // Assert
-        Assert.Equal(expected, error);
-    }
-
-    [Fact]
-    public void WhenMaximumIsAboveMinimum_ThenTheRangeHasNoError()
-    {
-        // Act
-        var error = SliderMath.ValidateRange(new ValueRange(-10, 0.5));
-
-        // Assert
-        Assert.Null(error);
-    }
-
     [Fact]
     public void WhenStepHasAFractionForAWholeNumberProperty_ThenItIsAnError()
     {

@@ -1,5 +1,4 @@
 using System.Globalization;
-using HomeBlaze.Components.Controls;
 using MudBlazor;
 
 namespace HomeBlaze.Components;
@@ -17,7 +16,7 @@ public static class GaugeDisplay
     /// <summary>
     /// Gets the state of a gauge: its range by <see cref="ValueRangeResolver"/> and where the value stands in it.
     /// A path that leads nowhere gives an empty ring without an error, as every value widget shows a dash for it.
-    /// A range whose maximum is not above its minimum gives the error of <see cref="SliderMath.ValidateRange"/>.
+    /// A range whose maximum is not above its minimum gives the error of <see cref="ValueRangeResolver.Validate"/>.
     /// </summary>
     public static GaugeState GetState(ValueReading reading, double? minimum, double? maximum)
     {
@@ -26,7 +25,7 @@ public static class GaugeDisplay
             return reading.Property is null ? default : new GaugeState(null, null, null, error);
         }
 
-        var rangeError = SliderMath.ValidateRange(range);
+        var rangeError = ValueRangeResolver.Validate(range);
         if (rangeError is not null)
         {
             return new GaugeState(null, null, null, rangeError);

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Controls;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -48,6 +49,14 @@ public static class ValueRangeResolver
         error = null;
         return true;
     }
+
+    /// <summary>
+    /// Gets the widget argument error of a range, or null when both ends are finite and the maximum is above the minimum.
+    /// </summary>
+    public static string? Validate(ValueRange range) =>
+        double.IsFinite(range.Minimum) && double.IsFinite(range.Maximum) && range.Maximum > range.Minimum
+            ? null
+            : $"Maximum must be above Minimum: {SliderMath.Format(range.Minimum)} to {SliderMath.Format(range.Maximum)}";
 
     // An attribute that external sources provide can hold anything, and a value that is no number is ignored.
     private static double? ReadNumberAttribute(RegisteredSubjectProperty? property, string attributeName) =>

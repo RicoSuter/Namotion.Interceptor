@@ -30,14 +30,6 @@ public static class SliderMath
         IsWholeNumber(propertyType) ? 1 : (range.Maximum - range.Minimum) / DefaultStepCount;
 
     /// <summary>
-    /// Gets the widget argument error of a range, or null when both ends are finite and the maximum is above the minimum.
-    /// </summary>
-    public static string? ValidateRange(ValueRange range) =>
-        double.IsFinite(range.Minimum) && double.IsFinite(range.Maximum) && range.Maximum > range.Minimum
-            ? null
-            : $"Maximum must be above Minimum: {Format(range.Minimum)} to {Format(range.Maximum)}";
-
-    /// <summary>
     /// Gets the widget argument error of a step, or null when the step is not set or fits the property type.
     /// </summary>
     public static string? ValidateStep(Type? propertyType, double? step)
@@ -149,5 +141,5 @@ public static class SliderMath
         return MaximumDecimals;
     }
 
-    private static string Format(double value) => value.ToString("0.##########", CultureInfo.InvariantCulture);
+    internal static string Format(double value) => value.ToString("0.##########", CultureInfo.InvariantCulture);
 }
