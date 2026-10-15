@@ -21,10 +21,10 @@ internal sealed class UpdateSchedule
     private int _failureCount;
     private long? _lastManualCheckTimestamp;
 
+    // Random so a container stuck in a restart loop does not call GitHub on every start.
     /// <summary>
     /// Returns a uniformly random delay from FirstCheckMinimumDelay (inclusive) to FirstCheckMaximumDelay (exclusive).
     /// </summary>
-    // Random so a container stuck in a restart loop does not call GitHub on every start.
     public static TimeSpan GetFirstCheckDelay(Random random) =>
         FirstCheckMinimumDelay + (FirstCheckMaximumDelay - FirstCheckMinimumDelay) * random.NextDouble();
 
@@ -64,10 +64,10 @@ internal sealed class UpdateSchedule
         return remaining > TimeSpan.Zero ? TimeSpan.FromMilliseconds(Math.Ceiling(remaining.TotalMilliseconds)) : TimeSpan.Zero;
     }
 
+    // A clock far in the past on a device without a real-time clock would otherwise stall checks for months.
     /// <summary>
     /// Returns the wait GitHub asked for, at most MaximumBackoff.
     /// </summary>
-    // A clock far in the past on a device without a real-time clock would otherwise stall checks for months.
     public static TimeSpan CapRetryAfter(TimeSpan retryAfter) =>
         retryAfter > MaximumBackoff ? MaximumBackoff : retryAfter;
 
