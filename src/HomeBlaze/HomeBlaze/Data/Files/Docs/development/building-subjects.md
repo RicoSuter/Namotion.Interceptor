@@ -973,6 +973,18 @@ public partial string? Path { get; set; }
 public partial string? Map { get; set; }
 ```
 
+A path to a property can be narrowed with `Kind` and `Writable`. `Kind` takes the flags of `SubjectPathKinds`, which combine with OR: `Boolean`, `Number` (integral, floating point and decimal types), `Enum`, `OtherValue`, `Operation` (an `[Operation]` or `[Query]` method), and `Value`, the default, for the four value kinds. A nullable type counts as its underlying type. `Writable = true` keeps only properties with a public setter and never matches an operation. Both are ignored for a path to a subject, so do not set them together with a type:
+
+```csharp
+[Configuration]
+[SubjectPath(Kind = SubjectPathKinds.Number, Writable = true)]
+public partial string? Path { get; set; }
+
+[Configuration]
+[SubjectPath(Kind = SubjectPathKinds.Operation)]
+public partial string? Operation { get; set; }
+```
+
 The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.
 
 On a `[State]` property with a type, the property panel shows the subject at the path with a button that opens it. Use it to point at a subject elsewhere in the tree without attaching it, see [Shared Child Subjects](#shared-child-subjects):
@@ -1001,7 +1013,7 @@ In an Edit component of your own, use the `SubjectPathField` component for a pat
 - Text input for direct path entry
 - Search icon button opens tree picker dialog
 - Tree shows all subjects with lazy loading
-- State properties and child properties are displayed
+- State properties and child properties are displayed, and operations when `CanSelectProperty` accepts them
 - Disabled properties shown grayed but still selectable
 - Preview shows resolved value
 
@@ -1017,7 +1029,7 @@ In an Edit component of your own, use the `SubjectPathField` component for a pat
 | `LocalSubjects` | `IDictionary<string, IInterceptorSubject>?` | `null` | Additional local subjects to show in picker |
 | `Class` | `string?` | `null` | CSS class for styling |
 | `IsPropertyVisible` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties the picker shows |
-| `CanSelectProperty` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties can be picked. Typed text is not checked |
+| `CanSelectProperty` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties can be picked. An operation is listed only when this accepts it. Typed text is not checked |
 | `CanSelectSubject` | `Func<IInterceptorSubject, bool>?` | `null` | Which subjects can be picked. Typed text is not checked |
 
 ---

@@ -47,7 +47,20 @@ A subject file is a segment without its extension, so `Pump.json` is `Pump`. A p
 
 ## The Path Picker
 
-The edit dialog of a widget lets you type a path or pick it in the tree of the subjects. For a path to a property, the tree offers the properties that have a state, which are the values that the property panel of a subject shows, and the subjects on the way to them. A configuration property without a state, for example the `Name` of a motor, is not offered, so type its path. For a path to a subject, such as the `Map` of a value widget, the tree offers the subjects of the matching type.
+A widget's edit dialog lets you type a path or pick it in the tree of the subjects. Open it with the edit button that a widget shows on the page, or with the "Edit" button of the page editor for its block, as [Editing in the Page Editor](../pages.md#editing-in-the-page-editor) describes. For a path to a property, the tree offers the properties that have a state, which are the values that the property panel of a subject shows, and the subjects on the way to them. A configuration property without a state, for example the `Name` of a motor, is not offered, so type its path. A typed path is not checked.
+
+Each path argument says what it can lead to, and the arguments table of each widget names it in brackets, for example `Path (Boolean)` or `Path (Number, writable)`:
+
+| Filter | The tree lets you select |
+|--------|--------------------------|
+| `Boolean` | A property that holds true or false |
+| `Number` | A property that holds a whole number, a number with a fraction or a decimal |
+| `Enum` | A property that holds one of a fixed set of names, such as the `Mode` of a motor |
+| `Value` | Any value: a boolean, a number, an enum, a text, a date and so on, but no operation |
+| `Operation` | An operation or a query of a subject, such as `EmergencyStop` of a motor |
+| `writable` | Only a property that a widget can write, combined with the filters above |
+
+A property that does not match is shown greyed out and cannot be selected. Operations are listed only for an argument that takes one. For a path to a subject, such as the `Map` of a value widget, the tree offers the subjects of the matching type.
 
 ## Missing Values
 
