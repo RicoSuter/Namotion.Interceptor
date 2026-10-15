@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -51,18 +50,8 @@ public partial class InstallationRepository : ITitleProvider, IIconProvider
     internal void Apply(InventoryRepository entry)
     {
         var current = Assemblies;
-        if (HasSameKeys(current, entry.Assemblies))
-        {
-            // No key change: update the existing subjects in place instead of allocating a replacement dictionary.
-            foreach (var item in entry.Assemblies)
-            {
-                current[item.Key].Apply(item);
-            }
-
-            return;
-        }
-
         var assemblies = new Dictionary<string, InstallationAssembly>(entry.Assemblies.Length, StringComparer.Ordinal);
+        var isChanged = entry.Assemblies.Length != current.Count;
         foreach (var item in entry.Assemblies)
         {
             if (current.TryGetValue(item.Key, out var assembly))
@@ -72,30 +61,16 @@ public partial class InstallationRepository : ITitleProvider, IIconProvider
             else
             {
                 assembly = new InstallationAssembly(item);
+                isChanged = true;
             }
 
             assemblies[item.Key] = assembly;
         }
 
         // The published dictionary is read concurrently, so it is replaced, never mutated.
-        Assemblies = assemblies;
-    }
-
-    private static bool HasSameKeys(Dictionary<string, InstallationAssembly> current, ImmutableArray<InventoryAssembly> entries)
-    {
-        if (current.Count != entries.Length)
+        if (isChanged)
         {
-            return false;
+            Assemblies = assemblies;
         }
-
-        foreach (var item in entries)
-        {
-            if (!current.ContainsKey(item.Key))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }
