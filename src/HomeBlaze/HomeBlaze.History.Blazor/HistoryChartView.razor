@@ -21,7 +21,7 @@
                    keep their own size instead of being scaled by a fixed 700x350 viewBox. MudChart
                    fills the box only when it has a height or is a flex box with a max-height:
                    otherwise it draws in a box of its own 350 px high, which is clipped or letterboxed. *@
-                <div @ref="_linesBox" data-testid="history-chart-lines" style="@GetLinesStyle()">
+                <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@($"{_valueLabelCount}x{_timeLabelCount}")" style="@GetLinesStyle()">
                     <MudChart ChartType="ChartType.Timeseries"
                               T="double"
                               ChartSeries="_chartSeries"
@@ -113,12 +113,14 @@
     private double _valueMinimum;
     private double _valueMaximum;
 
-    // The size the axes are spaced for: the measured size of the lines, or a guess until they are measured.
+    // The measured size of the lines, zero until they are measured, and the label counts the axes are spaced for.
     private double _linesWidth;
     private double _linesHeight;
+    private int _valueLabelCount;
+    private int _timeLabelCount;
     private ElementReference _linesBox;
+    private ElementReference? _observedLines;
     private IResizeObserver? _resizeObserver;
-    private bool _isObservingLines;
     private (string Band, PropertyHistoryChartModel.StateSegment Segment)[] _stateRows = [];
 
     /// <summary>
@@ -186,20 +188,21 @@
     {
         _shouldRender = false;
 
-        // The lines are drawn again in a new element whenever they reappear, so each one is observed on its own.
-        var hasLines = _chartSeries is not null;
-        if (hasLines == _isObservingLines || _disposed)
+        // The lines are drawn in a new element whenever they reappear, so the observed element follows the rendered one.
+        ElementReference? lines = _chartSeries is not null ? _linesBox : null;
+        if (lines?.Id == _observedLines?.Id || _disposed)
         {
             return;
         }
 
         _resizeObserver ??= CreateResizeObserver();
-        _isObservingLines = hasLines;
-        if (!hasLines)
+        if (_observedLines is { } observed)
         {
-            await _resizeObserver.Unobserve(_linesBox);
+            await _resizeObserver.Unobserve(observed);
         }
-        else if (await _resizeObserver.Observe(_linesBox) is { } size)
+
+        _observedLines = lines;
+        if (lines is { } element && await _resizeObserver.Observe(element) is { } size)
         {
             OnLinesResized(size.Width, size.Height);
         }
@@ -223,7 +226,7 @@
         ? $"display:flex; width:100%; max-height:{maxHeight}px; min-height:0; aspect-ratio:2 / 1;"
         : "display:flex; width:100%; height:100%; min-height:0;";
 
-    // Spaces the axes for the size the lines are drawn at, and draws them again only when the labels change.
+    // The label counts decide the whole spacing of both axes, so the options are built and drawn only when one changes.
     private void OnLinesResized(double width, double height)
     {
         if (_disposed || _chartSeries is null || width <= 0 || height <= 0)
@@ -231,20 +234,14 @@
             return;
         }
 
-        var options = _chartOptions;
         _linesWidth = width;
         _linesHeight = height;
-        BuildOptions();
-        if (options.YAxisTicks != _chartOptions.YAxisTicks ||
-            options.MaxNumYAxisTicks != _chartOptions.MaxNumYAxisTicks ||
-            options.TimeLabelSpacing != _chartOptions.TimeLabelSpacing)
+        if (HistoryChartAxis.GetValueLabelCount(height) != _valueLabelCount ||
+            HistoryChartAxis.GetTimeLabelCount(width) != _timeLabelCount)
         {
+            BuildOptions();
             _shouldRender = true;
             StateHasChanged();
-        }
-        else
-        {
-            _chartOptions = options;
         }
     }
 
@@ -324,19 +321,24 @@
         // Until the lines are measured, the axes are spaced for the size they take on a wide screen.
         var height = _linesHeight > 0 ? _linesHeight : MaxHeight ?? 300;
         var width = _linesWidth > 0 ? _linesWidth : height * 2;
+        _valueLabelCount = HistoryChartAxis.GetValueLabelCount(height);
+        _timeLabelCount = HistoryChartAxis.GetTimeLabelCount(width);
         var valueAxis = HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
         var range = data.To - data.From;
+        var timeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(range, data.Bucket, width);
         _chartOptions = new TimeSeriesChartOptions
         {
             ChartPalette = _palette,
             LineDisplayType = LineDisplayType.Line,
             // The series are named outside the chart: the dialog by its title, the widget by its own legend.
             ShowLegend = false,
-            TimeLabelFormat = HistoryChartAxis.GetTimeLabelFormat(range),
-            TimeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(range, data.Bucket, width),
+            TimeLabelFormat = HistoryChartAxis.GetTimeLabelFormat(range, timeLabelSpacing),
+            TimeLabelSpacing = timeLabelSpacing,
+            // The labels fall on round times rather than on the start of the range.
+            TimeLabelSpacingRounding = true,
             YAxisTicks = valueAxis.Step,
             // The chart doubles the step while it has more labels, which only a range beyond the largest step needs.
-            MaxNumYAxisTicks = HistoryChartAxis.GetValueLabelCount(height),
+            MaxNumYAxisTicks = _valueLabelCount,
             YAxisRequireZeroPoint = valueAxis.IncludesZero,
             YAxisSuggestedMax = valueAxis.SuggestedMaximum
         };

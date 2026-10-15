@@ -24,6 +24,17 @@ public static class HistoryChartAxis
 
     private const int LargestStep = 1_000_000_000;
 
+    /// <summary>The round steps between two time labels, from the shortest to the longest.</summary>
+    public static readonly IReadOnlyList<TimeSpan> TimeLabelSteps =
+    [
+        TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2),
+        TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(30),
+        TimeSpan.FromHours(1), TimeSpan.FromHours(2), TimeSpan.FromHours(3), TimeSpan.FromHours(6),
+        TimeSpan.FromHours(12), TimeSpan.FromDays(1), TimeSpan.FromDays(2), TimeSpan.FromDays(3), TimeSpan.FromDays(7),
+        TimeSpan.FromDays(14), TimeSpan.FromDays(30)
+    ];
+
     /// <summary>
     /// Gets how many value labels fit into lines of the height: one per <see cref="PixelsPerValueLabel"/>, at least two.
     /// </summary>
@@ -84,34 +95,58 @@ public static class HistoryChartAxis
     }
 
     /// <summary>
-    /// Gets the format of the time labels, which tells every label of the range apart: seconds for up to ten
-    /// minutes, the time of day for less than a day, the weekday with the time for up to two days, and the date
-    /// beyond that.
+    /// Gets how many time labels fit into lines of the width: one per <see cref="PixelsPerTimeLabel"/>, at least two
+    /// and at most <see cref="MaximumTimeLabelCount"/>.
     /// </summary>
-    /// <param name="range">The time span the lines show.</param>
-    public static string GetTimeLabelFormat(TimeSpan range) =>
-        range <= TimeSpan.FromMinutes(10) ? "HH:mm:ss" :
-        range < TimeSpan.FromDays(1) ? "HH:mm" :
-        range <= TimeSpan.FromDays(2) ? "ddd HH:mm" :
-        "MM-dd";
+    /// <param name="width">The width of the lines in pixels.</param>
+    public static int GetTimeLabelCount(double width) =>
+        double.IsFinite(width) ? (int)Math.Clamp(width / PixelsPerTimeLabel, 2, MaximumTimeLabelCount) : 2;
 
     /// <summary>
-    /// Gets the time between two time labels: the range split into as many parts as the width holds labels, at
-    /// most <see cref="MaximumTimeLabelCount"/> labels and at least two, never shorter than the bucket, and whole
-    /// days when the labels show dates.
+    /// Gets the format of the time labels, which tells every label apart: seconds for a spacing under a minute, the
+    /// date for a spacing of whole days, the time of day for a range under a day, and the weekday with the time
+    /// otherwise.
+    /// </summary>
+    /// <param name="range">The time span the lines show.</param>
+    /// <param name="spacing">The time between two time labels.</param>
+    public static string GetTimeLabelFormat(TimeSpan range, TimeSpan spacing) =>
+        spacing < TimeSpan.FromMinutes(1) ? "HH:mm:ss" :
+        spacing >= TimeSpan.FromDays(1) ? "MM-dd" :
+        range < TimeSpan.FromDays(1) ? "HH:mm" :
+        "ddd HH:mm";
+
+    /// <summary>
+    /// Gets the time between two time labels: the smallest round step of <see cref="TimeLabelSteps"/> that splits the
+    /// range into no more parts than the width holds labels, never shorter than the bucket. When that step leaves
+    /// less than two parts, the largest step that still splits the range in two is taken, so a narrow chart keeps more
+    /// than one label. With the label rounding of the chart the labels then fall on round times.
     /// </summary>
     /// <param name="range">The time span the lines show.</param>
     /// <param name="bucket">The interval one point stands for, or null for raw samples.</param>
     /// <param name="width">The width of the lines in pixels.</param>
     public static TimeSpan GetTimeLabelSpacing(TimeSpan range, TimeSpan? bucket, double width)
     {
-        var labelCount = double.IsFinite(width) ? (int)Math.Clamp(width / PixelsPerTimeLabel, 2, MaximumTimeLabelCount) : 2;
-        var spacing = range > TimeSpan.Zero ? TimeSpan.FromTicks(range.Ticks / (labelCount - 1)) : TimeSpan.FromMinutes(1);
-        if (bucket is { } size && size > spacing)
+        var minimum = bucket ?? TimeSpan.Zero;
+        var spacing = range > TimeSpan.Zero ? range / (GetTimeLabelCount(width) - 1) : TimeSpan.Zero;
+        TimeSpan? halving = null;
+        foreach (var step in TimeLabelSteps)
         {
-            spacing = size;
+            if (step < minimum)
+            {
+                continue;
+            }
+
+            if (step >= spacing)
+            {
+                return range >= 2 * step ? step : halving ?? step;
+            }
+
+            if (range >= 2 * step)
+            {
+                halving = step;
+            }
         }
 
-        return range > TimeSpan.FromDays(2) ? TimeSpan.FromDays(Math.Ceiling(spacing.TotalDays)) : spacing;
+        return halving ?? TimeLabelSteps[^1];
     }
 }

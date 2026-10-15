@@ -36,7 +36,9 @@ namespace HomeBlaze.History.Blazor
         public const int MaximumTimeLabelCount = 9;
         public const double PixelsPerTimeLabel = 90D;
         public const double PixelsPerValueLabel = 55D;
-        public static string GetTimeLabelFormat(System.TimeSpan range) { }
+        public static readonly System.Collections.Generic.IReadOnlyList<System.TimeSpan> TimeLabelSteps;
+        public static int GetTimeLabelCount(double width) { }
+        public static string GetTimeLabelFormat(System.TimeSpan range, System.TimeSpan spacing) { }
         public static System.TimeSpan GetTimeLabelSpacing(System.TimeSpan range, System.TimeSpan? bucket, double width) { }
         public static HomeBlaze.History.Blazor.HistoryChartValueAxis GetValueAxis(double minimum, double maximum, double height) { }
         public static int GetValueLabelCount(double height) { }

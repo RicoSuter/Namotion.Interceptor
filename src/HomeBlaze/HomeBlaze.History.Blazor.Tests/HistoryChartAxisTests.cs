@@ -137,17 +137,64 @@ public class HistoryChartAxisTests
     }
 
     [Theory]
-    [InlineData(1352, 8)]
-    [InlineData(600, 5)]
-    [InlineData(368, 3)]
-    [InlineData(100, 1)]
-    public void WhenLinesHaveAWidth_ThenTheRangeIsSplitIntoAsManyPartsAsTheWidthHoldsLabels(double width, int expectedParts)
+    [InlineData(1352, 9)]
+    [InlineData(600, 6)]
+    [InlineData(368, 4)]
+    [InlineData(100, 2)]
+    [InlineData(double.NaN, 2)]
+    public void WhenLinesHaveAWidth_ThenAboutOneTimeLabelFitsPer90Pixels(double width, int expected)
+    {
+        // Act
+        var count = HistoryChartAxis.GetTimeLabelCount(width);
+
+        // Assert
+        Assert.Equal(expected, count);
+    }
+
+    [Theory]
+    [InlineData(1352, 3)]
+    [InlineData(600, 6)]
+    [InlineData(368, 12)]
+    [InlineData(100, 12)]
+    public void WhenADayIsSplitByTheWidth_ThenTheSpacingIsARoundStepThatFitsIt(double width, int expectedHours)
     {
         // Act
         var spacing = HistoryChartAxis.GetTimeLabelSpacing(TimeSpan.FromHours(24), null, width);
 
         // Assert
-        Assert.Equal(TimeSpan.FromHours(24) / expectedParts, spacing);
+        Assert.Equal(TimeSpan.FromHours(expectedHours), spacing);
+    }
+
+    [Fact]
+    public void WhenRangesAndWidthsVary_ThenEverySpacingIsARoundStepThatSplitsTheRangeIntoAFewParts()
+    {
+        // Arrange
+        double[] widths = [100, 368, 600, 1128, 1352];
+
+        // Act & Assert
+        for (var range = TimeSpan.FromSeconds(30); range <= TimeSpan.FromDays(60); range *= 1.3)
+        {
+            foreach (var width in widths)
+            {
+                var spacing = HistoryChartAxis.GetTimeLabelSpacing(range, null, width);
+                var parts = range / spacing;
+                Assert.Contains(spacing, HistoryChartAxis.TimeLabelSteps);
+                Assert.True(parts <= Math.Max(HistoryChartAxis.GetTimeLabelCount(width) - 1, 5), $"{range} at {width} px is split every {spacing}");
+                Assert.True(parts >= 2 || range < TimeSpan.FromSeconds(2), $"{range} at {width} px is split every {spacing}");
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(7, 3)]
+    [InlineData(30, 14)]
+    public void WhenTheNextRoundStepLeavesOneLabel_ThenTheLargestStepThatSplitsTheRangeInTwoIsTaken(int rangeDays, int expectedDays)
+    {
+        // Act
+        var spacing = HistoryChartAxis.GetTimeLabelSpacing(TimeSpan.FromDays(rangeDays), null, 352);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromDays(expectedDays), spacing);
     }
 
     [Fact]
@@ -161,17 +208,17 @@ public class HistoryChartAxisTests
     }
 
     [Fact]
-    public void WhenTheRangeIsEmpty_ThenTheSpacingIsAMinute()
+    public void WhenTheRangeIsEmpty_ThenTheSpacingIsTheShortestStep()
     {
         // Act
         var spacing = HistoryChartAxis.GetTimeLabelSpacing(TimeSpan.Zero, null, 1352);
 
         // Assert
-        Assert.Equal(TimeSpan.FromMinutes(1), spacing);
+        Assert.Equal(TimeSpan.FromSeconds(1), spacing);
     }
 
     [Fact]
-    public void WhenLabelsShowDates_ThenTheSpacingIsWholeDays()
+    public void WhenLabelsShowAWeekOrAMonth_ThenTheSpacingIsWholeDays()
     {
         // Act
         var week = HistoryChartAxis.GetTimeLabelSpacing(TimeSpan.FromDays(7), null, 1352);
@@ -179,20 +226,20 @@ public class HistoryChartAxisTests
 
         // Assert
         Assert.Equal(TimeSpan.FromDays(1), week);
-        Assert.Equal(TimeSpan.FromDays(4), month);
+        Assert.Equal(TimeSpan.FromDays(7), month);
     }
 
     [Theory]
-    [InlineData(5, "HH:mm:ss")]
-    [InlineData(60, "HH:mm")]
-    [InlineData(1439, "HH:mm")]
-    [InlineData(1440, "ddd HH:mm")]
-    [InlineData(2880, "ddd HH:mm")]
-    [InlineData(10080, "MM-dd")]
-    public void WhenRangeHasALength_ThenItsTimeLabelsTellEveryLabelApart(int minutes, string expected)
+    [InlineData(10, 0.5, "HH:mm:ss")]
+    [InlineData(60, 10, "HH:mm")]
+    [InlineData(1439, 180, "HH:mm")]
+    [InlineData(1440, 180, "ddd HH:mm")]
+    [InlineData(4320, 720, "ddd HH:mm")]
+    [InlineData(10080, 1440, "MM-dd")]
+    public void WhenRangeAndSpacingHaveALength_ThenTheTimeLabelsTellEveryLabelApart(int rangeMinutes, double spacingMinutes, string expected)
     {
         // Act
-        var format = HistoryChartAxis.GetTimeLabelFormat(TimeSpan.FromMinutes(minutes));
+        var format = HistoryChartAxis.GetTimeLabelFormat(TimeSpan.FromMinutes(rangeMinutes), TimeSpan.FromMinutes(spacingMinutes));
 
         // Assert
         Assert.Equal(expected, format);
