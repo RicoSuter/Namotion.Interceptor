@@ -45,6 +45,28 @@ namespace HomeBlaze.History.Blazor
         public static string DescribeSegment(HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment segment) { }
         public static string GetLineColor(int index) { }
     }
+    public static class HistoryChartQuery
+    {
+        public static System.TimeSpan? GetAvailableCoverage(System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.IHistoryStore> stores, System.DateTimeOffset to) { }
+        public static System.Threading.Tasks.Task<HomeBlaze.History.Blazor.HistoryChartResult> QueryAsync(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.IHistoryStore> stores, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesRequest> requests, System.DateTimeOffset from, System.DateTimeOffset to, System.TimeSpan? bucket, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class HistoryChartResult : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartResult>
+    {
+        public HistoryChartResult(HomeBlaze.History.Blazor.HistoryChartData Data, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistorySeries> Series, bool IsTruncated) { }
+        public HomeBlaze.History.Blazor.HistoryChartData Data { get; init; }
+        public bool IsTruncated { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistorySeries> Series { get; init; }
+    }
+    public sealed class HistoryChartSeriesRequest : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartSeriesRequest>
+    {
+        public HistoryChartSeriesRequest(string PropertyPath, string Label, System.Type PropertyType, bool IsBand, string Aggregation, string? Color = null) { }
+        public string Aggregation { get; init; }
+        public string? Color { get; init; }
+        public bool IsBand { get; init; }
+        public string Label { get; init; }
+        public string PropertyPath { get; init; }
+        public System.Type PropertyType { get; init; }
+    }
     public sealed class HistoryStatePalette
     {
         public HistoryStatePalette() { }
