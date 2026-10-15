@@ -62,7 +62,7 @@ public class SlotMapTests
 
         // Assert
         Assert.Null(map.Error);
-        Assert.Equal(["_Item_2"], map.Named.Keys);
+        Assert.Equal(new[] { "_Item_2" }, map.Named.Keys);
     }
 
     [Theory]

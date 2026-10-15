@@ -30,29 +30,20 @@
     }
 
     @* Render cells *@
-    @if (Grid?.Cells != null)
+    @foreach (var cell in Cells)
     {
-        foreach (var cell in Grid.Cells)
-        {
-            <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
-                <div class="grid-cell-content">
-                    <SubjectComponent Subject="@cell.Child"
-                                      Type="SubjectComponentType.Widget">
-                        <ActionButtons>
-                            <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                                           Size="Size.Small"
-                                           title="Edit Cell"
-                                           OnClick="() => EditCell(cell)" />
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                           Size="Size.Small"
-                                           Color="Color.Error"
-                                           title="Delete"
-                                           OnClick="() => DeleteCell(cell)" />
-                        </ActionButtons>
-                    </SubjectComponent>
-                </div>
+        <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
+            @if (IsEditing)
+            {
+                <LayoutItemActions EditTitle="Edit Cell"
+                                   OnEdit="() => EditCell(cell)"
+                                   OnDelete="() => DeleteCell(cell)" />
+            }
+            <div class="grid-cell-content">
+                <SubjectComponent Subject="@cell.Child"
+                                  Type="SubjectComponentType.Widget" />
             </div>
-        }
+        </div>
     }
 
     @* Render empty cells for adding in edit mode *@
@@ -87,6 +78,7 @@
         border-radius: 4px;
         min-height: 100px;
         overflow: hidden;
+        position: relative;
     }
 
     /* In edit mode: disable widget interaction */
@@ -129,6 +121,8 @@
 
     private GridLayout? Grid => Subject as GridLayout;
 
+    private GridCell[] Cells => Grid?.Cells ?? [];
+
     private string GetCellStyle(GridCell cell)
     {
         var row = cell.Row.HasValue ? $"grid-row: {cell.Row.Value + 1} / span {cell.RowSpan}" : null;
@@ -150,7 +144,7 @@
         var occupied = new HashSet<(int, int)>();
 
         // Mark all occupied cells (accounting for spans)
-        foreach (var cell in Grid.Cells)
+        foreach (var cell in Cells)
         {
             if (!cell.Row.HasValue || !cell.Column.HasValue) continue;
 
@@ -187,8 +181,7 @@
                 cell.Column = column;
                 cell.Child = subject;
 
-                // Replace list to trigger property setter and parent tracking
-                Grid.Cells = [.. Grid.Cells, cell];
+                Grid.Cells = [.. Cells, cell];
             }
         });
     }
@@ -216,8 +209,7 @@
 
         if (confirmed == true)
         {
-            // Replace list to trigger property setter and parent tracking
-            Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
+            Grid.Cells = Cells.Where(existing => existing != cell).ToArray();
 
             await RootManager.WriteConfigurationOrWarnAsync(Grid, Snackbar, CancellationToken.None);
         }

@@ -215,6 +215,46 @@ public class PlaywrightFixture : IAsyncLifetime
         return content;
     }
 
+    /// <summary>
+    /// Reads a page of the demo folder, given by its file name, until its text with line feeds only is the expected
+    /// one, and returns that text. A write that the page refuses leaves the text as it was.
+    /// </summary>
+    public async Task<string> WaitForDemoPageTextAsync(string name, Func<string, bool> isExpected, string message)
+    {
+        var path = GetDemoPagePath(name);
+        var text = string.Empty;
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                if (!TryReadFile(path, out var written))
+                {
+                    return false;
+                }
+
+                text = written.Replace("\r\n", "\n");
+                return isExpected(text);
+            },
+            message: message);
+
+        return text;
+    }
+
+    // The server holds the file open while it reads it again after a write, and the poll tries a failed read again.
+    private static bool TryReadFile(string path, out string text)
+    {
+        try
+        {
+            text = File.ReadAllText(path);
+            return true;
+        }
+        catch (IOException)
+        {
+            text = string.Empty;
+            return false;
+        }
+    }
+
     // The server reads a file again after every write and keeps it open while it parses the page, which can still be
     // going on for the write of the test before this one. A sharing violation fails when the file is opened and
     // reads or writes nothing, so the operation is safe to try again.

@@ -1,8 +1,9 @@
 namespace HomeBlaze.Abstractions.Attributes;
 
 /// <summary>
-/// Marks a property that a markdown page fills with block content.
-/// The property is not configuration and is never serialized.
+/// Marks a property that a markdown page fills with block content. On a page the property is not
+/// configuration: it cannot be set on the head line or in the json block of its block, and is not written there.
+/// A property that is also marked as configuration is read and written as such in a configuration file.
 /// </summary>
 /// <remarks>
 /// The property type decides what a block produces: <c>IInterceptorSubject</c> takes the content

@@ -85,8 +85,7 @@
 
         var content = await _editor.GetValue();
 
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
-        await File.WriteAsync(stream, CancellationToken.None);
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content), CancellationToken.None);
         _originalContent = content;
         _currentContent = content;
         IsDirtyChanged?.Invoke(false);

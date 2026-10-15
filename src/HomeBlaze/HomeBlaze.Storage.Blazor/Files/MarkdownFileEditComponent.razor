@@ -213,8 +213,10 @@ else
             return;
         }
 
+        // Writes the head line and the json block only. When the graph has drifted from the text, the write-back
+        // can also have inserted or removed blocks, and writing the editor text below overwrites that.
         _currentContent = MarkdownBlockWriter.WriteConfiguration(
-            _currentContent, block, Serializer.Serialize(subject, ConfigurationNaming.CSharpProperty));
+            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject));
 
         // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
@@ -222,8 +224,7 @@ else
 
         // Save the file, which also reloads it on the worker of its storage. The reload keeps the edited
         // subject and applies its configuration.
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
-        await File.WriteAsync(stream, CancellationToken.None);
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(_currentContent), CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
@@ -300,8 +301,7 @@ else
         await _editor.SetValue(_currentContent);
 
         // Save the file, which also reloads it on the worker of its storage
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
-        await File.WriteAsync(stream, CancellationToken.None);
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(_currentContent), CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
@@ -332,7 +332,7 @@ else
         string json;
         try
         {
-            json = Serializer.Serialize(result.Subject, ConfigurationNaming.CSharpProperty);
+            json = MarkdownBlockConfiguration.Serialize(Serializer, result.Subject);
         }
         finally
         {
@@ -379,8 +379,7 @@ else
         await _editor.SetValue(_currentContent);
 
         // Save the file, which also reloads it on the worker of its storage
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
-        await File.WriteAsync(stream, CancellationToken.None);
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(_currentContent), CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
@@ -478,8 +477,7 @@ else
 
         var content = await _editor.GetValue();
 
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
-        await File.WriteAsync(stream, cancellationToken);
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content), cancellationToken);
 
         _originalContent = content;
         _currentContent = content;

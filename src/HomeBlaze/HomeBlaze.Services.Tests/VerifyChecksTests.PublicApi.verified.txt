@@ -33,6 +33,7 @@ namespace HomeBlaze.Services
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void Release(Namotion.Interceptor.IInterceptorSubject subject) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool> isExcluded, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
     }

@@ -18,10 +18,16 @@ internal static class LayoutPageExtensions
     /// <summary>
     /// Opens the layout page in inline edit mode.
     /// </summary>
-    public static async Task<IPage> OpenLayoutPageInInlineModeAsync(this PlaywrightFixture fixture)
+    public static Task<IPage> OpenLayoutPageInInlineModeAsync(this PlaywrightFixture fixture)
+        => fixture.OpenPageInEditModeAsync(PagePath);
+
+    /// <summary>
+    /// Opens a page, given by its path under the test data folder, in an edit mode of the edit mode menu.
+    /// </summary>
+    public static async Task<IPage> OpenPageInEditModeAsync(this PlaywrightFixture fixture, string pagePath, string editMode = "Inline")
     {
         var page = await fixture.CreatePageAsync();
-        await page.GotoAsync($"{fixture.ServerAddress}pages/{PagePath}");
+        await page.GotoAsync($"{fixture.ServerAddress}pages/{pagePath}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The edit menu is prerendered, and a click before the circuit is connected is lost.
@@ -31,7 +37,7 @@ internal static class LayoutPageExtensions
         var editMenu = page.Locator("[data-testid='edit-mode-menu']");
         await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
         await editMenu.ClickAsync();
-        await page.GetByText("Inline").ClickAsync();
+        await page.Locator(".mud-popover-open").GetByText(editMode, new() { Exact = true }).ClickAsync();
 
         return page;
     }

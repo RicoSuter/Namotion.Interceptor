@@ -34,17 +34,17 @@ public partial class CanvasLayout : IConfigurable, ITitleProvider
     public partial int GridSize { get; set; }
 
     /// <summary>
-    /// Collection of nodes positioned on the canvas.
+    /// The nodes on the canvas. On a page one <c>Node</c> block each, in a configuration file a list.
     /// </summary>
-    [Configuration, State]
-    public partial List<CanvasNode> Nodes { get; set; }
+    [Configuration, State, Slot("Node")]
+    public partial CanvasNode[] Nodes { get; set; }
 
     public string? Title => "Canvas";
 
     public CanvasLayout()
     {
         GridSize = 100;
-        Nodes = new List<CanvasNode>();
+        Nodes = [];
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)

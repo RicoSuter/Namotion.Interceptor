@@ -654,13 +654,27 @@ public partial class FluentStorageContainer :
     /// </remarks>
     public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
     {
-        var connection = Connection;
-        var relativePath = StoragePath.Normalize(path);
-
-        // Copied, because a write that was given up still reads its content, see TimeLimitedBlobStorage.
         using var buffer = new MemoryStream();
         await content.CopyToAsync(buffer, cancellationToken);
-        var bytes = buffer.ToArray();
+        await WriteBlobCoreAsync(path, buffer.ToArray(), cancellationToken);
+    }
+
+    /// <summary>
+    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file.
+    /// </summary>
+    /// <remarks>
+    /// The content is copied. When the subject cannot be refreshed after the write, the write still succeeds,
+    /// and the next pass loads the file again.
+    /// </remarks>
+    public Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
+        => WriteBlobCoreAsync(path, content.ToArray(), cancellationToken);
+
+    // The bytes belong to the write and are not changed by anyone else, because a write that was given up still
+    // reads them after the caller got its result, see TimeLimitedBlobStorage.
+    private async Task WriteBlobCoreAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        var relativePath = StoragePath.Normalize(path);
 
         await RunOperationAsync(connection, async token =>
         {

@@ -1188,31 +1188,23 @@ public class SubjectSetupDialogTests
     [Fact]
     public async Task WhenHostedSubjectIsAddedToGridWithIsEnabledCleared_ThenItStartsDisabled()
     {
-        // Creating the cell rewrites the page file in the test output directory, which later runs reuse.
-        // Restoring it only restores the file: file watching is off in testRoot.json, so the created
-        // (disabled) store stays in the live graph for the rest of the host's life.
-        var gridPagePath = Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", "Grid.md");
-        var originalGridPage = await File.ReadAllBytesAsync(gridPagePath);
+        // The grid is the one that is stored as its own file. A grid on a page is read again when the cell is
+        // written, and its cell then holds a store that the page created from its text and not the one that the
+        // dialog created and attached. Creating the cell rewrites the layout file in the test output directory,
+        // which later runs reuse.
+        var layoutFilePath = Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", "Layout.json");
+        var originalLayoutFile = await File.ReadAllBytesAsync(layoutFilePath);
+        var layout = Assert.IsType<GridLayout>(_fixture.GetDemoFolder().Children["Layout"]);
+        var originalCells = layout.Cells;
         var isCompleted = false;
         try
         {
             // Arrange
-            var page = await _fixture.CreatePageAsync();
-            await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Grid.md");
-            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            var page = await _fixture.OpenLayoutPageInInlineModeAsync();
 
-            // The edit menu is prerendered, and a click before the circuit is connected is lost.
-            await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
-                .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-            await editMenu.ClickAsync();
-            await page.GetByText("Inline").ClickAsync();
-
-            var emptyCell = page.Locator(".grid-cell.empty").First;
-            await Assertions.Expect(emptyCell).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-            var cellIndex = await page.Locator(".grid-cell:not(.empty)").CountAsync();
+            // The cell that the layout has holds a grid with empty cells of its own, so only the ones of the layout itself count.
+            var emptyCell = page.Locator(".grid-layout-container").First.Locator(":scope > .grid-cell.empty").First;
+            await Assertions.Expect(emptyCell).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
             await emptyCell.ClickAsync();
 
             await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
@@ -1233,7 +1225,8 @@ public class SubjectSetupDialogTests
 
             // Assert - the store reads IsEnabled once when it starts, so a start that saw the constructor
             // default reports Running for good instead of Disabled.
-            await page.GotoAsync($"{_fixture.ServerAddress}browser/Demo/Grid.md/grid/Cells/{cellIndex}/Child");
+            var cellIndex = originalCells.Length;
+            await page.GotoAsync($"{_fixture.ServerAddress}browser/Demo/Layout/Cells/{cellIndex}/Child");
             await Assertions.Expect(page.GetByText("In-Memory History").First)
                 .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
 
@@ -1253,14 +1246,16 @@ public class SubjectSetupDialogTests
         }
         finally
         {
+            // The cell leaves the layout that the server holds, and the file gets its bytes back.
+            layout.Cells = originalCells;
             try
             {
-                await File.WriteAllBytesAsync(gridPagePath, originalGridPage);
+                await File.WriteAllBytesAsync(layoutFilePath, originalLayoutFile);
             }
             catch (Exception exception) when (!isCompleted)
             {
                 // The failure of the test itself is the one to report.
-                _output.WriteLine($"Restoring {gridPagePath} failed: {exception}");
+                _output.WriteLine($"Restoring {layoutFilePath} failed: {exception}");
             }
         }
     }

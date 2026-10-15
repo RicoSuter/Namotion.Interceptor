@@ -1,0 +1,58 @@
+@* The buttons of one item of a layout, such as a cell of a grid or a node of a canvas, while the layout is edited. *@
+
+<div class="layout-item-actions">
+    <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                   Size="Size.Small"
+                   title="@EditTitle"
+                   OnClick="OnEdit" />
+    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                   Size="Size.Small"
+                   Color="Color.Error"
+                   title="Delete"
+                   OnClick="OnDelete" />
+</div>
+
+<style>
+    /*
+     * Bottom right, because the widget in the item has its edit button at the top right. Positioned against the
+     * item, which the layout makes position: relative. pointer-events: auto because the content of an edited
+     * layout takes none, and the buttons of a nested layout are inside such content.
+     */
+    .layout-item-actions {
+        position: absolute;
+        bottom: 4px;
+        right: 4px;
+        z-index: 10;
+        display: flex;
+        gap: 2px;
+        background: rgba(255,255,255,0.95);
+        border-radius: 4px;
+        padding: 2px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        pointer-events: auto;
+    }
+
+    .layout-item-actions .mud-icon-button {
+        padding: 4px;
+    }
+</style>
+
+@code {
+    /// <summary>
+    /// The title of the button that edits the item, for example "Edit Cell".
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string EditTitle { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Raised when the button that edits the item is clicked.
+    /// </summary>
+    [Parameter]
+    public EventCallback<MouseEventArgs> OnEdit { get; set; }
+
+    /// <summary>
+    /// Raised when the button that deletes the item is clicked.
+    /// </summary>
+    [Parameter]
+    public EventCallback<MouseEventArgs> OnDelete { get; set; }
+}

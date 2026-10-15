@@ -828,6 +828,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
 | `[Category]` on a property or method | Heading in the property panel, see [Categories](#categories) | No | Yes |
 | `[Slot]` | Content that a markdown page fills in | No | Rendered by the widget |
+| `[Configuration] + [Slot]` | A slot on a page that a configuration file can also hold, see [Content Slots](#content-slots) | Yes, as configuration in a `*.json` file, never on a page | Rendered by the widget |
 | `[DisplayName]`, `[Description]`, `[Category]`, `[SubjectIcon]` | Describe the type in the create dialog | No | In the create dialog |
 | `[ExcludeFromCreation]`, `[SingleInstance]` | Hide the type from the create dialog | No | No |
 
@@ -1268,6 +1269,8 @@ What a page author cannot do with each kind:
 - **Typed slots are configured like widget blocks**: A block for a slot with a class of your own takes the `[Configuration]` properties of that class as arguments and in a `json` block, with the same checks as a widget block.
 - **One block for a single value**: A second block for a slot that is no array is an error on the page.
 
+**An editor for a list of typed values.** To add or remove a value, the editor of a widget replaces the array with a new one and saves the owner, as the editors of `GridLayout` and `CanvasLayout` do with `RootManager.WriteConfigurationOrWarnAsync`. To change a value, it saves that value, which writes the head line and the `json` block of its block. A new value is written as a block after the last block of the slot, as [Editing in the Page Editor](../administration/pages.md#editing-in-the-page-editor) describes for cells and nodes. The order of the values is never written, because the text decides it: a save with the values in another order than their blocks is refused, and so is a save with one value twice.
+
 #### Rules for a Slot Property
 
 A slot property must meet these rules. A declaration that breaks one cannot be used: every block of that type then shows an error box with the message of the table, with the short type name and a colon before it, like "Gauge: the slot 'Content' needs a setter." No instance is created.
@@ -1290,7 +1293,7 @@ More that a declaration should follow:
 - **Name**: The slot name defaults to the property name and is case-sensitive. For an array, set the singular explicitly, like `[Slot("Item")]` on `Items`.
 - **Arrays**: Initialize an array property with an empty array in the constructor. All values of one slot have the same type. Mixed types in one list slot are not supported.
 - **The class of a typed slot**: It must implement `IConfigurable` and be known to HomeBlaze like every subject type. Otherwise the page shows "The type 'MyCompany.Widgets.Sidebar' of the slot 'Sidebar' could not be created. It must be a registered configurable subject type." Give it a default slot of its own when its blocks should take content. Put `[ExcludeFromCreation]` on it, because it only exists inside its widget and the create dialog would offer it on its own otherwise, see [Hiding a Type](#hiding-a-type).
-- **Not configuration**: A slot property is not configuration and is not saved. The content lives in the text of the page. Do not put `[Configuration]` on it.
+- **Not configuration on a page**: A slot property is not configuration on a page. Its values live in the text of the page as blocks, and an argument or a name in the `json` block that sets it is an error on the page that says how the slot is filled. Only an empty list of a slot that takes several blocks is ignored in the `json` block, because earlier versions wrote one for every layout. Put `[Configuration]` on it as well only when the same property must also be read and written in a configuration file, as `GridLayout.Cells` does.
 
 #### Rendering Slots
 
@@ -1390,7 +1393,7 @@ What a widget author must know about the life of a subject that a page creates. 
 - **Kept across reloads**: The page is read again with every change of its text. While the block stays, the page keeps the instance and updates it in place: it sets every `[Configuration]` property that the block names again, also when the value did not change, calls `ApplyConfigurationAsync`, and assigns the slots again. Expect all of this to run often.
 - **A new instance**: The page creates a new instance when the name, the position or the type of the block changes, when an argument is removed from the block, and when the block around it gets a new instance. The section "What an Edit of the Page Keeps" of [Markdown Pages](../administration/pages.md#what-an-edit-of-the-page-keeps) has the rules as a page author sees them.
 - **Slot values**: A content slot keeps its value while its block stays, and a list slot gets a new array on every reload. A slot whose block was removed is set to `null`, or to an empty array.
-- **Subjects in the configuration**: A subject that is a value of a `[Configuration]` property, like the child of a grid cell, is created again on every reload, because the configuration is applied again.
+- **Subjects in the configuration**: A subject that the `json` block holds as a value of a `[Configuration]` property is created again on every reload, because the configuration is applied again. A property that is a slot as well, like the `Child` of a grid cell, is filled from the content of its block and follows the rule for slot values.
 - **Release after an error**: The subject of a block that ends as an error box is released again. This also holds for the typed slot values and nested subjects that were created for it. A hosted subject can therefore get `StopAsync` without a preceding `StartAsync`.
 - **Failures are shown**: An exception from the constructor, from a property setter or from `ApplyConfigurationAsync` does not take the page down. The block shows an error box with the message of the exception, and the log has the stack trace.
 - **Never wait for the own page**: A subject must not wait for a write or a reload of its own page from its constructor, from a property setter or from `ApplyConfigurationAsync`. The reloads of one page run one after the other, so such a wait would never end.
