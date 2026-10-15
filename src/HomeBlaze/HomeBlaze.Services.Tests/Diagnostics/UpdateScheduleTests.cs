@@ -37,21 +37,6 @@ public class UpdateScheduleTests
         Assert.Equal(TimeSpan.FromHours(expectedHours), interval);
     }
 
-    [Theory]
-    [InlineData(1, 24)]
-    [InlineData(48, 48)]
-    public void WhenACheckSucceeds_ThenTheNextIsAfterTheIntervalButAtLeastADay(int intervalHours, int expectedHours)
-    {
-        // Arrange
-        var schedule = new UpdateSchedule();
-
-        // Act
-        var delay = schedule.GetDelayAfterSuccess(TimeSpan.FromHours(intervalHours));
-
-        // Assert
-        Assert.Equal(TimeSpan.FromHours(expectedHours), delay);
-    }
-
     [Fact]
     public void WhenChecksKeepFailing_ThenTheBackoffDoublesUpToADay()
     {
@@ -66,7 +51,7 @@ public class UpdateScheduleTests
     }
 
     [Fact]
-    public void WhenACheckSucceedsAfterFailures_ThenTheBackoffStartsOver()
+    public void WhenTheBackoffIsResetAfterFailures_ThenItStartsOver()
     {
         // Arrange
         var schedule = new UpdateSchedule();
@@ -74,7 +59,7 @@ public class UpdateScheduleTests
         schedule.GetDelayAfterFailure(retryAfter: null);
 
         // Act
-        schedule.GetDelayAfterSuccess(TimeSpan.FromHours(24));
+        schedule.ResetBackoff();
         var delay = schedule.GetDelayAfterFailure(retryAfter: null);
 
         // Assert
@@ -97,11 +82,8 @@ public class UpdateScheduleTests
     [Fact]
     public void WhenTheConfiguredIntervalExceedsAYear_ThenItIsClampedToAYear()
     {
-        // Arrange
-        var schedule = new UpdateSchedule();
-
         // Act
-        var delay = schedule.GetDelayAfterSuccess(TimeSpan.MaxValue);
+        var delay = UpdateSchedule.ClampInterval(TimeSpan.MaxValue);
 
         // Assert
         Assert.Equal(UpdateSchedule.MaximumInterval, delay);
@@ -112,11 +94,8 @@ public class UpdateScheduleTests
     [InlineData(-1)]
     public void WhenTheConfiguredIntervalIsZeroOrNegative_ThenItIsClampedToADay(int intervalHours)
     {
-        // Arrange
-        var schedule = new UpdateSchedule();
-
         // Act
-        var delay = schedule.GetDelayAfterSuccess(TimeSpan.FromHours(intervalHours));
+        var delay = UpdateSchedule.ClampInterval(TimeSpan.FromHours(intervalHours));
 
         // Assert
         Assert.Equal(UpdateSchedule.MinimumInterval, delay);

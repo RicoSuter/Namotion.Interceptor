@@ -58,8 +58,7 @@ public partial class HomeBlazeInstallation
             UpdateCheckStatus = null;
             ClearUpdateCheckError();
 
-            // Only resets the backoff; the loop reads the interval on every wake so a changed interval applies at once.
-            _updateSchedule.GetDelayAfterSuccess(UpdateCheckInterval);
+            _updateSchedule.ResetBackoff();
             return null;
         }
         catch (GitHubRequestException exception)
@@ -134,8 +133,9 @@ public partial class HomeBlazeInstallation
             var delay = Timeout.InfiniteTimeSpan;
             if (UpdateCheckEnabled && GetUpdateCheckUnavailableReason() is null)
             {
+                // Rounded up so a timer that fires a fraction of a millisecond early waits again instead of spinning.
                 var remaining = GetRemainingDelay();
-                delay = remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+                delay = remaining > TimeSpan.Zero ? TimeSpan.FromMilliseconds(Math.Ceiling(remaining.TotalMilliseconds)) : TimeSpan.Zero;
             }
 
             var isSignaled = await WaitAsync(_updateSignal, delay, stoppingToken);
@@ -147,9 +147,8 @@ public partial class HomeBlazeInstallation
             var isManual = Interlocked.Exchange(ref _isManualCheckRequested, 0) == 1;
             if (!isManual)
             {
-                if (!UpdateCheckEnabled)
+                if (ClearUpdateCheckErrorIfDisabled())
                 {
-                    ClearUpdateCheckError();
                     continue;
                 }
 

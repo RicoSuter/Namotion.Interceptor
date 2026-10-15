@@ -325,11 +325,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        if (!UpdateCheckEnabled)
-        {
-            ClearUpdateCheckError();
-        }
-
+        ClearUpdateCheckErrorIfDisabled();
         Release(_pollSignal);
         Release(_updateSignal);
         return Task.CompletedTask;
@@ -361,6 +357,23 @@ public partial class HomeBlazeInstallation : BackgroundService,
         {
             StatusMessage = message;
             Status = status;
+        }
+    }
+
+    /// <summary>
+    /// Clears an update check error when the check is disabled and returns whether it is disabled.
+    /// </summary>
+    private bool ClearUpdateCheckErrorIfDisabled()
+    {
+        lock (_statusLock)
+        {
+            if (UpdateCheckEnabled)
+            {
+                return false;
+            }
+
+            ClearUpdateCheckError();
+            return true;
         }
     }
 

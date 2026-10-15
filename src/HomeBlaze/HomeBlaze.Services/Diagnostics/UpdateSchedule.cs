@@ -28,12 +28,11 @@ internal sealed class UpdateSchedule
         FirstCheckMinimumDelay + (FirstCheckMaximumDelay - FirstCheckMinimumDelay) * random.NextDouble();
 
     /// <summary>
-    /// Resets the backoff and returns the configured interval clamped to MinimumInterval..MaximumInterval.
+    /// Starts the backoff over after a successful check.
     /// </summary>
-    public TimeSpan GetDelayAfterSuccess(TimeSpan configuredInterval)
+    public void ResetBackoff()
     {
         _failureCount = 0;
-        return ClampInterval(configuredInterval);
     }
 
     /// <summary>
