@@ -3,7 +3,7 @@
 @using HomeBlaze.History.Abstractions
 @using HomeBlaze.History
 @using HomeBlaze.History.Blazor
-@using HomeBlaze.Host.Components.Dialogs
+@using HomeBlaze.Components.Operations
 @using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
 
@@ -305,6 +305,7 @@
 
     private RegisteredSubject? _registeredSubject;
     private MethodMetadata? _executingMethod;
+    private readonly CancellationTokenSource _lifetime = new();
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -342,6 +343,8 @@
     {
         _isDisposed = true;
         TimeZone.Changed -= OnTimeZoneChanged;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
         _dotNetReference?.Dispose();
         if (_module is not null)
         {
@@ -874,50 +877,14 @@
             return;
         }
 
+        _executingMethod = method;
         try
         {
-            object?[]? parameters = null;
-
-            // Check if there are any parameters that need user input
-            if (method.Parameters.Any(p => p.RequiresInput))
-            {
-                var parameterDialog = await MethodParameterDialog.ShowAsync(DialogService, method);
-                var parameterResult = await parameterDialog.Result;
-                if (parameterResult == null || parameterResult.Canceled)
-                    return;
-
-                parameters = parameterResult.Data as object?[];
-            }
-            else if (method.RequiresConfirmation)
-            {
-                var confirmDialog = await MethodConfirmationDialog.ShowAsync(DialogService, method);
-                var confirmResult = await confirmDialog.Result;
-                if (confirmResult == null || confirmResult.Canceled)
-                    return;
-            }
-
-            // Execute the method
-            _executingMethod = method;
-            StateHasChanged();
-
-            var result = await method.InvokeAsync(parameters, ServiceProvider, CancellationToken.None);
-
-            _executingMethod = null;
-            StateHasChanged();
-
-            if (result != null)
-            {
-                await MethodResultDialog.ShowAsync(DialogService, method.Title, result);
-            }
+            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, method, _lifetime.Token);
         }
-        catch (OperationCanceledException)
+        finally
         {
             _executingMethod = null;
-        }
-        catch (Exception ex)
-        {
-            _executingMethod = null;
-            await MethodErrorDialog.ShowAsync(DialogService, method.Title, ex);
         }
     }
 }
