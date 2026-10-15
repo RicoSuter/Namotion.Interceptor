@@ -13,7 +13,7 @@ A ring that shows where a number stands between a minimum and a maximum, with th
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Path` | Path of a number | None | The path of the property whose value the gauge shows. The picker offers numbers only |
-| `Label` | Text | The title of the property | The text below the ring |
+| `Label` | Text | The title of the property, then its name | The text below the ring. Without it the gauge shows the title that the property declares, the name of the property when it declares none, and the path when the path leads nowhere |
 | `Minimum` | Number with a fraction | From the property | The value at which the ring is empty |
 | `Maximum` | Number with a fraction | From the property | The value at which the ring is full |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the text in the centre and the colour of the ring, see [ValueMap](../page-widgets.md#valuemap) |
@@ -103,7 +103,7 @@ The three sizes next to each other in a [FlowLayout](../page-widgets.md#flowlayo
 - **A missing value**: A value that is not set and a path that leads nowhere show a dash in the centre and an empty ring, with the path as tooltip, as every value widget does, see [Basics](basics.md).
 - **The text in the centre**: The formatted value with its unit, or the text of the matched case of the map.
 - **The colour**: The colour of the matched case of the map, otherwise the primary colour of the theme.
-- **Accessibility**: The gauge is a meter for screen readers, with the label as its name, the value and the range as its numbers and the text in the centre as its spoken value.
+- **Accessibility**: The gauge is a meter for screen readers, with the label as its name, the value kept inside the range and the range as its numbers, and the text in the centre as its spoken value. A gauge without a value is read as a group with its label.
 - **Live**: The ring and the text change on the page when the property changes.
 
 ## Related

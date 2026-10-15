@@ -22,18 +22,23 @@ public static class GaugeDisplay
     {
         if (!ValueRangeResolver.TryResolve(reading.Property, minimum, maximum, out var range, out var error))
         {
-            return reading.Property is null ? default : new GaugeState(null, null, null, error);
+            return reading.Property is null ? default : new GaugeState(null, null, null, null, error);
         }
 
         var rangeError = ValueRangeResolver.Validate(range);
         if (rangeError is not null)
         {
-            return new GaugeState(null, null, null, rangeError);
+            return new GaugeState(null, null, null, null, rangeError);
         }
 
         var percent = ValueReader.GetProgressPercent(reading.Value, range.Minimum, range.Maximum);
-        double? value = percent is null ? null : Convert.ToDouble(reading.Value, CultureInfo.InvariantCulture);
-        return new GaugeState(value, percent, range, null);
+        if (percent is null)
+        {
+            return new GaugeState(null, null, null, range, null);
+        }
+
+        var value = Convert.ToDouble(reading.Value, CultureInfo.InvariantCulture);
+        return new GaugeState(value, Math.Clamp(value, range.Minimum, range.Maximum), percent, range, null);
     }
 
     /// <summary>

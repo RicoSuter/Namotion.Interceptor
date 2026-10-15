@@ -111,6 +111,26 @@ public class GaugeDisplayTests
         Assert.Null(state.Range);
     }
 
+    [Theory]
+    [InlineData(0.25, 0.25)]
+    [InlineData(1.5, 1.0)]
+    [InlineData(-0.5, 0.0)]
+    [InlineData(double.PositiveInfinity, 1.0)]
+    [InlineData(double.NegativeInfinity, 0.0)]
+    public void WhenValueIsShownAsAMeter_ThenItsAriaValueIsKeptInsideTheRange(double load, double expected)
+    {
+        // Arrange
+        var subject = new MeasuredSubject(_context) { Load = load };
+        var reading = CreateReading(subject, nameof(MeasuredSubject.Load));
+
+        // Act
+        var state = GaugeDisplay.GetState(reading, null, null);
+
+        // Assert
+        Assert.Equal(load, state.Value);
+        Assert.Equal(expected, state.AriaValue);
+    }
+
     [Fact]
     public void WhenPathLeadsNowhere_ThenStateHasNoErrorAndAnEmptyRing()
     {
@@ -124,6 +144,7 @@ public class GaugeDisplayTests
         Assert.Null(state.Error);
         Assert.Null(state.Percent);
         Assert.Null(state.Value);
+        Assert.Null(state.AriaValue);
         Assert.Null(state.Range);
     }
 
@@ -140,6 +161,7 @@ public class GaugeDisplayTests
         // Assert
         Assert.Null(state.Percent);
         Assert.Null(state.Value);
+        Assert.Null(state.AriaValue);
         Assert.Equal(new ValueRange(0, 10), state.Range);
         Assert.Null(state.Error);
     }

@@ -28,7 +28,7 @@ public partial class Gauge : IConfigurable, ITitleProvider
     public partial string? Path { get; set; }
 
     /// <summary>
-    /// The text below the ring. Defaults to the title the property declares, then to its name.
+    /// The text below the ring. Defaults to the title the property declares, then to its name, and to the path when the path leads nowhere.
     /// </summary>
     [Configuration]
     public partial string? Label { get; set; }

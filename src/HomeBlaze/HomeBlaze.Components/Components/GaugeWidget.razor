@@ -26,15 +26,17 @@
     }
     else
     {
-        var label = ValueReader.GetLabel(reading, gauge.Label);
+        var label = ValueReader.GetControlLabel(reading.Property, gauge.Label, gauge.Path);
+        // A meter must have a value, so without one the gauge is a named group; Blazor leaves out the null attributes.
+        var isMeter = state.AriaValue is not null;
 
         <div class="d-inline-flex flex-column align-center gap-1"
-             role="meter"
+             role="@(isMeter ? "meter" : "group")"
              aria-label="@label"
-             aria-valuenow="@GaugeDisplay.FormatNumber(state.Value)"
-             aria-valuemin="@GaugeDisplay.FormatNumber(state.Range?.Minimum)"
-             aria-valuemax="@GaugeDisplay.FormatNumber(state.Range?.Maximum)"
-             aria-valuetext="@reading.Text"
+             aria-valuenow="@GaugeDisplay.FormatNumber(state.AriaValue)"
+             aria-valuemin="@GaugeDisplay.FormatNumber(isMeter ? state.Range?.Minimum : null)"
+             aria-valuemax="@GaugeDisplay.FormatNumber(isMeter ? state.Range?.Maximum : null)"
+             aria-valuetext="@(isMeter ? reading.Text : null)"
              data-testid="gauge"
              data-percent="@(state.Percent?.ToString("0.##", CultureInfo.InvariantCulture))">
             <div class="gauge-ring" style="@GaugeDisplay.GetRingStyle(size)">
