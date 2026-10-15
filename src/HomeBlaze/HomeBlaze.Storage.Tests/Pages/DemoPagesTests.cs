@@ -1,5 +1,9 @@
+using System.ComponentModel;
+using System.Reflection;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components;
+using HomeBlaze.History.Blazor;
 using HomeBlaze.Samples;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -101,7 +105,7 @@ public class DemoPagesTests
     }
 
     [Fact]
-    public async Task WhenDashboardPageIsLoaded_ThenItUsesEveryValueWidgetAndEachMapOfAWidgetIsTheMapOfThePage()
+    public async Task WhenDashboardPageIsLoaded_ThenItUsesEveryValueWidgetAndEachMapOfAWidgetIsAMapOfThePage()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
@@ -130,10 +134,74 @@ public class DemoPagesTests
         Assert.NotEmpty(subjects.OfType<Progress>());
         Assert.NotEmpty(subjects.OfType<Alert>());
 
+        var modeMap = Assert.IsType<ValueMap>(((IPathScope)page).TryGetNamedSubject("motormode"));
+        Assert.Equal(Enum.GetNames<MotorMode>(), modeMap.Cases.Select(valueCase => valueCase.Value));
+
         var maps = subjects.OfType<ValueRow>().Select(row => row.Map)
             .Concat(subjects.OfType<Indicator>().Select(indicator => indicator.Map))
+            .Concat(subjects.OfType<Select>().Select(control => control.Map))
+            .Concat(subjects.OfType<SubjectTableColumn>().Select(column => column.Map))
             .Where(name => name is not null);
-        Assert.All(maps, name => Assert.Equal("motorstate", name));
+        Assert.All(maps, name => Assert.Contains(name, new[] { "motorstate", "motormode" }));
+    }
+
+    [Fact]
+    public async Task WhenDashboardPageIsLoaded_ThenItShowsEveryWidgetThatShips()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        var widgetTypes = typeof(Card).Assembly.GetTypes()
+            .Where(type => type.GetCustomAttribute<CategoryAttribute>()?.Category == "Dashboard"
+                && type.GetCustomAttribute<ExcludeFromCreationAttribute>() is null)
+            .Append(typeof(HistoryChart))
+            .ToList();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Dashboard.md");
+
+        // Assert
+        var subjects = PageErrorBoxes.Flatten(page.Children.Values).ToList();
+        var shownTypes = subjects.Select(subject => subject.GetType()).ToHashSet();
+        Assert.Contains(widgetTypes, type => type.Name == nameof(Responsive));
+        Assert.Empty(widgetTypes.Where(type => !shownTypes.Contains(type)).Select(type => type.Name));
+
+        IPathScope scope = page;
+        Assert.IsType<HistoryChart>(scope.TryGetNamedSubject("trends"));
+        Assert.IsType<SubjectTable>(scope.TryGetNamedSubject("motortable"));
+        Assert.Equal(5, Assert.IsType<FlowLayout>(scope.TryGetNamedSubject("controlroom")).Items.Length);
+        Assert.Equal([ResponsiveShow.Phone, ResponsiveShow.NotPhone], subjects.OfType<Responsive>().Select(block => block.Show));
+    }
+
+    [Fact]
+    public async Task WhenDashboardPageIsLoaded_ThenItsControlsWriteNoConfigurationOfTheDemoMotors()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Dashboard.md");
+
+        // Assert: development runs against the checked-in files, which a control that saves would change.
+        var subjects = PageErrorBoxes.Flatten(page.Children.Values).ToList();
+        var writtenPaths = subjects.OfType<Switch>().Select(control => control.Path)
+            .Concat(subjects.OfType<Slider>().Select(control => control.Path))
+            .Concat(subjects.OfType<Select>().Select(control => control.Path))
+            .ToList();
+        Assert.Equal(15, writtenPaths.Count);
+        Assert.All(writtenPaths, path =>
+        {
+            Assert.NotNull(path);
+            Assert.StartsWith("/Demo/", path);
+            var property = typeof(Motor).GetProperty(path[(path.LastIndexOf('/') + 1)..]);
+            Assert.NotNull(property);
+            Assert.Null(property.GetCustomAttribute<ConfigurationAttribute>());
+        });
+        Assert.All(subjects.OfType<Switch>(), control =>
+        {
+            Assert.NotNull(control.Path);
+            var motor = control.Path[..control.Path.LastIndexOf('/')];
+            Assert.Equal(($"{motor}/PowerOn", $"{motor}/PowerOff"), (control.On, control.Off));
+        });
     }
 
     [Fact]

@@ -6,7 +6,11 @@ position: 7
 
 # Dashboard Demo
 
-This page is a complete dashboard built from the widgets for pages: value tiles, expansion panels with cards and value lists, tabs inside tabs, a grid and a canvas. Every value is live, and every motor is the same motor wherever it is shown. [Page Widgets](../Docs/administration/page-widgets.md) is the reference of each widget, with live samples.
+This page is a complete dashboard that uses every widget for pages: maps, value tiles, gauges, controls, a history chart, a table of subjects, blocks that depend on the width of the screen, expansion panels with cards and value lists, tabs inside tabs, a grid and a canvas. Every value is live, and every motor is the same motor wherever it is shown. [Widgets](../Docs/administration/widgets/overview.md) is the reference of each widget, with live samples.
+
+:: HomeBlaze.Components.Alert
+Every motor on this page is simulated. The speeds climb to the target of the motor, and the temperatures follow the speeds and the load. The controls change the power, the mode and the load of a motor until the next restart. They never change the files of the motors.
+::
 
 :: HomeBlaze.Components.ValueMap#motorstate
 ::: Case Value=Stopped Text="Off" Icon=StopCircle
@@ -16,24 +20,142 @@ This page is a complete dashboard built from the widgets for pages: value tiles,
 ::: Case Value=Error Text="Fault" Color=Error Icon=Error
 ::
 
-## Speeds
-
-:: HomeBlaze.Components.FlowLayout MinWidth=160
-::: Item
-:::: HomeBlaze.Components.ValueTile Path=/Demo/Compressor/CurrentSpeed Label="Compressor RPM" Icon=Bolt
-::: Item
-:::: HomeBlaze.Components.ValueTile Path=/Demo/WaterPump/CurrentSpeed Label="Water pump RPM" Icon=WaterDrop
-::: Item
-:::: HomeBlaze.Components.ValueTile Path=/Demo/Conveyor/CurrentSpeed Label="Conveyor RPM" Icon=Settings
-::: Item
-:::: HomeBlaze.Components.ValueTile Path=/Demo/CoolingFan/CurrentSpeed Label="Cooling fan RPM" Icon=AcUnit
-::: Item
-:::: HomeBlaze.Components.ValueTile Path=/Demo/ExhaustFan/CurrentSpeed Label="Exhaust fan RPM" Icon=Air
+:: HomeBlaze.Components.ValueMap#motormode
+::: Case Value=Eco Text="Eco" Color=Success Icon=Eco
+::: Case Value=Normal Text="Normal" Color=Info Icon=Speed
+::: Case Value=Boost Text="Boost" Color=Warning Icon=RocketLaunch
 ::
 
-:: HomeBlaze.Components.Alert
-Every motor on this page is simulated. The speeds climb to the target of the motor and the temperatures follow the speeds.
+## At a Glance
+
+:: HomeBlaze.Components.Responsive Show=Phone
+::: HomeBlaze.Components.ValueList
+:::: Value Path=/Demo/Compressor/Status Label="Compressor" Map=motorstate
+{{ /Demo/Compressor/CurrentSpeed }} RPM
+:::: Value Path=/Demo/WaterPump/Status Label="Water pump" Map=motorstate
+{{ /Demo/WaterPump/CurrentSpeed }} RPM
+:::: Value Path=/Demo/Conveyor/Status Label="Conveyor" Map=motorstate
+{{ /Demo/Conveyor/CurrentSpeed }} RPM
+:::: Value Path=/Demo/CoolingFan/Status Label="Cooling fan" Map=motorstate
+{{ /Demo/CoolingFan/CurrentSpeed }} RPM
+:::: Value Path=/Demo/ExhaustFan/Status Label="Exhaust fan" Map=motorstate
+{{ /Demo/ExhaustFan/CurrentSpeed }} RPM
 ::
+
+:: HomeBlaze.Components.Responsive Show=NotPhone
+::: HomeBlaze.Components.FlowLayout MinWidth=160
+:::: Item
+::::: HomeBlaze.Components.ValueTile Path=/Demo/Compressor/CurrentSpeed Label="Compressor RPM" Icon=Bolt
+:::: Item
+::::: HomeBlaze.Components.ValueTile Path=/Demo/WaterPump/CurrentSpeed Label="Water pump RPM" Icon=WaterDrop
+:::: Item
+::::: HomeBlaze.Components.ValueTile Path=/Demo/Conveyor/CurrentSpeed Label="Conveyor RPM" Icon=Settings
+:::: Item
+::::: HomeBlaze.Components.ValueTile Path=/Demo/CoolingFan/CurrentSpeed Label="Cooling fan RPM" Icon=AcUnit
+:::: Item
+::::: HomeBlaze.Components.ValueTile Path=/Demo/ExhaustFan/CurrentSpeed Label="Exhaust fan RPM" Icon=Air
+::: HomeBlaze.Components.FlowLayout MinWidth=140
+:::: Item
+::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/Temperature Label="Compressor" Minimum=20 Maximum=100
+:::: Item
+::::: HomeBlaze.Components.Gauge Path=/Demo/WaterPump/Temperature Label="Water pump" Minimum=20 Maximum=100
+:::: Item
+::::: HomeBlaze.Components.Gauge Path=/Demo/Conveyor/Temperature Label="Conveyor" Minimum=20 Maximum=100
+:::: Item
+::::: HomeBlaze.Components.Gauge Path=/Demo/CoolingFan/Temperature Label="Cooling fan" Minimum=20 Maximum=100
+:::: Item
+::::: HomeBlaze.Components.Gauge Path=/Demo/ExhaustFan/Temperature Label="Exhaust fan" Minimum=20 Maximum=100
+::
+
+A phone shows the status list, a wider screen the speed tiles and the temperature gauges. Widgets of this section: [Responsive](../Docs/administration/widgets/responsive.md) and [Gauge](../Docs/administration/widgets/gauge.md).
+
+## Control Room
+
+:: HomeBlaze.Components.FlowLayout#controlroom MinWidth=300
+::: Item
+:::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt IconColor=Primary Href="/browser/Demo/Compressor"
+::::: HomeBlaze.Components.Switch Path=/Demo/Compressor/IsPowered Label="Power" On=/Demo/Compressor/PowerOn Off=/Demo/Compressor/PowerOff
+::::: HomeBlaze.Components.Select Path=/Demo/Compressor/Mode Label="Mode" Map=motormode
+::::: HomeBlaze.Components.Slider Path=/Demo/Compressor/Load Label="Load"
+::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/Load Label="Load" Size=Small
+::::: HeaderRight
+:::::: HomeBlaze.Components.Indicator Path=/Demo/Compressor/Status Map=motorstate
+::::: Footer
+:::::: HomeBlaze.Components.OperationButton Path=/Demo/Compressor/EmergencyStop Color=Error Variant=Outlined
+:::::: HomeBlaze.Components.Control Path=/Demo/Compressor/GetDiagnostics
+::: Item
+:::: HomeBlaze.Components.Card Title="Water Pump" Icon=WaterDrop IconColor=Info Href="/browser/Demo/WaterPump"
+::::: HomeBlaze.Components.Switch Path=/Demo/WaterPump/IsPowered Label="Power" On=/Demo/WaterPump/PowerOn Off=/Demo/WaterPump/PowerOff
+::::: HomeBlaze.Components.Select Path=/Demo/WaterPump/Mode Label="Mode" Map=motormode
+::::: HomeBlaze.Components.Slider Path=/Demo/WaterPump/Load Label="Load"
+::::: HomeBlaze.Components.Gauge Path=/Demo/WaterPump/Load Label="Load" Size=Small
+::::: HeaderRight
+:::::: HomeBlaze.Components.Indicator Path=/Demo/WaterPump/Status Map=motorstate
+::::: Footer
+:::::: HomeBlaze.Components.OperationButton Path=/Demo/WaterPump/EmergencyStop Color=Error Variant=Outlined
+:::::: HomeBlaze.Components.Control Path=/Demo/WaterPump/GetDiagnostics
+::: Item
+:::: HomeBlaze.Components.Card Title="Conveyor" Icon=Settings IconColor=Secondary Href="/browser/Demo/Conveyor"
+::::: HomeBlaze.Components.Switch Path=/Demo/Conveyor/IsPowered Label="Power" On=/Demo/Conveyor/PowerOn Off=/Demo/Conveyor/PowerOff
+::::: HomeBlaze.Components.Select Path=/Demo/Conveyor/Mode Label="Mode" Map=motormode
+::::: HomeBlaze.Components.Slider Path=/Demo/Conveyor/Load Label="Load"
+::::: HomeBlaze.Components.Gauge Path=/Demo/Conveyor/Load Label="Load" Size=Small
+::::: HeaderRight
+:::::: HomeBlaze.Components.Indicator Path=/Demo/Conveyor/Status Map=motorstate
+::::: Footer
+:::::: HomeBlaze.Components.OperationButton Path=/Demo/Conveyor/EmergencyStop Color=Error Variant=Outlined
+:::::: HomeBlaze.Components.Control Path=/Demo/Conveyor/GetDiagnostics
+::: Item
+:::: HomeBlaze.Components.Card Title="Cooling Fan" Icon=AcUnit IconColor=Info Href="/browser/Demo/CoolingFan"
+::::: HomeBlaze.Components.Switch Path=/Demo/CoolingFan/IsPowered Label="Power" On=/Demo/CoolingFan/PowerOn Off=/Demo/CoolingFan/PowerOff
+::::: HomeBlaze.Components.Select Path=/Demo/CoolingFan/Mode Label="Mode" Map=motormode
+::::: HomeBlaze.Components.Slider Path=/Demo/CoolingFan/Load Label="Load"
+::::: HomeBlaze.Components.Gauge Path=/Demo/CoolingFan/Load Label="Load" Size=Small
+::::: HeaderRight
+:::::: HomeBlaze.Components.Indicator Path=/Demo/CoolingFan/Status Map=motorstate
+::::: Footer
+:::::: HomeBlaze.Components.OperationButton Path=/Demo/CoolingFan/EmergencyStop Color=Error Variant=Outlined
+:::::: HomeBlaze.Components.Control Path=/Demo/CoolingFan/GetDiagnostics
+::: Item
+:::: HomeBlaze.Components.Card Title="Exhaust Fan" Icon=Air IconColor=Info Href="/browser/Demo/ExhaustFan"
+::::: HomeBlaze.Components.Switch Path=/Demo/ExhaustFan/IsPowered Label="Power" On=/Demo/ExhaustFan/PowerOn Off=/Demo/ExhaustFan/PowerOff
+::::: HomeBlaze.Components.Select Path=/Demo/ExhaustFan/Mode Label="Mode" Map=motormode
+::::: HomeBlaze.Components.Slider Path=/Demo/ExhaustFan/Load Label="Load"
+::::: HomeBlaze.Components.Gauge Path=/Demo/ExhaustFan/Load Label="Load" Size=Small
+::::: HeaderRight
+:::::: HomeBlaze.Components.Indicator Path=/Demo/ExhaustFan/Status Map=motorstate
+::::: Footer
+:::::: HomeBlaze.Components.OperationButton Path=/Demo/ExhaustFan/EmergencyStop Color=Error Variant=Outlined
+:::::: HomeBlaze.Components.Control Path=/Demo/ExhaustFan/GetDiagnostics
+::
+
+Power, mode and load are runtime values of a motor: they last until the next restart, see [Basics](../Docs/administration/widgets/basics.md#control-writes). The emergency stop asks for confirmation, and **Power** brings the motor back. **Get Diagnostics** shows what the motor reports. Widgets of this section: [Switch](../Docs/administration/widgets/switch.md), [Select](../Docs/administration/widgets/select.md), [Slider](../Docs/administration/widgets/slider.md), [Gauge](../Docs/administration/widgets/gauge.md), [OperationButton](../Docs/administration/widgets/operation-button.md) and [Control](../Docs/administration/widgets/control.md).
+
+## Trends
+
+:: HomeBlaze.History.Blazor.HistoryChart#trends Range=1h Height=320
+::: Series Path=/Demo/Compressor/CurrentSpeed Label="Compressor"
+::: Series Path=/Demo/WaterPump/CurrentSpeed Label="Water pump"
+::: Series Path=/Demo/Conveyor/CurrentSpeed Label="Conveyor"
+::: Series Path=/Demo/CoolingFan/CurrentSpeed Label="Cooling fan"
+::: Series Path=/Demo/ExhaustFan/CurrentSpeed Label="Exhaust fan"
+::: Series Path=/Demo/Compressor/Status Label="Compressor status"
+::
+
+The speeds of the last hour as lines, and the status of the compressor as a band below them. Widget of this section: [HistoryChart](../Docs/administration/widgets/history-chart.md).
+
+## All Motors
+
+:: HomeBlaze.Components.SubjectTable#motortable Source=".." Type=HomeBlaze.Samples.Motor
+::: Column Property=Name Label="Motor"
+::: Column Property=Status Map=motorstate
+::: Column Property=CurrentSpeed Label="Speed"
+::: Column Property=Temperature
+::: Column Property=Load
+::: Column Property=Mode Map=motormode
+::
+
+One row for each motor of this folder. Widget of this section: [SubjectTable](../Docs/administration/widgets/subject-table.md).
 
 ## Motors
 
