@@ -213,8 +213,8 @@ else
             return;
         }
 
-        // Writes the head line and the json block only. A dialog that added or removed slot values would need the
-        // write-back of the saved page instead.
+        // Writes the head line and the json block only. When the graph has drifted from the text, the write-back
+        // can also have inserted or removed blocks, and writing the editor text below overwrites that.
         _currentContent = MarkdownBlockWriter.WriteConfiguration(
             _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject));
 

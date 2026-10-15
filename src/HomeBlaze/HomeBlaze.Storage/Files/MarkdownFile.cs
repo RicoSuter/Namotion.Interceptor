@@ -128,8 +128,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             var content = await reading;
             var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
-            // A full fence, because a volatile write lets later writes pass it: a write-back that sees a slot
-            // value this parse changed must also see the flag.
+            // A full fence, because a volatile write lets later writes pass it. With the fence before the read of
+            // the flag in WriteConfigurationAsync, a write-back that sees a slot value this parse changed also sees
+            // the flag.
             _isGraphAheadOfSnapshot = true;
             Thread.MemoryBarrier();
             var result = await _parser.ParseAsync(content, this, Children, cancellationToken);
@@ -146,8 +147,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             Content = content;
             Frontmatter = frontmatter;
 
-            // The load runs on the worker of the storage. Without the flow of that work, as for every assignment
-            // to the tree: lifecycle handlers run here for a page that is in the tree.
+            // Without the flow of the caller, which is the worker of the storage or a refused write-back, as for
+            // every assignment to the tree: lifecycle handlers run here for a page that is in the tree.
             using (ExecutionContext.SuppressFlow())
             {
                 Children = result.Children;
@@ -204,7 +205,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// when the page cannot keep the change or the change cannot be made without touching other content, when
     /// blocks would be inserted or removed while a reload runs or after one that failed, until the page has been
     /// read again, or when another write-back or a reload changed the page while this one ran. When the page cannot
-    /// keep the change, it is read again from its file before this returns, so the graph matches the text again.
+    /// keep the change, it is read again from its file before this returns, so the graph matches the text again unless that read fails.
     /// </remarks>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
@@ -226,13 +227,23 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
             // The graph keeps the refused values of a slot, and a later reload would give the blocks to them by
             // their position, so a value would take the block of another one.
-            await OnFileChangedAsync(cancellationToken);
+            try
+            {
+                await OnFileChangedAsync(cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                _parser.LogFailedReload(FullPath, exception);
+            }
+
             return false;
         }
 
         // After the graph was read and before anything is published: the blocks were compared with slot values
         // that a reload may have changed since the snapshot was parsed. A reload that published since then fails
-        // the exchange below.
+        // the exchange below. A full fence, because a volatile read lets the earlier reads of the graph pass it
+        // (see OnFileChangedAsync).
+        Thread.MemoryBarrier();
         if (write.HasInsertedOrRemovedBlocks && _isGraphAheadOfSnapshot)
         {
             _parser.LogRefusedWrite(FullPath, "Blocks cannot be inserted or removed until the page has been read again.");

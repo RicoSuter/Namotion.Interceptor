@@ -1,11 +1,13 @@
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Moq;
 using Namotion.Interceptor;
 using static HomeBlaze.Storage.Tests.Pages.TestTypeNames;
 
@@ -583,6 +585,41 @@ public class MarkdownSlotWriteBackTests
         Assert.Equal(
             new[] { "\n<p>one</p>\n", "\n<p>two</p>\n", "\n<p>three</p>\n" },
             board.Tiles.Select(tile => MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(tile.Child).Children)).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenThePageCannotBeReadAgainAfterARefusedWrite_ThenFalseIsReturnedAndTheFailureIsLogged()
+    {
+        // Arrange: the lone carriage return refuses the removal, and the second read of the file fails.
+        var (fixture, log) = await CreateFixtureWithLogAsync();
+        var storage = new Mock<IStorageContainer>();
+        storage
+            .SetupSequence(container => container.ReadBlobAsync("page.md", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MemoryStream(Encoding.UTF8.GetBytes(
+                $"intro\ra\n\n:: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n::\n")))
+            .ThrowsAsync(new IOException("The file cannot be read."));
+        var page = new MarkdownFile(
+            storage.Object,
+            "page.md",
+            fixture.Services.GetRequiredService<MarkdownContentParser>(),
+            fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>());
+        await page.OnFileChangedAsync(CancellationToken.None);
+        var board = (TestBoard)page.Children["board"];
+        board.Tiles = [];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Collection(
+            log.Entries,
+            entry => Assert.StartsWith("A change was not written to the page page.md:", entry.Message),
+            entry =>
+            {
+                Assert.Equal("Failed to reload the page page.md after a refused write", entry.Message);
+                Assert.IsType<IOException>(entry.Exception);
+            });
     }
 
     [Fact]

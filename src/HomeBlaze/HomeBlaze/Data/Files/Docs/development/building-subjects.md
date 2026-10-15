@@ -828,6 +828,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
 | `[Category]` on a property or method | Heading in the property panel, see [Categories](#categories) | No | Yes |
 | `[Slot]` | Content that a markdown page fills in | No | Rendered by the widget |
+| `[Configuration] + [Slot]` | A slot on a page that a configuration file can also hold, see [Content Slots](#content-slots) | Yes, as configuration in a `*.json` file, never on a page | Rendered by the widget |
 | `[DisplayName]`, `[Description]`, `[Category]`, `[SubjectIcon]` | Describe the type in the create dialog | No | In the create dialog |
 | `[ExcludeFromCreation]`, `[SingleInstance]` | Hide the type from the create dialog | No | No |
 
