@@ -72,7 +72,7 @@
         var commit = installation.Commit is { Length: >= 7 } value ? $" · {value[..7]}" : string.Empty;
         var built = installation.BuildTime is { } buildTime
             ? $" · built {buildTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}"
-            : " · development build";
+            : string.Empty;
         return installation.Version + commit + built;
     }
 
