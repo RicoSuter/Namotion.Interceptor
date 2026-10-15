@@ -156,12 +156,8 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Takes a subject of <see cref="AddPlainSubjectToRootAsync"/> out of the graph again.
-    /// </summary>
-    public void RemovePlainSubjectFromRoot(string name, PlainConfigurableSubject subject) => RemoveSubjectFromRoot(name, subject);
-
-    /// <summary>
-    /// Takes a subject of <see cref="AddSubjectToRootAsync{T}"/> out of the graph again.
+    /// Takes a subject of <see cref="AddSubjectToRootAsync{T}"/> or <see cref="AddPlainSubjectToRootAsync"/> out of the
+    /// graph again.
     /// </summary>
     public void RemoveSubjectFromRoot(string name, IInterceptorSubject subject)
     {

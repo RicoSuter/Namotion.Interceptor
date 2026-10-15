@@ -429,7 +429,7 @@ public class SubjectBrowserLayoutTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 
@@ -469,7 +469,7 @@ public class SubjectBrowserLayoutTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 
@@ -508,7 +508,7 @@ public class SubjectBrowserLayoutTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
             developerMode.SetEnabled(wasDeveloperMode);
         }
     }
