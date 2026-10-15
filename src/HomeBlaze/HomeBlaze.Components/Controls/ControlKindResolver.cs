@@ -27,9 +27,9 @@ public static class ControlKindResolver
             return ControlKind.OperationButton;
         }
 
-        // The property holds no operation here, so its setter alone decides what PropertyWriter.IsWritable would,
-        // without a read of the value that the chosen view reads anyway.
-        var isWritable = property.HasPublicSetter;
+        // The property holds no operation here, so a null current value decides the same as PropertyWriter.IsWritable
+        // would with the real value, without a tracked read of a value that the chosen view reads anyway.
+        var isWritable = PropertyWriter.IsWritable(property, currentValue: null);
         if (SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Boolean))
         {
             return isWritable ? ControlKind.Switch : ControlKind.Indicator;

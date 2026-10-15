@@ -20,6 +20,7 @@ public class ControlKindResolverTests
     [InlineData(nameof(ControlTargetSubject.Features), ControlKind.Value)]
     [InlineData(nameof(ControlTargetSubject.Speed), ControlKind.Slider)]
     [InlineData(nameof(ControlTargetSubject.Load), ControlKind.Slider)]
+    [InlineData(nameof(ControlTargetSubject.Pressure), ControlKind.Value)]
     [InlineData(nameof(ControlTargetSubject.Temperature), ControlKind.Value)]
     [InlineData(nameof(ControlTargetSubject.Name), ControlKind.Value)]
     public void WhenControlTargetsAPropertyOrAMethod_ThenItRendersTheWidgetForItsKind(string propertyName, ControlKind expected)

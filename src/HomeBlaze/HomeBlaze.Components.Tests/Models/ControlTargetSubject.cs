@@ -15,6 +15,8 @@ public partial class ControlTargetSubject
     {
         Speed_Minimum = 0;
         Speed_Maximum = 3000;
+        Pressure_Minimum = 0;
+        Pressure_Maximum = 100;
     }
 
     public partial bool IsOn { get; set; }
@@ -38,6 +40,14 @@ public partial class ControlTargetSubject
 
     [PropertyAttribute(nameof(Speed), KnownAttributes.Maximum)]
     public partial int Speed_Maximum { get; set; }
+
+    public partial int Pressure { get; internal set; }
+
+    [PropertyAttribute(nameof(Pressure), KnownAttributes.Minimum)]
+    public partial int Pressure_Minimum { get; set; }
+
+    [PropertyAttribute(nameof(Pressure), KnownAttributes.Maximum)]
+    public partial int Pressure_Maximum { get; set; }
 
     public partial double Temperature { get; set; }
 
