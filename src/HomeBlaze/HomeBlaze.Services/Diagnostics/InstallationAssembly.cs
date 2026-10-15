@@ -6,7 +6,7 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
-/// An assembly loaded by the installation. Only the owning <c>HomeBlazeInstallation</c> writes its values.
+/// An assembly loaded by the installation. Only the owning <see cref="HomeBlazeInstallation"/> writes its values.
 /// </summary>
 [DisplayName("Assembly")]
 [InterceptorSubject]

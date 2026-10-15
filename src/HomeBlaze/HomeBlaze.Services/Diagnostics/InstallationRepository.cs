@@ -8,7 +8,7 @@ namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
 /// The assemblies of the installation that come from one source repository. Only the owning
-/// <c>HomeBlazeInstallation</c> writes its values.
+/// <see cref="HomeBlazeInstallation"/> writes its values.
 /// </summary>
 [DisplayName("Repository")]
 [InterceptorSubject]
