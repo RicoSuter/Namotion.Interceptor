@@ -2,6 +2,55 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace HomeBlaze.History.Blazor
 {
+    public sealed class HistoryChartBand : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartBand>
+    {
+        public HistoryChartBand(string Label, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> Segments, string Background) { }
+        public string Background { get; init; }
+        public string Label { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> Segments { get; init; }
+    }
+    public sealed class HistoryChartData : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartData>
+    {
+        public HistoryChartData(System.DateTimeOffset From, System.DateTimeOffset To, System.TimeSpan? Bucket, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> StateLegend) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands { get; init; }
+        public System.TimeSpan? Bucket { get; init; }
+        public System.DateTimeOffset From { get; init; }
+        public bool IsEmpty { get; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> StateLegend { get; init; }
+        public System.DateTimeOffset To { get; init; }
+    }
+    public readonly struct HistoryChartLegendEntry : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartLegendEntry>
+    {
+        public HistoryChartLegendEntry(string Label, string Fill) { }
+        public string Fill { get; init; }
+        public string Label { get; init; }
+    }
+    public sealed class HistoryChartLine : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartLine>
+    {
+        public HistoryChartLine(string Label, string Color, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs) { }
+        public string Color { get; init; }
+        public string Label { get; init; }
+        public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs { get; init; }
+    }
+    public static class HistoryChartPalette
+    {
+        public const string NoValueFill = "#455A64";
+        public const string NoValueLabel = "(no value)";
+        public const string UnknownFill = "repeating-linear-gradient(45deg, #BDBDBD, #BDBDBD 4px, #E0E0E0 4px, #E0E0E0 8px)";
+        public const string UnknownLabel = "No data";
+        public static readonly System.Collections.Generic.IReadOnlyList<string> LineColors;
+        public static string BuildBandBackground(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> segments, System.DateTimeOffset from, System.DateTimeOffset to, HomeBlaze.History.Blazor.HistoryStatePalette palette) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> BuildStateLegend(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> bands, HomeBlaze.History.Blazor.HistoryStatePalette palette) { }
+        public static string DescribeSegment(HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment segment) { }
+        public static string GetLineColor(int index) { }
+    }
+    public sealed class HistoryStatePalette
+    {
+        public HistoryStatePalette() { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> Assigned { get; }
+        public string GetColor(string label) { }
+    }
     public static class PropertyHistoryChartModel
     {
         public const int MaxPoints = 1000;
