@@ -100,7 +100,9 @@
                     </div>
                 }
 
-                @* View or Inline mode - show page component. A click that no widget took clears the selection. *@
+                @* View or Inline mode - show page component. A click that no widget took clears the selection. In edit mode the
+                   area reaches down to the bottom of the window, so that a short page still has empty space to click; the 160px
+                   cover the app bar and the paddings of the layout, so that the area alone does not make the page scroll. *@
                 <div style="@(IsEditing ? "min-height: calc(100vh - 160px);" : null)" @onclick="ClearSelectionCallback">
                     <SubjectComponent @key="_componentKey"
                                       Subject="@_subject"
@@ -129,6 +131,9 @@
 
     private readonly WidgetSelection _widgetSelection = new();
 
+    // The selection is the receiver, so that a click on empty page space renders only the widget that it deselects.
+    private EventCallback<MouseEventArgs> _clearSelectionCallback;
+
     // How long the page waits after a change of the paths before it renders. Attaches and detaches come in bursts,
     // such as the subjects of a device that connects, and every one of them inside this time ends in the same render.
     // Nobody waits for a device that appears, so the time is long enough to keep a graph that changes all the time
@@ -154,6 +159,7 @@
         // The resolver caches an absolute path, so a widget or an expression reads no property on the way to its target
         // and the tracking scope does not see that an entry on the way appeared, was replaced or left.
         PathResolver.PathsChanged += OnPathsChanged;
+        _clearSelectionCallback = EventCallback.Factory.Create<MouseEventArgs>(_widgetSelection, _widgetSelection.Clear);
     }
 
     // Runs on the thread that changes the graph, inside the lock of the lifecycle interceptor.
@@ -200,7 +206,8 @@
         {
             _hotKeysContext = HotKeys.CreateContext()
                 .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None)
-                .Add(Code.Escape, OnEscape);
+                // Escape in a dialog belongs to the dialog, and the widget that the dialog edits stays selected.
+                .Add(Code.Escape, OnEscape, new HotKeyOptions { ExcludeSelector = ".mud-dialog-container, .mud-dialog-container *" });
         }
 
         return Task.CompletedTask;
@@ -264,7 +271,7 @@
 
     // Only an edited page has the handler, so that a click on a viewed page renders nothing.
     private EventCallback<MouseEventArgs> ClearSelectionCallback
-        => IsEditing ? EventCallback.Factory.Create<MouseEventArgs>(this, _widgetSelection.Clear) : default;
+        => IsEditing ? _clearSelectionCallback : default;
 
     private void OnEscape()
     {

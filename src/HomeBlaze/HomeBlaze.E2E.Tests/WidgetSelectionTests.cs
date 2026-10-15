@@ -71,6 +71,31 @@ public class WidgetSelectionTests
             .ToHaveValueAsync("selectionmotor/IsPowered", new() { Timeout = Timeout });
     }
 
+    [Fact]
+    public async Task WhenEscapeIsPressedInTheEditDialog_ThenTheWidgetStaysSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await GetWrapperOf(page, "switch").SelectWidgetAsync();
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog.GetByLabel("Path", new() { Exact = true }))
+            .ToHaveValueAsync("selectionmotor/IsPowered", new() { Timeout = Timeout });
+
+        // A text field ignores the shortcuts of the page anyway, so the focus is on a button of the dialog.
+        var closeButton = dialog.Locator(".mud-button-close");
+        await closeButton.FocusAsync();
+
+        // Act: the close comes after the key on the same connection, so the key has been handled once the dialog is gone.
+        await page.Keyboard.PressAsync("Escape");
+        await closeButton.ClickAsync();
+
+        // Assert
+        await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(GetWrapperOf(page, "switch")).ToHaveClassAsync(new Regex(@"\bselected\b"));
+        await Assertions.Expect(page.GetWidgetActionBar()).ToBeVisibleAsync();
+    }
+
     [Theory]
     [InlineData("switch")]
     [InlineData("slider")]
