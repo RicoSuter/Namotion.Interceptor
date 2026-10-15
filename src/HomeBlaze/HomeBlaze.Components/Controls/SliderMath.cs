@@ -95,6 +95,20 @@ public static class SliderMath
         var steps = Math.Round((value - range.Minimum) / step, MidpointRounding.AwayFromZero);
         var decimals = Math.Max(GetDecimals(step), GetDecimals(range.Minimum));
         var rounded = Math.Round(Math.Clamp(range.Minimum + steps * step, range.Minimum, range.Maximum), decimals);
+
+        // `decimals` comes from the step and the minimum, not the maximum, so a value clamped onto a fractional
+        // maximum can round up past it; step back onto the largest step from the minimum that still fits, and
+        // likewise step up to the minimum when the rounding went the other way.
+        if (rounded > range.Maximum)
+        {
+            var maximumSteps = Math.Floor((range.Maximum - range.Minimum) / step + WholeTolerance);
+            rounded = Math.Clamp(Math.Round(range.Minimum + maximumSteps * step, decimals), range.Minimum, range.Maximum);
+        }
+        else if (rounded < range.Minimum)
+        {
+            rounded = range.Minimum;
+        }
+
         if (!IsWholeNumber(propertyType))
         {
             return rounded;

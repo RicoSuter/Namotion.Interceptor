@@ -150,6 +150,28 @@ public class SliderMathTests
         Assert.Equal(2.5, value);
     }
 
+    [Theory]
+    [InlineData(typeof(double))]
+    [InlineData(typeof(decimal))]
+    public void WhenRoundingPushesAboveAFractionalMaximum_ThenTheValueStepsBackInsideTheRange(Type propertyType)
+    {
+        // Act
+        var value = SliderMath.ToPropertyValue(0.6, new ValueRange(0, 0.6), 1, 1, propertyType);
+
+        // Assert
+        Assert.Equal(0, value);
+    }
+
+    [Fact]
+    public void WhenStepIsAFractionForADecimalProperty_ThenTheValueKeepsNoBinaryRest()
+    {
+        // Act
+        var value = SliderMath.ToPropertyValue(0.3, new ValueRange(0, 1), 0.1, 1, typeof(decimal));
+
+        // Assert
+        Assert.Equal(0.3, value);
+    }
+
     [Fact]
     public void WhenRangeIsScaled_ThenTheEndsKeepNoBinaryRest()
     {
