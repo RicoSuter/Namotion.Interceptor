@@ -30,7 +30,7 @@ public partial class HomeBlazeInstallation
     [Operation(Title = "Check for updates", Description = "Asks GitHub for a newer version now.", Icon = "Update")]
     public void CheckForUpdates()
     {
-        if (GetUpdateCheckUnavailableReason() is { } reason)
+        if (_updateCheckUnavailableReason is { } reason)
         {
             throw new InvalidOperationException(reason);
         }
@@ -51,7 +51,7 @@ public partial class HomeBlazeInstallation
             }
         }
 
-        if (!_updateSchedule.TryStartManualCheck(_timeProvider.GetUtcNow()))
+        if (!_updateSchedule.TryStartManualCheck(_timeProvider))
         {
             throw new InvalidOperationException("Updates were checked less than a minute ago.");
         }
@@ -125,30 +125,20 @@ public partial class HomeBlazeInstallation
         return _updateSchedule.GetDelayAfterFailure(retryAfter);
     }
 
-    private string? GetUpdateCheckUnavailableReason()
-    {
-        if (Channel == InstallationChannel.Development)
-        {
-            return "Not available for development builds";
-        }
-
-        if (Channel == InstallationChannel.Edge)
-        {
-            return "Not available for edge builds";
-        }
-
-        if (_releaseClient is null)
-        {
-            return RepositoryUrl is { } repositoryUrl
-                ? $"Not supported for {repositoryUrl.Host}"
-                : "Not available without a repository URL";
-        }
-
-        return null;
-    }
+    private static string? GetUpdateCheckUnavailableReason(InstallationChannel channel, Uri? repositoryUrl, GitHubReleaseClient? releaseClient) =>
+        channel == InstallationChannel.Development ? "Not available for development builds" :
+        channel == InstallationChannel.Edge ? "Not available for edge builds" :
+        releaseClient is not null ? null :
+        repositoryUrl is not null ? $"Not supported for {repositoryUrl.Host}" :
+        "Not available without a repository URL";
 
     private async Task RunUpdateChecksAsync(CancellationToken stoppingToken)
     {
+        if (_updateCheckUnavailableReason is not null)
+        {
+            return;
+        }
+
         // The due time is measured on the monotonic clock, so a wall clock that jumps does not move it.
         var lastCheckTimestamp = _timeProvider.GetTimestamp();
 
@@ -160,8 +150,7 @@ public partial class HomeBlazeInstallation
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var isScheduled = UpdateCheckEnabled && GetUpdateCheckUnavailableReason() is null;
-            var delay = UpdateSchedule.GetWaitDelay(isScheduled ? GetRemainingDelay() : null);
+            var delay = UpdateSchedule.GetWaitDelay(UpdateCheckEnabled ? GetRemainingDelay() : null);
             var isSignaled = await WaitAsync(_updateSignal, delay, stoppingToken);
             if (stoppingToken.IsCancellationRequested)
             {
@@ -170,8 +159,7 @@ public partial class HomeBlazeInstallation
 
             // A configuration change, or a wait shortened to the hourly re-read, computes the delay again.
             var isManual = Interlocked.Exchange(ref _isManualCheckRequested, 0) == 1;
-            if (!isManual &&
-                (!UpdateCheckEnabled || isSignaled || GetUpdateCheckUnavailableReason() is not null || GetRemainingDelay() > TimeSpan.Zero))
+            if (!isManual && (!UpdateCheckEnabled || isSignaled || GetRemainingDelay() > TimeSpan.Zero))
             {
                 continue;
             }

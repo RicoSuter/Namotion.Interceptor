@@ -27,6 +27,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
 {
     private readonly DeveloperModeService _developerModeService;
     private readonly GitHubReleaseClient? _releaseClient;
+    private readonly string? _updateCheckUnavailableReason;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
 
@@ -241,7 +242,8 @@ public partial class HomeBlazeInstallation : BackgroundService,
         LatestReleaseDate = null;
         LatestReleaseUrl = null;
         LastUpdateCheck = null;
-        UpdateCheckStatus = GetUpdateCheckUnavailableReason();
+        _updateCheckUnavailableReason = GetUpdateCheckUnavailableReason(Channel, RepositoryUrl, _releaseClient);
+        UpdateCheckStatus = _updateCheckUnavailableReason;
 
         Repositories = new Dictionary<string, InstallationRepository>(StringComparer.Ordinal);
 

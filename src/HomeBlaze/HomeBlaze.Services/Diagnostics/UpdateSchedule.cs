@@ -19,7 +19,7 @@ internal sealed class UpdateSchedule
 
     private readonly Lock _manualCheckLock = new();
     private int _failureCount;
-    private DateTimeOffset? _lastManualCheck;
+    private long? _lastManualCheckTimestamp;
 
     /// <summary>
     /// Returns a uniformly random delay from FirstCheckMinimumDelay (inclusive) to FirstCheckMaximumDelay (exclusive).
@@ -93,24 +93,19 @@ internal sealed class UpdateSchedule
     }
 
     /// <summary>
-    /// Returns whether a manual check may start, at most once per ManualCheckThrottle.
+    /// Returns whether a manual check may start, at most once per ManualCheckThrottle on the monotonic clock.
     /// </summary>
-    public bool TryStartManualCheck(DateTimeOffset now)
+    public bool TryStartManualCheck(TimeProvider timeProvider)
     {
         lock (_manualCheckLock)
         {
-            if (_lastManualCheck is { } last)
+            var now = timeProvider.GetTimestamp();
+            if (_lastManualCheckTimestamp is { } last && timeProvider.GetElapsedTime(last, now) < ManualCheckThrottle)
             {
-                var elapsed = now - last;
-
-                // After the wall clock jumped back, waiting for it to catch up could block manual checks for hours.
-                if (elapsed >= TimeSpan.Zero && elapsed < ManualCheckThrottle)
-                {
-                    return false;
-                }
+                return false;
             }
 
-            _lastManualCheck = now;
+            _lastManualCheckTimestamp = now;
             return true;
         }
     }

@@ -185,31 +185,18 @@ public class UpdateScheduleTests
     {
         // Arrange
         var schedule = new UpdateSchedule();
-        var now = new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
+        var timeProvider = new TestTimeProvider(new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero));
 
         // Act
-        var first = schedule.TryStartManualCheck(now);
-        var second = schedule.TryStartManualCheck(now.AddSeconds(30));
-        var third = schedule.TryStartManualCheck(now.AddSeconds(61));
+        var first = schedule.TryStartManualCheck(timeProvider);
+        timeProvider.Advance(TimeSpan.FromSeconds(30));
+        var second = schedule.TryStartManualCheck(timeProvider);
+        timeProvider.Advance(TimeSpan.FromSeconds(31));
+        var third = schedule.TryStartManualCheck(timeProvider);
 
         // Assert
         Assert.True(first);
         Assert.False(second);
         Assert.True(third);
-    }
-
-    [Fact]
-    public void WhenTheClockJumpsBackward_ThenAManualCheckIsStillAllowed()
-    {
-        // Arrange
-        var schedule = new UpdateSchedule();
-        var now = new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
-        schedule.TryStartManualCheck(now);
-
-        // Act
-        var result = schedule.TryStartManualCheck(now.AddSeconds(-30));
-
-        // Assert
-        Assert.True(result);
     }
 }
