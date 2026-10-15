@@ -38,6 +38,7 @@ public class PageWidgetCreationTests
     [InlineData(typeof(Control), "Control")]
     [InlineData(typeof(Gauge), "Gauge")]
     [InlineData(typeof(SubjectTable), "Subject table")]
+    [InlineData(typeof(Responsive), "Responsive")]
     public void WhenWidgetIsDescribed_ThenItIsInTheDashboardGroupWithAnIconOfItsOwn(Type type, string expectedDisplayName)
     {
         // Arrange

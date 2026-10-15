@@ -21,6 +21,7 @@ The reference of each widget has its arguments, its slots and its samples. Some 
 | [GridLayout](../page-widgets.md#gridlayout) | A grid with a fixed number of rows and columns |
 | [CanvasLayout](../page-widgets.md#canvaslayout) | An area on which subjects are placed at any position |
 | [ExpansionPanels](../page-widgets.md#expansionpanels) | Page content in panels that open and close |
+| [Responsive](responsive.md) | Shows its content only on phones, tablets or desktops |
 
 ## Content
 

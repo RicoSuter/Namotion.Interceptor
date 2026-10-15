@@ -1,0 +1,19 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Responsive))]
+@implements ISubjectComponent
+
+@{
+    var responsive = Subject as Responsive;
+}
+
+@if (responsive is not null)
+{
+    @* Not MudHidden, which renders nothing on other screens: the content is rendered and kept live everywhere, and the classes alone hide it, without JavaScript. *@
+    <div class="@Responsive.GetCssClasses(responsive.Show)" data-testid="responsive">
+        <SubjectComponent Subject="@responsive.Content" Type="SubjectComponentType.Widget" />
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}
