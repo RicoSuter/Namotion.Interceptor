@@ -4,7 +4,6 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
-using Namotion.Interceptor.Registry.Abstractions;
 using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -257,9 +256,9 @@ public class ValueReaderTests
         var property = ValueReader.ResolveProperty(resolver, page, "meter/IsOn");
 
         // Act
-        var fromProperty = ValueReader.Read(resolver, page, property, "onoff", null);
+        var fromProperty = ValueReader.ReadResolved(resolver, page, property, "onoff", null);
         var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
-        var withoutProperty = ValueReader.Read(resolver, page, (RegisteredSubjectProperty?)null, "nomap", null);
+        var withoutProperty = ValueReader.ReadResolved(resolver, page, null, "nomap", null);
 
         // Assert
         Assert.Equal(fromPath, fromProperty);

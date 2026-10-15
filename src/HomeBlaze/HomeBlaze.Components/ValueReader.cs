@@ -41,14 +41,14 @@ public static class ValueReader
 
     /// <summary>
     /// Reads a property that <see cref="ResolveProperty"/> already resolved and applies the map, with the same
-    /// text, colour and missing value as <see cref="Read(SubjectPathResolver, IInterceptorSubject, string?, string?, ITimeZoneDisplay?)"/> gives for its path.
+    /// text, colour and missing value as <see cref="Read"/> gives for its path.
     /// </summary>
     /// <param name="resolver">The resolver of the map.</param>
     /// <param name="widget">The subject the map is relative to, usually the widget itself.</param>
     /// <param name="property">The property, or null for a missing reading.</param>
     /// <param name="map">The name or path of a <see cref="ValueMap"/>, or null or empty for none.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
-    public static ValueReading Read(
+    public static ValueReading ReadResolved(
         SubjectPathResolver resolver,
         IInterceptorSubject widget,
         RegisteredSubjectProperty? property,
@@ -61,7 +61,7 @@ public static class ValueReader
 
     /// <summary>
     /// Reads the property with the name on a subject and applies the map, with the same text, colour and
-    /// missing value as <see cref="Read(SubjectPathResolver, IInterceptorSubject, string?, string?, ITimeZoneDisplay?)"/> gives for a path.
+    /// missing value as <see cref="Read"/> gives for a path.
     /// </summary>
     /// <param name="resolver">The resolver of the map.</param>
     /// <param name="widget">The subject the map is relative to, usually the widget or its slot block.</param>
