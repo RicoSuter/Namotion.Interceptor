@@ -18,6 +18,10 @@ namespace HomeBlaze.Samples;
 [InterceptorSubject]
 public partial class Motor : BackgroundService, IConfigurable, ITemperatureSensor, ITitleProvider, IIconProvider
 {
+    // Serializes the read-modify-write of a simulation step with EmergencyStop, so a step that read the speed
+    // before the stop cannot overwrite it afterwards.
+    private readonly Lock _simulationLock = new();
+
     // Configuration (persisted to JSON)
 
     /// <summary>
@@ -97,6 +101,34 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     [Category("Speed")]
     public bool IsAtTargetSpeed => Math.Abs(SpeedDelta) < 50;
 
+    // Runtime controls (public setters, not persisted)
+
+    /// <summary>
+    /// Whether the motor is powered. While not powered the simulation slows it down to 0 and keeps the target speed.
+    /// </summary>
+    [State("Powered", Position = 7)]
+    public partial bool IsPowered { get; set; }
+
+    /// <summary>
+    /// Operating mode, which scales the speed the simulation aims at.
+    /// </summary>
+    [State(Position = 8)]
+    public partial MotorMode Mode { get; set; }
+
+    /// <summary>
+    /// Mechanical load from 0 to 1, which raises the simulated temperature.
+    /// </summary>
+    [State(Unit = StateUnit.Percent, Position = 9)]
+    public partial double Load { get; set; }
+
+    [Derived]
+    [PropertyAttribute(nameof(PowerOn), KnownAttributes.IsEnabled)]
+    public bool PowerOn_IsEnabled => !IsPowered;
+
+    [Derived]
+    [PropertyAttribute(nameof(PowerOff), KnownAttributes.IsEnabled)]
+    public bool PowerOff_IsEnabled => IsPowered;
+
     public Motor()
     {
         Name = string.Empty;
@@ -105,6 +137,9 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
         TargetSpeed_Maximum = 3000;
         SimulationInterval = TimeSpan.FromSeconds(1);
         Status = MotorStatus.Stopped;
+        IsPowered = true;
+        Mode = MotorMode.Normal;
+        Load = 0.5;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -112,28 +147,11 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
         Status = MotorStatus.Starting;
         await Task.Delay(500, stoppingToken); // Simulate startup delay
 
-        Status = MotorStatus.Running;
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // Simulate speed approaching target
-                if (CurrentSpeed < TargetSpeed)
-                {
-                    CurrentSpeed = Math.Min(CurrentSpeed + 50, TargetSpeed);
-                }
-                else if (CurrentSpeed > TargetSpeed)
-                {
-                    CurrentSpeed = Math.Max(CurrentSpeed - 50, TargetSpeed);
-                }
-
-                // Simulate temperature based on speed
-                var baseTemp = 25.0;
-                var speedFactor = CurrentSpeed / 1000.0 * 20.0; // Higher speed = more heat
-                var noise = (Random.Shared.NextDouble() - 0.5) * 2.0; // ±1°C noise
-                Temperature = (decimal)(baseTemp + speedFactor + noise);
-
+                SimulateStep();
                 await Task.Delay(SimulationInterval, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -152,6 +170,64 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
 
         Status = MotorStatus.Stopped;
         Temperature = 25m;
+    }
+
+    /// <summary>
+    /// Moves the current speed one step towards <see cref="GetSimulationTarget"/> and updates status and temperature.
+    /// </summary>
+    internal void SimulateStep()
+    {
+        lock (_simulationLock)
+        {
+            // Read once, so speed and status of this step agree when the power is switched concurrently.
+            var isPowered = IsPowered;
+            var target = isPowered ? GetPoweredSimulationTarget() : 0;
+
+            var currentSpeed = CurrentSpeed;
+            if (currentSpeed < target)
+            {
+                currentSpeed = Math.Min(currentSpeed + 50, target);
+            }
+            else if (currentSpeed > target)
+            {
+                currentSpeed = Math.Max(currentSpeed - 50, target);
+            }
+
+            CurrentSpeed = currentSpeed;
+
+            if (isPowered)
+            {
+                Status = Status is MotorStatus.Stopped or MotorStatus.Stopping ? MotorStatus.Starting : MotorStatus.Running;
+            }
+            else
+            {
+                Status = currentSpeed > 0 ? MotorStatus.Stopping : MotorStatus.Stopped;
+            }
+
+            var baseTemperature = 25.0;
+            var speedHeat = currentSpeed / 1000.0 * 20.0;
+            var loadHeat = Load * 10.0;
+            var noise = (Random.Shared.NextDouble() - 0.5) * 2.0; // ±1°C noise
+            Temperature = (decimal)(baseTemperature + speedHeat + loadHeat + noise);
+        }
+    }
+
+    /// <summary>
+    /// Gets the speed the simulation aims at: 0 while not powered, else the target speed scaled by the mode and
+    /// clamped to the range of the target speed.
+    /// </summary>
+    internal int GetSimulationTarget() => IsPowered ? GetPoweredSimulationTarget() : 0;
+
+    private int GetPoweredSimulationTarget()
+    {
+        var modePercent = Mode switch
+        {
+            MotorMode.Eco => 60,
+            MotorMode.Boost => 120,
+            _ => 100
+        };
+
+        return (int)Math.Clamp((long)TargetSpeed * modePercent / 100, TargetSpeed_Minimum, TargetSpeed_Maximum);
     }
 
     /// <summary>
@@ -178,15 +254,30 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     }
 
     /// <summary>
-    /// Immediately stops the motor by setting target speed to zero.
+    /// Immediately stops the motor by powering it off. The target speed is kept, so <see cref="PowerOn"/> recovers it.
     /// </summary>
     [Operation(Title = "Emergency Stop", Description = "Immediately stops the motor", Icon = "Stop", Position = 2, RequiresConfirmation = true)]
     public void EmergencyStop()
     {
-        TargetSpeed = 0;
-        CurrentSpeed = 0;
-        Status = MotorStatus.Stopped;
+        lock (_simulationLock)
+        {
+            IsPowered = false;
+            CurrentSpeed = 0;
+            Status = MotorStatus.Stopped;
+        }
     }
+
+    /// <summary>
+    /// Powers the motor on, so it speeds up to its target again.
+    /// </summary>
+    [Operation(Title = "Power On", Icon = "PowerSettingsNew", Position = 4)]
+    public void PowerOn() => IsPowered = true;
+
+    /// <summary>
+    /// Powers the motor off, so it slows down to 0 and keeps its target speed.
+    /// </summary>
+    [Operation(Title = "Power Off", Icon = "PowerOff", Position = 5)]
+    public void PowerOff() => IsPowered = false;
 
     /// <summary>
     /// Gets the current motor diagnostics.
@@ -208,7 +299,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// <summary>
     /// Simulates running for a specified duration.
     /// </summary>
-    [Operation(Title = "Run Test", Description = "Runs the motor at specified speed for a duration", Icon = "PlayArrow", Position = 4)]
+    [Operation(Title = "Run Test", Description = "Runs the motor at specified speed for a duration", Icon = "PlayArrow", Position = 6)]
     [Category("Speed")]
     public async Task RunTestAsync(int speed, int durationSeconds)
     {
@@ -241,4 +332,14 @@ public enum MotorStatus
     Running,
     Stopping,
     Error
+}
+
+/// <summary>
+/// Operating mode of a motor, which scales the speed it aims at.
+/// </summary>
+public enum MotorMode
+{
+    Eco,
+    Normal,
+    Boost
 }
