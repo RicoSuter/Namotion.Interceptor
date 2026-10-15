@@ -174,7 +174,7 @@ namespace HomeBlaze.History.Blazor
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
-        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override void OnAfterRender(bool firstRender) { }
         protected override void OnInitialized() { }
     }
     public sealed class HistoryRefreshThrottle : System.IDisposable

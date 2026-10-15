@@ -22,6 +22,6 @@ public static class HistoryPaths
     /// Joins a canonical subject path and a property name: "/Temperature" for the root subject "/",
     /// "/Child/Temperature" for "/Child".
     /// </summary>
-    public static string Join(string subjectPath, string propertyName) =>
+    internal static string Join(string subjectPath, string propertyName) =>
         subjectPath == "/" ? "/" + propertyName : subjectPath + "/" + propertyName;
 }

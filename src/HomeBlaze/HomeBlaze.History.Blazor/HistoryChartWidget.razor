@@ -115,13 +115,14 @@
         PathResolver.PathsChanged += OnPathsChanged;
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override void OnAfterRender(bool firstRender)
     {
         // The first query runs after the first interactive render, never while prerendering. A changed
         // configuration queries at once rather than at the end of the next window.
         if (firstRender || _isQueryOutdated)
         {
-            await RefreshAsync();
+            _isQueryOutdated = false;
+            QueueRefresh();
             return;
         }
 
@@ -212,10 +213,14 @@
     // and the page renders after a change of the paths.
     private void OnPathsChanged() => Interlocked.Increment(ref _pathsVersion);
 
-    // Runs on a timer thread under the lock of the throttle. Queued instead of calling InvokeAsync here, because InvokeAsync
-    // runs inline on an idle dispatcher: the query would run under that lock and in the execution context of the render
-    // that armed the throttle, which can hold the read recorder of the page tracking scope.
-    private void OnRefreshDue()
+    // Runs on a timer thread under the lock of the throttle (see the remarks of HistoryRefreshThrottle).
+    private void OnRefreshDue() => QueueRefresh();
+
+    // Every query starts on the thread pool without an execution context, never inline: after a render and in the
+    // throttle callback the execution context is the one of a render, which can hold the read recorder of the page
+    // tracking scope, and InvokeAsync runs inline on an idle dispatcher, so the query would also run under the lock
+    // of the throttle.
+    private void QueueRefresh()
     {
         if (_isDisposed)
         {
