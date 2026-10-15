@@ -12,11 +12,12 @@
         <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; flex:0 0 auto;">
             <MudSelect T="int" Value="_rangeIndex" ValueChanged="OnRangeChanged" Label="Range" Dense="true" Style="min-width:160px;"
                        HelperText="@_rangeHint">
-                @for (var index = 0; index < Presets.Length; index++)
+                @for (var index = 0; index < PropertyHistoryChartModel.RangePresets.Count; index++)
                 {
                     var captured = index;
-                    <MudSelectItem T="int" Value="captured">@Presets[captured].Label</MudSelectItem>
+                    <MudSelectItem T="int" Value="captured">@PropertyHistoryChartModel.RangePresets[captured].Label</MudSelectItem>
                 }
+                <MudSelectItem T="int" Value="CustomRangeIndex">Custom</MudSelectItem>
             </MudSelect>
 
             @if (_useCustom)
@@ -147,15 +148,8 @@
     [Parameter] public bool IsCumulative { get; set; }
     [Parameter] public bool IsDiscreteState { get; set; }
 
-    private static readonly (string Label, TimeSpan? Range)[] Presets =
-    {
-        ("Last hour", TimeSpan.FromHours(1)),
-        ("Last 6 hours", TimeSpan.FromHours(6)),
-        ("Last 24 hours", TimeSpan.FromHours(24)),
-        ("Last 7 days", TimeSpan.FromDays(7)),
-        ("Last 30 days", TimeSpan.FromDays(30)),
-        ("Custom", null),
-    };
+    // The entry after the presets; it shows the date pickers.
+    private static readonly int CustomRangeIndex = PropertyHistoryChartModel.RangePresets.Count;
 
     private int _rangeIndex; // default: last hour (index 0), so a fresh system shows recent data
     private bool _useCustom;
@@ -167,10 +161,9 @@
 
     private int _periodIndex; // default: Auto (first entry)
 
-    // "None (raw samples)": the entry with no bucket that is not Auto.
     private static readonly int RawPeriodIndex = PropertyHistoryChartModel.Periods
         .Select((period, index) => (period, index))
-        .First(entry => !entry.period.IsAuto && entry.period.Bucket is null)
+        .First(entry => entry.period.IsRaw)
         .index;
 
     // Short helper lines under each select, refreshed in LoadAsync so the controls row stays balanced.
@@ -178,10 +171,8 @@
     private string? _aggregationHint;
     private string? _periodHint;
 
-    // A raw (None) period has no bucket and is not Auto; aggregation does not apply to raw samples.
-    private bool IsRawPeriodSelected =>
-        !PropertyHistoryChartModel.Periods[_periodIndex].IsAuto
-        && PropertyHistoryChartModel.Periods[_periodIndex].Bucket is null;
+    // A raw period has no bucket; aggregation does not apply to raw samples.
+    private bool IsRawPeriodSelected => PropertyHistoryChartModel.Periods[_periodIndex].IsRaw;
 
     private bool _loading;
     private string? _error;
@@ -264,7 +255,7 @@
     private async Task OnRangeChanged(int index)
     {
         _rangeIndex = index;
-        _useCustom = Presets[index].Range is null;
+        _useCustom = index == CustomRangeIndex;
         await LoadAsync();
     }
 
@@ -307,7 +298,7 @@
             else
             {
                 to = DateTimeOffset.UtcNow;
-                from = to - Presets[_rangeIndex].Range!.Value;
+                from = to - PropertyHistoryChartModel.RangePresets[_rangeIndex].Range;
             }
 
             if (to <= from)

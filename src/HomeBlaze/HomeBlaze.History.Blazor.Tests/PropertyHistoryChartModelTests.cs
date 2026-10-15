@@ -547,4 +547,98 @@ public class PropertyHistoryChartModelTests
         HistoryAggregations.TimeWeightedAverage, HistoryAggregations.Minimum, HistoryAggregations.Maximum,
         HistoryAggregations.Sum, HistoryAggregations.Count, HistoryAggregations.StandardDeviation
     };
+
+    [Fact]
+    public void WhenRangePresetsAreListed_ThenTheyGoFromTheShortestToTheLongest()
+    {
+        // Act
+        var shortNames = PropertyHistoryChartModel.RangePresets.Select(preset => preset.ShortName).ToArray();
+
+        // Assert
+        Assert.Equal(["1h", "6h", "24h", "7d", "30d"], shortNames);
+        Assert.Equal("Last hour", PropertyHistoryChartModel.RangePresets[0].Label);
+    }
+
+    [Theory]
+    [InlineData("1h", 1)]
+    [InlineData("6h", 6)]
+    [InlineData("24h", 24)]
+    [InlineData("7d", 168)]
+    [InlineData("30d", 720)]
+    [InlineData("24H", 24)]
+    public void WhenRangeShortNameIsKnown_ThenTryGetRangeReturnsItsSpan(string shortName, int expectedHours)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetRange(shortName, out var range);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal(TimeSpan.FromHours(expectedHours), range);
+    }
+
+    [Theory]
+    [InlineData("2h")]
+    [InlineData("Custom")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void WhenRangeShortNameIsUnknown_ThenTryGetRangeFails(string? shortName)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetRange(shortName, out _);
+
+        // Assert
+        Assert.False(found);
+    }
+
+    [Theory]
+    [InlineData("Auto", true, false, null)]
+    [InlineData("Raw", false, true, null)]
+    [InlineData("raw", false, true, null)]
+    [InlineData("1s", false, false, 1)]
+    [InlineData("60s", false, false, 60)]
+    [InlineData("5m", false, false, 300)]
+    [InlineData("24h", false, false, 86400)]
+    public void WhenPeriodShortNameIsKnown_ThenTryGetPeriodReturnsThePeriod(
+        string shortName, bool expectedIsAuto, bool expectedIsRaw, int? expectedBucketSeconds)
+    {
+        // Arrange
+        TimeSpan? expectedBucket = expectedBucketSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null;
+
+        // Act
+        var found = PropertyHistoryChartModel.TryGetPeriod(shortName, out var period);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal(expectedIsAuto, period.IsAuto);
+        Assert.Equal(expectedIsRaw, period.IsRaw);
+        Assert.Equal(expectedBucket, period.Bucket);
+    }
+
+    [Theory]
+    [InlineData("2m")]
+    [InlineData("None")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void WhenPeriodShortNameIsUnknown_ThenTryGetPeriodFails(string? shortName)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetPeriod(shortName, out _);
+
+        // Assert
+        Assert.False(found);
+    }
+
+    [Fact]
+    public void WhenEveryPeriodIsLookedUpByItsShortName_ThenItIsFoundAndTheNamesAreDistinct()
+    {
+        // Act & Assert
+        Assert.All(PropertyHistoryChartModel.Periods, period =>
+        {
+            Assert.True(PropertyHistoryChartModel.TryGetPeriod(period.ShortName, out var match));
+            Assert.Equal(period, match);
+        });
+        Assert.Equal(
+            PropertyHistoryChartModel.Periods.Count,
+            PropertyHistoryChartModel.Periods.Select(period => period.ShortName.ToUpperInvariant()).Distinct().Count());
+    }
 }

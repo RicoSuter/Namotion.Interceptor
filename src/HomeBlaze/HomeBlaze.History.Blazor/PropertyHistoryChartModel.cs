@@ -5,8 +5,9 @@ using HomeBlaze.History.Abstractions;
 namespace HomeBlaze.History.Blazor;
 
 /// <summary>
-/// Pure presentation logic for the property-history chart dialog: auto bucket selection, aggregation
-/// gating, and gap-run splitting. No MudBlazor or graph dependency, so it is fully unit-testable.
+/// Pure presentation logic for history charts (the property history dialog and the history chart widget):
+/// range presets, auto bucket selection, aggregation gating, state segments and gap-run splitting. No
+/// MudBlazor or graph dependency, so it is fully unit-testable.
 /// </summary>
 public static class PropertyHistoryChartModel
 {
@@ -30,29 +31,83 @@ public static class PropertyHistoryChartModel
     /// <summary>
     /// A user-selectable aggregation period for the chart. <see cref="IsAuto"/> entries compute their bucket from the
     /// current range (so they have no fixed <see cref="Bucket"/>); a null <see cref="Bucket"/> on a non-auto entry
-    /// means a raw query (individual samples, no aggregation).
+    /// means a raw query (individual samples, no aggregation). <see cref="ShortName"/> is the name a page writes.
     /// </summary>
-    public readonly record struct ChartPeriod(string Label, TimeSpan? Bucket, bool IsAuto);
+    public readonly record struct ChartPeriod(string ShortName, string Label, TimeSpan? Bucket, bool IsAuto)
+    {
+        /// <summary>Gets whether the period asks for raw samples.</summary>
+        public bool IsRaw => !IsAuto && Bucket is null;
+    }
 
     /// <summary>
     /// The selectable periods in display order: Auto (range-derived bucket), None (raw samples), then fixed bucket sizes.
     /// </summary>
     public static readonly IReadOnlyList<ChartPeriod> Periods = new[]
     {
-        new ChartPeriod("Auto", null, IsAuto: true),
-        new ChartPeriod("None (raw samples)", null, IsAuto: false),
-        new ChartPeriod("1s", TimeSpan.FromSeconds(1), IsAuto: false),
-        new ChartPeriod("10s", TimeSpan.FromSeconds(10), IsAuto: false),
-        new ChartPeriod("60s", TimeSpan.FromSeconds(60), IsAuto: false),
-        new ChartPeriod("5m", TimeSpan.FromMinutes(5), IsAuto: false),
-        new ChartPeriod("10m", TimeSpan.FromMinutes(10), IsAuto: false),
-        new ChartPeriod("15m", TimeSpan.FromMinutes(15), IsAuto: false),
-        new ChartPeriod("1h", TimeSpan.FromHours(1), IsAuto: false),
-        new ChartPeriod("4h", TimeSpan.FromHours(4), IsAuto: false),
-        new ChartPeriod("6h", TimeSpan.FromHours(6), IsAuto: false),
-        new ChartPeriod("12h", TimeSpan.FromHours(12), IsAuto: false),
-        new ChartPeriod("24h", TimeSpan.FromHours(24), IsAuto: false),
+        new ChartPeriod("Auto", "Auto", null, IsAuto: true),
+        new ChartPeriod("Raw", "None (raw samples)", null, IsAuto: false),
+        new ChartPeriod("1s", "1s", TimeSpan.FromSeconds(1), IsAuto: false),
+        new ChartPeriod("10s", "10s", TimeSpan.FromSeconds(10), IsAuto: false),
+        new ChartPeriod("60s", "60s", TimeSpan.FromSeconds(60), IsAuto: false),
+        new ChartPeriod("5m", "5m", TimeSpan.FromMinutes(5), IsAuto: false),
+        new ChartPeriod("10m", "10m", TimeSpan.FromMinutes(10), IsAuto: false),
+        new ChartPeriod("15m", "15m", TimeSpan.FromMinutes(15), IsAuto: false),
+        new ChartPeriod("1h", "1h", TimeSpan.FromHours(1), IsAuto: false),
+        new ChartPeriod("4h", "4h", TimeSpan.FromHours(4), IsAuto: false),
+        new ChartPeriod("6h", "6h", TimeSpan.FromHours(6), IsAuto: false),
+        new ChartPeriod("12h", "12h", TimeSpan.FromHours(12), IsAuto: false),
+        new ChartPeriod("24h", "24h", TimeSpan.FromHours(24), IsAuto: false),
     };
+
+    /// <summary>
+    /// A range preset: the time span that ends now.
+    /// </summary>
+    /// <param name="ShortName">The name a page writes, for example "24h".</param>
+    /// <param name="Label">The text of the range select.</param>
+    /// <param name="Range">The time span.</param>
+    public readonly record struct RangePreset(string ShortName, string Label, TimeSpan Range);
+
+    /// <summary>The range presets in display order, from the shortest to the longest.</summary>
+    public static readonly IReadOnlyList<RangePreset> RangePresets = new[]
+    {
+        new RangePreset("1h", "Last hour", TimeSpan.FromHours(1)),
+        new RangePreset("6h", "Last 6 hours", TimeSpan.FromHours(6)),
+        new RangePreset("24h", "Last 24 hours", TimeSpan.FromHours(24)),
+        new RangePreset("7d", "Last 7 days", TimeSpan.FromDays(7)),
+        new RangePreset("30d", "Last 30 days", TimeSpan.FromDays(30)),
+    };
+
+    /// <summary>Finds the span of a range preset by its short name, ignoring case.</summary>
+    public static bool TryGetRange(string? shortName, out TimeSpan range)
+    {
+        foreach (var preset in RangePresets)
+        {
+            if (string.Equals(preset.ShortName, shortName, StringComparison.OrdinalIgnoreCase))
+            {
+                range = preset.Range;
+                return true;
+            }
+        }
+
+        range = default;
+        return false;
+    }
+
+    /// <summary>Finds a period by its short name, ignoring case.</summary>
+    public static bool TryGetPeriod(string? shortName, out ChartPeriod period)
+    {
+        foreach (var candidate in Periods)
+        {
+            if (string.Equals(candidate.ShortName, shortName, StringComparison.OrdinalIgnoreCase))
+            {
+                period = candidate;
+                return true;
+            }
+        }
+
+        period = default;
+        return false;
+    }
 
     /// <summary>
     /// Resolves the effective bucket for a selected period: an auto period uses <see cref="AutoBucket"/> over the
