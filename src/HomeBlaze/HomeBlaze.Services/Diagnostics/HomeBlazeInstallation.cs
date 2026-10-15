@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Reflection;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -194,7 +193,8 @@ public partial class HomeBlazeInstallation : BackgroundService,
         DeveloperModeService developerModeService,
         ILogger<HomeBlazeInstallation> logger)
         : this(
-            BuildInformation.FromAssembly(FindApplicationAssembly(hostEnvironment.ApplicationName)),
+            // Never packed on its own: it is built with the application and carries the same version and metadata.
+            BuildInformation.FromAssembly(typeof(HomeBlazeInstallation).Assembly),
             hostEnvironment.EnvironmentName,
             () => httpClientFactory.CreateClient(),
             developerModeService,
@@ -287,30 +287,10 @@ public partial class HomeBlazeInstallation : BackgroundService,
         }
     }
 
-    internal static InstallationChannel GetChannel(BuildInformation build) =>
+    private static InstallationChannel GetChannel(BuildInformation build) =>
         build.Tag is not null ? InstallationChannel.Release :
         string.Equals(build.Version, "edge", StringComparison.OrdinalIgnoreCase) ? InstallationChannel.Edge :
         InstallationChannel.Development;
-
-    // Under a test host the entry assembly is the test runner, so the application is found by its name.
-    private static Assembly FindApplicationAssembly(string applicationName)
-    {
-        var entryAssembly = Assembly.GetEntryAssembly();
-        if (entryAssembly is not null && string.Equals(entryAssembly.GetName().Name, applicationName, StringComparison.Ordinal))
-        {
-            return entryAssembly;
-        }
-
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (string.Equals(assembly.GetName().Name, applicationName, StringComparison.Ordinal))
-            {
-                return assembly;
-            }
-        }
-
-        return entryAssembly ?? typeof(HomeBlazeInstallation).Assembly;
-    }
 
     private static Uri? CreateUri(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri : null;
