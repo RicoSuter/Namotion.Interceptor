@@ -45,8 +45,9 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int? MinHeight { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.Slot("Node")]
         [HomeBlaze.Abstractions.Attributes.State]
-        public System.Collections.Generic.List<HomeBlaze.Components.CanvasNode> Nodes { get; set; }
+        public HomeBlaze.Components.CanvasNode[] Nodes { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -64,6 +65,7 @@ namespace HomeBlaze.Components
         public CanvasNode() { }
         public CanvasNode(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.Slot(IsDefault=true)]
         public Namotion.Interceptor.IInterceptorSubject? Child { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int Height { get; set; }
@@ -198,6 +200,7 @@ namespace HomeBlaze.Components
         public GridCell() { }
         public GridCell(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.Slot(IsDefault=true)]
         public Namotion.Interceptor.IInterceptorSubject? Child { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int? Column { get; set; }
@@ -226,8 +229,9 @@ namespace HomeBlaze.Components
         public GridLayout() { }
         public GridLayout(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.Slot("Cell")]
         [HomeBlaze.Abstractions.Attributes.State]
-        public System.Collections.Generic.List<HomeBlaze.Components.GridCell> Cells { get; set; }
+        public HomeBlaze.Components.GridCell[] Cells { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int Columns { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -312,8 +316,6 @@ namespace HomeBlaze.Components
     public class SubjectComponent : Microsoft.AspNetCore.Components.ComponentBase
     {
         public SubjectComponent() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.RenderFragment? ActionButtons { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.Dictionary<string, object?>? AdditionalParameters { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -698,6 +700,18 @@ namespace HomeBlaze.Components.Components
         public IndicatorWidget() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class LayoutItemActions : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public LayoutItemActions() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string EditTitle { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<Microsoft.AspNetCore.Components.Web.MouseEventArgs> OnDelete { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<Microsoft.AspNetCore.Components.Web.MouseEventArgs> OnEdit { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.Progress))]

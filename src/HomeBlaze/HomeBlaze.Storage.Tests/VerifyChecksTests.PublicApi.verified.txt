@@ -155,6 +155,7 @@ namespace HomeBlaze.Storage
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
         public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -185,6 +186,7 @@ namespace HomeBlaze.Storage
         public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
     }
 }
 namespace HomeBlaze.Storage.Internal
@@ -301,6 +303,10 @@ namespace HomeBlaze.Storage.Pages
         public string Key { get; init; }
         public string Value { get; init; }
     }
+    public static class MarkdownBlockConfiguration
+    {
+        public static string Serialize(HomeBlaze.Services.ConfigurableSubjectSerializer serializer, Namotion.Interceptor.IInterceptorSubject subject) { }
+    }
     public sealed class MarkdownBlockHead : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownBlockHead>
     {
         public MarkdownBlockHead(int FenceLength, string Name, string? Id, System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownBlockArgument> Arguments) { }
@@ -322,8 +328,8 @@ namespace HomeBlaze.Storage.Pages
     }
     public static class MarkdownBlockWriter
     {
-        public static string CreateBlock(string typeName, string? id, string configurationJson, int fenceLength, string lineEnding = "
-") { }
+        public static string CreateBlock(string name, string? id, string configurationJson, int fenceLength, string lineEnding = "
+", bool hasClosingLine = true, string? content = null) { }
         public static string GetLineEnding(string source, int offset = 0) { }
         public static string WriteConfiguration(string source, HomeBlaze.Storage.Pages.MarkdownBlock block, string configurationJson) { }
     }
