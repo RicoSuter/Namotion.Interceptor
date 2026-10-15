@@ -18,19 +18,23 @@
                 </MudStack>
                 @if (installation.VersionUrl is { } versionUrl)
                 {
-                    <MudIconButton Href="@versionUrl.AbsoluteUri"
-                                   Target="_blank"
-                                   Rel="noopener noreferrer"
-                                   Icon="@Icons.Material.Filled.OpenInNew"
-                                   Size="Size.Small"
-                                   aria-label="Open the version"
-                                   data-testid="installation-widget-version-link" />
+                    <MudTooltip Text="Open in new tab">
+                        <MudIconButton Href="@versionUrl.AbsoluteUri"
+                                       Target="_blank"
+                                       Rel="noopener noreferrer"
+                                       Icon="@Icons.Material.Filled.OpenInNew"
+                                       Size="Size.Small"
+                                       aria-label="@($"Open version {installation.Version} in new tab")"
+                                       data-testid="installation-widget-version-link" />
+                    </MudTooltip>
                 }
                 <MudSpacer />
                 <MudChip T="string" Size="Size.Small" data-testid="installation-widget-channel">@installation.Channel</MudChip>
                 @if (installation.MismatchedRepositories.Length > 0)
                 {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.Warning">@installation.MismatchedRepositories.Length</MudChip>
+                    <MudTooltip Text="Repositories whose assemblies come from different builds">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.Warning" data-testid="installation-widget-mismatch">@installation.MismatchedRepositories.Length mismatched</MudChip>
+                    </MudTooltip>
                 }
             </MudStack>
 
@@ -42,7 +46,7 @@
                     <MudIcon Icon="@Icons.Material.Filled.Update" Color="Color.Warning" Size="Size.Small" />
                     @if (installation.Channel == InstallationChannel.Edge)
                     {
-                        <MudText Typo="Typo.caption">@installation.CommitsBehind commits behind @(installation.Branch ?? "master")</MudText>
+                        <MudText Typo="Typo.caption">@FormatCommitsBehind(installation.CommitsBehind, installation.Branch)</MudText>
                         @if (installation.ChangesUrl is { } changesUrl)
                         {
                             <MudLink Href="@changesUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Changes</MudLink>
@@ -58,18 +62,21 @@
                     }
                 </MudStack>
             }
-            else if (installation.Status == ServiceStatus.Error)
+            @if (installation.Status == ServiceStatus.Error)
             {
                 <MudText Typo="Typo.caption" Color="Color.Error">Update check failed</MudText>
             }
 
             <MudText Typo="Typo.caption">
-                Services @(installation.MonitoredServiceCount - installation.ServicesInErrorCount) running · @installation.ServicesInErrorCount error
+                Services @installation.MonitoredServiceCount · @installation.ServicesInErrorCount in error
             </MudText>
             <MudText Typo="Typo.caption">Subjects @installation.SubjectCount.ToString("N0", CultureInfo.InvariantCulture)</MudText>
 
             <MudText Typo="Typo.caption">Data @FormatDataVolume(installation)</MudText>
-            <MudProgressLinear Value="@(ValueReader.GetProgressPercent(installation.DataVolumeUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
+            @if (installation.DataVolumeUsage is { } dataVolumeUsage)
+            {
+                <MudProgressLinear Value="@(ValueReader.GetProgressPercent(dataVolumeUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
+            }
 
             <MudText Typo="Typo.caption">
                 @installation.EnvironmentName · developer mode @(installation.IsDeveloperMode ? "on" : "off")
@@ -93,6 +100,13 @@
 
     private static string FormatDate(DateTimeOffset? date) =>
         date is { } value ? $"({value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)})" : string.Empty;
+
+    private static string FormatCommitsBehind(int? commitsBehind, string? branch)
+    {
+        var count = commitsBehind ?? 0;
+        var unit = count == 1 ? "commit" : "commits";
+        return $"{count} {unit} behind {branch ?? "master"}";
+    }
 
     private static string FormatDataVolume(HomeBlazeInstallation installation) =>
         installation.DataVolumeFreeSpace is { } free && installation.DataVolumeTotalSize is { } total
