@@ -17,6 +17,10 @@ title: History Chart Demo
 ::: Series Path=chartmotor/Temperature Label="Mixed temperature"
 ::
 
+:: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
+::: Series Path=chartmotor/CurrentSpeed Label="Compact speed"
+::
+
 :: HomeBlaze.Components.TabLayout
 ::: Tab Title="First"
 The chart is in the second tab, which is hidden when the page opens.

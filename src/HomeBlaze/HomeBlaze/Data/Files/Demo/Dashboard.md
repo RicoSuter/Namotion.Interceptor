@@ -70,19 +70,19 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 :::: HomeBlaze.Components.Card Title="Temperature trends, last hour" Icon=Timeline
 ::::: HomeBlaze.Components.FlowLayout MinWidth=180
 :::::: Item
-::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100
+::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
 :::::::: Series Path=/Demo/Compressor/Temperature Label="Compressor"
 :::::: Item
-::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100
+::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
 :::::::: Series Path=/Demo/WaterPump/Temperature Label="Water pump"
 :::::: Item
-::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100
+::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
 :::::::: Series Path=/Demo/Conveyor/Temperature Label="Conveyor"
 :::::: Item
-::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100
+::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
 :::::::: Series Path=/Demo/CoolingFan/Temperature Label="Cooling fan"
 :::::: Item
-::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100
+::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
 :::::::: Series Path=/Demo/ExhaustFan/Temperature Label="Exhaust fan"
 ::::
 

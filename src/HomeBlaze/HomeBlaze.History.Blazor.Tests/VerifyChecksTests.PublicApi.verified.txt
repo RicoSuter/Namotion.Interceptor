@@ -14,6 +14,8 @@ namespace HomeBlaze.History.Blazor
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string Bucket { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Compact { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         public int Height { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string Range { get; set; }
@@ -158,6 +160,7 @@ namespace HomeBlaze.History.Blazor
         public static string?[] AssignLineColors(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
         public static string ChooseAggregation(System.Type propertyType, bool isBand, bool isCumulative, bool isRaw, System.Collections.Generic.IReadOnlySet<string> storeAggregations) { }
         public static string? FindArgumentError(string? range, string? bucket, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
+        public static int FindFirstRecordedLine(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> Resolve(HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.History.Blazor.HistoryChart chart) { }
     }
     public readonly struct HistoryChartValueAxis : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartValueAxis>
@@ -180,7 +183,13 @@ namespace HomeBlaze.History.Blazor
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.RenderFragment? LineLegend { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback LinesClicked { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? LinesTitle { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public int? MaxHeight { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool ShowAxes { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool ShowBandLabels { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -200,6 +209,8 @@ namespace HomeBlaze.History.Blazor
     public class HistoryChartWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IDisposable
     {
         public HistoryChartWidget() { }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
+        public bool IsEditing { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
@@ -288,6 +299,7 @@ namespace HomeBlaze.History.Blazor
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference?> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, HomeBlaze.Abstractions.ISubjectPathResolver pathResolver, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string displayName) { }
         public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, string propertyPath, string displayName, System.Type propertyType, bool isCumulative, HomeBlaze.Abstractions.Attributes.StateUnit unit = 0, bool isDiscreteState = false) { }
     }
     public class _Imports

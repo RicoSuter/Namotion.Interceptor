@@ -150,6 +150,22 @@ public static class HistoryChartSeriesResolver
     }
 
     /// <summary>
+    /// Gets the index of the first recorded line, the series a click on the lines shows the history of, or -1.
+    /// </summary>
+    public static int FindFirstRecordedLine(IReadOnlyList<HistoryChartSeriesInfo> series)
+    {
+        for (var index = 0; index < series.Count; index++)
+        {
+            if (series[index] is { Kind: HistoryChartSeriesKind.Line, HasHistory: true })
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
     /// Chooses the aggregation of a series: the first that the history dialog offers for a line, which
     /// is the time-weighted average when a store supports it; the last value for a counter or a raw query,
     /// so those share one batch, and for a band, which is always queried raw.

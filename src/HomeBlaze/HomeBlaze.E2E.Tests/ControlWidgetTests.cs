@@ -75,12 +75,6 @@ public class ControlWidgetTests
             .Filter(new() { Has = picker.Page.GetByText(name, new() { Exact = true }) })
             .Locator("xpath=..");
 
-    private static async Task SwitchToInlineModeAsync(IPage page)
-    {
-        await page.GetByTestId("edit-mode-menu").ClickAsync();
-        await page.Locator(".mud-popover-open").GetByText("Inline", new() { Exact = true }).ClickAsync();
-        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
-    }
 
     // The server reads a page again after it wrote it, and a file that it holds open is read again later.
     private static string? TryReadContent(string path)
@@ -432,7 +426,7 @@ public class ControlWidgetTests
         await Assertions.Expect(GetSwitch(page, "Power")).ToBeEnabledAsync(new() { Timeout = Timeout });
 
         // Act
-        await SwitchToInlineModeAsync(page);
+        await page.SwitchToInlineModeAsync();
 
         // Assert: disabled for assistive technology as well, not only out of reach of the pointer.
         await Assertions.Expect(GetSwitch(page, "Power")).ToBeDisabledAsync(new() { Timeout = Timeout });
@@ -465,7 +459,7 @@ public class ControlWidgetTests
     {
         // Arrange: a widget is named by its label, else by its path.
         var page = await OpenPageAsync();
-        await SwitchToInlineModeAsync(page);
+        await page.SwitchToInlineModeAsync();
         var actionBar = await page.Locator($".subject-component-wrapper.selectable[aria-label='{widgetName}']").SelectWidgetAsync();
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
         await page.GetByRole(AriaRole.Dialog)

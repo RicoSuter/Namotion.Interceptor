@@ -16,6 +16,7 @@ Shows the recorded history of properties in one chart: numbers as lines on one v
 | `Bucket` | `Auto`, `Raw`, `1s`, `10s`, `60s`, `5m`, `10m`, `15m`, `1h`, `4h`, `6h`, `12h` or `24h` | `Auto` | The interval that one point of a line stands for. `Auto` picks one from the range, `Raw` shows every recorded sample. The bucket applies to lines only, a band always shows the recorded samples |
 | `Height` | Whole number | `300` | The height of the lines in pixels. The lines fill the width of the chart, and on a narrow screen they get lower to stay at least twice as wide as high |
 | `RefreshInterval` | Time span, for example `00:05:00` | `00:01:00` | How often the chart queries again at most while its values change. Less than a minute counts as a minute |
+| `Compact` | `true` or `false` | `false` | Leaves out the numbers of the value axis, the times of the time axis, the grid lines and the tooltips of the lines, so the lines fill the whole width. For a small chart next to others, whose detail is in the history dialog |
 
 `Range` and `Bucket` ignore case.
 
@@ -80,6 +81,35 @@ The last hour with the bucket that the chart picks from the range, a colour of i
 ::: Series Path=../Fan/Temperature Label="Fan temperature" Color="#E4572E"
 ::
 
+Three compact charts in a row: the temperature of each motor and the speed of the pump. A click on a chart opens the history dialog of its series:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.FlowLayout MinWidth=180
+::: Item
+:::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
+::::: Series Path=../Pump/Temperature Label="Pump"
+::: Item
+:::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
+::::: Series Path=../Fan/Temperature Label="Fan"
+::: Item
+:::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
+::::: Series Path=../Pump/CurrentSpeed Label="Pump speed"
+::
+~~~~
+
+:: HomeBlaze.Components.FlowLayout MinWidth=180
+::: Item
+:::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
+::::: Series Path=../Pump/Temperature Label="Pump"
+::: Item
+:::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
+::::: Series Path=../Fan/Temperature Label="Fan"
+::: Item
+:::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
+::::: Series Path=../Pump/CurrentSpeed Label="Pump speed"
+::
+
 ## Behaviour and Limits
 
 - **One unit**: All lines share one value axis, so every recorded number series needs the unit of the first one. A series with another unit, for example a temperature next to a speed, shows an error that names both series in place of the chart, see [Value Widget Errors](../page-errors.md#value-widget-errors). Put it in a second chart.
@@ -92,7 +122,7 @@ The last hour with the bucket that the chart picks from the range, a colour of i
 - **Refresh**: The chart queries again at most once per window, and only while one of its values changes. The window is the refresh interval, at least a minute, or the bucket when the bucket is longer. A changed series, range or bucket queries at once. A chart that nobody views costs nothing.
 - **No history**: A series whose property is not recorded shows "no history recorded" in the legend, and a path that leads nowhere shows "not found". Without any history store every series shows "no history store". None of these is an error. Only `[State]` properties of a number, a boolean, an enum or a text are recorded.
 - **Errors**: An unknown `Range` or `Bucket`, or a line with another unit, shows a small red alert in place of the chart and its legend, see [Value Widget Errors](../page-errors.md#value-widget-errors). A query that fails shows a warning "Could not load history" with the reason in place of the chart, the legend stays, and the chart tries again with the next refresh.
-- **History dialog**: The history link of a property in the browser opens the same chart for that one property, with a choice of range, bucket and aggregation.
+- **History dialog**: A click on the lines opens the history dialog of the first line, and a click on an entry of the legend or in the header of a band the dialog of that series. The dialog shows the same chart for that one property with its axes, with a choice of range, bucket and aggregation. The history link of a property in the browser opens the same dialog. In edit mode a click selects the chart instead.
 
 ## Related
 

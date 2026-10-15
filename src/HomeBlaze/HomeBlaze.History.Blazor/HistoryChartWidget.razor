@@ -14,6 +14,7 @@
 @inject ITimeZoneDisplay TimeZone
 @inject TimeProvider TimeProvider
 @inject IInterceptorSubjectContext RootContext
+@inject IDialogService DialogService
 
 @if (Subject is HistoryChart chart)
 {
@@ -42,7 +43,10 @@
             else if (_hasStores == true && _data is not null)
             {
                 @* The view shows the legend of the lines below them and each band series in the header of its band. *@
-                <HistoryChartView Data="_data" MaxHeight="height" LineLegend="_lineLegend" BandHeader="_bandHeader" />
+                var linesTarget = CanShowHistory(_firstLine) ? _firstLine : -1;
+                <HistoryChartView Data="_data" MaxHeight="height" ShowAxes="!chart.Compact" LineLegend="_lineLegend" BandHeader="_bandHeader"
+                                  LinesClicked="@(linesTarget >= 0 ? _showHistory[linesTarget] : default)"
+                                  LinesTitle="@(linesTarget >= 0 ? _historyTitles[linesTarget] : null)" />
             }
 
             @if (_queryError is not null || _hasStores != true || _data is null)
@@ -61,10 +65,14 @@
 @code {
     private const string MissingText = "–";
     private const string NoStoreNote = "no history store";
-    private const string LegendStyle = "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap;";
+    private const string EntryStyle = "display:flex; align-items:center; gap:6px;";
+
+    // The legend of the lines ends where the plot does, see HistoryChartView.LineLegend.
+    private const string LegendStyle =
+        "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; justify-content:flex-end; margin-right:var(--history-chart-plot-end, 0px);";
 
     // The legend of every series below the widget, while there is no chart view to hold it.
-    private const string OwnLegendStyle = LegendStyle + " margin-top:8px;";
+    private const string OwnLegendStyle = "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;";
 
     private HistoryRefreshThrottle? _throttle;
     private CancellationTokenSource? _queryCancellation;
@@ -85,6 +93,12 @@
     private string?[] _colors = [];
     private string?[] _swatchStyles = [];
     private string? _error;
+
+    // Built with the series, so a render allocates none: the first recorded line, which a click on the lines shows,
+    // and for every series what opens its history and the tooltip that says so.
+    private int _firstLine = -1;
+    private EventCallback[] _showHistory = [];
+    private string[] _historyTitles = [];
 
     // The series the shown data was queried for, and the index in them of the series of each band of the data.
     private IReadOnlyList<HistoryChartSeriesInfo>? _dataSeries;
@@ -108,6 +122,10 @@
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    // In edit mode a click selects the widget, so nothing opens the history.
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
 
     public HistoryChartWidget()
     {
@@ -157,34 +175,62 @@
 
     private void RenderLegendEntry(RenderTreeBuilder __builder, int index, bool isBand)
     {
+        if (CanShowHistory(index))
+        {
+            <button type="button" class="history-chart-legend-button" data-testid="history-chart-legend-entry" style="@EntryStyle"
+                    title="@_historyTitles[index]" @onclick="_showHistory[index]">
+                @{ RenderLegendEntryContent(__builder, index, isBand); }
+            </button>
+        }
+        else
+        {
+            <div data-testid="history-chart-legend-entry" style="@EntryStyle">
+                @{ RenderLegendEntryContent(__builder, index, isBand); }
+            </div>
+        }
+    }
+
+    private void RenderLegendEntryContent(RenderTreeBuilder __builder, int index, bool isBand)
+    {
         var entry = _series[index];
         var property = entry.Property;
         var value = property?.GetValue();
         var text = property is null || value is null ? MissingText : property.GetPropertyDisplayValue(value, TimeZone);
         var note = entry.Note ?? (_hasStores == false ? NoStoreNote : null);
 
-        <div data-testid="history-chart-legend-entry" style="display:flex; align-items:center; gap:6px;">
-            @if (isBand)
+        if (isBand)
+        {
+            @* The colon sits outside the label, which is found by its exact text. *@
+            <span style="display:inline-flex;">
+                <MudText Typo="Typo.caption">@entry.Label</MudText><MudText Typo="Typo.caption">:</MudText>
+            </span>
+        }
+        else
+        {
+            if (_swatchStyles[index] is { } swatchStyle)
             {
-                @* The colon sits outside the label, which is found by its exact text. *@
-                <span style="display:inline-flex;">
-                    <MudText Typo="Typo.caption">@entry.Label</MudText><MudText Typo="Typo.caption">:</MudText>
-                </span>
+                <span aria-hidden="true" style="@swatchStyle"></span>
             }
-            else
-            {
-                @if (_swatchStyles[index] is { } swatchStyle)
-                {
-                    <span aria-hidden="true" style="@swatchStyle"></span>
-                }
-                <MudText Typo="Typo.caption">@entry.Label</MudText>
-            }
-            <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-value">@text</MudText>
-            @if (note is not null)
-            {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-note">(@note)</MudText>
-            }
-        </div>
+            <MudText Typo="Typo.caption">@entry.Label</MudText>
+        }
+        <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-value">@text</MudText>
+        if (note is not null)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-note">(@note)</MudText>
+        }
+    }
+
+    private bool CanShowHistory(int index) =>
+        !IsEditing && _hasStores == true && index >= 0 && _series[index] is { HasHistory: true, Property: not null };
+
+    private async Task ShowHistoryAsync(HistoryChartSeriesInfo entry)
+    {
+        if (IsEditing || entry.Property is not { } property || RootContext.TryGetService<ISubjectRegistry>() is not { } registry)
+        {
+            return;
+        }
+
+        await PropertyHistoryDialog.ShowAsync(DialogService, registry, PathResolver, property, entry.Label);
     }
 
     protected override void OnInitialized()
@@ -272,6 +318,16 @@
         }
 
         _series = series;
+        _firstLine = HistoryChartSeriesResolver.FindFirstRecordedLine(series);
+        _showHistory = new EventCallback[series.Count];
+        _historyTitles = new string[series.Count];
+        for (var index = 0; index < series.Count; index++)
+        {
+            var entry = series[index];
+            _showHistory[index] = EventCallback.Factory.Create(this, () => ShowHistoryAsync(entry));
+            _historyTitles[index] = $"Show history of {entry.Label}";
+        }
+
         _colors = HistoryChartSeriesResolver.AssignLineColors(series);
         _swatchStyles = new string?[_colors.Length];
         for (var index = 0; index < _colors.Length; index++)

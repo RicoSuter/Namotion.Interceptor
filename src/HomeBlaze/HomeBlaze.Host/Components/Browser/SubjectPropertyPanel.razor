@@ -731,16 +731,7 @@
             return;
         }
 
-        var path = property.GetHistoryPath(PathResolver);
-        if (path is null)
-        {
-            return;
-        }
-
-        var metadata = property.GetStateMetadata();
-        await PropertyHistoryDialog.ShowAsync(
-            DialogService, SubjectRegistry, path, property.Name, property.Type, metadata?.IsCumulative ?? false,
-            metadata?.Unit ?? StateUnit.Default, metadata?.IsDiscrete ?? false);
+        await PropertyHistoryDialog.ShowAsync(DialogService, SubjectRegistry, PathResolver, property, property.Name);
     }
 
     private SubjectMemberGroups<RegisteredSubjectProperty, MethodMetadata> GetMemberGroups() =>

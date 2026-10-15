@@ -8,6 +8,18 @@ namespace HomeBlaze.E2E.Tests.Infrastructure;
 internal static class WidgetSelectionExtensions
 {
     /// <summary>
+    /// Switches the page to inline edit mode, in which a click selects a widget.
+    /// </summary>
+    public static async Task SwitchToInlineModeAsync(this IPage page)
+    {
+        var editMenu = page.GetByTestId("edit-mode-menu");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editMenu.ClickAsync();
+        await page.Locator(".mud-popover-open").GetByText("Inline", new() { Exact = true }).ClickAsync();
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+    }
+
+    /// <summary>
     /// Clicks the middle of the element, which selects the innermost widget there, and returns the bar with the
     /// actions of that widget.
     /// </summary>

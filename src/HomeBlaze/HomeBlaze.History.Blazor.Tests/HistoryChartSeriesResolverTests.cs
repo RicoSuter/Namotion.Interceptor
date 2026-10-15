@@ -37,6 +37,7 @@ public class HistoryChartSeriesResolverTests
         Assert.Equal("Auto", chart.Bucket);
         Assert.Equal(300, chart.Height);
         Assert.Equal(TimeSpan.FromSeconds(60), chart.RefreshInterval);
+        Assert.False(chart.Compact);
         Assert.Empty(chart.Series);
     }
 
@@ -151,6 +152,39 @@ public class HistoryChartSeriesResolverTests
 
         // Assert
         Assert.Equal(["#2979FF", null, "#123456", null, "#F6A609"], colors.AsEnumerable());
+    }
+
+    [Fact]
+    public void WhenTheFirstRecordedLineIsSearched_ThenBandsMissingSeriesAndLinesWithoutHistoryAreSkipped()
+    {
+        // Arrange
+        HistoryChartSeriesInfo[] series =
+        [
+            Band("Status"),
+            new("Gone", null, null, HistoryChartSeriesKind.Missing, StateUnit.Default, HasHistory: false, IsCumulative: false),
+            Line("Unrecorded", hasHistory: false),
+            Line("Fan"),
+            Line("Pump")
+        ];
+
+        // Act
+        var index = HistoryChartSeriesResolver.FindFirstRecordedLine(series);
+
+        // Assert
+        Assert.Equal(3, index);
+    }
+
+    [Fact]
+    public void WhenAChartHasNoRecordedLine_ThenNoLineIsFound()
+    {
+        // Arrange
+        HistoryChartSeriesInfo[] series = [Band("Status"), Line("Unrecorded", hasHistory: false)];
+
+        // Act
+        var index = HistoryChartSeriesResolver.FindFirstRecordedLine(series);
+
+        // Assert
+        Assert.Equal(-1, index);
     }
 
     [Theory]

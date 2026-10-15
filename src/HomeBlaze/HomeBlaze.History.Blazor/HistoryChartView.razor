@@ -21,10 +21,18 @@
                in a box of its own 350 px high, which is clipped or letterboxed. It decides this once, when it first
                renders, and a box that is not displayed, like one in a hidden tab, has no height yet. So the chart
                renders only once the box was measured with a size. *@
-            <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@_axesLabels" style="@_linesStyle">
+            <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@_axesLabels" style="@_linesStyle"
+                 title="@LinesTitle" @onclick="LinesClicked">
                 @if (_linesWidth > 0)
                 {
-                    @_plot
+                    @if (ShowAxes)
+                    {
+                        @_plot
+                    }
+                    else
+                    {
+                        <div style="@CompactPlotStyle">@_plot</div>
+                    }
                 }
             </div>
         }
@@ -113,6 +121,15 @@
     private const string PlotAlignedBandGroupStyle = BandGroupStyle +
         " margin-left:var(--history-chart-plot-left, 0px); margin-right:var(--history-chart-plot-right, 0px);";
 
+    // MudChart 9.11 keeps 30 px free right of the plot, and as long as its labels are empty also 30 px left of it,
+    // 25 px above and 30 px below. Without axes the chart is drawn that much larger than its box, which clips it, so
+    // the plot fills the width and leaves the lines a few pixels above and below so their strokes are not cut.
+    private const int PlotEndSpace = 30;
+    private const string CompactPlotStyle =
+        "position:absolute; left:-30px; top:-21px; width:calc(100% + 60px); height:calc(100% + 47px); display:flex;";
+
+    private static readonly Func<double, string> NoValueLabel = static _ => string.Empty;
+
     private HistoryChartData? _builtData;
     private int? _renderedMaxHeight;
     private string? _renderedStyle;
@@ -120,6 +137,10 @@
     private bool _renderedShowBandLabels;
     private bool _renderedShowRange;
     private bool _renderedShowStateTable;
+    private bool _renderedShowAxes = true;
+    private bool _renderedIsClickable;
+    private string? _renderedLinesTitle;
+    private bool _hasStyles;
     private bool _shouldRender = true;
     private volatile bool _disposed;
     private List<ChartSeries<double>>? _chartSeries;
@@ -184,7 +205,8 @@
     /// <summary>
     /// The legend of the lines, rendered right below them. The view renders every time its parent does while it has
     /// this or <see cref="BandHeader"/>, so the content may show values that change; the lines are drawn again only for
-    /// other data.
+    /// other data. The CSS property <c>--history-chart-plot-end</c> holds the distance of the right end of the plot from
+    /// the right edge of the view, so the legend can end where the plot does.
     /// </summary>
     [Parameter]
     public RenderFragment? LineLegend { get; set; }
@@ -203,6 +225,21 @@
     /// <summary>Whether the runs of the bands are listed in a table below the legend, newest first.</summary>
     [Parameter]
     public bool ShowStateTable { get; set; }
+
+    /// <summary>
+    /// Whether the lines have labels on their value and time axes, grid lines and tooltips. Without them the lines fill
+    /// the width of the view.
+    /// </summary>
+    [Parameter]
+    public bool ShowAxes { get; set; } = true;
+
+    /// <summary>Called when the lines are clicked. With it the lines show a pointer.</summary>
+    [Parameter]
+    public EventCallback LinesClicked { get; set; }
+
+    /// <summary>The tooltip of the lines, which says what a click on them does.</summary>
+    [Parameter]
+    public string? LinesTitle { get; set; }
 
     public HistoryChartView() => _plot = RenderPlot;
 
@@ -237,24 +274,29 @@
             }
         }
 
-        if (Style != _renderedStyle || _rootStyle.Length == 0)
+        var axesChanged = ShowAxes != _renderedShowAxes;
+        if (axesChanged && !dataChanged)
         {
-            _rootStyle = $"width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; {Style}";
+            BuildOptions();
         }
 
-        if (MaxHeight != _renderedMaxHeight || _linesStyle.Length == 0)
+        var isClickable = LinesClicked.HasDelegate;
+        var stylesChanged = !_hasStyles ||
+            dataChanged ||
+            axesChanged ||
+            isClickable != _renderedIsClickable ||
+            Style != _renderedStyle ||
+            MaxHeight != _renderedMaxHeight;
+        if (stylesChanged)
         {
-            _linesStyle = MaxHeight is { } maxHeight
-                ? $"display:flex; width:100%; max-height:{maxHeight}px; min-height:0; aspect-ratio:2 / 1;"
-                : "display:flex; width:100%; height:100%; min-height:0;";
+            BuildStyles(isClickable);
         }
 
-        _shouldRender = dataChanged ||
+        _shouldRender = stylesChanged ||
+            LinesTitle != _renderedLinesTitle ||
             LineLegend is not null ||
             BandHeader is not null ||
             stateTableChanged ||
-            MaxHeight != _renderedMaxHeight ||
-            Style != _renderedStyle ||
             BandHeight != _renderedBandHeight ||
             ShowBandLabels != _renderedShowBandLabels ||
             ShowRange != _renderedShowRange;
@@ -265,6 +307,23 @@
         _renderedShowBandLabels = ShowBandLabels;
         _renderedShowRange = ShowRange;
         _renderedShowStateTable = ShowStateTable;
+        _renderedShowAxes = ShowAxes;
+        _renderedIsClickable = isClickable;
+        _renderedLinesTitle = LinesTitle;
+    }
+
+    private void BuildStyles(bool isClickable)
+    {
+        _hasStyles = true;
+        var plotEnd = _chartSeries is null || !ShowAxes ? 0 : PlotEndSpace;
+        _rootStyle = $"width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; --history-chart-plot-end:{plotEnd}px; {Style}";
+
+        var size = MaxHeight is { } maxHeight
+            ? $"max-height:{maxHeight}px; min-height:0; aspect-ratio:2 / 1;"
+            : "height:100%; min-height:0;";
+        var frame = ShowAxes ? string.Empty : " position:relative; overflow:clip;";
+        var cursor = isClickable ? " cursor:pointer;" : string.Empty;
+        _linesStyle = $"display:flex; width:100%; {size}{frame}{cursor}";
     }
 
     protected override bool ShouldRender() => _shouldRender;
@@ -522,7 +581,13 @@
             LineDisplayType = LineDisplayType.Line,
             // The series are named outside the chart: the dialog by its title, the widget by its own legend.
             ShowLegend = false,
-            TimeLabelFormat = HistoryChartAxis.GetTimeLabelFormat(range, timeLabelSpacing),
+            // Empty labels, which MudChart measures as no space, so the space around the plot stays the same.
+            TimeLabelFormat = ShowAxes ? HistoryChartAxis.GetTimeLabelFormat(range, timeLabelSpacing) : "''",
+            YAxisToStringFunc = ShowAxes ? null : NoValueLabel,
+            // Without labels the grid lines would reach from edge to edge and run into those of a chart next to it, and
+            // the box would cut a tooltip at its edges.
+            YAxisLines = ShowAxes,
+            ShowToolTips = ShowAxes,
             TimeLabelSpacing = timeLabelSpacing,
             // The labels fall on round times rather than on the start of the range.
             TimeLabelSpacingRounding = true,

@@ -1,0 +1,27 @@
+/* MudChart draws its value labels once left of the chart before it has measured them, and only then makes room for
+   them, so they are not cut while they are there. */
+[data-testid="history-chart-lines"] svg {
+    overflow: visible;
+}
+
+/* A legend entry that opens the history of its series looks like the entry it is. */
+.history-chart-legend-button {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    cursor: pointer;
+}
+
+.history-chart-legend-button:hover {
+    text-decoration: underline;
+}
+
+.history-chart-legend-button:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 2px;
+    border-radius: 2px;
+}

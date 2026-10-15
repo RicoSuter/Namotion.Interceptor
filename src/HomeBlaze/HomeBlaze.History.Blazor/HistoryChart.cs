@@ -50,6 +50,13 @@ public partial class HistoryChart : IConfigurable, ITitleProvider
     public partial TimeSpan RefreshInterval { get; set; }
 
     /// <summary>
+    /// Whether the chart leaves out the labels of both axes, its grid lines and the tooltips of its lines, so its lines
+    /// fill the whole width. For a small chart that opens the history dialog for the detail.
+    /// </summary>
+    [Configuration]
+    public partial bool Compact { get; set; }
+
+    /// <summary>
     /// The series, one per <c>Series</c> block.
     /// </summary>
     [Slot("Series")]

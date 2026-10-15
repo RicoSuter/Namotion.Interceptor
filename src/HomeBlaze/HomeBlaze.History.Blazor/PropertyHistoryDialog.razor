@@ -1,5 +1,8 @@
+@using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.History
 @using HomeBlaze.History.Abstractions
+@using HomeBlaze.Services
 @using HomeBlaze.Services.Display
 @using Namotion.Interceptor.Registry.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
@@ -333,6 +336,28 @@
         // otherwise keep running and call StateHasChanged on this disposed component.
         _loadCts?.Cancel();
         _loadCts?.Dispose();
+    }
+
+    /// <summary>
+    /// Shows the history of a recorded property, with the unit and the kind of value the property declares.
+    /// Returns null without showing anything when the subject of the property is not in the graph.
+    /// </summary>
+    public static async Task<IDialogReference?> ShowAsync(
+        IDialogService dialogService,
+        ISubjectRegistry registry,
+        ISubjectPathResolver pathResolver,
+        RegisteredSubjectProperty property,
+        string displayName)
+    {
+        if (property.GetHistoryPath(pathResolver) is not { } path)
+        {
+            return null;
+        }
+
+        var metadata = property.GetStateMetadata();
+        return await ShowAsync(
+            dialogService, registry, path, displayName, property.Type, metadata?.IsCumulative ?? false,
+            metadata?.Unit ?? StateUnit.Default, metadata?.IsDiscrete ?? false);
     }
 
     public static Task<IDialogReference> ShowAsync(

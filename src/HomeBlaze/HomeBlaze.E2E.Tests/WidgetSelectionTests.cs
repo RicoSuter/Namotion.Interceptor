@@ -162,7 +162,7 @@ public class WidgetSelectionTests
         var wrapper = page.Locator(".subject-component-wrapper.selectable[aria-label='Value map']");
 
         // Act
-        await SwitchToInlineModeAsync(page);
+        await page.SwitchToInlineModeAsync();
 
         // Assert: a hidden element is no tab stop.
         await Assertions.Expect(wrapper).ToHaveCountAsync(1, new() { Timeout = Timeout });
@@ -272,7 +272,7 @@ public class WidgetSelectionTests
     private async Task<IPage> OpenPageInInlineModeAsync()
     {
         var page = await OpenPageAsync();
-        await SwitchToInlineModeAsync(page);
+        await page.SwitchToInlineModeAsync();
         return page;
     }
 
@@ -288,14 +288,6 @@ public class WidgetSelectionTests
         return page;
     }
 
-    private static async Task SwitchToInlineModeAsync(IPage page)
-    {
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await editMenu.ClickAsync();
-        await page.GetByText("Inline").ClickAsync();
-        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
-    }
 
     // The innermost widget around the element with the test id.
     private static ILocator GetWrapperOf(IPage page, string testId) =>

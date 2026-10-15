@@ -128,9 +128,11 @@ public class HistoryChartWidgetTests
                 const box = lines.getBoundingClientRect();
                 const valueLabels = box.height >= 2 * valueLabelPixels ? Math.floor(box.height / valueLabelPixels) : 2;
                 const timeLabels = Math.floor(Math.min(Math.max(box.width / timeLabelPixels, 2), maximumTimeLabels));
+                // MudChart draws its value labels left of the chart until it has measured them and made room for them.
                 return lines.getAttribute("data-axes-labels") === `${valueLabels}x${timeLabels}` &&
                     chart.getAttribute("viewBox") === `0 0 ${Math.round(box.width)} ${Math.round(box.height)}` &&
-                    chart.querySelector(".mud-charts-timeseries-series path") !== null;
+                    chart.querySelector(".mud-charts-timeseries-series path") !== null &&
+                    [...chart.querySelectorAll(".mud-charts-yaxis text")].every(text => text.getBBox().x >= 0);
             }
             """,
             new object[]
@@ -291,6 +293,8 @@ public class HistoryChartWidgetTests
         var aligned = await edges.JsonValueAsync<JsonElement>();
         var legend = await chart.GetByTestId("history-chart-legend").BoundingBoxAsync()
             ?? throw new InvalidOperationException("The legend has no box");
+        var lastLegendEntry = await chart.GetByTestId("history-chart-legend").GetByTestId("history-chart-legend-entry").Last.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("The legend entry has no box");
         var header = await chart.GetByTestId("history-chart-band-header").First.BoundingBoxAsync()
             ?? throw new InvalidOperationException("The band header has no box");
         var lines = await chart.GetByTestId("history-chart-lines").BoundingBoxAsync()
@@ -300,6 +304,8 @@ public class HistoryChartWidgetTests
         var plotLeft = aligned.GetProperty("plotLeft").GetDouble();
         Assert.True(plotLeft > lines.X + 10, $"The plot starts at {plotLeft} px, at the left edge of the lines at {lines.X} px");
         Assert.InRange(aligned.GetProperty("bandLeft").GetDouble(), plotLeft - 2, plotLeft + 2);
+        var plotRight = aligned.GetProperty("plotRight").GetDouble();
+        Assert.InRange(lastLegendEntry.X + lastLegendEntry.Width, plotRight - 2, plotRight + 2);
         Assert.True(legend.Y >= lines.Y + lines.Height - 1,
             $"The legend starts at {legend.Y} px, above the bottom of the lines at {lines.Y + lines.Height} px");
         Assert.True(legend.Y + legend.Height <= header.Y + 1,
@@ -308,6 +314,121 @@ public class HistoryChartWidgetTests
             .ToContainTextAsync("Chart status");
         await Assertions.Expect(chart.GetByTestId("history-chart-legend").GetByText("Chart status")).ToHaveCountAsync(0);
         await Assertions.Expect(chart.GetByTestId("history-chart-range")).ToHaveCountAsync(0);
+    }
+
+    [Theory]
+    [InlineData(PhoneWidth)]
+    [InlineData(DesktopWidth)]
+    public async Task WhenAChartIsCompact_ThenItHasNoAxisLabelsAndItsPlotAndLegendSpanTheBox(int width)
+    {
+        // Arrange
+        var page = await OpenPageAsync(width);
+        var chart = GetChart(page, "Compact speed");
+        var lines = chart.GetByTestId("history-chart-lines");
+        await Assertions.Expect(lines.Locator("svg").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act - the chart is drawn larger than its box, which clips the space MudChart keeps around the plot, so it is
+        // read once its drawing has the size of its svg and has lines. The widest path is the one that holds the time
+        // axis to the range, which spans the plot.
+        var drawing = await page.WaitForFunctionAsync(
+            """
+            lines => {
+                const chart = lines.querySelector("svg");
+                const size = chart.getBoundingClientRect();
+                const paths = [...chart.querySelectorAll(".mud-charts-timeseries-series path")].map(path => path.getBoundingClientRect());
+                if (chart.getAttribute("viewBox") !== `0 0 ${Math.round(size.width)} ${Math.round(size.height)}` || paths.length === 0) {
+                    return null;
+                }
+
+                const plot = paths.reduce((widest, path) => path.width > widest.width ? path : widest);
+                const box = lines.getBoundingClientRect();
+                return {
+                    labels: [...chart.querySelectorAll(".mud-charts-yaxis text, .mud-charts-xaxis text")]
+                        .filter(text => text.textContent.trim().length > 0).length,
+                    boxLeft: box.left, boxRight: box.right, plotLeft: plot.left, plotRight: plot.right
+                };
+            }
+            """,
+            await lines.ElementHandleAsync(),
+            new() { Timeout = Timeout });
+        var drawn = await drawing.JsonValueAsync<JsonElement>();
+        var legendEntry = await chart.GetByTestId("history-chart-legend-entry").BoundingBoxAsync()
+            ?? throw new InvalidOperationException("The legend entry has no box");
+
+        // Assert
+        Assert.Equal(0, drawn.GetProperty("labels").GetInt32());
+        Assert.Matches(@"^\d+x\d+$", await lines.GetAttributeAsync("data-axes-labels"));
+        var boxLeft = drawn.GetProperty("boxLeft").GetDouble();
+        var boxRight = drawn.GetProperty("boxRight").GetDouble();
+        Assert.InRange(drawn.GetProperty("plotLeft").GetDouble(), boxLeft - 2, boxLeft + 2);
+        Assert.InRange(drawn.GetProperty("plotRight").GetDouble(), boxRight - 2, boxRight + 2);
+        Assert.InRange(legendEntry.X + legendEntry.Width, boxRight - 2, boxRight + 2);
+    }
+
+    // A dialog is identified by its title, which names the series.
+    private static ILocator GetHistoryDialog(IPage page, string label) =>
+        page.Locator(".mud-dialog").Filter(new()
+        {
+            Has = page.Locator(".mud-dialog-title").GetByText($"History: {label}")
+        });
+
+    [Fact]
+    public async Task WhenTheLinesOfAChartAreClicked_ThenTheHistoryDialogOfItsFirstLineOpens()
+    {
+        // Arrange
+        var page = await OpenPageAsync(DesktopWidth);
+        var lines = GetChart(page, "Chart speed").GetByTestId("history-chart-lines");
+
+        // The lines open the history once the chart has found a history store.
+        await Assertions.Expect(lines).ToHaveAttributeAsync("title", "Show history of Chart speed", new() { Timeout = Timeout });
+
+        // Act
+        await lines.ClickAsync();
+
+        // Assert
+        var dialog = GetHistoryDialog(page, "Chart speed");
+        await Assertions.Expect(dialog.GetByTestId("property-history-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("history-chart-view")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenALegendEntryIsClicked_ThenTheHistoryDialogOfItsSeriesOpens()
+    {
+        // Arrange
+        var page = await OpenPageAsync(DesktopWidth);
+        var entry = GetChart(page, "Chart speed").GetByTestId("history-chart-band-header")
+            .GetByRole(AriaRole.Button, new() { Name = "Chart status" });
+        await Assertions.Expect(entry).ToHaveAttributeAsync("title", "Show history of Chart status", new() { Timeout = Timeout });
+
+        // Act
+        await entry.ClickAsync();
+
+        // Assert
+        await Assertions.Expect(GetHistoryDialog(page, "Chart status").GetByTestId("property-history-dialog"))
+            .ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetHistoryDialog(page, "Chart speed")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenAChartIsClickedInInlineEditMode_ThenItIsSelectedAndNoDialogOpens()
+    {
+        // Arrange
+        var page = await OpenPageAsync(DesktopWidth);
+        var chart = GetChart(page, "Chart speed");
+        var lines = chart.GetByTestId("history-chart-lines");
+        await Assertions.Expect(lines).ToHaveAttributeAsync("title", "Show history of Chart speed", new() { Timeout = Timeout });
+        await page.SwitchToInlineModeAsync();
+
+        // In edit mode nothing in the chart offers the history.
+        await Assertions.Expect(lines).Not.ToHaveAttributeAsync("title", "Show history of Chart speed", new() { Timeout = Timeout });
+        await Assertions.Expect(chart.GetByRole(AriaRole.Button)).ToHaveCountAsync(0);
+
+        // Act
+        await lines.SelectWidgetAsync();
+
+        // Assert
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected").GetByTestId("history-chart")).ToHaveCountAsync(1);
+        await Assertions.Expect(page.GetByTestId("property-history-dialog")).ToHaveCountAsync(0);
     }
 
     [Fact]
