@@ -96,6 +96,47 @@ public class WidgetSelectionTests
         await Assertions.Expect(page.GetWidgetActionBar()).ToBeVisibleAsync();
     }
 
+    [Fact]
+    public async Task WhenANestedWidgetWithoutConfigurationIsSelected_ThenItsBarOffersOnlyItsParent()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var wrapper = GetValueListWrapper(page, "Nested Row");
+        await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var actionBar = await wrapper.SelectWidgetAsync();
+
+        // Assert
+        await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"));
+        await Assertions.Expect(actionBar.GetByTestId("select-parent-button")).ToBeVisibleAsync();
+        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCountAsync(0);
+
+        // Act
+        await actionBar.GetByTestId("select-parent-button").ClickAsync();
+
+        // Assert
+        var selected = page.Locator(".subject-component-wrapper.selected");
+        await Assertions.Expect(selected).ToContainTextAsync("List Card", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("edit-subject-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenATopLevelWidgetWithoutConfigurationIsSelected_ThenItHasNoBar()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var wrapper = GetValueListWrapper(page, "Top Level Row");
+        await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await wrapper.ClickAsync(new() { Force = true });
+
+        // Assert
+        await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar()).ToHaveCountAsync(0);
+    }
+
     [Theory]
     [InlineData("switch")]
     [InlineData("slider")]
@@ -178,6 +219,10 @@ public class WidgetSelectionTests
         page.Locator($".subject-component-wrapper.selectable:has([data-testid='{testId}'])")
             .Filter(new() { HasNot = page.Locator($".subject-component-wrapper.selectable:has([data-testid='{testId}'])") })
             .First;
+
+    private static ILocator GetValueListWrapper(IPage page, string rowLabel) =>
+        page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-list'])")
+            .Filter(new() { HasText = rowLabel });
 
     private Motor GetMotor() =>
         (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["selectionmotor"];

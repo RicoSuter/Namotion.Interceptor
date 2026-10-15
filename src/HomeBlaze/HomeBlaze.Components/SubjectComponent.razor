@@ -24,7 +24,11 @@
              @onclick:stopPropagation="@isSelectable"
              @onkeydown="@(isSelectable ? _keyDownCallback : default)"
              @onkeydown:stopPropagation="@isSelectable">
-            @if (isSelected)
+            @{
+                var selectableParent = isSelected ? SelectableParent : null;
+                var hasEditAction = isSelected && HasEditComponent;
+            }
+            @if (isSelected && (selectableParent != null || hasEditAction))
             {
                 @* The anchor of the bar, see widget-selection.css. *@
                 <div class="subject-action-bar-anchor">
@@ -37,7 +41,7 @@
                                 role="toolbar"
                                 aria-label="Widget actions"
                                 data-testid="widget-action-bar">
-                        @if (SelectableParent != null)
+                        @if (selectableParent != null)
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
                                            Size="Size.Small"
@@ -48,7 +52,7 @@
                                            data-testid="select-parent-button" />
                         }
 
-                        @if (HasEditComponent)
+                        @if (hasEditAction)
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                            Size="Size.Small"
@@ -140,11 +144,13 @@
         Subject != null &&
         (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit) || Subject.HasConfigurationProperties());
 
+    // Every block of a page is configurable, also one without configuration properties of its own. The content of a slot,
+    // such as the text of a card, and an expression in the text are not.
     private bool IsSelectable =>
         IsEditing &&
         Type == SubjectComponentType.Widget &&
         Selection != null &&
-        HasEditComponent;
+        (Subject is IConfigurable || HasEditComponent);
 
     // The name of the type, which names a selectable widget without a title, looked up once per subject.
     private string? _typeDisplayName;

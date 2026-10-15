@@ -21,3 +21,12 @@ Body of the selection card.
 
 :: HomeBlaze.Components.OperationButton Path=selectionmotor/PowerOff
 ::
+
+:: HomeBlaze.Components.Card Title="List Card"
+::: HomeBlaze.Components.ValueList
+:::: Value Path=selectionmotor/TargetSpeed Label="Nested Row"
+::
+
+:: HomeBlaze.Components.ValueList
+::: Value Path=selectionmotor/TargetSpeed Label="Top Level Row"
+::
