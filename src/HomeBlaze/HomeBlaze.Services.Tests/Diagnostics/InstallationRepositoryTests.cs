@@ -41,22 +41,6 @@ public class InstallationRepositoryTests
     }
 
     [Fact]
-    public void WhenAnAssemblyIsAdded_ThenKeepsTheExistingSubjects()
-    {
-        // Arrange
-        var repository = new InstallationRepository("repo", null);
-        repository.Apply(CreateEntry(CreateAssembly("A")));
-        var first = repository.Assemblies["A"];
-
-        // Act
-        repository.Apply(CreateEntry(CreateAssembly("A"), CreateAssembly("B")));
-
-        // Assert
-        Assert.Equal(new[] { "A", "B" }, repository.Assemblies.Keys);
-        Assert.Same(first, repository.Assemblies["A"]);
-    }
-
-    [Fact]
     public void WhenAnAssemblyIsInAPluginContext_ThenTitleNamesTheContext()
     {
         // Act
@@ -84,35 +68,24 @@ public class InstallationRepositoryTests
         Assert.Equal("abcdef0", first.Commit);
     }
 
-    [Fact]
-    public void WhenAnAssemblyIsRemoved_ThenReplacesTheDictionary()
+    [Theory]
+    [InlineData("A")]
+    [InlineData("A", "C")]
+    [InlineData("A", "B", "C")]
+    public void WhenTheAssembliesChange_ThenANewDictionaryKeepsTheSubjectsThatStay(params string[] names)
     {
         // Arrange
         var repository = new InstallationRepository("repo", null);
         repository.Apply(CreateEntry(CreateAssembly("A"), CreateAssembly("B")));
         var assemblies = repository.Assemblies;
+        var first = assemblies["A"];
 
         // Act
-        repository.Apply(CreateEntry(CreateAssembly("A")));
+        repository.Apply(CreateEntry(names.Select(name => CreateAssembly(name)).ToArray()));
 
         // Assert
         Assert.NotSame(assemblies, repository.Assemblies);
-        Assert.Equal(new[] { "A" }, repository.Assemblies.Keys);
-    }
-
-    [Fact]
-    public void WhenKeysChangeWithTheSameCount_ThenReplacesTheDictionary()
-    {
-        // Arrange
-        var repository = new InstallationRepository("repo", null);
-        repository.Apply(CreateEntry(CreateAssembly("A"), CreateAssembly("B")));
-        var assemblies = repository.Assemblies;
-
-        // Act
-        repository.Apply(CreateEntry(CreateAssembly("A"), CreateAssembly("C")));
-
-        // Assert
-        Assert.NotSame(assemblies, repository.Assemblies);
-        Assert.Equal(new[] { "A", "C" }, repository.Assemblies.Keys);
+        Assert.Equal(names, repository.Assemblies.Keys);
+        Assert.Same(first, repository.Assemblies["A"]);
     }
 }

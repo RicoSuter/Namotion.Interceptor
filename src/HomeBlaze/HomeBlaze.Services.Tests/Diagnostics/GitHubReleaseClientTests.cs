@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using HomeBlaze.Services.Diagnostics;
 using Xunit;
@@ -11,6 +12,8 @@ public class GitHubReleaseClientTests
         { "tag_name": "v0.6.0", "published_at": "2026-10-20T08:00:00Z", "html_url": "https://github.com/owner/repo/releases/tag/v0.6.0" }
         """;
 
+    private const string RateLimitMessage = "GitHub rate limit reached.";
+
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
 
     private static GitHubReleaseClient CreateClient(FakeHttpMessageHandler handler, string repositoryUrl = "https://github.com/owner/repo") =>
@@ -19,17 +22,20 @@ public class GitHubReleaseClientTests
     [Theory]
     [InlineData("https://github.com/RicoSuter/Namotion.Interceptor", "https://api.github.com/repos/RicoSuter/Namotion.Interceptor/releases/latest")]
     [InlineData("https://GitHub.com/owner/repo", "https://api.github.com/repos/owner/repo/releases/latest")]
-    public async Task WhenCreatedForAGitHubUrl_ThenTheLatestReleaseOfThatRepositoryIsRequested(string repositoryUrl, string expectedRequestUri)
+    public async Task WhenTheLatestReleaseIsRead_ThenItIsParsedAndTheRequestIsPolite(string repositoryUrl, string expectedRequestUri)
     {
         // Arrange
         var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson));
         var client = CreateClient(handler, repositoryUrl);
 
         // Act
-        await client.GetLatestReleaseAsync(CancellationToken.None);
+        var release = await client.GetLatestReleaseAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(expectedRequestUri, Assert.Single(handler.Requests).RequestUri!.ToString());
+        Assert.Equal(new LatestRelease("0.6.0", new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero), new Uri("https://github.com/owner/repo/releases/tag/v0.6.0")), release);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(expectedRequestUri, request.RequestUri!.ToString());
+        Assert.Equal("HomeBlaze/0.5.0", string.Join(' ', request.Headers.GetValues("User-Agent")));
     }
 
     [Theory]
@@ -46,23 +52,6 @@ public class GitHubReleaseClientTests
     }
 
     [Fact]
-    public async Task WhenTheLatestReleaseIsRead_ThenItIsParsedAndTheRequestIsPolite()
-    {
-        // Arrange
-        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson));
-        var client = CreateClient(handler);
-
-        // Act
-        var release = await client.GetLatestReleaseAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(new LatestRelease("0.6.0", new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero), new Uri("https://github.com/owner/repo/releases/tag/v0.6.0")), release);
-        var request = Assert.Single(handler.Requests);
-        Assert.Equal("https://api.github.com/repos/owner/repo/releases/latest", request.RequestUri!.ToString());
-        Assert.Equal("HomeBlaze/0.5.0", string.Join(' ', request.Headers.GetValues("User-Agent")));
-    }
-
-    [Fact]
     public async Task WhenTheRepositoryHasNoRelease_ThenNullIsReturned()
     {
         // Arrange
@@ -75,53 +64,33 @@ public class GitHubReleaseClientTests
         Assert.Null(release);
     }
 
-    [Fact]
-    public async Task WhenTheRateLimitIsExhausted_ThenTheExceptionCarriesTheTimeUntilReset()
+    [Theory]
+    [InlineData("RateLimitWithReset", RateLimitMessage, 90.0)]
+    [InlineData("RateLimitWithoutReset", RateLimitMessage, null)]
+    [InlineData("RateLimitWithResetOutOfRange", RateLimitMessage, null)]
+    [InlineData("TooManyRequestsWithRetryAfterDelay", RateLimitMessage, 5.0)]
+    [InlineData("TooManyRequestsWithRetryAfterDate", RateLimitMessage, 10.0)]
+    [InlineData("ServerError", "GitHub answered 500 Internal Server Error.", null)]
+    [InlineData("UnknownStatusWithoutReason", "GitHub answered 599.", null)]
+    public async Task WhenGitHubAnswersWithAnError_ThenTheExceptionDescribesItAndCarriesTheRequestedWait(
+        string answer, string expectedMessage, double? expectedRetryAfterMinutes)
     {
         // Arrange
-        var response = new HttpResponseMessage(HttpStatusCode.Forbidden);
-        response.Headers.Add("x-ratelimit-remaining", "0");
-        response.Headers.Add("x-ratelimit-reset", Now.AddMinutes(90).ToUnixTimeSeconds().ToString());
-        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
+        var client = CreateClient(new FakeHttpMessageHandler(_ => CreateErrorAnswer(answer)));
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<GitHubRequestException>(() => client.GetLatestReleaseAsync(CancellationToken.None));
-        Assert.Equal("GitHub rate limit reached.", exception.Message);
-        Assert.Equal(TimeSpan.FromMinutes(90), exception.RetryAfter);
+        Assert.Equal(expectedMessage, exception.Message);
+        Assert.Equal(expectedRetryAfterMinutes is { } minutes ? TimeSpan.FromMinutes(minutes) : null, exception.RetryAfter);
     }
 
-    [Fact]
-    public async Task WhenTheRateLimitResetIsOutOfRange_ThenItIsIgnored()
+    [Theory]
+    [InlineData("""{ "name": "x" }""")]
+    [InlineData("[]")]
+    public async Task WhenTheReleaseAnswerHasNoTagOrIsNotAnObject_ThenAJsonExceptionIsThrown(string json)
     {
         // Arrange
-        var response = new HttpResponseMessage(HttpStatusCode.Forbidden);
-        response.Headers.Add("x-ratelimit-remaining", "0");
-        response.Headers.Add("x-ratelimit-reset", "99999999999999");
-        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<GitHubRequestException>(() => client.GetLatestReleaseAsync(CancellationToken.None));
-        Assert.Null(exception.RetryAfter);
-    }
-
-    [Fact]
-    public async Task WhenGitHubAnswersTooManyRequestsWithRetryAfter_ThenTheExceptionCarriesIt()
-    {
-        // Arrange
-        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
-        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMinutes(5));
-        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<GitHubRequestException>(() => client.GetLatestReleaseAsync(CancellationToken.None));
-        Assert.Equal(TimeSpan.FromMinutes(5), exception.RetryAfter);
-    }
-
-    [Fact]
-    public async Task WhenTheReleaseJsonHasNoTag_ThenAJsonExceptionIsThrown()
-    {
-        // Arrange
-        var client = CreateClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json("""{ "name": "x" }""")));
+        var client = CreateClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(json)));
 
         // Act & Assert
         await Assert.ThrowsAsync<JsonException>(() => client.GetLatestReleaseAsync(CancellationToken.None));
@@ -146,67 +115,6 @@ public class GitHubReleaseClientTests
     }
 
     [Fact]
-    public async Task WhenTheReleaseAnswerIsNotAJsonObject_ThenAJsonExceptionIsThrown()
-    {
-        // Arrange
-        var client = CreateClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json("[]")));
-
-        // Act & Assert
-        await Assert.ThrowsAsync<JsonException>(() => client.GetLatestReleaseAsync(CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task WhenGitHubAnswersTooManyRequestsWithARetryAfterDate_ThenTheExceptionCarriesTheDifferenceToNow()
-    {
-        // Arrange
-        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
-        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(Now.AddMinutes(10));
-        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<GitHubRequestException>(() => client.GetLatestReleaseAsync(CancellationToken.None));
-        Assert.Equal(TimeSpan.FromMinutes(10), exception.RetryAfter);
-    }
-
-    [Fact]
-    public async Task WhenGitHubAnswersWithoutAReasonPhrase_ThenTheMessageOmitsIt()
-    {
-        // Arrange
-        var response = new HttpResponseMessage((HttpStatusCode)599);
-        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<GitHubRequestException>(() => client.GetLatestReleaseAsync(CancellationToken.None));
-        Assert.Equal("GitHub answered 599.", exception.Message);
-    }
-
-    [Fact]
-    public async Task WhenTheRateLimitIsExhausted_ThenTheMessageSaysSo()
-    {
-        // Arrange
-        var response = new HttpResponseMessage(HttpStatusCode.Forbidden);
-        response.Headers.Add("x-ratelimit-remaining", "0");
-        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<GitHubRequestException>(() => client.GetLatestReleaseAsync(CancellationToken.None));
-        Assert.Equal("GitHub rate limit reached.", exception.Message);
-    }
-
-    [Fact]
-    public async Task WhenGitHubAnswersTooManyRequestsWithRetryAfter_ThenTheMessageSaysRateLimited()
-    {
-        // Arrange
-        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
-        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMinutes(5));
-        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<GitHubRequestException>(() => client.GetLatestReleaseAsync(CancellationToken.None));
-        Assert.Equal("GitHub rate limit reached.", exception.Message);
-    }
-
-    [Fact]
     public async Task WhenTheCallerTokenIsAlreadyCanceled_ThenOperationCanceledExceptionIsThrown()
     {
         // Arrange
@@ -216,5 +124,29 @@ public class GitHubReleaseClientTests
 
         // Act & Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.GetLatestReleaseAsync(cancellationTokenSource.Token));
+    }
+
+    private static HttpResponseMessage CreateErrorAnswer(string answer) => answer switch
+    {
+        "RateLimitWithReset" => CreateRateLimitAnswer(Now.AddMinutes(90).ToUnixTimeSeconds().ToString()),
+        "RateLimitWithoutReset" => CreateRateLimitAnswer(reset: null),
+        "RateLimitWithResetOutOfRange" => CreateRateLimitAnswer("99999999999999"),
+        "TooManyRequestsWithRetryAfterDelay" => new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Headers = { RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromMinutes(5)) } },
+        "TooManyRequestsWithRetryAfterDate" => new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Headers = { RetryAfter = new RetryConditionHeaderValue(Now.AddMinutes(10)) } },
+        "ServerError" => new HttpResponseMessage(HttpStatusCode.InternalServerError),
+        "UnknownStatusWithoutReason" => new HttpResponseMessage((HttpStatusCode)599),
+        _ => throw new ArgumentOutOfRangeException(nameof(answer), answer, null)
+    };
+
+    private static HttpResponseMessage CreateRateLimitAnswer(string? reset)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.Forbidden);
+        response.Headers.Add("x-ratelimit-remaining", "0");
+        if (reset is not null)
+        {
+            response.Headers.Add("x-ratelimit-reset", reset);
+        }
+
+        return response;
     }
 }

@@ -70,16 +70,20 @@ public class HomeBlazeInstallationUpdateTests
         Assert.Equal(expected, isNewer);
     }
 
-    [Fact]
-    public void WhenCheckForUpdatesIsCalledOnAnEdgeBuild_ThenTheReasonIsThrown()
+    [Theory]
+    [InlineData("1.0.0", null, RepositoryUrl, "Not available for development builds")]
+    [InlineData("edge", null, RepositoryUrl, "Not available for edge builds")]
+    [InlineData("0.5.0", "v0.5.0", "https://gitlab.com/owner/repo", "Not supported for gitlab.com")]
+    [InlineData("0.5.0", "v0.5.0", null, "Not available without a repository URL")]
+    public void WhenNoCheckCanRunForTheBuild_ThenTheStatusAndCheckForUpdatesSayWhy(string version, string? tag, string? repositoryUrl, string expectedReason)
     {
         // Arrange
-        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson))));
+        var installation = CreateInstallation(CreateBuild(version, tag, repositoryUrl: repositoryUrl));
 
         // Act & Assert
-        Assert.Equal("Not available for edge builds", installation.UpdateCheckStatus);
+        Assert.Equal(expectedReason, installation.UpdateCheckStatus);
         var exception = Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
-        Assert.Equal("Not available for edge builds", exception.Message);
+        Assert.Equal(expectedReason, exception.Message);
     }
 
     [Fact]
@@ -177,42 +181,8 @@ public class HomeBlazeInstallationUpdateTests
         {
             await installation.StopAsync(CancellationToken.None);
         }
-    }
 
-    [Fact]
-    public void WhenCheckForUpdatesIsCalledOnADevelopmentBuild_ThenTheReasonIsThrown()
-    {
-        // Arrange
-        var installation = CreateInstallation(CreateBuild("1.0.0", tag: null));
-
-        // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
-        Assert.Equal("Not available for development builds", exception.Message);
-    }
-
-    [Fact]
-    public async Task WhenStartedWithACheckRequested_ThenTheCheckRunsInTheBackground()
-    {
-        // Arrange
-        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson));
-        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
-
-        // Act
-        await StartAndWaitUntilRunningAsync(installation);
-        try
-        {
-            installation.CheckForUpdates();
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => installation.UpdateAvailable is not null, message: "The update check did not run");
-        }
-        finally
-        {
-            await installation.StopAsync(CancellationToken.None);
-        }
-
-        // Assert
         Assert.True(installation.UpdateAvailable);
-        Assert.Equal(ServiceStatus.Stopped, installation.Status);
     }
 
     [Fact]
@@ -247,17 +217,6 @@ public class HomeBlazeInstallationUpdateTests
         // Assert
         Assert.True(installation.UpdateAvailable);
         Assert.Null(installation.UpdateCheckStatus);
-    }
-
-    [Fact]
-    public void WhenCheckForUpdatesIsCalledForARepositoryOutsideGitHub_ThenTheReasonIsThrown()
-    {
-        // Arrange
-        var installation = CreateInstallation(CreateBuild(repositoryUrl: "https://gitlab.com/owner/repo"), () => new HttpClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson))));
-
-        // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
-        Assert.Equal("Not supported for gitlab.com", exception.Message);
     }
 
     [Fact]

@@ -63,24 +63,13 @@ public class HomeBlazeInstallationTests
     }
 
     [Fact]
-    public void WhenADevelopmentBuildIsCreated_ThenTheVersionLinksToTheCommitAndUpdatesAreUnavailable()
+    public void WhenADevelopmentBuildIsCreated_ThenTheVersionLinksToTheCommit()
     {
         // Act
         var installation = CreateInstallation(CreateBuild("1.0.0", tag: null));
 
         // Assert
-        Assert.Equal(installation.CommitUrl, installation.VersionUrl);
-        Assert.Equal("Not available for development builds", installation.UpdateCheckStatus);
-    }
-
-    [Fact]
-    public void WhenTheRepositoryIsNotOnGitHub_ThenTheUpdateCheckIsNotSupported()
-    {
-        // Act
-        var installation = CreateInstallation(CreateBuild(repositoryUrl: "https://gitlab.com/owner/repo"));
-
-        // Assert
-        Assert.Equal("Not supported for gitlab.com", installation.UpdateCheckStatus);
+        Assert.Equal(new Uri($"{RepositoryUrl}/commit/{Commit}"), installation.VersionUrl);
     }
 
     [Fact]

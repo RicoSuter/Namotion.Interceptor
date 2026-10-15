@@ -10,6 +10,25 @@ public class UpdateScheduleTests
         public override double NextDouble() => value;
     }
 
+    public static TheoryData<TimeSpan, TimeSpan> ClampedIntervals => new()
+    {
+        { TimeSpan.FromHours(-1), UpdateSchedule.MinimumInterval },
+        { TimeSpan.Zero, UpdateSchedule.MinimumInterval },
+        { TimeSpan.FromHours(1), UpdateSchedule.MinimumInterval },
+        { TimeSpan.FromHours(48), TimeSpan.FromHours(48) },
+        { TimeSpan.FromDays(400), UpdateSchedule.MaximumInterval },
+        { TimeSpan.MaxValue, UpdateSchedule.MaximumInterval },
+    };
+
+    public static TheoryData<TimeSpan?, TimeSpan> WaitDelays => new()
+    {
+        { null, TimeSpan.FromMinutes(60) },
+        { TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30) },
+        { TimeSpan.FromDays(1), TimeSpan.FromMinutes(60) },
+        { TimeSpan.FromMinutes(-5), TimeSpan.Zero },
+        { TimeSpan.FromTicks(1), TimeSpan.FromMilliseconds(1) },
+    };
+
     [Theory]
     [InlineData(0.0, 5)]
     [InlineData(0.5, 32.5)]
@@ -24,41 +43,25 @@ public class UpdateScheduleTests
     }
 
     [Theory]
-    [InlineData(-1, 24)]
-    [InlineData(1, 24)]
-    [InlineData(48, 48)]
-    [InlineData(24 * 400, 24 * 365)]
-    public void WhenAnIntervalIsClamped_ThenItIsBetweenADayAndAYear(int intervalHours, int expectedHours)
+    [MemberData(nameof(ClampedIntervals))]
+    public void WhenAnIntervalIsClamped_ThenItIsBetweenADayAndAYear(TimeSpan configuredInterval, TimeSpan expectedInterval)
     {
         // Act
-        var interval = UpdateSchedule.ClampInterval(TimeSpan.FromHours(intervalHours));
+        var interval = UpdateSchedule.ClampInterval(configuredInterval);
 
         // Assert
-        Assert.Equal(TimeSpan.FromHours(expectedHours), interval);
+        Assert.Equal(expectedInterval, interval);
     }
 
     [Theory]
-    [InlineData(null, 60)]
-    [InlineData(30.0, 30)]
-    [InlineData(24.0 * 60, 60)]
-    [InlineData(-5.0, 0)]
-    public void WhenTheUpdateLoopWaits_ThenItWakesAtLeastHourly(double? remainingMinutes, double expectedMinutes)
+    [MemberData(nameof(WaitDelays))]
+    public void WhenTheUpdateLoopWaits_ThenItWakesAtLeastHourlyAndRoundsUpToMilliseconds(TimeSpan? remainingUntilDue, TimeSpan expectedDelay)
     {
         // Act
-        var delay = UpdateSchedule.GetWaitDelay(remainingMinutes is { } minutes ? TimeSpan.FromMinutes(minutes) : null);
+        var delay = UpdateSchedule.GetWaitDelay(remainingUntilDue);
 
         // Assert
-        Assert.Equal(TimeSpan.FromMinutes(expectedMinutes), delay);
-    }
-
-    [Fact]
-    public void WhenLessThanAMillisecondRemains_ThenTheWaitIsRoundedUp()
-    {
-        // Act
-        var delay = UpdateSchedule.GetWaitDelay(TimeSpan.FromTicks(1));
-
-        // Assert
-        Assert.Equal(TimeSpan.FromMilliseconds(1), delay);
+        Assert.Equal(expectedDelay, delay);
     }
 
     [Theory]
@@ -102,68 +105,24 @@ public class UpdateScheduleTests
         Assert.Equal(TimeSpan.FromHours(1), delay);
     }
 
-    [Fact]
-    public void WhenGitHubAsksToWaitLongerThanTheBackoff_ThenItsTimeWins()
-    {
-        // Arrange
-        var schedule = new UpdateSchedule();
-
-        // Act
-        var delay = schedule.GetDelayAfterFailure(retryAfter: TimeSpan.FromHours(3));
-
-        // Assert
-        Assert.Equal(TimeSpan.FromHours(3), delay);
-    }
-
-    [Fact]
-    public void WhenTheConfiguredIntervalExceedsAYear_ThenItIsClampedToAYear()
-    {
-        // Act
-        var delay = UpdateSchedule.ClampInterval(TimeSpan.MaxValue);
-
-        // Assert
-        Assert.Equal(UpdateSchedule.MaximumInterval, delay);
-    }
-
     [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void WhenTheConfiguredIntervalIsZeroOrNegative_ThenItIsClampedToADay(int intervalHours)
-    {
-        // Act
-        var delay = UpdateSchedule.ClampInterval(TimeSpan.FromHours(intervalHours));
-
-        // Assert
-        Assert.Equal(UpdateSchedule.MinimumInterval, delay);
-    }
-
-    [Fact]
-    public void WhenGitHubAsksToWaitMuchLongerThanTheCap_ThenTheDelayIsCappedAtTheMaximumBackoff()
+    [InlineData(0, 3, 3)]
+    [InlineData(0, 24 * 30, 24)]
+    [InlineData(3, 3, 8)]
+    public void WhenGitHubAsksToWait_ThenTheLongerOfItsWaitAndTheBackoffWinsUpToADay(int previousFailures, int retryAfterHours, int expectedHours)
     {
         // Arrange
         var schedule = new UpdateSchedule();
+        for (var failure = 0; failure < previousFailures; failure++)
+        {
+            schedule.GetDelayAfterFailure(retryAfter: null);
+        }
 
         // Act
-        var delay = schedule.GetDelayAfterFailure(retryAfter: TimeSpan.FromDays(30));
+        var delay = schedule.GetDelayAfterFailure(TimeSpan.FromHours(retryAfterHours));
 
         // Assert
-        Assert.Equal(UpdateSchedule.MaximumBackoff, delay);
-    }
-
-    [Fact]
-    public void WhenGitHubAsksToWaitLessThanTheBackoff_ThenTheBackoffWins()
-    {
-        // Arrange
-        var schedule = new UpdateSchedule();
-        schedule.GetDelayAfterFailure(retryAfter: null); // backoff becomes 1h
-        schedule.GetDelayAfterFailure(retryAfter: null); // backoff becomes 2h
-        schedule.GetDelayAfterFailure(retryAfter: null); // backoff becomes 4h
-
-        // Act
-        var delay = schedule.GetDelayAfterFailure(retryAfter: TimeSpan.FromHours(3)); // backoff is 8h, longer than retryAfter
-
-        // Assert
-        Assert.Equal(TimeSpan.FromHours(8), delay);
+        Assert.Equal(TimeSpan.FromHours(expectedHours), delay);
     }
 
     [Fact]
