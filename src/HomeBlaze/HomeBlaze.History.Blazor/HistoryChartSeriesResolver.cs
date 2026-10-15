@@ -151,8 +151,8 @@ public static class HistoryChartSeriesResolver
 
     /// <summary>
     /// Chooses the aggregation of a series: the first that the history dialog offers for a line, which
-    /// is the time-weighted average when a store supports it; the last value for a band, a counter or a
-    /// raw query, so those share one batch.
+    /// is the time-weighted average when a store supports it; the last value for a counter or a raw query,
+    /// so those share one batch, and for a band, which is always queried raw.
     /// </summary>
     public static string ChooseAggregation(
         Type propertyType, bool isBand, bool isCumulative, bool isRaw, IReadOnlySet<string> storeAggregations)

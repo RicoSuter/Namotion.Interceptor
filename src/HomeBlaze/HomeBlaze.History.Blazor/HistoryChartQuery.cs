@@ -54,14 +54,15 @@ public static class HistoryChartQuery
     }
 
     /// <summary>
-    /// Queries every requested series over [<paramref name="from"/>, <paramref name="to"/>), one batch
-    /// per aggregation, and builds lines and bands from the results.
+    /// Queries every requested series over [<paramref name="from"/>, <paramref name="to"/>) and builds lines
+    /// and bands from the results. Lines are queried in <paramref name="bucket"/>, one batch per aggregation;
+    /// bands are always queried as raw samples with the value held entering the window.
     /// </summary>
     /// <param name="stores">The history stores to merge.</param>
     /// <param name="requests">The series in legend order.</param>
     /// <param name="from">The start of the window.</param>
     /// <param name="to">The end of the window.</param>
-    /// <param name="bucket">The bucket of the queries, or null for raw samples.</param>
+    /// <param name="bucket">The bucket of the line queries, or null for raw samples.</param>
     /// <param name="cancellationToken">Cancels the queries.</param>
     /// <returns>What the chart draws and the query result of each request.</returns>
     /// <exception cref="HistoryAggregationNotSupportedException">No store supports an aggregation.</exception>
@@ -75,7 +76,7 @@ public static class HistoryChartQuery
         CancellationToken cancellationToken)
     {
         var batches = new List<(List<int> Indexes, Task<IReadOnlyList<HistorySeries>> Query)>();
-        foreach (var indexes in GroupByAggregation(requests))
+        foreach (var (isBand, indexes) in GroupBatches(requests))
         {
             var paths = new string[indexes.Count];
             for (var position = 0; position < paths.Length; position++)
@@ -83,23 +84,24 @@ public static class HistoryChartQuery
                 paths[position] = requests[indexes[position]].PropertyPath;
             }
 
-            var query = stores.QueryHistoryAsync(
-                paths, from, to, bucket, requests[indexes[0]].Aggregation, PropertyHistoryChartModel.MaxPoints, cancellationToken);
+            // A bucket without a sample is null whether the value was unknown or recorded as null, so a band,
+            // which tells the two apart, is always queried raw. Raw samples ignore the aggregation.
+            var query = isBand
+                ? stores.QueryHistoryAsync(
+                    paths, from, to, null, HistoryAggregations.Last, PropertyHistoryChartModel.MaxPoints, cancellationToken)
+                : stores.QueryHistoryAsync(
+                    paths, from, to, bucket, requests[indexes[0]].Aggregation, PropertyHistoryChartModel.MaxPoints, cancellationToken);
             batches.Add((indexes, query));
         }
 
         // The value held entering the window: a raw query returns only the samples inside it, so a band
-        // whose property last changed before 'from' would otherwise render empty. A bucketed query always
-        // emits a point at the aligned bucket start, which is at or before 'from', so it needs none.
+        // whose property last changed before 'from' would otherwise render as unknown.
         var valuesAtStart = new Task<HistoryPoint?>?[requests.Count];
-        if (bucket is null)
+        for (var index = 0; index < requests.Count; index++)
         {
-            for (var index = 0; index < requests.Count; index++)
+            if (requests[index].IsBand)
             {
-                if (requests[index].IsBand)
-                {
-                    valuesAtStart[index] = stores.GetValueAtAsync(requests[index].PropertyPath, from, cancellationToken);
-                }
+                valuesAtStart[index] = stores.GetValueAtAsync(requests[index].PropertyPath, from, cancellationToken);
             }
         }
 
@@ -169,18 +171,34 @@ public static class HistoryChartQuery
         return new HistoryChartResult(data, series, isTruncated);
     }
 
-    /// <summary>Groups the request indexes by aggregation, in order of first use.</summary>
-    private static List<List<int>> GroupByAggregation(IReadOnlyList<HistoryChartSeriesRequest> requests)
+    /// <summary>
+    /// Groups the request indexes into query batches in order of first use: the bands in one raw batch, the
+    /// lines by aggregation.
+    /// </summary>
+    private static List<(bool IsBand, List<int> Indexes)> GroupBatches(IReadOnlyList<HistoryChartSeriesRequest> requests)
     {
-        var groups = new List<List<int>>();
+        var groups = new List<(bool IsBand, List<int> Indexes)>();
+        List<int>? bands = null;
         var groupByAggregation = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         for (var index = 0; index < requests.Count; index++)
         {
-            if (!groupByAggregation.TryGetValue(requests[index].Aggregation, out var group))
+            var request = requests[index];
+            List<int>? group;
+            if (request.IsBand)
+            {
+                if (bands is null)
+                {
+                    bands = [];
+                    groups.Add((true, bands));
+                }
+
+                group = bands;
+            }
+            else if (!groupByAggregation.TryGetValue(request.Aggregation, out group))
             {
                 group = [];
-                groupByAggregation[requests[index].Aggregation] = group;
-                groups.Add(group);
+                groupByAggregation[request.Aggregation] = group;
+                groups.Add((false, group));
             }
 
             group.Add(index);

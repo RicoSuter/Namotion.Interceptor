@@ -153,7 +153,7 @@
         _aggregation = _aggregations.Count > 0 ? _aggregations[0] : HistoryAggregations.Last;
 
         // A discrete property defaults to raw samples: its transitions are the data, and bucketing would
-        // only round them to the bucket edge. The period select stays available for long ranges.
+        // only round them to the bucket edge. The period select stays available for Count, which draws a line.
         if (isDiscrete)
         {
             _periodIndex = RawPeriodIndex;
@@ -226,7 +226,11 @@
             _rangeHint = range <= TimeSpan.FromHours(24)
                 ? $"{TimeZone.ToZoned(from):HH:mm} to {TimeZone.ToZoned(to):HH:mm}"
                 : $"{TimeZone.ToZoned(from):MMM d, HH:mm} to {TimeZone.ToZoned(to):MMM d, HH:mm}";
-            _periodHint = PropertyHistoryChartModel.DescribePeriod(PropertyHistoryChartModel.Periods[_periodIndex], bucket);
+            // A state timeline is always queried as raw samples, the period applies only to a line.
+            var isRaw = bucket is null || UseStateTimeline;
+            _periodHint = UseStateTimeline && bucket is not null
+                ? "Not applicable to states."
+                : PropertyHistoryChartModel.DescribePeriod(PropertyHistoryChartModel.Periods[_periodIndex], bucket);
             _aggregationHint = PropertyHistoryChartModel.DescribeAggregation(_aggregation);
 
             var request = new HistoryChartSeriesRequest(PropertyPath, DisplayName, PropertyType, UseStateTimeline, _aggregation);
@@ -243,7 +247,7 @@
             // A raw query truncates because the window genuinely holds more samples than the cap. A bucketed
             // one truncates because the range divided by the bucket exceeds it, which says nothing about how
             // much was recorded: a fixed period far finer than the range reports it over an empty store.
-            _truncationHint = bucket is null
+            _truncationHint = isRaw
                 ? "Too many samples in this range: the oldest are not shown."
                 : $"Bucket too small for this range: only the newest {PropertyHistoryChartModel.MaxPoints} intervals are shown.";
 

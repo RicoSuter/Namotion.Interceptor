@@ -8,20 +8,20 @@ namespace HomeBlaze.History.Blazor;
 /// </summary>
 public static class HistoryChartPalette
 {
-    /// <summary>The hatch of a span that no store vouches for.</summary>
+    /// <summary>The hatch of a span whose value is unknown: no store vouches for it, or nothing was recorded in it yet.</summary>
     public const string UnknownFill =
         "repeating-linear-gradient(45deg, #BDBDBD, #BDBDBD 4px, #E0E0E0 4px, #E0E0E0 8px)";
 
-    /// <summary>The legend text of a span that no store vouches for.</summary>
+    /// <summary>The legend text of a span whose value is unknown.</summary>
     public const string UnknownLabel = "No data";
 
     /// <summary>
-    /// The fill of a covered span whose value is absent. It must not read as missing history: the store
-    /// vouches for the span, the value there simply is null.
+    /// The fill of a span whose value was recorded as absent. It must not read as missing history: the
+    /// value there is known to be null.
     /// </summary>
     public const string NoValueFill = "#455A64";
 
-    /// <summary>The legend text of a covered span whose value is absent.</summary>
+    /// <summary>The legend text of a span whose value was recorded as absent.</summary>
     public const string NoValueLabel = "(no value)";
 
     /// <summary>The line colours in the order the lines of a chart take them; the first is that of the history dialog.</summary>

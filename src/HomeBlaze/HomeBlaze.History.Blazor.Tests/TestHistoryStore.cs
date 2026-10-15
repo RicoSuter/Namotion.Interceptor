@@ -4,14 +4,13 @@ using HomeBlaze.History.Abstractions;
 namespace HomeBlaze.History.Blazor.Tests;
 
 /// <summary>
-/// A store that serves the raw samples of each path inside a query window and records the queries and
-/// look-backs it got. Unlike the real stores, it does not limit the look-back to its coverage.
+/// A store that serves the raw samples of each path inside a query window and records the queries it got.
+/// Unlike the real stores, it does not limit the look-back to its coverage.
 /// </summary>
 internal sealed class TestHistoryStore : IHistoryStore
 {
     private readonly Dictionary<string, List<HistoryPoint>> _samples = new(StringComparer.Ordinal);
     private readonly List<HistoryQuery> _receivedQueries = [];
-    private int _lookBackCount;
 
     public TestHistoryStore(HistoryCoverage coverage, int priority = 0)
     {
@@ -39,9 +38,6 @@ internal sealed class TestHistoryStore : IHistoryStore
             }
         }
     }
-
-    /// <summary>The number of <see cref="GetSampleAtOrBeforeAsync"/> calls.</summary>
-    public int LookBackCount => Volatile.Read(ref _lookBackCount);
 
     public TestHistoryStore Add(string propertyPath, DateTimeOffset timestamp, double? number)
     {
@@ -73,7 +69,6 @@ internal sealed class TestHistoryStore : IHistoryStore
     public ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
     {
-        Interlocked.Increment(ref _lookBackCount);
         return new(Samples(propertyPath).LastOrDefault(point => point.Timestamp <= asOf));
     }
 

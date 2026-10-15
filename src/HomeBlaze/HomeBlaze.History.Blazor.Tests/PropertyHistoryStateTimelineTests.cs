@@ -74,16 +74,39 @@ public class PropertyHistoryStateTimelineTests
     }
 
     [Fact]
-    public void WhenCoveredButNoValueWasEverObserved_ThenTheRunIsCoveredWithNoLabel()
+    public void WhenACoveredSpanPrecedesTheFirstSampleWithoutALookBackValue_ThenItIsAGap()
     {
-        // Arrange & Act
-        var segments = Build([], valueAtStart: null);
+        // Arrange
+        var recordedAt = From.AddMinutes(20);
 
-        // Assert: the store vouches for the window, so this is not a coverage gap. It is a covered
-        // span whose value is absent, and conflating the two makes a healthy null read as lost history.
-        var single = Assert.Single(segments);
-        Assert.False(single.IsUnknown);
-        Assert.Null(single.Label);
+        // Act
+        var segments = Build([Bool(recordedAt, true)], valueAtStart: null);
+
+        // Assert: the store vouches for the span, but the value there is unknown, not empty.
+        Assert.Collection(
+            segments,
+            unknown => Assert.Equal((From, recordedAt, (string?)null, true), (unknown.Start, unknown.End, unknown.Label, unknown.IsUnknown)),
+            known => Assert.Equal((recordedAt, To, "Yes", false), (known.Start, known.End, known.Label, known.IsUnknown)));
+    }
+
+    [Fact]
+    public void WhenASampleIsRecordedAsNull_ThenTheSpanFromThatSampleOnHasNoValue()
+    {
+        // Arrange
+        var clearedAt = From.AddMinutes(20);
+
+        // Act
+        var segments = Build([new HistoryPoint(clearedAt, null, null)], valueAtStart: null);
+
+        // Assert
+        Assert.Collection(
+            segments,
+            unknown => Assert.Equal((From, clearedAt, true), (unknown.Start, unknown.End, unknown.IsUnknown)),
+            empty =>
+            {
+                Assert.Equal((clearedAt, To, (string?)null, false), (empty.Start, empty.End, empty.Label, empty.IsUnknown));
+                Assert.Equal(HistoryChartPalette.NoValueLabel, HistoryChartPalette.DescribeSegment(empty));
+            });
     }
 
     [Fact]
@@ -116,11 +139,11 @@ public class PropertyHistoryStateTimelineTests
     [Fact]
     public void WhenAGapAdjoinsAnAbsentValue_ThenTheyRemainSeparateRuns()
     {
-        // Arrange: coverage stops at 20m; the value was already absent before that.
+        // Arrange: coverage stops at 20m; the value was recorded as absent before that.
         ImmutableArray<HistoryCoverage> coverage = [new HistoryCoverage(From, From.AddMinutes(20))];
 
         // Act
-        var segments = Build([], valueAtStart: null, coverage: coverage);
+        var segments = Build([], valueAtStart: new HistoryPoint(From.AddMinutes(-5), null, null), coverage: coverage);
 
         // Assert: merging these would hide where recording actually stopped.
         Assert.Collection(
@@ -145,12 +168,36 @@ public class PropertyHistoryStateTimelineTests
         // Act
         var segments = Build([], valueAtStart: Bool(From.AddMinutes(-5), true), coverage: coverage);
 
-        // Assert
+        // Assert: the next range has no sample, so its value stays unknown and merges with the gap.
         Assert.Collection(
             segments,
             first => Assert.Equal((From, gapStart, "Yes", false), (first.Start, first.End, first.Label, first.IsUnknown)),
-            gap => Assert.Equal((gapStart, gapEnd, (string?)null, true), (gap.Start, gap.End, gap.Label, gap.IsUnknown)),
-            last => Assert.Equal((gapEnd, To, "Yes", false), (last.Start, last.End, last.Label, last.IsUnknown)));
+            unknown => Assert.Equal((gapStart, To, (string?)null, true), (unknown.Start, unknown.End, unknown.Label, unknown.IsUnknown)));
+    }
+
+    [Fact]
+    public void WhenACoverageRangeEndsAfterASample_ThenTheNextRangeIsAGapUntilItsFirstSample()
+    {
+        // Arrange
+        var gapStart = From.AddMinutes(20);
+        var gapEnd = From.AddMinutes(30);
+        var firstSampleOfNextRange = From.AddMinutes(45);
+        ImmutableArray<HistoryCoverage> coverage =
+            [new HistoryCoverage(From, gapStart), new HistoryCoverage(gapEnd, To)];
+
+        // Act
+        var segments = Build(
+            [Bool(From.AddMinutes(10), true), Bool(firstSampleOfNextRange, false)],
+            valueAtStart: Bool(From.AddMinutes(-5), false),
+            coverage: coverage);
+
+        // Assert
+        Assert.Collection(
+            segments,
+            held => Assert.Equal((From, From.AddMinutes(10), "No", false), (held.Start, held.End, held.Label, held.IsUnknown)),
+            sample => Assert.Equal((From.AddMinutes(10), gapStart, "Yes", false), (sample.Start, sample.End, sample.Label, sample.IsUnknown)),
+            unknown => Assert.Equal((gapStart, firstSampleOfNextRange, (string?)null, true), (unknown.Start, unknown.End, unknown.Label, unknown.IsUnknown)),
+            next => Assert.Equal((firstSampleOfNextRange, To, "No", false), (next.Start, next.End, next.Label, next.IsUnknown)));
     }
 
     [Fact]

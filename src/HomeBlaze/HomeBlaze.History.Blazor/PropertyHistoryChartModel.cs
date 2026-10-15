@@ -251,10 +251,9 @@ public static class PropertyHistoryChartModel
     }
 
     /// <summary>
-    /// One constant-value run of a discrete property's history. <see cref="IsUnknown"/> means no store
-    /// vouches for the span, so nothing can be said about it. A null <see cref="Label"/> on a covered
-    /// span means the opposite: the span is recorded, and the value there is genuinely absent (an
-    /// explicit null, or a bucket with no sample under an aggregation that does not carry forward).
+    /// One constant-value run of a discrete property's history. <see cref="IsUnknown"/> means the value
+    /// of the span is not known: no store vouches for it, or no sample of its coverage session precedes
+    /// it. A null <see cref="Label"/> on a known span means the value was recorded as absent.
     /// </summary>
     public readonly record struct StateSegment(
         DateTimeOffset Start, DateTimeOffset End, string? Label, bool IsUnknown)
@@ -270,7 +269,9 @@ public static class PropertyHistoryChartModel
     ///
     /// Spans outside <paramref name="coverage"/> become unknown segments rather than extending the
     /// neighbouring value across them: a gap means no store can say whether the value changed, which is
-    /// precisely the distinction a line chart cannot draw.
+    /// precisely the distinction a line chart cannot draw. A held value is cleared at every coverage gap,
+    /// so a covered span is unknown as well until the first sample of its coverage range, unless
+    /// <paramref name="valueAtStart"/> holds it from the window start.
     ///
     /// <paramref name="points"/> and <paramref name="coverage"/> must be ascending by time, which is what
     /// every store and the merger return.
@@ -331,13 +332,14 @@ public static class PropertyHistoryChartModel
 
             var isCovered = coverageIndex < coverage.Count &&
                 coverage[coverageIndex].Contains(new HistoryCoverage(start, end));
+            if (!isCovered)
+            {
+                held = null;
+            }
 
-            // Three distinct states, and conflating the last two is what makes a healthy null read as
-            // missing history: no store vouches for this span; a store vouches for it but no value was
-            // ever observed (an explicitly recorded null, or a bucket with no sample under a
-            // non-carrying aggregation); or a value is held.
-            var label = isCovered && held is not null ? format(held) : null;
-            segments.Add(new StateSegment(start, end, label, IsUnknown: !isCovered));
+            // A held point whose value is null was recorded as absent, which is known and not a gap.
+            var label = held is not null ? format(held) : null;
+            segments.Add(new StateSegment(start, end, label, IsUnknown: held is null));
         }
 
         return Coalesce(segments);

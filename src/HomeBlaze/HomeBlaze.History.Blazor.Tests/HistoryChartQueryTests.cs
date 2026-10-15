@@ -180,24 +180,33 @@ public class HistoryChartQueryTests
     }
 
     [Fact]
-    public async Task WhenABandIsQueriedInBuckets_ThenNoValueBeforeTheWindowIsUsed()
+    public async Task WhenAChartIsBucketed_ThenItsBandIsQueriedRawAndTheValueHeldBeforeTheWindowStartsIt()
     {
         // Arrange
-        var store = CreateStore().Add("/pump/IsOn", At(-10), 1);
-        // Maximum carries no held value into a bucket, so the merger needs no look-back either.
-        var request = new HistoryChartSeriesRequest("/pump/IsOn", "On", typeof(bool), IsBand: true, HistoryAggregations.Maximum);
+        var bucket = TimeSpan.FromMinutes(10);
+        var store = CreateStore()
+            .Add("/pump/IsOn", At(-10), 1)
+            .Add("/pump/IsOn", At(30), 0)
+            .Add("/pump/CurrentSpeed", At(10), 100);
+        HistoryChartSeriesRequest[] requests =
+        [
+            new("/pump/CurrentSpeed", "Pump", typeof(int), IsBand: false, HistoryAggregations.Last),
+            new("/pump/IsOn", "On", typeof(bool), IsBand: true, HistoryAggregations.Last)
+        ];
 
         // Act
-        var result = await HistoryChartQuery.QueryAsync(
-            [store], [request], At(0), At(60), TimeSpan.FromMinutes(10), CancellationToken.None);
+        var result = await HistoryChartQuery.QueryAsync([store], requests, At(0), At(60), bucket, CancellationToken.None);
 
         // Assert
-        Assert.Equal(0, store.LookBackCount);
-        var query = Assert.Single(store.ReceivedQueries);
-        Assert.Equal(TimeSpan.FromMinutes(10), query.Bucket);
-        Assert.Equal(PropertyHistoryChartModel.MaxPoints, query.MaxPoints);
-        Assert.Equal(TimeSpan.FromMinutes(10), result.Data.Bucket);
-        Assert.All(Assert.Single(result.Data.Bands).Segments, segment => Assert.Null(segment.Label));
+        var queries = store.ReceivedQueries;
+        Assert.Equal(bucket, Assert.Single(queries, query => query.PropertyPath == "/pump/CurrentSpeed").Bucket);
+        Assert.Null(Assert.Single(queries, query => query.PropertyPath == "/pump/IsOn").Bucket);
+        Assert.Equal(bucket, result.Data.Bucket);
+        var band = Assert.Single(result.Data.Bands);
+        Assert.Collection(
+            band.Segments,
+            held => Assert.Equal((At(0), At(30), "Yes", false), (held.Start, held.End, held.Label, held.IsUnknown)),
+            changed => Assert.Equal((At(30), At(60), "No", false), (changed.Start, changed.End, changed.Label, changed.IsUnknown)));
     }
 
     [Fact]
