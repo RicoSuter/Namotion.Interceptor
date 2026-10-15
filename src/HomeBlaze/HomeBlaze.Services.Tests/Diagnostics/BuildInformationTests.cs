@@ -55,7 +55,6 @@ public class BuildInformationTests
             ["Namotion.Build.CommitDate"] = "2026-10-14T18:02:00+02:00",
             ["Namotion.Build.Time"] = "2026-10-14T18:20:00Z",
             ["Namotion.Build.RunUrl"] = "https://github.com/owner/repo/actions/runs/1",
-            ["Namotion.Build.ImageTags"] = "0.5.0;0.5;latest",
         };
 
         // Act
@@ -71,7 +70,6 @@ public class BuildInformationTests
         Assert.Equal(TimeSpan.Zero, build.CommitDate!.Value.Offset);
         Assert.Equal(new DateTimeOffset(2026, 10, 14, 18, 20, 0, TimeSpan.Zero), build.BuildTime);
         Assert.Equal("https://github.com/owner/repo/actions/runs/1", build.RunUrl);
-        Assert.Equal("0.5.0;0.5;latest", build.ImageTags);
     }
 
     [Fact]
@@ -92,7 +90,6 @@ public class BuildInformationTests
         Assert.Null(build.CommitDate);
         Assert.Null(build.BuildTime);
         Assert.Null(build.RunUrl);
-        Assert.Null(build.ImageTags);
     }
 
     [Fact]

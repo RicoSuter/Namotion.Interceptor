@@ -1,23 +1,11 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.Services.Tests.Diagnostics;
-
-[InterceptorSubject]
-public partial class TestMonitoredService : IMonitoredService
-{
-    [State]
-    public partial ServiceStatus Status { get; set; }
-
-    [State]
-    public partial string? StatusMessage { get; set; }
-}
 
 public class HomeBlazeInstallationTests
 {
@@ -25,22 +13,20 @@ public class HomeBlazeInstallationTests
     internal const string RepositoryUrl = "https://github.com/owner/repo";
 
     internal static BuildInformation CreateBuild(string version = "0.5.0", string? tag = "v0.5.0", string? commit = Commit, string? repositoryUrl = RepositoryUrl) =>
-        new(version, commit, repositoryUrl, tag, Branch: "master", CommitDate: null, BuildTime: null, RunUrl: null, ImageTags: null);
+        new(version, commit, repositoryUrl, tag, Branch: "master", CommitDate: null, BuildTime: null, RunUrl: null);
 
     internal static HomeBlazeInstallation CreateInstallation(
         BuildInformation build,
         Func<HttpClient>? createHttpClient = null,
-        DeveloperModeService? developerMode = null,
-        IListeningUrlsProvider? listeningUrlsProvider = null) =>
-        CreateInstallation(build, createHttpClient, TimeProvider.System, developerMode, listeningUrlsProvider);
+        DeveloperModeService? developerMode = null) =>
+        CreateInstallation(build, createHttpClient, TimeProvider.System, developerMode);
 
     internal static HomeBlazeInstallation CreateInstallation(
         BuildInformation build,
         Func<HttpClient>? createHttpClient,
         TimeProvider timeProvider,
-        DeveloperModeService? developerMode = null,
-        IListeningUrlsProvider? listeningUrlsProvider = null) =>
-        new(build, "Production", createHttpClient, developerMode ?? new DeveloperModeService(), listeningUrlsProvider, timeProvider, NullLogger.Instance);
+        DeveloperModeService? developerMode = null) =>
+        new(build, "Production", createHttpClient, developerMode ?? new DeveloperModeService(), timeProvider, NullLogger.Instance);
 
     [Theory]
     [InlineData("0.5.0", "v0.5.0", InstallationChannel.Release)]
@@ -105,27 +91,6 @@ public class HomeBlazeInstallationTests
 
         // Assert
         Assert.True(installation.IsDeveloperMode);
-    }
-
-    [Fact]
-    public void WhenSubjectsAreCounted_ThenServicesInErrorAndTheInventoryAreHandled()
-    {
-        // Arrange
-        IInterceptorSubject[] subjects =
-        [
-            new TestMonitoredService { Status = ServiceStatus.Running },
-            new TestMonitoredService { Status = ServiceStatus.Error },
-            new InstallationRepository("repo", null),
-            CreateInstallation(CreateBuild()),
-        ];
-
-        // Act
-        var (subjectCount, serviceCount, errorCount) = HomeBlazeInstallation.CountSubjects(subjects);
-
-        // Assert
-        Assert.Equal(3, subjectCount);
-        Assert.Equal(3, serviceCount);
-        Assert.Equal(1, errorCount);
     }
 
     [Fact]
@@ -226,8 +191,9 @@ public class HomeBlazeInstallationTests
     public async Task WhenAPollFails_ThenTheNextPollStillRuns()
     {
         // Arrange
-        var listeningUrlsProvider = new FailingOnceListeningUrlsProvider();
-        var installation = CreateInstallation(CreateBuild(), listeningUrlsProvider: listeningUrlsProvider);
+        var dataDirectoryProvider = new FailingOnceDataDirectoryProvider(Path.GetTempPath());
+        var installation = CreateInstallation(CreateBuild());
+        ((IInterceptorSubject)installation).Context.AddService<IDataDirectoryProvider>(dataDirectoryProvider);
         installation.PollingInterval = TimeSpan.FromSeconds(1);
 
         // Act
@@ -242,28 +208,23 @@ public class HomeBlazeInstallationTests
         }
 
         // Assert
-        Assert.True(listeningUrlsProvider.CallCount >= 2);
-        Assert.Equal(new[] { "http://localhost:5000" }, installation.ListeningUrls);
+        Assert.True(dataDirectoryProvider.CallCount >= 2);
+        Assert.Equal(Path.GetTempPath(), installation.DataDirectory);
         Assert.NotEmpty(installation.Repositories);
     }
 
     private static InventoryRepository CreateRepository(string name, string repositoryUrl) =>
         new(name, repositoryUrl, [new InventoryAssembly(name, name, "Default", "1.0.0", Commit)]);
 
-    private sealed class FailingOnceListeningUrlsProvider : IListeningUrlsProvider
+    private sealed class FailingOnceDataDirectoryProvider(string dataDirectory) : IDataDirectoryProvider
     {
         private int _callCount;
 
         public int CallCount => Volatile.Read(ref _callCount);
 
-        public IReadOnlyList<string> GetListeningUrls()
-        {
-            if (Interlocked.Increment(ref _callCount) == 1)
-            {
-                throw new InvalidCastException("The first read fails");
-            }
-
-            return ["http://localhost:5000"];
-        }
+        public string DataDirectory =>
+            Interlocked.Increment(ref _callCount) == 1
+                ? throw new InvalidCastException("The first read fails")
+                : dataDirectory;
     }
 }

@@ -14,8 +14,7 @@ internal sealed record BuildInformation(
     string? Branch,
     DateTimeOffset? CommitDate,
     DateTimeOffset? BuildTime,
-    string? RunUrl,
-    string? ImageTags)
+    string? RunUrl)
 {
     private const string MetadataPrefix = "Namotion.Build.";
 
@@ -44,8 +43,7 @@ internal sealed record BuildInformation(
             GetValue(metadata, MetadataPrefix + "Branch"),
             ParseDate(GetValue(metadata, MetadataPrefix + "CommitDate")),
             ParseDate(GetValue(metadata, MetadataPrefix + "Time")),
-            GetValue(metadata, MetadataPrefix + "RunUrl"),
-            GetValue(metadata, MetadataPrefix + "ImageTags"));
+            GetValue(metadata, MetadataPrefix + "RunUrl"));
     }
 
     /// <summary>

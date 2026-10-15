@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Services.Diagnostics;
 
@@ -22,36 +21,7 @@ public partial class HomeBlazeInstallation
     private bool _hasPollFailed;
 
     /// <summary>
-    /// Counts the subjects, the monitored services and those in <see cref="ServiceStatus.Error"/>. The repositories
-    /// and assemblies of an installation are not counted.
-    /// </summary>
-    internal static (int Subjects, int Services, int Errors) CountSubjects(IEnumerable<IInterceptorSubject> subjects)
-    {
-        int subjectCount = 0, serviceCount = 0, errorCount = 0;
-        foreach (var subject in subjects)
-        {
-            if (subject is InstallationRepository or InstallationAssembly)
-            {
-                continue;
-            }
-
-            subjectCount++;
-            if (subject is IMonitoredService service)
-            {
-                serviceCount++;
-                if (service.Status == ServiceStatus.Error)
-                {
-                    errorCount++;
-                }
-            }
-        }
-
-        return (subjectCount, serviceCount, errorCount);
-    }
-
-    /// <summary>
-    /// Refreshes the environment, health and, after an assembly was loaded, the inventory. Only the polling loop
-    /// calls it.
+    /// Refreshes the environment and, after an assembly was loaded, the inventory. Only the polling loop calls it.
     /// </summary>
     internal void Poll()
     {
@@ -60,16 +30,6 @@ public partial class HomeBlazeInstallation
         var dataDirectory = context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
         DataDirectory = dataDirectory;
         (DataVolumeFreeSpace, DataVolumeTotalSize) = ReadVolume(dataDirectory);
-
-        if (_listeningUrlsProvider?.GetListeningUrls() is { } urls && !urls.SequenceEqual(ListeningUrls))
-        {
-            ListeningUrls = urls.ToArray();
-        }
-
-        if (context.TryGetService<ISubjectRegistry>() is { } registry)
-        {
-            (SubjectCount, MonitoredServiceCount, ServicesInErrorCount) = CountSubjects(registry.KnownSubjects.Keys);
-        }
 
         if (Interlocked.Exchange(ref _isInventoryOutdated, 0) == 1)
         {

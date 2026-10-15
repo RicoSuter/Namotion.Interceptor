@@ -6,6 +6,5 @@
     <AssemblyMetadata Include="Namotion.Build.CommitDate" Value="$(SourceCommitDate)" Condition="'$(SourceCommitDate)' != ''" />
     <AssemblyMetadata Include="Namotion.Build.Time" Value="$(BuildTime)" Condition="'$(BuildTime)' != ''" />
     <AssemblyMetadata Include="Namotion.Build.RunUrl" Value="$(BuildRunUrl)" Condition="'$(BuildRunUrl)' != ''" />
-    <AssemblyMetadata Include="Namotion.Build.ImageTags" Value="$(ContainerImageTags)" Condition="'$(ContainerImageTags)' != ''" />
   </ItemGroup>
 </Project>

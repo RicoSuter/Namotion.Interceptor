@@ -6,15 +6,14 @@ using HomeBlaze.Abstractions.Common;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
-using DiagnosticsProcess = System.Diagnostics.Process;
 
 namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
-/// The running HomeBlaze installation: its build, loaded assemblies, environment, health and available updates.
+/// The running HomeBlaze installation: its build, loaded assemblies, environment and available updates.
 /// </summary>
 [Category("System")]
-[Description("Reports the build, assemblies, environment, health and available updates of this installation")]
+[Description("Reports the build, assemblies, environment and available updates of this installation")]
 [DisplayName("Installation")]
 [SubjectIcon("Info")]
 [SingleInstance]
@@ -29,7 +28,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
     private const string DefaultBranch = "master";
 
     private readonly DeveloperModeService _developerModeService;
-    private readonly IListeningUrlsProvider? _listeningUrlsProvider;
     private readonly GitHubReleaseClient? _releaseClient;
     private readonly (string Owner, string Name)? _gitHubRepository;
     private readonly TimeProvider _timeProvider;
@@ -86,10 +84,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [Category("Build")]
     public partial DateTimeOffset? BuildTime { get; internal set; }
 
-    [State(Position = 407)]
-    [Category("Build")]
-    public partial string? ImageTags { get; internal set; }
-
     [State(Position = 408)]
     [Category("Build")]
     public partial Uri? RepositoryUrl { get; internal set; }
@@ -127,10 +121,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [Category("Environment")]
     public partial bool IsDeveloperMode { get; internal set; }
 
-    [State(Position = 422)]
-    [Category("Environment")]
-    public partial string[] ListeningUrls { get; internal set; }
-
     [State(Position = 423)]
     [Category("Environment")]
     public partial string? DataDirectory { get; internal set; }
@@ -150,24 +140,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
         DataVolumeTotalSize is { } total and > 0 && DataVolumeFreeSpace is { } free
             ? Math.Round((decimal)(total - free) / total, 3)
             : null;
-
-    [State(Position = 427)]
-    [Category("Environment")]
-    public partial DateTimeOffset StartTime { get; internal set; }
-
-    // Health
-
-    /// <summary>
-    /// Subjects in the graph, without the repositories and assemblies of this installation.
-    /// </summary>
-    [State(Position = 440)]
-    public partial int SubjectCount { get; internal set; }
-
-    [State(Position = 441)]
-    public partial int MonitoredServiceCount { get; internal set; }
-
-    [State(Position = 442)]
-    public partial int ServicesInErrorCount { get; internal set; }
 
     // Update
 
@@ -239,14 +211,12 @@ public partial class HomeBlazeInstallation : BackgroundService,
         IHostEnvironment hostEnvironment,
         IHttpClientFactory httpClientFactory,
         DeveloperModeService developerModeService,
-        ILogger<HomeBlazeInstallation> logger,
-        IListeningUrlsProvider? listeningUrlsProvider = null)
+        ILogger<HomeBlazeInstallation> logger)
         : this(
             BuildInformation.FromAssembly(FindApplicationAssembly(hostEnvironment.ApplicationName)),
             hostEnvironment.EnvironmentName,
             () => httpClientFactory.CreateClient(),
             developerModeService,
-            listeningUrlsProvider,
             TimeProvider.System,
             logger)
     {
@@ -257,12 +227,10 @@ public partial class HomeBlazeInstallation : BackgroundService,
         string environmentName,
         Func<HttpClient>? createHttpClient,
         DeveloperModeService developerModeService,
-        IListeningUrlsProvider? listeningUrlsProvider,
         TimeProvider timeProvider,
         ILogger logger)
     {
         _developerModeService = developerModeService;
-        _listeningUrlsProvider = listeningUrlsProvider;
         _timeProvider = timeProvider;
         _logger = logger;
         _gitHubRepository = GitHubReleaseClient.TryParseRepository(build.RepositoryUrl);
@@ -282,21 +250,14 @@ public partial class HomeBlazeInstallation : BackgroundService,
         Branch = build.Branch;
         CommitDate = build.CommitDate;
         BuildTime = build.BuildTime;
-        ImageTags = build.ImageTags;
         RepositoryUrl = CreateUri(build.RepositoryUrl);
         BuildRunUrl = CreateUri(build.RunUrl);
 
         EnvironmentName = environmentName;
         IsDeveloperMode = developerModeService.IsEnabled;
-        ListeningUrls = [];
         DataDirectory = null;
         DataVolumeFreeSpace = null;
         DataVolumeTotalSize = null;
-        StartTime = ReadStartTime();
-
-        SubjectCount = 0;
-        MonitoredServiceCount = 0;
-        ServicesInErrorCount = 0;
 
         UpdateAvailable = null;
         LatestVersion = null;
@@ -377,19 +338,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
         }
 
         return entryAssembly ?? typeof(HomeBlazeInstallation).Assembly;
-    }
-
-    private static DateTimeOffset ReadStartTime()
-    {
-        try
-        {
-            using var process = DiagnosticsProcess.GetCurrentProcess();
-            return new DateTimeOffset(process.StartTime);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException)
-        {
-            return DateTimeOffset.UtcNow;
-        }
     }
 
     private static Uri? CreateUri(string? value) =>

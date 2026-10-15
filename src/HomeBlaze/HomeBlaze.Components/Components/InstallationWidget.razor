@@ -61,11 +61,6 @@
                 <MudText Typo="Typo.caption">Update check: @updateCheckStatus</MudText>
             }
 
-            <MudText Typo="Typo.caption">
-                Services @installation.MonitoredServiceCount · @installation.ServicesInErrorCount in error
-            </MudText>
-            <MudText Typo="Typo.caption">Subjects @installation.SubjectCount.ToString("N0", CultureInfo.InvariantCulture)</MudText>
-
             <MudText Typo="Typo.caption">Data @FormatDataVolume(installation)</MudText>
             @if (installation.DataVolumeUsage is { } dataVolumeUsage)
             {
