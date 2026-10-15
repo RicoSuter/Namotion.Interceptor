@@ -87,70 +87,19 @@ public class HomeBlazeInstallationTests
     }
 
     [Fact]
-    public void WhenPolled_ThenTheInventoryListsThisLibrary()
+    public void WhenPolled_ThenTheDataVolumeAndLastUpdatedAreSet()
     {
         // Arrange
         var installation = CreateInstallation(CreateBuild());
+        ((IInterceptorSubject)installation).Context.AddService<IDataDirectoryProvider>(new DataDirectoryProvider(Path.GetTempPath()));
 
         // Act
         installation.Poll();
 
         // Assert
-        Assert.Contains(
-            installation.Repositories.Values.SelectMany(repository => repository.Assemblies.Values),
-            assembly => assembly.Name == "HomeBlaze.Services");
+        Assert.Equal(Path.GetTempPath(), installation.DataDirectory);
+        Assert.NotNull(installation.DataVolumeTotalSize);
         Assert.NotNull(installation.LastUpdated);
-    }
-
-    [Fact]
-    public void WhenTheSameInventoryIsAppliedTwice_ThenTheDictionaryAndSubjectsAreKept()
-    {
-        // Arrange
-        var installation = CreateInstallation(CreateBuild());
-        installation.ApplyInventory([CreateRepository("repo", RepositoryUrl)]);
-        var repositories = installation.Repositories;
-        var repository = repositories["repo"];
-
-        // Act
-        installation.ApplyInventory([CreateRepository("repo", RepositoryUrl)]);
-
-        // Assert
-        Assert.Same(repositories, installation.Repositories);
-        Assert.Same(repository, installation.Repositories["repo"]);
-    }
-
-    [Fact]
-    public void WhenARepositoryIsAdded_ThenANewDictionaryKeepsTheExistingSubject()
-    {
-        // Arrange
-        var installation = CreateInstallation(CreateBuild());
-        installation.ApplyInventory([CreateRepository("repo", RepositoryUrl)]);
-        var repositories = installation.Repositories;
-        var repository = repositories["repo"];
-
-        // Act
-        installation.ApplyInventory([CreateRepository("repo", RepositoryUrl), CreateRepository("other", "https://github.com/owner/other")]);
-
-        // Assert
-        Assert.NotSame(repositories, installation.Repositories);
-        Assert.Equal(2, installation.Repositories.Count);
-        Assert.Same(repository, installation.Repositories["repo"]);
-    }
-
-    [Fact]
-    public void WhenARepositoryNameMovesToAnotherUrl_ThenANewSubjectWithTheNewUrlIsCreated()
-    {
-        // Arrange
-        var installation = CreateInstallation(CreateBuild());
-        installation.ApplyInventory([CreateRepository("Lib", "https://github.com/first/Lib")]);
-        var repository = installation.Repositories["Lib"];
-
-        // Act
-        installation.ApplyInventory([CreateRepository("Lib", "https://github.com/second/Lib")]);
-
-        // Assert
-        Assert.NotSame(repository, installation.Repositories["Lib"]);
-        Assert.Equal(new Uri("https://github.com/second/Lib"), installation.Repositories["Lib"].RepositoryUrl);
     }
 
     [Fact]
@@ -203,11 +152,13 @@ public class HomeBlazeInstallationTests
         // Assert
         Assert.True(dataDirectoryProvider.CallCount >= 2);
         Assert.Equal(Path.GetTempPath(), installation.DataDirectory);
-        Assert.NotEmpty(installation.Repositories);
+        Assert.NotNull(installation.DataVolumeTotalSize);
     }
 
-    private static InventoryRepository CreateRepository(string name, string repositoryUrl) =>
-        new(name, repositoryUrl, [new InventoryAssembly(name, name, "Default", "1.0.0", Commit)]);
+    private sealed class DataDirectoryProvider(string dataDirectory) : IDataDirectoryProvider
+    {
+        public string DataDirectory => dataDirectory;
+    }
 
     private sealed class FailingOnceDataDirectoryProvider(string dataDirectory) : IDataDirectoryProvider
     {

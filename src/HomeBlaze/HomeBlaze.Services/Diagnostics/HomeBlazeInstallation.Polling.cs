@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -14,16 +13,13 @@ public partial class HomeBlazeInstallation
 
     private readonly SemaphoreSlim _pollSignal = new(0, 1);
 
-    // Set by AssemblyLoad on any thread and cleared by the poll that rebuilds the inventory.
-    private int _isInventoryOutdated = 1;
-
     // Only the polling loop reads and writes it.
     private bool _hasPollFailed;
 
     private readonly Lock _developerModeLock = new();
 
     /// <summary>
-    /// Refreshes the environment and, after an assembly was loaded, the inventory. Only the polling loop calls it.
+    /// Refreshes the environment. Only the polling loop calls it.
     /// </summary>
     internal void Poll()
     {
@@ -33,47 +29,7 @@ public partial class HomeBlazeInstallation
         DataDirectory = dataDirectory;
         (DataVolumeFreeSpace, DataVolumeTotalSize) = ReadVolume(dataDirectory);
 
-        if (Interlocked.Exchange(ref _isInventoryOutdated, 0) == 1)
-        {
-            try
-            {
-                ApplyInventory(AssemblyInventory.Create(LoadedAssemblyReader.Read()));
-            }
-            catch
-            {
-                Volatile.Write(ref _isInventoryOutdated, 1);
-                throw;
-            }
-        }
-
         LastUpdated = _timeProvider.GetUtcNow();
-    }
-
-    /// <summary>
-    /// Applies an inventory. Repositories that stay under the same name and URL keep their subject, so their paths
-    /// and history stay.
-    /// </summary>
-    internal void ApplyInventory(ImmutableArray<InventoryRepository> inventory)
-    {
-        var current = Repositories;
-        var repositories = new Dictionary<string, InstallationRepository>(inventory.Length, StringComparer.Ordinal);
-        var isChanged = inventory.Length != current.Count;
-        foreach (var entry in inventory)
-        {
-            if (!current.TryGetValue(entry.Name, out var repository) || !repository.HasRepositoryUrl(entry.RepositoryUrl))
-            {
-                repository = new InstallationRepository(entry.Name, entry.RepositoryUrl);
-                isChanged = true;
-            }
-
-            repository.Apply(entry);
-            repositories[entry.Name] = repository;
-        }
-
-        if (isChanged)
-        {
-            Repositories = repositories;
-        }
     }
 
     private async Task RunPollingAsync(CancellationToken stoppingToken)
@@ -136,15 +92,6 @@ public partial class HomeBlazeInstallation
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             return false;
-        }
-    }
-
-    private void OnAssemblyLoad(object? sender, AssemblyLoadEventArgs args)
-    {
-        // The inventory leaves dynamic assemblies out, so emitting one does not change it.
-        if (!args.LoadedAssembly.IsDynamic)
-        {
-            Interlocked.Exchange(ref _isInventoryOutdated, 1);
         }
     }
 

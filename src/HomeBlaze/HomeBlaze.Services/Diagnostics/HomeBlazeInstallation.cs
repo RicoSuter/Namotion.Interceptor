@@ -9,10 +9,10 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
-/// The running HomeBlaze installation: its build, loaded assemblies, environment and available updates.
+/// The running HomeBlaze installation: its build, environment and available updates.
 /// </summary>
 [Category("System")]
-[Description("Reports the build, assemblies, environment and available updates of this installation")]
+[Description("Reports the build, environment and available updates of this installation")]
 [DisplayName("Installation")]
 [SubjectIcon("Info")]
 [SingleInstance]
@@ -165,11 +165,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [Category("Update")]
     public partial string? UpdateCheckStatus { get; internal set; }
 
-    // Inventory
-
-    [State(Position = 490)]
-    public partial Dictionary<string, InstallationRepository> Repositories { get; internal set; }
-
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
 
@@ -246,8 +241,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
         _updateCheckUnavailableReason = GetUpdateCheckUnavailableReason(Channel, RepositoryUrl, _releaseClient);
         UpdateCheckStatus = _updateCheckUnavailableReason;
 
-        Repositories = new Dictionary<string, InstallationRepository>(StringComparer.Ordinal);
-
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         LastUpdated = null;
@@ -264,9 +257,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
     {
         try
         {
-            AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoad;
             _developerModeService.OnChange += RefreshDeveloperMode;
-            Interlocked.Exchange(ref _isInventoryOutdated, 1);
 
             // Read after subscribing, so a change in between is not missed.
             RefreshDeveloperMode();
@@ -282,7 +273,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
         }
         finally
         {
-            AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
             _developerModeService.OnChange -= RefreshDeveloperMode;
             Status = ServiceStatus.Stopped;
         }

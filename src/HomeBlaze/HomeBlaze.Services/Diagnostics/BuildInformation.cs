@@ -17,7 +17,6 @@ internal sealed record BuildInformation(
     string? RunUrl)
 {
     private const string MetadataPrefix = "Namotion.Build.";
-    private const string RepositoryUrlKey = "RepositoryUrl";
 
     public static BuildInformation FromAssembly(Assembly assembly)
     {
@@ -27,7 +26,11 @@ internal sealed record BuildInformation(
             metadata[attribute.Key] = attribute.Value;
         }
 
-        return Create(ReadInformationalVersion(assembly), metadata);
+        var informationalVersion =
+            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? assembly.GetName().Version?.ToString()
+            ?? string.Empty;
+        return Create(informationalVersion, metadata);
     }
 
     public static BuildInformation Create(string informationalVersion, IReadOnlyDictionary<string, string?> metadata)
@@ -36,37 +39,12 @@ internal sealed record BuildInformation(
         return new BuildInformation(
             version,
             commit,
-            NormalizeRepositoryUrl(GetValue(metadata, RepositoryUrlKey)),
+            NormalizeRepositoryUrl(GetValue(metadata, "RepositoryUrl")),
             GetValue(metadata, MetadataPrefix + "Tag"),
             GetValue(metadata, MetadataPrefix + "Branch"),
             ParseDate(GetValue(metadata, MetadataPrefix + "CommitDate")),
             ParseDate(GetValue(metadata, MetadataPrefix + "Time")),
             GetValue(metadata, MetadataPrefix + "RunUrl"));
-    }
-
-    /// <summary>
-    /// Returns the informational version, or the assembly version when there is none.
-    /// </summary>
-    public static string ReadInformationalVersion(Assembly assembly) =>
-        assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-        ?? assembly.GetName().Version?.ToString()
-        ?? string.Empty;
-
-    /// <summary>
-    /// Returns the normalized <c>RepositoryUrl</c> metadata, or null when there is none.
-    /// </summary>
-    public static string? ReadRepositoryUrl(Assembly assembly)
-    {
-        string? repositoryUrl = null;
-        foreach (var attribute in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
-        {
-            if (attribute.Key == RepositoryUrlKey)
-            {
-                repositoryUrl = attribute.Value;
-            }
-        }
-
-        return NormalizeRepositoryUrl(repositoryUrl);
     }
 
     /// <summary>
