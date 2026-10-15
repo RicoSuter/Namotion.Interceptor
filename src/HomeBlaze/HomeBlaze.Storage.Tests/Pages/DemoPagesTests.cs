@@ -79,10 +79,14 @@ public class DemoPagesTests
         // Act
         var page = await AddDemoPageAsync(fixture, "Dashboard.md");
 
-        // Assert
-        var dashboard = Assert.Single(page.Children.Values.OfType<TabLayout>());
+        // Assert: the tabs of the widget groups come first, the tabs of the views at the end of the page.
+        var layouts = page.Children.Values.OfType<TabLayout>().ToList();
+        Assert.Equal(2, layouts.Count);
+        Assert.Same(layouts[0], ((IPathScope)page).TryGetNamedSubject("widgets"));
+        Assert.Equal(["Values", "Controls", "History", "Table"], layouts[0].Tabs.Select(tab => tab.Title));
+        var dashboard = layouts[1];
         Assert.Equal(["Devices", "Grid and Canvas", "On This Page"], dashboard.Tabs.Select(tab => tab.Title));
-        Assert.Equal(4, PageErrorBoxes.Flatten(page.Children.Values).OfType<TabLayout>().Count());
+        Assert.Equal(5, PageErrorBoxes.Flatten(page.Children.Values).OfType<TabLayout>().Count());
 
         // Tabs three levels deep: the tab of the devices holds a tab layout, and its tab of the fans holds another one.
         var devices = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[0]));
@@ -167,6 +171,7 @@ public class DemoPagesTests
 
         IPathScope scope = page;
         Assert.IsType<HistoryChart>(scope.TryGetNamedSubject("trends"));
+        Assert.IsType<HistoryChart>(scope.TryGetNamedSubject("loadtrends"));
         Assert.IsType<SubjectTable>(scope.TryGetNamedSubject("motortable"));
         Assert.Equal(5, Assert.IsType<FlowLayout>(scope.TryGetNamedSubject("controlroom")).Items.Length);
         Assert.Equal([ResponsiveShow.Phone, ResponsiveShow.NotPhone], subjects.OfType<Responsive>().Select(block => block.Show));
