@@ -1,6 +1,7 @@
 ---
 title: Monitoring
 navTitle: Monitoring
+position: 8
 ---
 
 # Monitoring and Health Checks
@@ -8,6 +9,8 @@ navTitle: Monitoring
 HomeBlaze reports its health over HTTP and exports logs, metrics and traces with OpenTelemetry. The settings are listed in [Configuration](configuration.md).
 
 See [Observability Design](../architecture/design/observability.md) for the architectural design.
+
+The running version, its build and the update check are described in [Version and Updates](updates.md).
 
 ## Host system
 

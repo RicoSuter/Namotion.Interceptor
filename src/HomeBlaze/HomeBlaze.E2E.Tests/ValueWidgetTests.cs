@@ -313,7 +313,7 @@ public class ValueWidgetTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 
@@ -342,7 +342,7 @@ public class ValueWidgetTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 
@@ -359,7 +359,7 @@ public class ValueWidgetTests
             await Assertions.Expect(tile.GetByTestId("value-text")).ToHaveTextAsync("Original label", new() { Timeout = Timeout });
 
             // Act
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
             isRemoved = true;
 
             // Assert
@@ -370,7 +370,7 @@ public class ValueWidgetTests
         {
             if (!isRemoved)
             {
-                _fixture.RemovePlainSubjectFromRoot(name, subject);
+                _fixture.RemoveSubjectFromRoot(name, subject);
             }
         }
     }
@@ -393,7 +393,7 @@ public class ValueWidgetTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 
@@ -416,7 +416,7 @@ public class ValueWidgetTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 

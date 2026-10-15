@@ -179,7 +179,7 @@ public class PageEditTests
         }
         finally
         {
-            _fixture.RemovePlainSubjectFromRoot(name, subject);
+            _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
 }
