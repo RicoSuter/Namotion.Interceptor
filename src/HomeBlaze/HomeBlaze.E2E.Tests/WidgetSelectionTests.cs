@@ -65,10 +65,27 @@ public class WidgetSelectionTests
         // Act
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
 
-        // Assert
-        var dialog = page.GetByRole(AriaRole.Dialog);
+        // Assert: the switch has no title or label, so the dialog is named "Edit" and its type tells which widget it edits.
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit", Exact = true });
         await Assertions.Expect(dialog.GetByLabel("Path", new() { Exact = true }))
             .ToHaveValueAsync("selectionmotor/IsPowered", new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("subject-edit-dialog-type")).ToHaveTextAsync("HomeBlaze.Components.Switch");
+    }
+
+    [Fact]
+    public async Task WhenEditIsClickedOnACardWithATitle_ThenTheEditDialogIsTitledWithItAndShowsTheType()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await page.GetByText("Body of the selection card.").SelectWidgetAsync();
+
+        // Act
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+
+        // Assert
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit Selection Card", Exact = true });
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("subject-edit-dialog-type")).ToHaveTextAsync("HomeBlaze.Components.Card");
     }
 
     [Fact]

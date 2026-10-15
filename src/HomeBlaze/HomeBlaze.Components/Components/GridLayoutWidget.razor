@@ -168,7 +168,8 @@
 
     private async Task EditCell(GridCell cell)
     {
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, cell, "Edit Cell");
+        var title = cell.Child is { } child ? SubjectNames.TryGetTitle(child) : null;
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, cell, title is null ? "Edit Cell" : $"Edit Cell: {title}");
     }
 
     private async Task DeleteCell(GridCell cell)

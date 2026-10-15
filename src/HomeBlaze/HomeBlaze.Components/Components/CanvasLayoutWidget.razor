@@ -284,7 +284,8 @@
 
     private async Task EditNode(CanvasNode node)
     {
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, node, "Edit Node");
+        var title = node.Child is { } child ? SubjectNames.TryGetTitle(child) : null;
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, node, title is null ? "Edit Node" : $"Edit Node: {title}");
     }
 
     private async Task DeleteNode(CanvasNode node)

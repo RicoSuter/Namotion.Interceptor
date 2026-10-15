@@ -163,14 +163,9 @@
 
     private string GetAccessibleName()
     {
-        if (Subject is ITitleProvider { Title: { Length: > 0 } title })
+        if (SubjectNames.TryGetTitle(Subject!, _labelProperty) is { } title)
         {
             return title;
-        }
-
-        if (_labelProperty?.GetValue() is string { Length: > 0 } label)
-        {
-            return label;
         }
 
         if (_pathProperty?.GetValue() is string { Length: > 0 } path)
@@ -264,7 +259,7 @@
             if (Subject != _previousSubject)
             {
                 var registeredSubject = Subject?.TryGetRegisteredSubject();
-                _labelProperty = TryGetTextProperty(registeredSubject, "Label");
+                _labelProperty = TryGetTextProperty(registeredSubject, SubjectNames.LabelPropertyName);
                 _pathProperty = TryGetTextProperty(registeredSubject, "Path");
             }
 
@@ -311,7 +306,8 @@
         if (Subject == null)
             return;
 
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, "Edit");
+        var title = SubjectNames.TryGetTitle(Subject, _labelProperty);
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, title is null ? "Edit" : $"Edit {title}");
     }
 
     public void Dispose()
