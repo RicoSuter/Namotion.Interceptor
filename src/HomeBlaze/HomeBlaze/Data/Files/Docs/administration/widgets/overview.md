@@ -45,6 +45,7 @@ The reference of each widget has its arguments, its slots and its samples. Some 
 | Widget | Purpose |
 |--------|---------|
 | [Switch](switch.md) | Turns a boolean on and off, by writing it or by invoking an operation per state |
+| [Slider](slider.md) | Sets a number between a minimum and a maximum |
 
 ---
 

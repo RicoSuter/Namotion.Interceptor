@@ -10,6 +10,7 @@ public class ControlWidgetPathTests
     [InlineData(typeof(Switch), nameof(Switch.Path), SubjectPathKinds.Boolean, false)]
     [InlineData(typeof(Switch), nameof(Switch.On), SubjectPathKinds.Operation, false)]
     [InlineData(typeof(Switch), nameof(Switch.Off), SubjectPathKinds.Operation, false)]
+    [InlineData(typeof(Slider), nameof(Slider.Path), SubjectPathKinds.Number, true)]
     public void WhenControlWidgetHasAPathArgument_ThenThePickerOffersOnlyTheTargetsItCanUse(
         Type widgetType, string propertyName, SubjectPathKinds expectedKind, bool expectedWritable)
     {
