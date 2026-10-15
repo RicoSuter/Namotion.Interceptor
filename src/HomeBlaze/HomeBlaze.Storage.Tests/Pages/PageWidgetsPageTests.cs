@@ -248,7 +248,7 @@ public class PageWidgetsPageTests
 
         // Assert
         var flows = DocumentationFolderFixture.FindSubjects(page).OfType<FlowLayout>().Select(flow => (flow.MinWidth, flow.Items.Length));
-        Assert.Equal([(200, 3), (320, 3), (120, 6), (600, 2), (320, 2), (140, 3)], flows);
+        Assert.Equal([(320, 3), (320, 3), (120, 6), (600, 2), (320, 2), (140, 3)], flows);
     }
 
     [Fact]

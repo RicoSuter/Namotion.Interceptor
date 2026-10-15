@@ -32,7 +32,7 @@ A titled box around page content. Type name: `HomeBlaze.Components.Card`.
 | `Outlined` | Yes or no | `true` | A border around the card instead of a shadow. `false` gives a card with a shadow, see `Elevation` |
 | `Elevation` | Whole number | `2` | The depth of the shadow of a card that is not outlined. `0` is no shadow. An outlined card has no shadow, whatever the value is |
 | `Image` | Text | None | A picture between the header and the body, 200 pixels high. Written like `Href` |
-| `Height` | Whole number | None | The height of the whole card in pixels. Without it, and without `AspectRatio`, the card is as high as its content. `Height` wins when both are set |
+| `Height` | Whole number | None | The height of the whole card in pixels, above 0. Without it, and without `AspectRatio`, the card is as high as its content. `Height` wins when both are set. A value of 0 or less shows an error in place of the card |
 | `AspectRatio` | Text | None | The width and the height of the card in the form `W:H`, for example `4:3` or `1:1`, so that the height of the card follows its width. A value in another form shows an error in place of the card |
 
 | Slot | Blocks | Holds |
@@ -96,11 +96,11 @@ The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
 {{ ../widgets/Pump/Status }}
 ::
 
-Three cards in a flow layout with `AspectRatio="4:3"`. Each card is three quarters as high as it is wide, so the three cards are equally high whatever their text is, and they grow and shrink with the width of the window. The text of the third card does not fit, and its body scrolls:
+Three cards in a flow layout with `AspectRatio="4:3"`. Each card is three quarters as high as it is wide, so the three cards are equally high whatever their text is, and they grow and shrink with the width of the window. A body whose text does not fit scrolls:
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.FlowLayout MinWidth=200
+:: HomeBlaze.Components.FlowLayout
 ::: Item
 :::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop AspectRatio="4:3"
 The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
@@ -117,7 +117,7 @@ Their speeds change while the page is open, so the values above are live.
 ::
 ~~~~
 
-:: HomeBlaze.Components.FlowLayout MinWidth=200
+:: HomeBlaze.Components.FlowLayout
 ::: Item
 :::: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop AspectRatio="4:3"
 The pump runs at {{ ../widgets/Pump/CurrentSpeed }} RPM.
@@ -158,7 +158,7 @@ Target speed: {{ ../widgets/Pump/TargetSpeed }} RPM
 - The header, the body and the footer have 12 pixels of room to the edge of the card, and a body right below the header starts close to the title, like the next line of a paragraph. The first and the last paragraph of the body and the footer add no room of their own.
 - A card is as wide as the place it stands in. Put cards into a `FlowLayout` to place them next to each other.
 - A card with a `Height` or an `AspectRatio` keeps the size of its header, its picture and its footer, and its body takes the rest of the height. A body that does not fit scrolls.
-- A card that is the subject of a [GridLayout](#gridlayout) cell is as high as the cell, unless it has a `Height` of its own, and its body scrolls like that of a card with a height.
+- A card that is the subject of a [GridLayout](#gridlayout) cell or a [CanvasLayout](#canvaslayout) node fills it and ignores `AspectRatio`. A `Height` of its own still wins. The cell or the node is the frame, so the card has no border and no shadow there, and its body scrolls like that of a card with a height.
 - A card has no other parts than the header, the picture, the body and the footer. It has no buttons.
 
 ## FlowLayout
@@ -539,7 +539,7 @@ The pump is set to **{{ ../widgets/Pump/TargetSpeed }}** and the fan to **{{ ../
 ::
 
 - All rows have the same height and all columns the same width, and the grid is at least 400 pixels high.
-- A [Card](#card) in a cell is as high as the cell, and its body scrolls when its content does not fit.
+- A [Card](#card) in a cell fills the cell and ignores its `AspectRatio`, unless it has a `Height` of its own. Its body scrolls when its content does not fit.
 - The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
 - Give a cell a `#name` to keep it and everything in it when cells are added or removed, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps).
 - In a configuration file of its own, a `GridLayout` has its cells as the list `cells`, each with one subject as `child`. On a page they are always `Cell` blocks as above, and the [`json` block](pages.md#the-json-block) cannot set them.
@@ -590,6 +590,7 @@ A canvas with two nodes that show the two sample motors. A canvas does not adapt
 - While the page is in edit mode, the nodes can be moved with the mouse, each node has buttons to edit and remove it, a click on a node selects the widget in it, and a click on a free place adds a node there. The canvas itself is selected with the arrow up button of a selected widget in a node, or with the keyboard, see [Editing in the Page Editor](pages.md#editing-in-the-page-editor).
 - A canvas can be zoomed with the mouse wheel and moved by dragging its background only while the page is edited. While the page is viewed, the canvas itself cannot be zoomed or moved, the wheel scrolls the page, and the widgets in its nodes work as anywhere else on the page. While the page is edited, the widgets in the nodes do not react to the mouse, so that a node can be moved without triggering what it shows. No line can be drawn between nodes in either mode.
 - A node has a fixed size and cuts off content that needs more room. Names and a configuration file work as for the cells of a `GridLayout`, with the list `nodes`.
+- A [Card](#card) in a node fills the node, as in a cell of a `GridLayout`.
 
 ## Value Widgets
 
