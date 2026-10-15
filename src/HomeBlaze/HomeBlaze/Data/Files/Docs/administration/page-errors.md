@@ -99,6 +99,9 @@ A map that cannot be found, or an argument that a widget cannot use, does not ta
 | `Cannot select a value of the flags enum MotorFeatures` | The property of a `Select` holds an enum whose values combine as flags. The message shows the name of the enum | Show the value with a value widget instead, see [Select](widgets/select.md) |
 | `Needs a Source: a folder or a property that holds subjects` | A `SubjectTable` has no `Source` | Set `Source` to a folder, a page or a property that holds subjects, see [SubjectTable](widgets/subject-table.md) |
 | `Cannot list subjects of: ../Motors` | The `Source` of a `SubjectTable` leads nowhere, to a subject that is no folder or page, or to a property that holds no subjects. The message shows the source as written | Check the path in `Source`. A path to a folder or a page lists what it holds, a path to a property lists its subjects |
+| `Unknown range '2h': use one of 1h, 6h, 24h, 7d, 30d` | The `Range` of a `HistoryChart` is none of the listed values. The message shows the range as written | Use one of the listed values, or remove `Range` for `24h`, see [HistoryChart](widgets/history-chart.md) |
+| `Unknown bucket '2m': use one of Auto, Raw, 1s, 10s, 60s, 5m, 10m, 15m, 1h, 4h, 6h, 12h, 24h` | The `Bucket` of a `HistoryChart` is none of the listed values. The message shows the bucket as written | Use one of the listed values, or remove `Bucket` for `Auto` |
+| `Series 'Fan temperature' (°C) has another unit than 'Pump' (no unit): show it in a second chart` | A recorded number series of a `HistoryChart` has another unit than its first recorded number series | Put the series in a second chart, see [HistoryChart](widgets/history-chart.md) |
 
 ## Other Messages
 

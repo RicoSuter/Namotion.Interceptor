@@ -53,6 +53,12 @@ The reference of each widget has its arguments, its slots and its samples. Some 
 | [OperationButton](operation-button.md) | Invokes an operation or a query |
 | [Control](control.md) | Shows the control that fits a property or an operation |
 
+## History
+
+| Widget | Purpose |
+|--------|---------|
+| [HistoryChart](history-chart.md) | The recorded history of numbers as lines and of states as bands, with a legend of the current values |
+
 ---
 
 ## Related
