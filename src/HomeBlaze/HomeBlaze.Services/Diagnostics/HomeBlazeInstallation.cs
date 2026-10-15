@@ -214,7 +214,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
         Name = string.Empty;
         PollingInterval = TimeSpan.FromSeconds(30);
-        UpdateCheckEnabled = false;
+        UpdateCheckEnabled = true;
         UpdateCheckInterval = UpdateSchedule.MinimumInterval;
 
         Version = build.Version;

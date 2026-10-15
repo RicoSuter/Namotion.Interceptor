@@ -53,6 +53,7 @@ public class HomeBlazeInstallationTests
 
         // Assert
         Assert.Equal("Installation", installation.Title);
+        Assert.True(installation.UpdateCheckEnabled);
         Assert.Equal("0.5.0", installation.Version);
         Assert.Equal(new Uri($"{RepositoryUrl}/commit/{Commit}"), installation.CommitUrl);
         Assert.Equal(new Uri($"{RepositoryUrl}/releases/tag/v0.5.0"), installation.VersionUrl);

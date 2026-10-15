@@ -2,6 +2,6 @@
   "$type": "HomeBlaze.Services.Diagnostics.HomeBlazeInstallation",
   "name": "",
   "pollingInterval": "00:00:30",
-  "updateCheckEnabled": false,
+  "updateCheckEnabled": true,
   "updateCheckInterval": "1.00:00:00"
 }
