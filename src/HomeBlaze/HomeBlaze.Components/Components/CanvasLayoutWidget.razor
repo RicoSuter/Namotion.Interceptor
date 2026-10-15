@@ -116,6 +116,17 @@
         border-style: solid;
     }
 
+    /*
+     * The outline of the selected widget is the only highlight of a node. The library draws its own around the node
+     * that a press selected: an animated dashed stroke on the rect that moves the node, and a stroke on the border
+     * strip. Both rects are told apart by their cursor attribute (checked for 4.1.136); the animation is an inline style.
+     */
+    .canvas-diagram > svg rect[cursor="move"],
+    .canvas-diagram > svg rect[cursor="pointer"] {
+        stroke: transparent;
+        animation: none !important;
+    }
+
     .canvas-node-content {
         width: 100%;
         height: 100%;
