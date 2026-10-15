@@ -1,0 +1,74 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SubjectTable))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    var table = Subject as SubjectTable;
+}
+
+@if (table is not null)
+{
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    if (!SubjectTableRows.TryGetRows(PathResolver, table, table.Source, table.Type, out var rows, out var error))
+    {
+        <WidgetArgumentError Message="@(error ?? string.Empty)" />
+    }
+    else
+    {
+        var columns = table.Columns;
+
+        <MudSimpleTable Dense="true" Hover="true" Elevation="0" data-testid="subject-table">
+            <thead>
+                <tr>
+                    @if (columns.Length == 0)
+                    {
+                        <th>Name</th>
+                    }
+
+                    @foreach (var column in columns)
+                    {
+                        <th @key="column">@SubjectTableRows.GetHeader(column, rows)</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in rows)
+                {
+                    var link = SubjectTableRows.GetLink(PathResolver, row.Subject);
+
+                    <tr @key="row.Subject" data-testid="subject-table-row">
+                        @if (columns.Length == 0)
+                        {
+                            <td>
+                                <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">@SubjectTableRows.GetTitle(row)</MudLink>
+                            </td>
+                        }
+
+                        @for (var index = 0; index < columns.Length; index++)
+                        {
+                            var column = columns[index];
+                            var reading = ValueReader.ReadProperty(PathResolver, column, row.Subject, column.Property, column.Map, TimeZone);
+
+                            <td data-testid="subject-table-cell">
+                                @if (index == 0 && reading.MapError is null)
+                                {
+                                    <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">@reading.Text</MudLink>
+                                }
+                                else
+                                {
+                                    <ValueText Reading="@reading" Path="@column.Property" />
+                                }
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

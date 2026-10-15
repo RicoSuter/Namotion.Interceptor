@@ -40,6 +40,7 @@ The reference of each widget has its arguments, its slots and its samples. Some 
 | [Indicator](../page-widgets.md#indicator) | Shows a state as a coloured chip, or as an icon alone |
 | [Progress](../page-widgets.md#progress) | A bar that shows where a number stands between a minimum and a maximum |
 | [Gauge](gauge.md) | A ring that shows where a number stands between a minimum and a maximum |
+| [SubjectTable](subject-table.md) | A table with a row per subject of a folder or a list and a column per property |
 
 ## Controls
 
