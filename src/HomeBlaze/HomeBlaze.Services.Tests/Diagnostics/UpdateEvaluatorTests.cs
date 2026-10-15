@@ -15,6 +15,8 @@ public class UpdateEvaluatorTests
     [InlineData("0.6.0", "0.6.0-beta.1", true)]
     [InlineData("1.0.0.1", "1.0.0", true)]
     [InlineData("not a version", "0.5.0", false)]
+    [InlineData("0.6.0+abc", "0.6.0", false)]
+    [InlineData("0.4.0", "0.5.0", false)]
     public void WhenVersionsAreCompared_ThenSemanticVersionOrderingApplies(string candidate, string current, bool expected)
     {
         // Act
@@ -36,6 +38,7 @@ public class UpdateEvaluatorTests
         // Assert
         Assert.True(state.UpdateAvailable);
         Assert.Equal("0.6.0", state.LatestVersion);
+        Assert.Equal(new DateTimeOffset(2026, 10, 20, 0, 0, 0, TimeSpan.Zero), state.LatestReleaseDate);
         Assert.Equal(ReleaseUrl, state.LatestReleaseUrl);
         Assert.Null(state.CommitsBehind);
         Assert.Null(state.ChangesUrl);
@@ -50,6 +53,19 @@ public class UpdateEvaluatorTests
         // Assert
         Assert.False(state.UpdateAvailable);
         Assert.Null(state.LatestVersion);
+    }
+
+    [Fact]
+    public void WhenAReleaseRunsAndTheRunningVersionDoesNotParse_ThenUpdateAvailabilityIsUnknown()
+    {
+        // Arrange
+        var release = new LatestRelease("0.6.0", null, ReleaseUrl);
+
+        // Act
+        var state = UpdateEvaluator.Evaluate(InstallationChannel.Release, "edge", release, comparison: null);
+
+        // Assert
+        Assert.Null(state.UpdateAvailable);
     }
 
     [Theory]
@@ -69,6 +85,19 @@ public class UpdateEvaluatorTests
         Assert.Equal(commitsBehind, state.CommitsBehind);
         Assert.Equal(CompareUrl, state.ChangesUrl);
         Assert.Equal("0.6.0", state.LatestVersion);
+    }
+
+    [Fact]
+    public void WhenAnEdgeBuildRunsAndNoComparisonExists_ThenUpdateAvailabilityIsUnknown()
+    {
+        // Arrange
+        var release = new LatestRelease("0.6.0", null, ReleaseUrl);
+
+        // Act
+        var state = UpdateEvaluator.Evaluate(InstallationChannel.Edge, "edge", release, comparison: null);
+
+        // Assert
+        Assert.Null(state.UpdateAvailable);
     }
 
     [Fact]
