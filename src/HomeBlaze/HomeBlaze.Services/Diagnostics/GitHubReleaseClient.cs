@@ -15,9 +15,7 @@ internal sealed class GitHubRequestException(string message, HttpStatusCode stat
 }
 
 /// <summary>
-/// Reads the latest release and branch comparisons from the unauthenticated GitHub REST API. Requests repeat the
-/// last ETag so an unchanged answer is not downloaded and parsed again. Not thread-safe; the update loop is its
-/// only caller.
+/// Reads the latest release from the unauthenticated GitHub REST API.
 /// </summary>
 internal sealed class GitHubReleaseClient
 {
@@ -28,11 +26,6 @@ internal sealed class GitHubReleaseClient
     private readonly Func<HttpClient> _createHttpClient;
     private readonly string _userAgent;
     private readonly TimeProvider _timeProvider;
-
-    private CachedResponse<LatestRelease>? _release;
-    private CachedResponse<BranchComparison>? _comparison;
-
-    private sealed record CachedResponse<T>(Uri RequestUri, string ETag, T Value);
 
     public GitHubReleaseClient(Func<HttpClient> createHttpClient, string userAgent, TimeProvider timeProvider)
     {
@@ -66,17 +59,9 @@ internal sealed class GitHubReleaseClient
         var requestToken = timeoutCts.Token;
 
         var requestUri = new Uri(ApiBaseAddress, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/releases/latest");
-        var cached = _release is { } release && release.RequestUri == requestUri ? release : null;
-
-        using var response = await SendAsync(requestUri, cached?.ETag, requestToken);
-        if (response.StatusCode == HttpStatusCode.NotModified && cached is not null)
-        {
-            return cached.Value;
-        }
-
+        using var response = await SendAsync(requestUri, requestToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            _release = null;
             return null;
         }
 
@@ -87,65 +72,20 @@ internal sealed class GitHubReleaseClient
             throw new JsonException("The GitHub release answer is not a JSON object.");
         }
 
-        var value = new LatestRelease(
+        return new LatestRelease(
             NormalizeVersion(GetRequiredString(root, "tag_name")),
             root.TryGetProperty("published_at", out var publishedAt) &&
             publishedAt.ValueKind == JsonValueKind.String &&
             publishedAt.TryGetDateTimeOffset(out var date) ? date : null,
             GetUri(root, "html_url"));
-
-        _release = response.Headers.ETag?.ToString() is { } etag ? new CachedResponse<LatestRelease>(requestUri, etag, value) : null;
-        return value;
     }
 
-    /// <summary>
-    /// Returns how many commits <paramref name="branch"/> has that <paramref name="commit"/> does not.
-    /// </summary>
-    public async Task<BranchComparison> CompareWithBranchAsync(string owner, string name, string commit, string branch, CancellationToken cancellationToken)
-    {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(RequestTimeout);
-        var requestToken = timeoutCts.Token;
-
-        // The files list is only on the first page; page 2 keeps the answer small and still has ahead_by.
-        var requestUri = new Uri(ApiBaseAddress,
-            $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/compare/{Uri.EscapeDataString(commit)}...{Uri.EscapeDataString(branch)}?page=2&per_page=1");
-        var cached = _comparison is { } comparison && comparison.RequestUri == requestUri ? comparison : null;
-
-        using var response = await SendAsync(requestUri, cached?.ETag, requestToken);
-        if (response.StatusCode == HttpStatusCode.NotModified && cached is not null)
-        {
-            return cached.Value;
-        }
-
-        using var document = await ReadJsonAsync(response, requestToken);
-        var root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object)
-        {
-            throw new JsonException("The GitHub comparison answer is not a JSON object.");
-        }
-
-        if (!root.TryGetProperty("ahead_by", out var aheadBy) || aheadBy.ValueKind != JsonValueKind.Number || !aheadBy.TryGetInt32(out var commitsBehind))
-        {
-            throw new JsonException("The GitHub comparison has no ahead_by count.");
-        }
-
-        var value = new BranchComparison(commitsBehind, GetUri(root, "html_url"));
-        _comparison = response.Headers.ETag?.ToString() is { } etag ? new CachedResponse<BranchComparison>(requestUri, etag, value) : null;
-        return value;
-    }
-
-    private async Task<HttpResponseMessage> SendAsync(Uri requestUri, string? etag, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(Uri requestUri, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.TryAddWithoutValidation("User-Agent", _userAgent);
         request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
         request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
-        if (etag is not null)
-        {
-            request.Headers.TryAddWithoutValidation("If-None-Match", etag);
-        }
-
         return await _createHttpClient().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
     }
 

@@ -69,17 +69,11 @@ public partial class HomeBlazeInstallation
         try
         {
             var release = await _releaseClient!.GetLatestReleaseAsync(owner, name, cancellationToken);
-            var comparison = Channel == InstallationChannel.Edge && Commit is { } commit
-                ? await _releaseClient.CompareWithBranchAsync(owner, name, commit, ComparedBranch, cancellationToken)
-                : null;
-            var state = UpdateEvaluator.Evaluate(Channel, Version, release, comparison);
 
-            LatestVersion = state.LatestVersion;
-            LatestReleaseDate = state.LatestReleaseDate;
-            LatestReleaseUrl = state.LatestReleaseUrl;
-            CommitsBehind = state.CommitsBehind;
-            ChangesUrl = state.ChangesUrl;
-            UpdateAvailable = state.UpdateAvailable;
+            LatestVersion = release?.Version;
+            LatestReleaseDate = release?.PublishedAt;
+            LatestReleaseUrl = release?.Url;
+            UpdateAvailable = UpdateEvaluator.IsUpdateAvailable(Version, release);
 
             LastUpdateCheck = _timeProvider.GetUtcNow();
             UpdateCheckStatus = null;
@@ -126,16 +120,16 @@ public partial class HomeBlazeInstallation
             return "Not available for development builds";
         }
 
+        if (Channel == InstallationChannel.Edge)
+        {
+            return "Not available for edge builds";
+        }
+
         if (_gitHubRepository is null)
         {
             return RepositoryUrl is { } repositoryUrl
                 ? $"Not supported for {repositoryUrl.Host}"
                 : "Not available without a repository URL";
-        }
-
-        if (Channel == InstallationChannel.Edge && Commit is null)
-        {
-            return "Not available without a commit";
         }
 
         return _releaseClient is null ? "Not available without an HTTP client" : null;

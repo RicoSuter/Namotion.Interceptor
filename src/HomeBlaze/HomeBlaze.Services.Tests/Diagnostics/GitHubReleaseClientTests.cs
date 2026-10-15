@@ -45,7 +45,7 @@ public class GitHubReleaseClientTests
     public async Task WhenTheLatestReleaseIsRead_ThenItIsParsedAndTheRequestIsPolite()
     {
         // Arrange
-        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson, "\"abc\""));
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson));
         var client = CreateClient(handler);
 
         // Act
@@ -56,27 +56,6 @@ public class GitHubReleaseClientTests
         var request = Assert.Single(handler.Requests);
         Assert.Equal("https://api.github.com/repos/owner/repo/releases/latest", request.RequestUri!.ToString());
         Assert.Equal("HomeBlaze/0.5.0", string.Join(' ', request.Headers.GetValues("User-Agent")));
-        Assert.False(request.Headers.Contains("If-None-Match"));
-    }
-
-    [Fact]
-    public async Task WhenTheReleaseIsUnchanged_ThenTheETagIsSentAndTheCachedReleaseReturned()
-    {
-        // Arrange
-        var responses = new Queue<HttpResponseMessage>([
-            FakeHttpMessageHandler.Json(ReleaseJson, "\"abc\""),
-            new HttpResponseMessage(HttpStatusCode.NotModified),
-        ]);
-        var handler = new FakeHttpMessageHandler(_ => responses.Dequeue());
-        var client = CreateClient(handler);
-        var first = await client.GetLatestReleaseAsync("owner", "repo", CancellationToken.None);
-
-        // Act
-        var second = await client.GetLatestReleaseAsync("owner", "repo", CancellationToken.None);
-
-        // Assert
-        Assert.Equal(first, second);
-        Assert.Equal("\"abc\"", string.Join(' ', handler.Requests[1].Headers.GetValues("If-None-Match")));
     }
 
     [Fact]
@@ -144,22 +123,6 @@ public class GitHubReleaseClientTests
         await Assert.ThrowsAsync<JsonException>(() => client.GetLatestReleaseAsync("owner", "repo", CancellationToken.None));
     }
 
-    [Fact]
-    public async Task WhenABranchIsCompared_ThenCommitsBehindAndTheCompareUrlAreRead()
-    {
-        // Arrange
-        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(
-            """{ "ahead_by": 12, "behind_by": 0, "html_url": "https://github.com/owner/repo/compare/abc...master" }"""));
-        var client = CreateClient(handler);
-
-        // Act
-        var comparison = await client.CompareWithBranchAsync("owner", "repo", "abc1234", "master", CancellationToken.None);
-
-        // Assert
-        Assert.Equal(new BranchComparison(12, new Uri("https://github.com/owner/repo/compare/abc...master")), comparison);
-        Assert.Equal("https://api.github.com/repos/owner/repo/compare/abc1234...master?page=2&per_page=1", Assert.Single(handler.Requests).RequestUri!.ToString());
-    }
-
     [Theory]
     [InlineData("v0.6.0", "0.6.0")]
     [InlineData("V1.2.3", "1.2.3")]
@@ -186,58 +149,6 @@ public class GitHubReleaseClientTests
 
         // Act & Assert
         await Assert.ThrowsAsync<JsonException>(() => client.GetLatestReleaseAsync("owner", "repo", CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task WhenTheComparisonHasNoAheadByNumber_ThenAJsonExceptionIsThrown()
-    {
-        // Arrange
-        var client = CreateClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json("""{ "ahead_by": null }""")));
-
-        // Act & Assert
-        await Assert.ThrowsAsync<JsonException>(() => client.CompareWithBranchAsync("owner", "repo", "abc1234", "master", CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task WhenTheComparisonIsUnchanged_ThenTheETagIsSentAndTheCachedComparisonReturned()
-    {
-        // Arrange
-        var responses = new Queue<HttpResponseMessage>([
-            FakeHttpMessageHandler.Json(
-                """{ "ahead_by": 12, "behind_by": 0, "html_url": "https://github.com/owner/repo/compare/abc...master" }""", "\"xyz\""),
-            new HttpResponseMessage(HttpStatusCode.NotModified),
-        ]);
-        var handler = new FakeHttpMessageHandler(_ => responses.Dequeue());
-        var client = CreateClient(handler);
-        var first = await client.CompareWithBranchAsync("owner", "repo", "abc1234", "master", CancellationToken.None);
-
-        // Act
-        var second = await client.CompareWithBranchAsync("owner", "repo", "abc1234", "master", CancellationToken.None);
-
-        // Assert
-        Assert.Equal(first, second);
-        Assert.Equal("\"xyz\"", string.Join(' ', handler.Requests[1].Headers.GetValues("If-None-Match")));
-    }
-
-    [Fact]
-    public async Task WhenTheReleaseDisappearsAfterBeingCached_ThenTheCacheIsClearedAndNoETagIsSentNext()
-    {
-        // Arrange
-        var responses = new Queue<HttpResponseMessage>([
-            FakeHttpMessageHandler.Json(ReleaseJson, "\"abc\""),
-            new HttpResponseMessage(HttpStatusCode.NotFound),
-            FakeHttpMessageHandler.Json(ReleaseJson, "\"abc\""),
-        ]);
-        var handler = new FakeHttpMessageHandler(_ => responses.Dequeue());
-        var client = CreateClient(handler);
-        await client.GetLatestReleaseAsync("owner", "repo", CancellationToken.None);
-        await client.GetLatestReleaseAsync("owner", "repo", CancellationToken.None);
-
-        // Act
-        await client.GetLatestReleaseAsync("owner", "repo", CancellationToken.None);
-
-        // Assert
-        Assert.False(handler.Requests[2].Headers.Contains("If-None-Match"));
     }
 
     [Fact]

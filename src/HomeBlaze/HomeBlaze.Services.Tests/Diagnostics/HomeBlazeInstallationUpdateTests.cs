@@ -33,22 +33,15 @@ public class HomeBlazeInstallationUpdateTests
     }
 
     [Fact]
-    public async Task WhenAnEdgeBuildIsBehind_ThenCommitsBehindAndChangesAreReported()
+    public void WhenCheckForUpdatesIsCalledOnAnEdgeBuild_ThenTheReasonIsThrown()
     {
         // Arrange
-        var handler = new FakeHttpMessageHandler(request => request.RequestUri!.AbsolutePath.Contains("/compare/")
-            ? FakeHttpMessageHandler.Json("""{ "ahead_by": 3, "html_url": "https://github.com/owner/repo/compare/x...master" }""")
-            : FakeHttpMessageHandler.Json(ReleaseJson));
-        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(handler));
+        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson))));
 
-        // Act
-        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
-
-        // Assert
-        Assert.True(installation.UpdateAvailable);
-        Assert.Equal(3, installation.CommitsBehind);
-        Assert.Equal(new Uri("https://github.com/owner/repo/compare/x...master"), installation.ChangesUrl);
-        Assert.Contains(handler.Requests, request => request.RequestUri!.AbsolutePath.EndsWith($"/compare/{Commit}...master"));
+        // Act & Assert
+        Assert.Equal("Not available for edge builds", installation.UpdateCheckStatus);
+        var exception = Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
+        Assert.Equal("Not available for edge builds", exception.Message);
     }
 
     [Fact]
@@ -103,37 +96,6 @@ public class HomeBlazeInstallationUpdateTests
         // Assert
         Assert.Null(installation.UpdateCheckStatus);
         Assert.True(installation.UpdateAvailable);
-    }
-
-    [Theory]
-    [InlineData("develop", "develop")]
-    [InlineData(null, "master")]
-    public void WhenCreated_ThenTheComparedBranchIsTheBuildBranchOrMaster(string? branch, string expected)
-    {
-        // Arrange
-        var build = CreateBuild("edge", tag: null) with { Branch = branch };
-
-        // Act
-        var installation = CreateInstallation(build);
-
-        // Assert
-        Assert.Equal(expected, installation.ComparedBranch);
-    }
-
-    [Fact]
-    public async Task WhenAnEdgeBuildHasNoBranch_ThenItIsComparedWithMaster()
-    {
-        // Arrange
-        var handler = new FakeHttpMessageHandler(request => request.RequestUri!.AbsolutePath.Contains("/compare/")
-            ? FakeHttpMessageHandler.Json("""{ "ahead_by": 0, "html_url": "https://github.com/owner/repo/compare/x...master" }""")
-            : FakeHttpMessageHandler.Json(ReleaseJson));
-        var installation = CreateInstallation(CreateBuild("edge", tag: null) with { Branch = null }, () => new HttpClient(handler));
-
-        // Act
-        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Contains(handler.Requests, request => request.RequestUri!.AbsolutePath.EndsWith($"/compare/{Commit}...master"));
     }
 
     [Fact]

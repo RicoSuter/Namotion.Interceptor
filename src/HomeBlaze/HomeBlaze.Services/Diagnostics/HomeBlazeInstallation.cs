@@ -25,8 +25,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
     IIconProvider,
     ILastUpdatedProvider
 {
-    private const string DefaultBranch = "master";
-
     private readonly DeveloperModeService _developerModeService;
     private readonly GitHubReleaseClient? _releaseClient;
     private readonly (string Owner, string Name)? _gitHubRepository;
@@ -69,12 +67,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [State(Position = 404)]
     [Category("Build")]
     public partial string? Branch { get; internal set; }
-
-    /// <summary>
-    /// The branch an edge build is compared with for updates: the build branch, or master without one.
-    /// </summary>
-    [Derived]
-    public string ComparedBranch => Branch ?? DefaultBranch;
 
     [State(Position = 405)]
     [Category("Build")]
@@ -162,25 +154,14 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [Category("Update")]
     public partial Uri? LatestReleaseUrl { get; internal set; }
 
-    /// <summary>
-    /// Commits the branch of an edge build has that the running build does not.
-    /// </summary>
     [State(Position = 464)]
-    [Category("Update")]
-    public partial int? CommitsBehind { get; internal set; }
-
-    [State(Position = 465)]
-    [Category("Update")]
-    public partial Uri? ChangesUrl { get; internal set; }
-
-    [State(Position = 466)]
     [Category("Update")]
     public partial DateTimeOffset? LastUpdateCheck { get; internal set; }
 
     /// <summary>
     /// Why no check can run for this build, or the error of the last check until a check succeeds.
     /// </summary>
-    [State(Position = 467)]
+    [State(Position = 465)]
     [Category("Update")]
     public partial string? UpdateCheckStatus { get; internal set; }
 
@@ -263,8 +244,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
         LatestVersion = null;
         LatestReleaseDate = null;
         LatestReleaseUrl = null;
-        CommitsBehind = null;
-        ChangesUrl = null;
         LastUpdateCheck = null;
         UpdateCheckStatus = GetUpdateCheckUnavailableReason();
 

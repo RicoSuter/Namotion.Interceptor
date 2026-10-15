@@ -38,21 +38,10 @@
             {
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                     <MudIcon Icon="@Icons.Material.Filled.Update" Color="Color.Warning" Size="Size.Small" />
-                    @if (installation.Channel == InstallationChannel.Edge)
+                    <MudText Typo="Typo.caption">Update available: @installation.LatestVersion @FormatDate(installation.LatestReleaseDate)</MudText>
+                    @if (installation.LatestReleaseUrl is { } releaseUrl)
                     {
-                        <MudText Typo="Typo.caption">@FormatCommitsBehind(installation.CommitsBehind, installation.ComparedBranch)</MudText>
-                        @if (installation.ChangesUrl is { } changesUrl)
-                        {
-                            <MudLink Href="@changesUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Changes</MudLink>
-                        }
-                    }
-                    else
-                    {
-                        <MudText Typo="Typo.caption">Update available: @installation.LatestVersion @FormatDate(installation.LatestReleaseDate)</MudText>
-                        @if (installation.LatestReleaseUrl is { } releaseUrl)
-                        {
-                            <MudLink Href="@releaseUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Release notes</MudLink>
-                        }
+                        <MudLink Href="@releaseUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Release notes</MudLink>
                     }
                 </MudStack>
             }
@@ -89,13 +78,6 @@
 
     private static string FormatDate(DateTimeOffset? date) =>
         date is { } value ? $"({value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)})" : string.Empty;
-
-    private static string FormatCommitsBehind(int? commitsBehind, string branch)
-    {
-        var count = commitsBehind ?? 0;
-        var unit = count == 1 ? "commit" : "commits";
-        return $"{count} {unit} behind {branch}";
-    }
 
     private static string FormatDataVolume(HomeBlazeInstallation installation) =>
         installation.DataVolumeFreeSpace is { } free && installation.DataVolumeTotalSize is { } total

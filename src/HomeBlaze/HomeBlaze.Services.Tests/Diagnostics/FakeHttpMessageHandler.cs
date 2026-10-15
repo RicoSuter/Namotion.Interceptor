@@ -10,16 +10,8 @@ internal sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpRespon
 {
     public List<HttpRequestMessage> Requests { get; } = [];
 
-    public static HttpResponseMessage Json(string json, string? etag = null)
-    {
-        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
-        if (etag is not null)
-        {
-            response.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue(etag);
-        }
-
-        return response;
-    }
+    public static HttpResponseMessage Json(string json) =>
+        new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
