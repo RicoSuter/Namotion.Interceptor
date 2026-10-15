@@ -42,8 +42,12 @@ The test puts the subject `HistoryValues` next to this page before it opens it.
 ::: Series Path=../HistoryValues/Gapped Label="Gapped"
 ::
 
-:: HomeBlaze.History.Blazor.HistoryChart#scales Range=1h Bucket=Raw
+:: HomeBlaze.History.Blazor.HistoryChart#fraction Range=1h Bucket=Raw
 ::: Series Path=../HistoryValues/Fraction Label="Fraction"
+::
+
+:: HomeBlaze.History.Blazor.HistoryChart#scales Range=1h Bucket=Raw
+::: Series Path=../HistoryValues/Fraction Label="Two scales"
 ::: Series Path=../HistoryValues/Large Label="Large scale"
 ::
 
