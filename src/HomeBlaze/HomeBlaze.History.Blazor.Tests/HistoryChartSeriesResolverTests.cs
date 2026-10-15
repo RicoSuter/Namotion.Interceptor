@@ -1,5 +1,6 @@
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.History;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Blazor;
 using HomeBlaze.Services;
@@ -8,6 +9,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit;
 
@@ -225,21 +227,65 @@ public class HistoryChartSeriesResolverTests
     }
 
     [Fact]
-    public void WhenTheHistoryPathIsBuilt_ThenItIsThePathTheRecorderWrites()
+    public void WhenAStringAnEnumOrADiscreteNumberIsResolved_ThenItIsABand()
+    {
+        // Arrange
+        var (resolver, root) = CreateGraph(
+            new HistoryChartSeries { Path = "/Status" },
+            new HistoryChartSeries { Path = "/Mode" },
+            new HistoryChartSeries { Path = "/Level" });
+
+        // Act
+        var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart!);
+
+        // Assert
+        Assert.All(series, entry => Assert.Equal(HistoryChartSeriesKind.Band, entry.Kind));
+        Assert.All(series, entry => Assert.True(entry.HasHistory));
+    }
+
+    [Fact]
+    public void WhenAPathIsRelativeToTheScopeOfTheChart_ThenItResolvesFromThatScope()
+    {
+        // Arrange
+        var (resolver, root) = CreateGraph();
+        var chart = new HistoryChart { Series = [new HistoryChartSeries { Path = "../Temperature" }] };
+        root.Page = new ChartPageSubject { Chart = chart };
+
+        // Act
+        var series = HistoryChartSeriesResolver.Resolve(resolver, chart);
+
+        // Assert
+        var entry = Assert.Single(series);
+        Assert.Equal(HistoryChartSeriesKind.Line, entry.Kind);
+        Assert.Same(root, entry.Property!.Subject);
+        Assert.Equal(nameof(ChartTargetSubject.Temperature), entry.Property.Name);
+    }
+
+    [Fact]
+    public async Task WhenTheHistoryPathIsBuilt_ThenItIsThePathTheRecorderWrites()
     {
         // Arrange
         var (resolver, root) = CreateGraph();
         root.Child = new ChartTargetSubject();
-        var rootProperty = root.TryGetRegisteredSubject()!.TryGetProperty(nameof(ChartTargetSubject.Temperature))!;
-        var childProperty = root.Child.TryGetRegisteredSubject()!.TryGetProperty(nameof(ChartTargetSubject.Temperature))!;
+        RegisteredSubjectProperty[] properties =
+        [
+            root.TryGetRegisteredSubject()!.TryGetProperty(nameof(ChartTargetSubject.Temperature))!,
+            root.Child.TryGetRegisteredSubject()!.TryGetProperty(nameof(ChartTargetSubject.Temperature))!
+        ];
+        var engine = new PathRecordingEngine();
+        var recorder = new HistoryChangeRecorder(engine, resolver);
+        var changes = properties
+            .Select(property => SubjectPropertyChange.Create(
+                property.Reference, ChangeOrigin.Local, DateTimeOffset.UnixEpoch, null, 0.0, 1.0))
+            .ToArray();
 
         // Act
-        var rootPath = HistoryChartSeriesResolver.GetHistoryPath(resolver, rootProperty);
-        var childPath = HistoryChartSeriesResolver.GetHistoryPath(resolver, childProperty);
+        var paths = properties.Select(property => property.GetHistoryPath(resolver)).ToArray();
+        await recorder.RecordBatch(changes);
 
         // Assert
-        Assert.Equal("/Temperature", rootPath);
-        Assert.Equal("/Child/Temperature", childPath);
+        Assert.Equal(engine.Paths, paths);
+        Assert.Equal("/Child/Temperature", paths[1]);
     }
 
     private static (SubjectPathResolver Resolver, ChartTargetSubject Root) CreateGraph(params HistoryChartSeries[] series)
@@ -247,6 +293,7 @@ public class HistoryChartSeriesResolverTests
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
+            .WithParents()
             .WithLifecycle()
             .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
@@ -254,5 +301,20 @@ public class HistoryChartSeriesResolverTests
 
         var root = new ChartTargetSubject(context) { Chart = new HistoryChart { Series = series } };
         return (new SubjectPathResolver(() => root), root);
+    }
+
+    private sealed class PathRecordingEngine : IHistoryRecorder
+    {
+        public List<string> Paths { get; } = [];
+
+        public bool TryRecord(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
+        {
+            Paths.Add(propertyPath);
+            return true;
+        }
+
+        public void RecordMove(DateTimeOffset timestamp, string fromPath, string toPath)
+        {
+        }
     }
 }

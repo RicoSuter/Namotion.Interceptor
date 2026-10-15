@@ -16,6 +16,11 @@ namespace HomeBlaze.History
     {
         public static bool HasHistory(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
+    public static class HistoryPaths
+    {
+        public static string? GetHistoryPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, HomeBlaze.Abstractions.ISubjectPathResolver resolver) { }
+        public static string Join(string subjectPath, string propertyName) { }
+    }
     public static class HistoryStoreMerger
     {
         public static System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistoryPoint?> GetValueAtAsync(this Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }

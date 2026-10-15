@@ -141,7 +141,6 @@ namespace HomeBlaze.History.Blazor
         public static string?[] AssignLineColors(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
         public static string ChooseAggregation(System.Type propertyType, bool isBand, bool isCumulative, bool isRaw, System.Collections.Generic.IReadOnlySet<string> storeAggregations) { }
         public static string? FindArgumentError(string? range, string? bucket, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
-        public static string? GetHistoryPath(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> Resolve(HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.History.Blazor.HistoryChart chart) { }
     }
     public class HistoryChartView : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable

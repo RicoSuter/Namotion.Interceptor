@@ -167,20 +167,6 @@ public static class HistoryChartSeriesResolver
         return offered.Count > 0 ? offered[0] : HistoryAggregations.Last;
     }
 
-    /// <summary>
-    /// Gets the path the history of a property is recorded under, or null when its subject is not in the graph.
-    /// </summary>
-    public static string? GetHistoryPath(SubjectPathResolver resolver, RegisteredSubjectProperty property)
-    {
-        var subjectPath = resolver.GetPath(property.Subject, PathStyle.Canonical);
-        if (subjectPath is null)
-        {
-            return null;
-        }
-
-        return subjectPath == "/" ? $"/{property.Name}" : $"{subjectPath}/{property.Name}";
-    }
-
     // Same order as GetDisplayName, reusing the metadata that Resolve already looked up.
     private static string GetLabel(string? label, StateMetadata? metadata, RegisteredSubjectProperty? property, string? path)
     {
