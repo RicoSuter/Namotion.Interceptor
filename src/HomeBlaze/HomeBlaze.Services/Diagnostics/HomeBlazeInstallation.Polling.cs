@@ -75,7 +75,7 @@ public partial class HomeBlazeInstallation
         {
             try
             {
-                ApplyInventory(AssemblyInventory.Create(LoadedAssemblyReader.Read(), _build.RepositoryUrl));
+                ApplyInventory(AssemblyInventory.Create(LoadedAssemblyReader.Read()));
             }
             catch
             {
@@ -96,7 +96,6 @@ public partial class HomeBlazeInstallation
         var current = Repositories;
         var repositories = new Dictionary<string, InstallationRepository>(inventory.Length, StringComparer.Ordinal);
         var isChanged = inventory.Length != current.Count;
-        var mismatched = new List<string>();
         foreach (var entry in inventory)
         {
             if (!current.TryGetValue(entry.Name, out var repository) || !repository.HasRepositoryUrl(entry.RepositoryUrl))
@@ -107,23 +106,12 @@ public partial class HomeBlazeInstallation
 
             repository.Apply(entry);
             repositories[entry.Name] = repository;
-            if (entry.HasAnyMismatch)
-            {
-                mismatched.Add(entry.Name);
-            }
         }
 
         if (isChanged)
         {
             Repositories = repositories;
         }
-
-        if (!mismatched.SequenceEqual(MismatchedRepositories))
-        {
-            MismatchedRepositories = mismatched.ToArray();
-        }
-
-        HasVersionMismatch = mismatched.Count > 0;
     }
 
     private async Task RunPollingAsync(CancellationToken stoppingToken)

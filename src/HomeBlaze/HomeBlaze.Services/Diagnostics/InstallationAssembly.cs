@@ -20,9 +20,6 @@ public partial class InstallationAssembly : ITitleProvider, IIconProvider
     [Derived]
     public string IconName => "Code";
 
-    [Derived]
-    public string? IconColor => HasMismatch ? "Warning" : null;
-
     [State(Position = 400)]
     public partial string Name { get; internal set; }
 
@@ -37,12 +34,6 @@ public partial class InstallationAssembly : ITitleProvider, IIconProvider
     /// </summary>
     [State(Position = 403)]
     public partial string LoadContext { get; internal set; }
-
-    /// <summary>
-    /// Whether the same assembly is loaded elsewhere with another version or commit.
-    /// </summary>
-    [State(IsDiscrete = true, Position = 404)]
-    public partial bool HasMismatch { get; internal set; }
 
     internal InstallationAssembly(InventoryAssembly entry)
     {
@@ -59,6 +50,5 @@ public partial class InstallationAssembly : ITitleProvider, IIconProvider
         Version = entry.Version;
         Commit = entry.Commit;
         LoadContext = entry.LoadContext;
-        HasMismatch = entry.HasMismatch;
     }
 }

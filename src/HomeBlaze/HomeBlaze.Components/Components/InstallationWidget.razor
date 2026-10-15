@@ -30,12 +30,6 @@
                 }
                 <MudSpacer />
                 <MudChip T="string" Size="Size.Small" data-testid="installation-widget-channel">@installation.Channel</MudChip>
-                @if (installation.MismatchedRepositories.Length > 0)
-                {
-                    <MudTooltip Text="Repositories whose assemblies come from different builds">
-                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.Warning" data-testid="installation-widget-mismatch">@installation.MismatchedRepositories.Length mismatched</MudChip>
-                    </MudTooltip>
-                }
             </MudStack>
 
             <MudDivider />

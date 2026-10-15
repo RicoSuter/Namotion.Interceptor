@@ -247,28 +247,8 @@ public class HomeBlazeInstallationTests
         Assert.NotEmpty(installation.Repositories);
     }
 
-    [Fact]
-    public void WhenTheInventoryHasAMismatch_ThenTheInstallationWarns()
-    {
-        // Arrange
-        var installation = CreateInstallation(CreateBuild());
-        InventoryAssembly[] assemblies =
-        [
-            new("Lib", "Lib", "Default", "1.0.0", Commit, true),
-            new("Lib (Plugin)", "Lib", "Plugin", "0.9.0", null, true),
-        ];
-
-        // Act
-        installation.ApplyInventory([new InventoryRepository("repo", RepositoryUrl, false, [.. assemblies])]);
-
-        // Assert
-        Assert.True(installation.HasVersionMismatch);
-        Assert.Equal(new[] { "repo" }, installation.MismatchedRepositories);
-        Assert.Equal("Warning", installation.IconColor);
-    }
-
     private static InventoryRepository CreateRepository(string name, string repositoryUrl) =>
-        new(name, repositoryUrl, false, [new InventoryAssembly(name, name, "Default", "1.0.0", Commit, false)]);
+        new(name, repositoryUrl, [new InventoryAssembly(name, name, "Default", "1.0.0", Commit)]);
 
     private sealed class FailingOnceListeningUrlsProvider : IListeningUrlsProvider
     {

@@ -28,7 +28,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
 {
     private const string DefaultBranch = "master";
 
-    private readonly BuildInformation _build;
     private readonly DeveloperModeService _developerModeService;
     private readonly IListeningUrlsProvider? _listeningUrlsProvider;
     private readonly GitHubReleaseClient? _releaseClient;
@@ -219,12 +218,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     // Inventory
 
-    [State(IsDiscrete = true, Position = 480)]
-    public partial bool HasVersionMismatch { get; internal set; }
-
-    [State(Position = 481)]
-    public partial string[] MismatchedRepositories { get; internal set; }
-
     [State(Position = 490)]
     public partial Dictionary<string, InstallationRepository> Repositories { get; internal set; }
 
@@ -246,7 +239,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [Derived]
     public string? IconColor =>
         Status == ServiceStatus.Error ? "Error" :
-        UpdateAvailable == true || HasVersionMismatch ? "Warning" :
+        UpdateAvailable == true ? "Warning" :
         null;
 
     public HomeBlazeInstallation(
@@ -275,7 +268,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
         TimeProvider timeProvider,
         ILogger logger)
     {
-        _build = build;
         _developerModeService = developerModeService;
         _listeningUrlsProvider = listeningUrlsProvider;
         _timeProvider = timeProvider;
@@ -322,8 +314,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
         LastUpdateCheck = null;
         UpdateCheckStatus = GetUpdateCheckUnavailableReason();
 
-        HasVersionMismatch = false;
-        MismatchedRepositories = [];
         Repositories = new Dictionary<string, InstallationRepository>(StringComparer.Ordinal);
 
         Status = ServiceStatus.Stopped;
