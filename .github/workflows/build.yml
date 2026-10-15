@@ -402,14 +402,17 @@ jobs:
 
       - name: Check build metadata
         run: |
-          docker cp homeblaze:/app/HomeBlaze.dll "${{ runner.temp }}/HomeBlaze.dll"
-          if ($LASTEXITCODE -ne 0) { throw "Could not copy HomeBlaze.dll from the container" }
-          # Attribute arguments are UTF-8 strings in the metadata blob heap, so a text search finds them.
-          $text = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes("${{ runner.temp }}/HomeBlaze.dll"))
-          if (-not $text.Contains("Namotion.Build.Time")) { throw "HomeBlaze.dll has no build time" }
-          if (-not $text.Contains("2000-01-01T00:00:00Z")) { throw "HomeBlaze.dll has another build time" }
-          if ($text -notmatch 'edge\+[0-9a-f]{40}') { throw "The informational version has no commit" }
-          if ($text -match 'edge\+[0-9a-f]+\.[0-9a-f]') { throw "The informational version has a doubled commit" }
+          # The Installation subject reads its build from HomeBlaze.Services.dll, not HomeBlaze.dll, so both carry the metadata.
+          foreach ($name in @("HomeBlaze.dll", "HomeBlaze.Services.dll")) {
+            docker cp "homeblaze:/app/$name" "${{ runner.temp }}/$name"
+            if ($LASTEXITCODE -ne 0) { throw "Could not copy $name from the container" }
+            # Attribute arguments are UTF-8 strings in the metadata blob heap, so a text search finds them.
+            $text = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes("${{ runner.temp }}/$name"))
+            if (-not $text.Contains("Namotion.Build.Time")) { throw "$name has no build time" }
+            if (-not $text.Contains("2000-01-01T00:00:00Z")) { throw "$name has another build time" }
+            if ($text -notmatch 'edge\+[0-9a-f]{40}') { throw "$name's informational version has no commit" }
+            if ($text -match 'edge\+[0-9a-f]+\.[0-9a-f]') { throw "$name's informational version has a doubled commit" }
+          }
 
       - name: Build arm64 image archive
         run: |
