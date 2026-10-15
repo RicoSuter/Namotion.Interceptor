@@ -108,6 +108,20 @@ public class GitHubReleaseClientTests
     }
 
     [Fact]
+    public async Task WhenTheRateLimitResetIsOutOfRange_ThenItIsIgnored()
+    {
+        // Arrange
+        var response = new HttpResponseMessage(HttpStatusCode.Forbidden);
+        response.Headers.Add("x-ratelimit-remaining", "0");
+        response.Headers.Add("x-ratelimit-reset", "99999999999999");
+        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<GitHubRequestException>(() => client.GetLatestReleaseAsync("owner", "repo", CancellationToken.None));
+        Assert.Null(exception.RetryAfter);
+    }
+
+    [Fact]
     public async Task WhenGitHubAnswersTooManyRequestsWithRetryAfter_ThenTheExceptionCarriesIt()
     {
         // Arrange

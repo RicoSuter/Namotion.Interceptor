@@ -23,6 +23,7 @@ internal sealed class GitHubReleaseClient
 {
     private static readonly Uri ApiBaseAddress = new("https://api.github.com/");
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly long MaximumUnixTimeSeconds = DateTimeOffset.MaxValue.ToUnixTimeSeconds();
 
     private readonly Func<HttpClient> _createHttpClient;
     private readonly string _userAgent;
@@ -196,7 +197,8 @@ internal sealed class GitHubReleaseClient
 
         if (response.Headers.TryGetValues("x-ratelimit-remaining", out var remaining) && remaining.FirstOrDefault() == "0" &&
             response.Headers.TryGetValues("x-ratelimit-reset", out var reset) &&
-            long.TryParse(reset.FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out var resetSeconds))
+            long.TryParse(reset.FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out var resetSeconds) &&
+            resetSeconds <= MaximumUnixTimeSeconds)
         {
             var untilReset = DateTimeOffset.FromUnixTimeSeconds(resetSeconds) - now;
             if (retryAfter is null || untilReset > retryAfter)
