@@ -11,10 +11,12 @@ public interface ITestDevice
     int Speed { get; }
 }
 
+public interface ITestSensor<T>;
+
 public abstract class TestDeviceBase;
 
 [InterceptorSubject]
-public partial class TestDevice : TestDeviceBase, ITestDevice, ITitleProvider
+public partial class TestDevice : TestDeviceBase, ITestDevice, ITestSensor<int>, ITitleProvider
 {
     public TestDevice()
     {

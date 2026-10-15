@@ -125,6 +125,8 @@ public class SubjectTableRowsTests
     [InlineData(typeof(TestDevice))]
     [InlineData(typeof(TestDeviceBase))]
     [InlineData(typeof(ITestDevice))]
+    [InlineData(typeof(ITestSensor<>))]
+    [InlineData(typeof(ITestSensor<int>))]
     public void WhenTypeIsTheClassABaseClassOrAnInterface_ThenOnlyRowsOfThatTypeRemain(Type type)
     {
         // Arrange

@@ -70,7 +70,7 @@ public static class SubjectTableRows
     }
 
     /// <summary>
-    /// Whether the type, one of its base classes or one of its interfaces has the full name, with regard to case.
+    /// Whether the type, one of its base classes or one of its interfaces has the full name, case-sensitive. A generic type also matches the full name of its definition, like <c>Namespace.IDevice`1</c>.
     /// </summary>
     public static bool MatchesType(Type type, string typeName) =>
         TypeNames.GetValue(type, static type => CollectTypeNames(type)).Contains(typeName);
@@ -202,20 +202,27 @@ public static class SubjectTableRows
         var names = new HashSet<string>(StringComparer.Ordinal);
         for (var current = type; current is not null; current = current.BaseType)
         {
-            if (current.FullName is { } name)
-            {
-                names.Add(name);
-            }
+            AddNames(names, current);
         }
 
         foreach (var implemented in type.GetInterfaces())
         {
-            if (implemented.FullName is { } name)
-            {
-                names.Add(name);
-            }
+            AddNames(names, implemented);
         }
 
         return names;
+    }
+
+    private static void AddNames(HashSet<string> names, Type type)
+    {
+        if (type.FullName is { } name)
+        {
+            names.Add(name);
+        }
+
+        if (type.IsGenericType && type.GetGenericTypeDefinition().FullName is { } definitionName)
+        {
+            names.Add(definitionName);
+        }
     }
 }

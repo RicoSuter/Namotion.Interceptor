@@ -98,7 +98,7 @@ A map that cannot be found, or an argument that a widget cannot use, does not ta
 | `Step must be a whole number for a whole number property: 0.5` | A `Slider` of a property that holds whole numbers has a `Step` with a fraction | Use a whole number, or remove `Step` for the default of 1 |
 | `Cannot select a value of the flags enum MotorFeatures` | The property of a `Select` holds an enum whose values combine as flags. The message shows the name of the enum | Show the value with a value widget instead, see [Select](widgets/select.md) |
 | `Needs a Source: a folder or a property that holds subjects` | A `SubjectTable` has no `Source` | Set `Source` to a folder, a page or a property that holds subjects, see [SubjectTable](widgets/subject-table.md) |
-| `Cannot list subjects of: ../Motors` | The `Source` of a `SubjectTable` leads nowhere, or to a property that holds no subjects. The message shows the source as written | Check the path in `Source`. A path to a folder or a page lists what it holds, a path to a property lists its subjects |
+| `Cannot list subjects of: ../Motors` | The `Source` of a `SubjectTable` leads nowhere, to a subject that is no folder or page, or to a property that holds no subjects. The message shows the source as written | Check the path in `Source`. A path to a folder or a page lists what it holds, a path to a property lists its subjects |
 
 ## Other Messages
 
