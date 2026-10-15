@@ -39,33 +39,29 @@ The `Collect garbage` operation on `Process` runs a full, compacting garbage col
 
 ## Installation
 
-The `Installation` subject describes the running HomeBlaze installation: its build, the assemblies it loaded, its environment, its health and whether a newer version exists. A new installation has one in `Servers/Installation.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
+The `Installation` subject describes the running HomeBlaze installation: its build, the assemblies it loaded, its environment and whether a newer release exists. A new installation has one in `Servers/Installation.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
 
 | Property | Description |
 |----------|-------------|
 | `Version`, `Channel` | The running version and whether it is a `Release`, an `Edge` build of the latest commit, or a `Development` build |
-| `Commit`, `Tag`, `Branch`, `CommitDate`, `BuildTime`, `ImageTags` | Where and when the build was made; only CI builds have a tag, branch, times and image tags |
-| `VersionUrl`, `CommitUrl`, `BuildRunUrl` | Links to the release or commit on GitHub and to the CI run |
-| `EnvironmentName`, `IsDeveloperMode`, `ListeningUrls`, `StartTime` | How HomeBlaze runs and when it started |
+| `Commit`, `Tag`, `Branch`, `CommitDate`, `BuildTime` | Where and when the build was made; only CI builds have a tag, branch and times |
+| `RepositoryUrl`, `VersionUrl`, `CommitUrl`, `BuildRunUrl` | Links to the repository, to the release or commit, and to the CI run |
+| `EnvironmentName`, `IsDeveloperMode` | The hosting environment and whether developer mode is on |
 | `DataDirectory`, `DataVolumeFreeSpace`, `DataVolumeTotalSize`, `DataVolumeUsage` | The data folder and the free space, total size and usage of its volume |
-| `SubjectCount`, `MonitoredServiceCount`, `ServicesInErrorCount` | Size of the graph, excluding this installation's own repository and assembly subjects, and services in error; these do not change the status of the installation itself |
 | `Repositories` | The loaded assemblies grouped by the repository they were built from, each with version, commit and load context |
-| `HasVersionMismatch`, `MismatchedRepositories` | Whether the loaded assemblies are inconsistent, see below |
-| `UpdateAvailable`, `LatestVersion`, `LatestReleaseDate`, `LatestReleaseUrl`, `CommitsBehind`, `ChangesUrl`, `LastUpdateCheck`, `UpdateCheckStatus` | The result of the update check, see below |
+| `UpdateAvailable`, `LatestVersion`, `LatestReleaseDate`, `LatestReleaseUrl`, `LastUpdateCheck`, `UpdateCheckStatus` | The result of the update check, see below |
 
-The build, environment and health values refresh every `PollingInterval` (30 seconds by default, at least 1 second). The assembly inventory also refreshes on each poll, but only after a new assembly has been loaded since the last one. A dashboard widget shows the version, channel and build, an update or mismatch warning, the reason of a failed update check while the installation is in `Error`, service and subject counts, and data volume usage.
-
-### Version mismatches
-
-An assembly is marked when the same assembly is loaded more than once with another version or commit, usually because a plugin brings its own copy of a library HomeBlaze already has. A repository is marked when the assemblies of the repository HomeBlaze itself was built from come from more than one commit. Other repositories only list their commits, because large repositories ship packages at different versions. An assembly with a missing commit or version never causes a mismatch on that assembly.
+`Status` is `Running` while the installation runs and `Stopped` otherwise. The environment values refresh every `PollingInterval` (30 seconds by default, at least 1 second), and the inventory refreshes on the next poll after an assembly was loaded. The inventory leaves out dynamic assemblies and those of the shared .NET framework; an assembly in a plugin load context is listed with the context name in parentheses. A dashboard widget shows the version, channel and build, an available update, `UpdateCheckStatus` when it is set, the data volume usage and the environment.
 
 ### Update check
 
-The update check is off by default. With `UpdateCheckEnabled`, HomeBlaze asks the GitHub API for the latest release once every `UpdateCheckInterval` (24 hours by default, from 24 hours up to 365 days), starting 5 to 60 minutes after the start. An edge build also asks how many commits its build branch (`master` by default) has that its own commit does not. The latest-release request sends nothing about the installation except the version in its user agent; the comparison request of an edge build also contains its commit and branch in the URL. Each request repeats the last answer's ETag so an unchanged answer is not downloaded again. A check uses one request for a release build and two for an edge build, plus the retries after a failure. GitHub allows 60 unauthenticated requests per hour per IP address, shared by everything behind that address; since the requests are unauthenticated, an unchanged (`304`) answer counts against the limit the same as any other. A request that takes longer than 30 seconds fails the check with "GitHub did not answer in time."
+Only release builds can check for updates. For an edge or development build, or a repository outside GitHub, `UpdateCheckStatus` says why the check is not available.
 
-After a failure the check backs off 1, 2, 4, 8 and 16 hours, doubling each time up to a cap of 24 hours; a longer wait requested by GitHub wins instead, also capped at 24 hours. The `Check for updates` operation checks immediately, at most once per minute, also while the scheduled check is off; it reports why no check is possible, such as for a development build or when the repository is not on GitHub, and it is refused while GitHub asked to wait, with the minutes that remain. A change of `UpdateCheckEnabled` or `UpdateCheckInterval` in the editor or the configuration file applies at once; one written directly to the property, for example through MCP, applies within an hour.
+The update check is off by default. With `UpdateCheckEnabled`, HomeBlaze asks the GitHub API for the latest release once every `UpdateCheckInterval` (24 hours by default, from 24 hours up to 365 days), starting 5 to 60 minutes after the start. The request sends nothing about the installation except the version in its user agent. A check is one request, plus the retries after a failure. GitHub allows 60 unauthenticated requests per hour per IP address, shared by everything behind that address. A request that takes longer than 30 seconds fails the check with "GitHub did not answer in time."
 
-`UpdateAvailable`, `LatestVersion`, `LatestReleaseDate` and `LatestReleaseUrl` show the result; an edge build also gets `CommitsBehind` and `ChangesUrl`. `LastUpdateCheck` is when the last check finished, successful or not. `UpdateCheckStatus` says why no check can run for this build, for example a development build or a repository outside GitHub, or otherwise holds the error of the last check until a check succeeds. It is empty while the check is simply off and nothing failed. A failed check puts the installation into `Error` while `UpdateCheckEnabled` is on, until the next success or until the check is turned off.
+After a failure the check backs off 1, 2, 4, 8 and 16 hours, doubling each time up to a cap of 24 hours; a longer wait requested by GitHub wins instead, also capped at 24 hours. The `Check for updates` operation checks immediately, at most once per minute, also while the scheduled check is off. It reports why no check is possible, and it is refused while the installation is stopped or while GitHub asked to wait, with the minutes that remain. A change of `UpdateCheckEnabled` or `UpdateCheckInterval` in the editor or the configuration file applies at once; one written directly to the property, for example through MCP, applies within an hour.
+
+`UpdateAvailable` is true when the latest release is newer than the running version and false when it is not or when the repository has no release. It stays empty until the first successful check, and when the running version is not a semantic version. `LatestVersion`, `LatestReleaseDate` and `LatestReleaseUrl` describe the latest release, and an available update colors the icon as a warning. `LastUpdateCheck` is when the last check finished, successful or not. `UpdateCheckStatus` says why no check can run for this build, or otherwise holds the error of the last check until a check succeeds; it is empty while the check is simply off and nothing failed. A failed check is reported only there and does not change `Status`.
 
 ## Health endpoints
 
