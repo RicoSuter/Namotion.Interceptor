@@ -119,13 +119,15 @@ public class CardLayoutTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenACardIsInAGridCell_ThenItIsAsHighAsTheCell(bool isInlineMode)
+    [InlineData("Grid Card", ".grid-cell-content", false)]
+    [InlineData("Grid Card", ".grid-cell-content", true)]
+    [InlineData("Canvas Card", ".canvas-node-content", false)]
+    [InlineData("Canvas Card", ".canvas-node-content", true)]
+    public async Task WhenACardIsInAGridCellOrACanvasNode_ThenItFillsItWithoutAFrameOfItsOwn(string title, string container, bool isInlineMode)
     {
         // Arrange
         var page = await OpenPageAsync();
-        var card = GetCard(page, "Grid Card");
+        var card = GetCard(page, title);
         await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -133,14 +135,27 @@ public class CardLayoutTests
         {
             await page.GetByTestId("edit-mode-menu").ClickAsync();
             await page.Locator(".mud-popover-open").GetByText("Inline", new() { Exact = true }).ClickAsync();
-            await Assertions.Expect(page.Locator(".grid-cell-content > .subject-component-wrapper.selectable"))
+            await Assertions.Expect(page.Locator($"{container} > .subject-component-wrapper.selectable"))
                 .ToHaveCountAsync(1, new() { Timeout = Timeout });
         }
 
         // Assert
-        var heights = await card.EvaluateAsync<double[]>(
-            "card => [card.getBoundingClientRect().height, card.closest('.grid-cell-content').getBoundingClientRect().height]");
-        Assert.True(heights[1] > 100, $"The cell is {heights[1]} pixels high.");
-        Assert.Equal(heights[1], heights[0], 1.0);
+        var measures = await card.EvaluateAsync<double[]>(
+            """
+            (card, container) => {
+                const style = getComputedStyle(card);
+                return [
+                    card.getBoundingClientRect().height,
+                    card.closest(container).getBoundingClientRect().height,
+                    parseFloat(style.borderTopWidth),
+                    style.boxShadow === 'none' ? 0 : 1
+                ];
+            }
+            """,
+            container);
+        Assert.True(measures[1] > 100, $"The container is {measures[1]} pixels high.");
+        Assert.Equal(measures[1], measures[0], 1.0);
+        Assert.Equal(0, measures[2]);
+        Assert.Equal(0, measures[3]);
     }
 }

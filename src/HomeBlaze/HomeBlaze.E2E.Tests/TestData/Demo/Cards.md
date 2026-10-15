@@ -40,3 +40,13 @@ Body of the invalid ratio card.
 }
 ```
 ::
+
+:: HomeBlaze.Components.CanvasLayout#cardcanvas
+```json
+{
+  "Nodes": [
+    { "X": 20, "Y": 20, "Width": 300, "Height": 200, "Child": { "$type": "HomeBlaze.Components.Card", "Title": "Canvas Card" } }
+  ]
+}
+```
+::

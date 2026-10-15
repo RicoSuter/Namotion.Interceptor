@@ -82,78 +82,8 @@
     }
 }
 
-/* A card is spaced like a paragraph of a page, so that cards below each other do not touch. */
-.card-widget {
-    margin-bottom: 0.75rem;
-}
-
-/* A layout cell spaces its content itself, so the card that ends the cell adds nothing below.
-   The two wrappers are those of SubjectComponent, for the content of the cell and for the card. */
-.layout-cell > .subject-component-wrapper > .subject-component-wrapper:last-of-type > .card-widget {
-    margin-bottom: 0;
-}
-
-.card-widget > .mud-card-header.mud-card-header-padding,
-.card-widget > .mud-card-content.mud-card-content-padding,
-.card-widget > .mud-card-actions.mud-card-actions-padding {
-    padding: 12px;
-}
-
-/* The title and a body that follows it directly sit close together, as the lines of a paragraph. A picture between
-   them, or a missing body or header, leaves the full padding. */
-.card-widget > .mud-card-header.mud-card-header-padding:has(+ .mud-card-content) {
-    padding-bottom: 4px;
-}
-
-.card-widget > .mud-card-header + .mud-card-content.mud-card-content-padding {
-    padding-top: 0;
-}
-
-/* The padding of the body and the footer is the distance to the edge, so the first and the last block of their content
-   lose their outer margin, also inside the wrappers of a widget block, which a margin collapses through. The anchor of
-   the action bar comes first in a selected wrapper. Blocks keep their distance from each other. */
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > :first-child,
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > .subject-component-wrapper:first-child > :is(:first-child, .subject-action-bar-anchor + *),
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > .subject-component-wrapper:first-child > .subject-component-wrapper:is(:first-child, .subject-action-bar-anchor + *) > :is(:first-child, .subject-action-bar-anchor + *) {
-    margin-top: 0;
-}
-
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > :last-child,
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > .subject-component-wrapper:last-child > :last-child,
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > .subject-component-wrapper:last-child > .subject-component-wrapper:last-child > :last-child {
-    margin-bottom: 0;
-}
-
-/* A card with a height, and a card that fills a grid cell: the header, the picture and the footer keep their size, and
-   the body takes the rest and scrolls. Without min-height: 0 an aspect ratio would let the content make the card higher. */
-.card-widget.card-widget-sized,
-.grid-cell-content > .subject-component-wrapper > .card-widget {
-    min-height: 0;
-}
-
-.card-widget.card-widget-sized > *,
-.grid-cell-content > .subject-component-wrapper > .card-widget > * {
-    flex-shrink: 0;
-}
-
-.card-widget.card-widget-sized > .mud-card-content,
-.grid-cell-content > .subject-component-wrapper > .card-widget > .mud-card-content {
-    flex: 1 1 0;
-    min-height: 0;
-    overflow-y: auto;
-}
-
-/* A card in a grid cell is as high as the cell, unless it has a height of its own. */
-.grid-cell-content > .subject-component-wrapper:has(> .card-widget) {
-    height: 100%;
-}
-
-.grid-cell-content > .subject-component-wrapper > .card-widget {
-    height: 100%;
-    margin-bottom: 0;
-}
-
-/* A grid cell cuts off what does not fit into it, so the outline of a selectable widget in a cell is drawn inside. */
-.grid-cell-content > .subject-component-wrapper.selectable {
+/* A grid cell and a canvas node cut off what does not fit into them, so the outline of a selectable widget in one is
+   drawn inside. */
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper.selectable {
     outline-offset: -2px;
 }
