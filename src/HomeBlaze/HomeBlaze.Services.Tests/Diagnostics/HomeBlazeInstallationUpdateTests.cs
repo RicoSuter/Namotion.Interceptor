@@ -2,6 +2,7 @@ using System.Net;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Diagnostics;
 using Namotion.Interceptor.Testing;
+using NuGet.Versioning;
 using Xunit;
 using static HomeBlaze.Services.Tests.Diagnostics.FakeHttpMessageHandler;
 using static HomeBlaze.Services.Tests.Diagnostics.HomeBlazeInstallationTests;
@@ -34,6 +35,7 @@ public class HomeBlazeInstallationUpdateTests
     [InlineData("0.6.0", true, false)]
     [InlineData("0.5.0", false, false)]
     [InlineData("not a version", true, null)]
+    [InlineData("not a version", false, null)]
     public async Task WhenChecked_ThenUpdateAvailableComparesTheRunningVersionWithTheLatestRelease(string version, bool hasRelease, bool? expected)
     {
         // Arrange
@@ -61,7 +63,7 @@ public class HomeBlazeInstallationUpdateTests
     public void WhenVersionsAreCompared_ThenSemanticVersionOrderingApplies(string candidate, string current, bool expected)
     {
         // Act
-        var isNewer = HomeBlazeInstallation.IsNewer(candidate, current);
+        var isNewer = HomeBlazeInstallation.IsNewer(candidate, NuGetVersion.Parse(current));
 
         // Assert
         Assert.Equal(expected, isNewer);

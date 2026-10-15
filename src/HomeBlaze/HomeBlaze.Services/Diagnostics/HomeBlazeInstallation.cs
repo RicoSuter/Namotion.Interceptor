@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions.Common;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
+using NuGet.Versioning;
 
 namespace HomeBlaze.Services.Diagnostics;
 
@@ -27,6 +28,9 @@ public partial class HomeBlazeInstallation : BackgroundService,
     private readonly DeveloperModeService _developerModeService;
     private readonly GitHubReleaseClient? _releaseClient;
     private readonly string? _updateCheckUnavailableReason;
+
+    // Null when the running version is not a semantic version, which no release can be compared with.
+    private readonly NuGetVersion? _runningVersion;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
 
@@ -218,6 +222,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         UpdateCheckInterval = UpdateSchedule.MinimumInterval;
 
         Version = build.Version;
+        _runningVersion = NuGetVersion.TryParse(build.Version, out var runningVersion) ? runningVersion : null;
         Channel = GetChannel(build);
         Commit = build.Commit;
         Tag = build.Tag;

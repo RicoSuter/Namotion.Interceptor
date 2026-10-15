@@ -71,9 +71,9 @@ public partial class HomeBlazeInstallation
             LatestReleaseDate = release?.PublishedAt;
             LatestReleaseUrl = release?.Url;
             UpdateAvailable =
+                _runningVersion is null ? null :
                 release is null ? false :
-                NuGetVersion.TryParse(Version, out _) ? IsNewer(release.Version, Version) :
-                null;
+                IsNewer(release.Version, _runningVersion);
 
             LastUpdateCheck = _timeProvider.GetUtcNow();
             UpdateCheckStatus = null;
@@ -103,12 +103,11 @@ public partial class HomeBlazeInstallation
 
     /// <summary>
     /// Returns whether <paramref name="candidate"/> is a greater semantic version than <paramref name="current"/>,
-    /// ignoring build metadata. Versions that do not parse are never newer.
+    /// ignoring build metadata. A candidate that does not parse is never newer.
     /// </summary>
-    internal static bool IsNewer(string candidate, string current) =>
+    internal static bool IsNewer(string candidate, NuGetVersion current) =>
         NuGetVersion.TryParse(candidate, out var candidateVersion) &&
-        NuGetVersion.TryParse(current, out var currentVersion) &&
-        VersionComparer.VersionRelease.Compare(candidateVersion, currentVersion) > 0;
+        VersionComparer.VersionRelease.Compare(candidateVersion, current) > 0;
 
     // A request accepted while a check was in flight would otherwise bypass a wait that check recorded.
     /// <summary>
