@@ -86,6 +86,7 @@ public class DisplayWidgetTests
         await Assertions.Expect(gauge.GetByTestId("value-missing")).ToHaveTextAsync(MissingText, new() { Timeout = Timeout });
         await Assertions.Expect(gauge).Not.ToHaveAttributeAsync("aria-valuenow", new Regex(".*"));
         await Assertions.Expect(gauge).Not.ToHaveAttributeAsync("data-percent", new Regex(".*"));
+        await Assertions.Expect(gauge).ToHaveAttributeAsync("role", "group");
     }
 
     [Fact]
