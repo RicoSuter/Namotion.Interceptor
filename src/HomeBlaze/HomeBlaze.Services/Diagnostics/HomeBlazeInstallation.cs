@@ -355,6 +355,11 @@ public partial class HomeBlazeInstallation : BackgroundService,
                 IsDeveloperMode = _developerModeService.IsEnabled;
             }
 
+            // A request accepted while the previous run stopped would otherwise skip the delay of the first check.
+            // Cleared before the status is Running, which is when CheckForUpdates accepts requests again.
+            Interlocked.Exchange(ref _isManualCheckRequested, 0);
+            Drain(_updateSignal);
+            Drain(_pollSignal);
             SetStatus(ServiceStatus.Running, null);
 
             await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken));
@@ -445,6 +450,13 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     private static Uri? CreateUri(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri : null;
+
+    private static void Drain(SemaphoreSlim signal)
+    {
+        while (signal.Wait(0))
+        {
+        }
+    }
 
     private static void Release(SemaphoreSlim signal)
     {
