@@ -22,11 +22,6 @@ public partial class HomeBlazeInstallation
 
     private sealed record GitHubWait(long StartTimestamp, TimeSpan Duration);
 
-    /// <summary>
-    /// Whether a manual check or a wake-up waits for the update loop.
-    /// </summary>
-    internal bool HasPendingUpdateWakeUp => Volatile.Read(ref _isManualCheckRequested) == 1 || _updateSignal.CurrentCount > 0;
-
     [Operation(Title = "Check for updates", Description = "Asks GitHub for a newer version now.", Icon = "Update")]
     public void CheckForUpdates()
     {

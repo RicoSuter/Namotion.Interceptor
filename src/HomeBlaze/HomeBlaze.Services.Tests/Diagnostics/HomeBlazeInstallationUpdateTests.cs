@@ -309,33 +309,6 @@ public class HomeBlazeInstallationUpdateTests
     }
 
     [Fact]
-    public async Task WhenACheckWasRequestedWhileTheLoopStopped_ThenTheNextStartDoesNotRunIt()
-    {
-        // Arrange
-        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson));
-        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
-
-        // The update loop has ended but the status is still Running, so the request is accepted and left behind.
-        installation.Status = ServiceStatus.Running;
-        installation.CheckForUpdates();
-        installation.Status = ServiceStatus.Stopped;
-        Assert.True(installation.HasPendingUpdateWakeUp);
-
-        // Act
-        await StartAndWaitUntilRunningAsync(installation);
-        try
-        {
-            // Assert
-            Assert.False(installation.HasPendingUpdateWakeUp);
-            Assert.Empty(handler.Requests);
-        }
-        finally
-        {
-            await installation.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Fact]
     public async Task WhenGitHubAskedToWait_ThenAManualCheckIsRejectedUntilThen()
     {
         // Arrange

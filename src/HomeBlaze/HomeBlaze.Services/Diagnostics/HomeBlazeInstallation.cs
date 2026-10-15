@@ -268,12 +268,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
             // Read after subscribing, so a change in between is not missed.
             RefreshDeveloperMode();
-
-            // A request accepted while the previous run stopped would otherwise skip the delay of the first check.
-            // Cleared before the status is Running, which is when CheckForUpdates accepts requests again.
-            Volatile.Write(ref _isManualCheckRequested, 0);
-            Drain(_updateSignal);
-            Drain(_pollSignal);
             Status = ServiceStatus.Running;
 
             await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken));
@@ -315,13 +309,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             return false;
-        }
-    }
-
-    private static void Drain(SemaphoreSlim signal)
-    {
-        while (signal.Wait(0))
-        {
         }
     }
 
