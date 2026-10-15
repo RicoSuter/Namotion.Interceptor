@@ -78,6 +78,25 @@ public static class ValueReader
         ITimeZoneDisplay? timeZone)
     {
         var valueMap = ResolveMap(resolver, widget, map, out var mapError);
+        return ReadProperty(subject, propertyName, valueMap, mapError, timeZone);
+    }
+
+    /// <summary>
+    /// Reads the property with the name on a subject and applies a map that <see cref="ResolveMap"/> already
+    /// resolved, with the same reading as the overload that takes the name or path of the map.
+    /// </summary>
+    /// <param name="subject">The subject that has the property, for example a row of a table.</param>
+    /// <param name="propertyName">The name of the property. Null, empty or unknown gives a missing reading.</param>
+    /// <param name="valueMap">The resolved map, or null for none.</param>
+    /// <param name="mapError">The error that <see cref="ResolveMap"/> gave for the map, or null.</param>
+    /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    public static ValueReading ReadProperty(
+        IInterceptorSubject subject,
+        string? propertyName,
+        ValueMap? valueMap,
+        string? mapError,
+        ITimeZoneDisplay? timeZone)
+    {
         var property = string.IsNullOrEmpty(propertyName) ? null : subject.TryGetRegisteredProperty(propertyName);
         return ReadCore(property, valueMap, mapError, timeZone);
     }

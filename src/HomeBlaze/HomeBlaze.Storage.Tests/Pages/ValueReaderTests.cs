@@ -249,6 +249,26 @@ public class ValueReaderTests
     }
 
     [Fact]
+    public async Task WhenPropertyOfASubjectIsReadWithAResolvedMap_ThenReadingEqualsThatOfTheMapPath()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out var mapError);
+        var noMap = ValueReader.ResolveMap(resolver, page, "nomap", out var noMapError);
+
+        // Act
+        var fromResolvedMap = ValueReader.ReadProperty(meter, nameof(TestMeter.IsOn), valueMap, mapError, null);
+        var fromMapPath = ValueReader.ReadProperty(resolver, page, meter, nameof(TestMeter.IsOn), "onoff", null);
+        var withMapError = ValueReader.ReadProperty(meter, nameof(TestMeter.Power), noMap, noMapError, null);
+
+        // Assert
+        Assert.Equal(fromMapPath, fromResolvedMap);
+        Assert.Equal("an", fromResolvedMap.Text);
+        Assert.Equal("Cannot resolve map: nomap", withMapError.MapError);
+    }
+
+    [Fact]
     public async Task WhenResolvedPropertyIsRead_ThenReadingEqualsThatOfThePath()
     {
         // Arrange

@@ -194,7 +194,7 @@ public static class SubjectTableRows
             }
         }
 
-        return builder is null ? children : builder.ToImmutable();
+        return builder is null ? children : builder.DrainToImmutable();
     }
 
     private static HashSet<string> CollectTypeNames(Type type)

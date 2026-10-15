@@ -18,6 +18,14 @@
     {
         var columns = table.Columns;
 
+        // Resolved once per render instead of once per cell.
+        var maps = columns.Length == 0 ? [] : new (ValueMap? Map, string? Error)[columns.Length];
+        for (var index = 0; index < columns.Length; index++)
+        {
+            var map = ValueReader.ResolveMap(PathResolver, columns[index], columns[index].Map, out var mapError);
+            maps[index] = (map, mapError);
+        }
+
         <MudSimpleTable Dense="true" Hover="true" Elevation="0" data-testid="subject-table">
             <thead>
                 <tr>
