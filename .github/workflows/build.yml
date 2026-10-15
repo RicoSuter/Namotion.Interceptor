@@ -539,7 +539,6 @@ jobs:
           $commitDate = git log -1 --format=%cI
           if ($LASTEXITCODE -ne 0) { throw "Could not read the commit date" }
           echo "SOURCE_COMMIT_DATE=$commitDate" >> $env:GITHUB_OUTPUT
-          echo "BUILD_TIME=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture))" >> $env:GITHUB_OUTPUT
 
       # AssemblyVersion stays unchanged so binding is unaffected; only the informational version carries the release.
       - run: |
@@ -547,7 +546,6 @@ jobs:
             -p:InformationalVersion=${{ steps.version.outputs.VERSION }} `
             -p:BuildTag=${{ github.event.release.tag_name }} `
             -p:SourceCommitDate=${{ steps.build.outputs.SOURCE_COMMIT_DATE }} `
-            -p:BuildTime=${{ steps.build.outputs.BUILD_TIME }} `
             -p:BuildRunUrl=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} `
             -p:ContinuousIntegrationBuild=true
 
