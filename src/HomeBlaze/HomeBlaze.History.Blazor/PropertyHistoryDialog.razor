@@ -136,6 +136,7 @@
         PropertyHistoryChartModel.IsDiscrete(PropertyType, IsDiscreteState) &&
         (IsRawPeriodSelected || _aggregation is HistoryAggregations.Last or HistoryAggregations.First);
     private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
 
     protected override async Task OnInitializedAsync()
     {
@@ -266,7 +267,7 @@
             _error = exception.Message;
             ClearView();
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return; // superseded by a newer load; leave its result in place
         }
@@ -301,10 +302,20 @@
 
     private void Close() => MudDialog?.Close(DialogResult.Ok(true));
 
-    private void OnTimeZoneChanged() => InvokeAsync(LoadAsync);
+    private void OnTimeZoneChanged()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        // Dispose runs on the dispatcher too, so the check inside cannot race it.
+        InvokeAsync(() => _disposed ? Task.CompletedTask : LoadAsync());
+    }
 
     public void Dispose()
     {
+        _disposed = true;
         TimeZone.Changed -= OnTimeZoneChanged;
         // Cancel before disposing: disposing a CTS does not cancel its token, so an in-flight LoadAsync would
         // otherwise keep running and call StateHasChanged on this disposed component.

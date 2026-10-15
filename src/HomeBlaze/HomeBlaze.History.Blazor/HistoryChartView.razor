@@ -100,7 +100,12 @@
 @code {
     private HistoryChartData? _builtData;
     private string? _renderedChartStyle;
+    private string? _renderedStyle;
+    private int _renderedBandHeight;
+    private bool _renderedShowBandLabels;
+    private bool _renderedShowStateTable;
     private bool _shouldRender = true;
+    private volatile bool _disposed;
     private List<ChartSeries<double>>? _chartSeries;
     private TimeSeriesChartOptions _chartOptions = new();
     private (string Band, PropertyHistoryChartModel.StateSegment Segment)[] _stateRows = [];
@@ -116,7 +121,7 @@
     [Parameter]
     public string ChartStyle { get; set; } = "height:100%; aspect-ratio:2 / 1; max-width:100%;";
 
-    /// <summary>More CSS style of the root element.</summary>
+    /// <summary>Extra CSS appended to the style of the root element.</summary>
     [Parameter]
     public string? Style { get; set; }
 
@@ -137,13 +142,28 @@
     protected override void OnParametersSet()
     {
         var dataChanged = !ReferenceEquals(Data, _builtData);
+        var stateTableChanged = ShowStateTable != _renderedShowStateTable;
         if (dataChanged)
         {
             Build();
         }
+        else if (stateTableChanged)
+        {
+            BuildStateRows();
+        }
 
-        _shouldRender = dataChanged || ChartStyle != _renderedChartStyle;
+        _shouldRender = dataChanged ||
+            stateTableChanged ||
+            ChartStyle != _renderedChartStyle ||
+            Style != _renderedStyle ||
+            BandHeight != _renderedBandHeight ||
+            ShowBandLabels != _renderedShowBandLabels;
+
         _renderedChartStyle = ChartStyle;
+        _renderedStyle = Style;
+        _renderedBandHeight = BandHeight;
+        _renderedShowBandLabels = ShowBandLabels;
+        _renderedShowStateTable = ShowStateTable;
     }
 
     protected override bool ShouldRender() => _shouldRender;
@@ -154,7 +174,7 @@
     {
         _builtData = Data;
         _chartSeries = null;
-        _stateRows = [];
+        BuildStateRows();
         if (Data is not { } data)
         {
             return;
@@ -217,14 +237,16 @@
             };
             _chartSeries = chartSeries;
         }
+    }
 
-        if (ShowStateTable && data.Bands.Count > 0)
-        {
-            _stateRows = data.Bands
+    private void BuildStateRows()
+    {
+        _stateRows = ShowStateTable && Data is { Bands.Count: > 0 } data
+            ? data.Bands
                 .SelectMany(band => band.Segments.Select(segment => (Band: band.Label, Segment: segment)))
                 .OrderByDescending(row => row.Segment.Start)
-                .ToArray();
-        }
+                .ToArray()
+            : [];
     }
 
     private static string FormatDuration(TimeSpan duration)
@@ -236,12 +258,30 @@
     }
 
     // The chart holds zoned times, so another time zone needs another build even without new data.
-    private void OnTimeZoneChanged() => InvokeAsync(() =>
+    private void OnTimeZoneChanged()
     {
-        Build();
-        _shouldRender = true;
-        StateHasChanged();
-    });
+        if (_disposed)
+        {
+            return;
+        }
 
-    public void Dispose() => TimeZone.Changed -= OnTimeZoneChanged;
+        InvokeAsync(() =>
+        {
+            // Dispose runs on the dispatcher too, so this check cannot race it.
+            if (_disposed)
+            {
+                return;
+            }
+
+            Build();
+            _shouldRender = true;
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        TimeZone.Changed -= OnTimeZoneChanged;
+    }
 }
