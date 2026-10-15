@@ -51,7 +51,7 @@ public class HomeBlazeInstallationTests
     public void WhenAReleaseIsCreated_ThenLinksPointToTheReleaseAndTheCommit()
     {
         // Act
-        var installation = CreateInstallation(CreateBuild());
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage())));
 
         // Assert
         Assert.Equal("Installation", installation.Title);
