@@ -7,6 +7,7 @@ namespace HomeBlaze.Services.Diagnostics;
 internal sealed class UpdateSchedule
 {
     public static readonly TimeSpan MinimumInterval = TimeSpan.FromHours(24);
+    public static readonly TimeSpan MaximumInterval = TimeSpan.FromDays(365);
     public static readonly TimeSpan FirstCheckMinimumDelay = TimeSpan.FromMinutes(5);
     public static readonly TimeSpan FirstCheckMaximumDelay = TimeSpan.FromMinutes(60);
     public static readonly TimeSpan InitialBackoff = TimeSpan.FromHours(1);
@@ -18,17 +19,32 @@ internal sealed class UpdateSchedule
     private DateTimeOffset? _lastManualCheck;
 
     /// <summary>
-    /// A random delay, so a container in a restart loop does not call GitHub on every start.
+    /// Returns a uniformly random delay from FirstCheckMinimumDelay (inclusive) to FirstCheckMaximumDelay (exclusive).
     /// </summary>
+    /// <remarks>
+    /// The randomness keeps a container stuck in a restart loop from calling GitHub on every start.
+    /// </remarks>
     public static TimeSpan GetFirstCheckDelay(Random random) =>
         FirstCheckMinimumDelay + (FirstCheckMaximumDelay - FirstCheckMinimumDelay) * random.NextDouble();
 
+    /// <summary>
+    /// Resets the backoff and returns the configured interval clamped to MinimumInterval..MaximumInterval.
+    /// </summary>
     public TimeSpan GetDelayAfterSuccess(TimeSpan configuredInterval)
     {
         _failureCount = 0;
-        return configuredInterval < MinimumInterval ? MinimumInterval : configuredInterval;
+
+        if (configuredInterval < MinimumInterval)
+        {
+            return MinimumInterval;
+        }
+
+        return configuredInterval > MaximumInterval ? MaximumInterval : configuredInterval;
     }
 
+    /// <summary>
+    /// Advances the backoff and returns it, or a longer retryAfter up to MaximumBackoff.
+    /// </summary>
     public TimeSpan GetDelayAfterFailure(TimeSpan? retryAfter)
     {
         var backoff = InitialBackoff * Math.Pow(2, Math.Min(_failureCount, 5));
@@ -38,16 +54,34 @@ internal sealed class UpdateSchedule
         }
 
         _failureCount++;
-        return retryAfter is { } requested && requested > backoff ? requested : backoff;
+
+        if (retryAfter is { } requested && requested > backoff)
+        {
+            // Devices without an RTC can report a clock far in the past, making the server's Retry-After
+            // header look like months away; capping it keeps a single bad clock from stalling checks for good.
+            return requested > MaximumBackoff ? MaximumBackoff : requested;
+        }
+
+        return backoff;
     }
 
+    /// <summary>
+    /// Returns whether a manual check may start, at most once per ManualCheckThrottle.
+    /// </summary>
     public bool TryStartManualCheck(DateTimeOffset now)
     {
         lock (_manualCheckLock)
         {
-            if (_lastManualCheck is { } last && now - last < ManualCheckThrottle)
+            if (_lastManualCheck is { } last)
             {
-                return false;
+                var elapsed = now - last;
+
+                // A backward clock jump is treated as allowed rather than blocked for the throttle window,
+                // since a negative elapsed time means no real minute has actually passed.
+                if (elapsed >= TimeSpan.Zero && elapsed < ManualCheckThrottle)
+                {
+                    return false;
+                }
             }
 
             _lastManualCheck = now;

@@ -81,6 +81,77 @@ public class UpdateScheduleTests
     }
 
     [Fact]
+    public void WhenTheConfiguredIntervalExceedsAYear_ThenItIsClampedToAYear()
+    {
+        // Arrange
+        var schedule = new UpdateSchedule();
+
+        // Act
+        var delay = schedule.GetDelayAfterSuccess(TimeSpan.MaxValue);
+
+        // Assert
+        Assert.Equal(UpdateSchedule.MaximumInterval, delay);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void WhenTheConfiguredIntervalIsZeroOrNegative_ThenItIsClampedToADay(int intervalHours)
+    {
+        // Arrange
+        var schedule = new UpdateSchedule();
+
+        // Act
+        var delay = schedule.GetDelayAfterSuccess(TimeSpan.FromHours(intervalHours));
+
+        // Assert
+        Assert.Equal(UpdateSchedule.MinimumInterval, delay);
+    }
+
+    [Fact]
+    public void WhenGitHubAsksToWaitMuchLongerThanTheCap_ThenTheDelayIsCappedAtTheMaximumBackoff()
+    {
+        // Arrange
+        var schedule = new UpdateSchedule();
+
+        // Act
+        var delay = schedule.GetDelayAfterFailure(retryAfter: TimeSpan.FromDays(30));
+
+        // Assert
+        Assert.Equal(UpdateSchedule.MaximumBackoff, delay);
+    }
+
+    [Fact]
+    public void WhenGitHubAsksToWaitLessThanTheBackoff_ThenTheBackoffWins()
+    {
+        // Arrange
+        var schedule = new UpdateSchedule();
+        schedule.GetDelayAfterFailure(retryAfter: null); // backoff becomes 1h
+        schedule.GetDelayAfterFailure(retryAfter: null); // backoff becomes 2h
+        schedule.GetDelayAfterFailure(retryAfter: null); // backoff becomes 4h
+
+        // Act
+        var delay = schedule.GetDelayAfterFailure(retryAfter: TimeSpan.FromHours(3)); // backoff is 8h, longer than retryAfter
+
+        // Assert
+        Assert.Equal(TimeSpan.FromHours(8), delay);
+    }
+
+    [Fact]
+    public void WhenARetryAfterWins_ThenTheFailureCountStillAdvances()
+    {
+        // Arrange
+        var schedule = new UpdateSchedule();
+
+        // Act
+        schedule.GetDelayAfterFailure(retryAfter: TimeSpan.FromHours(10));
+        var delay = schedule.GetDelayAfterFailure(retryAfter: null);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromHours(2), delay);
+    }
+
+    [Fact]
     public void WhenManualChecksAreRequestedQuickly_ThenOnlyOnePerMinuteStarts()
     {
         // Arrange
@@ -96,5 +167,20 @@ public class UpdateScheduleTests
         Assert.True(first);
         Assert.False(second);
         Assert.True(third);
+    }
+
+    [Fact]
+    public void WhenTheClockJumpsBackward_ThenAManualCheckIsStillAllowed()
+    {
+        // Arrange
+        var schedule = new UpdateSchedule();
+        var now = new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
+        schedule.TryStartManualCheck(now);
+
+        // Act
+        var result = schedule.TryStartManualCheck(now.AddSeconds(-30));
+
+        // Assert
+        Assert.True(result);
     }
 }
