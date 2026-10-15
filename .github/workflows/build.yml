@@ -390,7 +390,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not read deps.json from the container" }
           if (-not ($deps -match '"Namotion.Interceptor/9\.9\.9"')) { throw "deps.json does not report the library package version" }
           if (-not ($deps -match '"HomeBlaze.Abstractions/1\.0\.0"')) { throw "deps.json does not report the pinned HomeBlaze version" }
-          foreach ($path in @("Root.json", "Files/Plugins.json", "Files/Servers/SqliteHistory.json", "Files/Docs")) {
+          foreach ($path in @("Root.json", "Files/Plugins.json", "Files/Servers/SqliteHistory.json", "Files/Servers/Installation.json", "Files/Docs")) {
             if (-not (Test-Path (Join-Path $data.FullName $path))) { throw "Missing seeded path $path" }
           }
           $historyCreated = $false
