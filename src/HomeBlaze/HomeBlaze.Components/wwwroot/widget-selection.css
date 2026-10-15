@@ -10,7 +10,8 @@
     outline-offset: 1px;
 }
 
-.subject-component-wrapper.selectable > * {
+/* A selectable widget that is a direct child of another one keeps the pointer. */
+.subject-component-wrapper.selectable > :not(.subject-component-wrapper.selectable) {
     pointer-events: none;
 }
 
@@ -33,6 +34,11 @@
     outline: 2px solid var(--mud-palette-primary);
 }
 
+/* The outline of the selection would hide the focus, so a focused selected widget also gets a ring around it. */
+.subject-component-wrapper.selectable.selected:focus-visible {
+    box-shadow: 0 0 0 5px rgba(var(--mud-palette-primary-rgb), 0.35);
+}
+
 /* The bar sits above the top right corner of the selected widget and flips below the widget when there is no room.
    MudBlazor flips a popover only at the edges of the window, so the anchor reaches up by the height of the fixed app bar
    and the bar moves down by as much while it is not flipped: the bar flips once the app bar leaves it no room. */
@@ -45,6 +51,8 @@
     pointer-events: none;
 }
 
+/* MudBlazor moves a popover whose top would be less than 24px (its overflowPadding) below the top of the window down to
+   that line while the anchor starts inside the window, so an unflipped bar can end up on the top edge of its widget. */
 .subject-action-bar {
     display: flex;
     gap: 2px;

@@ -118,7 +118,13 @@ public class WidgetSelectionTests
 
         // Assert: the bar comes with a render after the click, so whatever the click caused has arrived on the server.
         await Assertions.Expect(page.GetWidgetActionBar()).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(GetWrapperOf(page, testId)).ToHaveClassAsync(new Regex(@"\bselected\b"));
+        var wrapper = GetWrapperOf(page, testId);
+        await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"));
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("role", "button");
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-pressed", "true");
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-label", new Regex(@"\S"));
+        await Assertions.Expect(page.GetByRole(AriaRole.Toolbar, new() { Name = "Widget actions" })
+            .GetByRole(AriaRole.Button, new() { Name = "Edit", Exact = true })).ToBeVisibleAsync();
         Assert.True(motor.IsPowered);
         Assert.Equal(1000, motor.TargetSpeed);
     }

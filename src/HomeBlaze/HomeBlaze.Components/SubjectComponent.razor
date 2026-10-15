@@ -16,6 +16,9 @@
         <div class="@(isSelected ? "subject-component-wrapper selectable selected" : isSelectable ? "subject-component-wrapper selectable" : "subject-component-wrapper")"
              style="position: relative;"
              tabindex="@(isSelectable ? "0" : null)"
+             role="@(isSelectable ? "button" : null)"
+             aria-pressed="@(isSelectable ? (isSelected ? "true" : "false") : null)"
+             aria-label="@(isSelectable ? GetAccessibleName() : null)"
              @onpointerdown="@(isSelectable ? _pointerDownCallback : default)"
              @onclick="@(isSelectable ? _clickCallback : default)"
              @onclick:stopPropagation="@isSelectable"
@@ -31,6 +34,8 @@
                                 OverflowBehavior="OverflowBehavior.FlipAlways"
                                 Elevation="4"
                                 Class="subject-action-bar"
+                                role="toolbar"
+                                aria-label="Widget actions"
                                 data-testid="widget-action-bar">
                         @if (SelectableParent != null)
                         {
@@ -38,6 +43,7 @@
                                            Size="Size.Small"
                                            Class="select-parent-button"
                                            title="Select parent"
+                                           aria-label="Select parent"
                                            OnClick="_selectParentCallback"
                                            data-testid="select-parent-button" />
                         }
@@ -48,6 +54,7 @@
                                            Size="Size.Small"
                                            Color="Color.Primary"
                                            title="Edit"
+                                           aria-label="Edit"
                                            OnClick="_editCallback"
                                            data-testid="edit-subject-button" />
                         }
@@ -139,6 +146,19 @@
         Selection != null &&
         HasEditComponent;
 
+    // The name of the type, which names a selectable widget without a title, looked up once per subject.
+    private string? _typeDisplayName;
+
+    private string GetAccessibleName()
+    {
+        if (Subject is ITitleProvider { Title: { Length: > 0 } title })
+        {
+            return title;
+        }
+
+        return _typeDisplayName ??= SubjectTypeCatalog.Describe(Subject!.GetType()).DisplayName;
+    }
+
     private SubjectComponent? SelectableParent
     {
         get
@@ -168,7 +188,7 @@
 
     internal void OnSelectionChanged()
     {
-        _ = InvokeAsync(StateHasChanged);
+        StateHasChanged();
     }
 
     private void SelectParent()
@@ -215,6 +235,7 @@
         if (Subject != _previousSubject || AdditionalParameters != _previousAdditionalParameters)
         {
             _previousSubject = Subject;
+            _typeDisplayName = null;
             _previousAdditionalParameters = AdditionalParameters;
             _cachedParameters = BuildComponentParameters();
         }
