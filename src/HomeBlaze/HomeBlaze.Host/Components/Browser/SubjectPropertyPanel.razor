@@ -853,16 +853,18 @@
                 var isQuery = method.Kind == MethodKind.Query;
                 var defaultIcon = isQuery ? "Search" : "PlayArrow";
                 var isEnabled = _registeredSubject?.TryGetProperty(method.PropertyName)?.IsMethodEnabled() ?? true;
+                var isExecuting = _executingMethod == method;
                 <MudButton Variant="Variant.Filled"
                            Color="@(isQuery ? Color.Info : Color.Primary)"
                            Size="Size.Small"
                            Class="subject-pane-method"
-                           StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
-                           Disabled="@(_executingMethod == method || !isEnabled)"
+                           StartIcon="@(isExecuting ? null : SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon))"
+                           Disabled="@(isExecuting || !isEnabled)"
                            OnClick="@(() => ExecuteMethodAsync(method))">
-                    @if (_executingMethod == method)
+                    @* The spinner takes the start icon's place instead of adding one, so the button keeps its width while busy. *@
+                    @if (isExecuting)
                     {
-                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" Style="width: 20px; height: 20px;" />
                     }
                     @method.Title
                 </MudButton>
