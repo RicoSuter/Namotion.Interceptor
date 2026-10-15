@@ -32,7 +32,7 @@
     <MudSwitch T="bool"
                @key="_resetKey"
                Value="@(_pending ?? isOn)"
-               ValueChanged="ToggleAsync"
+               ValueChanged="_toggleCallback"
                Label="@ValueReader.GetControlLabel(property, Label, Path)"
                Color="Color.Primary"
                Disabled="@(IsEditing || _pending is not null || !canToggle)" />
@@ -42,6 +42,7 @@
     private readonly CancellationTokenSource _lifetime = new();
     private bool? _pending;
     private int _resetKey;
+    private EventCallback<bool> _toggleCallback;
 
     /// <summary>
     /// The boolean property that the switch shows, or null when the path leads nowhere.
@@ -55,6 +56,9 @@
     [Parameter]
     public string? Path { get; set; }
 
+    /// <summary>
+    /// The label next to the switch, the title that the property declares when it is not set.
+    /// </summary>
     [Parameter]
     public string? Label { get; set; }
 
@@ -78,6 +82,12 @@
 
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
+
+    protected override void OnInitialized()
+    {
+        // Created once: binding the method group directly in the markup would allocate a new delegate on every render.
+        _toggleCallback = EventCallback.Factory.Create<bool>(this, ToggleAsync);
+    }
 
     private async Task ToggleAsync(bool requested)
     {

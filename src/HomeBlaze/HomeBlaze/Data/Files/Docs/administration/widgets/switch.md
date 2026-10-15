@@ -23,7 +23,7 @@ The switch has no slots.
 
 ## Samples
 
-These samples operate the shared sample motors `Pump` and `Fan` next to this page. What they change lasts until the motors restart, see [Basics](basics.md).
+These samples operate the shared sample motors `Pump` and `Fan` next to this page. What they change lasts until the motors restart, see [Basics](basics.md#control-writes).
 
 A switch that writes the property. `IsPowered` of the pump can be written, so the switch writes it. While the pump is off it slows down to a stop, which the indicator below the switch shows:
 
@@ -57,7 +57,7 @@ A switch with an operation for each state. Turning it on invokes `PowerOn` of th
 - **Enabled state**: With `On` and `Off`, the switch is disabled while the operation that a toggle would invoke is not enabled, for example `PowerOn` while the motor is powered, and while that operation does not exist.
 - **Confirmation**: An operation that asks for confirmation shows its dialog first. Cancel leaves the switch in its state.
 - **Operations without input**: `On` and `Off` are operations whose parameters need no input. One of them alone shows `Set both On and Off, or neither`, and an operation that needs input shows `On needs an operation without input` with its path, in place of the switch, see [Value Widget Errors](../page-errors.md#value-widget-errors).
-- **Saving**: A write to a configuration property saves the page or the file that holds its subject, see [Basics](basics.md). `IsPowered` of the sample motors is no configuration property, so these samples save nothing.
+- **Saving**: A write to a configuration property saves the page or the file that holds its subject, see [Basics](basics.md#control-writes). `IsPowered` of the sample motors is no configuration property, so these samples save nothing.
 - **Edit mode**: While the page is edited, the switch is disabled.
 - **Several viewers**: A change by another viewer, or by the device, moves the switch.
 
