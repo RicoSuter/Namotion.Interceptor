@@ -166,6 +166,17 @@ namespace HomeBlaze.History.Blazor
         protected override void OnParametersSet() { }
         protected override bool ShouldRender() { }
     }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.History.Blazor.HistoryChart))]
+    public class HistoryChartWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IDisposable
+    {
+        public HistoryChartWidget() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override void OnInitialized() { }
+    }
     public sealed class HistoryRefreshThrottle : System.IDisposable
     {
         public static readonly System.TimeSpan MinimumInterval;

@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
+using HomeBlaze.History.Blazor;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
@@ -53,6 +54,7 @@ public sealed class DocumentationFolderFixture : IDisposable
             .AddAssembly(typeof(FluentStorageContainer).Assembly)
             .AddAssembly(typeof(DocumentationFolderFixture).Assembly)
             .AddAssembly(typeof(Card).Assembly)
+            .AddAssembly(typeof(HistoryChart).Assembly)
             .AddAssembly(typeof(Motor).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 

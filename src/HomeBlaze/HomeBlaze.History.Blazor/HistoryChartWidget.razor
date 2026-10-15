@@ -1,0 +1,329 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HistoryChart))]
+@implements ISubjectComponent
+@implements IDisposable
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Components.Abstractions.TimeZones
+@using HomeBlaze.History.Abstractions
+@using HomeBlaze.Services
+@using HomeBlaze.Services.Display
+@using Namotion.Interceptor
+@using Namotion.Interceptor.Registry.Abstractions
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+@inject TimeProvider TimeProvider
+@inject IInterceptorSubjectContext RootContext
+
+@if (Subject is HistoryChart chart)
+{
+    // The configuration and the current values are read on every render and the values are never kept: these
+    // reads are what the page tracking scope records, so a change of a charted value renders the legend again,
+    // and that render arms the refresh of the chart.
+    Resolve(chart);
+    var series = _series;
+    var height = chart.Height;
+
+    <div data-testid="history-chart">
+        @if (_error is not null)
+        {
+            @* The markup of WidgetArgumentError, which this project cannot reference. *@
+            <MudAlert Severity="Severity.Error" Dense="true" data-testid="widget-argument-error">@_error</MudAlert>
+        }
+        else
+        {
+            @if (_queryError is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" data-testid="history-chart-query-error">@_queryError</MudAlert>
+            }
+            else if (_hasStores is null)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            }
+            else if (_hasStores == true)
+            {
+                <HistoryChartView Data="_data" ChartStyle="@GetChartStyle(height)" ShowBandLabels="true" />
+            }
+
+            <div data-testid="history-chart-legend" style="display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;">
+                @for (var index = 0; index < series.Count; index++)
+                {
+                    var entry = series[index];
+                    var property = entry.Property;
+                    var value = property?.GetValue();
+                    var text = property is null || value is null ? MissingText : property.GetPropertyDisplayValue(value, TimeZone);
+                    var note = entry.Note ?? (_hasStores == false ? NoStoreNote : null);
+
+                    <div data-testid="history-chart-legend-entry" style="display:flex; align-items:center; gap:6px;">
+                        @if (_swatchStyles[index] is { } swatchStyle)
+                        {
+                            <span aria-hidden="true" style="@swatchStyle"></span>
+                        }
+                        <MudText Typo="Typo.caption">@entry.Label</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-value">@text</MudText>
+                        @if (note is not null)
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-note">(@note)</MudText>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private const string MissingText = "–";
+    private const string NoStoreNote = "no history store";
+
+    private HistoryRefreshThrottle? _throttle;
+    private CancellationTokenSource? _queryCancellation;
+    private HistoryChartData? _data;
+    private bool? _hasStores;
+    private string? _queryError;
+    private TimeSpan? _bucket;
+    private bool _skipNextArm;
+
+    // The resolution of the series, kept until the configuration or the paths of the graph change, because the
+    // legend renders on every change of a charted value.
+    private HistoryChartSeries[]? _resolvedEntries;
+    private (string? Path, string? Label, string? Color)[] _resolvedConfiguration = [];
+    private string? _resolvedRange;
+    private string? _resolvedBucket;
+    private int _resolvedPathsVersion = -1;
+    private IReadOnlyList<HistoryChartSeriesInfo> _series = [];
+    private string?[] _colors = [];
+    private string?[] _swatchStyles = [];
+    private string? _error;
+    private int _chartStyleHeight = -1;
+    private string _chartStyle = string.Empty;
+
+    // Set when a render resolved other series, range or bucket than the last query used.
+    private bool _isQueryOutdated;
+
+    // Incremented on the thread that changes the graph.
+    private int _pathsVersion;
+
+    // Read on a timer thread by OnRefreshDue.
+    private volatile bool _isDisposed;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    protected override void OnInitialized()
+    {
+        _throttle = new HistoryRefreshThrottle(TimeProvider, OnRefreshDue);
+        PathResolver.PathsChanged += OnPathsChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The first query runs after the first interactive render, never while prerendering. A changed
+        // configuration queries at once rather than at the end of the next window.
+        if (firstRender || _isQueryOutdated)
+        {
+            await RefreshAsync();
+            return;
+        }
+
+        // The render that shows a new result is no change of a value.
+        if (_skipNextArm)
+        {
+            _skipNextArm = false;
+            return;
+        }
+
+        if (_error is null && Subject is HistoryChart chart)
+        {
+            _throttle?.Arm(HistoryRefreshThrottle.GetWindow(chart.RefreshInterval, _bucket));
+        }
+    }
+
+    private void Resolve(HistoryChart chart)
+    {
+        var entries = chart.Series;
+        var range = chart.Range;
+        var bucket = chart.Bucket;
+        var pathsVersion = Volatile.Read(ref _pathsVersion);
+
+        // Every entry is read even when an earlier one differs, so the tracking scope records all of them.
+        var isCurrent = ReferenceEquals(entries, _resolvedEntries) &&
+            pathsVersion == _resolvedPathsVersion &&
+            range == _resolvedRange &&
+            bucket == _resolvedBucket &&
+            entries.Length == _resolvedConfiguration.Length;
+        for (var index = 0; index < entries.Length; index++)
+        {
+            var entry = entries[index];
+            var configuration = (entry.Path, entry.Label, entry.Color);
+            isCurrent &= index < _resolvedConfiguration.Length && _resolvedConfiguration[index] == configuration;
+        }
+
+        if (isCurrent)
+        {
+            return;
+        }
+
+        var configurations = new (string? Path, string? Label, string? Color)[entries.Length];
+        for (var index = 0; index < entries.Length; index++)
+        {
+            var entry = entries[index];
+            configurations[index] = (entry.Path, entry.Label, entry.Color);
+        }
+
+        var series = HistoryChartSeriesResolver.Resolve(PathResolver, chart);
+        var error = HistoryChartSeriesResolver.FindArgumentError(range, bucket, series);
+
+        // A change of the graph that leaves the series as they were, which is the common case, does not query again.
+        _isQueryOutdated |= error != _error ||
+            range != _resolvedRange ||
+            bucket != _resolvedBucket ||
+            !series.SequenceEqual(_series);
+
+        _resolvedEntries = entries;
+        _resolvedConfiguration = configurations;
+        _resolvedRange = range;
+        _resolvedBucket = bucket;
+        _resolvedPathsVersion = pathsVersion;
+        _series = series;
+        _error = error;
+        _colors = HistoryChartSeriesResolver.AssignLineColors(series);
+        _swatchStyles = new string?[_colors.Length];
+        for (var index = 0; index < _colors.Length; index++)
+        {
+            if (_colors[index] is { } color)
+            {
+                _swatchStyles[index] = $"width:12px; height:3px; border-radius:1px; background:{color};";
+            }
+        }
+    }
+
+    private string GetChartStyle(int height)
+    {
+        if (height != _chartStyleHeight)
+        {
+            _chartStyleHeight = height;
+            _chartStyle = $"height:{height}px; aspect-ratio:2 / 1; max-width:100%;";
+        }
+
+        return _chartStyle;
+    }
+
+    // Runs on the thread that changes the graph, inside the lock of the lifecycle interceptor: it only notes the change,
+    // and the page renders after a change of the paths.
+    private void OnPathsChanged() => Interlocked.Increment(ref _pathsVersion);
+
+    // Runs on a timer thread under the lock of the throttle. Queued instead of calling InvokeAsync here, because InvokeAsync
+    // runs inline on an idle dispatcher: the query would run under that lock and in the execution context of the render
+    // that armed the throttle, which can hold the read recorder of the page tracking scope.
+    private void OnRefreshDue()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        ThreadPool.UnsafeQueueUserWorkItem(static widget => widget.PostRefresh(), this, preferLocal: false);
+    }
+
+    private void PostRefresh()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(RefreshAsync);
+    }
+
+    private async Task RefreshAsync()
+    {
+        _isQueryOutdated = false;
+        if (_isDisposed || Subject is not HistoryChart || _error is not null)
+        {
+            return;
+        }
+
+        PropertyHistoryChartModel.TryGetRange(_resolvedRange, out var range);
+        PropertyHistoryChartModel.TryGetPeriod(_resolvedBucket, out var period);
+
+        var stores = RootContext.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
+        _hasStores = stores.Length > 0;
+        if (stores.Length == 0)
+        {
+            _skipNextArm = true;
+            StateHasChanged();
+            return;
+        }
+
+        var storeAggregations = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var store in stores)
+        {
+            storeAggregations.UnionWith(store.SupportedAggregations);
+        }
+
+        var series = _series;
+        var requests = new List<HistoryChartSeriesRequest>(series.Count);
+        for (var index = 0; index < series.Count; index++)
+        {
+            var entry = series[index];
+            if (entry.Property is not { } property || !entry.HasHistory || property.GetHistoryPath(PathResolver) is not { } path)
+            {
+                continue;
+            }
+
+            var isBand = entry.Kind == HistoryChartSeriesKind.Band;
+            var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
+                property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations);
+            requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index]));
+        }
+
+        // A newer query supersedes this one, and disposing the widget cancels it.
+        _queryCancellation?.Cancel();
+        _queryCancellation?.Dispose();
+        _queryCancellation = new CancellationTokenSource();
+        var cancellationToken = _queryCancellation.Token;
+
+        var to = TimeProvider.GetUtcNow();
+        var from = to - range;
+        var bucket = PropertyHistoryChartModel.ResolveBucket(period, range, HistoryChartQuery.GetAvailableCoverage(stores, to));
+        try
+        {
+            var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, cancellationToken);
+            if (cancellationToken.IsCancellationRequested || _isDisposed)
+            {
+                return;
+            }
+
+            _data = result.Data;
+            _bucket = bucket;
+            _queryError = null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            if (cancellationToken.IsCancellationRequested || _isDisposed)
+            {
+                return;
+            }
+
+            _queryError = "Could not load history: " + exception.Message;
+        }
+
+        _skipNextArm = true;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        PathResolver.PathsChanged -= OnPathsChanged;
+        _throttle?.Dispose();
+
+        // Cancel before disposing: disposing does not cancel the token of a running query.
+        _queryCancellation?.Cancel();
+        _queryCancellation?.Dispose();
+    }
+}
