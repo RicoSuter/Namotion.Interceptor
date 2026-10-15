@@ -87,24 +87,16 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [Category("Build")]
     public partial Uri? BuildRunUrl { get; internal set; }
 
-    [Derived]
     [State(Position = 410)]
     [Category("Build")]
-    public Uri? CommitUrl =>
-        RepositoryUrl is { } repositoryUrl && Commit is { } commit
-            ? new Uri($"{repositoryUrl.AbsoluteUri.TrimEnd('/')}/commit/{commit}")
-            : null;
+    public partial Uri? CommitUrl { get; internal set; }
 
     /// <summary>
     /// The release page of a release, otherwise the commit.
     /// </summary>
-    [Derived]
     [State(Position = 411)]
     [Category("Build")]
-    public Uri? VersionUrl =>
-        Channel == InstallationChannel.Release && RepositoryUrl is { } repositoryUrl && Tag is { } tag
-            ? new Uri($"{repositoryUrl.AbsoluteUri.TrimEnd('/')}/releases/tag/{Uri.EscapeDataString(tag)}")
-            : CommitUrl;
+    public partial Uri? VersionUrl { get; internal set; }
 
     // Environment
 
@@ -232,6 +224,14 @@ public partial class HomeBlazeInstallation : BackgroundService,
         BuildTime = build.BuildTime;
         RepositoryUrl = CreateUri(build.RepositoryUrl);
         BuildRunUrl = CreateUri(build.RunUrl);
+
+        var repositoryAddress = RepositoryUrl?.AbsoluteUri.TrimEnd('/');
+        CommitUrl = repositoryAddress is not null && build.Commit is { } commit
+            ? new Uri($"{repositoryAddress}/commit/{commit}")
+            : null;
+        VersionUrl = repositoryAddress is not null && build.Tag is { } tag
+            ? new Uri($"{repositoryAddress}/releases/tag/{Uri.EscapeDataString(tag)}")
+            : CommitUrl;
 
         EnvironmentName = environmentName;
         IsDeveloperMode = developerModeService.IsEnabled;
