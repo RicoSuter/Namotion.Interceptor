@@ -20,10 +20,18 @@ public partial class RecordingConfigurationStore : IConfigurationWriter
     /// <summary>The result of every write, false to act as a writer that stores no configuration of the subject.</summary>
     public bool WritesConfiguration { get; set; } = true;
 
+    /// <summary>An exception that every write throws, to act as a writer that fails.</summary>
+    public Exception? WriteException { get; set; }
+
     public IReadOnlyCollection<IInterceptorSubject> WrittenSubjects => _writtenSubjects;
 
     public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
+        if (WriteException is not null)
+        {
+            throw WriteException;
+        }
+
         _writtenSubjects.Enqueue(subject);
         return Task.FromResult(WritesConfiguration);
     }

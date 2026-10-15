@@ -1,3 +1,4 @@
+using HomeBlaze.Components.Controls;
 using HomeBlaze.Host.Services;
 using HomeBlaze.Host.TimeZones;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,6 +26,7 @@ public static class ServiceCollectionExtensions
 
         services.AddHttpContextAccessor();
         services.AddScoped<TimeZoneInterop>();
+        services.AddScoped<PropertyWriter>();
 
         // TryAdd, so that a test host can register its own clock first.
         services.TryAddSingleton(TimeProvider.System);
