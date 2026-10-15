@@ -14,7 +14,7 @@ Shows the recorded history of properties in one chart: numbers as lines on one v
 |----------|---------------|---------|---------|
 | `Range` | `1h`, `6h`, `24h`, `7d` or `30d` | `24h` | The time span that ends now |
 | `Bucket` | `Auto`, `Raw`, `1s`, `10s`, `60s`, `5m`, `10m`, `15m`, `1h`, `4h`, `6h`, `12h` or `24h` | `Auto` | The interval that one point of a line stands for. `Auto` picks one from the range, `Raw` shows every recorded sample. The bucket applies to lines only, a band always shows the recorded samples |
-| `Height` | Whole number | `300` | The height of the lines in pixels |
+| `Height` | Whole number | `300` | The height of the lines in pixels. On a narrow screen the lines get lower to keep their proportions |
 | `RefreshInterval` | Time span, for example `00:05:00` | `00:01:00` | How often the chart queries again at most while its values change. Less than a minute counts as a minute |
 
 `Range` and `Bucket` ignore case.

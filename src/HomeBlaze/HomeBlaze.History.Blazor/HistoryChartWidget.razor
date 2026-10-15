@@ -203,7 +203,9 @@
         if (height != _chartStyleHeight)
         {
             _chartStyleHeight = height;
-            _chartStyle = $"height:{height}px; aspect-ratio:2 / 1; max-width:100%;";
+            // The height follows the width at 2:1, so a narrow screen gets lower lines. MudChart fills its parent
+            // only when the parent is a flex box with a max-height; otherwise it draws in a box of its own 350 px high.
+            _chartStyle = $"display:flex; width:100%; max-width:{height * 2}px; max-height:{height}px; min-height:0; aspect-ratio:2 / 1;";
         }
 
         return _chartStyle;
