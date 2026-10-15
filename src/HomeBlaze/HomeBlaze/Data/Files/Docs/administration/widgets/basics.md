@@ -66,6 +66,19 @@ A property that does not match is shown greyed out and cannot be selected. Opera
 
 A value widget shows a dash for a value that is not set and for a path that leads nowhere, and no error box. [Value Widgets](../page-widgets.md#value-widgets) has the rules for values.
 
+## Control Writes
+
+The control widgets ([Switch](switch.md) and the others of the group Controls in the [overview](overview.md)) write properties and invoke operations. They follow the same rules as the property panel of a subject.
+
+- **Who can operate**: Every viewer of a page can operate its controls. Every viewer of this documentation can operate the two sample motors through the control samples.
+- **Disabled**: A control is disabled when its path leads nowhere, when the property cannot be written because it has no public setter, and while the page is edited.
+- **Writes**: A value is converted to the type of the property. A value that the type cannot hold, or that the property refuses, shows an error message, and nothing is rolled back.
+- **Runtime values**: A property that is no configuration property, such as `IsPowered`, `Mode` and `Load` of the sample motors, changes in memory only and keeps its value until the subject restarts. The control samples of these pages write only such properties, so they change no file.
+- **Saving**: A write to a configuration property saves the subject that owns the configuration, one second after the last write to it, so a series of arrow keys gives one save. A subject defined on a page saves its block of that page and leaves the rest of the page as it is. A subject of a `*.json` file saves that file.
+- **Not saved**: When nothing can save the value, for example for a subject that a device discovered at runtime and that belongs to no file, a warning says that the value is not saved, and the value stays in memory. Such a subject warns at each save.
+- **Devices**: A write to a property that a connector sends to a device can fail later on the device side, without a message on the page.
+- **The text editor**: A page that is open in the Split mode text editor does not take what a control saved, and saving the editor afterwards overwrites it.
+
 ---
 
 ## Related

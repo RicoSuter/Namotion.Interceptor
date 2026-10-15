@@ -1,0 +1,40 @@
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Controls
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Switch))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+
+@{
+    var widget = Subject as Switch;
+}
+
+@if (widget is not null)
+{
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var path = widget.Path;
+    var on = widget.On;
+    var off = widget.Off;
+    var onProperty = ValueReader.ResolveProperty(PathResolver, widget, on);
+    var offProperty = ValueReader.ResolveProperty(PathResolver, widget, off);
+    var error = SwitchArguments.Validate(
+        on, off, onProperty?.GetValue() as MethodMetadata, offProperty?.GetValue() as MethodMetadata);
+
+    if (error is not null)
+    {
+        <WidgetArgumentError Message="@error" />
+    }
+    else
+    {
+        <SwitchView Property="@ValueReader.ResolveProperty(PathResolver, widget, path)"
+                    Path="@path"
+                    Label="@widget.Label"
+                    UsesOperations="@(!string.IsNullOrEmpty(on))"
+                    OnProperty="@onProperty"
+                    OffProperty="@offProperty" />
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

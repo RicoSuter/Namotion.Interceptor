@@ -6,9 +6,9 @@ position: 1
 
 # Page Widgets
 
-The widgets that ship with HomeBlaze for [markdown pages](../pages.md), by group, with one line each. [Widget Basics](basics.md) has the rules that all of them share: type names, paths, the path picker and missing values.
+The widgets that ship with HomeBlaze for [markdown pages](../pages.md), by group, with one line each. [Widget Basics](basics.md) has the rules that all of them share: type names, paths, the path picker, missing values and control writes.
 
-The reference of each widget, with its arguments, its slots and its samples, is still a section of [Widgets for Markdown Pages](../page-widgets.md), and the links below lead there. Each widget gets a page of its own in this folder, and the links will then lead to that page.
+The reference of each widget has its arguments, its slots and its samples. Some widgets are still described in a section of [Widgets for Markdown Pages](../page-widgets.md), and their links lead there. The others have a page of their own in this folder.
 
 ---
 
@@ -39,6 +39,12 @@ The reference of each widget, with its arguments, its slots and its samples, is 
 | [ValueTile](../page-widgets.md#valuetile) | A small box with a label and one large value |
 | [Indicator](../page-widgets.md#indicator) | Shows a state as a coloured chip, or as an icon alone |
 | [Progress](../page-widgets.md#progress) | A bar that shows where a number stands between a minimum and a maximum |
+
+## Controls
+
+| Widget | Purpose |
+|--------|---------|
+| [Switch](switch.md) | Turns a boolean on and off, by writing it or by invoking an operation per state |
 
 ---
 

@@ -85,11 +85,13 @@ An expression with a wrong format does not take a block down. The page shows the
 
 ## Value Widget Errors
 
-A map that cannot be found does not take a block down either. The widget shows the message in a small red alert in place of its value, without a line number, and the rest of the page is shown as usual.
+A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual.
 
 | Message | Cause | Fix |
 |---------|-------|-----|
 | `Cannot resolve map: motorstat` | The `Map` of a `ValueList` row, a `ValueTile` or an `Indicator` leads to no subject, or to a subject that is no `ValueMap`. The message shows the map as written | Check the name or the path in `Map`. The name is that of the block of the map, and a map on another page is reached through that page, see [ValueMap](page-widgets.md#valuemap) |
+| `Set both On and Off, or neither` | A `Switch` has only one of `On` and `Off` | Set both, so that the switch invokes an operation per state, or remove both, so that it writes its property, see [Switch](widgets/switch.md) |
+| `On needs an operation without input: pump/SetTargetSpeed` | `On` of a `Switch` leads to an operation with a parameter that needs input. `Off` gives the same message with its own name. The message shows the path as written | Use an operation whose parameters need no input, see [Switch](widgets/switch.md) |
 
 ## Other Messages
 

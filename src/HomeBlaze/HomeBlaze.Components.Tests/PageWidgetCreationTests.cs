@@ -31,6 +31,7 @@ public class PageWidgetCreationTests
     [InlineData(typeof(Card), "Card")]
     [InlineData(typeof(FlowLayout), "Flow layout")]
     [InlineData(typeof(TabLayout), "Tab layout")]
+    [InlineData(typeof(Switch), "Switch")]
     public void WhenWidgetIsDescribed_ThenItIsInTheDashboardGroupWithAnIconOfItsOwn(Type type, string expectedDisplayName)
     {
         // Arrange

@@ -67,14 +67,21 @@ public static class ValueReader
     /// <summary>
     /// Gets the label of a value: the given one, otherwise the title the property declares, otherwise its name.
     /// </summary>
-    public static string GetLabel(ValueReading? reading, string? label)
+    public static string GetLabel(ValueReading? reading, string? label) =>
+        GetControlLabel(reading?.Property, label, path: null);
+
+    /// <summary>
+    /// Gets the label of a control: the given one, otherwise the title the property declares, otherwise its name,
+    /// and the path when the path leads nowhere.
+    /// </summary>
+    public static string GetControlLabel(RegisteredSubjectProperty? property, string? label, string? path)
     {
         if (!string.IsNullOrEmpty(label))
         {
             return label;
         }
 
-        return reading?.Property?.GetDisplayName() ?? string.Empty;
+        return property?.GetDisplayName() ?? path ?? string.Empty;
     }
 
     /// <summary>
@@ -113,7 +120,14 @@ public static class ValueReader
     private static bool IsNumber(object? value) =>
         value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal;
 
-    private static ValueMap? ResolveMap(SubjectPathResolver resolver, IInterceptorSubject widget, string? map, out string? error)
+    /// <summary>
+    /// Resolves the name or path of a <see cref="ValueMap"/>. Null or empty gives no map and no error.
+    /// </summary>
+    /// <param name="resolver">The resolver of the map.</param>
+    /// <param name="widget">The subject the map is relative to, usually the widget itself.</param>
+    /// <param name="map">The name or path of the map as written.</param>
+    /// <param name="error">The widget argument error when the map leads nowhere or to no <see cref="ValueMap"/>, otherwise null.</param>
+    public static ValueMap? ResolveMap(SubjectPathResolver resolver, IInterceptorSubject widget, string? map, out string? error)
     {
         error = null;
         if (string.IsNullOrEmpty(map))
@@ -130,9 +144,10 @@ public static class ValueReader
         return null;
     }
 
-    // The path of a property and that of a map are written by the author of a page, and a malformed one
-    // must not take the page down. This holds for both resolving methods below.
-    private static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string? path)
+    /// <summary>
+    /// Resolves the path of a widget to a property, or to null when the path is null, empty, malformed or leads nowhere.
+    /// </summary>
+    public static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string? path)
     {
         if (string.IsNullOrEmpty(path))
         {
@@ -149,6 +164,8 @@ public static class ValueReader
         }
     }
 
+    // The path of a property and that of a map are written by the author of a page, and a malformed one
+    // must not take the page down. This holds for ResolveProperty above as well.
     private static IInterceptorSubject? ResolveSubject(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
     {
         try

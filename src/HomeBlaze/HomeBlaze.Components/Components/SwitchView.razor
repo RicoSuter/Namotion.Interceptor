@@ -1,0 +1,119 @@
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Controls
+@using HomeBlaze.Components.Inputs
+@using HomeBlaze.Components.Operations
+@implements IDisposable
+@inject PropertyWriter Writer
+@inject IDialogService DialogService
+@inject IServiceProvider ServiceProvider
+
+@{
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var property = Property;
+    var isOn = property?.GetValue() as bool? ?? false;
+    var canToggle = false;
+    if (property is not null && SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Boolean))
+    {
+        if (UsesOperations)
+        {
+            // A toggle can only go to the other state, so only the operation for that state counts.
+            var operation = isOn ? OffProperty : OnProperty;
+            canToggle = operation is not null && operation.GetValue() is MethodMetadata && operation.IsMethodEnabled();
+        }
+        else
+        {
+            canToggle = PropertyWriter.IsWritable(property);
+        }
+    }
+}
+
+<div data-testid="switch">
+    <MudSwitch T="bool"
+               @key="_resetKey"
+               Value="@(_pending ?? isOn)"
+               ValueChanged="ToggleAsync"
+               Label="@ValueReader.GetControlLabel(property, Label, Path)"
+               Color="Color.Primary"
+               Disabled="@(IsEditing || _pending is not null || !canToggle)" />
+</div>
+
+@code {
+    private readonly CancellationTokenSource _lifetime = new();
+    private bool? _pending;
+    private int _resetKey;
+
+    /// <summary>
+    /// The boolean property that the switch shows, or null when the path leads nowhere.
+    /// </summary>
+    [Parameter]
+    public RegisteredSubjectProperty? Property { get; set; }
+
+    /// <summary>
+    /// The path as written, the label when the path leads nowhere and no label is given.
+    /// </summary>
+    [Parameter]
+    public string? Path { get; set; }
+
+    [Parameter]
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// Whether a toggle invokes <see cref="OnProperty"/> or <see cref="OffProperty"/> instead of writing the property.
+    /// </summary>
+    [Parameter]
+    public bool UsesOperations { get; set; }
+
+    /// <summary>
+    /// The method property of the operation that turns the switch on, or null when it leads nowhere.
+    /// </summary>
+    [Parameter]
+    public RegisteredSubjectProperty? OnProperty { get; set; }
+
+    /// <summary>
+    /// The method property of the operation that turns the switch off, or null when it leads nowhere.
+    /// </summary>
+    [Parameter]
+    public RegisteredSubjectProperty? OffProperty { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    private async Task ToggleAsync(bool requested)
+    {
+        var property = Property;
+        if (property is null || _pending is not null)
+        {
+            return;
+        }
+
+        _pending = requested;
+        try
+        {
+            if (!UsesOperations)
+            {
+                Writer.TryWrite(property, requested);
+            }
+            else if ((requested ? OnProperty : OffProperty)?.GetValue() is MethodMetadata method)
+            {
+                await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, method, _lifetime.Token);
+            }
+        }
+        finally
+        {
+            _pending = null;
+
+            // The switch keeps the state the user gave it, and only a new key makes it show the property again.
+            if ((property.GetValue() as bool? ?? false) != requested)
+            {
+                _resetKey++;
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}

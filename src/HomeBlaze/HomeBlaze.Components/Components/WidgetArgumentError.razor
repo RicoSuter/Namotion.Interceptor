@@ -1,0 +1,8 @@
+@* A widget argument error: it stands in place of the widget, and the rest of the page renders. *@
+
+<MudAlert Severity="Severity.Error" Dense="true" data-testid="widget-argument-error">@Message</MudAlert>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Message { get; set; } = string.Empty;
+}
