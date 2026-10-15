@@ -89,7 +89,7 @@ internal sealed class MarkdownBlockReconciler
             blockSubjects,
             configurationJson);
 
-        foreach (var slot in SlotMap.For(owner.GetType()).Named.Values)
+        foreach (var slot in SlotMap.For(owner.GetType()).Slots)
         {
             if (slot is { IsList: true, IsOpen: false } && !reconciler.TryReconcile(slot))
             {
@@ -107,7 +107,7 @@ internal sealed class MarkdownBlockReconciler
     // there in the graph is in no text, and the reload would replace it with that content.
     private static SlotDefinition? FindSlotWithSubjectFromTheGraph(IInterceptorSubject owner)
     {
-        foreach (var slot in SlotMap.For(owner.GetType()).Named.Values)
+        foreach (var slot in SlotMap.For(owner.GetType()).Slots)
         {
             if (slot.IsOpen && !HoldsOnlyContentOfThePage(slot.GetValue(owner)))
             {
@@ -256,7 +256,7 @@ internal sealed class MarkdownBlockReconciler
 
         string? content = null;
         var blockCount = 1;
-        foreach (var valueSlot in SlotMap.For(value.GetType()).Named.Values)
+        foreach (var valueSlot in SlotMap.For(value.GetType()).Slots)
         {
             var slotValue = valueSlot.GetValue(value);
             if (IsEmpty(slotValue))
@@ -390,7 +390,7 @@ internal sealed class MarkdownBlockReconciler
 
     private static bool HasSlotContent(IInterceptorSubject subject)
     {
-        foreach (var slot in SlotMap.For(subject.GetType()).Named.Values)
+        foreach (var slot in SlotMap.For(subject.GetType()).Slots)
         {
             if (!IsEmpty(slot.GetValue(subject)))
             {

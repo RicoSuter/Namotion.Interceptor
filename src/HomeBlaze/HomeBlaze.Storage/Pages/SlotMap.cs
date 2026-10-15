@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
@@ -29,17 +30,18 @@ internal sealed class SlotMap
 
     private static readonly ConcurrentDictionary<Type, SlotMap> Cache = new();
 
-    private readonly FrozenDictionary<string, SlotDefinition> _byPropertyName;
-
-    private SlotMap(SlotDefinition? defaultSlot, Dictionary<string, SlotDefinition> named, string? error)
+    private SlotMap(SlotDefinition? defaultSlot, ImmutableArray<SlotDefinition> slots, string? error)
     {
         Default = defaultSlot;
-        Named = named.ToFrozenDictionary();
-        _byPropertyName = named.Values.ToFrozenDictionary(slot => slot.PropertyName, StringComparer.Ordinal);
+        Slots = slots;
+        Named = slots.ToFrozenDictionary(slot => slot.Name);
         Error = error;
     }
 
     public SlotDefinition? Default { get; }
+
+    /// <summary>All slots in declaration order, including the default slot.</summary>
+    public ImmutableArray<SlotDefinition> Slots { get; }
 
     /// <summary>All slots by block name, including the default slot.</summary>
     public FrozenDictionary<string, SlotDefinition> Named { get; }
@@ -49,14 +51,17 @@ internal sealed class SlotMap
 
     /// <summary>Gets the slot that the property with exactly this name declares, or null.</summary>
     public SlotDefinition? FindByPropertyName(string propertyName) =>
-        _byPropertyName.GetValueOrDefault(propertyName);
+        Find(propertyName, StringComparison.Ordinal);
 
     /// <summary>Gets the slot that the property with this name in any casing declares, or null.</summary>
-    public SlotDefinition? FindByPropertyNameIgnoringCase(string propertyName)
+    public SlotDefinition? FindByPropertyNameIgnoringCase(string propertyName) =>
+        Find(propertyName, StringComparison.OrdinalIgnoreCase);
+
+    private SlotDefinition? Find(string propertyName, StringComparison comparison)
     {
-        foreach (var slot in Named.Values)
+        foreach (var slot in Slots)
         {
-            if (string.Equals(slot.PropertyName, propertyName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(slot.PropertyName, propertyName, comparison))
             {
                 return slot;
             }
@@ -69,13 +74,16 @@ internal sealed class SlotMap
 
     private static SlotMap Create(Type type)
     {
-        var named = new Dictionary<string, SlotDefinition>();
+        var slots = ImmutableArray.CreateBuilder<SlotDefinition>();
         SlotDefinition? defaultSlot = null;
         var interceptedProperties = FindInterceptedProperties(type);
 
-        SlotMap Invalid(string error) => new(null, new Dictionary<string, SlotDefinition>(), $"{type.Name}: {error}");
+        SlotMap Invalid(string error) => new(null, [], $"{type.Name}: {error}");
 
-        foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        // GetProperties returns no defined order, the metadata token is the declaration order.
+        foreach (var property in type
+                     .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                     .OrderBy(property => property.MetadataToken))
         {
             var attribute = property.GetCustomAttribute<SlotAttribute>(true);
             if (attribute is null)
@@ -116,7 +124,7 @@ internal sealed class SlotMap
                 return Invalid($"the type {valueType.Name} of the slot '{name}' cannot be created because it is abstract or an interface.");
             }
 
-            if (named.ContainsKey(name))
+            if (slots.Any(slot => slot.Name == name))
             {
                 return Invalid($"the slot '{name}' is declared twice.");
             }
@@ -149,14 +157,14 @@ internal sealed class SlotMap
 
             var slot = new SlotDefinition(
                 name, property.Name, property.PropertyType, valueType, isList, attribute.IsDefault, getValue, setValue);
-            named.Add(name, slot);
+            slots.Add(slot);
             if (attribute.IsDefault)
             {
                 defaultSlot = slot;
             }
         }
 
-        return new SlotMap(defaultSlot, named, null);
+        return new SlotMap(defaultSlot, slots.ToImmutable(), null);
     }
 
     // An instance has the same metadata in IInterceptorSubject.Properties, but the map is needed before
