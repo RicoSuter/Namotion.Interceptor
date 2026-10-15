@@ -41,7 +41,7 @@
             }
             else if (_hasStores == true)
             {
-                <HistoryChartView Data="_data" ChartStyle="@GetChartStyle(height)" ShowBandLabels="true" />
+                <HistoryChartView Data="_data" MaxHeight="height" ShowBandLabels="true" />
             }
 
             <div data-testid="history-chart-legend" style="display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;">
@@ -94,8 +94,6 @@
     private string?[] _colors = [];
     private string?[] _swatchStyles = [];
     private string? _error;
-    private int _chartStyleHeight = -1;
-    private string _chartStyle = string.Empty;
 
     // Set when a render resolved other series, range or bucket than the last query used.
     private bool _isQueryOutdated;
@@ -196,19 +194,6 @@
                 _swatchStyles[index] = $"width:12px; height:3px; border-radius:1px; background:{color};";
             }
         }
-    }
-
-    private string GetChartStyle(int height)
-    {
-        if (height != _chartStyleHeight)
-        {
-            _chartStyleHeight = height;
-            // The height follows the width at 2:1, so a narrow screen gets lower lines. MudChart fills its parent
-            // only when the parent is a flex box with a max-height; otherwise it draws in a box of its own 350 px high.
-            _chartStyle = $"display:flex; width:100%; max-width:{height * 2}px; max-height:{height}px; min-height:0; aspect-ratio:2 / 1;";
-        }
-
-        return _chartStyle;
     }
 
     // Runs on the thread that changes the graph, inside the lock of the lifecycle interceptor: it only notes the change,

@@ -1,7 +1,9 @@
 @using HomeBlaze.History.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
+@using MudBlazor.Services
 @inject ITimeZoneDisplay TimeZone
-@implements IDisposable
+@inject IResizeObserverFactory ResizeObserverFactory
+@implements IAsyncDisposable
 
 @if (Data is { } data)
 {
@@ -16,11 +18,10 @@
             @if (_chartSeries is not null)
             {
                 @* MatchBoundsToSize sizes the SVG viewBox to the rendered box, so labels and strokes
-                   keep their own size instead of being scaled by a fixed 700x350 viewBox. The chart
-                   then derives its height from its width at 2:1, so the box carries that ratio:
-                   without it the SVG is taller than its box and the x-axis labels and the lowest
-                   part of the plot are clipped. *@
-                <div data-testid="history-chart-lines" style="@ChartStyle">
+                   keep their own size instead of being scaled by a fixed 700x350 viewBox. MudChart
+                   fills the box only when it has a height or is a flex box with a max-height:
+                   otherwise it draws in a box of its own 350 px high, which is clipped or letterboxed. *@
+                <div @ref="_linesBox" data-testid="history-chart-lines" style="@GetLinesStyle()">
                     <MudChart ChartType="ChartType.Timeseries"
                               T="double"
                               ChartSeries="_chartSeries"
@@ -99,7 +100,7 @@
 
 @code {
     private HistoryChartData? _builtData;
-    private string? _renderedChartStyle;
+    private int? _renderedMaxHeight;
     private string? _renderedStyle;
     private int _renderedBandHeight;
     private bool _renderedShowBandLabels;
@@ -108,6 +109,16 @@
     private volatile bool _disposed;
     private List<ChartSeries<double>>? _chartSeries;
     private TimeSeriesChartOptions _chartOptions = new();
+    private string[] _palette = [];
+    private double _valueMinimum;
+    private double _valueMaximum;
+
+    // The size the axes are spaced for: the measured size of the lines, or a guess until they are measured.
+    private double _linesWidth;
+    private double _linesHeight;
+    private ElementReference _linesBox;
+    private IResizeObserver? _resizeObserver;
+    private bool _isObservingLines;
     private (string Band, PropertyHistoryChartModel.StateSegment Segment)[] _stateRows = [];
 
     /// <summary>
@@ -117,9 +128,12 @@
     [Parameter, EditorRequired]
     public HistoryChartData? Data { get; set; }
 
-    /// <summary>The CSS style of the box of the lines. The chart keeps a 2:1 ratio inside it.</summary>
+    /// <summary>
+    /// The highest the lines may be, in pixels. With it the lines fill the width and are half as high as wide, up
+    /// to this height. Without it they fill the width and the height of the view.
+    /// </summary>
     [Parameter]
-    public string ChartStyle { get; set; } = "height:100%; aspect-ratio:2 / 1; max-width:100%;";
+    public int? MaxHeight { get; set; }
 
     /// <summary>Extra CSS appended to the style of the root element.</summary>
     [Parameter]
@@ -154,12 +168,12 @@
 
         _shouldRender = dataChanged ||
             stateTableChanged ||
-            ChartStyle != _renderedChartStyle ||
+            MaxHeight != _renderedMaxHeight ||
             Style != _renderedStyle ||
             BandHeight != _renderedBandHeight ||
             ShowBandLabels != _renderedShowBandLabels;
 
-        _renderedChartStyle = ChartStyle;
+        _renderedMaxHeight = MaxHeight;
         _renderedStyle = Style;
         _renderedBandHeight = BandHeight;
         _renderedShowBandLabels = ShowBandLabels;
@@ -168,7 +182,71 @@
 
     protected override bool ShouldRender() => _shouldRender;
 
-    protected override void OnAfterRender(bool firstRender) => _shouldRender = false;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        _shouldRender = false;
+
+        // The lines are drawn again in a new element whenever they reappear, so each one is observed on its own.
+        var hasLines = _chartSeries is not null;
+        if (hasLines == _isObservingLines || _disposed)
+        {
+            return;
+        }
+
+        _resizeObserver ??= CreateResizeObserver();
+        _isObservingLines = hasLines;
+        if (!hasLines)
+        {
+            await _resizeObserver.Unobserve(_linesBox);
+        }
+        else if (await _resizeObserver.Observe(_linesBox) is { } size)
+        {
+            OnLinesResized(size.Width, size.Height);
+        }
+    }
+
+    private IResizeObserver CreateResizeObserver()
+    {
+        var observer = ResizeObserverFactory.Create();
+        observer.OnResized += changes =>
+        {
+            foreach (var size in changes.Values)
+            {
+                InvokeAsync(() => OnLinesResized(size.Width, size.Height));
+            }
+        };
+
+        return observer;
+    }
+
+    private string GetLinesStyle() => MaxHeight is { } maxHeight
+        ? $"display:flex; width:100%; max-height:{maxHeight}px; min-height:0; aspect-ratio:2 / 1;"
+        : "display:flex; width:100%; height:100%; min-height:0;";
+
+    // Spaces the axes for the size the lines are drawn at, and draws them again only when the labels change.
+    private void OnLinesResized(double width, double height)
+    {
+        if (_disposed || _chartSeries is null || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        var options = _chartOptions;
+        _linesWidth = width;
+        _linesHeight = height;
+        BuildOptions();
+        if (options.YAxisTicks != _chartOptions.YAxisTicks ||
+            options.MaxNumYAxisTicks != _chartOptions.MaxNumYAxisTicks ||
+            options.TimeLabelSpacing != _chartOptions.TimeLabelSpacing)
+        {
+            _shouldRender = true;
+            StateHasChanged();
+        }
+        else
+        {
+            _chartOptions = options;
+        }
+    }
 
     private void Build()
     {
@@ -183,6 +261,8 @@
         var chartSeries = new List<ChartSeries<double>>();
         var palette = new List<string>();
         double? anchorValue = null;
+        var minimum = double.PositiveInfinity;
+        var maximum = double.NegativeInfinity;
         foreach (var line in data.Lines)
         {
             foreach (var run in line.Runs)
@@ -191,7 +271,10 @@
                 var points = new List<(DateTime, double)>(run.Count);
                 for (var index = 0; index < run.Count; index++)
                 {
-                    points.Add((TimeZone.ToZoned(run[index].Timestamp), run[index].Number!.Value));
+                    var number = run[index].Number!.Value;
+                    minimum = Math.Min(minimum, number);
+                    maximum = Math.Max(maximum, number);
+                    points.Add((TimeZone.ToZoned(run[index].Timestamp), number));
                 }
 
                 chartSeries.Add(new ChartSeries<double>
@@ -222,21 +305,41 @@
             });
             palette.Add("transparent");
 
-            var range = data.To - data.From;
-            var rangeSpacingTicks = range.Ticks / 8;
-            _chartOptions = new TimeSeriesChartOptions
-            {
-                ChartPalette = palette.ToArray(),
-                LineDisplayType = LineDisplayType.Line,
-                // The series are named outside the chart: the dialog by its title, the widget by its own legend.
-                ShowLegend = false,
-                TimeLabelFormat = range <= TimeSpan.FromHours(24) ? "HH:mm" : "MM-dd",
-                // A raw query has no aggregation interval, so its labels are spaced by the range alone.
-                TimeLabelSpacing = TimeSpan.FromTicks(
-                    data.Bucket is { } bucket ? Math.Max(rangeSpacingTicks, bucket.Ticks) : rangeSpacingTicks)
-            };
+            _palette = palette.ToArray();
+            _valueMinimum = minimum;
+            _valueMaximum = maximum;
             _chartSeries = chartSeries;
+            BuildOptions();
         }
+    }
+
+    // A new instance, because the chart draws again only for other options.
+    private void BuildOptions()
+    {
+        if (Data is not { } data)
+        {
+            return;
+        }
+
+        // Until the lines are measured, the axes are spaced for the size they take on a wide screen.
+        var height = _linesHeight > 0 ? _linesHeight : MaxHeight ?? 300;
+        var width = _linesWidth > 0 ? _linesWidth : height * 2;
+        var valueAxis = HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
+        var range = data.To - data.From;
+        _chartOptions = new TimeSeriesChartOptions
+        {
+            ChartPalette = _palette,
+            LineDisplayType = LineDisplayType.Line,
+            // The series are named outside the chart: the dialog by its title, the widget by its own legend.
+            ShowLegend = false,
+            TimeLabelFormat = HistoryChartAxis.GetTimeLabelFormat(range),
+            TimeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(range, data.Bucket, width),
+            YAxisTicks = valueAxis.Step,
+            // The chart doubles the step while it has more labels, which only a range beyond the largest step needs.
+            MaxNumYAxisTicks = HistoryChartAxis.GetValueLabelCount(height),
+            YAxisRequireZeroPoint = valueAxis.IncludesZero,
+            YAxisSuggestedMax = valueAxis.SuggestedMaximum
+        };
     }
 
     private void BuildStateRows()
@@ -279,9 +382,13 @@
         });
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         _disposed = true;
         TimeZone.Changed -= OnTimeZoneChanged;
+        if (_resizeObserver is not null)
+        {
+            await _resizeObserver.DisposeAsync();
+        }
     }
 }

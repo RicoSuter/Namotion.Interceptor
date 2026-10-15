@@ -31,6 +31,16 @@ namespace HomeBlaze.History.Blazor
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
+    public static class HistoryChartAxis
+    {
+        public const int MaximumTimeLabelCount = 9;
+        public const double PixelsPerTimeLabel = 90D;
+        public const double PixelsPerValueLabel = 55D;
+        public static string GetTimeLabelFormat(System.TimeSpan range) { }
+        public static System.TimeSpan GetTimeLabelSpacing(System.TimeSpan range, System.TimeSpan? bucket, double width) { }
+        public static HomeBlaze.History.Blazor.HistoryChartValueAxis GetValueAxis(double minimum, double maximum, double height) { }
+        public static int GetValueLabelCount(double height) { }
+    }
     public sealed class HistoryChartBand : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartBand>
     {
         public HistoryChartBand(string Label, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> Segments, string Background) { }
@@ -143,16 +153,23 @@ namespace HomeBlaze.History.Blazor
         public static string? FindArgumentError(string? range, string? bucket, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> Resolve(HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.History.Blazor.HistoryChart chart) { }
     }
-    public class HistoryChartView : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    public readonly struct HistoryChartValueAxis : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartValueAxis>
+    {
+        public HistoryChartValueAxis(int Step, bool IncludesZero, double? SuggestedMaximum) { }
+        public bool IncludesZero { get; init; }
+        public int Step { get; init; }
+        public double? SuggestedMaximum { get; init; }
+    }
+    public class HistoryChartView : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
         public HistoryChartView() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public int BandHeight { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string ChartStyle { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.History.Blazor.HistoryChartData? Data { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int? MaxHeight { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool ShowBandLabels { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -160,8 +177,8 @@ namespace HomeBlaze.History.Blazor
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Style { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
-        protected override void OnAfterRender(bool firstRender) { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override void OnInitialized() { }
         protected override void OnParametersSet() { }
         protected override bool ShouldRender() { }
