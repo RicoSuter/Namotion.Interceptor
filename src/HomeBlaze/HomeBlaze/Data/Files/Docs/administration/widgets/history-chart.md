@@ -82,7 +82,7 @@ The last hour with the bucket that the chart picks from the range, a colour of i
 
 ## Behaviour and Limits
 
-- **One unit**: All lines share one value axis, so every number series needs the unit of the first one. A series with another unit, for example a temperature next to a speed, shows an error that names both series in place of the chart, see [Value Widget Errors](../page-errors.md#value-widget-errors). Put it in a second chart.
+- **One unit**: All lines share one value axis, so every recorded number series needs the unit of the first one. A series with another unit, for example a temperature next to a speed, shows an error that names both series in place of the chart, see [Value Widget Errors](../page-errors.md#value-widget-errors). Put it in a second chart.
 - **States as bands**: A boolean, an enum or a text is a band below the lines, one per series with its label above it. A state has the same colour in every band of a chart, and "Yes" is always blue. A band is always queried as recorded samples, together with the value held when the range starts, whatever the bucket.
 - **"No data" and "(no value)"**: A hatched span marked "No data" in a band has no known value: no history store recorded it, or nothing was recorded in it since recording started. "(no value)" is a value that was recorded as empty. A value never reaches across a span that no store recorded. Over a long range a band holds only the newest samples up to a limit, and the span before the oldest of them shows "No data". The [history design](../../architecture/design/history.md#state-timeline) has the details.
 - **Recorded on change**: History is recorded when a value changes. A value that has not changed since HomeBlaze started shows "No data" in a band until it changes.
