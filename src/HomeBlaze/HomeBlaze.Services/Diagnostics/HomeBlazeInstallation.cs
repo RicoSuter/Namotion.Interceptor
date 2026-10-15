@@ -211,7 +211,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
     public partial DateTimeOffset? LastUpdateCheck { get; internal set; }
 
     /// <summary>
-    /// Why no check runs, or the error of the last check.
+    /// Why no check can run for this build, or the error of the last check until a check succeeds.
     /// </summary>
     [State(Position = 467)]
     [Category("Update")]
