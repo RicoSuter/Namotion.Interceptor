@@ -1,3 +1,4 @@
+using System.Reflection;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Inputs;
@@ -199,15 +200,15 @@ public class SubjectPathSelectionTests
     }
 
     [Theory]
-    [InlineData(typeof(Progress), nameof(Progress.Path), null)]
-    [InlineData(typeof(Indicator), nameof(Indicator.Path), null)]
-    [InlineData(typeof(Indicator), nameof(Indicator.Map), typeof(ValueMap))]
-    [InlineData(typeof(ValueTile), nameof(ValueTile.Path), null)]
-    [InlineData(typeof(ValueTile), nameof(ValueTile.Map), typeof(ValueMap))]
-    [InlineData(typeof(ValueRow), nameof(ValueRow.Path), null)]
-    [InlineData(typeof(ValueRow), nameof(ValueRow.Map), typeof(ValueMap))]
+    [InlineData(typeof(Progress), nameof(Progress.Path), null, SubjectPathKinds.Number)]
+    [InlineData(typeof(Indicator), nameof(Indicator.Path), null, SubjectPathKinds.Value)]
+    [InlineData(typeof(Indicator), nameof(Indicator.Map), typeof(ValueMap), SubjectPathKinds.Value)]
+    [InlineData(typeof(ValueTile), nameof(ValueTile.Path), null, SubjectPathKinds.Value)]
+    [InlineData(typeof(ValueTile), nameof(ValueTile.Map), typeof(ValueMap), SubjectPathKinds.Value)]
+    [InlineData(typeof(ValueRow), nameof(ValueRow.Path), null, SubjectPathKinds.Value)]
+    [InlineData(typeof(ValueRow), nameof(ValueRow.Map), typeof(ValueMap), SubjectPathKinds.Value)]
     public void WhenAValueWidgetIsRegistered_ThenItsPathPropertiesCarryTheAttributeForTheEditor(
-        Type widgetType, string propertyName, Type? expectedSubjectType)
+        Type widgetType, string propertyName, Type? expectedSubjectType, SubjectPathKinds expectedKind)
     {
         // Arrange
         var widget = (IInterceptorSubject)Activator.CreateInstance(widgetType, _context)!;
@@ -218,6 +219,8 @@ public class SubjectPathSelectionTests
         // Assert
         Assert.NotNull(attribute);
         Assert.Equal(expectedSubjectType, attribute.SubjectType);
+        Assert.Equal(expectedKind, attribute.Kind);
+        Assert.False(attribute.Writable);
     }
 
     [Fact]
@@ -411,5 +414,26 @@ public class SubjectPathSelectionTests
 
         // Assert
         Assert.True(canSelect);
+    }
+
+    [Fact]
+    public void WhenAWidgetPathLeadsToASubject_ThenItSetsNeitherKindNorWritable()
+    {
+        // Arrange
+        var subjectPaths = typeof(Card).Assembly.GetTypes()
+            .SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            .Select(property => (Property: property, Attribute: property.GetCustomAttribute<SubjectPathAttribute>()))
+            .Where(pair => pair.Attribute?.SubjectType is not null)
+            .ToList();
+
+        // Act
+        var combined = subjectPaths
+            .Where(pair => pair.Attribute!.Kind != SubjectPathKinds.Value || pair.Attribute.Writable)
+            .Select(pair => $"{pair.Property.DeclaringType!.Name}.{pair.Property.Name}")
+            .ToList();
+
+        // Assert
+        Assert.NotEmpty(subjectPaths);
+        Assert.Empty(combined);
     }
 }
