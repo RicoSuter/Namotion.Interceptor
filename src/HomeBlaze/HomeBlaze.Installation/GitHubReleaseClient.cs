@@ -14,6 +14,9 @@ internal sealed record LatestRelease(string Version, DateTimeOffset? PublishedAt
 /// </summary>
 public sealed class GitHubRequestException(string message, TimeSpan? retryAfter) : Exception(message)
 {
+    /// <summary>
+    /// The time GitHub asked to wait before the next request, or null when it gave none.
+    /// </summary>
     public TimeSpan? RetryAfter { get; } = retryAfter;
 }
 
