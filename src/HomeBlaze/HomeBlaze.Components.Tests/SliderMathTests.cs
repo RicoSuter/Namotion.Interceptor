@@ -163,13 +163,16 @@ public class SliderMathTests
     }
 
     [Fact]
-    public void WhenStepIsAFractionForADecimalProperty_ThenTheValueKeepsNoBinaryRest()
+    public void WhenRoundingPushesBelowAFractionalMinimum_ThenTheValueSnapsToMinimum()
     {
+        // Arrange
+        var minimum = 1.0 / 3;
+
         // Act
-        var value = SliderMath.ToPropertyValue(0.3, new ValueRange(0, 1), 0.1, 1, typeof(decimal));
+        var value = SliderMath.ToPropertyValue(minimum, new ValueRange(minimum, 10), 1, 1, typeof(double));
 
         // Assert
-        Assert.Equal(0.3, value);
+        Assert.Equal(minimum, value);
     }
 
     [Fact]

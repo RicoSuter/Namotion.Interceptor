@@ -14,7 +14,7 @@ A button that invokes an operation or a query of a subject. Type name: `HomeBlaz
 |----------|---------------|---------|---------|
 | `Path` | Path (Operation) | None | The path of the operation or the query, for example `pump/EmergencyStop` |
 | `Label` | Text | The title of the method | The text of the button |
-| `Icon` | Text | The icon of the method | The icon at the start of the button, the name of a MudBlazor Material icon in its filled form |
+| `Icon` | Text | The icon of the method, else `PlayArrow` for an operation and `Search` for a query | The icon at the start of the button, the name of a MudBlazor Material icon in its filled form |
 | `Color` | Colour | `Primary` | The colour of the button |
 | `Variant` | `Filled`, `Outlined` or `Text` | `Filled` | A filled button, a button with a border, or text alone |
 
@@ -68,7 +68,6 @@ A query with a label, an icon and a variant of its own. `GetDiagnostics` changes
 - **Running**: While the method runs, the button is disabled and shows a spinner in place of its icon, so a second click has to wait for the first to end.
 - **Enabled state**: The button is disabled while the method is not enabled, and when the path leads nowhere. Then the button shows the path as text unless `Label` is set, and the path as tooltip.
 - **Leaving the page**: An operation that has started runs to its end when the page is left or reloaded. Its result dialog is not shown then.
-- **Who can operate**: Every viewer of the page can press the button, see [Basics](basics.md#control-writes).
 - **Edit mode**: While the page is edited, the button is disabled.
 
 ## Related

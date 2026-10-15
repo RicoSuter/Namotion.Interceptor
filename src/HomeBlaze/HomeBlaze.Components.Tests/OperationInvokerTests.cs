@@ -36,6 +36,45 @@ public class OperationInvokerTests
     }
 
     [Fact]
+    public void WhenOperationHasNoIcon_ThenTheIconNameIsPlayArrow()
+    {
+        // Arrange
+        var method = new MethodMetadata(_ => null) { Kind = MethodKind.Operation };
+
+        // Act
+        var iconName = OperationInvoker.GetIconName(method);
+
+        // Assert
+        Assert.Equal("PlayArrow", iconName);
+    }
+
+    [Fact]
+    public void WhenQueryHasNoIcon_ThenTheIconNameIsSearch()
+    {
+        // Arrange
+        var method = new MethodMetadata(_ => null) { Kind = MethodKind.Query };
+
+        // Act
+        var iconName = OperationInvoker.GetIconName(method);
+
+        // Assert
+        Assert.Equal("Search", iconName);
+    }
+
+    [Fact]
+    public void WhenMethodHasAnIcon_ThenTheIconNameIsItsOwnIcon()
+    {
+        // Arrange
+        var method = new MethodMetadata(_ => null) { Kind = MethodKind.Operation, Icon = "Stop" };
+
+        // Act
+        var iconName = OperationInvoker.GetIconName(method);
+
+        // Assert
+        Assert.Equal("Stop", iconName);
+    }
+
+    [Fact]
     public void WhenAParameterRequiresInput_ThenParametersArePrompted()
     {
         // Arrange

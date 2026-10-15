@@ -10,7 +10,7 @@
     var method = property?.GetValue() as MethodMetadata;
     var isEnabled = method is not null && property!.IsMethodEnabled();
     var text = !string.IsNullOrEmpty(Label) ? Label : method?.Title ?? Path ?? string.Empty;
-    var icon = MudBlazorIconResolver.ResolveOrNull(!string.IsNullOrEmpty(Icon) ? Icon : method?.Icon);
+    var icon = MudBlazorIconResolver.ResolveOrNull(!string.IsNullOrEmpty(Icon) ? Icon : method is null ? null : OperationInvoker.GetIconName(method));
 }
 
 <MudButton Variant="@Variant"
@@ -52,7 +52,8 @@
     public string? Label { get; set; }
 
     /// <summary>
-    /// The name of the icon at the start of the button, the icon of the method when it is not set.
+    /// The name of the icon at the start of the button. Defaults to the icon of the method, else "PlayArrow"
+    /// for an operation and "Search" for a query.
     /// </summary>
     [Parameter]
     public string? Icon { get; set; }

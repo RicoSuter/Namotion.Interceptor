@@ -1,4 +1,5 @@
 @using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Operations
 @using Namotion.Interceptor.Registry.Attributes
 
 @inject RootManager RootManager
@@ -464,7 +465,7 @@
 
     private static string GetMethodIcon(MethodMetadata method)
     {
-        return MudBlazorIconResolver.Resolve(method.Icon ?? (method.Kind == MethodKind.Query ? "Search" : "PlayArrow"));
+        return MudBlazorIconResolver.Resolve(OperationInvoker.GetIconName(method));
     }
 
     private static string? GetItemClass(PathTreeItem? item)

@@ -11,6 +11,13 @@ namespace HomeBlaze.Components.Operations;
 public static class OperationInvoker
 {
     /// <summary>
+    /// Gets the icon name of a method: its own icon when set, else "Search" for a query and "PlayArrow" for an
+    /// operation.
+    /// </summary>
+    public static string GetIconName(MethodMetadata method) =>
+        !string.IsNullOrEmpty(method.Icon) ? method.Icon : method.Kind == MethodKind.Query ? "Search" : "PlayArrow";
+
+    /// <summary>
     /// Gets what the user is asked before the method runs: the parameters when one of them requires input, else
     /// a confirmation when the method requires one.
     /// </summary>

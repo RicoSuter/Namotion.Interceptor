@@ -851,14 +851,13 @@
             @foreach (var method in methods)
             {
                 var isQuery = method.Kind == MethodKind.Query;
-                var defaultIcon = isQuery ? "Search" : "PlayArrow";
                 var isEnabled = _registeredSubject?.TryGetProperty(method.PropertyName)?.IsMethodEnabled() ?? true;
                 var isExecuting = _executingMethod == method;
                 <MudButton Variant="Variant.Filled"
                            Color="@(isQuery ? Color.Info : Color.Primary)"
                            Size="Size.Small"
                            Class="subject-pane-method"
-                           StartIcon="@(isExecuting ? null : SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon))"
+                           StartIcon="@(isExecuting ? null : SubjectIconExtensions.ResolveMudBlazorIcon(OperationInvoker.GetIconName(method)))"
                            Disabled="@(isExecuting || !isEnabled)"
                            OnClick="@(() => ExecuteMethodAsync(method))">
                     @* The spinner takes the start icon's place instead of adding one, so the button keeps its width while busy. *@

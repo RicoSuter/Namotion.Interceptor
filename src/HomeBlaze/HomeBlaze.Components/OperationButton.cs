@@ -35,7 +35,8 @@ public partial class OperationButton : IConfigurable, ITitleProvider
     public partial string? Label { get; set; }
 
     /// <summary>
-    /// Name of the icon at the start of the button, for example "Stop". Defaults to the icon of the method.
+    /// Name of the icon at the start of the button, for example "Stop". Defaults to the icon of the method,
+    /// else "PlayArrow" for an operation and "Search" for a query.
     /// </summary>
     [Configuration]
     public partial string? Icon { get; set; }
