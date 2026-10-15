@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
 
-namespace HomeBlaze.Services.Tests.Diagnostics;
+namespace HomeBlaze.Installation.Tests;
 
 /// <summary>
 /// Answers requests with the given function and keeps the requests it received.

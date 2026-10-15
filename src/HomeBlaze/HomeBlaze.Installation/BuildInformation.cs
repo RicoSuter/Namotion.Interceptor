@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 
-namespace HomeBlaze.Services.Diagnostics;
+namespace HomeBlaze.Installation;
 
 /// <summary>
 /// Version, commit, repository and CI metadata of one assembly.

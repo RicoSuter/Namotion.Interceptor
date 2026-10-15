@@ -1,11 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using HomeBlaze.Services.Diagnostics;
 using Xunit;
-using static HomeBlaze.Services.Tests.Diagnostics.FakeHttpMessageHandler;
+using static HomeBlaze.Installation.Tests.FakeHttpMessageHandler;
 
-namespace HomeBlaze.Services.Tests.Diagnostics;
+namespace HomeBlaze.Installation.Tests;
 
 public class GitHubReleaseClientTests
 {
@@ -119,7 +118,7 @@ public class GitHubReleaseClientTests
     {
         // Arrange
         using var cancellationTokenSource = new CancellationTokenSource();
-        cancellationTokenSource.Cancel();
+        await cancellationTokenSource.CancelAsync();
         var client = CreateClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson)));
 
         // Act & Assert

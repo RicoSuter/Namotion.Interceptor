@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services.Diagnostics;
+namespace HomeBlaze.Installation;
 
 /// <summary>
 /// Where the running build comes from.

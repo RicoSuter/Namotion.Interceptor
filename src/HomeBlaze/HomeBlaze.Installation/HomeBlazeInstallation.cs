@@ -2,12 +2,13 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using NuGet.Versioning;
 
-namespace HomeBlaze.Services.Diagnostics;
+namespace HomeBlaze.Installation;
 
 /// <summary>
 /// The running HomeBlaze installation: its build, environment and available updates.
@@ -279,10 +280,17 @@ public partial class HomeBlazeInstallation : BackgroundService,
         }
     }
 
-    private static InstallationChannel GetChannel(BuildInformation build) =>
-        build.Tag is not null ? InstallationChannel.Release :
-        string.Equals(build.Version, "edge", StringComparison.OrdinalIgnoreCase) ? InstallationChannel.Edge :
-        InstallationChannel.Development;
+    private static InstallationChannel GetChannel(BuildInformation build)
+    {
+        if (build.Tag is not null)
+        {
+            return InstallationChannel.Release;
+        }
+
+        return string.Equals(build.Version, "edge", StringComparison.OrdinalIgnoreCase)
+            ? InstallationChannel.Edge
+            : InstallationChannel.Development;
+    }
 
     private static Uri? CreateUri(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri : null;

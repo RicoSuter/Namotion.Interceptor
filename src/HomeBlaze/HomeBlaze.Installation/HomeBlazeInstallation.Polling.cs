@@ -2,7 +2,7 @@ using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Services.Diagnostics;
+namespace HomeBlaze.Installation;
 
 public partial class HomeBlazeInstallation
 {

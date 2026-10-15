@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
-using HomeBlaze.Services.Diagnostics;
+using HomeBlaze.Installation;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;

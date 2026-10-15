@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services.Diagnostics;
+namespace HomeBlaze.Installation;
 
 /// <summary>
 /// Decides when the next update check runs. The backoff is only touched by the update loop; the manual throttle may

@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 
-namespace HomeBlaze.Services.Diagnostics;
+namespace HomeBlaze.Installation;
 
 /// <summary>
 /// The newest published release, with the version without its <c>v</c> prefix.
@@ -12,7 +12,7 @@ internal sealed record LatestRelease(string Version, DateTimeOffset? PublishedAt
 /// <summary>
 /// A GitHub answer other than success, with the time GitHub asks to wait before the next request.
 /// </summary>
-internal sealed class GitHubRequestException(string message, TimeSpan? retryAfter) : Exception(message)
+public sealed class GitHubRequestException(string message, TimeSpan? retryAfter) : Exception(message)
 {
     public TimeSpan? RetryAfter { get; } = retryAfter;
 }
@@ -132,7 +132,16 @@ internal sealed class GitHubReleaseClient
     private GitHubRequestException CreateRequestException(HttpResponseMessage response)
     {
         var isRemainingZero = response.Headers.TryGetValues("x-ratelimit-remaining", out var remaining) && remaining.FirstOrDefault() == "0";
-        var now = _timeProvider.GetUtcNow();
+        var retryAfter = GetRetryAfter(response, isRemainingZero, _timeProvider.GetUtcNow());
+        return new GitHubRequestException(GetFailureMessage(response, isRemainingZero), retryAfter > TimeSpan.Zero ? retryAfter : null);
+    }
+
+    /// <summary>
+    /// Returns the wait of the <c>Retry-After</c> header or, when no requests remain, the longer wait until the rate
+    /// limit resets.
+    /// </summary>
+    private static TimeSpan? GetRetryAfter(HttpResponseMessage response, bool isRemainingZero, DateTimeOffset now)
+    {
         TimeSpan? retryAfter = response.Headers.RetryAfter switch
         {
             { Delta: { } delta } => delta,
@@ -140,27 +149,45 @@ internal sealed class GitHubReleaseClient
             _ => null
         };
 
-        if (isRemainingZero &&
-            response.Headers.TryGetValues("x-ratelimit-reset", out var reset) &&
-            long.TryParse(reset.FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out var resetSeconds) &&
-            resetSeconds <= MaximumUnixTimeSeconds)
+        if (isRemainingZero && TryGetRateLimitReset(response, out var reset))
         {
-            var untilReset = DateTimeOffset.FromUnixTimeSeconds(resetSeconds) - now;
+            var untilReset = reset - now;
             if (retryAfter is null || untilReset > retryAfter)
             {
                 retryAfter = untilReset;
             }
         }
 
+        return retryAfter;
+    }
+
+    private static bool TryGetRateLimitReset(HttpResponseMessage response, out DateTimeOffset reset)
+    {
+        if (response.Headers.TryGetValues("x-ratelimit-reset", out var values) &&
+            long.TryParse(values.FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out var resetSeconds) &&
+            resetSeconds <= MaximumUnixTimeSeconds)
+        {
+            reset = DateTimeOffset.FromUnixTimeSeconds(resetSeconds);
+            return true;
+        }
+
+        reset = default;
+        return false;
+    }
+
+    private static string GetFailureMessage(HttpResponseMessage response, bool isRemainingZero)
+    {
         // A rate limit answers 403 or 429, which alone does not tell a person why the check failed.
         var isRateLimited = isRemainingZero || (response.Headers.RetryAfter is not null &&
             response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests);
-        var message =
-            isRateLimited ? "GitHub rate limit reached." :
-            response.ReasonPhrase is { Length: > 0 } reason ? $"GitHub answered {(int)response.StatusCode} {reason}." :
-            $"GitHub answered {(int)response.StatusCode}.";
+        if (isRateLimited)
+        {
+            return "GitHub rate limit reached.";
+        }
 
-        return new GitHubRequestException(message, retryAfter > TimeSpan.Zero ? retryAfter : null);
+        return response.ReasonPhrase is { Length: > 0 } reason
+            ? $"GitHub answered {(int)response.StatusCode} {reason}."
+            : $"GitHub answered {(int)response.StatusCode}.";
     }
 
     /// <summary>
@@ -168,7 +195,7 @@ internal sealed class GitHubReleaseClient
     /// digit, so a tag such as <c>version-1</c> is left untouched.
     /// </summary>
     private static string NormalizeVersion(string tagName) =>
-        tagName.Length > 1 && (tagName[0] == 'v' || tagName[0] == 'V') && char.IsAsciiDigit(tagName[1])
+        tagName is ['v' or 'V', var second, ..] && char.IsAsciiDigit(second)
             ? tagName[1..]
             : tagName;
 

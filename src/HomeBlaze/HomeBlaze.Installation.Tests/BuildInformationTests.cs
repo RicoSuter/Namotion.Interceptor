@@ -1,7 +1,6 @@
-using HomeBlaze.Services.Diagnostics;
 using Xunit;
 
-namespace HomeBlaze.Services.Tests.Diagnostics;
+namespace HomeBlaze.Installation.Tests;
 
 public class BuildInformationTests
 {

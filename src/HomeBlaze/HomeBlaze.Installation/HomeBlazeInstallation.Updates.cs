@@ -5,7 +5,7 @@ using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Logging;
 using NuGet.Versioning;
 
-namespace HomeBlaze.Services.Diagnostics;
+namespace HomeBlaze.Installation;
 
 public partial class HomeBlazeInstallation
 {
@@ -58,17 +58,15 @@ public partial class HomeBlazeInstallation
     /// </summary>
     internal async Task<TimeSpan?> CheckForUpdatesCoreAsync(CancellationToken cancellationToken)
     {
+        var releaseClient = _releaseClient ?? throw new InvalidOperationException(_updateCheckUnavailableReason);
         try
         {
-            var release = await _releaseClient!.GetLatestReleaseAsync(cancellationToken);
+            var release = await releaseClient.GetLatestReleaseAsync(cancellationToken);
 
             LatestVersion = release?.Version;
             LatestReleaseDate = release?.PublishedAt;
             LatestReleaseUrl = release?.Url;
-            UpdateAvailable =
-                _runningVersion is null ? null :
-                release is null ? false :
-                IsNewer(release.Version, _runningVersion);
+            UpdateAvailable = _runningVersion is null ? null : release is not null && IsNewer(release.Version, _runningVersion);
 
             LastUpdateCheck = _timeProvider.GetUtcNow();
             UpdateCheckStatus = null;
@@ -80,13 +78,13 @@ public partial class HomeBlazeInstallation
         }
         catch (GitHubRequestException exception)
         {
-            _logger.LogWarning("Checking for updates failed: {Message}", exception.Message);
+            _logger.LogWarning(exception, "Checking for updates failed");
             return ReportUpdateCheckFailure(exception.Message, exception.RetryAfter);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             // Not stopping, so the cancellation is the request timeout of the client.
-            _logger.LogWarning("Checking for updates failed: {Message}", TimeoutMessage);
+            _logger.LogWarning(exception, "Checking for updates failed: {Message}", TimeoutMessage);
             return ReportUpdateCheckFailure(TimeoutMessage, retryAfter: null);
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException)
@@ -130,9 +128,12 @@ public partial class HomeBlazeInstallation
     }
 
     private static string? GetUpdateCheckUnavailableReason(InstallationChannel channel, string? repositoryUrl) =>
-        channel == InstallationChannel.Development ? "Not available for development builds" :
-        channel == InstallationChannel.Edge ? "Not available for edge builds" :
-        GitHubReleaseClient.GetUnsupportedReason(repositoryUrl);
+        channel switch
+        {
+            InstallationChannel.Development => "Not available for development builds",
+            InstallationChannel.Edge => "Not available for edge builds",
+            _ => GitHubReleaseClient.GetUnsupportedReason(repositoryUrl)
+        };
 
     private async Task RunUpdateChecksAsync(CancellationToken stoppingToken)
     {
@@ -167,16 +168,25 @@ public partial class HomeBlazeInstallation
             }
 
             lastCheckTimestamp = _timeProvider.GetTimestamp();
-            try
-            {
-                retryDelay = await CheckForUpdatesCoreAsync(stoppingToken);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
-            {
-                // The host never observes ExecuteTask, so an escaping exception would silently end the checks.
-                _logger.LogError(exception, "Checking for updates failed unexpectedly");
-                retryDelay = ReportUpdateCheckFailure(exception.Message, retryAfter: null);
-            }
+            retryDelay = await RunUpdateCheckAsync(stoppingToken);
+        }
+    }
+
+    /// <summary>
+    /// Runs <see cref="CheckForUpdatesCoreAsync"/> and reports an unexpected exception as a failed check; only a
+    /// cancellation while stopping escapes.
+    /// </summary>
+    private async Task<TimeSpan?> RunUpdateCheckAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            return await CheckForUpdatesCoreAsync(stoppingToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
+        {
+            // The host never observes ExecuteTask, so an escaping exception would silently end the checks.
+            _logger.LogError(exception, "Checking for updates failed unexpectedly");
+            return ReportUpdateCheckFailure(exception.Message, retryAfter: null);
         }
     }
 }

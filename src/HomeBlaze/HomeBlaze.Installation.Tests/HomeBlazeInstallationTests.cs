@@ -1,12 +1,12 @@
 using System.Net;
 using HomeBlaze.Abstractions;
-using HomeBlaze.Services.Diagnostics;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
-namespace HomeBlaze.Services.Tests.Diagnostics;
+namespace HomeBlaze.Installation.Tests;
 
 public class HomeBlazeInstallationTests
 {

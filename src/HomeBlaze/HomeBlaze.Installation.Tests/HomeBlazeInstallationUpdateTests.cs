@@ -1,14 +1,13 @@
 using System.Diagnostics;
 using System.Net;
 using HomeBlaze.Abstractions;
-using HomeBlaze.Services.Diagnostics;
 using Namotion.Interceptor.Testing;
 using NuGet.Versioning;
 using Xunit;
-using static HomeBlaze.Services.Tests.Diagnostics.FakeHttpMessageHandler;
-using static HomeBlaze.Services.Tests.Diagnostics.HomeBlazeInstallationTests;
+using static HomeBlaze.Installation.Tests.FakeHttpMessageHandler;
+using static HomeBlaze.Installation.Tests.HomeBlazeInstallationTests;
 
-namespace HomeBlaze.Services.Tests.Diagnostics;
+namespace HomeBlaze.Installation.Tests;
 
 public class HomeBlazeInstallationUpdateTests
 {

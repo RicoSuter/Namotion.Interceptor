@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services.Tests.Diagnostics;
+namespace HomeBlaze.Installation.Tests;
 
 /// <summary>
 /// A clock the test moves: <see cref="UtcNow"/> is the wall clock, which may also jump, and <see cref="Advance"/>
