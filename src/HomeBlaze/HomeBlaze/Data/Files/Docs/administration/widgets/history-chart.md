@@ -30,7 +30,7 @@ The arguments of a `Series` block:
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Path` | Path (Number, Boolean or Enum) | None | The path of the property whose history the series shows. A number is a line, a boolean or an enum a band. The picker offers these kinds only |
-| `Label` | Text | The title of the property, then its name | The label in the legend and above a band. Without it the series shows the title that the property declares, the name of the property when it declares none, and the path when the path leads nowhere |
+| `Label` | Text | The title of the property, then its name | The label in the legend of the lines or above a band. Without it the series shows the title that the property declares, the name of the property when it declares none, and the path when the path leads nowhere |
 | `Color` | Text, a CSS colour such as `"#E4572E"` | The next colour of the chart | The colour of a line. A band has one colour per state and ignores it |
 
 ## Samples
@@ -52,7 +52,7 @@ The speed of both motors in one chart. Neither speed has a unit, so they share t
 ::: Series Path=../Fan/CurrentSpeed Label="Fan"
 ::
 
-The status of the pump as a band below its speed. The band has one colour per state, and the legend below it names them. A status that has not changed since HomeBlaze started shows "No data" until it changes, see [Behaviour and Limits](#behaviour-and-limits):
+The status of the pump as a band below its speed. The band has one colour per state, and its header names its current value on the left and its states on the right. A status that has not changed since HomeBlaze started shows "No data" until it changes, see [Behaviour and Limits](#behaviour-and-limits):
 
 <!-- sample: live -->
 ~~~~markdown
@@ -84,11 +84,11 @@ The last hour with the bucket that the chart picks from the range, a colour of i
 
 - **One unit**: All lines share one value axis, so every recorded number series needs the unit of the first one. A series with another unit, for example a temperature next to a speed, shows an error that names both series in place of the chart, see [Value Widget Errors](../page-errors.md#value-widget-errors). Put it in a second chart.
 - **Percent**: A percent value is recorded as a fraction from 0 to 1 and drawn times 100, on a value axis from 0 % to 100 % that grows only when a value leaves that range. The history dialog draws it the same way, and its count of samples stays a count.
-- **States as bands**: A boolean, an enum or a text is a band below the lines, one per series with its label above it. A state has the same colour in every band of a chart, and "Yes" is always blue. A band is always queried as recorded samples, together with the value held when the range starts, whatever the bucket.
+- **States as bands**: A boolean, an enum or a text is a band below the lines, one per series with a header above it: the label and the current value, and the states that the band shows. Below lines a band starts and ends where the lines do, so a change of state sits under its time. A chart without lines names its range below the bands. A state has the same colour in every band of a chart, and "Yes" is always blue. A band is always queried as recorded samples, together with the value held when the range starts, whatever the bucket.
 - **"No data" and "(no value)"**: A hatched span marked "No data" in a band has no known value: no history store recorded it, or nothing was recorded in it since recording started. "(no value)" is a value that was recorded as empty. A value never reaches across a span that no store recorded. Over a long range a band holds only the newest samples up to a limit, and the span before the oldest of them shows "No data". The [history design](../../architecture/design/history.md#state-timeline) has the details.
 - **Recorded on change**: History is recorded when a value changes. A value that has not changed since HomeBlaze started shows "No data" in a band until it changes.
 - **Gaps in a line**: A span that no history store has recorded is a gap in a line.
-- **Legend**: The legend lists every series with its current value, which follows every change at once.
+- **Legend**: The legend below the lines lists every line with its current value, and the header of each band its current value, which follow every change at once. A band series without a band, for example one without history, is listed with the lines.
 - **Refresh**: The chart queries again at most once per window, and only while one of its values changes. The window is the refresh interval, at least a minute, or the bucket when the bucket is longer. A changed series, range or bucket queries at once. A chart that nobody views costs nothing.
 - **No history**: A series whose property is not recorded shows "no history recorded" in the legend, and a path that leads nowhere shows "not found". Without any history store every series shows "no history store". None of these is an error. Only `[State]` properties of a number, a boolean, an enum or a text are recorded.
 - **Errors**: An unknown `Range` or `Bucket`, or a line with another unit, shows a small red alert in place of the chart and its legend, see [Value Widget Errors](../page-errors.md#value-widget-errors). A query that fails shows a warning "Could not load history" with the reason in place of the chart, the legend stays, and the chart tries again with the next refresh.

@@ -65,7 +65,7 @@ public class HistoryChartQueryTests
         Assert.Empty(result.Data.Lines);
         Assert.Equal(
             [new HistoryChartLegendEntry("Yes", "#2979FF"), new HistoryChartLegendEntry("No", "#9E9E9E")],
-            result.Data.StateLegend);
+            band.Legend);
     }
 
     [Fact]

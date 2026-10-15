@@ -87,28 +87,44 @@ public class HistoryChartPaletteTests
     }
 
     [Fact]
-    public void WhenBandsShareALabelAndHaveGaps_ThenTheLegendListsEachStateOnceAndEndsWithTheGaps()
+    public void WhenABandHasGaps_ThenItsLegendListsEachOfItsStatesOnceAndEndsWithTheGaps()
     {
         // Arrange
         var palette = new HistoryStatePalette();
-        PropertyHistoryChartModel.StateSegment[] first = [Segment(0, 50, "Running"), Segment(50, 100, null, isUnknown: true)];
-        PropertyHistoryChartModel.StateSegment[] second = [Segment(0, 50, null), Segment(50, 100, "Running")];
-        var bands = new[]
-        {
-            new HistoryChartBand("A", first, HistoryChartPalette.BuildBandBackground(first, At(0), At(100), palette)),
-            new HistoryChartBand("B", second, HistoryChartPalette.BuildBandBackground(second, At(0), At(100), palette))
-        };
+        PropertyHistoryChartModel.StateSegment[] segments =
+            [Segment(0, 20, "Running"), Segment(20, 40, null, isUnknown: true), Segment(40, 60, "Stopped"), Segment(60, 80, null), Segment(80, 100, "Running")];
+        HistoryChartPalette.BuildBandBackground(segments, At(0), At(100), palette);
 
         // Act
-        var legend = HistoryChartPalette.BuildStateLegend(bands, palette);
+        var legend = HistoryChartPalette.BuildBandLegend(segments, palette);
 
         // Assert
         Assert.Equal(
             [
                 new HistoryChartLegendEntry("Running", "#00B8A9"),
+                new HistoryChartLegendEntry("Stopped", "#F6A609"),
                 new HistoryChartLegendEntry(HistoryChartPalette.UnknownLabel, HistoryChartPalette.UnknownFill),
                 new HistoryChartLegendEntry(HistoryChartPalette.NoValueLabel, HistoryChartPalette.NoValueFill)
             ],
+            legend);
+    }
+
+    [Fact]
+    public void WhenBandsShareAPalette_ThenTheLegendOfEachListsOnlyItsOwnStatesInPaletteOrder()
+    {
+        // Arrange
+        var palette = new HistoryStatePalette();
+        PropertyHistoryChartModel.StateSegment[] first = [Segment(0, 50, "Running"), Segment(50, 100, "Stopped")];
+        PropertyHistoryChartModel.StateSegment[] second = [Segment(0, 50, "Error"), Segment(50, 100, "Running")];
+        HistoryChartPalette.BuildBandBackground(first, At(0), At(100), palette);
+        HistoryChartPalette.BuildBandBackground(second, At(0), At(100), palette);
+
+        // Act
+        var legend = HistoryChartPalette.BuildBandLegend(second, palette);
+
+        // Assert
+        Assert.Equal(
+            [new HistoryChartLegendEntry("Running", "#00B8A9"), new HistoryChartLegendEntry("Error", "#8E44AD")],
             legend);
     }
 

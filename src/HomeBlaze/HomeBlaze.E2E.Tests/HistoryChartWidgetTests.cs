@@ -260,6 +260,56 @@ public class HistoryChartWidgetTests
             $"The chart ends at {layout.Chart.Y + layout.Chart.Height} px, below the top of the legend at {legend.Y} px");
     }
 
+    [Theory]
+    [InlineData(PhoneWidth)]
+    [InlineData(DesktopWidth)]
+    public async Task WhenAChartHasLinesAndABand_ThenTheLineLegendIsAboveTheBandAndTheBandSpansThePlotArea(int width)
+    {
+        // Arrange
+        var page = await OpenPageAsync(width);
+        var chart = GetChart(page, "Chart speed");
+        await GetLayoutAsync(chart);
+        var band = chart.GetByTestId("history-chart-band");
+        await Assertions.Expect(band).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act - MudChart widens the space left of the plot once it has measured its value labels, and the band follows
+        // the plot area it drew, so the edges are read once they agree.
+        var edges = await page.WaitForFunctionAsync(
+            """
+            ([lines, band]) => {
+                const gridLine = [...lines.querySelectorAll(".mud-charts-grid path")]
+                    .map(path => path.getBoundingClientRect())
+                    .find(box => box.height < 1 && box.width > 0);
+                const bandBox = band.getBoundingClientRect();
+                return gridLine && Math.abs(bandBox.left - gridLine.left) <= 2 && Math.abs(bandBox.right - gridLine.right) <= 2
+                    ? { bandLeft: bandBox.left, bandRight: bandBox.right, plotLeft: gridLine.left, plotRight: gridLine.right }
+                    : null;
+            }
+            """,
+            new object[] { await chart.GetByTestId("history-chart-lines").ElementHandleAsync(), await band.ElementHandleAsync() },
+            new() { Timeout = Timeout });
+        var aligned = await edges.JsonValueAsync<JsonElement>();
+        var legend = await chart.GetByTestId("history-chart-legend").BoundingBoxAsync()
+            ?? throw new InvalidOperationException("The legend has no box");
+        var header = await chart.GetByTestId("history-chart-band-header").First.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("The band header has no box");
+        var lines = await chart.GetByTestId("history-chart-lines").BoundingBoxAsync()
+            ?? throw new InvalidOperationException("The lines have no box");
+
+        // Assert
+        var plotLeft = aligned.GetProperty("plotLeft").GetDouble();
+        Assert.True(plotLeft > lines.X + 10, $"The plot starts at {plotLeft} px, at the left edge of the lines at {lines.X} px");
+        Assert.InRange(aligned.GetProperty("bandLeft").GetDouble(), plotLeft - 2, plotLeft + 2);
+        Assert.True(legend.Y >= lines.Y + lines.Height - 1,
+            $"The legend starts at {legend.Y} px, above the bottom of the lines at {lines.Y + lines.Height} px");
+        Assert.True(legend.Y + legend.Height <= header.Y + 1,
+            $"The legend ends at {legend.Y + legend.Height} px, below the top of the band header at {header.Y} px");
+        await Assertions.Expect(chart.GetByTestId("history-chart-band-header").GetByTestId("history-chart-legend-entry"))
+            .ToContainTextAsync("Chart status");
+        await Assertions.Expect(chart.GetByTestId("history-chart-legend").GetByText("Chart status")).ToHaveCountAsync(0);
+        await Assertions.Expect(chart.GetByTestId("history-chart-range")).ToHaveCountAsync(0);
+    }
+
     // Written one value after the other, each once the one before it is recorded, because the store keeps only the last
     // of the values written within its buffer time. Null is a value recorded as empty, which breaks a line, and the
     // boolean is written as 1 for true.
@@ -372,6 +422,7 @@ public class HistoryChartWidgetTests
             var bands = GetChart(page, "Only a band");
             await Assertions.Expect(bands.GetByTestId("history-chart-band")).ToBeVisibleAsync(new() { Timeout = Timeout });
             await Assertions.Expect(bands.GetByTestId("history-chart-lines")).ToHaveCountAsync(0);
+            await Assertions.Expect(bands.GetByTestId("history-chart-range")).ToBeVisibleAsync();
             await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(0);
             await Assertions.Expect(page.GetByTestId("history-chart-query-error")).ToHaveCountAsync(0);
         }

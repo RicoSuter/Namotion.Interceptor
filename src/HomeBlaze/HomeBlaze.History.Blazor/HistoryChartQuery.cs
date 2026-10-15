@@ -162,8 +162,10 @@ public static class HistoryChartQuery
                     to,
                     result.CoverageRanges,
                     point => PropertyHistoryChartModel.FormatDiscreteValue(point, request.PropertyType));
+                // The background colours the states first, so the legend finds them in the palette.
+                var background = HistoryChartPalette.BuildBandBackground(segments, from, to, palette);
                 bands.Add(new HistoryChartBand(
-                    request.Label, segments, HistoryChartPalette.BuildBandBackground(segments, from, to, palette)));
+                    request.Label, segments, background, HistoryChartPalette.BuildBandLegend(segments, palette)));
             }
             else
             {
@@ -178,7 +180,7 @@ public static class HistoryChartQuery
             }
         }
 
-        var data = new HistoryChartData(from, to, bucket, lines, bands, HistoryChartPalette.BuildStateLegend(bands, palette));
+        var data = new HistoryChartData(from, to, bucket, lines, bands);
         return new HistoryChartResult(data, series, isTruncated);
     }
 

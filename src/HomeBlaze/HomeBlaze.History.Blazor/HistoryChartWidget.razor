@@ -9,6 +9,7 @@
 @using HomeBlaze.Services.Display
 @using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
+@using Microsoft.AspNetCore.Components.Rendering
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
 @inject TimeProvider TimeProvider
@@ -18,9 +19,8 @@
 {
     // The configuration and the current values are read on every render and the values are never kept: these
     // reads are what the page tracking scope records, so a change of a charted value renders the legend again,
-    // and that render arms the refresh of the chart.
+    // and that render arms the refresh of the chart. The legends in the chart view are read in the same render batch.
     Resolve(chart);
-    var series = _series;
     var height = chart.Height;
 
     <div data-testid="history-chart">
@@ -39,34 +39,21 @@
             {
                 <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
             }
-            else if (_hasStores == true)
+            else if (_hasStores == true && _data is not null)
             {
-                <HistoryChartView Data="_data" MaxHeight="height" ShowBandLabels="true" />
+                @* The view shows the legend of the lines below them and each band series in the header of its band. *@
+                <HistoryChartView Data="_data" MaxHeight="height" LineLegend="_lineLegend" BandHeader="_bandHeader" />
             }
 
-            <div data-testid="history-chart-legend" style="display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;">
-                @for (var index = 0; index < series.Count; index++)
-                {
-                    var entry = series[index];
-                    var property = entry.Property;
-                    var value = property?.GetValue();
-                    var text = property is null || value is null ? MissingText : property.GetPropertyDisplayValue(value, TimeZone);
-                    var note = entry.Note ?? (_hasStores == false ? NoStoreNote : null);
-
-                    <div data-testid="history-chart-legend-entry" style="display:flex; align-items:center; gap:6px;">
-                        @if (_swatchStyles[index] is { } swatchStyle)
-                        {
-                            <span aria-hidden="true" style="@swatchStyle"></span>
-                        }
-                        <MudText Typo="Typo.caption">@entry.Label</MudText>
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-value">@text</MudText>
-                        @if (note is not null)
-                        {
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-note">(@note)</MudText>
-                        }
-                    </div>
-                }
-            </div>
+            @if (_queryError is not null || _hasStores != true || _data is null)
+            {
+                <div data-testid="history-chart-legend" style="@OwnLegendStyle">
+                    @for (var index = 0; index < _series.Count; index++)
+                    {
+                        RenderLegendEntry(__builder, index, isBand: false);
+                    }
+                </div>
+            }
         }
     </div>
 }
@@ -74,6 +61,10 @@
 @code {
     private const string MissingText = "–";
     private const string NoStoreNote = "no history store";
+    private const string LegendStyle = "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap;";
+
+    // The legend of every series below the widget, while there is no chart view to hold it.
+    private const string OwnLegendStyle = LegendStyle + " margin-top:8px;";
 
     private HistoryRefreshThrottle? _throttle;
     private CancellationTokenSource? _queryCancellation;
@@ -95,6 +86,14 @@
     private string?[] _swatchStyles = [];
     private string? _error;
 
+    // The series the shown data was queried for, and the index in them of the series of each band of the data.
+    private IReadOnlyList<HistoryChartSeriesInfo>? _dataSeries;
+    private int[] _bandSeries = [];
+    private bool[] _hasBand = [];
+
+    private readonly RenderFragment _lineLegend;
+    private readonly RenderFragment<int> _bandHeader;
+
     // Set when a render resolved other series, range or bucket than the last query used.
     private bool _isQueryOutdated;
 
@@ -106,6 +105,82 @@
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    public HistoryChartWidget()
+    {
+        _lineLegend = RenderLineLegend;
+        _bandHeader = RenderBandHeader;
+    }
+
+    // Every series without a band in the shown data: the lines, and a band series that has no band, such as one
+    // without history, so its note stays in view.
+    private void RenderLineLegend(RenderTreeBuilder __builder)
+    {
+        var bandsMatch = ReferenceEquals(_dataSeries, _series);
+        var hasEntries = false;
+        for (var index = 0; index < _series.Count && !hasEntries; index++)
+        {
+            hasEntries = !bandsMatch || !_hasBand[index];
+        }
+
+        if (hasEntries)
+        {
+            <div data-testid="history-chart-legend" style="@LegendStyle">
+                @for (var index = 0; index < _series.Count; index++)
+                {
+                    if (!bandsMatch || !_hasBand[index])
+                    {
+                        RenderLegendEntry(__builder, index, isBand: false);
+                    }
+                }
+            </div>
+        }
+    }
+
+    // Until the series of a changed configuration are queried, a band cannot be matched to its series and shows its label.
+    private RenderFragment RenderBandHeader(int band) => __builder =>
+    {
+        if (ReferenceEquals(_dataSeries, _series) && band < _bandSeries.Length)
+        {
+            RenderLegendEntry(__builder, _bandSeries[band], isBand: true);
+        }
+        else if (_data is { } data && band < data.Bands.Count)
+        {
+            <MudText Typo="Typo.caption">@data.Bands[band].Label</MudText>
+        }
+    };
+
+    private void RenderLegendEntry(RenderTreeBuilder __builder, int index, bool isBand)
+    {
+        var entry = _series[index];
+        var property = entry.Property;
+        var value = property?.GetValue();
+        var text = property is null || value is null ? MissingText : property.GetPropertyDisplayValue(value, TimeZone);
+        var note = entry.Note ?? (_hasStores == false ? NoStoreNote : null);
+
+        <div data-testid="history-chart-legend-entry" style="display:flex; align-items:center; gap:6px;">
+            @if (isBand)
+            {
+                @* The colon sits outside the label, which is found by its exact text. *@
+                <span style="display:inline-flex;">
+                    <MudText Typo="Typo.caption">@entry.Label</MudText><MudText Typo="Typo.caption">:</MudText>
+                </span>
+            }
+            else
+            {
+                @if (_swatchStyles[index] is { } swatchStyle)
+                {
+                    <span aria-hidden="true" style="@swatchStyle"></span>
+                }
+                <MudText Typo="Typo.caption">@entry.Label</MudText>
+            }
+            <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-value">@text</MudText>
+            @if (note is not null)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="history-chart-legend-note">(@note)</MudText>
+            }
+        </div>
+    }
 
     protected override void OnInitialized()
     {
@@ -265,6 +340,8 @@
 
             var series = _series;
             var requests = new List<HistoryChartSeriesRequest>(series.Count);
+            var bandSeries = new List<int>();
+            var hasBand = new bool[series.Count];
             for (var index = 0; index < series.Count; index++)
             {
                 var entry = series[index];
@@ -274,6 +351,13 @@
                 }
 
                 var isBand = entry.Kind == HistoryChartSeriesKind.Band;
+                if (isBand)
+                {
+                    // The query returns one band per band request, in request order.
+                    bandSeries.Add(index);
+                    hasBand[index] = true;
+                }
+
                 var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
                     property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations);
                 requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index], entry.Unit));
@@ -289,6 +373,9 @@
             }
 
             _data = result.Data;
+            _dataSeries = series;
+            _bandSeries = bandSeries.ToArray();
+            _hasBand = hasBand;
             _bucket = bucket;
             _queryError = null;
         }

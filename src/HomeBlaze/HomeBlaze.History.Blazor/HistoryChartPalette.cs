@@ -98,46 +98,58 @@ public static class HistoryChartPalette
     }
 
     /// <summary>
-    /// Builds the legend of the bands: every state the palette coloured, then the unknown and the absent
-    /// value when a band shows them.
+    /// Builds the legend of a band: the states it shows in the order the palette coloured them, then the unknown
+    /// and the absent value when it shows them.
     /// </summary>
-    /// <param name="bands">The bands of the chart.</param>
-    /// <param name="palette">The state palette that coloured the bands.</param>
+    /// <param name="segments">The runs of the band.</param>
+    /// <param name="palette">The state palette that coloured the band.</param>
     /// <returns>The legend entries in display order.</returns>
-    public static IReadOnlyList<HistoryChartLegendEntry> BuildStateLegend(
-        IReadOnlyList<HistoryChartBand> bands, HistoryStatePalette palette)
+    public static IReadOnlyList<HistoryChartLegendEntry> BuildBandLegend(
+        IReadOnlyList<PropertyHistoryChartModel.StateSegment> segments, HistoryStatePalette palette)
     {
         var hasUnknown = false;
         var hasNoValue = false;
-        for (var bandIndex = 0; bandIndex < bands.Count && !(hasUnknown && hasNoValue); bandIndex++)
+        for (var index = 0; index < segments.Count; index++)
         {
-            var segments = bands[bandIndex].Segments;
-            for (var index = 0; index < segments.Count; index++)
-            {
-                var segment = segments[index];
-                hasUnknown |= segment.IsUnknown;
-                hasNoValue |= !segment.IsUnknown && segment.Label is null;
-            }
+            var segment = segments[index];
+            hasUnknown |= segment.IsUnknown;
+            hasNoValue |= !segment.IsUnknown && segment.Label is null;
         }
 
         var assigned = palette.Assigned;
-        var legend = new HistoryChartLegendEntry[assigned.Count + (hasUnknown ? 1 : 0) + (hasNoValue ? 1 : 0)];
+        var legend = new List<HistoryChartLegendEntry>(assigned.Count + 2);
         for (var index = 0; index < assigned.Count; index++)
         {
-            legend[index] = assigned[index];
+            if (Contains(segments, assigned[index].Label))
+            {
+                legend.Add(assigned[index]);
+            }
         }
 
-        var position = assigned.Count;
         if (hasUnknown)
         {
-            legend[position++] = new HistoryChartLegendEntry(UnknownLabel, UnknownFill);
+            legend.Add(new HistoryChartLegendEntry(UnknownLabel, UnknownFill));
         }
 
         if (hasNoValue)
         {
-            legend[position] = new HistoryChartLegendEntry(NoValueLabel, NoValueFill);
+            legend.Add(new HistoryChartLegendEntry(NoValueLabel, NoValueFill));
         }
 
         return legend;
+    }
+
+    private static bool Contains(IReadOnlyList<PropertyHistoryChartModel.StateSegment> segments, string label)
+    {
+        for (var index = 0; index < segments.Count; index++)
+        {
+            var segment = segments[index];
+            if (!segment.IsUnknown && segment.Label == label)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

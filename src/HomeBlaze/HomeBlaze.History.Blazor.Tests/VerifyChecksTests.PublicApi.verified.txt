@@ -48,20 +48,20 @@ namespace HomeBlaze.History.Blazor
     }
     public sealed class HistoryChartBand : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartBand>
     {
-        public HistoryChartBand(string Label, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> Segments, string Background) { }
+        public HistoryChartBand(string Label, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> Segments, string Background, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> Legend) { }
         public string Background { get; init; }
         public string Label { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> Legend { get; init; }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> Segments { get; init; }
     }
     public sealed class HistoryChartData : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartData>
     {
-        public HistoryChartData(System.DateTimeOffset From, System.DateTimeOffset To, System.TimeSpan? Bucket, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> StateLegend) { }
+        public HistoryChartData(System.DateTimeOffset From, System.DateTimeOffset To, System.TimeSpan? Bucket, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands) { }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands { get; init; }
         public System.TimeSpan? Bucket { get; init; }
         public System.DateTimeOffset From { get; init; }
         public bool IsEmpty { get; }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines { get; init; }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> StateLegend { get; init; }
         public System.DateTimeOffset To { get; init; }
     }
     public readonly struct HistoryChartLegendEntry : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartLegendEntry>
@@ -86,7 +86,7 @@ namespace HomeBlaze.History.Blazor
         public const string UnknownLabel = "No data";
         public static readonly System.Collections.Generic.IReadOnlyList<string> LineColors;
         public static string BuildBandBackground(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> segments, System.DateTimeOffset from, System.DateTimeOffset to, HomeBlaze.History.Blazor.HistoryStatePalette palette) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> BuildStateLegend(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> bands, HomeBlaze.History.Blazor.HistoryStatePalette palette) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> BuildBandLegend(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> segments, HomeBlaze.History.Blazor.HistoryStatePalette palette) { }
         public static string DescribeSegment(HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment segment) { }
         public static string GetLineColor(int index) { }
     }
@@ -171,10 +171,14 @@ namespace HomeBlaze.History.Blazor
     {
         public HistoryChartView() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment<int>? BandHeader { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public int BandHeight { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.History.Blazor.HistoryChartData? Data { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? LineLegend { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public int? MaxHeight { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
