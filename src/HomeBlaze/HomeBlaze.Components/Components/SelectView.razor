@@ -15,7 +15,7 @@ else
 {
     var value = property?.GetValue();
     var names = GetNames(enumType);
-    var isNullable = property is not null && Nullable.GetUnderlyingType(property.Type) is not null;
+    var isNullable = enumType is not null && Nullable.GetUnderlyingType(property!.Type) is not null;
     var canWrite = enumType is not null && PropertyWriter.IsWritable(property!, value);
     var map = Map;
 

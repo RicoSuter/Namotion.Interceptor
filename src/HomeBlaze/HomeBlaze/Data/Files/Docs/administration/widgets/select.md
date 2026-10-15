@@ -61,7 +61,8 @@ A select with a map. Each value in the list gets the text and the icon of its ca
 ## Behaviour and Limits
 
 - **The values**: The list holds every value of the enum by its name, in the order of the enum. A property that can hold no value as well gets a dash as first item, which clears it.
-- **The map**: With `Map`, a value with a case shows the text and the icon of the case, in the colour of the case. A value without a case keeps its name. A map that cannot be resolved shows `Cannot resolve map` in place of the select, see [Value Widget Errors](../page-errors.md#value-widget-errors).
+- **The map**: With `Map`, a value with a case shows the text and the icon of the case, the icon in the colour of the case. A value without a case keeps its name. A map that cannot be resolved shows `Cannot resolve map` in place of the select, see [Value Widget Errors](../page-errors.md#value-widget-errors).
+- **A missing value**: A property that holds no value, and a path that leads nowhere, show a dash as the chosen value.
 - **Flags enums**: An enum whose values combine as flags cannot be shown as one choice. The select shows `Cannot select a value of the flags enum` with the name of the enum in its place.
 - **Disabled**: The select is disabled when the property cannot be written, holds no enum, or the path leads nowhere, and while the page is edited.
 - **Saving**: A write to a configuration property saves the page or the file that holds its subject, see [Basics](basics.md#control-writes). `Mode` of the sample motors is no configuration property, so these samples save nothing.
