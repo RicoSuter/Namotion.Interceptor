@@ -98,25 +98,25 @@ internal static class AssemblyInventory
         return hasDifferentVersion || HasDifferentCommits(first.Commit, second.Commit);
     }
 
+    // Prefix equality is transitive, so comparing every known commit against the first one found is enough to detect
+    // any pairwise mismatch among them.
     private static bool HasConflictingCommits(List<LoadedAssembly> members)
     {
-        var commits = new List<string>();
+        string? firstCommit = null;
         foreach (var member in members)
         {
-            if (member.Commit is { Length: >= ShortCommitLength } commit)
+            if (member.Commit is not { Length: >= ShortCommitLength } commit)
             {
-                commits.Add(commit);
+                continue;
             }
-        }
 
-        for (var firstIndex = 0; firstIndex < commits.Count; firstIndex++)
-        {
-            for (var secondIndex = firstIndex + 1; secondIndex < commits.Count; secondIndex++)
+            if (firstCommit is null)
             {
-                if (!ArePrefixesEqual(commits[firstIndex], commits[secondIndex]))
-                {
-                    return true;
-                }
+                firstCommit = commit;
+            }
+            else if (!ArePrefixesEqual(firstCommit, commit))
+            {
+                return true;
             }
         }
 
