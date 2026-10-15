@@ -28,6 +28,6 @@ A check asks the GitHub API for the latest release. It sends nothing about the i
 
 The first check runs 5 to 60 minutes after each start, then every `UpdateCheckInterval` (24 hours by default, from 24 hours up to 365 days). A change of `UpdateCheckEnabled` or `UpdateCheckInterval` in the editor or the configuration file applies at once; one written directly to the property, for example through MCP, applies within an hour.
 
-A failed check is retried after 1 hour, doubling each time up to 24 hours. A longer wait that GitHub asks for wins, also capped at 24 hours. The error stays in `UpdateCheckStatus` until a check succeeds and does not change `Status`. GitHub allows 60 unauthenticated requests per hour per IP address, shared by everything behind that address; a request taking longer than 30 seconds fails the check with "GitHub did not answer in time."
+A failed check is retried after 1 hour, doubling each time up to 24 hours. A longer wait that GitHub asks for wins, also capped at 24 hours. The error stays in `UpdateCheckStatus` until a check succeeds and does not change `Status`. GitHub allows 60 unauthenticated requests per hour per IP address, shared by everything behind that address, so other clients can use them up and the check fails with "GitHub rate limit reached." A request that takes longer than 30 seconds fails the check with "GitHub did not answer in time."
 
 `Check for updates` checks immediately, also while the scheduled check is off, at most once per minute. It is refused while the installation is stopped or while GitHub asked to wait.

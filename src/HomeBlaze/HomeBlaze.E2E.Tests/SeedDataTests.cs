@@ -1,9 +1,8 @@
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -26,45 +25,36 @@ public class SeedDataTests
     public void WhenSeedFilesAreRead_ThenEveryTypeDiscriminatorResolves()
     {
         // Arrange
-        var seedDirectory = GetSeedDirectory();
+        // The build output's Seed folder is what the image ships as /app/Seed, including the linked docs.
+        var seedDirectory = Path.Combine(AppContext.BaseDirectory, "Seed");
         var typeProvider = _fixture.ServerServices.GetRequiredService<TypeProvider>();
-        var seedFiles = Directory.EnumerateFiles(seedDirectory, "*.json", SearchOption.AllDirectories);
+        var seedFiles = Directory.GetFiles(seedDirectory, "*.json", SearchOption.AllDirectories);
 
         // Act
+        var checkedFiles = new List<string>();
         var failures = new List<string>();
         foreach (var seedFile in seedFiles)
         {
             using var document = JsonDocument.Parse(File.ReadAllText(seedFile));
             foreach (var typeName in CollectTypeDiscriminators(document.RootElement).Distinct())
             {
-                // Mirrors the resolution ConfigurableSubjectSerializer.Deserialize performs for a "$type" value.
-                if (typeProvider.Types.All(type => type.FullName != typeName))
+                checkedFiles.Add(Path.GetRelativePath(seedDirectory, seedFile));
+
+                // The loader only creates non-abstract configurable types; any other type leaves a plain JSON file.
+                var isLoadable = typeProvider.Types.Any(type =>
+                    type.FullName == typeName &&
+                    typeof(IConfigurable).IsAssignableFrom(type) &&
+                    type is { IsAbstract: false, IsInterface: false });
+                if (!isLoadable)
                 {
-                    failures.Add($"{seedFile}: '{typeName}' does not resolve to a known type");
+                    failures.Add($"{seedFile}: '{typeName}' is not a configurable type of the app");
                 }
             }
         }
 
         // Assert
+        Assert.Contains("Root.json", checkedFiles);
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
-    }
-
-    // Resolved like Program.cs: the configured seed directory, otherwise the Seed folder next to the app.
-    private string GetSeedDirectory()
-    {
-        var configuration = _fixture.ServerServices.GetRequiredService<IConfiguration>();
-        var configuredSeedDirectory = configuration[HomeBlazePaths.SeedDirectoryKey];
-        var environment = _fixture.ServerServices.GetRequiredService<IHostEnvironment>();
-        var seedDirectory = string.IsNullOrWhiteSpace(configuredSeedDirectory)
-            ? Path.Combine(environment.ContentRootPath, "Seed")
-            : Path.GetFullPath(configuredSeedDirectory);
-
-        if (!Directory.Exists(seedDirectory))
-        {
-            throw new DirectoryNotFoundException($"The seed directory '{seedDirectory}' does not exist.");
-        }
-
-        return seedDirectory;
     }
 
     // A configurable subject can hold another one with its own "$type", so all depths are searched.
