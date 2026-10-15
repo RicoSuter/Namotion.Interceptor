@@ -47,6 +47,7 @@ The reference of each widget has its arguments, its slots and its samples. Some 
 | [Switch](switch.md) | Turns a boolean on and off, by writing it or by invoking an operation per state |
 | [Slider](slider.md) | Sets a number between a minimum and a maximum |
 | [Select](select.md) | Picks one value of an enum |
+| [OperationButton](operation-button.md) | Invokes an operation or a query |
 
 ---
 

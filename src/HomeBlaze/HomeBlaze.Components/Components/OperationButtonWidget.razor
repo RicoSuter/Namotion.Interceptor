@@ -1,0 +1,24 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(OperationButton))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+
+@{
+    var button = Subject as OperationButton;
+}
+
+@if (button is not null)
+{
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var path = button.Path;
+    <OperationButtonView Property="@ValueReader.ResolveProperty(PathResolver, button, path)"
+                         Path="@path"
+                         Label="@button.Label"
+                         Icon="@button.Icon"
+                         Color="@button.Color"
+                         Variant="@button.Variant" />
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

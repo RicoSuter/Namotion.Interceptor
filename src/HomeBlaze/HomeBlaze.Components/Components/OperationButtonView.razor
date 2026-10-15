@@ -1,0 +1,98 @@
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Operations
+@implements IDisposable
+@inject IDialogService DialogService
+@inject IServiceProvider ServiceProvider
+
+@{
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var property = Property;
+    var method = property?.GetValue() as MethodMetadata;
+    var isEnabled = method is not null && property!.IsMethodEnabled();
+    var text = !string.IsNullOrEmpty(Label) ? Label : method?.Title ?? Path ?? string.Empty;
+    var icon = MudBlazorIconResolver.ResolveOrNull(!string.IsNullOrEmpty(Icon) ? Icon : method?.Icon);
+}
+
+<MudButton Variant="@Variant"
+           Color="@Color"
+           StartIcon="@(_isRunning ? null : icon)"
+           Disabled="@(IsEditing || _isRunning || !isEnabled)"
+           OnClick="_runCallback"
+           title="@(method is null ? Path : method.Description)"
+           data-testid="operation-button">
+    @* The spinner takes the start icon's place instead of adding one, so the button keeps its width while busy. *@
+    @if (_isRunning)
+    {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" Style="width: 20px; height: 20px;" />
+    }
+    @text
+</MudButton>
+
+@code {
+    private readonly CancellationTokenSource _lifetime = new();
+    private bool _isRunning;
+    private EventCallback<MouseEventArgs> _runCallback;
+
+    /// <summary>
+    /// The method property of the operation or query, or null when the path leads nowhere.
+    /// </summary>
+    [Parameter]
+    public RegisteredSubjectProperty? Property { get; set; }
+
+    /// <summary>
+    /// The path as written, the text when the path leads nowhere and no label is given.
+    /// </summary>
+    [Parameter]
+    public string? Path { get; set; }
+
+    /// <summary>
+    /// The text of the button, the title of the method when it is not set.
+    /// </summary>
+    [Parameter]
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// The name of the icon at the start of the button, the icon of the method when it is not set.
+    /// </summary>
+    [Parameter]
+    public string? Icon { get; set; }
+
+    [Parameter]
+    public Color Color { get; set; } = Color.Primary;
+
+    [Parameter]
+    public Variant Variant { get; set; } = Variant.Filled;
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    protected override void OnInitialized()
+    {
+        // Created once: binding the method group directly in the markup would allocate a new delegate on every render.
+        _runCallback = EventCallback.Factory.Create<MouseEventArgs>(this, RunAsync);
+    }
+
+    private async Task RunAsync()
+    {
+        if (_isRunning || Property?.GetValue() is not MethodMetadata method)
+        {
+            return;
+        }
+
+        _isRunning = true;
+        try
+        {
+            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, method, _lifetime.Token);
+        }
+        finally
+        {
+            _isRunning = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}
