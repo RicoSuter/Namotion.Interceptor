@@ -372,7 +372,8 @@ jobs:
             -p:ContainerRuntimeIdentifiers= -p:ContainerImageTag=smoke `
             -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze.tar.gz `
             -p:LibraryPackageVersion=9.9.9 `
-            -p:InformationalVersion=edge -p:BuildTime=2000-01-01T00:00:00Z
+            -p:InformationalVersion=edge -p:BuildTime=2000-01-01T00:00:00Z `
+            -p:ContinuousIntegrationBuild=true
 
       - name: Smoke test image
         run: |
