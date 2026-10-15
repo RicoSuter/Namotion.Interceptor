@@ -4,6 +4,7 @@
 @inject IDialogService DialogService
 
 @implements IDisposable
+@implements IHandleEvent
 
 @if (Subject != null)
 {
@@ -15,40 +16,43 @@
         <div class="@(isSelected ? "subject-component-wrapper selectable selected" : isSelectable ? "subject-component-wrapper selectable" : "subject-component-wrapper")"
              style="position: relative;"
              tabindex="@(isSelectable ? "0" : null)"
-             @onpointerdown="PointerDownCallback"
-             @onclick="ClickCallback"
+             @onpointerdown="@(isSelectable ? _pointerDownCallback : default)"
+             @onclick="@(isSelectable ? _clickCallback : default)"
              @onclick:stopPropagation="@isSelectable"
-             @onkeydown="KeyDownCallback"
+             @onkeydown="@(isSelectable ? _keyDownCallback : default)"
              @onkeydown:stopPropagation="@isSelectable">
             @if (isSelected)
             {
-                var selectableParent = SelectableParent;
-                <MudPopover Open="true"
-                            AnchorOrigin="Origin.TopRight"
-                            TransformOrigin="Origin.BottomRight"
-                            OverflowBehavior="OverflowBehavior.FlipAlways"
-                            Elevation="4"
-                            Class="subject-action-bar"
-                            data-testid="widget-action-bar">
-                    @if (selectableParent != null)
-                    {
-                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
-                                       Size="Size.Small"
-                                       title="Select parent"
-                                       OnClick="() => Selection!.Select(selectableParent)"
-                                       data-testid="select-parent-button" />
-                    }
+                @* The anchor of the bar, see widget-selection.css. *@
+                <div class="subject-action-bar-anchor">
+                    <MudPopover Open="true"
+                                AnchorOrigin="Origin.TopRight"
+                                TransformOrigin="Origin.BottomRight"
+                                OverflowBehavior="OverflowBehavior.FlipAlways"
+                                Elevation="4"
+                                Class="subject-action-bar"
+                                data-testid="widget-action-bar">
+                        @if (SelectableParent != null)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                                           Size="Size.Small"
+                                           Class="select-parent-button"
+                                           title="Select parent"
+                                           OnClick="_selectParentCallback"
+                                           data-testid="select-parent-button" />
+                        }
 
-                    @if (HasEditComponent)
-                    {
-                        <MudIconButton Icon="@Icons.Material.Filled.Edit"
-                                       Size="Size.Small"
-                                       Color="Color.Primary"
-                                       title="Edit"
-                                       OnClick="OpenEditDialog"
-                                       data-testid="edit-subject-button" />
-                    }
-                </MudPopover>
+                        @if (HasEditComponent)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                           Size="Size.Small"
+                                           Color="Color.Primary"
+                                           title="Edit"
+                                           OnClick="_editCallback"
+                                           data-testid="edit-subject-button" />
+                        }
+                    </MudPopover>
+                </div>
             }
             <CascadingValue Value="this" Name="ParentSubjectComponent" IsFixed="true">
                 <DynamicComponent Type="registration.ComponentType"
@@ -64,60 +68,6 @@
         </MudAlert>
     }
 }
-
-<style>
-    /* In edit mode a widget is selected with a click, which shows its actions. The content of a selectable widget takes no
-       pointer input, so that a click selects the widget instead of operating it. A nested widget takes the pointer again and
-       is selected on its own. A part of a widget that is meant to be used in edit mode, like the area of a canvas that moves
-       its nodes, takes the pointer back with the class edit-mode-interactive, and one that the widget offers only once it
-       is selected, like the empty cells of a grid that add a widget, with edit-mode-selected-interactive. */
-    .subject-component-wrapper.selectable {
-        pointer-events: auto;
-        cursor: pointer;
-        outline: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.35);
-        outline-offset: 1px;
-    }
-
-    .subject-component-wrapper.selectable > * {
-        pointer-events: none;
-    }
-
-    .subject-component-wrapper.selectable .edit-mode-interactive,
-    .subject-component-wrapper.selected .edit-mode-selected-interactive {
-        pointer-events: auto;
-    }
-
-    @@media (hover: hover) {
-        .subject-component-wrapper.selectable:not(.selected):hover:not(:has(.subject-component-wrapper.selectable:hover)) {
-            outline: 1px solid rgba(var(--mud-palette-primary-rgb), 0.7);
-        }
-    }
-
-    .subject-component-wrapper.selectable:focus-visible {
-        outline: 2px solid rgba(var(--mud-palette-primary-rgb), 0.7);
-    }
-
-    .subject-component-wrapper.selectable.selected {
-        outline: 2px solid var(--mud-palette-primary);
-    }
-
-    .subject-action-bar {
-        display: flex;
-        gap: 2px;
-        padding: 2px;
-        margin: 4px 0;
-    }
-
-    .subject-action-bar .mud-icon-button {
-        padding: 4px;
-    }
-
-    @@media (pointer: coarse) {
-        .subject-action-bar .mud-icon-button {
-            padding: 10px;
-        }
-    }
-</style>
 
 @code {
     private DynamicComponent? _dynamicComponent;
@@ -155,6 +105,14 @@
 
     private double _pointerDownX;
     private double _pointerDownY;
+
+    // Created once: a method group in the markup would allocate a delegate on every render, and every widget renders here.
+    // Only a selectable widget gets the handlers of the wrapper, so that an event on a viewed page stays in the browser.
+    private EventCallback<PointerEventArgs> _pointerDownCallback;
+    private EventCallback<MouseEventArgs> _clickCallback;
+    private EventCallback<KeyboardEventArgs> _keyDownCallback;
+    private EventCallback _selectParentCallback;
+    private EventCallback _editCallback;
 
     /// <summary>
     /// Two-way binding for accessing the rendered component instance.
@@ -195,20 +153,27 @@
         }
     }
 
-    // A widget that cannot be selected has no handlers, so that a click or a key in it renders nothing and is not hidden
-    // from the handlers above it.
-    private EventCallback<PointerEventArgs> PointerDownCallback
-        => IsSelectable ? EventCallback.Factory.Create<PointerEventArgs>(this, OnPointerDown) : default;
+    protected override void OnInitialized()
+    {
+        _pointerDownCallback = EventCallback.Factory.Create<PointerEventArgs>(this, OnPointerDown);
+        _clickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, OnClick);
+        _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown);
+        _selectParentCallback = EventCallback.Factory.Create(this, SelectParent);
+        _editCallback = EventCallback.Factory.Create(this, OpenEditDialog);
+    }
 
-    private EventCallback<MouseEventArgs> ClickCallback
-        => IsSelectable ? EventCallback.Factory.Create<MouseEventArgs>(this, OnClick) : default;
-
-    private EventCallback<KeyboardEventArgs> KeyDownCallback
-        => IsSelectable ? EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown) : default;
+    // An event of the wrapper or the bar does not render the widget: a press, a key or a click that selects nothing changes
+    // nothing, and a change of the selection renders the two widgets it concerns through OnSelectionChanged.
+    Task IHandleEvent.HandleEventAsync(EventCallbackWorkItem callback, object? argument) => callback.InvokeAsync(argument);
 
     internal void OnSelectionChanged()
     {
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void SelectParent()
+    {
+        Selection?.Select(SelectableParent);
     }
 
     private void OnPointerDown(PointerEventArgs args)

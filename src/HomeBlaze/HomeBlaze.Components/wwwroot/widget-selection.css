@@ -1,0 +1,69 @@
+/* In edit mode a widget is selected with a click, which shows its actions. The content of a selectable widget takes no
+   pointer input, so that a click selects the widget instead of operating it. A nested widget takes the pointer again and
+   is selected on its own. A part of a widget that is meant to be used in edit mode, like the area of a canvas that moves
+   its nodes, takes the pointer back with the class edit-mode-interactive, and one that the widget offers only once it
+   is selected, like the empty cells of a grid that add a widget, with edit-mode-selected-interactive. */
+.subject-component-wrapper.selectable {
+    pointer-events: auto;
+    cursor: pointer;
+    outline: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.35);
+    outline-offset: 1px;
+}
+
+.subject-component-wrapper.selectable > * {
+    pointer-events: none;
+}
+
+.subject-component-wrapper.selectable .edit-mode-interactive,
+.subject-component-wrapper.selected .edit-mode-selected-interactive {
+    pointer-events: auto;
+}
+
+@media (hover: hover) {
+    .subject-component-wrapper.selectable:not(.selected):hover:not(:has(.subject-component-wrapper.selectable:hover)) {
+        outline: 1px solid rgba(var(--mud-palette-primary-rgb), 0.7);
+    }
+}
+
+.subject-component-wrapper.selectable:focus-visible {
+    outline: 2px solid rgba(var(--mud-palette-primary-rgb), 0.7);
+}
+
+.subject-component-wrapper.selectable.selected {
+    outline: 2px solid var(--mud-palette-primary);
+}
+
+/* The bar sits above the top right corner of the selected widget and flips below the widget when there is no room.
+   MudBlazor flips a popover only at the edges of the window, so the anchor reaches up by the height of the fixed app bar
+   and the bar moves down by as much while it is not flipped: the bar flips once the app bar leaves it no room. */
+.subject-action-bar-anchor {
+    position: absolute;
+    top: calc(-1 * var(--mud-appbar-height, 64px));
+    right: 0;
+    bottom: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+.subject-action-bar {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    margin-top: calc(var(--mud-appbar-height, 64px) - 4px);
+    /* MudBlazor lifts a popover that comes close to the app bar above it. The bar stays below the app bar like the page. */
+    z-index: calc(var(--mud-zindex-popover) + 1) !important;
+}
+
+.subject-action-bar[data-mudpopover-flip^="bottom"] {
+    margin-top: 4px;
+}
+
+.subject-action-bar .mud-icon-button {
+    padding: 4px;
+}
+
+@media (pointer: coarse) {
+    .subject-action-bar .mud-icon-button {
+        padding: 10px;
+    }
+}

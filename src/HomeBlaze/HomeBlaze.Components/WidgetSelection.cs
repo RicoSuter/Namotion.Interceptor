@@ -3,6 +3,9 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// The widget of a page in edit mode whose actions are shown. At most one widget of a page is selected.
 /// </summary>
+/// <remarks>
+/// Not thread-safe: use it on the dispatcher of the renderer, like the components that it notifies.
+/// </remarks>
 public sealed class WidgetSelection
 {
     /// <summary>
