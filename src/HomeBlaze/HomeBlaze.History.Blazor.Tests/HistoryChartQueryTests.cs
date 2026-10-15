@@ -184,13 +184,15 @@ public class HistoryChartQueryTests
     {
         // Arrange
         var store = CreateStore().Add("/pump/IsOn", At(-10), 1);
-        var request = new HistoryChartSeriesRequest("/pump/IsOn", "On", typeof(bool), IsBand: true, HistoryAggregations.Last);
+        // Maximum carries no held value into a bucket, so the merger needs no look-back either.
+        var request = new HistoryChartSeriesRequest("/pump/IsOn", "On", typeof(bool), IsBand: true, HistoryAggregations.Maximum);
 
         // Act
         var result = await HistoryChartQuery.QueryAsync(
             [store], [request], At(0), At(60), TimeSpan.FromMinutes(10), CancellationToken.None);
 
         // Assert
+        Assert.Equal(0, store.LookBackCount);
         var query = Assert.Single(store.ReceivedQueries);
         Assert.Equal(TimeSpan.FromMinutes(10), query.Bucket);
         Assert.Equal(PropertyHistoryChartModel.MaxPoints, query.MaxPoints);
