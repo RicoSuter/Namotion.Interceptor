@@ -140,10 +140,12 @@
     }
 
     // Three levels with equal steps in lightness: the drawer, the page background and the surfaces of cards,
-    // tiles and tab bars. The secondary text of the light palette is darker than the default, which is below
-    // 4.5:1 on the page background.
+    // tiles and tab bars. The secondary text and the primary colour of the light palette are darker than the
+    // defaults, which are below 4.5:1 on the page background and on the active drawer link.
     private readonly PaletteLight _lightPalette = new()
     {
+        Primary = "#3f2ddd",
+        AppbarBackground = "#3f2ddd",
         Background = "#e9eaee",
         BackgroundGray = "#d5d5dc",
         DrawerBackground = "#d5d5dc",
