@@ -63,7 +63,7 @@ internal sealed record BuildInformation(
         var buildMetadata = informationalVersion.AsSpan(plusIndex + 1);
         var dotIndex = buildMetadata.IndexOf('.');
         var commit = dotIndex < 0 ? buildMetadata : buildMetadata[..dotIndex];
-        return (informationalVersion[..plusIndex], IsCommit(commit) ? commit.ToString() : null);
+        return (informationalVersion[..plusIndex], IsCommit(commit) ? commit.ToString().ToLowerInvariant() : null);
     }
 
     /// <summary>
@@ -107,5 +107,5 @@ internal sealed record BuildInformation(
         metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
 
     private static DateTimeOffset? ParseDate(string? value) =>
-        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var date) ? date : null;
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var date) ? date : null;
 }
