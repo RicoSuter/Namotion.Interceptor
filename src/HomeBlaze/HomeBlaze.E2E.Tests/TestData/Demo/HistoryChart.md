@@ -17,6 +17,11 @@ title: History Chart Demo
 ::: Series Path=chartmotor/Temperature Label="Mixed temperature"
 ::
 
+:: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=150
+::: Series Path=chartmotor/CurrentSpeed Label="Pair speed"
+::: Series Path=chartmotor/TargetSpeed Label="Pair target"
+::
+
 :: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
 ::: Series Path=chartmotor/CurrentSpeed Label="Compact speed"
 ::

@@ -67,6 +67,10 @@
     private const string NoStoreNote = "no history store";
     private const string EntryStyle = "display:flex; align-items:center; gap:6px;";
 
+    // A legend entry that opens the history of its series looks like the entry it is.
+    private const string ButtonEntryStyle = EntryStyle +
+        " margin:0; padding:0; border:0; background:none; color:inherit; font:inherit; text-align:inherit; cursor:pointer;";
+
     // The legend of the lines ends where the plot does, see HistoryChartView.LineLegend.
     private const string LegendStyle =
         "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; justify-content:flex-end; margin-right:var(--history-chart-plot-end, 0px);";
@@ -177,7 +181,7 @@
     {
         if (CanShowHistory(index))
         {
-            <button type="button" class="history-chart-legend-button" data-testid="history-chart-legend-entry" style="@EntryStyle"
+            <button type="button" class="history-chart-legend-button" data-testid="history-chart-legend-entry" style="@ButtonEntryStyle"
                     title="@_historyTitles[index]" @onclick="_showHistory[index]">
                 @{ RenderLegendEntryContent(__builder, index, isBand); }
             </button>

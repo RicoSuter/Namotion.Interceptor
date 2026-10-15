@@ -410,6 +410,24 @@ public class HistoryChartWidgetTests
     }
 
     [Fact]
+    public async Task WhenTheLegendEntryOfALineAfterTheFirstIsClicked_ThenTheHistoryDialogOfThatLineOpens()
+    {
+        // Arrange
+        var page = await OpenPageAsync(DesktopWidth);
+        var entry = GetChart(page, "Pair target").GetByTestId("history-chart-legend")
+            .GetByRole(AriaRole.Button, new() { Name = "Pair target" });
+        await Assertions.Expect(entry).ToHaveAttributeAsync("title", "Show history of Pair target", new() { Timeout = Timeout });
+
+        // Act
+        await entry.ClickAsync();
+
+        // Assert
+        await Assertions.Expect(GetHistoryDialog(page, "Pair target").GetByTestId("property-history-dialog"))
+            .ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetHistoryDialog(page, "Pair speed")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenAChartIsClickedInInlineEditMode_ThenItIsSelectedAndNoDialogOpens()
     {
         // Arrange

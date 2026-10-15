@@ -75,7 +75,6 @@ public class ControlWidgetTests
             .Filter(new() { Has = picker.Page.GetByText(name, new() { Exact = true }) })
             .Locator("xpath=..");
 
-
     // The server reads a page again after it wrote it, and a file that it holds open is read again later.
     private static string? TryReadContent(string path)
     {

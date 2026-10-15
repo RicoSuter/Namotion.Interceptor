@@ -288,7 +288,6 @@ public class WidgetSelectionTests
         return page;
     }
 
-
     // The innermost widget around the element with the test id.
     private static ILocator GetWrapperOf(IPage page, string testId) =>
         page.Locator($".subject-component-wrapper.selectable:has([data-testid='{testId}'])")

@@ -121,12 +121,19 @@
     private const string PlotAlignedBandGroupStyle = BandGroupStyle +
         " margin-left:var(--history-chart-plot-left, 0px); margin-right:var(--history-chart-plot-right, 0px);";
 
-    // MudChart 9.11 keeps 30 px free right of the plot, and as long as its labels are empty also 30 px left of it,
-    // 25 px above and 30 px below. Without axes the chart is drawn that much larger than its box, which clips it, so
-    // the plot fills the width and leaves the lines a few pixels above and below so their strokes are not cut.
+    // The fixed space MudChart 9.11 keeps around the plot while its labels are empty, which the E2E test of the edges of
+    // a compact chart guards. Without axes the chart is drawn that much larger than its box, which clips it, so the plot
+    // fills the width and keeps the lines a few pixels inside the box at the top and bottom so their strokes are not cut.
+    private const int PlotStartSpace = 30;
     private const int PlotEndSpace = 30;
-    private const string CompactPlotStyle =
-        "position:absolute; left:-30px; top:-21px; width:calc(100% + 60px); height:calc(100% + 47px); display:flex;";
+    private const int PlotTopSpace = 25;
+    private const int PlotBottomSpace = 30;
+    private const int StrokeMargin = 4;
+
+    private static readonly string CompactPlotStyle =
+        $"position:absolute; left:-{PlotStartSpace}px; top:-{PlotTopSpace - StrokeMargin}px; " +
+        $"width:calc(100% + {PlotStartSpace + PlotEndSpace}px); " +
+        $"height:calc(100% + {PlotTopSpace + PlotBottomSpace - 2 * StrokeMargin}px); display:flex;";
 
     private static readonly Func<double, string> NoValueLabel = static _ => string.Empty;
 
@@ -140,6 +147,7 @@
     private bool _renderedShowAxes = true;
     private bool _renderedIsClickable;
     private string? _renderedLinesTitle;
+    private EventCallback _renderedLinesClicked;
     private bool _hasStyles;
     private bool _shouldRender = true;
     private volatile bool _disposed;
@@ -299,7 +307,9 @@
             stateTableChanged ||
             BandHeight != _renderedBandHeight ||
             ShowBandLabels != _renderedShowBandLabels ||
-            ShowRange != _renderedShowRange;
+            ShowRange != _renderedShowRange ||
+            // Last, because EventCallback compares only boxed; a view with a legend has already decided to render.
+            !LinesClicked.Equals(_renderedLinesClicked);
 
         _renderedMaxHeight = MaxHeight;
         _renderedStyle = Style;
@@ -310,6 +320,7 @@
         _renderedShowAxes = ShowAxes;
         _renderedIsClickable = isClickable;
         _renderedLinesTitle = LinesTitle;
+        _renderedLinesClicked = LinesClicked;
     }
 
     private void BuildStyles(bool isClickable)

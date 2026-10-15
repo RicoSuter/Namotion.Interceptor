@@ -4,18 +4,7 @@
     overflow: visible;
 }
 
-/* A legend entry that opens the history of its series looks like the entry it is. */
-.history-chart-legend-button {
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: inherit;
-    cursor: pointer;
-}
-
+/* The look of a legend entry that opens the history of its series is inline; only its states are here. */
 .history-chart-legend-button:hover {
     text-decoration: underline;
 }
