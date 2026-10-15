@@ -11,7 +11,7 @@ namespace HomeBlaze.E2E.Tests.Models;
 /// A subject without an edit component, so the create dialog and the edit dialog show the generated properties
 /// editor for it. The editor has no field for an array, which it therefore shows as text that cannot be applied,
 /// and it does not know the range of the level, so that the setter is what rejects a level outside of it.
-/// Its only state value is a path to another subject.
+/// Its state values are a path to another subject and a web address.
 /// </summary>
 [DisplayName("Plain configurable")]
 [InterceptorSubject]
@@ -45,6 +45,9 @@ public partial class PlainConfigurableSubject : IConfigurable
     [State]
     [SubjectPath(typeof(IInterceptorSubject))]
     public partial string? LinkedPath { get; set; }
+
+    [State]
+    public partial Uri? Website { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

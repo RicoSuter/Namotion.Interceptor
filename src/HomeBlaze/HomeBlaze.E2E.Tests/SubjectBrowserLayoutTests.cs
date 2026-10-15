@@ -434,6 +434,45 @@ public class SubjectBrowserLayoutTests
     }
 
     [Theory]
+    [InlineData("https://example.com/page", true)]
+    [InlineData("javascript:alert(1)", false)]
+    public async Task WhenAStateValueIsAUri_ThenOnlyAWebAddressGetsALink(string address, bool isLink)
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
+        try
+        {
+            subject.Website = new Uri(address);
+
+            // Act
+            var page = await OpenAsync($"browser/{name}", 1280, 720, paneCount: 2);
+
+            // Assert
+            var row = ValueRow(LastPane(page), "Website");
+            await Assertions.Expect(row.Locator("[data-testid='subject-pane-value-text']"))
+                .ToHaveTextAsync(address, new() { Timeout = PageLoadTimeout });
+            var link = row.Locator("[data-testid='subject-pane-value-link']");
+            var copy = row.Locator("[data-testid='subject-pane-value-copy']");
+            if (isLink)
+            {
+                await Assertions.Expect(link).ToHaveAttributeAsync("href", address);
+                await Assertions.Expect(link).ToHaveAttributeAsync("target", "_blank");
+                await Assertions.Expect(link).ToHaveAttributeAsync("rel", "noopener noreferrer");
+                await Assertions.Expect(copy).ToHaveCountAsync(0);
+            }
+            else
+            {
+                await Assertions.Expect(link).ToHaveCountAsync(0);
+                await Assertions.Expect(copy).ToHaveCountAsync(1);
+            }
+        }
+        finally
+        {
+            _fixture.RemovePlainSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)] // Developer mode replaces the content of a pane on every change of a value.
     public async Task WhenTheCopyButtonOfAChangedValueIsClicked_ThenTheValueIsInTheClipboard(bool isDeveloperMode)
