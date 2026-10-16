@@ -4,7 +4,7 @@ title: History Chart Values
 
 # History Chart Values
 
-The test puts the subject `HistoryValues` next to this page before it opens it.
+The subject `HistoryValues` next to this page is the file `HistoryValues.json`, and the test writes its values before it opens the page.
 
 :: HomeBlaze.History.Blazor.HistoryChart#constant Range=1h Bucket=Raw
 ::: Series Path=../HistoryValues/Constant Label="Constant"

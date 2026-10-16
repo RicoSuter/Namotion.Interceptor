@@ -33,8 +33,8 @@ public class PlaywrightFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Start the test server with Kestrel. It learns the test subject and its widget before it loads anything.
-        _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget)]);
+        // Start the test server with Kestrel. It learns the test subjects and the widget before it loads anything.
+        _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget), typeof(HistoryValuesSubject)]);
         // Force server to start by accessing ServerAddress which calls EnsureServer
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");

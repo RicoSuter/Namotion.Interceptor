@@ -43,6 +43,9 @@ public class HistoryChartWidgetTests
 
     private static readonly TimeSpan RecordingTimeout = TimeSpan.FromSeconds(20);
 
+    // The whole of the test of the many charts, from recording the values to the last chart.
+    private static readonly TimeSpan ValuesTestBudget = TimeSpan.FromSeconds(120);
+
     private readonly PlaywrightFixture _fixture;
 
     public HistoryChartWidgetTests(PlaywrightFixture fixture)
@@ -68,7 +71,7 @@ public class HistoryChartWidgetTests
         return page;
     }
 
-    private async Task WaitUntilRecordedAsync(RegisteredSubjectProperty property, Func<HistoryPoint, bool> isRecorded)
+    private async Task WaitUntilRecordedAsync(RegisteredSubjectProperty property, Func<HistoryPoint, bool> isRecorded, DateTime? deadline = null)
     {
         var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
         var path = property.GetHistoryPath(resolver) ?? throw new InvalidOperationException("The subject is not in the graph");
@@ -91,7 +94,7 @@ public class HistoryChartWidgetTests
 
                 return false;
             },
-            RecordingTimeout,
+            deadline is { } end ? TimeSpan.FromMilliseconds(GetRemainingMilliseconds(end)) : RecordingTimeout,
             message: $"The history store did not record the expected value of {path}");
     }
 
@@ -101,74 +104,120 @@ public class HistoryChartWidgetTests
             Has = page.GetByTestId("history-chart-legend-entry").GetByText(legendLabel, new() { Exact = true })
         });
 
+    private sealed record Box(double X, double Y, double Width, double Height);
+
     private sealed record ChartLayout(
-        LocatorBoundingBoxResult Widget,
-        LocatorBoundingBoxResult Lines,
-        LocatorBoundingBoxResult Chart,
+        Box Widget,
+        Box Lines,
+        Box Chart,
         string[] ValueLabels,
         string[] TimeLabels,
         double LineTop,
         double LineBottom);
 
-    // Waits until the chart is drawn at the size of its box with the axes spaced for that size, then reads it. MudChart
-    // draws at a default size first and fits itself to the box once it has measured it, and the view spaces the axes
-    // once it has measured the lines. The first svg stands for the chart, because MudChart renders more than one.
-    private static async Task<ChartLayout> GetLayoutAsync(ILocator widget)
+    private static Task<ChartLayout> GetLayoutAsync(IPage page, string legendLabel)
+        => GetLayoutAsync(page, legendLabel, DateTime.UtcNow.AddMilliseconds(Timeout));
+
+    // Waits until the chart is drawn at the size of its box with the axes spaced for that size, and reads it in the same
+    // poll, so that what is asserted is the chart that was found ready. MudChart draws at a default size first and fits
+    // itself to the box once it has measured it, and the view spaces the axes once it has measured the lines. The chart is
+    // found by its legend in every poll, because a render can replace its elements. The first svg stands for the chart,
+    // because MudChart renders more than one.
+    private static async Task<ChartLayout> GetLayoutAsync(IPage page, string legendLabel, DateTime deadline)
     {
-        var lines = widget.GetByTestId("history-chart-lines");
-        var chart = lines.Locator("svg").First;
-        await Assertions.Expect(chart).ToBeVisibleAsync(new() { Timeout = Timeout });
-
-        // The label counts follow the rule of HistoryChartAxis and are computed from the live box, so a box that changes
-        // while the chart settles, for example when a scrollbar appears, is waited for rather than timed out on.
-        await widget.Page.WaitForFunctionAsync(
-            """
-            ([lines, valueLabelPixels, timeLabelPixels, maximumTimeLabels]) => {
-                const chart = lines.querySelector("svg");
-                const box = lines.getBoundingClientRect();
-                const valueLabels = box.height >= 2 * valueLabelPixels ? Math.floor(box.height / valueLabelPixels) : 2;
-                const timeLabels = Math.floor(Math.min(Math.max(box.width / timeLabelPixels, 2), maximumTimeLabels));
-                // MudChart draws its value labels left of the chart until it has measured them and made room for them.
-                return lines.getAttribute("data-axes-labels") === `${valueLabels}x${timeLabels}` &&
-                    chart.getAttribute("viewBox") === `0 0 ${Math.round(box.width)} ${Math.round(box.height)}` &&
-                    chart.querySelector(".mud-charts-timeseries-series path") !== null &&
-                    [...chart.querySelectorAll(".mud-charts-yaxis text")].every(text => text.getBBox().x >= 0);
-            }
-            """,
-            new object[]
-            {
-                await lines.ElementHandleAsync(),
-                HistoryChartAxis.PixelsPerValueLabel,
-                HistoryChartAxis.PixelsPerTimeLabel,
-                HistoryChartAxis.MaximumTimeLabelCount
-            },
-            new() { Timeout = Timeout });
-
-        var box = await lines.BoundingBoxAsync() ?? throw new InvalidOperationException("The lines have no box");
-
-        var drawn = await lines.EvaluateAsync<JsonElement>(
-            """
-            lines => {
-                const chart = lines.querySelector("svg");
-                const paths = [...chart.querySelectorAll(".mud-charts-timeseries-series path")].map(path => path.getBBox());
-                return {
-                    values: [...chart.querySelectorAll(".mud-charts-yaxis text")].map(text => text.textContent),
-                    times: [...chart.querySelectorAll(".mud-charts-xaxis text")].map(text => text.textContent),
-                    top: Math.min(...paths.map(path => path.y)),
-                    bottom: Math.max(...paths.map(path => path.y + path.height))
-                };
-            }
-            """);
+        JsonElement snapshot;
+        try
+        {
+            // The label counts follow the rule of HistoryChartAxis and are computed from the live box, so a box that
+            // changes while the chart settles, for example when a scrollbar appears, is waited for rather than measured.
+            var handle = await page.WaitForFunctionAsync(
+                LayoutScript,
+                CreateLayoutArguments(legendLabel, isDiagnosis: false),
+                new() { Timeout = GetRemainingMilliseconds(deadline) });
+            snapshot = await handle.JsonValueAsync<JsonElement>();
+        }
+        catch (TimeoutException exception)
+        {
+            // The same script names the condition that is not met.
+            var state = await page.EvaluateAsync<JsonElement>(LayoutScript, CreateLayoutArguments(legendLabel, isDiagnosis: true));
+            throw new TimeoutException($"The chart '{legendLabel}' was not drawn at the size of its box in time: {state}", exception);
+        }
 
         return new ChartLayout(
-            await widget.BoundingBoxAsync() ?? throw new InvalidOperationException("The widget has no box"),
-            box,
-            await chart.BoundingBoxAsync() ?? throw new InvalidOperationException("The chart has no box"),
-            drawn.GetProperty("values").EnumerateArray().Select(text => text.GetString()!).ToArray(),
-            drawn.GetProperty("times").EnumerateArray().Select(text => text.GetString()!).ToArray(),
-            drawn.GetProperty("top").GetDouble(),
-            drawn.GetProperty("bottom").GetDouble());
+            ReadBox(snapshot.GetProperty("widget")),
+            ReadBox(snapshot.GetProperty("lines")),
+            ReadBox(snapshot.GetProperty("chart")),
+            snapshot.GetProperty("values").EnumerateArray().Select(text => text.GetString()!).ToArray(),
+            snapshot.GetProperty("times").EnumerateArray().Select(text => text.GetString()!).ToArray(),
+            snapshot.GetProperty("top").GetDouble(),
+            snapshot.GetProperty("bottom").GetDouble());
     }
+
+    private const string LayoutScript =
+        """
+        ([label, valueLabelPixels, timeLabelPixels, maximumTimeLabels, isDiagnosis]) => {
+            const widget = [...document.querySelectorAll("[data-testid=history-chart]")].find(candidate =>
+                [...candidate.querySelectorAll("[data-testid=history-chart-legend-entry] *")]
+                    .some(element => element.childElementCount === 0 && element.textContent.trim() === label));
+            const lines = widget?.querySelector("[data-testid=history-chart-lines]");
+            const chart = lines?.querySelector("svg");
+            if (!chart) return isDiagnosis ? (widget ? "no svg in the lines" : "no chart with that legend") : null;
+
+            const box = lines.getBoundingClientRect();
+            const valueLabels = box.height >= 2 * valueLabelPixels ? Math.floor(box.height / valueLabelPixels) : 2;
+            const timeLabels = Math.floor(Math.min(Math.max(box.width / timeLabelPixels, 2), maximumTimeLabels));
+            const paths = [...chart.querySelectorAll(".mud-charts-timeseries-series path")];
+            const valueTexts = [...chart.querySelectorAll(".mud-charts-yaxis text")];
+
+            // MudChart draws its value labels left of the chart until it has measured them and made room for them. Once
+            // it has, the box of a label can still start a fraction of a pixel left of the chart, by the side bearing of
+            // its first glyph, which depends on the value.
+            if (box.width === 0 || box.height === 0 ||
+                lines.getAttribute("data-axes-labels") !== `${valueLabels}x${timeLabels}` ||
+                chart.getAttribute("viewBox") !== `0 0 ${Math.round(box.width)} ${Math.round(box.height)}` ||
+                paths.length === 0 ||
+                !valueTexts.every(text => text.getBBox().x >= -1)) {
+                return isDiagnosis
+                    ? `box ${box.width}x${box.height}, axes ${lines.getAttribute("data-axes-labels")} for ${valueLabels}x${timeLabels}, ` +
+                      `viewBox ${chart.getAttribute("viewBox")}, ${paths.length} paths, value label x ${valueTexts.map(text => text.getBBox().x)}`
+                    : null;
+            }
+
+            const rect = element => {
+                const bounds = element.getBoundingClientRect();
+                return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+            };
+            const pathBoxes = paths.map(path => path.getBBox());
+            return {
+                widget: rect(widget),
+                lines: rect(lines),
+                chart: rect(chart),
+                values: valueTexts.map(text => text.textContent),
+                times: [...chart.querySelectorAll(".mud-charts-xaxis text")].map(text => text.textContent),
+                top: Math.min(...pathBoxes.map(path => path.y)),
+                bottom: Math.max(...pathBoxes.map(path => path.y + path.height))
+            };
+        }
+    """;
+
+    private static object[] CreateLayoutArguments(string legendLabel, bool isDiagnosis) =>
+    [
+        legendLabel,
+        HistoryChartAxis.PixelsPerValueLabel,
+        HistoryChartAxis.PixelsPerTimeLabel,
+        HistoryChartAxis.MaximumTimeLabelCount,
+        isDiagnosis
+    ];
+
+    private static Box ReadBox(JsonElement box) => new(
+        box.GetProperty("x").GetDouble(),
+        box.GetProperty("y").GetDouble(),
+        box.GetProperty("width").GetDouble(),
+        box.GetProperty("height").GetDouble());
+
+    // Playwright reads a timeout of zero as no timeout.
+    private static float GetRemainingMilliseconds(DateTime deadline)
+        => (float)Math.Max(1, (deadline - DateTime.UtcNow).TotalMilliseconds);
 
     [Fact]
     public async Task WhenAPageHasAHistoryChart_ThenItDrawsTheLineTheBandAndTheCurrentValues()
@@ -208,7 +257,7 @@ public class HistoryChartWidgetTests
     {
         // Arrange & Act
         var page = await OpenPageAsync(DesktopWidth);
-        var layout = await GetLayoutAsync(GetChart(page, "Chart speed"));
+        var layout = await GetLayoutAsync(page, "Chart speed");
 
         // Assert
         Assert.InRange(layout.Lines.Width, layout.Widget.Width - 2, layout.Widget.Width + 2);
@@ -223,7 +272,7 @@ public class HistoryChartWidgetTests
     {
         // Arrange & Act
         var page = await OpenPageAsync(PhoneWidth);
-        var layout = await GetLayoutAsync(GetChart(page, "Chart speed"));
+        var layout = await GetLayoutAsync(page, "Chart speed");
 
         // Assert
         Assert.InRange(layout.Lines.Width, layout.Widget.Width - 2, layout.Widget.Width + 2);
@@ -249,7 +298,7 @@ public class HistoryChartWidgetTests
 
         // Act
         await page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Speed" }).ClickAsync();
-        var layout = await GetLayoutAsync(chart);
+        var layout = await GetLayoutAsync(page, "Tab speed");
         var legend = await chart.GetByTestId("history-chart-legend").BoundingBoxAsync()
             ?? throw new InvalidOperationException("The legend has no box");
 
@@ -270,7 +319,7 @@ public class HistoryChartWidgetTests
         // Arrange
         var page = await OpenPageAsync(width);
         var chart = GetChart(page, "Chart speed");
-        await GetLayoutAsync(chart);
+        await GetLayoutAsync(page, "Chart speed");
         var band = chart.GetByTestId("history-chart-band");
         await Assertions.Expect(band).ToBeVisibleAsync(new() { Timeout = Timeout });
 
@@ -462,7 +511,8 @@ public class HistoryChartWidgetTests
         var bandEntry = chart.GetByTestId("history-chart-band-header").GetByTestId("history-chart-legend-entry");
         await Assertions.Expect(bandEntry).ToContainTextAsync("Chart status", new() { Timeout = Timeout });
 
-        // See WhenValuesAreConstantNegativeLargeSmallOrBroken_ThenEveryAxisHasFewDistinctFiniteLabelsAndHoldsItsLines.
+        // A pass of the storage that finds a change sets the children of the folder anew from its files, so the changes
+        // that earlier tests left on disk are taken in before the children are set below.
         await root.ReconcileAsync();
         var folder = _fixture.GetDemoFolder();
         var originalChildren = folder.Children;
@@ -518,27 +568,33 @@ public class HistoryChartWidgetTests
     // Values below one need a step of one, the smallest the chart takes; its default of 20 pinned them to the floor.
     private static readonly string[] ChartsBelowOne = ["Single", "Small", "Fraction"];
 
-    private async Task RecordValuesAsync(HistoryValuesSubject subject)
+    private async Task RecordValuesAsync(HistoryValuesSubject subject, DateTime deadline)
     {
-        // A sample of an earlier run is at the same path, so only one written after this run started counts.
+        // A sample of an earlier run is at the same path, so only one written after this run started counts. A value that
+        // the subject already holds, from an earlier run of this process, writes nothing and is already recorded.
         var start = DateTimeOffset.UtcNow;
         var valueCount = RecordedValues.Max(entry => entry.Values.Length);
         for (var index = 0; index < valueCount; index++)
         {
-            var written = RecordedValues.Where(entry => index < entry.Values.Length).ToArray();
-            foreach (var (property, values) in written)
-            {
-                var value = values[index];
-                subject.TryGetRegisteredProperty(property)!.SetValue(
-                    property == nameof(HistoryValuesSubject.IsOn) ? value == 1 : value);
-            }
+            var written = RecordedValues
+                .Where(entry => index < entry.Values.Length)
+                .Select(entry =>
+                {
+                    var property = subject.TryGetRegisteredProperty(entry.Property)!;
+                    var expected = entry.Values[index];
+                    object? value = entry.Property == nameof(HistoryValuesSubject.IsOn) ? expected == 1 : expected;
+                    var isChanged = !Equals(property.GetValue(), value);
+                    property.SetValue(value);
+                    return (Property: property, Expected: expected, IsChanged: isChanged);
+                })
+                .ToArray();
 
-            foreach (var (property, values) in written)
+            foreach (var (property, expected, isChanged) in written)
             {
-                var expected = values[index];
                 await WaitUntilRecordedAsync(
-                    subject.TryGetRegisteredProperty(property)!,
-                    point => point.Timestamp >= start && point.Number == expected);
+                    property,
+                    point => (!isChanged || point.Timestamp >= start) && point.Number == expected,
+                    deadline);
             }
         }
     }
@@ -548,71 +604,86 @@ public class HistoryChartWidgetTests
     [InlineData(DesktopWidth)]
     public async Task WhenValuesAreConstantNegativeLargeSmallOrBroken_ThenEveryAxisHasFewDistinctFiniteLabelsAndHoldsItsLines(int width)
     {
-        // Arrange
-        var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
-        var subjectFactory = _fixture.ServerServices.GetRequiredService<SubjectFactory>();
-        var subject = subjectFactory.CreateSubject<HistoryValuesSubject>();
+        // Arrange - the subject is a file of the test data, so that a pass of the storage keeps it.
+        var deadline = DateTime.UtcNow + ValuesTestBudget;
+        var subject = (HistoryValuesSubject)_fixture.GetDemoFolder().Children[ValuesSubjectName];
+        await RecordValuesAsync(subject, deadline);
 
-        // A pass of the storage that finds a change sets the children of the folder anew from its files, which drops
-        // the subject, so the changes that earlier tests left on disk are taken in first.
-        await root.ReconcileAsync();
-        var folder = _fixture.GetDemoFolder();
-        var originalChildren = folder.Children;
+        // Act
+        var page = await OpenAsync(ValuesPageName, width);
+        await WaitUntilChartsAreDrawnAsync(page, deadline);
+        Assert.True(
+            _fixture.GetDemoFolder().Children.TryGetValue(ValuesSubjectName, out var current) && ReferenceEquals(current, subject),
+            $"The storage replaced or dropped the subject {ValuesSubjectName} while the test ran, so the charts read another one");
 
-        try
+        // Assert
+        var valueLabelLimit = width == PhoneWidth ? 3 : 5;
+        foreach (var label in LineChartLabels)
         {
-            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren) { [ValuesSubjectName] = subject };
-            await RecordValuesAsync(subject);
+            var layout = await GetLayoutAsync(page, label, deadline);
+            var height = layout.Lines.Height;
 
-            // Act
-            var page = await OpenAsync(ValuesPageName, width);
+            Assert.InRange(layout.ValueLabels.Length, 2, valueLabelLimit);
+            Assert.Equal(layout.ValueLabels.Length, layout.ValueLabels.Distinct().Count());
+            Assert.All(layout.ValueLabels, text => Assert.True(
+                double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && double.IsFinite(value),
+                $"{label}: the value label '{text}' is no finite number"));
+            Assert.All(layout.TimeLabels, text => Assert.DoesNotContain("NaN", text));
+            Assert.Equal(layout.TimeLabels.Length, layout.TimeLabels.Distinct().Count());
+            Assert.True(layout.LineTop >= 0 && layout.LineBottom <= height,
+                $"{label}: the lines reach from {layout.LineTop} to {layout.LineBottom} in a chart {height} high");
 
-            // Assert
-            var valueLabelLimit = width == PhoneWidth ? 3 : 5;
-            foreach (var label in LineChartLabels)
+            if (ChartsBelowOne.Contains(label))
             {
-                var layout = await GetLayoutAsync(GetChart(page, label));
-                var height = layout.Lines.Height;
-
-                Assert.InRange(layout.ValueLabels.Length, 2, valueLabelLimit);
-                Assert.Equal(layout.ValueLabels.Length, layout.ValueLabels.Distinct().Count());
-                Assert.All(layout.ValueLabels, text => Assert.True(
-                    double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && double.IsFinite(value),
-                    $"{label}: the value label '{text}' is no finite number"));
-                Assert.All(layout.TimeLabels, text => Assert.DoesNotContain("NaN", text));
-                Assert.Equal(layout.TimeLabels.Length, layout.TimeLabels.Distinct().Count());
-                Assert.True(layout.LineTop >= 0 && layout.LineBottom <= height,
-                    $"{label}: the lines reach from {layout.LineTop} to {layout.LineBottom} in a chart {height} high");
-
-                if (ChartsBelowOne.Contains(label))
-                {
-                    Assert.Equal("1", layout.ValueLabels[^1]);
-                }
-
-                // A fraction in percent is drawn times 100 on an axis from 0 to 100.
-                if (label == "Percent")
-                {
-                    Assert.Equal(["0", "100"], [layout.ValueLabels[0], layout.ValueLabels[^1]]);
-                }
-
-                if (label == "Fraction")
-                {
-                    Assert.True(layout.LineBottom - layout.LineTop >= 0.3 * height,
-                        $"Fraction: 0.2 to 0.9 takes {layout.LineBottom - layout.LineTop} of {height} pixels");
-                }
+                Assert.Equal("1", layout.ValueLabels[^1]);
             }
 
-            var bands = GetChart(page, "Only a band");
-            await Assertions.Expect(bands.GetByTestId("history-chart-band")).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(bands.GetByTestId("history-chart-lines")).ToHaveCountAsync(0);
-            await Assertions.Expect(bands.GetByTestId("history-chart-range")).ToBeVisibleAsync();
-            await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(0);
-            await Assertions.Expect(page.GetByTestId("history-chart-query-error")).ToHaveCountAsync(0);
+            // A fraction in percent is drawn times 100 on an axis from 0 to 100.
+            if (label == "Percent")
+            {
+                Assert.Equal(["0", "100"], [layout.ValueLabels[0], layout.ValueLabels[^1]]);
+            }
+
+            if (label == "Fraction")
+            {
+                Assert.True(layout.LineBottom - layout.LineTop >= 0.3 * height,
+                    $"Fraction: 0.2 to 0.9 takes {layout.LineBottom - layout.LineTop} of {height} pixels");
+            }
         }
-        finally
+
+        var bands = GetChart(page, "Only a band");
+        await Assertions.Expect(bands.GetByTestId("history-chart-band")).ToBeVisibleAsync(new() { Timeout = GetRemainingMilliseconds(deadline) });
+        await Assertions.Expect(bands.GetByTestId("history-chart-lines")).ToHaveCountAsync(0);
+        await Assertions.Expect(bands.GetByTestId("history-chart-range")).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("history-chart-query-error")).ToHaveCountAsync(0);
+    }
+
+    // Before a chart is measured: every chart on the page that shows lines has drawn them, and the page no longer grows,
+    // since a page that still grows moves the charts and can add a scrollbar that narrows them.
+    private static async Task WaitUntilChartsAreDrawnAsync(IPage page, DateTime deadline)
+    {
+        try
         {
-            folder.Children = originalChildren;
-            subjectFactory.DiscardSubject(subject);
+            await page.WaitForFunctionAsync(
+                """
+                () => {
+                    const lines = [...document.querySelectorAll("[data-testid=history-chart-lines]")]
+                        .filter(element => element.getBoundingClientRect().height > 0);
+                    const isDrawn = lines.length > 0 &&
+                        lines.every(element => element.querySelector("svg .mud-charts-timeseries-series path") !== null);
+                    const height = document.documentElement.scrollHeight;
+                    const isStable = window.historyChartTestHeight === height;
+                    window.historyChartTestHeight = height;
+                    return isDrawn && isStable;
+                }
+                """,
+                null,
+                new() { Timeout = GetRemainingMilliseconds(deadline), PollingInterval = 250 });
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException("The charts of the page did not draw their lines, or the page kept growing", exception);
         }
     }
 }
