@@ -32,6 +32,54 @@ public class SliderMathTests
     }
 
     [Fact]
+    public void WhenSliderShowsNoNumberAndFindsNoRange_ThenItGetsThePlaceholderRangeAndNoError()
+    {
+        // Act
+        var isFound = SliderMath.TryGetRange(null, isNumber: false, null, null, out var range, out var error);
+
+        // Assert
+        Assert.True(isFound);
+        Assert.Equal(SliderMath.PlaceholderRange, range);
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void WhenSliderShowsANumberWithoutRange_ThenItIsTheMissingRangeError()
+    {
+        // Arrange
+        var property = ControlTestContext.GetProperty(new ControlTargetSubject(ControlTestContext.Create()), nameof(ControlTargetSubject.Temperature));
+
+        // Act
+        var isFound = SliderMath.TryGetRange(property, isNumber: true, null, null, out _, out var error);
+
+        // Assert
+        Assert.False(isFound);
+        Assert.Equal(ValueRangeResolver.MissingRangeError, error);
+    }
+
+    [Fact]
+    public void WhenSliderShowsNoNumberAndItsRangeIsEmpty_ThenItIsTheRangeError()
+    {
+        // Act
+        var isFound = SliderMath.TryGetRange(null, isNumber: false, 0.8, 0.2, out _, out var error);
+
+        // Assert
+        Assert.False(isFound);
+        Assert.Equal("Maximum must be above Minimum: 0.8 to 0.2", error);
+    }
+
+    [Fact]
+    public void WhenSliderShowsNoNumberAndHasARange_ThenItKeepsThatRange()
+    {
+        // Act
+        var isFound = SliderMath.TryGetRange(null, isNumber: false, 0, 50, out var range, out _);
+
+        // Assert
+        Assert.True(isFound);
+        Assert.Equal(new ValueRange(0, 50), range);
+    }
+
+    [Fact]
     public void WhenStepHasAFractionForAWholeNumberProperty_ThenItIsAnError()
     {
         // Act

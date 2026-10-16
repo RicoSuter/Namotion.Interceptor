@@ -1,4 +1,6 @@
 using System.Globalization;
+using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Inputs;
 using MudBlazor;
 
 namespace HomeBlaze.Components;
@@ -15,13 +17,15 @@ internal static class GaugeDisplay
 
     /// <summary>
     /// Gets the state of a gauge: its range by <see cref="ValueRangeResolver"/> and where the value stands in it.
-    /// A path that leads nowhere gives an empty ring without an error, as every value widget shows a dash for it.
+    /// Only a number needs a range: a path that leads nowhere, as every value widget shows a dash for it, and a property
+    /// that holds no number give an empty ring without an error when no range is found.
     /// </summary>
     public static GaugeState GetState(ValueReading reading, double? minimum, double? maximum)
     {
         if (!ValueRangeResolver.TryResolve(reading.Property, minimum, maximum, out var range, out var error))
         {
-            return reading.Property is null && error == ValueRangeResolver.MissingRangeError
+            var isNumber = reading.Property is { } property && SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number);
+            return !isNumber && error == ValueRangeResolver.MissingRangeError
                 ? default
                 : new GaugeState(null, null, null, error);
         }

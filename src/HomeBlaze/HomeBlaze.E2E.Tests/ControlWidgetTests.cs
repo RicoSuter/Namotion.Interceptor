@@ -323,6 +323,19 @@ public class ControlWidgetTests
     }
 
     [Fact]
+    public async Task WhenThePathOfASliderLeadsNowhere_ThenItIsDisabledWithADashAndNoError()
+    {
+        // Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var slider = page.GetByTestId("slider").Filter(new() { HasText = "Wrong slider" });
+        await Assertions.Expect(slider.GetByTestId("slider-value")).ToHaveTextAsync("–", new() { Timeout = Timeout });
+        await Assertions.Expect(GetSlider(page, "Wrong slider")).ToBeDisabledAsync();
+        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenAValueIsSelected_ThenTheEnumPropertyIsWritten()
     {
         try

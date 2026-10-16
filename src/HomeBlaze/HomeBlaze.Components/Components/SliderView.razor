@@ -9,18 +9,17 @@
 @{
     // Read once per render and never kept: the reads are what the tracking scope records.
     var property = Property;
+    var isNumber = IsNumber(property);
 }
 
-@if (!TryResolveScale(property, out var range, out var step, out var scale, out var error))
+@if (!TryResolveScale(property, isNumber, out var range, out var step, out var scale, out var error))
 {
     <WidgetArgumentError Message="@error" />
 }
 else
 {
     var value = property?.GetValue();
-    var canWrite = property is not null &&
-        PropertyWriter.IsWritable(property, value) &&
-        SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number);
+    var canWrite = isNumber && PropertyWriter.IsWritable(property!, value);
     var label = ValueReader.GetControlLabel(property, Label, Path);
 
     @* The input events of the range input bubble here, so the text follows the thumb while the slider writes only on release.
@@ -98,12 +97,15 @@ else
         _releaseCallback = EventCallback.Factory.Create<double>(this, Release);
     }
 
-    private bool TryResolveScale(RegisteredSubjectProperty? property, out ValueRange range, out double step,
+    private static bool IsNumber([NotNullWhen(true)] RegisteredSubjectProperty? property) =>
+        property is not null && SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number);
+
+    private bool TryResolveScale(RegisteredSubjectProperty? property, bool isNumber, out ValueRange range, out double step,
         out double scale, [NotNullWhen(false)] out string? error)
     {
         step = 0;
         scale = 1;
-        if (!ValueRangeResolver.TryResolve(property, Minimum, Maximum, out range, out error))
+        if (!SliderMath.TryGetRange(property, isNumber, Minimum, Maximum, out range, out error))
         {
             return false;
         }
@@ -145,7 +147,7 @@ else
     {
         _dragValue = null;
         var property = Property;
-        if (property is null || !TryResolveScale(property, out var range, out var step, out var scale, out _))
+        if (!IsNumber(property) || !TryResolveScale(property, isNumber: true, out var range, out var step, out var scale, out _))
         {
             return;
         }

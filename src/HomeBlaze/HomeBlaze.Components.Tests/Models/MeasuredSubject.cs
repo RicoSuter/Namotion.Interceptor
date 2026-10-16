@@ -30,4 +30,7 @@ public partial class MeasuredSubject
 
     [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Maximum)]
     public partial int TargetSpeed_Maximum { get; set; }
+
+    [State]
+    public partial string? Name { get; set; }
 }

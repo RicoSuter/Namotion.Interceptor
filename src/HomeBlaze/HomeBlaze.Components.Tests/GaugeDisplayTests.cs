@@ -147,6 +147,32 @@ public class GaugeDisplayTests
     }
 
     [Fact]
+    public void WhenPropertyHoldsNoNumberAndHasNoRange_ThenStateHasNoErrorAndAnEmptyRing()
+    {
+        // Arrange
+        var subject = new MeasuredSubject(_context) { Name = "Pump" };
+        var reading = CreateReading(subject, nameof(MeasuredSubject.Name));
+
+        // Act
+        var state = GaugeDisplay.GetState(reading, null, null);
+
+        // Assert
+        Assert.Null(state.Error);
+        Assert.Null(state.Percent);
+        Assert.Null(state.Range);
+    }
+
+    [Fact]
+    public void WhenPathLeadsNowhereAndTheRangeIsEmpty_ThenStateHasTheRangeError()
+    {
+        // Act
+        var state = GaugeDisplay.GetState(ValueReading.Missing, 10, 0);
+
+        // Assert
+        Assert.Equal("Maximum must be above Minimum: 10 to 0", state.Error);
+    }
+
+    [Fact]
     public void WhenValueIsNotSet_ThenRingIsEmptyAndRangeIsKept()
     {
         // Arrange

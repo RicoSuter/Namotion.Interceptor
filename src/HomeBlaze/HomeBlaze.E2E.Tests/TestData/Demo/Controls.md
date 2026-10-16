@@ -51,3 +51,6 @@ The outline of this card is switched by a control.
 
 :: HomeBlaze.Components.Control#ctlspeedcontrol Path=ctlmotor/CurrentSpeed Label="Control speed"
 ::
+
+:: HomeBlaze.Components.Slider#ctlwrongslider Path=ctlmotor/Missing Label="Wrong slider"
+::

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -14,6 +15,40 @@ internal static class SliderMath
     private const int DefaultStepCount = 100;
     private const int MaximumDecimals = 10;
     private const double WholeTolerance = 1e-9;
+
+    /// <summary>
+    /// The range of a slider that shows no number and is disabled.
+    /// </summary>
+    public static readonly ValueRange PlaceholderRange = new(0, 1);
+
+    /// <summary>
+    /// Gets the range of a slider by <see cref="ValueRangeResolver.TryResolve"/>. Only a number needs a range: for a path
+    /// that leads nowhere or a property that holds no number, which the slider shows disabled, a range that is not found
+    /// gives <see cref="PlaceholderRange"/> and no error.
+    /// </summary>
+    /// <param name="property">The property of the slider, or null when the path leads nowhere.</param>
+    /// <param name="isNumber">Whether the property holds a number.</param>
+    /// <param name="minimum">The <c>Minimum</c> argument of the slider.</param>
+    /// <param name="maximum">The <c>Maximum</c> argument of the slider.</param>
+    /// <param name="range">The range, when there is no error.</param>
+    /// <param name="error">The widget argument error of the range, otherwise null.</param>
+    public static bool TryGetRange(RegisteredSubjectProperty? property, bool isNumber, double? minimum, double? maximum,
+        out ValueRange range, [NotNullWhen(false)] out string? error)
+    {
+        if (ValueRangeResolver.TryResolve(property, minimum, maximum, out range, out error))
+        {
+            return true;
+        }
+
+        if (isNumber || error != ValueRangeResolver.MissingRangeError)
+        {
+            return false;
+        }
+
+        range = PlaceholderRange;
+        error = null;
+        return true;
+    }
 
     /// <summary>
     /// Gets the factor from the value of the property to the position of the slider: 100 for a property with the unit

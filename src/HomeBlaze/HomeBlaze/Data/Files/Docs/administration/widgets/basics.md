@@ -102,7 +102,7 @@ A [Slider](slider.md) and a [Gauge](gauge.md), and a [Control](control.md) that 
 
 Rules for all ranges:
 
-- **No range**: A widget that finds no end of its range shows `Needs a range: set Minimum and Maximum` in its place, see [Value Widget Errors](../page-errors.md#value-widget-errors). A `Gauge` whose path leads nowhere shows the dash of a [missing value](#missing-values) instead, and a `Control` chooses a value row, without a message.
+- **No range**: A widget that finds no end of the range of a number shows `Needs a range: set Minimum and Maximum` in its place, see [Value Widget Errors](../page-errors.md#value-widget-errors). Only a number needs a range: a path that leads nowhere, or one to a property that holds no number, shows no message. A `Gauge` then shows an empty ring with the dash of a [missing value](#missing-values) or the value as text, a `Slider` is disabled, and a `Control` chooses a value row.
 - **An empty range**: A `Maximum` that is not above `Minimum` shows `Maximum must be above Minimum` with both ends in place of the widget.
 - **The unit of the property**: `Minimum` and `Maximum` are in the unit of the property, so a percent runs from 0 to 1.
 - **Progress**: A [Progress](progress.md) has a range of its own, from its arguments only.
