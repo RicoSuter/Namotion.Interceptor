@@ -38,6 +38,29 @@ public class HistoryQueryTests
     }
 
     [Fact]
+    public void WhenCalendarUnitIsUndefined_ThenValidationThrows()
+    {
+        // Arrange
+        var bucket = HistoryBucket.Calendar((HistoryCalendarUnit)99, TimeZoneInfo.Utc);
+        var query = new HistoryQuery("/a/Value", From, From.AddMinutes(1), bucket);
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(query.Validate);
+        Assert.StartsWith("The bucket needs a positive size or a calendar unit.", exception.Message);
+    }
+
+    [Fact]
+    public void WhenBucketIsDefault_ThenValidationThrows()
+    {
+        // Arrange
+        var query = new HistoryQuery("/a/Value", From, From.AddMinutes(1), default(HistoryBucket));
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(query.Validate);
+        Assert.StartsWith("The bucket needs a positive size or a calendar unit.", exception.Message);
+    }
+
+    [Fact]
     public void WhenAggregationIsBlank_ThenValidationThrows()
     {
         // Arrange

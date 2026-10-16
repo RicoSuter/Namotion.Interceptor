@@ -39,8 +39,6 @@ internal static class SqliteBucketReader
 
         var bucket = query.Bucket!.Value;
         var aggregation = query.Aggregation;
-        var bucketTicks = bucket.FixedSize?.Ticks
-            ?? throw new NotSupportedException("Calendar buckets are not supported by the SQLite reader yet.");
 
         // Resolve the move chain once: each leg owns its [ValidFrom, ValidTo) slice of time and stores its
         // samples under its own path. With no moves this is a single unbounded leg under query.PropertyPath.
@@ -111,7 +109,7 @@ internal static class SqliteBucketReader
                     // The held value only enters the scan when this store covers the first bucket's start.
                     var seed = windowIndex == 0 && window.From == alignedFrom ? carrySeed?.Number : null;
                     ReadTimeWeightedAverageWindow(
-                        context, pathIds, segments, window, timeWeightedAverageSql, bucketTicks, seed, partials,
+                        context, pathIds, segments, window, timeWeightedAverageSql, bucket, seed, partials,
                         cancellationToken);
                     continue;
                 }
@@ -125,12 +123,15 @@ internal static class SqliteBucketReader
                         continue; // unreadable partition, or one that never saw the path
                     }
 
-                    foreach (var partial in ReadPartials(connection, pathId, aggregation, isUlong,
-                                 bucketTicks, segment.FromTicks, segment.ToTicks))
+                    foreach (var (originTicks, widthTicks, fromTicks, toTicks) in GroupRanges(bucket, segment.FromTicks, segment.ToTicks))
                     {
-                        partials[partial.BucketStartTicks] = partials.TryGetValue(partial.BucketStartTicks, out var existing)
-                            ? BucketPartial.Combine(existing, partial)
-                            : partial;
+                        foreach (var partial in ReadPartials(connection, pathId, aggregation, isUlong,
+                                     originTicks, widthTicks, fromTicks, toTicks))
+                        {
+                            partials[partial.BucketStartTicks] = partials.TryGetValue(partial.BucketStartTicks, out var existing)
+                                ? BucketPartial.Combine(existing, partial)
+                                : partial;
+                        }
                     }
                 }
             }
@@ -199,24 +200,58 @@ internal static class SqliteBucketReader
             or HistoryAggregations.Minimum or HistoryAggregations.Maximum
             or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation;
 
+    // The grouped reads for one segment. A fixed bucket is one read on the epoch grid. A calendar bucket has no
+    // constant width, so each bucket the segment touches is one read grouped onto that bucket's own start.
+    private static IEnumerable<(long OriginTicks, long WidthTicks, long FromTicks, long ToTicks)> GroupRanges(
+        HistoryBucket bucket, long fromTicks, long toTicks)
+    {
+        if (bucket.FixedSize is { } size)
+        {
+            yield return (0, size.Ticks, fromTicks, toTicks);
+            yield break;
+        }
+
+        var start = fromTicks;
+        while (start < toTicks)
+        {
+            var (bucketStart, bucketEnd) = LocateBucket(start, bucket);
+            var end = Math.Min(bucketEnd, toTicks);
+            yield return (bucketStart, bucketEnd - bucketStart, start, end);
+            start = end;
+        }
+    }
+
+    private static (long Start, long End) LocateBucket(long ticks, HistoryBucket bucket)
+    {
+        if (bucket.FixedSize is { } size)
+        {
+            var fixedStart = AlignBucketStart(ticks, size.Ticks);
+            return (fixedStart, fixedStart + size.Ticks);
+        }
+
+        var bucketStart = BucketAlignment.Start(EpochTicks.FromEpochTicks(ticks), bucket);
+        return (EpochTicks.ToEpochTicks(bucketStart), EpochTicks.ToEpochTicks(BucketAlignment.Next(bucketStart, bucket)));
+    }
+
     // One grouped query per partition producing the partials for the requested aggregation. Only the
-    // columns the aggregation needs are fetched. The bucket key is (ts/@b)*@b on epoch ticks, which equals
-    // BucketAlignment.BucketStart for the same bucket size.
+    // columns the aggregation needs are fetched. The bucket key is @o + floor((ts - @o) / @b) * @b on epoch
+    // ticks: the epoch grid of BucketAlignment.BucketStart for fixed buckets, the bucket's own start for a
+    // calendar bucket queried alone.
     private static IEnumerable<BucketPartial> ReadPartials(
         SqliteConnection connection, long pathId, string aggregation, bool isUlong,
-        long bucketTicks, long fromTicks, long toTicks)
+        long originTicks, long bucketTicks, long fromTicks, long toTicks)
     {
         if (aggregation is HistoryAggregations.First or HistoryAggregations.Last)
         {
-            return ReadEdgePartials(connection, pathId, aggregation, isUlong, bucketTicks, fromTicks, toTicks);
+            return ReadEdgePartials(connection, pathId, aggregation, isUlong, originTicks, bucketTicks, fromTicks, toTicks);
         }
 
         if (aggregation == HistoryAggregations.Count)
         {
-            return ReadCountPartials(connection, pathId, bucketTicks, fromTicks, toTicks);
+            return ReadCountPartials(connection, pathId, originTicks, bucketTicks, fromTicks, toTicks);
         }
 
-        return ReadNumericPartials(connection, pathId, isUlong, bucketTicks, fromTicks, toTicks);
+        return ReadNumericPartials(connection, pathId, isUlong, originTicks, bucketTicks, fromTicks, toTicks);
     }
 
     // Time-weighted average for one coverage window: integrates value * duration per bucket over covered
@@ -235,7 +270,7 @@ internal static class SqliteBucketReader
         List<ChainSegment> segments,
         HistoryCoverage window,
         string sql,
-        long bucketTicks,
+        HistoryBucket bucket,
         double? seed,
         Dictionary<long, BucketPartial> result,
         CancellationToken cancellationToken)
@@ -264,13 +299,13 @@ internal static class SqliteBucketReader
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var ticks = reader.GetInt64(0);
-                Integrate(result, previousTicks, ticks, previousValue, bucketTicks);
+                Integrate(result, previousTicks, ticks, previousValue, bucket);
                 previousTicks = ticks;
                 previousValue = reader.IsDBNull(1) ? null : reader.GetDouble(1);
             }
         }
 
-        Integrate(result, previousTicks, EpochTicks.ToEpochTicks(window.To), previousValue, bucketTicks);
+        Integrate(result, previousTicks, EpochTicks.ToEpochTicks(window.To), previousValue, bucket);
     }
 
     private static int CompareByTime(ChainSegment left, ChainSegment right)
@@ -282,7 +317,7 @@ internal static class SqliteBucketReader
     // Spreads value * duration over every bucket [fromTicks, toTicks) touches; a null value is unknown
     // and adds nothing.
     private static void Integrate(
-        Dictionary<long, BucketPartial> result, long fromTicks, long toTicks, double? value, long bucketTicks)
+        Dictionary<long, BucketPartial> result, long fromTicks, long toTicks, double? value, HistoryBucket bucket)
     {
         if (value is not { } number)
         {
@@ -292,8 +327,8 @@ internal static class SqliteBucketReader
         var start = fromTicks;
         while (start < toTicks)
         {
-            var bucketStart = AlignBucketStart(start, bucketTicks);
-            var end = Math.Min(bucketStart + bucketTicks, toTicks);
+            var (bucketStart, bucketEnd) = LocateBucket(start, bucket);
+            var end = Math.Min(bucketEnd, toTicks);
             var duration = (double)(end - start);
             ref var partial = ref CollectionsMarshal.GetValueRefOrAddDefault(result, bucketStart, out _);
             partial = partial with
@@ -315,7 +350,7 @@ internal static class SqliteBucketReader
     // First/Last: the earliest (MIN ts) or latest (MAX ts) row per bucket, with its raw value columns.
     private static List<BucketPartial> ReadEdgePartials(
         SqliteConnection connection, long pathId, string aggregation, bool isUlong,
-        long bucketTicks, long fromTicks, long toTicks)
+        long originTicks, long bucketTicks, long fromTicks, long toTicks)
     {
         var isFirst = aggregation == HistoryAggregations.First;
         var edge = isFirst ? "MIN(ts)" : "MAX(ts)";
@@ -332,6 +367,7 @@ internal static class SqliteBucketReader
             "WHERE path_id = @path_id AND ts >= @from AND ts < @to " +
             "GROUP BY bucket;";
         command.Parameters.AddWithValue("@path_id", pathId);
+        command.Parameters.AddWithValue("@o", originTicks);
         command.Parameters.AddWithValue("@b", bucketTicks);
         command.Parameters.AddWithValue("@from", fromTicks);
         command.Parameters.AddWithValue("@to", toTicks);
@@ -379,13 +415,14 @@ internal static class SqliteBucketReader
     // Count: total number of samples per bucket (COUNT(*)), matching InMemory's samples.Count, which
     // includes non-numeric and explicit-null samples (Count is allowed on any column type).
     private static List<BucketPartial> ReadCountPartials(
-        SqliteConnection connection, long pathId, long bucketTicks, long fromTicks, long toTicks)
+        SqliteConnection connection, long pathId, long originTicks, long bucketTicks, long fromTicks, long toTicks)
     {
         using var command = connection.CreateCommand();
         command.CommandText =
             "SELECT " + FloorBucketExpression("ts") + " AS bucket, COUNT(*) AS cnt FROM history " +
             "WHERE path_id = @path_id AND ts >= @from AND ts < @to GROUP BY bucket ORDER BY bucket;";
         command.Parameters.AddWithValue("@path_id", pathId);
+        command.Parameters.AddWithValue("@o", originTicks);
         command.Parameters.AddWithValue("@b", bucketTicks);
         command.Parameters.AddWithValue("@from", fromTicks);
         command.Parameters.AddWithValue("@to", toTicks);
@@ -408,7 +445,7 @@ internal static class SqliteBucketReader
     // COALESCE includes value_json (numeric text parses to a number) so the reductions fold it in too.
     private static List<BucketPartial> ReadNumericPartials(
         SqliteConnection connection, long pathId, bool isUlong,
-        long bucketTicks, long fromTicks, long toTicks)
+        long originTicks, long bucketTicks, long fromTicks, long toTicks)
     {
         // The numeric expression: for ulong properties also fold value_json (a JSON number stored as text).
         // Read as REAL like TimeWeightedAverageSql: an integer SUM errors on long overflow, which the sum of
@@ -428,6 +465,7 @@ internal static class SqliteBucketReader
             "FROM history WHERE path_id = @path_id AND ts >= @from AND ts < @to " +
             "GROUP BY bucket ORDER BY bucket;";
         command.Parameters.AddWithValue("@path_id", pathId);
+        command.Parameters.AddWithValue("@o", originTicks);
         command.Parameters.AddWithValue("@b", bucketTicks);
         command.Parameters.AddWithValue("@from", fromTicks);
         command.Parameters.AddWithValue("@to", toTicks);
@@ -451,7 +489,9 @@ internal static class SqliteBucketReader
         return result;
     }
 
+    // Floors ts onto the grid that starts at @o with width @b. Fixed buckets pass @o = 0, which is the epoch
+    // grid of BucketAlignment.BucketStart; a calendar bucket is queried alone with its own start and length.
     private static string FloorBucketExpression(string timestampExpression) =>
-        "((" + timestampExpression + " / @b) - CASE WHEN " + timestampExpression +
-        " < 0 AND " + timestampExpression + " % @b <> 0 THEN 1 ELSE 0 END) * @b";
+        "(@o + (((" + timestampExpression + " - @o) / @b) - CASE WHEN " + timestampExpression +
+        " - @o < 0 AND (" + timestampExpression + " - @o) % @b <> 0 THEN 1 ELSE 0 END) * @b)";
 }

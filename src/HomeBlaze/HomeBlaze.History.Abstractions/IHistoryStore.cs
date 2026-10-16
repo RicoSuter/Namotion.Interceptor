@@ -175,10 +175,19 @@ public record HistoryQuery(
             throw new ArgumentException("The query start must be earlier than its end.", nameof(From));
         }
 
-        if (Bucket is { } bucket &&
-            (bucket.FixedSize is { } size ? size <= TimeSpan.Zero : bucket.CalendarUnit is null))
+        if (Bucket is { } bucket)
         {
-            throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket size must be positive.");
+            if (bucket.FixedSize is { } size)
+            {
+                if (size <= TimeSpan.Zero)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket size must be positive.");
+                }
+            }
+            else if (bucket.CalendarUnit is not { } unit || !Enum.IsDefined(unit))
+            {
+                throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket needs a positive size or a calendar unit.");
+            }
         }
 
         if (string.IsNullOrWhiteSpace(Aggregation))
