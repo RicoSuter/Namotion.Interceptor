@@ -115,6 +115,19 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         Assert.Equal("Missing parameter 'query'.", result.GetProperty("error").GetString());
     }
 
+    [Fact]
+    public async Task WhenThePathIsNotAString_ThenAnErrorIsReturned()
+    {
+        // Arrange
+        var tool = await CreateToolAsync();
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer", path = 42 });
+
+        // Assert
+        Assert.Equal("Parameter 'path' must be a string.", result.GetProperty("error").GetString());
+    }
+
     [Theory]
     [InlineData("/Storage/Docs")]
     [InlineData("Storage/Docs/")]

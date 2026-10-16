@@ -94,16 +94,17 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
             return new { error = queryError };
         }
 
+        if (!TryGetPathPrefix(input, out var pathPrefix))
+        {
+            return new { error = "Parameter 'path' must be a string." };
+        }
+
         var rootSubject = _rootSubjectProvider();
         var registry = rootSubject.Context.TryGetService<ISubjectRegistry>();
         if (registry is null)
         {
             return new { error = "Subject registry is not available." };
         }
-
-        var pathPrefix = input.TryGetProperty("path", out var pathElement) && pathElement.ValueKind == JsonValueKind.String
-            ? NormalizePathPrefix(pathElement.GetString())
-            : null;
 
         var files = FindFiles(registry, rootSubject, pathPrefix);
         return SearchFiles(files, query, GetMaxPages(input), cancellationToken);
@@ -299,6 +300,24 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
         var parent = parents[0];
         var path = parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index);
         return path is not null ? "/" + path : null;
+    }
+
+    // A missing or null path searches all pages; any other value that is not a string is refused, as by the other tools.
+    private static bool TryGetPathPrefix(JsonElement input, out string? pathPrefix)
+    {
+        pathPrefix = null;
+        if (!input.TryGetProperty("path", out var pathElement) || pathElement.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        if (pathElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        pathPrefix = NormalizePathPrefix(pathElement.GetString());
+        return true;
     }
 
     private static string? NormalizePathPrefix(string? pathPrefix)
