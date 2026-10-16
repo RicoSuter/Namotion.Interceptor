@@ -1,13 +1,4 @@
-/* A card is spaced like a paragraph of a page, so that cards below each other do not touch. */
-.card-widget {
-    margin-bottom: 0.75rem;
-}
-
-/* A layout cell spaces its content itself, so the card that ends the cell adds nothing below.
-   The two wrappers are those of SubjectComponent, for the content of the cell and for the card. */
-.layout-cell > .subject-component-wrapper > .subject-component-wrapper:last-of-type > .card-widget {
-    margin-bottom: 0;
-}
+/* A card has no outer margin: the page and the layout it stands in space it, see the styles of a markdown page. */
 
 .card-widget > .mud-card-header.mud-card-header-padding,
 .card-widget > .mud-card-content.mud-card-content-padding,
@@ -23,21 +14,6 @@
 
 .card-widget > .mud-card-header + .mud-card-content.mud-card-content-padding {
     padding-top: 0;
-}
-
-/* The padding of the body and the footer is the distance to the edge, so the first and the last block of their content
-   lose their outer margin, also inside the wrappers of a widget block, which a margin collapses through. The anchor of
-   the action bar comes first in a selected wrapper. Blocks keep their distance from each other. */
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > :first-child,
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > .subject-component-wrapper:first-child > :is(:first-child, .subject-action-bar-anchor + *),
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > .subject-component-wrapper:first-child > .subject-component-wrapper:is(:first-child, .subject-action-bar-anchor + *) > :is(:first-child, .subject-action-bar-anchor + *) {
-    margin-top: 0;
-}
-
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > :last-child,
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > .subject-component-wrapper:last-child > :last-child,
-.card-widget > :is(.mud-card-content, .mud-card-actions) > .subject-component-wrapper > .subject-component-wrapper:last-child > .subject-component-wrapper:last-child > :last-child {
-    margin-bottom: 0;
 }
 
 /* A card with a height, and a card that fills a grid cell or a canvas node: the header, the picture and the footer keep
@@ -68,7 +44,18 @@
 
 :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .card-widget {
     height: 100%;
-    margin-bottom: 0;
     border: 0;
     box-shadow: none;
+}
+
+/* A card that is the content of a flow item is as high as the highest item of its row, so that the cards of a row end on
+   one line. A height or an aspect ratio of its own wins. A card in the content of a page item is reached through the
+   styles of a markdown page. A card that is higher than its content keeps its footer at the bottom. */
+.flow-layout-item > .subject-component-wrapper:has(> .card-widget:not(.card-widget-sized)),
+.flow-layout-item > .subject-component-wrapper > .card-widget:not(.card-widget-sized) {
+    height: 100%;
+}
+
+.flow-layout-item .card-widget:not(.card-widget-sized) > .mud-card-content {
+    flex-grow: 1;
 }

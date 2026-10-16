@@ -130,7 +130,7 @@ public class MarkdownBlockTests
     }
 
     [Fact]
-    public async Task WhenTwoCardsFollowEachOther_ThenTheyAreSeparatedLikeParagraphs()
+    public async Task WhenTwoCardsFollowEachOther_ThenTheyKeepTheSpacingOfBlocks()
     {
         // Arrange
         var page = await OpenPageAsync("Blocks.md");
@@ -143,8 +143,8 @@ public class MarkdownBlockTests
             "(second, first) => second.getBoundingClientRect().top - first.getBoundingClientRect().bottom",
             await firstCard.ElementHandleAsync());
 
-        // Assert: 0.75rem, the margin of a paragraph of the page.
-        Assert.Equal(12.0, gap, 1.0);
+        // Assert: 1rem, the space between the blocks of a page.
+        Assert.Equal(16.0, gap, 1.0);
     }
 
     [Fact]

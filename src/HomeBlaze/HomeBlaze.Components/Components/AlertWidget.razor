@@ -10,22 +10,11 @@
     <MudAlert Severity="@alert.Severity"
               Variant="@alert.Variant"
               Icon="@MudBlazorIconResolver.ResolveOrNull(alert.Icon)"
-              Class="alert-widget my-3"
+              Class="alert-widget"
               data-testid="alert">
         <SubjectComponent Subject="@alert.Content" Type="SubjectComponentType.Widget" />
     </MudAlert>
 }
-
-<style>
-    /* A utility class cannot reach the paragraph of the content, and the distance that a page gives it pushes a one-line text below the icon. Only the outer distances are removed, so that paragraphs keep their distance from each other. The rule is meant for the text of the alert and reaches the paragraphs of a widget inside it as well. */
-    .alert-widget .mud-alert-message p:first-of-type {
-        margin-top: 0;
-    }
-
-    .alert-widget .mud-alert-message p:last-of-type {
-        margin-bottom: 0;
-    }
-</style>
 
 @code {
     [Parameter]

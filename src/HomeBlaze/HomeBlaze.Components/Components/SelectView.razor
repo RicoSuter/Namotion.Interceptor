@@ -19,7 +19,7 @@ else
     var canWrite = enumType is not null && PropertyWriter.IsWritable(property!, value);
     var map = Map;
 
-    <div data-testid="select">
+    <div class="select-widget" data-testid="select">
         <MudSelect T="string"
                    @key="_resetKey"
                    Label="@ValueReader.GetControlLabel(property, Label, Path)"

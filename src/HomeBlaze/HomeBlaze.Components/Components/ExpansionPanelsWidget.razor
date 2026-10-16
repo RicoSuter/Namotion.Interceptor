@@ -8,7 +8,7 @@
     var panels = layout?.Panels ?? [];
 }
 
-<MudExpansionPanels MultiExpansion="@(layout?.Single != true)" Class="my-4" data-testid="expansion-panels">
+<MudExpansionPanels MultiExpansion="@(layout?.Single != true)" data-testid="expansion-panels">
     @foreach (var panel in panels)
     {
         @* The content of a closed panel stays rendered, so that it is read in the render of the tracking
