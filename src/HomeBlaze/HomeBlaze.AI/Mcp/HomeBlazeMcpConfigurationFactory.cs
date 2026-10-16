@@ -17,6 +17,8 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 internal static class HomeBlazeMcpConfigurationFactory
 {
+    private const string PathPrefix = "/";
+
     private static readonly Func<RegisteredSubject, MethodMetadata, string?> RefuseAgentOperation =
         (subject, _) => subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
 
@@ -63,7 +65,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         var configuration = new McpServerConfiguration
         {
             PathProvider = pathProvider,
-            PathPrefix = "/",
+            PathPrefix = PathPrefix,
             ExcludeTypes = excludeTypes,
             SubjectEnrichers = { new HomeBlazeMcpSubjectEnricher(typeProviders, isReadOnly) },
             TypeProviders = typeProviders,
@@ -71,7 +73,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             {
                 new HomeBlazeMcpToolProvider(invoker, isReadOnly),
                 new HomeBlazeMarkdownToolProvider(invoker, isReadOnly),
-                new HomeBlazeContentSearchToolProvider(rootSubjectProvider, pathProvider)
+                new HomeBlazeContentSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix)
             },
             ToolDescriptionAdditions =
             {

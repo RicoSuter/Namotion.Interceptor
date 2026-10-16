@@ -21,15 +21,15 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
     /// <summary>The name of the tool that finds text in Markdown pages and documents.</summary>
     public const string SearchContentToolName = "search_content";
 
-    internal const int DefaultMaxPages = 20;
-    internal const int MaxPagesLimit = 100;
-    internal const int MaxSearchedPages = 2000;
-    internal const int MaxMatchesPerPage = 5;
-    internal const int SnippetLength = 160;
+    private const int DefaultMaxPages = 20;
+    private const int MaxPagesLimit = 100;
+    private const int MaxSearchedPages = 2000;
+    private const int MaxMatchesPerPage = 5;
+    private const int SnippetLength = 160;
     private const int SnippetLeadLength = 60;
 
-    internal static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(100);
-    internal static readonly TimeSpan SearchTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan SearchTimeout = TimeSpan.FromSeconds(10);
 
     private static readonly string Description =
         "Find text in Markdown pages and documents (subjects whose name ends in .md), such as the documentation and notes of " +
@@ -56,13 +56,16 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
 
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly PathProviderBase _pathProvider;
+    private readonly string _pathPrefix;
 
     /// <param name="rootSubjectProvider">Resolves the root subject when the tool runs.</param>
     /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
-    public HomeBlazeContentSearchToolProvider(Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider)
+    /// <param name="pathPrefix">The prefix of every path, <see cref="McpServerConfiguration.PathPrefix"/> of the configuration.</param>
+    public HomeBlazeContentSearchToolProvider(Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
+        _pathPrefix = pathPrefix;
     }
 
     public IEnumerable<McpToolInfo> GetTools()
@@ -114,24 +117,25 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
     {
         var ignoreCase = GetBoolean(input, "ignore_case", defaultValue: true);
         var comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        error = null;
-        query = new ContentQuery(queryText, null, comparison);
-        if (!GetBoolean(input, "regex", defaultValue: false))
+        Regex? regex = null;
+        if (GetBoolean(input, "regex", defaultValue: false))
         {
-            return true;
+            try
+            {
+                var options = RegexOptions.CultureInvariant | (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None);
+                regex = new Regex(queryText, options, RegexMatchTimeout);
+            }
+            catch (ArgumentException exception)
+            {
+                query = default;
+                error = $"Invalid regular expression: {exception.Message}";
+                return false;
+            }
         }
 
-        try
-        {
-            var options = RegexOptions.CultureInvariant | (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None);
-            query = new ContentQuery(queryText, new Regex(queryText, options, RegexMatchTimeout), comparison);
-            return true;
-        }
-        catch (ArgumentException exception)
-        {
-            error = $"Invalid regular expression: {exception.Message}";
-            return false;
-        }
+        query = new ContentQuery(queryText, regex, comparison);
+        error = null;
+        return true;
     }
 
     private static int GetMaxPages(JsonElement input) =>
@@ -163,10 +167,6 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
             }
 
             pagesSearched++;
-            if (content.Length == 0)
-            {
-                continue;
-            }
 
             // Once max_pages pages matched, one more hit only decides truncated, so the scan stops at it.
             var isFull = pages.Count == maxPages;
@@ -288,7 +288,7 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
         return files;
     }
 
-    // The path as browse and search show it: the path through the first parent, after the leading slash.
+    // The path as browse and search show it: the path through the first parent, after the path prefix.
     private string? TryGetPath(RegisteredSubject subject, IInterceptorSubject rootSubject)
     {
         var parents = subject.Parents;
@@ -299,7 +299,7 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
 
         var parent = parents[0];
         var path = parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index);
-        return path is not null ? "/" + path : null;
+        return path is null ? null : _pathPrefix + path;
     }
 
     // A missing or null path searches all pages; any other value that is not a string is refused, as by the other tools.

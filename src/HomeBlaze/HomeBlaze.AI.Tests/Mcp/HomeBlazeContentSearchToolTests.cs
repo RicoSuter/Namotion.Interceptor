@@ -32,7 +32,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "freezer" });
 
         // Assert
-        var page = Assert.Single(result.GetProperty("pages").EnumerateArray());
+        var page = GetSinglePage(result);
         Assert.Equal("/Storage/Notes.md", page.GetProperty("path").GetString());
         Assert.Equal("Notes", page.GetProperty("title").GetString());
         Assert.Equal(2, page.GetProperty("match_count").GetInt32());
@@ -54,7 +54,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "FREEZER", ignore_case = false });
 
         // Assert
-        var page = Assert.Single(result.GetProperty("pages").EnumerateArray());
+        var page = GetSinglePage(result);
         Assert.Equal(1, page.GetProperty("match_count").GetInt32());
         Assert.Equal(4, Assert.Single(page.GetProperty("matches").EnumerateArray()).GetProperty("line").GetInt32());
     }
@@ -141,7 +141,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "heat pump", path });
 
         // Assert
-        var page = Assert.Single(result.GetProperty("pages").EnumerateArray());
+        var page = GetSinglePage(result);
         Assert.Equal("/Storage/Docs/HeatPump.md", page.GetProperty("path").GetString());
         Assert.Equal(1, result.GetProperty("pages_searched").GetInt32());
     }
@@ -156,7 +156,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "heat pump", max_pages = 1 });
 
         // Assert
-        var page = Assert.Single(result.GetProperty("pages").EnumerateArray());
+        var page = GetSinglePage(result);
         Assert.Equal("/Storage/Docs/HeatPump.md", page.GetProperty("path").GetString());
         Assert.True(result.GetProperty("truncated").GetBoolean());
     }
@@ -171,7 +171,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "heat pump", max_pages = 0 });
 
         // Assert
-        Assert.Single(result.GetProperty("pages").EnumerateArray());
+        GetSinglePage(result);
         Assert.True(result.GetProperty("truncated").GetBoolean());
     }
 
@@ -186,7 +186,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var matchingCase = await CallAsync(tool, new { query = "freezer door", regex = true, ignore_case = false });
 
         // Assert
-        var page = Assert.Single(ignoringCase.GetProperty("pages").EnumerateArray());
+        var page = GetSinglePage(ignoringCase);
         Assert.Equal("/Storage/Notes.md", page.GetProperty("path").GetString());
         Assert.Empty(matchingCase.GetProperty("pages").EnumerateArray());
     }
@@ -214,7 +214,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "needle" });
 
         // Assert
-        var page = Assert.Single(result.GetProperty("pages").EnumerateArray());
+        var page = GetSinglePage(result);
         Assert.Equal(2, Assert.Single(page.GetProperty("matches").EnumerateArray()).GetProperty("line").GetInt32());
     }
 
@@ -228,7 +228,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "needle" });
 
         // Assert
-        var match = Assert.Single(Assert.Single(result.GetProperty("pages").EnumerateArray()).GetProperty("matches").EnumerateArray());
+        var match = Assert.Single(GetSinglePage(result).GetProperty("matches").EnumerateArray());
         Assert.Equal(2, match.GetProperty("line").GetInt32());
         Assert.Equal("second needle", match.GetProperty("snippet").GetString());
     }
@@ -244,7 +244,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
 
         // Assert
         Assert.Equal(4, result.GetProperty("pages_searched").GetInt32());
-        Assert.Equal("/Storage/Notes.md", Assert.Single(result.GetProperty("pages").EnumerateArray()).GetProperty("path").GetString());
+        Assert.Equal("/Storage/Notes.md", GetSinglePage(result).GetProperty("path").GetString());
     }
 
     [Fact]
@@ -287,7 +287,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "needle" });
 
         // Assert
-        var page = Assert.Single(result.GetProperty("pages").EnumerateArray());
+        var page = GetSinglePage(result);
         Assert.Equal(8, page.GetProperty("match_count").GetInt32());
         Assert.Equal([1, 2, 3, 4, 5], page.GetProperty("matches").EnumerateArray().Select(match => match.GetProperty("line").GetInt32()));
         Assert.False(result.GetProperty("truncated").GetBoolean());
@@ -303,8 +303,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "needle" });
 
         // Assert
-        var snippet = Assert.Single(Assert.Single(result.GetProperty("pages").EnumerateArray()).GetProperty("matches").EnumerateArray())
-            .GetProperty("snippet").GetString()!;
+        var snippet = GetSingleSnippet(result);
         Assert.StartsWith("…", snippet);
         Assert.EndsWith("…", snippet);
         Assert.Contains(" needle ", snippet);
@@ -324,8 +323,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
 
         // Assert
         Assert.Empty(secretSearch.GetProperty("pages").EnumerateArray());
-        var snippet = Assert.Single(Assert.Single(hostSearch.GetProperty("pages").EnumerateArray()).GetProperty("matches").EnumerateArray())
-            .GetProperty("snippet").GetString();
+        var snippet = GetSingleSnippet(hostSearch);
         Assert.Contains("***", snippet);
         Assert.DoesNotContain("s3cr3t", snippet);
     }
@@ -333,20 +331,18 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
     [Fact]
     public async Task WhenTheConfigurationIsReadOnly_ThenSearchContentIsOfferedAsAReadOnlyTool()
     {
-        // Arrange
-        var (root, services) = await CreateGraphAsync([]);
-
         // Act
-        var tools = CreateTools(services, root, isReadOnly: true);
+        var tool = await CreateToolAsync();
 
         // Assert
-        Assert.Same(McpToolAnnotations.ReadOnly, tools[HomeBlazeContentSearchToolProvider.SearchContentToolName].Annotations);
+        Assert.Same(McpToolAnnotations.ReadOnly, tool.Annotations);
     }
 
     private async Task<McpToolInfo> CreateToolAsync(params (string Path, string Content)[] additionalFiles)
     {
         var (root, services) = await CreateGraphAsync(additionalFiles);
-        return CreateTools(services, root, isReadOnly: true)[HomeBlazeContentSearchToolProvider.SearchContentToolName];
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: true, forAgents: true);
+        return new McpToolFactory(root, configuration).CreateTools().Single(tool => tool.Name == HomeBlazeContentSearchToolProvider.SearchContentToolName);
     }
 
     private async Task<(AgentTestRoot Root, IServiceProvider Services)> CreateGraphAsync((string Path, string Content)[] additionalFiles)
@@ -389,14 +385,11 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         return (root, serviceProvider);
     }
 
-    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isReadOnly)
-    {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly, forAgents: true);
-        return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
-    }
+    private static JsonElement GetSinglePage(JsonElement result) =>
+        Assert.Single(result.GetProperty("pages").EnumerateArray());
 
     private static string GetSingleSnippet(JsonElement result) =>
-        Assert.Single(Assert.Single(result.GetProperty("pages").EnumerateArray()).GetProperty("matches").EnumerateArray())
+        Assert.Single(GetSinglePage(result).GetProperty("matches").EnumerateArray())
             .GetProperty("snippet").GetString()!;
 
     private static async Task<JsonElement> CallAsync(McpToolInfo tool, object input) =>
