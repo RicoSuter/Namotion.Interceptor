@@ -584,16 +584,20 @@ public sealed partial class MarkdownContentParser
 
         public void AddErrorBox() => ErrorBoxCount++;
 
+        /// <summary>The text of the page that this parse reads.</summary>
+        public string Source => _source;
+
         /// <summary>
-        /// Gets the lines of the block in the text of the page, from its head line to its last line. False on a
-        /// page with a lone carriage return, whose line numbers are not the ones counted here.
+        /// Gets where the lines of the block are in <see cref="Source"/>, from its head line to its last line. False
+        /// on a page with a lone carriage return, whose line numbers are not the ones counted here.
         /// </summary>
-        public bool TryGetBlockText(MarkdownBlock block, out ReadOnlySpan<char> text)
+        public bool TryGetBlockSpan(MarkdownBlock block, out int start, out int length)
         {
             _hasLoneCarriageReturn ??= MarkdownBlockWriter.HasLoneCarriageReturn(_source);
             if (_hasLoneCarriageReturn.Value)
             {
-                text = default;
+                start = 0;
+                length = 0;
                 return false;
             }
 
@@ -606,8 +610,8 @@ public sealed partial class MarkdownContentParser
                 }
             }
 
-            var start = GetLineStart(block.Line);
-            text = _source.AsSpan(start, GetLineStart(block.EndLine + 1) - start);
+            start = GetLineStart(block.Line);
+            length = GetLineStart(block.EndLine + 1) - start;
             return true;
         }
 

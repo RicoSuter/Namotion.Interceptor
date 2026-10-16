@@ -252,9 +252,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             _parser.LogRefusedWrite(FullPath, refusal!);
 
             // The graph keeps the refused values of a slot, and a later reload would give the blocks to them by
-            // their position, so a value would take the block of another one. The reload applies only the blocks
-            // whose text changed, so the subjects of this block are made to take their text again.
+            // their position, so a value would take the block of another one. The reload keeps the blocks whose
+            // text did not change as they are in memory, so this block and the blocks inside it are made to take
+            // their text again, and the blocks around it are read in full so that the reload reaches them.
             ForgetAppliedConfigurations(page.AllBlocks[blockIndex], snapshot.BlockSubjects);
+            ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             try
             {
                 await OnFileChangedAsync(cancellationToken);
@@ -289,15 +291,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         // The text of the block and of the blocks around it changes in the file, so a later read of the text that
         // they had before is a change that must be applied, also when the read inside the write is skipped or fails.
         // The blocks inside it keep their text.
-        var writtenBlock = page.AllBlocks[blockIndex];
-        foreach (var candidate in page.AllBlocks)
-        {
-            if (candidate.Line <= writtenBlock.Line && candidate.EndLine >= writtenBlock.EndLine &&
-                snapshot.BlockSubjects.TryGetValue(candidate.Index, out var candidateSubject))
-            {
-                _parser.ForgetAppliedBlock(candidateSubject);
-            }
-        }
+        ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
 
         // Before the write, because the storage reloads this file from inside WriteAsync. The reload
         // must find the keys that are now in the file, or a value that became null would recreate the subject.
@@ -311,6 +305,19 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         await Storage.WriteBlobAsync(FullPath, Encoding.UTF8.GetBytes(content), cancellationToken);
         return true;
+    }
+
+    // The block itself and every block whose lines contain its lines.
+    private void ForgetAppliedBlocksAround(MarkdownPage page, MarkdownBlock block, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects)
+    {
+        foreach (var candidate in page.AllBlocks)
+        {
+            if (candidate.Line <= block.Line && candidate.EndLine >= block.EndLine &&
+                blockSubjects.TryGetValue(candidate.Index, out var subject))
+            {
+                _parser.ForgetAppliedBlock(subject);
+            }
+        }
     }
 
     private void ForgetAppliedConfigurations(MarkdownBlock block, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects)

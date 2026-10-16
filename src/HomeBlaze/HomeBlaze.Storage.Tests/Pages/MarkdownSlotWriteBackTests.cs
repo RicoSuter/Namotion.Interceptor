@@ -632,6 +632,30 @@ public class MarkdownSlotWriteBackTests
     }
 
     [Fact]
+    public async Task WhenWriteOfABlockInsideAnotherBlockIsRefused_ThenItsSlotIsReadAgainAndALaterSaveIsWritten()
+    {
+        // Arrange: the swapped tiles stand in another order than their blocks, which refuses the write.
+        var (fixture, _) = await CreateFixtureWithLogAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md",
+            $":: {Namespace}.TestPanel#panel\n::: {BoardType}#board Columns=2\n" +
+            ":::: Tile Position=1\n::::\n:::: Tile Position=2\n::::\n:::\n::\n");
+        var board = Assert.IsType<TestBoard>(page.GetBlockSubject(1));
+        board.Tiles = [board.Tiles[1], board.Tiles[0]];
+
+        // Act
+        var isRefusedWriteWritten = await page.WriteConfigurationAsync(board, CancellationToken.None);
+        board.Columns = 3;
+        var isLaterWriteWritten = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.False(isRefusedWriteWritten);
+        Assert.Equal([1, 2], board.Tiles.Select(tile => tile.Position));
+        Assert.True(isLaterWriteWritten);
+        Assert.Contains($"::: {BoardType}#board Columns=3\n", await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
     public async Task WhenThePageCannotBeReadAgainAfterARefusedWrite_ThenFalseIsReturnedAndTheFailureIsLogged()
     {
         // Arrange: the lone carriage return refuses the removal, and the second read of the file fails.

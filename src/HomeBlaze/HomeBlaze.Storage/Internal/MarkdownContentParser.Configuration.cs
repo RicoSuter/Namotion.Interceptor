@@ -155,8 +155,8 @@ public sealed partial class MarkdownContentParser
     private bool TryKeepUnchangedBlock(IInterceptorSubject existing, MarkdownBlock block, ParseState state)
     {
         if (!_appliedBlocks.TryGetValue(existing, out var applied) ||
-            !state.TryGetBlockText(block, out var text) ||
-            !text.SequenceEqual(applied.Text))
+            !state.TryGetBlockSpan(block, out var start, out var length) ||
+            !state.Source.AsSpan(start, length).SequenceEqual(applied.Text))
         {
             return false;
         }
@@ -186,7 +186,7 @@ public sealed partial class MarkdownContentParser
     // name that another block took, and must go away when that changes.
     private void RememberAppliedBlock(IInterceptorSubject subject, MarkdownBlock block, ParseState state, int registrationCount)
     {
-        if (!state.TryGetBlockText(block, out var text))
+        if (!state.TryGetBlockSpan(block, out var start, out var length))
         {
             _appliedBlocks.Remove(subject);
             return;
@@ -201,7 +201,7 @@ public sealed partial class MarkdownContentParser
             }
         }
 
-        _appliedBlocks.AddOrUpdate(subject, new AppliedBlock(text.ToString(), innerSubjects.ToArray()));
+        _appliedBlocks.AddOrUpdate(subject, new AppliedBlock(state.Source, start, length, innerSubjects.ToArray()));
     }
 
     // Updating in place only sets the keys that are present. A key that was removed from the page
@@ -446,8 +446,14 @@ public sealed partial class MarkdownContentParser
         }
     }
 
-    /// <summary>The text of a block and the subjects of the blocks inside it, by their distance from the block.</summary>
-    private sealed record AppliedBlock(string Text, (int Offset, IInterceptorSubject Subject)[] InnerSubjects);
+    /// <summary>
+    /// Where the text of a block is in the text of the page it was parsed from, which all blocks of that parse share
+    /// instead of a copy each, and the subjects of the blocks inside it by their distance from the block.
+    /// </summary>
+    private sealed record AppliedBlock(string Source, int Start, int Length, (int Offset, IInterceptorSubject Subject)[] InnerSubjects)
+    {
+        public ReadOnlySpan<char> Text => Source.AsSpan(Start, Length);
+    }
 
     /// <summary>The merged configuration of one block and its top-level keys without the type discriminator.</summary>
     private readonly record struct BlockConfiguration(string Json, string[] Keys);
