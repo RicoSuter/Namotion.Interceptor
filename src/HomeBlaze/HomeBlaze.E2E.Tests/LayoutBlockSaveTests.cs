@@ -164,6 +164,31 @@ public class LayoutBlockSaveTests
     }
 
     [Fact]
+    public async Task WhenNodeOfCanvasOnPageHoldsACardBelowText_ThenItsEditDialogIsNamedAfterTheCard()
+    {
+        // Arrange
+        const string content = "---\ntitle: Canvas Demo\n---\n\n# Canvas Demo\n\n"
+            + ":: HomeBlaze.Components.CanvasLayout#canvas MinHeight=400\n"
+            + "::: Node X=40 Y=40 Width=300 Height=200\nText above.\n\n:::: HomeBlaze.Components.Card Title=\"Node Card\"\n::\n";
+
+        await WithPageAsync(CanvasPage, content, async () =>
+        {
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{CanvasPage}");
+            var node = page.Locator(".canvas-node.editing");
+            await Assertions.Expect(node.GetByText("Node Card", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+            // Act
+            await node.GetByTitle("Edit Node").ClickAsync();
+
+            // Assert
+            var dialog = page.Locator(".mud-dialog");
+            await Assertions.Expect(dialog.Locator(".mud-dialog-title h6")).ToHaveTextAsync("Edit Node: Node Card", new() { Timeout = Timeout });
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        });
+    }
+
+    [Fact]
     public async Task WhenNodeOfCanvasOnPageIsDragged_ThenOnlyTheLineOfThatNodeChanges()
     {
         // Arrange

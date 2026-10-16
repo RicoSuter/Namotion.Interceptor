@@ -69,6 +69,8 @@ public static class SubjectNames
             return null;
         }
 
+        // One level only: on a page the subject of a cell or a node is its page content, and its direct children are the
+        // widgets the user placed there. A deeper search would name a cell after a widget nested in one of them.
         foreach (var property in registeredSubject.Properties)
         {
             if (!property.CanContainSubjects)
