@@ -197,7 +197,7 @@ The agent reaches the graph through the HomeBlaze MCP tools. Each turn offers ex
 | Tool | Default | What it does |
 |---|---|---|
 | `browse` | on | Browses the subject tree and reads property values |
-| `search` | on | Finds subjects by title, path or type |
+| `search` | on | Finds subjects by title, path, type or property values |
 | `get_property` | on | Reads one property value |
 | `list_types` | on | Lists interfaces and concrete types, so subjects can be found by capability |
 | `list_methods` | on | Lists the methods of a subject, each with its kind (`query` or `operation`) and whether it requires confirmation |

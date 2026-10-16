@@ -146,6 +146,7 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
 | `includeAttributes` | false | Include registry attributes on properties |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
+| `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
 
@@ -190,12 +191,32 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 | `query` | (none) | Filter by path and enrichment values (e.g. `$title`, `$icon`); does not match types, interfaces, or property names |
 | `types` | all | Filter subjects by type/interface full names |
 | `path` | (none) | Scope search to a subtree path prefix |
+| `where` | (none) | Filter by property values, see [Filtering by value](#filtering-by-value) |
+| `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `includeProperties` | false | Include property values |
 | `includeAttributes` | false | Include registry attributes on properties |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
+
+#### Filtering by value
+
+`where` takes one C#-style expression over the subject's properties:
+
+```text
+IsConnected == false || BatteryLevel < 0.2 && Status != "Running"
+```
+
+- Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=` between a property name and a number, `true`, `false`, `null` or a string in double or single quotes. A bare word on the right, as in `Status != Running`, is read as a string.
+- Combine comparisons with `&&` (or `and`) and `||` (or `or`); `&&` binds tighter, and parentheses group.
+- Numbers compare numerically whatever their CLR type. Enums compare by name and strings case-insensitively for `==` and `!=`; strings order by ordinal. `DateTime` and `DateTimeOffset` values compare against an ISO 8601 string, a string without an offset read as UTC.
+- A subject without the property, with a null value under `<`, `<=`, `>` or `>=`, or with a value of an incompatible type does not match, for every operator including `!=`.
+- Only properties the path provider exposes can be filtered on.
+- An expression may be at most 1000 characters long and nest parentheses at most 32 levels deep.
+- An invalid expression returns an error naming the zero-based position, for example `where: use '==' for equality at position 12`.
+
+`browse` has no `where`; to filter a subtree, use `search` with `path` and `where`. Combine `where` with `properties` to return only the values the question needs.
 
 ### `get_property`
 
