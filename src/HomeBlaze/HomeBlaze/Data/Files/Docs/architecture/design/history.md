@@ -222,7 +222,7 @@ Empty bucket behavior is:
 
 | Aggregation | Empty bucket |
 |---|---|
-| `Count` | `0`, or null when the bucket is only partly covered |
+| `Count` | `0` |
 | `Last` | carried value, or null when unknown |
 | `TimeWeightedAverage` | carried value integrated over known duration, or null when unknown |
 | `Delta` | `0` when a counter reading is held, else null |
@@ -230,7 +230,7 @@ Empty bucket behavior is:
 
 Bucketed merger results include the complete newest bucket grid, subject to `MaxPoints`. Planning and store aggregation start at the first bucket that can appear in that output, so a multi-year request with a small point budget does not enumerate every older bucket. Buckets that no store covers at all are explicit null points. This lets the chart render gaps without guessing whether an omitted point means no data or truncation.
 
-Direct store queries apply the same coverage rule. A bucket is measured over `[bucket start, min(bucket end, To))` intersected with that store's coverage. A bucket with no covered part is null and clears carried state, except for `Delta`, whose counter reading survives it. A partly covered bucket is aggregated over its covered part: `Count` and `Sum` are null because they would underreport, and every other aggregation uses only the covered samples and covered time. Ending at `To` is not a coverage gap, so the newest bucket keeps `Count` and `Sum`.
+Direct store queries apply the same coverage rule. A bucket is measured over `[bucket start, min(bucket end, To))` intersected with that store's coverage. A bucket with no covered part is null and clears carried state, except for `Delta`, whose counter reading survives it. A partly covered bucket is aggregated over its covered part: every aggregation uses only the covered samples and covered time, so `Count` and `Sum` cover only that part and are lower bounds for the whole bucket. Ending at `To` is not a coverage gap. The MCP tool lists the partly covered buckets in `coverage.partial`, and the chart shows their `Count` and `Sum` as gaps.
 
 A held value never crosses a coverage gap, inside a bucket or between buckets. It is unknown at every coverage start until the first sample after it, and it is cleared at every coverage end, so `Last` and `TimeWeightedAverage` never synthesize values through a restart or drop gap. When `MaxPoints` clips older buckets, the store's coverage-scoped look-back at the clipped boundary replaces any `CarrySeed`, and a null look-back clears it. `Delta` is the exception: its seed is replaced by the last numeric reading before the first kept bucket, wherever it lies.
 
@@ -332,7 +332,7 @@ The parity test suite feeds identical cases to both engines. Any future Timescal
 
 The history subjects implement `ITitleProvider` and render as "In-Memory History" and "SQLite History".
 
-The property history dialog is available for eligible `[State]` properties when at least one store exists. It supports preset and custom ranges, raw or bucketed queries, and type-aware aggregation choices. Numeric properties render as a line chart, split at explicit null gaps. A run with a single point is drawn as a flat segment so it stays visible: one bucket wide for a bucketed query, held until the next point for raw samples, and never past the window end.
+The property history dialog is available for eligible `[State]` properties when at least one store exists. It supports preset and custom ranges, raw or bucketed queries, and type-aware aggregation choices. Numeric properties render as a line chart, split at explicit null gaps. A `Count` or `Sum` bucket that the series coverage covers only partly is drawn as a gap too rather than as a too-low value; a bucket is measured within the requested window, so the oldest and newest buckets reaching past it are not partial for that alone. A run with a single point is drawn as a flat segment so it stays visible: one bucket wide for a bucketed query, held until the next point for raw samples, and never past the window end.
 
 ### State timeline
 
@@ -367,8 +367,8 @@ Filling the start of a window needs the value held entering it, which a raw quer
 
 The response carries the resolved `from` and `to`, the `time_zone`, one coverage summary and a per-path `series` map:
 
-- `coverage`: the covered fraction of the range (`ratio`, rounded toward zero so a range with a gap never reads as 1), the number of `gaps` and the `largest_gap` as a compact duration such as `2h14m`. With `coverage: "ranges"` it also lists the covered `ranges` as `[from, to]` pairs. It is the coverage of the first served series; a series whose coverage differs, for example because the point limit truncated it, carries its own `ranges` when ranges are requested.
-- per path: a value type hint (number / string / boolean / enum), the `unit` when the property's State attribute has one other than `Default` (the `StateUnit` name, for example `WattHour`), points as `[timestamp, value]` pairs including explicit null gaps, and `truncated: true` when the point limit cut the series. `Delta` returns the counter's own unit, so a `WattHour` counter yields Wh per bucket. Values an aggregation computes (`SampleAverage`, `TimeWeightedAverage`, `Sum`, `StandardDeviation` and `Delta`) are rounded to 12 significant digits (`500.18000000000757` becomes `500.18`); raw samples and the aggregations that return a recorded sample (`Last`, `First`, `Minimum`, `Maximum`) and `Count` are returned as recorded.
+- `coverage`: the covered fraction of the range (`ratio`, rounded toward zero so a range with a gap never reads as 1), the number of `gaps` and the `largest_gap` as a compact duration such as `2h14m`. With `coverage: "ranges"` it also lists the covered `ranges` as `[from, to]` pairs. For a bucketed query, `partial` lists the buckets of the returned grid that this coverage covers only partly, in the form of the points' first element (a calendar label or a full timestamp); their `Count` and `Sum` are lower bounds over the covered part. A bucket is measured within `[from, to)`, so the oldest bucket starting before `from` and the newest ending at `to` are not partial for that alone. `partial` is omitted when empty and for raw queries. It is the coverage of the first served series; a series whose coverage differs, for example because the point limit truncated it, carries its own `ranges` when ranges are requested.
+- per path: a value type hint (number / string / boolean / enum), the `unit` when the property's State attribute has one other than `Default` (the `StateUnit` name, for example `WattHour`), points as `[timestamp, value]` pairs, where a null value means no coverage or no known value. The point limit keeps the newest points and drops the oldest: a cut series carries `truncated: true` and `complete_from`, the full timestamp of its first returned point, from which the series is complete (for calendar buckets too, not a label). A caller narrows `from` and `to` or uses a coarser bucket to see older data. `Delta` returns the counter's own unit, so a `WattHour` counter yields Wh per bucket. Values an aggregation computes (`SampleAverage`, `TimeWeightedAverage`, `Sum`, `StandardDeviation` and `Delta`) are rounded to 12 significant digits (`500.18000000000757` becomes `500.18`); raw samples and the aggregations that return a recorded sample (`Last`, `First`, `Minimum`, `Maximum`) and `Count` are returned as recorded.
 
 When no path could be served, `coverage` is omitted.
 
@@ -400,7 +400,7 @@ Queries should send the relevant range predicate to PostgreSQL rather than loadi
 - The in-memory store loses all data on restart.
 - Move detection cannot discover moves that occurred while HomeBlaze was stopped.
 - Per-property time resolution is bounded by the change queue's coalescing interval.
-- When the requested bucket size exceeds `InMemory.MaxAge`, no store covers the whole newest bucket, so it is served partially, usually by the persistent store, whose coverage covers the bucket start but ends at its last flush. It omits the samples outside that store's coverage and its `Count` and `Sum` are null. Raise `MaxAgeSeconds` for a complete live edge.
+- When the requested bucket size exceeds `InMemory.MaxAge`, no store covers the whole newest bucket, so it is served partially, usually by the persistent store, whose coverage covers the bucket start but ends at its last flush. It omits the samples outside that store's coverage, so its `Count` and `Sum` are lower bounds. Raise `MaxAgeSeconds` for a complete live edge.
 - For a value that has not changed within `InMemory.MaxAge`, `Last` and `TimeWeightedAverage` can be briefly null at the live edge: right after a bucket boundary, until the persistent store flushes past it. The held value is not looked up across stores.
 - No sample is recorded when recording resumes, so after a restart a property shows no value until it next changes.
 - Subject-bearing state, full graph snapshots, `Rate`, `StateDuration`, interpolation, compression, and continuous aggregates are future work.
