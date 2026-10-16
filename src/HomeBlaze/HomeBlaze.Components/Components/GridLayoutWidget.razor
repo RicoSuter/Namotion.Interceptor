@@ -22,16 +22,17 @@
     @foreach (var cell in Cells)
     {
         <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
+            <div class="grid-cell-content">
+                <SubjectComponent Subject="@cell.Child"
+                                  Type="SubjectComponentType.Widget" />
+            </div>
+            @* After the content, so that Tab reaches them right after a selected widget in the cell. *@
             @if (IsEditing)
             {
                 <LayoutItemActions EditTitle="Edit Cell"
                                    OnEdit="() => EditCell(cell)"
                                    OnDelete="() => DeleteCell(cell)" />
             }
-            <div class="grid-cell-content">
-                <SubjectComponent Subject="@cell.Child"
-                                  Type="SubjectComponentType.Widget" />
-            </div>
         </div>
     }
 

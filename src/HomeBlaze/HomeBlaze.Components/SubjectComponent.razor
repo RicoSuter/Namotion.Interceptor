@@ -151,7 +151,7 @@
 
     // Every block of a page is configurable, also one without configuration properties of its own. The content of a slot,
     // such as the text of a card, and an expression in the text are not.
-    private bool IsSelectable =>
+    internal bool IsSelectable =>
         IsEditing &&
         Type == SubjectComponentType.Widget &&
         Selection != null &&

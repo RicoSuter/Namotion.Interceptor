@@ -75,6 +75,9 @@ public class NestedSubjectSaveTests
 
     private static async Task SaveCellWithColumnSpanThreeAsync(IPage page)
     {
+        // The cells show their buttons once the grid is selected, which a click on one of its free places does.
+        await page.Locator(".grid-layout-container").First.Locator(":scope > .grid-cell.empty").First.SelectWidgetAsync();
+
         var editCellButton = page.GetByTitle("Edit Cell");
         await Assertions.Expect(editCellButton).ToBeVisibleAsync(new() { Timeout = 30000 });
         await editCellButton.ClickAsync();

@@ -408,6 +408,9 @@ public class CanvasLayoutTests
         var page = await OpenCanvasPageAsync(editMode: "Split");
         var node = GetNodes(page).First;
 
+        // A click on the node selects the widget in it, which shows the buttons of the nodes.
+        await node.SelectWidgetAsync();
+
         // Act
         await node.GetByTitle("Edit Node").ClickAsync();
 

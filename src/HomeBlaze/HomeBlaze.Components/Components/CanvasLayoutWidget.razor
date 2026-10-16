@@ -35,17 +35,18 @@
                          @onmouseup:stopPropagation="@(!IsEditing)"
                          @onmousemove:stopPropagation="@(!IsEditing)"
                          @onkeydown:stopPropagation="@(!IsEditing)">
+                        <div class="canvas-node-content">
+                            <SubjectComponent @ref="_nodeComponents[node]"
+                                              Subject="@node.Child"
+                                              Type="SubjectComponentType.Widget" />
+                        </div>
+                        @* After the content, so that Tab reaches them right after a selected widget in the node. *@
                         @if (IsEditing)
                         {
                             <LayoutItemActions EditTitle="Edit Node"
                                                OnEdit="() => EditNode(node)"
                                                OnDelete="() => DeleteNode(node)" />
                         }
-                        <div class="canvas-node-content">
-                            <SubjectComponent @ref="_nodeComponents[node]"
-                                              Subject="@node.Child"
-                                              Type="SubjectComponentType.Widget" />
-                        </div>
                     </div>
                 </Node>
             }
@@ -153,6 +154,10 @@
     [CascadingParameter]
     public WidgetSelection? Selection { get; set; }
 
+    // The widget that shows this canvas.
+    [CascadingParameter(Name = "ParentSubjectComponent")]
+    private SubjectComponent? OwnComponent { get; set; }
+
     private CanvasLayout? Canvas => Subject as CanvasLayout;
 
     private CanvasNode[] Nodes => Canvas?.Nodes ?? [];
@@ -246,10 +251,17 @@
             return;
         }
 
-        // A click on a node selects its widget, on a page the first widget in the content of the node.
+        // A click on a node selects its widget, on a page the first widget in the content of the node. A node without one
+        // selects the canvas, which shows the buttons of its nodes.
         if (_pressedNode is { } node)
         {
-            if (_nodeComponents.TryGetValue(node, out var component) && component.FindSelectable() is { } selectable)
+            var selectable = _nodeComponents.TryGetValue(node, out var component) ? component.FindSelectable() : null;
+            if (selectable is null && OwnComponent is { IsSelectable: true })
+            {
+                selectable = OwnComponent;
+            }
+
+            if (selectable is not null)
             {
                 Selection?.Select(selectable);
             }

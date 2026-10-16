@@ -62,7 +62,7 @@ The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/Targ
 - The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
 - Give a cell a `#name` to keep it and everything in it when cells are added or removed, see [What an Edit of the Page Keeps](../pages.md#what-an-edit-of-the-page-keeps).
 - In a configuration file of its own, a `GridLayout` has its cells as the list `cells`, each with one subject as `child`. On a page they are always `Cell` blocks as above, and the [`json` block](../pages.md#the-json-block) cannot set them.
-- While the page is in edit mode, each cell has buttons to edit and remove it, and once the grid itself is selected, a click on the plus in a free place adds a cell there, see [Editing in the Page Editor](../pages.md#editing-in-the-page-editor).
+- While the page is in edit mode, each cell has buttons to edit and remove it, which show while the grid or a widget in one of its cells is selected. A click on a cell without a widget, or on a free place, selects the grid, and once the grid itself is selected, a click on the plus in a free place adds a cell there, see [Editing in the Page Editor](../pages.md#editing-in-the-page-editor).
 
 ## Related
 

@@ -93,7 +93,9 @@ public class LayoutBlockSaveTests
         {
             var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
             var firstCell = page.Locator(".grid-cell.editing").Filter(new() { HasText = "first cell" });
-            await Assertions.Expect(firstCell).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+            // The cells show their buttons once the grid is selected, which a click on text in a cell does.
+            await firstCell.SelectWidgetAsync();
 
             // Act
             await firstCell.GetByTitle("Delete", new() { Exact = true }).ClickAsync();
@@ -113,17 +115,19 @@ public class LayoutBlockSaveTests
     }
 
     [Fact]
-    public async Task WhenEmptyCellOfGridOnPageIsShownInEditMode_ThenItHasItsButtons()
+    public async Task WhenGridWithAnEmptyCellIsSelected_ThenTheEmptyCellHasItsButtons()
     {
         // Arrange
         await WithPageAsync(GridPage, CreateGridPage("::: Cell Row=0 Column=0"), async () =>
         {
-            // Act
             var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
-
-            // Assert
             var cell = page.Locator(".grid-cell.editing");
             await Assertions.Expect(cell).ToHaveCountAsync(1, new() { Timeout = Timeout });
+
+            // Act: the cell has no widget, so a click on it selects the grid.
+            await cell.SelectWidgetAsync();
+
+            // Assert
             await Assertions.Expect(cell.GetByTitle("Edit Cell")).ToBeVisibleAsync();
             await Assertions.Expect(cell.GetByTitle("Delete", new() { Exact = true })).ToBeVisibleAsync();
 
@@ -150,7 +154,7 @@ public class LayoutBlockSaveTests
         {
             var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
             var cell = page.Locator(".grid-cell.editing");
-            await Assertions.Expect(cell.GetByText("Cell Card", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await cell.GetByText("Cell Card", new() { Exact = true }).SelectWidgetAsync();
 
             // Act
             await cell.GetByTitle("Edit Cell").ClickAsync();
@@ -176,6 +180,11 @@ public class LayoutBlockSaveTests
             var page = await _fixture.OpenPageInEditModeAsync($"Demo/{CanvasPage}");
             var node = page.Locator(".canvas-node.editing");
             await Assertions.Expect(node.GetByText("Node Card", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+            // A click on the node selects the card in it, which shows the buttons of the node. The canvas selects a node
+            // with a press only once the library has drawn the area that moves it.
+            await Assertions.Expect(page.Locator(".canvas-layout-container.editing svg rect")).ToHaveCountAsync(2, new() { Timeout = Timeout });
+            await node.SelectWidgetAsync();
 
             // Act
             await node.GetByTitle("Edit Node").ClickAsync();
@@ -249,7 +258,7 @@ public class LayoutBlockSaveTests
         {
             var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
             var cell = page.Locator(".grid-cell.editing").Filter(new() { HasText = "the cell" });
-            await Assertions.Expect(cell).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await cell.SelectWidgetAsync();
 
             // Act
             await cell.GetByTitle("Edit Cell").ClickAsync();
