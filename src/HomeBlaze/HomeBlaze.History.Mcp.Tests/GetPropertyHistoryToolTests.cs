@@ -503,4 +503,43 @@ public class GetPropertyHistoryToolTests
         // Assert
         Assert.Equal("Unknown time zone 'Mars/Olympus'.", json.GetProperty("error").GetString());
     }
+
+    [Fact]
+    public async Task WhenDeltaHasNoBucket_ThenStructuredError()
+    {
+        // Act - raw samples ignore the aggregation, so this used to return cumulative readings as if they were increases.
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Energy" }, from = "2026-01-01T00:00:00Z", to = "2026-01-02T00:00:00Z", aggregation = "Delta" },
+            store => { });
+
+        // Assert
+        Assert.Equal("Delta needs a bucket.", json.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task WhenTimeZoneIsBlank_ThenItCountsAsAbsent()
+    {
+        // Act
+        var json = await InvokeAsync(new { paths = new[] { "/Energy" }, from = "2026-01-01T00:00:00Z", to = "2026-01-03T00:00:00Z", bucket = "day", time_zone = "  " });
+
+        // Assert
+        Assert.False(json.TryGetProperty("error", out _));
+        Assert.Equal(HistoryToolParsing.GetIanaId(TimeZoneInfo.Local), json.GetProperty("time_zone").GetString());
+    }
+
+    [Fact]
+    public async Task WhenDeltaPathDoesNotResolve_ThenThatPathCarriesANotFoundError()
+    {
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Missing", "/Energy" }, from = "2026-01-01T00:00:00Z", to = "2026-03-01T00:00:00Z", bucket = "month", time_zone = "Europe/Zurich", aggregation = "Delta" },
+            store => { });
+
+        // Assert
+        var series = json.GetProperty("series");
+        Assert.Equal(
+            "Property not found; Delta needs the property to check that it is cumulative.",
+            series.GetProperty("/Missing").GetProperty("error").GetString());
+        Assert.False(series.GetProperty("/Energy").TryGetProperty("error", out _));
+    }
 }

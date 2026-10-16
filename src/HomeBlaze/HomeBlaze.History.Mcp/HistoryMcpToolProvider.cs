@@ -198,7 +198,9 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         var bucketText = input.TryGetProperty("bucket", out var bucketElement) && bucketElement.ValueKind == JsonValueKind.String
             ? bucketElement.GetString()
             : null;
-        var timeZoneText = input.TryGetProperty("time_zone", out var timeZoneElement) && timeZoneElement.ValueKind == JsonValueKind.String
+        // Blank counts as absent, as for bucket and aggregation.
+        var timeZoneText = input.TryGetProperty("time_zone", out var timeZoneElement) && timeZoneElement.ValueKind == JsonValueKind.String &&
+                           !string.IsNullOrWhiteSpace(timeZoneElement.GetString())
             ? timeZoneElement.GetString()
             : null;
         var calendarUnit = HistoryToolParsing.ParseCalendarUnit(bucketText);
@@ -258,6 +260,12 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 error = "Unknown aggregation.",
                 available = HistoryToolParsing.AllAggregations.OrderBy(name => name).ToArray()
             };
+        }
+
+        // Raw samples ignore the aggregation, so Delta would return the cumulative readings as if they were increases.
+        if (aggregation == HistoryAggregations.Delta && bucket is null)
+        {
+            return new { error = "Delta needs a bucket." };
         }
 
         if (HasWrongType(input, "coverage") is { } coverageTypeError)
@@ -415,6 +423,15 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             if (resolved is { } match && HistoryColumns.IsRecordable(match.Property.Type))
             {
                 valueType = HistoryToolParsing.ValueType(match.Property.Type);
+            }
+
+            if (aggregation == HistoryAggregations.Delta && resolved is null)
+            {
+                return new PathResult(path, valueType, null, new
+                {
+                    value_type = valueType,
+                    error = "Property not found; Delta needs the property to check that it is cumulative."
+                });
             }
 
             if (aggregation == HistoryAggregations.Delta && !IsCumulative(resolved?.Property))
