@@ -33,7 +33,7 @@ public static class HistoryStoreMerger
             .ToArray();
         var plan = query.Bucket is null
             ? HistoryDispatchPlanner.PlanRaw(snapshots, query)
-            : HistoryDispatchPlanner.PlanBucketed(snapshots, query);
+            : HistoryDispatchPlanner.PlanBucketed(snapshots, query, cancellationToken);
         return await ExecuteWithBudget(ordered, plan, query, cancellationToken).ConfigureAwait(false);
     }
 
@@ -388,7 +388,13 @@ public static class HistoryStoreMerger
                 builder.Add(byTimestamp.TryGetValue(bucketStart, out var point)
                     ? point
                     : new HistoryPoint(bucketStart, null, null));
-                bucketStart = BucketAlignment.Next(bucketStart, bucket);
+                var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
+                if (bucketEnd <= bucketStart)
+                {
+                    throw new InvalidOperationException($"The {bucket} bucket starting at {bucketStart:O} does not advance.");
+                }
+
+                bucketStart = bucketEnd;
             }
 
             points = builder.DrainToImmutable();

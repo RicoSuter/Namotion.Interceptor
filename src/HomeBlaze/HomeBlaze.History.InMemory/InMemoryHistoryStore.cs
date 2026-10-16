@@ -544,6 +544,10 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         while (bucketStart < query.To)
         {
             var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
+            if (bucketEnd <= bucketStart)
+            {
+                throw new InvalidOperationException($"The {bucket} bucket starting at {bucketStart:O} does not advance.");
+            }
 
             // Samples are ascending, so the bucket's slice starts at the cursor and runs to the first
             // sample at or after bucketEnd.

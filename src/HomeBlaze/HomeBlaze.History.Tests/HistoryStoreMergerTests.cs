@@ -1062,4 +1062,31 @@ public class HistoryStoreMergerTests
         Assert.Equal(2, seriesList.Count);
         Assert.All(seriesList, series => Assert.Empty(series.Points));
     }
+
+    [Fact]
+    public async Task WhenACalendarDayIsSkipped_ThenTheQueryCompletes()
+    {
+        // Arrange - Fakaofo skipped 2011-12-30; its zero-width day bucket used to spin the planner forever.
+        var bucket = HistoryBucket.Calendar(
+            HistoryCalendarUnit.Day, TimeZoneInfo.FindSystemTimeZoneById("Pacific/Fakaofo"));
+        var query = new HistoryQuery(
+            "/X",
+            new DateTimeOffset(2011, 12, 28, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2012, 1, 2, 0, 0, 0, TimeSpan.Zero),
+            bucket,
+            HistoryAggregations.Last);
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(query.From, query.To)
+        };
+
+        // Act - the timeout fails the test instead of hanging the suite if the grid stops advancing.
+        var series = await Task.Run(() => new[] { store }.QueryHistoryAsync(query, CancellationToken.None))
+            .WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert - local days 12-27 (partly), 12-28, 12-29, 12-31, 01-01 and 01-02 (partly); 12-30 never happened.
+        Assert.Equal(6, series.Points.Length);
+        Assert.Equal(series.Points.Select(point => point.Timestamp).Distinct().Count(), series.Points.Length);
+    }
 }

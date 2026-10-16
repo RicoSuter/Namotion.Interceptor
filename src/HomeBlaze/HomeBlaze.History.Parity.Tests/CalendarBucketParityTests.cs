@@ -67,6 +67,33 @@ public class CalendarBucketParityTests
 
     [Theory]
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenLocalMidnightIsSkipped_ThenTheShortDayStartsAtTheTransition(ParityStoreFactory factory)
+    {
+        // Arrange - Asuncion went from -04:00 to -03:00 at local midnight of 2023-10-01, so 2023-09-30 runs from
+        // 04:00Z to the transition at 04:00Z the next day, and 2023-10-01 is 23 hours long. One sample per hour.
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Asuncion");
+        var from = new DateTimeOffset(2023, 9, 30, 4, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2023, 10, 2, 3, 0, 0, TimeSpan.Zero);
+        using var store = factory.Create();
+        for (var instant = from; instant < to; instant = instant.AddHours(1))
+        {
+            store.Record("/a/Value", instant, 1d, typeof(double));
+        }
+
+        await store.FlushAsync();
+        var query = new HistoryQuery(
+            "/a/Value", from, to, HistoryBucket.Calendar(HistoryCalendarUnit.Day, timeZone), HistoryAggregations.Count, MaxPoints: 1000);
+
+        // Act
+        var series = store.Query(query);
+
+        // Assert
+        Assert.Equal([from, from.AddDays(1)], series.Points.Select(point => point.Timestamp).ToArray());
+        ParityAssert.NumbersEqual([24d, 23d], series);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
     public async Task WhenMonthBucketsAreQueried_ThenEachMonthCountsItsOwnDays(ParityStoreFactory factory)
     {
         // Arrange - one sample per day at UTC noon, which is the same local date in Zurich.

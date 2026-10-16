@@ -66,7 +66,8 @@ internal static class HistoryDispatchPlanner
 
     public static IReadOnlyList<PlannedSegment> PlanBucketed(
         IReadOnlyList<StoreCoverageSnapshot> stores,
-        HistoryQuery query)
+        HistoryQuery query,
+        CancellationToken cancellationToken)
     {
         var bucket = query.Bucket!.Value;
         var segments = new List<PlannedSegment>();
@@ -82,7 +83,12 @@ internal static class HistoryDispatchPlanner
         var bucketStart = BucketAlignment.FirstBucketStart(query.From, query.To, bucket, query.MaxPoints);
         while (bucketStart < query.To)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
+            if (bucketEnd <= bucketStart)
+            {
+                throw new InvalidOperationException($"The {bucket} bucket starting at {bucketStart:O} does not advance.");
+            }
 
             // Clipped at To for ownership and the segment end alike: unclipped, the live edge would look
             // partly uncovered and the sub-query could aggregate samples from after To.

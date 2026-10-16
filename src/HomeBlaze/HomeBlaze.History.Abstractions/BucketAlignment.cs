@@ -7,6 +7,9 @@ namespace HomeBlaze.History.Abstractions;
 /// </summary>
 public static class BucketAlignment
 {
+    private static readonly TimeSpan SearchMargin = TimeSpan.FromHours(15);
+    private static readonly TimeSpan TransitionScanStep = TimeSpan.FromHours(6);
+
     /// <summary>
     /// Returns the start of the bucket containing <paramref name="ts"/> for the given
     /// <paramref name="bucket"/> size, anchored at the Unix epoch.
@@ -63,8 +66,10 @@ public static class BucketAlignment
 
     /// <summary>
     /// Returns the start of the bucket containing <paramref name="timestamp"/>, as a UTC instant. A fixed bucket is
-    /// anchored at the Unix epoch; a calendar bucket starts at local midnight of its period in the bucket's time zone,
-    /// or at the first instant after it when the clocks skip midnight.
+    /// anchored at the Unix epoch. A calendar period starts at the earliest instant whose local date in the bucket's
+    /// time zone is on or after the period's first date: local midnight, or the transition when the clocks skip it,
+    /// or the earlier instant when it occurs twice. Buckets partition time by these start instants, so the result is
+    /// at or before <paramref name="timestamp"/> and the next bucket starts after it.
     /// </summary>
     public static DateTimeOffset Start(DateTimeOffset timestamp, HistoryBucket bucket)
     {
@@ -74,11 +79,27 @@ public static class BucketAlignment
         }
 
         var (unit, timeZone) = GetCalendar(bucket);
-        return ToInstant(PeriodStartDate(TimeZoneInfo.ConvertTime(timestamp, timeZone).DateTime, unit), timeZone);
+        var periodStart = PeriodStartDate(TimeZoneInfo.ConvertTime(timestamp, timeZone).DateTime, unit);
+        var start = PeriodStartInstant(periodStart, timeZone);
+
+        // The local date can fall back across midnight, so a later period may already have started.
+        while (true)
+        {
+            periodStart = AddPeriod(periodStart, unit);
+            var nextStart = PeriodStartInstant(periodStart, timeZone);
+            if (nextStart > timestamp)
+            {
+                return start;
+            }
+
+            start = nextStart;
+        }
     }
 
     /// <summary>
-    /// Returns the start of the bucket after the one starting at <paramref name="bucketStart"/>, as a UTC instant.
+    /// Returns the start of the bucket after the one containing <paramref name="bucketStart"/>, as a UTC instant.
+    /// The result is always after <paramref name="bucketStart"/>; a calendar period that never occurs locally, such
+    /// as a skipped day, gets no bucket.
     /// </summary>
     public static DateTimeOffset Next(DateTimeOffset bucketStart, HistoryBucket bucket)
     {
@@ -94,14 +115,15 @@ public static class BucketAlignment
 
         var (unit, timeZone) = GetCalendar(bucket);
         var periodStart = PeriodStartDate(TimeZoneInfo.ConvertTime(bucketStart, timeZone).DateTime, unit);
-        var nextPeriodStart = unit switch
+        while (true)
         {
-            HistoryCalendarUnit.Day => periodStart.AddDays(1),
-            HistoryCalendarUnit.Week => periodStart.AddDays(7),
-            HistoryCalendarUnit.Month => periodStart.AddMonths(1),
-            _ => periodStart.AddYears(1)
-        };
-        return ToInstant(nextPeriodStart, timeZone);
+            periodStart = AddPeriod(periodStart, unit);
+            var nextStart = PeriodStartInstant(periodStart, timeZone);
+            if (nextStart > bucketStart)
+            {
+                return nextStart;
+            }
+        }
     }
 
     /// <summary>
@@ -157,20 +179,72 @@ public static class BucketAlignment
         };
     }
 
-    // Local midnight to a UTC instant. A skipped midnight resolves to the transition, the first local time that
-    // exists; a repeated one to the earlier instant.
-    private static DateTimeOffset ToInstant(DateTime localMidnight, TimeZoneInfo timeZone)
+    private static DateTime AddPeriod(DateTime periodStart, HistoryCalendarUnit unit) => unit switch
     {
-        var local = DateTime.SpecifyKind(localMidnight, DateTimeKind.Unspecified);
-        if (timeZone.IsInvalidTime(local))
+        HistoryCalendarUnit.Day => periodStart.AddDays(1),
+        HistoryCalendarUnit.Week => periodStart.AddDays(7),
+        HistoryCalendarUnit.Month => periodStart.AddMonths(1),
+        _ => periodStart.AddYears(1)
+    };
+
+    // The earliest instant whose local time is at or after localStart. Only UTC to local conversions are used,
+    // because .NET answers the local to UTC questions (IsInvalidTime, GetUtcOffset(DateTime)) inconsistently
+    // with them around some transitions, which made a bucket end where it started.
+    private static DateTimeOffset PeriodStartInstant(DateTime localStart, TimeZoneInfo timeZone)
+    {
+        var target = new DateTimeOffset(DateTime.SpecifyKind(localStart, DateTimeKind.Unspecified), TimeSpan.Zero);
+
+        // UTC offsets stay within 14 hours, so the local time is still before localStart here.
+        var segmentStart = target - SearchMargin;
+        var offset = timeZone.GetUtcOffset(segmentStart);
+        while (true)
         {
-            var offsetBefore = timeZone.GetUtcOffset(local.AddDays(-1));
-            return new DateTimeOffset(local - offsetBefore, TimeSpan.Zero);
+            // Within a segment of constant offset the local time rises with the instant.
+            var candidate = target - offset;
+            if (candidate <= segmentStart)
+            {
+                return segmentStart;
+            }
+
+            var offsetChange = FindOffsetChange(timeZone, segmentStart, candidate, offset);
+            if (offsetChange is not { } transition)
+            {
+                return candidate;
+            }
+
+            segmentStart = transition;
+            offset = timeZone.GetUtcOffset(transition);
+        }
+    }
+
+    // The first instant in (low, high] whose offset differs from the offset at low, or null. Offset changes
+    // that revert within one scan step are not seen; no zone has them.
+    private static DateTimeOffset? FindOffsetChange(TimeZoneInfo timeZone, DateTimeOffset low, DateTimeOffset high, TimeSpan offset)
+    {
+        while (low < high)
+        {
+            var probe = high - low > TransitionScanStep ? low + TransitionScanStep : high;
+            if (timeZone.GetUtcOffset(probe) != offset)
+            {
+                while ((probe - low).Ticks > 1)
+                {
+                    var middle = low.AddTicks((probe - low).Ticks / 2);
+                    if (timeZone.GetUtcOffset(middle) == offset)
+                    {
+                        low = middle;
+                    }
+                    else
+                    {
+                        probe = middle;
+                    }
+                }
+
+                return probe;
+            }
+
+            low = probe;
         }
 
-        var offset = timeZone.IsAmbiguousTime(local)
-            ? timeZone.GetAmbiguousTimeOffsets(local).Max()
-            : timeZone.GetUtcOffset(local);
-        return new DateTimeOffset(local, offset).ToUniversalTime();
+        return null;
     }
 }

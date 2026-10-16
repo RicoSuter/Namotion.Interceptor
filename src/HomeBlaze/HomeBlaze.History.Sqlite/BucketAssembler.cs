@@ -117,6 +117,10 @@ internal static class BucketAssembler
         while (bucketStartTimestamp < query.To)
         {
             var bucketEndTimestamp = BucketAlignment.Next(bucketStartTimestamp, bucket);
+            if (bucketEndTimestamp <= bucketStartTimestamp)
+            {
+                throw new InvalidOperationException($"The {bucket} bucket starting at {bucketStartTimestamp:O} does not advance.");
+            }
 
             // Measured over [bucket start, min(bucket end, To)) within coverage (partial buckets: history.md).
             var clippedEnd = bucketEndTimestamp < query.To ? bucketEndTimestamp : query.To;
