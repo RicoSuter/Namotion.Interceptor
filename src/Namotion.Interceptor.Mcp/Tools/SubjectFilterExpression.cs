@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// property against a number, <c>true</c>, <c>false</c>, <c>null</c> or a string, combined with
 /// <c>&amp;&amp;</c> (<c>and</c>), <c>||</c> (<c>or</c>) and parentheses, where <c>&amp;&amp;</c> binds tighter.
 /// Properties resolve through the path provider, so a filter only sees properties the provider exposes.
-/// A missing property, a null value under an ordering operator or an incompatible type never matches.
+/// A missing property, a null value against a non-null literal or an incompatible type never matches.
 /// </summary>
 internal sealed class SubjectFilterExpression
 {
@@ -125,7 +125,7 @@ internal sealed class SubjectFilterExpression
             {
                 (bool boolean, bool literalBoolean) when isEquality => boolean == literalBoolean ? 0 : 1,
                 (Enum enumValue, string name) when isEquality =>
-                    string.Equals(enumValue.ToString(), name, StringComparison.OrdinalIgnoreCase) ? 0 : 1,
+                    string.Equals(GetEnumName(enumValue), name, StringComparison.OrdinalIgnoreCase) ? 0 : 1,
                 (string text, string literalText) => isEquality
                     ? string.Equals(text, literalText, StringComparison.OrdinalIgnoreCase) ? 0 : 1
                     : string.CompareOrdinal(text, literalText),
@@ -152,6 +152,11 @@ internal sealed class SubjectFilterExpression
                 _ => result >= 0
             };
         }
+
+        // The cached name of a defined value, so a match does not allocate; ToString only for flag combinations
+        // and undefined values.
+        private static string GetEnumName(Enum enumValue) =>
+            Enum.GetName(enumValue.GetType(), enumValue) ?? enumValue.ToString();
 
         private static bool IsNumber(object value) =>
             value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal;
