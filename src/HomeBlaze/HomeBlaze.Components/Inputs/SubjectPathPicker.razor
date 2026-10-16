@@ -308,9 +308,9 @@
                 var isEnabledAttribute = property.TryGetAttribute(KnownAttributes.IsEnabled);
                 var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
 
-                // Check if property can be selected; reuse IsListedMethod's result instead of calling the
+                // Check if property can be selected; for a method reuse IsListedMethod's result instead of calling the
                 // predicate a second time for the same property.
-                var canSelect = isListedMethod || CanSelectProperty == null || CanSelectProperty(property);
+                var canSelect = method is not null ? isListedMethod : CanSelectProperty == null || CanSelectProperty(property);
 
                 var pathItem = new PathTreeItem
                 {
