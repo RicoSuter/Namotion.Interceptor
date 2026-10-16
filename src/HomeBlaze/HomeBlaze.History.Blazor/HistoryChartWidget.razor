@@ -418,6 +418,7 @@
             _hasStores = stores.Length > 0;
             if (stores.Length == 0)
             {
+                _queryError = null;
                 StateHasChanged();
                 return;
             }
