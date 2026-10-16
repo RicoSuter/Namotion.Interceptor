@@ -69,6 +69,18 @@
         }
     }
 
+    /// <summary>
+    /// Gets the title of the dialog that edits a widget, "Edit" or "Edit {title}", or an item of a layout, such as
+    /// "Edit Cell" or "Edit Cell: {title}".
+    /// </summary>
+    internal static string GetTitle(string? itemName, string? title) => (itemName, title) switch
+    {
+        (null, null) => "Edit",
+        (null, _) => $"Edit {title}",
+        (_, null) => $"Edit {itemName}",
+        _ => $"Edit {itemName}: {title}"
+    };
+
     public static Task<IDialogReference> ShowAsync(
         IDialogService dialogService,
         SubjectComponentRegistry componentRegistry,

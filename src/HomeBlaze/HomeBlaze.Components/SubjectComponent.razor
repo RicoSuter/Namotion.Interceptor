@@ -339,7 +339,7 @@
             return;
 
         var title = SubjectNames.TryGetTitle(Subject, _labelProperty);
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, title is null ? "Edit" : $"Edit {title}");
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, SubjectEditDialog.GetTitle(null, title));
     }
 
     public void Dispose()
