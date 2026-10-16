@@ -28,9 +28,16 @@ public class SpacingLayoutTests
         _fixture = fixture;
     }
 
-    private async Task<IPage> OpenPageAsync(bool isInlineMode = false)
+    private async Task<IPage> OpenPageAsync(bool isInlineMode = false, int? width = null)
     {
         var page = await _fixture.CreatePageAsync();
+
+        // Before the page opens: a narrower window closes the navigation drawer with a transition.
+        if (width is { } viewportWidth)
+        {
+            await page.SetViewportSizeAsync(viewportWidth, 900);
+        }
+
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Spacing.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
@@ -175,8 +182,7 @@ public class SpacingLayoutTests
     public async Task WhenAValueListIsTheBodyOfACard_ThenItsRowsAddNoSpaceAtTheEdgesOfTheCard(int width)
     {
         // Arrange
-        var page = await OpenPageAsync();
-        await page.SetViewportSizeAsync(width, 900);
+        var page = await OpenPageAsync(width: width);
         var card = GetCard(page, "List Card");
         await Assertions.Expect(card.GetByTestId("value-row")).ToHaveCountAsync(2, new() { Timeout = Timeout });
 
@@ -194,6 +200,85 @@ public class SpacingLayoutTests
         // Assert
         Assert.Equal(TitleGap, gaps[0], Tolerance);
         Assert.Equal(CardPadding, gaps[1], Tolerance);
+    }
+
+    [Fact]
+    public async Task WhenAHeadingStandsInACard_ThenItIsCloserToTheTextBelowThanToTheTextAbove()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var card = GetCard(page, "Heading Card");
+        await Assertions.Expect(card.Locator("h4")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var gaps = await card.EvaluateAsync<double[]>(
+            """
+            card => {
+                const [above, below] = [...card.querySelectorAll('p')].map(p => p.getBoundingClientRect());
+                const heading = card.querySelector('h4').getBoundingClientRect();
+                return [heading.top - above.bottom, below.top - heading.bottom];
+            }
+            """);
+
+        // Assert
+        Assert.Equal(BlockSpacing, gaps[0], Tolerance);
+        Assert.Equal(8, gaps[1], Tolerance);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAWidgetShowsNothing_ThenItTakesNoSpaceBetweenParagraphs(bool isInlineMode)
+    {
+        // Arrange
+        var page = await OpenPageAsync(isInlineMode);
+        var after = page.Locator(".markdown-content > p").GetByText("Text after the map.", new() { Exact = true });
+        await Assertions.Expect(after).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var gap = await page.EvaluateAsync<double>(
+            """
+            () => {
+                const paragraph = text => [...document.querySelectorAll('.markdown-content > p')].find(p => p.textContent === text).getBoundingClientRect();
+                return paragraph('Text after the map.').top - paragraph('Text before the map.').bottom;
+            }
+            """);
+
+        // Assert: 0.75rem, the space between two paragraphs.
+        Assert.Equal(12, gap, Tolerance);
+    }
+
+    [Theory]
+    [InlineData(400)]
+    [InlineData(1400)]
+    public async Task WhenAPageHasATitle_ThenItsTimeAndTheEditButtonDoNotOverlapItOrEachOther(int width)
+    {
+        // Arrange
+        var page = await OpenPageAsync(width: width);
+        await Assertions.Expect(page.GetByTestId("page-last-modified")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var overlaps = await page.EvaluateAsync<string[]>(
+            """
+            () => {
+                const range = document.createRange();
+                range.selectNodeContents(document.querySelector('.markdown-content h1'));
+                const boxes = {
+                    time: [document.querySelector('[data-testid=page-last-modified]').getBoundingClientRect()],
+                    button: [document.querySelector('[data-testid=edit-mode-menu]').getBoundingClientRect()],
+                    title: [...range.getClientRects()]
+                };
+                const intersect = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+                const result = [];
+                for (const [first, second] of [['time', 'button'], ['time', 'title'], ['button', 'title']]) {
+                    if (boxes[first].some(a => boxes[second].some(b => intersect(a, b)))) result.push(`${first} and ${second}`);
+                }
+                return result;
+            }
+            """);
+
+        // Assert
+        Assert.Empty(overlaps);
     }
 
     [Fact]

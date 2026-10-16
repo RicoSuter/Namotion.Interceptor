@@ -155,7 +155,7 @@ Target speed: {{ ../widgets/Pump/TargetSpeed }} RPM
 - The header is shown when the card has a title, a subtitle, an icon or a `HeaderRight`.
 - The icon and the content of `HeaderRight` stand on the line of the title, also when the subtitle takes several lines.
 - The title of a card with `Href` looks like the title of any card and is underlined when the pointer is on it.
-- The header, the body and the footer have 12 pixels of room to the edge of the card, and a body right below the header starts close to the title, like the next line of a paragraph. The first and the last block of the body and the footer add no room of their own, and the blocks of a footer stand in a row. [Spacing](widgets/basics.md#spacing) has the rules for all widgets.
+- [Spacing](widgets/basics.md#spacing) has the room inside a card and around it.
 - A card is as wide as the place it stands in. Put cards into a `FlowLayout` to place them next to each other.
 - A card with a `Height` or an `AspectRatio` keeps the size of its header, its picture and its footer, and its body takes the rest of the height. A body that does not fit scrolls.
 - A card that is the subject of a [GridLayout](#gridlayout) cell or a [CanvasLayout](#canvaslayout) node fills it and ignores `AspectRatio`. A `Height` of its own still wins. The cell or the node is the frame, so the card has no border and no shadow there, and its body scrolls like that of a card with a height.
@@ -284,8 +284,7 @@ How `MinWidth` works and how to choose it:
 - **Smaller means more columns**: With `MinWidth=120` many cells fit into one row. With `MinWidth=600` two cells stand next to each other only on a wide screen.
 - **At least as wide as the widest widget**: A cell can get as narrow as `MinWidth`, and a widget that needs more room then paints over the next cell. The sample motor widget needs 280 pixels, and 304 pixels inside a card, so 320 fits it.
 - **Narrow screens**: On a screen that is narrower than `MinWidth` there is one column, as wide as the screen.
-- **Cards of a row**: A card that is the only content of a cell is as high as the highest cell of its row, so the cards of a row end on one line.
-- **Widgets of a fixed size**: A gauge stands at the start of its cell, so a row of gauges looks even with a `MinWidth` a little above the size of the ring, see [Gauge Rows](widgets/gauge.md#gauge-rows).
+- **Cards and gauges**: [Spacing](widgets/basics.md#spacing) has the height of the cards of a row, and [Gauge Rows](widgets/gauge.md#gauge-rows) the `MinWidth` for a row of gauges.
 
 Limits:
 

@@ -1,0 +1,85 @@
+/* The spacing of the blocks of a markdown page: only containers and the page create space, and a widget has no outer
+   margin of its own. See "Spacing" in the widget basics. */
+
+/* The title makes room for the time of the last change and the button of the edit modes, which stand in its corner. */
+.markdown-content > h1:first-of-type {
+    padding-right: 11rem;
+}
+
+/* The blocks of a page are 1rem apart, from each other and from the text around them. */
+.markdown-content > .subject-component-wrapper {
+    margin: 1rem 0;
+}
+
+/* A widget that shows nothing, such as a ValueMap, takes no space, in view mode as in edit mode (see widget-selection.css). */
+.markdown-content .subject-component-wrapper:empty {
+    display: none;
+}
+
+/* The content of a container: a card body, a tab, an expansion panel, a layout cell, an alert or a Responsive. Its blocks
+   and paragraphs are 1rem apart, and the padding of the container alone is the space at its edges. The two empty boxes
+   cancel the outer margin of the first and of the last block in the collapsed margins, also when that block is hidden,
+   like a Responsive for other screens, which a first-child rule would take for the first block. Content that is part of
+   a widget, such as the value of a list row, keeps the margins of the page. */
+.markdown-content :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment {
+    display: flow-root;
+
+    & > * {
+        margin-top: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    /* A heading is closer to the text below it than to the block above it. A heading that ends the content keeps its
+       1rem, which the box at the end cancels. */
+    & > :is(h1, h2, h3, h4, h5, h6):not(:last-child) {
+        margin-bottom: 0.5rem;
+    }
+
+    & > :is(h1, h2, h3, h4, h5, h6) + * {
+        margin-top: 0.5rem;
+    }
+
+    /* The boxes cancel exactly 1rem: a first or a last block with another outer margin would show the difference at the
+       edge, or be pulled over it. */
+    &::before,
+    &::after {
+        content: "";
+        display: block;
+    }
+
+    &::before {
+        margin-bottom: -1rem;
+    }
+
+    &::after {
+        margin-top: -1rem;
+    }
+}
+
+/* The blocks of a card footer, such as buttons, stand in a row, and the footer padding is the space at its edges. */
+.markdown-content .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+
+    & > * {
+        margin: 0;
+    }
+}
+
+/* A card that is the only content of a flow item, directly or as the only block of its page content, is as high as the
+   highest item of its row, so that the cards of a row end on one line, and its footer stays at the bottom. A height or an
+   aspect ratio of its own wins, and a card that shares its item with other blocks keeps its own height. */
+.flow-layout-item > .subject-component-wrapper:has(> .card-widget:not(.card-widget-sized)),
+.flow-layout-item > .subject-component-wrapper > .card-widget:not(.card-widget-sized),
+.flow-layout-item > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:only-child > .card-widget:not(.card-widget-sized)),
+.flow-layout-item > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:only-child > .card-widget:not(.card-widget-sized)),
+.flow-layout-item > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child:has(> .card-widget:not(.card-widget-sized)),
+.flow-layout-item > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child > .card-widget:not(.card-widget-sized) {
+    height: 100%;
+}
+
+.flow-layout-item .card-widget:not(.card-widget-sized) > .mud-card-content {
+    flex-grow: 1;
+}

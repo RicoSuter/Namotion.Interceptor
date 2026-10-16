@@ -62,6 +62,22 @@ A paragraph last.
 ::::: HomeBlaze.Components.Indicator Path=spacingmotor/IsAtTargetSpeed Kind=Icon Icon=Speed
 ::
 
+:: HomeBlaze.Components.Card Title="Heading Card"
+A paragraph above the heading.
+
+#### Heading in a card
+
+A paragraph below the heading.
+::
+
+Text before the map.
+
+:: HomeBlaze.Components.ValueMap#spacingmap
+::: Case Value=Running Text="Running" Color=Success
+::
+
+Text after the map.
+
 :: HomeBlaze.Components.Card Title="Footer Card"
 Body of the footer card.
 ::: Footer

@@ -1,4 +1,5 @@
-/* A card has no outer margin: the page and the layout it stands in space it, see the styles of a markdown page. */
+/* A card has no outer margin: the page and the layout it stands in space it, see markdown-page.css of
+   HomeBlaze.Storage.Blazor, which also makes a card in a flow item as high as its row. */
 
 .card-widget > .mud-card-header.mud-card-header-padding,
 .card-widget > .mud-card-content.mud-card-content-padding,
@@ -46,16 +47,4 @@
     height: 100%;
     border: 0;
     box-shadow: none;
-}
-
-/* A card that is the content of a flow item is as high as the highest item of its row, so that the cards of a row end on
-   one line. A height or an aspect ratio of its own wins. A card in the content of a page item is reached through the
-   styles of a markdown page. A card that is higher than its content keeps its footer at the bottom. */
-.flow-layout-item > .subject-component-wrapper:has(> .card-widget:not(.card-widget-sized)),
-.flow-layout-item > .subject-component-wrapper > .card-widget:not(.card-widget-sized) {
-    height: 100%;
-}
-
-.flow-layout-item .card-widget:not(.card-widget-sized) > .mud-card-content {
-    flex-grow: 1;
 }

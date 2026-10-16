@@ -27,6 +27,18 @@
     {
         <CascadingValue Value="@IsEditing" Name="IsEditing">
         <CascadingValue Value="_widgetSelection" IsFixed="true">
+            @* The head of the page in every mode: what the page shows there, such as the time of its last change, and the
+               button of the edit modes, side by side. In the view modes a markdown page leaves room for them next to its
+               title, and in the editing modes they stand at the end of the bar above the editor. One outlet that stays in
+               place, because a second outlet of the same section while the mode changes would end the circuit. *@
+            <div class="d-flex align-center gap-2" style="position: absolute; top: 84px; right: 20px; z-index: 100;" data-testid="page-head">
+                <SectionOutlet SectionName="PageHeadInfo" />
+                @if (CanEdit())
+                {
+                    @RenderEditMenu()
+                }
+            </div>
+
             @if (_editMode == PageEditMode.Split && CanEdit())
             {
                 <div data-testid="edit-splitter">
@@ -47,7 +59,6 @@
                                     <div class="d-flex gap-2">
                                         <SectionOutlet SectionName="EditActions" />
                                     </div>
-                                    @RenderEditMenu()
                                 </div>
                                 <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                                     <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
@@ -74,7 +85,6 @@
                         <div class="d-flex gap-2">
                             <SectionOutlet SectionName="EditActions" />
                         </div>
-                        @RenderEditMenu()
                     </div>
                     <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                         <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
@@ -93,12 +103,6 @@
             }
             else
             {
-                @if (CanEdit())
-                {
-                    <div style="position: absolute; top: 80px; right: 20px; z-index: 100;">
-                        @RenderEditMenu()
-                    </div>
-                }
 
                 @* View or Inline mode - show page component. A click that no widget took clears the selection. In edit mode the
                    area reaches down to the bottom of the window, so that a short page still has empty space to click; the 160px

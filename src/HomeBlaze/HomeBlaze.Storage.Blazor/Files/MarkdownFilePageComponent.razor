@@ -6,6 +6,7 @@
 @using HomeBlaze.Services
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using Microsoft.JSInterop
+@using Microsoft.AspNetCore.Components.Sections
 
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
@@ -22,11 +23,12 @@
         }
         else
         {
-            <div class="markdown-page-toolbar" style="position: absolute; top: 0.5rem; right: 1rem; display: flex; gap: 0.5rem; align-items: center;">
-                <span style="font-size: 0.8rem; color: var(--mud-palette-text-secondary);">
+            @* Shown by the page next to the button of the edit modes, so that the two never overlap. *@
+            <SectionContent SectionName="PageHeadInfo">
+                <span style="font-size: 0.8rem; color: var(--mud-palette-text-secondary); white-space: nowrap;" data-testid="page-last-modified">
                     @(File is { } file ? TimeZone.ToZoned(new DateTimeOffset(file.LastModified, TimeSpan.Zero)).ToString("yyyy-MM-dd HH:mm:ss") : "")
                 </span>
-            </div>
+            </SectionContent>
             <MarkdownContentView Children="@File?.Children" />
         }
     </div>
@@ -53,35 +55,6 @@
     .homeblaze-dark-mode .markdown-content a { color: var(--mud-palette-primary-lighten); }
     .markdown-content a:hover { text-decoration: underline; }
     .markdown-content .markdown-block-error { border: 1px solid var(--mud-palette-error); color: var(--mud-palette-error); border-radius: 4px; padding: 0.5rem 0.75rem; margin: 0.75rem 0; font-family: monospace; font-size: 0.85rem; }
-    /* The title makes room for the time of the last change in its corner, which stands above it. */
-    .markdown-content > h1:first-of-type { padding-right: 9rem; }
-
-    /* Only containers and the page create space; a widget has no outer margin of its own. The blocks of a page are
-       1rem apart, from each other and from the text around them. */
-    .markdown-content > .subject-component-wrapper { margin: 1rem 0; }
-
-    /* The content of a container: a card body, a tab, an expansion panel, a layout cell, an alert or a Responsive. Its blocks
-       and paragraphs are 1rem apart, and the padding of the container alone is the space at its edges. The two empty boxes
-       cancel the outer margin of the first and of the last block in the collapsed margins, also when that block is hidden,
-       like a Responsive for other screens, which a first-child rule would take for the first block. Content that is part
-       of a widget, such as the value of a list row, keeps the margins of the page. */
-    .markdown-content :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, [data-testid=responsive]) > .subject-component-wrapper > .markdown-fragment { display: flow-root; }
-    .markdown-content :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, [data-testid=responsive]) > .subject-component-wrapper > .markdown-fragment > * { margin-top: 1rem; margin-bottom: 1rem; }
-    .markdown-content :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, [data-testid=responsive]) > .subject-component-wrapper > .markdown-fragment::before,
-    .markdown-content :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, [data-testid=responsive]) > .subject-component-wrapper > .markdown-fragment::after { content: ""; display: block; }
-    .markdown-content :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, [data-testid=responsive]) > .subject-component-wrapper > .markdown-fragment::before { margin-bottom: -1rem; }
-    .markdown-content :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, [data-testid=responsive]) > .subject-component-wrapper > .markdown-fragment::after { margin-top: -1rem; }
-
-    /* A flow item whose content is one card: the card is as high as the row, as card-widget.css does for a card that is the
-       content itself. A card that shares its item with other blocks keeps its own height. */
-    .markdown-content .flow-layout-item > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:only-child > .card-widget:not(.card-widget-sized)),
-    .markdown-content .flow-layout-item > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:only-child > .card-widget:not(.card-widget-sized)),
-    .markdown-content .flow-layout-item > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child:has(> .card-widget:not(.card-widget-sized)),
-    .markdown-content .flow-layout-item > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child > .card-widget:not(.card-widget-sized) { height: 100%; }
-
-    /* The blocks of a card footer, such as buttons, stand in a row, and the footer padding is the space at its edges. */
-    .markdown-content .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-    .markdown-content .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > * { margin: 0; }
 </style>
 
 @code {
