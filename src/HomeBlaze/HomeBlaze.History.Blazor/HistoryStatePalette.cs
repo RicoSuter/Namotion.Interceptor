@@ -7,10 +7,11 @@ namespace HomeBlaze.History.Blazor;
 /// </summary>
 internal sealed class HistoryStatePalette
 {
-    private const string PinnedOnColor = "#2979FF";
     private const string PinnedOffColor = "#9E9E9E";
 
-    private static readonly string[] Colors = ["#00B8A9", "#F6A609", "#8E44AD", "#E4572E", "#3D5A80", "#C2185B"];
+    // The first line colour is pinned to the on state, so the other states take the line colours after it.
+    private static readonly string PinnedOnColor = HistoryChartPalette.LineColors[0];
+    private static readonly string[] Colors = HistoryChartPalette.LineColors.Skip(1).ToArray();
 
     private readonly Dictionary<string, string> _colors = new(StringComparer.Ordinal);
     private readonly List<HistoryChartLegendEntry> _assigned = [];
