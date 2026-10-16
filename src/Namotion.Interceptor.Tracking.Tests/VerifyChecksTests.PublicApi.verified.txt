@@ -239,16 +239,25 @@ namespace Namotion.Interceptor.Tracking.Performance
 }
 namespace Namotion.Interceptor.Tracking.Recorder
 {
+    public interface IReadPropertyRecorderTarget
+    {
+        void OnRead(Namotion.Interceptor.PropertyReference property);
+    }
     public class ReadPropertyRecorder : Namotion.Interceptor.Interceptors.IReadInterceptor
     {
         public ReadPropertyRecorder() { }
         public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
+        public static Namotion.Interceptor.Tracking.Recorder.ReadPropertyRecorderTargetScope RecordOnCurrentThread(Namotion.Interceptor.Tracking.Recorder.IReadPropertyRecorderTarget target) { }
         public static Namotion.Interceptor.Tracking.Recorder.ReadPropertyRecorderScope Start(System.Collections.Concurrent.ConcurrentDictionary<Namotion.Interceptor.PropertyReference, bool>? properties = null) { }
     }
     public sealed class ReadPropertyRecorderScope : System.IDisposable
     {
         public void Dispose() { }
         public System.Collections.Generic.ICollection<Namotion.Interceptor.PropertyReference> GetPropertiesAndDispose() { }
+    }
+    public readonly ref struct ReadPropertyRecorderTargetScope
+    {
+        public void Dispose() { }
     }
 }
 namespace Namotion.Interceptor.Tracking.Transactions

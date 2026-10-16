@@ -13,6 +13,30 @@ public class ReadPropertyRecorder : IReadInterceptor
 {
     private static readonly AsyncLocal<List<ReadPropertyRecorderScope>?> _activeScopes = new();
 
+    [ThreadStatic]
+    private static IReadPropertyRecorderTarget? _currentThreadTarget;
+
+    internal static IReadPropertyRecorderTarget? CurrentThreadTarget
+    {
+        get => _currentThreadTarget;
+        set => _currentThreadTarget = value;
+    }
+
+    /// <summary>
+    /// Sends the property reads of the current thread to the given target until the returned scope is disposed.
+    /// While a target is set, reads on this thread are not recorded by the scopes of <see cref="Start"/>.
+    /// The scope must be disposed on the same thread, which a <c>ref struct</c> ensures across awaits.
+    /// </summary>
+    /// <param name="target">The target that receives the reads.</param>
+    /// <returns>The scope that restores the previous target of the thread.</returns>
+    public static ReadPropertyRecorderTargetScope RecordOnCurrentThread(IReadPropertyRecorderTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        var previousTarget = _currentThreadTarget;
+        _currentThreadTarget = target;
+        return new ReadPropertyRecorderTargetScope(previousTarget);
+    }
+
     /// <summary>
     /// Starts recording property reads to a new scope.
     /// Property reads are automatically recorded via the interceptor.
@@ -54,6 +78,14 @@ public class ReadPropertyRecorder : IReadInterceptor
 
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
     {
+        // Recorded before the value is read, so that a change written after the read finds the property recorded.
+        var target = _currentThreadTarget;
+        if (target is not null)
+        {
+            target.OnRead(context.Property);
+            return next(ref context);
+        }
+
         var result = next(ref context);
 
         // Record to all active scopes in this async context
