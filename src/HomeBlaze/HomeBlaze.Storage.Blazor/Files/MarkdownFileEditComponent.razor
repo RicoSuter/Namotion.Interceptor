@@ -25,6 +25,7 @@
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
 @implements ISubjectEditComponent
+@implements IAsyncDisposable
 
 @if (string.IsNullOrEmpty(_originalContent))
 {
@@ -69,16 +70,25 @@ else
         width: 100%;
     }
 
-    /* Decoration styles for subject blocks and expressions */
-    .subject-block-decoration {
-        background-color: rgba(65, 105, 225, 0.25); /* Royal blue, works in light/dark modes */
-        border-radius: 3px;
-    }
+    /* The colors of the block depths, as red, green and blue for rgb() and rgba(). */
+    .monaco-editor.vs-dark .block-color-0 { --block-color: 108, 166, 240; }
+    .monaco-editor.vs-dark .block-color-1 { --block-color: 79, 201, 164; }
+    .monaco-editor.vs-dark .block-color-2 { --block-color: 179, 157, 245; }
+    .monaco-editor.vs-dark .block-color-3 { --block-color: 238, 143, 181; }
+    .monaco-editor.vs-dark .block-color-4 { --block-color: 150, 200, 90; }
+    .monaco-editor.vs .block-color-0 { --block-color: 37, 99, 200; }
+    .monaco-editor.vs .block-color-1 { --block-color: 13, 140, 105; }
+    .monaco-editor.vs .block-color-2 { --block-color: 110, 80, 210; }
+    .monaco-editor.vs .block-color-3 { --block-color: 200, 60, 120; }
+    .monaco-editor.vs .block-color-4 { --block-color: 70, 130, 30; }
 
-    .expression-decoration {
-        background-color: rgba(65, 105, 225, 0.25); /* Royal blue, works in light/dark modes */
-        border-radius: 3px;
-    }
+    .monaco-editor .block-fence { color: rgb(var(--block-color)) !important; font-weight: bold; }
+    .monaco-editor .block-closing-label { color: rgb(var(--block-color)) !important; font-style: italic; opacity: 0.6; }
+    .monaco-editor .block-head { background-color: rgba(var(--block-color), 0.16); border-radius: 3px; }
+    .monaco-editor.vs .block-head { background-color: rgba(var(--block-color), 0.12); }
+
+    .monaco-editor .expression-decoration { background-color: rgba(224, 160, 80, 0.22); border-radius: 3px; }
+    .monaco-editor.vs .expression-decoration { background-color: rgba(210, 130, 20, 0.18); }
 </style>
 
 @code {
@@ -97,6 +107,10 @@ else
     private bool _previousDarkMode = true;
     private List<DecorationRegion> _decorationRegions = new();
     private string[] _currentDecorationIds = Array.Empty<string>();
+    private const string FoldingModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownFileEditComponent.razor.js";
+    private int[] _foldingLines = [];
+    private IJSObjectReference? _foldingModule;
+    private bool _isDisposed;
     private DecorationRegion? _activeRegion;
     private Task? _decorationRefresh;
     private bool _isDecorationRefreshRequested;
@@ -122,7 +136,15 @@ else
             Language = "markdown",
             Value = _originalContent,
             WordWrap = "on",
-            Theme = MonacoTheme
+            Theme = MonacoTheme,
+            Folding = true,
+            ShowFoldingControls = "always",
+            StickyScroll = new EditorStickyScrollOptions
+            {
+                Enabled = true,
+                DefaultModel = "foldingProviderModel",
+                MaxLineCount = 6
+            }
         };
     }
 
@@ -418,32 +440,62 @@ else
 
     private async Task ApplyDecorationsAsync()
     {
-        if (_editor == null)
+        if (_editor == null || _isDisposed)
             return;
 
-        // Parse decoration regions from current content
         Func<int, IInterceptorSubject?>? getBlockSubject = File is null ? null : File.GetBlockSubject;
-        _decorationRegions = MarkdownDecorationParser.Parse(_currentContent, getBlockSubject);
+        var parsed = MarkdownDecorationParser.ParseDecorations(_currentContent, getBlockSubject);
+        _decorationRegions = parsed.Regions;
 
-        // Convert to Monaco decorations
-        var decorations = _decorationRegions.Select(region => new ModelDeltaDecoration
+        // The head lines of blocks are tinted by their outlines. subject-block-decoration has no style and marks the
+        // blocks that can be edited.
+        var decorations = new List<ModelDeltaDecoration>();
+        foreach (var region in _decorationRegions)
         {
-            Range = new BlazorMonaco.Range(
-                region.StartLine,
-                region.StartColumn,
-                region.EndLine,
-                region.EndColumn),
-            Options = new ModelDecorationOptions
+            decorations.Add(new ModelDeltaDecoration
             {
-                ClassName = region.Type == DecorationRegionType.SubjectBlock
-                    ? "subject-block-decoration"
-                    : "expression-decoration",
-                IsWholeLine = false
-            }
-        }).ToArray();
+                Range = new BlazorMonaco.Range(region.StartLine, region.StartColumn, region.EndLine, region.EndColumn),
+                Options = new ModelDecorationOptions
+                {
+                    ClassName = region.Type == DecorationRegionType.SubjectBlock
+                        ? "subject-block-decoration"
+                        : "expression-decoration"
+                }
+            });
+        }
+
+        BlockOutlineDecorations.Add(parsed.Outlines, decorations);
 
         // Apply decorations (delta update - removes old, adds new)
-        _currentDecorationIds = await _editor.DeltaDecorations(_currentDecorationIds, decorations);
+        _currentDecorationIds = await _editor.DeltaDecorations(_currentDecorationIds, decorations.ToArray());
+
+        if (!BlockOutlineDecorations.HasSameFoldingLines(parsed.Outlines, _foldingLines))
+        {
+            await SetFoldingLinesAsync(_editor, BlockOutlineDecorations.GetFoldingLines(parsed.Outlines));
+        }
+    }
+
+    // A disposed component sends no more ranges: the editor id is reused by the next page editor, whose model
+    // would get the ranges of this page.
+    private async Task SetFoldingLinesAsync(StandaloneCodeEditor editor, int[] foldingLines)
+    {
+        if (_isDisposed)
+            return;
+
+        if (_foldingModule is null)
+        {
+            var module = await JsRuntime.InvokeAsync<IJSObjectReference>("import", FoldingModulePath);
+            if (_isDisposed)
+            {
+                await module.DisposeAsync();
+                return;
+            }
+
+            _foldingModule = module;
+        }
+
+        await _foldingModule.InvokeVoidAsync("setRanges", editor.Id, foldingLines);
+        _foldingLines = foldingLines;
     }
 
     protected override async Task OnInitializedAsync()
@@ -488,4 +540,22 @@ else
         IsDirtyChanged?.Invoke(false);
     }
 
+    // The module forgets the ranges of a model when Monaco disposes the model together with the editor.
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        if (_foldingModule is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _foldingModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone and the browser with it.
+        }
+    }
 }
