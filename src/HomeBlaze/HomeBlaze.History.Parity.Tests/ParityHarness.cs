@@ -16,6 +16,7 @@ public interface IParityStore : IDisposable
     Task FlushAsync();
     HistorySeries Query(HistoryQuery query);
     HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf);
+    HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before);
     ImmutableArray<HistoryCoverage> CoverageRanges { get; }
 }
 
@@ -58,6 +59,9 @@ internal sealed class InMemoryParityStore : IParityStore
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
         => _engine.GetSampleAtOrBefore(propertyPath, asOf);
 
+    public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
+        => _engine.GetLastNumericSampleBefore(propertyPath, before);
+
     public ImmutableArray<HistoryCoverage> CoverageRanges => _engine.CoverageRanges;
 
     public void Dispose() { }
@@ -93,6 +97,9 @@ internal sealed class SqliteParityStore : IParityStore
 
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
         => _engine.GetSampleAtOrBefore(propertyPath, asOf);
+
+    public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
+        => _engine.GetLastNumericSampleBefore(propertyPath, before);
 
     public ImmutableArray<HistoryCoverage> CoverageRanges => _engine.CoverageRanges;
 

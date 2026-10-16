@@ -40,7 +40,8 @@ public sealed class FakeHistoryStore : IHistoryStore
             HistoryAggregations.Maximum,
             HistoryAggregations.Sum,
             HistoryAggregations.Count,
-            HistoryAggregations.StandardDeviation
+            HistoryAggregations.StandardDeviation,
+            HistoryAggregations.Delta
         };
 
     /// <summary>Records the queries this store received, for routing assertions.</summary>
@@ -113,6 +114,19 @@ public sealed class FakeHistoryStore : IHistoryStore
 
         cancellationToken.ThrowIfCancellationRequested();
         return new ValueTask<HistoryPoint?>(SampleAtOrBefore(asOf));
+    }
+
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        if (ThrowOnQuery)
+        {
+            throw new InvalidOperationException("Fake store failure.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var sample = _samples.LastOrDefault(point => point.Timestamp < before && point.Number is not null);
+        return new ValueTask<HistoryPoint?>(sample is null ? null : sample with { Json = null });
     }
 
     private HistoryPoint? SampleAtOrBefore(DateTimeOffset asOf)

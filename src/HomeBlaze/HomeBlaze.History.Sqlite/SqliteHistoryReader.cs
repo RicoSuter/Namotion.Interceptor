@@ -187,6 +187,27 @@ internal static class SqliteHistoryReader
         return null;
     }
 
+    public static HistoryPoint? GetLastNumericSampleBefore(SqliteReadContext context, string propertyPath, DateTimeOffset before)
+    {
+        // Newest leg first, like GetSampleAtOrBefore; each leg only answers inside its own validity.
+        foreach (var leg in ResolveChain(context, propertyPath))
+        {
+            if (leg.ValidFrom >= before)
+            {
+                continue;
+            }
+
+            var ceiling = before < leg.ValidTo ? before : leg.ValidTo;
+            var found = GetLegNumericSampleBefore(context, leg.Path, ceiling, ResolveIsUlong(context, leg.Path));
+            if (found is { } point && point.Timestamp >= leg.ValidFrom)
+            {
+                return point;
+            }
+        }
+
+        return null;
+    }
+
     // The stored column kind and ulong flag for a (possibly moved) property: the first path along its chain
     // that the paths table knows. The SQLite equivalent of InMemoryHistoryStore.ResolveBuffer (which returns the
     // first buffer in the chain), used for the numeric-on-json-non-ulong guard and ulong-overflow folding.
@@ -261,6 +282,43 @@ internal static class SqliteHistoryReader
             if (reader.Read())
             {
                 return ReadRawRow(reader);
+            }
+        }
+
+        return null;
+    }
+
+    // Newest row with a numeric value strictly before the given instant for a single path across its partitions.
+    private static HistoryPoint? GetLegNumericSampleBefore(SqliteReadContext context, string path, DateTimeOffset before, bool isUlong)
+    {
+        var numeric = isUlong
+            ? "CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL)"
+            : "CAST(COALESCE(value_double, value_long) AS REAL)";
+        var beforeTicks = EpochTicks.ToEpochTicks(before);
+        foreach (var key in context.PartitionKeysAtOrBefore(before))
+        {
+            if (!context.PartitionFileExists(key))
+            {
+                continue;
+            }
+
+            var connection = context.OpenPartition(key);
+            if (connection is null || ResolvePathId(connection, path) is not { } pathId)
+            {
+                continue; // unreadable partition, or one that never saw the path
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT ts, " + numeric + " AS v FROM history " +
+                "WHERE path_id = @path_id AND ts < @before AND " + numeric + " IS NOT NULL ORDER BY ts DESC LIMIT 1;";
+            command.Parameters.AddWithValue("@path_id", pathId);
+            command.Parameters.AddWithValue("@before", beforeTicks);
+
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                return new HistoryPoint(EpochTicks.FromEpochTicks(reader.GetInt64(0)), reader.GetDouble(1), null);
             }
         }
 

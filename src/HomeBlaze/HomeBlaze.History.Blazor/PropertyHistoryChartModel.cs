@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text.Json;
 using HomeBlaze.History.Abstractions;
@@ -16,6 +17,10 @@ public static class PropertyHistoryChartModel
     /// than the query will ever return, which the chart then reports as truncated history.
     /// </summary>
     public const int MaxPoints = 1000;
+
+    // Delta is for agents reading cumulative counters; the chart does not offer it.
+    private static readonly ImmutableArray<string> NumericChartAggregations =
+        HistoryAggregations.All.Remove(HistoryAggregations.Delta);
 
     // "Nice" bucket sizes in ascending order; auto-bucket picks the smallest >= range/200.
     private static readonly TimeSpan[] Ladder =
@@ -188,7 +193,7 @@ public static class PropertyHistoryChartModel
             }
             : isDiscrete || column == ValueColumn.Json
                 ? new[] { HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count }
-                : HistoryAggregations.All;
+                : NumericChartAggregations;
 
         var allowed = new HashSet<string>(storeUnion, StringComparer.Ordinal);
         allowed.UnionWith(HistoryAggregations.AlwaysAvailable);

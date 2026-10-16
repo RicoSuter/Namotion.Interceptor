@@ -64,4 +64,8 @@ public partial class TestHistoryStore : IHistoryStore
     public ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken) =>
         new((HistoryPoint?)null);
+
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken) =>
+        new((HistoryPoint?)null);
 }

@@ -19,6 +19,7 @@ namespace HomeBlaze.History.Abstractions
     public static class HistoryAggregations
     {
         public const string Count = "Count";
+        public const string Delta = "Delta";
         public const string First = "First";
         public const string Last = "Last";
         public const string Maximum = "Maximum";
@@ -72,6 +73,10 @@ namespace HomeBlaze.History.Abstractions
         public static System.TimeSpan CoveredDuration(System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> ranges, HomeBlaze.History.Abstractions.HistoryCoverage window) { }
         public static System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> Normalize(System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.HistoryCoverage> ranges) { }
     }
+    public static class HistoryDelta
+    {
+        public static double Step(double previous, double current) { }
+    }
     public readonly struct HistoryMove : System.IEquatable<HomeBlaze.History.Abstractions.HistoryMove>
     {
         public HistoryMove(System.DateTimeOffset Timestamp, string FromPath, string ToPath) { }
@@ -120,6 +125,7 @@ namespace HomeBlaze.History.Abstractions
         System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges { get; }
         int Priority { get; }
         System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
+        System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetLastNumericSampleBeforeAsync(string propertyPath, System.DateTimeOffset before, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryAsync(HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken);
     }

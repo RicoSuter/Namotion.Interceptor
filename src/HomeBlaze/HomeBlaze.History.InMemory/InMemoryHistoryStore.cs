@@ -29,7 +29,8 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         HistoryAggregations.Maximum,
         HistoryAggregations.Sum,
         HistoryAggregations.Count,
-        HistoryAggregations.StandardDeviation
+        HistoryAggregations.StandardDeviation,
+        HistoryAggregations.Delta
     };
 
     private readonly int _maxPointsPerProperty;
@@ -403,6 +404,41 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         return null;
     }
 
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(GetLastNumericSampleBefore(propertyPath, before));
+    }
+
+    /// <summary>
+    /// Gets the most recent sample with a numeric value strictly before <paramref name="before"/>, following move
+    /// chains and regardless of coverage, or null if none. See <see cref="IHistoryStore.GetLastNumericSampleBeforeAsync"/>.
+    /// </summary>
+    public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
+    {
+        foreach (var leg in ResolveChain(propertyPath))
+        {
+            if (leg.ValidFrom >= before || !_buffers.TryGetValue(leg.Path, out var buffer))
+            {
+                continue;
+            }
+
+            var ceiling = (before < leg.ValidTo ? before : leg.ValidTo) - new TimeSpan(1);
+            while (buffer.AtOrBefore(ceiling) is { } sample && sample.Timestamp >= leg.ValidFrom)
+            {
+                if (InMemoryHistoryAggregation.Numeric(sample, buffer.IsUlong) is { } number)
+                {
+                    return new HistoryPoint(sample.Timestamp, number, null);
+                }
+
+                ceiling = sample.Timestamp - new TimeSpan(1);
+            }
+        }
+
+        return null;
+    }
+
     public HistorySeries Query(HistoryQuery query)
     {
         query.Validate();
@@ -463,7 +499,8 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
                 });
         }
 
-        var carriedNumber = InMemoryHistoryAggregation.IsCarryDependent(aggregation)
+        var isDelta = aggregation == HistoryAggregations.Delta;
+        var carriedNumber = InMemoryHistoryAggregation.IsCarryDependent(aggregation) || isDelta
             ? query.CarrySeed?.Number
             : null;
         var carriedJson = InMemoryHistoryAggregation.IsCarryDependent(aggregation)
@@ -483,6 +520,12 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
             var prior = GetSampleAtOrBefore(query.PropertyPath, bucketStart);
             carriedNumber = prior?.Number;
             carriedJson = prior?.Json;
+        }
+
+        // Delta bridges coverage gaps, so its seed is the last counter reading before the first bucket, wherever it lies.
+        if (isDelta && (bucketStart > alignedFrom || query.CarrySeed is null))
+        {
+            carriedNumber = GetLastNumericSampleBefore(query.PropertyPath, bucketStart)?.Number;
         }
 
         // The covered window is read once, then walked with a cursor. Querying per bucket took the
@@ -518,17 +561,22 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
             var measured = readWindow?.Intersect(new HistoryCoverage(bucketStart, clippedEnd));
             if (measured is not { } covered)
             {
-                carriedNumber = null;
-                carriedJson = null;
+                if (!isDelta)
+                {
+                    carriedNumber = null;
+                    carriedJson = null;
+                }
+
                 allPoints.Add(new HistoryPoint(bucketStart, null, null));
                 bucketStart = bucketEnd;
                 continue;
             }
 
-            // A held value survives neither a coverage start nor a coverage end inside the bucket.
+            // A held value survives neither a coverage start nor a coverage end inside the bucket, except Delta's
+            // counter reading, which bridges gaps.
             var startsInside = covered.From > bucketStart;
             var endsInside = covered.To < clippedEnd;
-            if (startsInside)
+            if (startsInside && !isDelta)
             {
                 carriedNumber = null;
                 carriedJson = null;
@@ -547,7 +595,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
                     ref carriedJson);
             allPoints.Add(point);
 
-            if (endsInside)
+            if (endsInside && !isDelta)
             {
                 carriedNumber = null;
                 carriedJson = null;

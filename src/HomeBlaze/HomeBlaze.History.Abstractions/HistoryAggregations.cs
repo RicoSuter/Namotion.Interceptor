@@ -37,13 +37,21 @@ public static class HistoryAggregations
     public const string StandardDeviation = "StandardDeviation";
 
     /// <summary>
+    /// Increase of a cumulative counter in the bucket: every step between consecutive numeric samples, starting
+    /// from the value held before the bucket, where a drop counts as a restart from zero (see
+    /// <see cref="HistoryDelta.Step"/>). Bridges coverage gaps, because a counter keeps counting while nothing
+    /// records it.
+    /// </summary>
+    public const string Delta = "Delta";
+
+    /// <summary>
     /// All aggregation identifiers in canonical display order (the order numeric columns offer them,
     /// time-weighted average first). The single source of truth for the full set: the MCP boundary and
     /// the chart gating derive their lists from this instead of re-listing the identifiers.
     /// </summary>
     public static readonly ImmutableArray<string> All =
     [
-        TimeWeightedAverage, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count
+        TimeWeightedAverage, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count, Delta
     ];
 
     /// <summary>

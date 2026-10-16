@@ -32,7 +32,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         HistoryAggregations.Maximum,
         HistoryAggregations.Sum,
         HistoryAggregations.Count,
-        HistoryAggregations.StandardDeviation
+        HistoryAggregations.StandardDeviation,
+        HistoryAggregations.Delta
     };
 
     private readonly int _priority;
@@ -488,6 +489,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                 : SqliteBucketReader.QueryBucketed(
                     _readContext, query,
                     (path, asOf) => GetSampleAtOrBeforeCore(path, asOf, coverageRanges),
+                    (path, before) => SqliteHistoryReader.GetLastNumericSampleBefore(_readContext, path, before),
                     coverageRanges,
                     cancellationToken);
             return result with
@@ -506,6 +508,26 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         lock (_connectionLock)
         {
             return GetSampleAtOrBeforeCore(propertyPath, asOf, coverageRanges);
+        }
+    }
+
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(GetLastNumericSampleBefore(propertyPath, before));
+    }
+
+    /// <summary>
+    /// Gets the most recent sample with a numeric value strictly before <paramref name="before"/>, following move
+    /// chains and regardless of coverage, or null if none. See <see cref="IHistoryStore.GetLastNumericSampleBeforeAsync"/>.
+    /// </summary>
+    public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
+    {
+        // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).
+        lock (_connectionLock)
+        {
+            return SqliteHistoryReader.GetLastNumericSampleBefore(_readContext, propertyPath, before);
         }
     }
 
