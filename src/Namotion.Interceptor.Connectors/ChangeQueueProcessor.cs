@@ -35,6 +35,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly bool _writeHandlerOwnsChanges;
     private Action? _terminalHandler;
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
+    private readonly CancellationToken _stoppingToken;
     private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
@@ -153,6 +154,11 @@ public class ChangeQueueProcessor : IDisposable
     /// <see cref="Dispose"/> does not dispose the subscription. Use this when the subscription must
     /// outlive the processor, for example a source-lifetime subscription reused across reconnects.
     /// </summary>
+    /// <remarks>
+    /// With <paramref name="stoppingToken"/> supplied, <see cref="TeardownFlushBound"/> counts from its
+    /// cancellation rather than from the cancellation of <see cref="ProcessAsync"/>: a run ended for any
+    /// other reason waits for its in-flight write and final flush without a bound.
+    /// </remarks>
     internal ChangeQueueProcessor(
         object? source,
         PropertyChangeQueueSubscription subscription,
@@ -165,7 +171,8 @@ public class ChangeQueueProcessor : IDisposable
         Action<long>? dropHandler = null,
         bool writeHandlerOwnsChanges = false,
         Action? terminalHandler = null,
-        Func<CancellationToken, ValueTask>? completionHandler = null)
+        Func<CancellationToken, ValueTask>? completionHandler = null,
+        CancellationToken stoppingToken = default)
     {
         _source = source;
         _propertyFilter = propertyFilter;
@@ -176,6 +183,7 @@ public class ChangeQueueProcessor : IDisposable
         _writeHandlerOwnsChanges = writeHandlerOwnsChanges;
         _terminalHandler = terminalHandler;
         _completionHandler = completionHandler;
+        _stoppingToken = stoppingToken;
         _mergedDeliveryAdmission = writeHandlerOwnsChanges ? null : TryAdmitMergedDelivery;
 
         ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
@@ -271,7 +279,7 @@ public class ChangeQueueProcessor : IDisposable
         var processingCancellationTask = processingTokenSource.CancelAsync();
         var teardownCancellationTask = Task.CompletedTask;
         using var teardownDelayCancellation = new CancellationTokenSource();
-        var teardownDelay = Task.Delay(TeardownFlushBound, teardownDelayCancellation.Token);
+        var teardownDelay = DelayTeardownBoundAsync(_stoppingToken, teardownDelayCancellation.Token);
         try
         {
             if (await Task.WhenAny(processingTask, teardownDelay).ConfigureAwait(false) == processingTask)
@@ -422,6 +430,21 @@ public class ChangeQueueProcessor : IDisposable
                 DisposeMerger();
             }
         }
+    }
+
+    // Elapses TeardownFlushBound after the stop when a stopping token was supplied (see the internal
+    // constructor), otherwise after the call; cancelled when the run completes first.
+    private static async Task DelayTeardownBoundAsync(CancellationToken stoppingToken, CancellationToken cancellationToken)
+    {
+        if (stoppingToken.CanBeCanceled)
+        {
+            var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var registration = stoppingToken.UnsafeRegister(
+                static state => ((TaskCompletionSource)state!).TrySetResult(), stopped);
+            await stopped.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await Task.Delay(TeardownFlushBound, cancellationToken).ConfigureAwait(false);
     }
 
     private static void ObserveLateLifetimeInBackground(
