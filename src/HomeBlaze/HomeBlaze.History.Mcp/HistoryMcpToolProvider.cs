@@ -127,11 +127,23 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     /// Returns a structured error when an optional parameter is present but is neither a string nor
     /// null, so a wrong-typed value is reported rather than silently falling back to its default.
     /// </summary>
-    private static object? HasWrongType(JsonElement input, string name) =>
-        input.TryGetProperty(name, out var element) &&
-        element.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)
-            ? new { error = $"Parameter '{name}' must be a string." }
-            : null;
+    // An optional string parameter: absent or null reads as null, any other non-string kind is an error.
+    private static object? TryReadOptionalString(JsonElement input, string name, out string? value)
+    {
+        value = null;
+        if (!input.TryGetProperty(name, out var element))
+        {
+            return null;
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            value = element.GetString();
+            return null;
+        }
+
+        return element.ValueKind == JsonValueKind.Null ? null : new { error = $"Parameter '{name}' must be a string." };
+    }
 
     private async Task<object?> HandleGetPropertyHistoryAsync(JsonElement input, CancellationToken cancellationToken)
     {
@@ -187,41 +199,34 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         // A present-but-wrong-typed parameter is rejected rather than ignored. Silently dropping a
         // numeric 'bucket' turned a bucketed request into a raw one with ten times the point budget,
         // and a numeric 'to' silently extended the range, both with no signal to the caller.
-        if (HasWrongType(input, "to") is { } toTypeError)
+        if (TryReadOptionalString(input, "to", out var toText) is { } toTypeError)
         {
             return toTypeError;
         }
 
-        if (HasWrongType(input, "bucket") is { } bucketTypeError)
+        if (TryReadOptionalString(input, "bucket", out var bucketText) is { } bucketTypeError)
         {
             return bucketTypeError;
         }
 
-        if (HasWrongType(input, "aggregation") is { } aggregationTypeError)
+        if (TryReadOptionalString(input, "aggregation", out var aggregationText) is { } aggregationTypeError)
         {
             return aggregationTypeError;
         }
 
-        if (HasWrongType(input, "time_zone") is { } timeZoneTypeError)
+        if (TryReadOptionalString(input, "time_zone", out var timeZoneText) is { } timeZoneTypeError)
         {
             return timeZoneTypeError;
         }
 
-        var bucketText = input.TryGetProperty("bucket", out var bucketElement) && bucketElement.ValueKind == JsonValueKind.String
-            ? bucketElement.GetString()
-            : null;
-        // Blank counts as absent, as for bucket and aggregation.
-        var timeZoneText = input.TryGetProperty("time_zone", out var timeZoneElement) && timeZoneElement.ValueKind == JsonValueKind.String &&
-                           !string.IsNullOrWhiteSpace(timeZoneElement.GetString())
-            ? timeZoneElement.GetString()
-            : null;
         var calendarUnit = HistoryToolParsing.ParseCalendarUnit(bucketText);
 
-        // The zone reads offset-less timestamps, formats every response timestamp and aligns calendar buckets.
+        // The zone reads offset-less timestamps, formats every response timestamp and aligns calendar buckets. Blank
+        // counts as absent, as for bucket and aggregation.
         TimeZoneInfo timeZone;
         try
         {
-            timeZone = timeZoneText is null ? TimeZoneInfo.Local : HistoryToolParsing.ParseTimeZone(timeZoneText);
+            timeZone = string.IsNullOrWhiteSpace(timeZoneText) ? TimeZoneInfo.Local : HistoryToolParsing.ParseTimeZone(timeZoneText);
         }
         catch (FormatException exception)
         {
@@ -234,9 +239,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         try
         {
             from = HistoryToolParsing.ParseTimestamp(fromElement.GetString()!, timeZone);
-            to = input.TryGetProperty("to", out var toElement) && toElement.ValueKind == JsonValueKind.String
-                ? HistoryToolParsing.ParseTimestamp(toElement.GetString()!, timeZone)
-                : DateTimeOffset.UtcNow;
+            to = toText is not null ? HistoryToolParsing.ParseTimestamp(toText, timeZone) : DateTimeOffset.UtcNow;
             bucket = calendarUnit is { } unit
                 ? HistoryBucket.Calendar(unit, timeZone)
                 : HistoryToolParsing.ParseBucket(bucketText);
@@ -254,8 +257,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             return new { error = "Parameter 'from' must be earlier than 'to'." };
         }
 
-        var aggregation = HistoryToolParsing.NormalizeAggregation(
-            input.TryGetProperty("aggregation", out var aggregationElement) ? aggregationElement.GetString() : null);
+        var aggregation = HistoryToolParsing.NormalizeAggregation(aggregationText);
         if (aggregation is null)
         {
             return new
@@ -271,14 +273,11 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             return new { error = "Delta needs a bucket." };
         }
 
-        if (HasWrongType(input, "coverage") is { } coverageTypeError)
+        if (TryReadOptionalString(input, "coverage", out var coverageMode) is { } coverageTypeError)
         {
             return coverageTypeError;
         }
 
-        var coverageMode = input.TryGetProperty("coverage", out var coverageElement) && coverageElement.ValueKind == JsonValueKind.String
-            ? coverageElement.GetString()
-            : null;
         var includeRanges = string.Equals(coverageMode, "ranges", StringComparison.OrdinalIgnoreCase);
         if (!includeRanges && coverageMode is not null && !string.Equals(coverageMode, "summary", StringComparison.OrdinalIgnoreCase))
         {
@@ -394,7 +393,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             : HistoryToolFormatting.FormatTimestamp(point.Timestamp, timeZone),
         point.Number is { } number
             ? bucket is not null ? HistoryToolFormatting.RoundToSignificantDigits(number) : number
-            : point.Json is { } json ? json : null
+            : point.Json
     ];
 
     private static string[][] FormatRanges(ImmutableArray<HistoryCoverage> ranges, TimeZoneInfo timeZone) =>
