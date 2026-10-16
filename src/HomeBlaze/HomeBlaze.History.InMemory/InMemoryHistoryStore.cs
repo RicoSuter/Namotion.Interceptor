@@ -581,17 +581,14 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
                 carriedJson = null;
             }
 
-            var isPartial = startsInside || endsInside;
-            var point = isPartial && aggregation is (HistoryAggregations.Count or HistoryAggregations.Sum)
-                ? new HistoryPoint(bucketStart, null, null)
-                : InMemoryHistoryAggregation.AggregateBucket(
-                    aggregation,
-                    bucketStart,
-                    covered,
-                    bucketSamples,
-                    isUlong,
-                    ref carriedNumber,
-                    ref carriedJson);
+            var point = InMemoryHistoryAggregation.AggregateBucket(
+                aggregation,
+                bucketStart,
+                covered,
+                bucketSamples,
+                isUlong,
+                ref carriedNumber,
+                ref carriedJson);
             allPoints.Add(point);
 
             if (endsInside && !isDelta)

@@ -140,7 +140,6 @@ internal static class BucketAssembler
             }
 
             var hasPartial = partials.TryGetValue(EpochTicks.ToEpochTicks(bucketStartTimestamp), out var partial);
-            var isPartial = covered < clippedEnd - bucketStartTimestamp;
             HistoryPoint point;
             if (isDelta)
             {
@@ -157,10 +156,8 @@ internal static class BucketAssembler
             }
             else
             {
-                point = isPartial && aggregation is (HistoryAggregations.Count or HistoryAggregations.Sum)
-                    ? new HistoryPoint(bucketStartTimestamp, null, null)
-                    : AggregateBucket(aggregation, bucketStartTimestamp, hasPartial ? partial : null,
-                        ref carriedNumber, ref carriedJson);
+                point = AggregateBucket(aggregation, bucketStartTimestamp, hasPartial ? partial : null,
+                    ref carriedNumber, ref carriedJson);
             }
 
             allPoints.Add(point);
