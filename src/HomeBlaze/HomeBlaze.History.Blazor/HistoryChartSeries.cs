@@ -31,5 +31,13 @@ public partial class HistoryChartSeries : IConfigurable
     [Configuration]
     public partial string? Color { get; set; }
 
+    /// <summary>
+    /// The aggregation of a line in place of the one of the chart, a name of
+    /// <see cref="HomeBlaze.History.Abstractions.HistoryAggregations"/>. Null or empty for the one of the chart.
+    /// A band ignores it.
+    /// </summary>
+    [Configuration]
+    public partial string? Aggregation { get; set; }
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

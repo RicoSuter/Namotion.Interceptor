@@ -33,7 +33,7 @@
                        Disabled="IsRawPeriodSelected" HelperText="@(IsRawPeriodSelected ? "Not applicable to raw samples." : _aggregationHint)">
                 @foreach (var aggregation in _aggregations)
                 {
-                    <MudSelectItem T="string" Value="aggregation">@Label(aggregation)</MudSelectItem>
+                    <MudSelectItem T="string" Value="aggregation">@PropertyHistoryChartModel.GetAggregationLabel(aggregation)</MudSelectItem>
                 }
             </MudSelect>
 
@@ -102,11 +102,12 @@
     [Parameter] public bool IsCumulative { get; set; }
     [Parameter] public bool IsDiscreteState { get; set; }
     [Parameter] public StateUnit Unit { get; set; }
+    [Parameter] public PropertyHistoryDialogSettings? Settings { get; set; }
 
     // The entry after the presets; it shows the date pickers.
     private static readonly int CustomRangeIndex = PropertyHistoryChartModel.RangePresets.Count;
 
-    private int _rangeIndex; // default: last hour (index 0), so a fresh system shows recent data
+    private int _rangeIndex;
     private bool _useCustom;
     private DateTime? _customFrom;
     private DateTime? _customTo;
@@ -114,12 +115,7 @@
     private IReadOnlyList<string> _aggregations = Array.Empty<string>();
     private string _aggregation = HistoryAggregations.Last;
 
-    private int _periodIndex; // default: Auto (first entry)
-
-    private static readonly int RawPeriodIndex = PropertyHistoryChartModel.Periods
-        .Select((period, index) => (period, index))
-        .First(entry => entry.period.IsRaw)
-        .index;
+    private int _periodIndex;
 
     // Short helper lines under each select, refreshed in LoadAsync so the controls row stays balanced.
     private string? _rangeHint;
@@ -157,13 +153,16 @@
 
         var isDiscrete = PropertyHistoryChartModel.IsDiscrete(PropertyType, IsDiscreteState);
         _aggregations = PropertyHistoryChartModel.GateAggregations(column, IsCumulative, union, isDiscrete);
-        _aggregation = _aggregations.Count > 0 ? _aggregations[0] : HistoryAggregations.Last;
 
-        // A discrete property defaults to raw samples: its transitions are the data, and bucketing would
-        // only round them to the bucket edge. The period select stays available for Count, which draws a line.
-        if (isDiscrete)
+        var selection = PropertyHistoryChartModel.GetInitialSelection(Settings, _aggregations, isDiscrete);
+        _rangeIndex = selection.RangeIndex;
+        _periodIndex = selection.PeriodIndex;
+        _aggregation = selection.Aggregation;
+        if (selection.CustomRange is { } customRange)
         {
-            _periodIndex = RawPeriodIndex;
+            // An empty To ends the custom range now, see ResolveCustomRange.
+            _useCustom = true;
+            _customFrom = TimeZone.ToZoned(DateTimeOffset.UtcNow - customRange);
         }
 
         await LoadAsync();
@@ -308,13 +307,6 @@
         _tableRows = null;
     }
 
-    private static string Label(string aggregation) => aggregation switch
-    {
-        HistoryAggregations.TimeWeightedAverage => "Average",
-        HistoryAggregations.SampleAverage => "Sample Average",
-        _ => aggregation
-    };
-
     private void Close() => MudDialog?.Close(DialogResult.Ok(true));
 
     private void OnTimeZoneChanged()
@@ -342,12 +334,19 @@
     /// Shows the history of a recorded property, with the unit and the kind of value the property declares.
     /// Returns null without showing anything when the subject of the property is not in the graph.
     /// </summary>
+    /// <param name="dialogService">The dialog service.</param>
+    /// <param name="registry">The registry that knows the history stores.</param>
+    /// <param name="pathResolver">The resolver of the history path of the property.</param>
+    /// <param name="property">The property.</param>
+    /// <param name="displayName">The name of the property in the title.</param>
+    /// <param name="settings">The selections the dialog opens with, or null for its defaults.</param>
     public static async Task<IDialogReference?> ShowAsync(
         IDialogService dialogService,
         ISubjectRegistry registry,
         ISubjectPathResolver pathResolver,
         RegisteredSubjectProperty property,
-        string displayName)
+        string displayName,
+        PropertyHistoryDialogSettings? settings = null)
     {
         if (property.GetHistoryPath(pathResolver) is not { } path)
         {
@@ -357,7 +356,7 @@
         var metadata = property.GetStateMetadata();
         return await ShowAsync(
             dialogService, registry, path, displayName, property.Type, metadata?.IsCumulative ?? false,
-            metadata?.Unit ?? StateUnit.Default, metadata?.IsDiscrete ?? false);
+            metadata?.Unit ?? StateUnit.Default, metadata?.IsDiscrete ?? false, settings);
     }
 
     public static Task<IDialogReference> ShowAsync(
@@ -368,7 +367,8 @@
         Type propertyType,
         bool isCumulative,
         StateUnit unit = StateUnit.Default,
-        bool isDiscreteState = false)
+        bool isDiscreteState = false,
+        PropertyHistoryDialogSettings? settings = null)
     {
         var parameters = new DialogParameters<PropertyHistoryDialog>
         {
@@ -378,7 +378,8 @@
             { dialog => dialog.PropertyType, propertyType },
             { dialog => dialog.IsCumulative, isCumulative },
             { dialog => dialog.IsDiscreteState, isDiscreteState },
-            { dialog => dialog.Unit, unit }
+            { dialog => dialog.Unit, unit },
+            { dialog => dialog.Settings, settings }
         };
 
         var options = new DialogOptions { FullScreen = true, CloseButton = true };

@@ -109,6 +109,103 @@ public static class PropertyHistoryChartModel
         return false;
     }
 
+    /// <summary>Finds an aggregation of <see cref="HistoryAggregations.All"/> by its name, ignoring case.</summary>
+    public static bool TryGetAggregation(string? name, out string aggregation)
+    {
+        foreach (var candidate in HistoryAggregations.All)
+        {
+            if (string.Equals(candidate, name, StringComparison.OrdinalIgnoreCase))
+            {
+                aggregation = candidate;
+                return true;
+            }
+        }
+
+        aggregation = string.Empty;
+        return false;
+    }
+
+    /// <summary>Gets the name of an aggregation in a select or a note, for example "Average" for the time-weighted average.</summary>
+    public static string GetAggregationLabel(string aggregation) => aggregation switch
+    {
+        HistoryAggregations.TimeWeightedAverage => "Average",
+        HistoryAggregations.SampleAverage => "Sample Average",
+        _ => aggregation
+    };
+
+    /// <summary>
+    /// The selections of the history dialog.
+    /// </summary>
+    /// <param name="RangeIndex">The index in <see cref="RangePresets"/>, or their count for a custom range.</param>
+    /// <param name="CustomRange">The span of a custom range that ends now, or null.</param>
+    /// <param name="PeriodIndex">The index in <see cref="Periods"/>.</param>
+    /// <param name="Aggregation">The aggregation.</param>
+    public readonly record struct DialogSelection(int RangeIndex, TimeSpan? CustomRange, int PeriodIndex, string Aggregation);
+
+    /// <summary>
+    /// Gets the selections the history dialog opens with: those of <paramref name="settings"/> that it can show, otherwise
+    /// the last hour, the first offered aggregation, and the Auto period, or raw samples for a discrete property.
+    /// </summary>
+    /// <param name="settings">The selections asked for, or null.</param>
+    /// <param name="offeredAggregations">The aggregations the dialog offers for the property, see <see cref="GateAggregations"/>.</param>
+    /// <param name="isDiscrete">Whether the property holds a discrete state.</param>
+    public static DialogSelection GetInitialSelection(
+        PropertyHistoryDialogSettings? settings, IReadOnlyList<string> offeredAggregations, bool isDiscrete)
+    {
+        var rangeIndex = 0;
+        TimeSpan? customRange = null;
+        if (settings?.Range is { } range && range > TimeSpan.Zero)
+        {
+            rangeIndex = RangePresets.Count;
+            for (var index = 0; index < RangePresets.Count; index++)
+            {
+                if (RangePresets[index].Range == range)
+                {
+                    rangeIndex = index;
+                    break;
+                }
+            }
+
+            customRange = rangeIndex == RangePresets.Count ? range : null;
+        }
+
+        // A discrete property defaults to raw samples: its transitions are the data, and bucketing would only round
+        // them to the bucket edge.
+        var periodIndex = isDiscrete ? FindRawPeriodIndex() : 0;
+        if (settings?.Period is { } period)
+        {
+            for (var index = 0; index < Periods.Count; index++)
+            {
+                if (Periods[index] == period)
+                {
+                    periodIndex = index;
+                    break;
+                }
+            }
+        }
+
+        var aggregation = offeredAggregations.Count > 0 ? offeredAggregations[0] : HistoryAggregations.Last;
+        if (TryGetAggregation(settings?.Aggregation, out var requested) && offeredAggregations.Contains(requested))
+        {
+            aggregation = requested;
+        }
+
+        return new DialogSelection(rangeIndex, customRange, periodIndex, aggregation);
+    }
+
+    private static int FindRawPeriodIndex()
+    {
+        for (var index = 0; index < Periods.Count; index++)
+        {
+            if (Periods[index].IsRaw)
+            {
+                return index;
+            }
+        }
+
+        return 0;
+    }
+
     /// <summary>
     /// Resolves the effective bucket for a selected period: an auto period uses <see cref="AutoBucket"/> over the
     /// current range (clamped to <paramref name="availableCoverage"/> when supplied); any other period uses its

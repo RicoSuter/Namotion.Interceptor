@@ -26,6 +26,14 @@ title: History Chart Demo
 ::: Series Path=chartmotor/CurrentSpeed Label="Compact speed"
 ::
 
+:: HomeBlaze.History.Blazor.HistoryChart Range=6h Bucket=10m Aggregation=Maximum Height=150
+::: Series Path=chartmotor/CurrentSpeed Label="Highest speed"
+::
+
+:: HomeBlaze.History.Blazor.HistoryChart Range=1h Aggregation=Median
+::: Series Path=chartmotor/CurrentSpeed Label="Median speed"
+::
+
 :: HomeBlaze.Components.TabLayout
 ::: Tab Title="First"
 The chart is in the second tab, which is hidden when the page opens.

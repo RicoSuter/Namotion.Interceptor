@@ -31,6 +31,7 @@ public enum HistoryChartSeriesKind
 /// <param name="Unit">The unit of the property.</param>
 /// <param name="HasHistory">Whether the property is recorded.</param>
 /// <param name="IsCumulative">Whether the property is a counter that only grows.</param>
+/// <param name="Aggregation">The aggregation the series asks for as written, its own or else the one of the chart, or null or empty for the automatic choice.</param>
 public sealed record HistoryChartSeriesInfo(
     string Label,
     string? Color,
@@ -38,7 +39,8 @@ public sealed record HistoryChartSeriesInfo(
     HistoryChartSeriesKind Kind,
     StateUnit Unit,
     bool HasHistory,
-    bool IsCumulative)
+    bool IsCumulative,
+    string? Aggregation = null)
 {
     /// <summary>Gets what the legend says about a series that has no history to show, or null.</summary>
     public string? Note =>
@@ -58,12 +60,14 @@ public static class HistoryChartSeriesResolver
     public static IReadOnlyList<HistoryChartSeriesInfo> Resolve(SubjectPathResolver resolver, HistoryChart chart)
     {
         var series = chart.Series;
+        var chartAggregation = chart.Aggregation;
         var result = new HistoryChartSeriesInfo[series.Length];
         for (var index = 0; index < series.Length; index++)
         {
             var entry = series[index];
             var path = entry.Path;
             var label = entry.Label;
+            var aggregation = entry.Aggregation;
             var property = ResolveProperty(resolver, entry, path);
             var metadata = property?.GetStateMetadata();
             var kind = property is null
@@ -79,17 +83,20 @@ public static class HistoryChartSeriesResolver
                 kind,
                 metadata?.Unit ?? StateUnit.Default,
                 property?.HasHistory() ?? false,
-                metadata?.IsCumulative ?? false);
+                metadata?.IsCumulative ?? false,
+                string.IsNullOrEmpty(aggregation) ? chartAggregation : aggregation);
         }
 
         return result;
     }
 
     /// <summary>
-    /// Gets the widget argument error of a chart, or null: an unknown range or bucket, or a recorded line
-    /// whose unit differs from that of the first recorded line.
+    /// Gets the widget argument error of a chart, or null: an unknown range, bucket or aggregation, or a recorded
+    /// line whose unit differs from that of the first recorded line. An aggregation that the property or the stores
+    /// do not offer is no error, see <see cref="GetAggregationNote"/>.
     /// </summary>
-    public static string? FindArgumentError(string? range, string? bucket, IReadOnlyList<HistoryChartSeriesInfo> series)
+    public static string? FindArgumentError(
+        string? range, string? bucket, string? aggregation, IReadOnlyList<HistoryChartSeriesInfo> series)
     {
         if (!PropertyHistoryChartModel.TryGetRange(range, out _))
         {
@@ -101,6 +108,20 @@ public static class HistoryChartSeriesResolver
         {
             var choices = string.Join(", ", PropertyHistoryChartModel.Periods.Select(period => period.ShortName));
             return $"Unknown bucket '{bucket}': use one of {choices}";
+        }
+
+        if (!string.IsNullOrEmpty(aggregation) && !PropertyHistoryChartModel.TryGetAggregation(aggregation, out _))
+        {
+            return $"Unknown aggregation '{aggregation}': use one of {string.Join(", ", HistoryAggregations.All)}";
+        }
+
+        // The chart's own is checked above, so an unknown aggregation of a series is the series' own.
+        foreach (var entry in series)
+        {
+            if (!string.IsNullOrEmpty(entry.Aggregation) && !PropertyHistoryChartModel.TryGetAggregation(entry.Aggregation, out _))
+            {
+                return $"Unknown aggregation '{entry.Aggregation}' of series '{entry.Label}': use one of {string.Join(", ", HistoryAggregations.All)}";
+            }
         }
 
         HistoryChartSeriesInfo? first = null;
@@ -166,12 +187,18 @@ public static class HistoryChartSeriesResolver
     }
 
     /// <summary>
-    /// Chooses the aggregation of a series: the first that the history dialog offers for a line, which
-    /// is the time-weighted average when a store supports it; the last value for a counter or a raw query,
-    /// so those share one batch, and for a band, which is always queried raw.
+    /// Chooses the aggregation of a series: for a line the <paramref name="requested"/> one when the history dialog
+    /// offers it for the property, otherwise the first that the dialog offers, which is the time-weighted average when
+    /// a store supports it and the last value for a counter; the last value for a raw query, so those share one batch,
+    /// and for a band, which is always queried raw.
     /// </summary>
     public static string ChooseAggregation(
-        Type propertyType, bool isBand, bool isCumulative, bool isRaw, IReadOnlySet<string> storeAggregations)
+        Type propertyType,
+        bool isBand,
+        bool isCumulative,
+        bool isRaw,
+        IReadOnlySet<string> storeAggregations,
+        string? requested = null)
     {
         if (isRaw || isBand)
         {
@@ -180,7 +207,54 @@ public static class HistoryChartSeriesResolver
 
         var offered = PropertyHistoryChartModel.GateAggregations(
             HistoryColumns.GetValueColumnFor(propertyType), isCumulative, storeAggregations);
+        if (PropertyHistoryChartModel.TryGetAggregation(requested, out var aggregation) && offered.Contains(aggregation))
+        {
+            return aggregation;
+        }
+
         return offered.Count > 0 ? offered[0] : HistoryAggregations.Last;
+    }
+
+    /// <summary>
+    /// Gets what the legend says about a line that shows another aggregation than the one it asks for, because the
+    /// property or the stores do not offer it, or null. A band and a raw query use no aggregation.
+    /// </summary>
+    /// <param name="series">The series.</param>
+    /// <param name="isRaw">Whether the lines are queried as raw samples.</param>
+    /// <param name="chosen">The aggregation <see cref="ChooseAggregation"/> chose for the series.</param>
+    public static string? GetAggregationNote(HistoryChartSeriesInfo series, bool isRaw, string chosen)
+    {
+        if (series.Kind != HistoryChartSeriesKind.Line || isRaw ||
+            !PropertyHistoryChartModel.TryGetAggregation(series.Aggregation, out var requested) || requested == chosen)
+        {
+            return null;
+        }
+
+        return $"{PropertyHistoryChartModel.GetAggregationLabel(requested)} not available, " +
+            $"shows {PropertyHistoryChartModel.GetAggregationLabel(chosen)}";
+    }
+
+    /// <summary>
+    /// Gets the selections the history dialog of a series opens with: the range of the chart, and for a line also its
+    /// bucket and the aggregation it shows when bucketed. A band keeps the state timeline of the dialog.
+    /// </summary>
+    /// <param name="series">The series.</param>
+    /// <param name="range">The range of the chart as written.</param>
+    /// <param name="bucket">The bucket of the chart as written.</param>
+    /// <param name="storeAggregations">The aggregations the history stores support together.</param>
+    public static PropertyHistoryDialogSettings GetDialogSettings(
+        HistoryChartSeriesInfo series, string? range, string? bucket, IReadOnlySet<string> storeAggregations)
+    {
+        TimeSpan? span = PropertyHistoryChartModel.TryGetRange(range, out var rangeSpan) ? rangeSpan : null;
+        if (series.Kind != HistoryChartSeriesKind.Line || series.Property is not { } property)
+        {
+            return new PropertyHistoryDialogSettings(span);
+        }
+
+        PropertyHistoryChartModel.ChartPeriod? period = PropertyHistoryChartModel.TryGetPeriod(bucket, out var chartPeriod) ? chartPeriod : null;
+        var aggregation = ChooseAggregation(
+            property.Type, isBand: false, series.IsCumulative, isRaw: false, storeAggregations, series.Aggregation);
+        return new PropertyHistoryDialogSettings(span, period, aggregation);
     }
 
     // Same order as GetDisplayName, reusing the metadata that Resolve already looked up.

@@ -14,11 +14,12 @@ Shows the recorded history of properties in one chart: numbers as lines on one v
 |----------|---------------|---------|---------|
 | `Range` | `1h`, `6h`, `24h`, `7d` or `30d` | `24h` | The time span that ends now |
 | `Bucket` | `Auto`, `Raw`, `1s`, `10s`, `60s`, `5m`, `10m`, `15m`, `1h`, `4h`, `6h`, `12h` or `24h` | `Auto` | The interval that one point of a line stands for. `Auto` picks one from the range, `Raw` shows every recorded sample. The bucket applies to lines only, a band always shows the recorded samples |
+| `Aggregation` | `TimeWeightedAverage`, `SampleAverage`, `Minimum`, `Maximum`, `Sum`, `StandardDeviation`, `Last`, `First` or `Count` | Automatic | How the values in a bucket become one point of a line. Without it a line takes the time-weighted average when a history store offers it, and a counter its last value. A band ignores it, and with `Bucket=Raw` it does not apply, because every recorded sample is shown. An aggregation that the property or the history stores do not offer, for example `Sum` for a counter, falls back to the automatic one, and the legend says so |
 | `Height` | Whole number | `300` | The height of the lines in pixels. The lines fill the width of the chart, and on a narrow screen they get lower to stay at least twice as wide as high |
 | `RefreshInterval` | Time span, for example `00:05:00` | `00:01:00` | How often the chart queries again at most while its values change. Less than a minute counts as a minute |
 | `Compact` | `true` or `false` | `false` | Leaves out the numbers of the value axis, the times of the time axis, the grid lines and the tooltips of the lines, so the lines fill the whole width. For a small chart next to others, whose detail is in the history dialog |
 
-`Range` and `Bucket` ignore case.
+`Range`, `Bucket` and `Aggregation` ignore case.
 
 ## Slots
 
@@ -33,6 +34,7 @@ The arguments of a `Series` block:
 | `Path` | Path (Number, Boolean or Enum) | None | The path of the property whose history the series shows. A number is a line, a boolean or an enum a band. The picker offers these kinds only |
 | `Label` | Text | The title of the property, then its name | The label in the legend of the lines or above a band. Without it the series shows the title that the property declares, the name of the property when it declares none, and the path when the path leads nowhere |
 | `Color` | Text, a CSS colour such as `"#E4572E"` | The next colour of the chart | The colour of a line. A band has one colour per state and ignores it |
+| `Aggregation` | Like `Aggregation` of the chart | The aggregation of the chart | The aggregation of this line in place of the one of the chart. A band ignores it |
 
 ## Samples
 
@@ -81,6 +83,21 @@ The last hour with the bucket that the chart picks from the range, a colour of i
 ::: Series Path=../Fan/Temperature Label="Fan temperature" Color="#E4572E"
 ::
 
+The highest speed of the pump in every ten minutes of the last six hours, next to its average:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.History.Blazor.HistoryChart Range=6h Bucket=10m Aggregation=Maximum Height=200
+::: Series Path=../Pump/CurrentSpeed Label="Highest speed"
+::: Series Path=../Pump/CurrentSpeed Label="Average speed" Aggregation=TimeWeightedAverage
+::
+~~~~
+
+:: HomeBlaze.History.Blazor.HistoryChart Range=6h Bucket=10m Aggregation=Maximum Height=200
+::: Series Path=../Pump/CurrentSpeed Label="Highest speed"
+::: Series Path=../Pump/CurrentSpeed Label="Average speed" Aggregation=TimeWeightedAverage
+::
+
 Three compact charts in a row: the temperature of each motor and the speed of the pump. A click on a chart opens the history dialog of its series:
 
 <!-- sample: live -->
@@ -121,8 +138,9 @@ Three compact charts in a row: the temperature of each motor and the speed of th
 - **Legend**: The legend below the lines lists every line with its current value, and the header of each band its current value, which follow every change at once. A band series without a band, for example one without history, is listed with the lines.
 - **Refresh**: The chart queries again at most once per window, and only while one of its values changes. The window is the refresh interval, at least a minute, or the bucket when the bucket is longer. A changed series, range or bucket queries at once. A chart that nobody views costs nothing.
 - **No history**: A series whose property is not recorded shows "no history recorded" in the legend, and a path that leads nowhere shows "not found". Without any history store every series shows "no history store". None of these is an error. Only `[State]` properties of a number, a boolean, an enum or a text are recorded.
-- **Errors**: An unknown `Range` or `Bucket`, or a line with another unit, shows a small red alert in place of the chart and its legend, see [Value Widget Errors](../page-errors.md#value-widget-errors). A query that fails shows a warning "Could not load history" with the reason in place of the chart, the legend stays, and the chart tries again with the next refresh.
-- **History dialog**: A click on the lines opens the history dialog of the first line, and a click on an entry of the legend or in the header of a band the dialog of that series. The dialog shows the same chart for that one property with its axes, with a choice of range, bucket and aggregation. The lines open it with a mouse click only; with the keyboard, the entries of the legend and of the band headers are buttons that open the same dialogs. The history link of a property in the browser opens the same dialog. In edit mode a click selects the chart instead.
+- **Aggregation**: A line whose aggregation the property or the history stores do not offer shows the automatic one, with a note in the legend that names both, for example "(Sum not available, shows Average)". This is no error, because stores offer different aggregations. An aggregation such as `Maximum` reads only the samples inside a bucket, so a bucket without a recorded sample is a gap in its line, while `Last` and the time-weighted average carry the value held into it.
+- **Errors**: An unknown `Range`, `Bucket` or `Aggregation`, or a line with another unit, shows a small red alert in place of the chart and its legend, see [Value Widget Errors](../page-errors.md#value-widget-errors). A query that fails shows a warning "Could not load history" with the reason in place of the chart, the legend stays, and the chart tries again with the next refresh.
+- **History dialog**: A click on the lines opens the history dialog of the first line, and a click on an entry of the legend or in the header of a band the dialog of that series. The dialog shows the same chart for that one property with its axes, with a choice of range, bucket and aggregation, and opens with the range, bucket and aggregation of the chart. A band opens it with the range of the chart and its recorded states. The lines open it with a mouse click only; with the keyboard, the entries of the legend and of the band headers are buttons that open the same dialogs. The history link of a property in the browser opens the same dialog. In edit mode a click selects the chart instead.
 
 ## Related
 

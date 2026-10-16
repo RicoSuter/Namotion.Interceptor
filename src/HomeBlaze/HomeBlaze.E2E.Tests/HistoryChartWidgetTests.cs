@@ -245,11 +245,24 @@ public class HistoryChartWidgetTests
     {
         // Arrange & Act
         var page = await OpenPageAsync(DesktopWidth);
-        var error = page.GetByTestId("widget-argument-error");
+        var error = page.GetByTestId("widget-argument-error").Filter(new() { HasText = "Mixed temperature" });
 
         // Assert
         await Assertions.Expect(error).ToHaveCountAsync(1, new() { Timeout = Timeout });
-        await Assertions.Expect(error).ToContainTextAsync("Mixed temperature");
+        await Assertions.Expect(error).ToContainTextAsync("has another unit than 'Mixed speed'");
+    }
+
+    [Fact]
+    public async Task WhenAChartHasAnUnknownAggregation_ThenItShowsAnErrorThatNamesTheAggregation()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync(DesktopWidth);
+        var error = page.GetByTestId("widget-argument-error").Filter(new() { HasText = "Median" });
+
+        // Assert
+        await Assertions.Expect(error).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(error).ToHaveTextAsync(
+            "Unknown aggregation 'Median': use one of TimeWeightedAverage, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count");
     }
 
     [Fact]
@@ -438,6 +451,31 @@ public class HistoryChartWidgetTests
         var dialog = GetHistoryDialog(page, "Chart speed");
         await Assertions.Expect(dialog.GetByTestId("property-history-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(dialog.GetByTestId("history-chart-view")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAChartWithARangeABucketAndAnAggregationIsClicked_ThenTheHistoryDialogOpensWithThem()
+    {
+        // Arrange
+        var page = await OpenPageAsync(DesktopWidth);
+        var lines = GetChart(page, "Highest speed").GetByTestId("history-chart-lines");
+        await Assertions.Expect(lines).ToHaveAttributeAsync("title", "Show history of Highest speed", new() { Timeout = Timeout });
+
+        // Act
+        await lines.ClickAsync();
+
+        // Assert
+        var dialog = GetHistoryDialog(page, "Highest speed");
+        await Assertions.Expect(dialog.GetByTestId("history-chart-view")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // The dialog scales while it opens, and a select that is read meanwhile can still be moving.
+        await page.WaitForFunctionAsync(
+            "() => [...document.querySelectorAll('.mud-dialog')].every(dialog => dialog.getAnimations().every(animation => animation.playState === 'finished'))",
+            null,
+            new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByRole(AriaRole.Combobox, new() { Name = "Range" })).ToHaveTextAsync("Last 6 hours");
+        await Assertions.Expect(dialog.GetByRole(AriaRole.Combobox, new() { Name = "Period" })).ToHaveTextAsync("10m");
+        await Assertions.Expect(dialog.GetByRole(AriaRole.Combobox, new() { Name = "Aggregation" })).ToHaveTextAsync("Maximum");
     }
 
     [Fact]

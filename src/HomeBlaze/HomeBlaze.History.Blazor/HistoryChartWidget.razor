@@ -89,9 +89,10 @@
     // The resolution of the series, kept until the configuration or the paths of the graph change, because the
     // legend renders on every change of a charted value.
     private HistoryChartSeries[]? _resolvedEntries;
-    private (string? Path, string? Label, string? Color)[] _resolvedConfiguration = [];
+    private (string? Path, string? Label, string? Color, string? Aggregation)[] _resolvedConfiguration = [];
     private string? _resolvedRange;
     private string? _resolvedBucket;
+    private string? _resolvedAggregation;
     private int _resolvedPathsVersion = -1;
     private IReadOnlyList<HistoryChartSeriesInfo> _series = [];
     private string?[] _colors = [];
@@ -108,6 +109,12 @@
     private IReadOnlyList<HistoryChartSeriesInfo>? _dataSeries;
     private int[] _bandSeries = [];
     private bool[] _hasBand = [];
+
+    // Per series of the shown data, what the legend says about a line that shows another aggregation than it asks for.
+    private string?[] _aggregationNotes = [];
+
+    // The aggregations the history stores support together, found by the last query.
+    private IReadOnlySet<string> _storeAggregations = new HashSet<string>();
 
     // One fragment per band of the shown data, built with it, so a render allocates none.
     private RenderFragment[] _bandHeaders = [];
@@ -200,7 +207,9 @@
         var property = entry.Property;
         var value = property?.GetValue();
         var text = property is null || value is null ? MissingText : property.GetPropertyDisplayValue(value, TimeZone);
-        var note = entry.Note ?? (_hasStores == false ? NoStoreNote : null);
+        var note = entry.Note ??
+            (_hasStores == false ? NoStoreNote : null) ??
+            (ReferenceEquals(_dataSeries, _series) ? _aggregationNotes[index] : null);
 
         if (isBand)
         {
@@ -234,7 +243,8 @@
             return;
         }
 
-        await PropertyHistoryDialog.ShowAsync(DialogService, registry, PathResolver, property, entry.Label);
+        var settings = HistoryChartSeriesResolver.GetDialogSettings(entry, _resolvedRange, _resolvedBucket, _storeAggregations);
+        await PropertyHistoryDialog.ShowAsync(DialogService, registry, PathResolver, property, entry.Label, settings);
     }
 
     protected override void OnInitialized()
@@ -272,6 +282,7 @@
         var entries = chart.Series;
         var range = chart.Range;
         var bucket = chart.Bucket;
+        var aggregation = chart.Aggregation;
         var pathsVersion = Volatile.Read(ref _pathsVersion);
 
         // Every entry is read even when an earlier one differs, so the tracking scope records all of them.
@@ -279,11 +290,12 @@
             pathsVersion == _resolvedPathsVersion &&
             range == _resolvedRange &&
             bucket == _resolvedBucket &&
+            aggregation == _resolvedAggregation &&
             entries.Length == _resolvedConfiguration.Length;
         for (var index = 0; index < entries.Length; index++)
         {
             var entry = entries[index];
-            var configuration = (entry.Path, entry.Label, entry.Color);
+            var configuration = (entry.Path, entry.Label, entry.Color, entry.Aggregation);
             isCurrent &= index < _resolvedConfiguration.Length && _resolvedConfiguration[index] == configuration;
         }
 
@@ -292,15 +304,15 @@
             return;
         }
 
-        var configurations = new (string? Path, string? Label, string? Color)[entries.Length];
+        var configurations = new (string? Path, string? Label, string? Color, string? Aggregation)[entries.Length];
         for (var index = 0; index < entries.Length; index++)
         {
             var entry = entries[index];
-            configurations[index] = (entry.Path, entry.Label, entry.Color);
+            configurations[index] = (entry.Path, entry.Label, entry.Color, entry.Aggregation);
         }
 
         var series = HistoryChartSeriesResolver.Resolve(PathResolver, chart);
-        var error = HistoryChartSeriesResolver.FindArgumentError(range, bucket, series);
+        var error = HistoryChartSeriesResolver.FindArgumentError(range, bucket, aggregation, series);
 
         // A change of the graph that leaves the series as they were, which is the common case, does not query again.
         var seriesChanged = !series.SequenceEqual(_series);
@@ -313,6 +325,7 @@
         _resolvedConfiguration = configurations;
         _resolvedRange = range;
         _resolvedBucket = bucket;
+        _resolvedAggregation = aggregation;
         _resolvedPathsVersion = pathsVersion;
         _error = error;
         if (!seriesChanged)
@@ -410,10 +423,13 @@
                 storeAggregations.UnionWith(store.SupportedAggregations);
             }
 
+            _storeAggregations = storeAggregations;
+
             var series = _series;
             var requests = new List<HistoryChartSeriesRequest>(series.Count);
             var bandSeries = new List<int>();
             var hasBand = new bool[series.Count];
+            var aggregationNotes = new string?[series.Count];
             for (var index = 0; index < series.Count; index++)
             {
                 var entry = series[index];
@@ -431,7 +447,8 @@
                 }
 
                 var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
-                    property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations);
+                    property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations, entry.Aggregation);
+                aggregationNotes[index] = HistoryChartSeriesResolver.GetAggregationNote(entry, period.IsRaw, aggregation);
                 requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index], entry.Unit));
             }
 
@@ -448,6 +465,7 @@
             _dataSeries = series;
             _bandSeries = bandSeries.ToArray();
             _hasBand = hasBand;
+            _aggregationNotes = aggregationNotes;
             _bandHeaders = new RenderFragment[_bandSeries.Length];
             for (var band = 0; band < _bandHeaders.Length; band++)
             {

@@ -641,4 +641,119 @@ public class PropertyHistoryChartModelTests
             PropertyHistoryChartModel.Periods.Count,
             PropertyHistoryChartModel.Periods.Select(period => period.ShortName.ToUpperInvariant()).Distinct().Count());
     }
+
+    [Theory]
+    [InlineData("Maximum", HistoryAggregations.Maximum)]
+    [InlineData("timeweightedaverage", HistoryAggregations.TimeWeightedAverage)]
+    [InlineData("STANDARDDEVIATION", HistoryAggregations.StandardDeviation)]
+    public void WhenAnAggregationNameIsKnownInAnyCase_ThenTryGetAggregationReturnsItsIdentifier(string name, string expected)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetAggregation(name, out var aggregation);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal(expected, aggregation);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Median")]
+    [InlineData("Average")]
+    public void WhenAnAggregationNameIsUnknown_ThenTryGetAggregationFails(string? name)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetAggregation(name, out _);
+
+        // Assert
+        Assert.False(found);
+    }
+
+    private static readonly IReadOnlyList<string> NumberAggregations = HistoryAggregations.All;
+
+    [Fact]
+    public void WhenTheDialogOpensWithoutSettings_ThenItShowsTheLastHourAutoAndTheFirstOfferedAggregation()
+    {
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(null, NumberAggregations, isDiscrete: false);
+
+        // Assert
+        Assert.Equal(new PropertyHistoryChartModel.DialogSelection(0, null, 0, HistoryAggregations.TimeWeightedAverage), selection);
+    }
+
+    [Fact]
+    public void WhenTheDialogOfADiscretePropertyOpensWithoutSettings_ThenItShowsRawSamplesAndTheLastValue()
+    {
+        // Arrange
+        string[] offered = [HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count];
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(null, offered, isDiscrete: true);
+
+        // Assert
+        Assert.True(PropertyHistoryChartModel.Periods[selection.PeriodIndex].IsRaw);
+        Assert.Equal(HistoryAggregations.Last, selection.Aggregation);
+    }
+
+    [Fact]
+    public void WhenTheDialogOpensWithTheSettingsOfAChart_ThenItSelectsThePresetThePeriodAndTheAggregation()
+    {
+        // Arrange
+        PropertyHistoryChartModel.TryGetPeriod("10m", out var period);
+        var settings = new PropertyHistoryDialogSettings(TimeSpan.FromHours(6), period, HistoryAggregations.Maximum);
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(settings, NumberAggregations, isDiscrete: false);
+
+        // Assert
+        Assert.Equal("Last 6 hours", PropertyHistoryChartModel.RangePresets[selection.RangeIndex].Label);
+        Assert.Null(selection.CustomRange);
+        Assert.Equal("10m", PropertyHistoryChartModel.Periods[selection.PeriodIndex].ShortName);
+        Assert.Equal(HistoryAggregations.Maximum, selection.Aggregation);
+    }
+
+    [Theory]
+    [InlineData("Auto")]
+    [InlineData("Raw")]
+    public void WhenTheDialogOpensWithAnAutoOrRawPeriod_ThenItSelectsThatPeriod(string shortName)
+    {
+        // Arrange
+        PropertyHistoryChartModel.TryGetPeriod(shortName, out var period);
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(
+            new PropertyHistoryDialogSettings(Period: period), NumberAggregations, isDiscrete: false);
+
+        // Assert
+        Assert.Equal(period, PropertyHistoryChartModel.Periods[selection.PeriodIndex]);
+    }
+
+    [Fact]
+    public void WhenTheDialogOpensWithARangeThatIsNoPreset_ThenItSelectsACustomRangeOfThatLength()
+    {
+        // Arrange
+        var settings = new PropertyHistoryDialogSettings(TimeSpan.FromHours(3));
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(settings, NumberAggregations, isDiscrete: false);
+
+        // Assert
+        Assert.Equal(PropertyHistoryChartModel.RangePresets.Count, selection.RangeIndex);
+        Assert.Equal(TimeSpan.FromHours(3), selection.CustomRange);
+    }
+
+    [Fact]
+    public void WhenTheDialogOpensWithAnAggregationItDoesNotOffer_ThenItSelectsItsDefault()
+    {
+        // Arrange
+        string[] offered = [HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count];
+        var settings = new PropertyHistoryDialogSettings(Aggregation: HistoryAggregations.Sum);
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(settings, offered, isDiscrete: false);
+
+        // Assert
+        Assert.Equal(HistoryAggregations.Last, selection.Aggregation);
+    }
 }
