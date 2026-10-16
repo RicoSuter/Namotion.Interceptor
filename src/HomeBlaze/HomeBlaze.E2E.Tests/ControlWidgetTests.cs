@@ -95,13 +95,27 @@ public class ControlWidgetTests
         return lines[^1].Length == 0 ? lines[..^1] : lines;
     }
 
+    /// <summary>
+    /// Asserts that a save changed one line of the page, the head line of the block with this name, and that the
+    /// line now holds the argument.
+    /// </summary>
+    private static void AssertOnlyTheHeadLineChanged(string original, string saved, string blockName, string expectedArgument)
+    {
+        var originalLines = SplitLines(original);
+        var savedLines = SplitLines(saved);
+        Assert.Equal(originalLines.Length, savedLines.Length);
+
+        var changedIndex = Assert.Single(Enumerable.Range(0, originalLines.Length), index => originalLines[index] != savedLines[index]);
+        Assert.Matches($"^:+ \\S+#{blockName}( |$)", originalLines[changedIndex]);
+        Assert.Contains($" {expectedArgument}", savedLines[changedIndex]);
+    }
+
     [Fact]
     public async Task WhenSwitchOfAConfigurationPropertyIsToggled_ThenOnlyTheHeadLineOfItsBlockIsSaved()
     {
         // Arrange
         var pagePath = _fixture.GetDemoPagePath(PageName);
         var originalContent = await _fixture.ReadFileAsync(pagePath);
-        var linesBefore = SplitLines(originalContent);
 
         try
         {
@@ -116,18 +130,16 @@ public class ControlWidgetTests
             // Assert: the page is saved a moment after the write, so the file is read until it has the new value.
             await Assertions.Expect(outlineSwitch).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
 
-            string[] linesAfter = [];
+            var savedContent = string.Empty;
             await AsyncTestHelpers.WaitUntilAsync(
                 () => TryReadContent(pagePath) is { } content &&
-                    (linesAfter = SplitLines(content)).Any(line =>
+                    SplitLines(savedContent = content).Any(line =>
                         line.StartsWith(CardHeadLine, StringComparison.Ordinal) &&
                         line.Contains("Outlined=false", StringComparison.Ordinal)),
                 WaitTimeout,
                 message: "The page was not saved with the outline of the card switched off");
 
-            Assert.Equal(linesBefore.Length, linesAfter.Length);
-            var changedLine = Assert.Single(Enumerable.Range(0, linesBefore.Length), index => linesBefore[index] != linesAfter[index]);
-            Assert.StartsWith(CardHeadLine, linesAfter[changedLine]);
+            AssertOnlyTheHeadLineChanged(originalContent, savedContent, "ctlcard", "Outlined=false");
         }
         finally
         {
@@ -263,13 +275,15 @@ public class ControlWidgetTests
             // Assert: the page is saved a moment after the write, by which time any further write would have happened.
             await AsyncTestHelpers.WaitUntilAsync(() => GetMotor().TargetSpeed != originalSpeed, WaitTimeout, message: "The slider did not write the target speed");
             var writtenSpeed = GetMotor().TargetSpeed;
+            var savedContent = string.Empty;
             await AsyncTestHelpers.WaitUntilAsync(
                 () => TryReadContent(pagePath) is { } content &&
-                    SplitLines(content).Any(line =>
+                    SplitLines(savedContent = content).Any(line =>
                         line.StartsWith(MotorHeadLine, StringComparison.Ordinal) &&
                         line.Contains($"TargetSpeed={writtenSpeed} ", StringComparison.Ordinal)),
                 WaitTimeout,
                 message: "The page was not saved with the new target speed");
+            AssertOnlyTheHeadLineChanged(originalContent, savedContent, MotorName, $"TargetSpeed={writtenSpeed}");
             Assert.Equal(1, Volatile.Read(ref writes));
 
             await page.ReloadAsync();
