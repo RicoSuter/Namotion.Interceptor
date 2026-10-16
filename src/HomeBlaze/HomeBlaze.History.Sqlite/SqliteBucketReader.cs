@@ -250,8 +250,19 @@ internal static class SqliteBucketReader
             return (fixedStart, fixedStart + size.Ticks);
         }
 
-        var bucketStart = BucketAlignment.Start(EpochTicks.FromEpochTicks(ticks), bucket);
-        return (EpochTicks.ToEpochTicks(bucketStart), EpochTicks.ToEpochTicks(BucketAlignment.Next(bucketStart, bucket)));
+        var instant = EpochTicks.FromEpochTicks(ticks);
+        var bucketStart = BucketAlignment.Start(instant, bucket);
+        var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
+
+        // The loops that walk buckets advance to the located end, so a bucket that does not contain the instant would
+        // spin forever under the connection lock.
+        if (bucketStart > instant || bucketEnd <= instant)
+        {
+            throw new InvalidOperationException(
+                $"The {bucket} bucket located for {instant:O} spans [{bucketStart:O}, {bucketEnd:O}), which does not contain it.");
+        }
+
+        return (EpochTicks.ToEpochTicks(bucketStart), EpochTicks.ToEpochTicks(bucketEnd));
     }
 
     // One grouped query per partition producing the partials for the requested aggregation. Only the
