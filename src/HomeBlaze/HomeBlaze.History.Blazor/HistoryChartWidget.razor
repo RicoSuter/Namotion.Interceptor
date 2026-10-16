@@ -89,7 +89,7 @@
     // The resolution of the series, kept until the configuration or the paths of the graph change, because the
     // legend renders on every change of a charted value.
     private HistoryChartSeries[]? _resolvedEntries;
-    private (string? Path, string? Label, string? Color, string? Aggregation)[] _resolvedConfiguration = [];
+    private HistoryChartSeriesConfiguration[] _resolvedConfiguration = [];
     private string? _resolvedRange;
     private string? _resolvedBucket;
     private string? _resolvedAggregation;
@@ -282,33 +282,37 @@
         var aggregation = chart.Aggregation;
         var pathsVersion = Volatile.Read(ref _pathsVersion);
 
-        // Every entry is read even when an earlier one differs, so the tracking scope records all of them.
         var isCurrent = ReferenceEquals(entries, _resolvedEntries) &&
             pathsVersion == _resolvedPathsVersion &&
             range == _resolvedRange &&
             bucket == _resolvedBucket &&
             aggregation == _resolvedAggregation &&
             entries.Length == _resolvedConfiguration.Length;
+
+        // Every entry is read once, also after one differs, so the tracking scope records all of them. While they are
+        // current nothing is allocated.
+        var configurations = isCurrent ? null : new HistoryChartSeriesConfiguration[entries.Length];
         for (var index = 0; index < entries.Length; index++)
         {
-            var entry = entries[index];
-            var configuration = (entry.Path, entry.Label, entry.Color, entry.Aggregation);
-            isCurrent &= index < _resolvedConfiguration.Length && _resolvedConfiguration[index] == configuration;
+            var configuration = HistoryChartSeriesConfiguration.Read(entries[index]);
+            if (configurations is null && configuration != _resolvedConfiguration[index])
+            {
+                configurations = new HistoryChartSeriesConfiguration[entries.Length];
+                Array.Copy(_resolvedConfiguration, configurations, index);
+            }
+
+            if (configurations is not null)
+            {
+                configurations[index] = configuration;
+            }
         }
 
-        if (isCurrent)
+        if (configurations is null)
         {
             return;
         }
 
-        var configurations = new (string? Path, string? Label, string? Color, string? Aggregation)[entries.Length];
-        for (var index = 0; index < entries.Length; index++)
-        {
-            var entry = entries[index];
-            configurations[index] = (entry.Path, entry.Label, entry.Color, entry.Aggregation);
-        }
-
-        var series = HistoryChartSeriesResolver.Resolve(PathResolver, chart);
+        var series = HistoryChartSeriesResolver.Resolve(PathResolver, entries, configurations, aggregation);
         var error = HistoryChartSeriesResolver.FindArgumentError(range, bucket, aggregation, series);
 
         // A change of the graph that leaves the series as they were, which is the common case, does not query again.

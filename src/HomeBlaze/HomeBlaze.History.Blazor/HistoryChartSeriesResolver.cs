@@ -49,6 +49,16 @@ internal sealed record HistoryChartSeriesInfo(
 }
 
 /// <summary>
+/// The arguments of a series of a <see cref="HistoryChart"/> as written.
+/// </summary>
+internal readonly record struct HistoryChartSeriesConfiguration(string? Path, string? Label, string? Color, string? Aggregation)
+{
+    /// <summary>Reads the arguments of a series, so a caller in a tracking scope renders again when one changes.</summary>
+    public static HistoryChartSeriesConfiguration Read(HistoryChartSeries series) =>
+        new(series.Path, series.Label, series.Color, series.Aggregation);
+}
+
+/// <summary>
 /// Resolves and checks the series of a <see cref="HistoryChart"/>.
 /// </summary>
 internal static class HistoryChartSeriesResolver
@@ -59,21 +69,23 @@ internal static class HistoryChartSeriesResolver
             : new[] { aggregation }));
 
     /// <summary>
-    /// Resolves the path of every series relative to the series. Reads the properties of the series, so a
-    /// caller in a tracking scope renders again when one changes.
+    /// Resolves the path of every series relative to the series.
     /// </summary>
-    public static IReadOnlyList<HistoryChartSeriesInfo> Resolve(SubjectPathResolver resolver, HistoryChart chart)
+    /// <param name="resolver">The path resolver.</param>
+    /// <param name="series">The series of the chart.</param>
+    /// <param name="configurations">The arguments of each series, read with <see cref="HistoryChartSeriesConfiguration.Read"/>.</param>
+    /// <param name="chartAggregation">The aggregation of the chart as written.</param>
+    public static IReadOnlyList<HistoryChartSeriesInfo> Resolve(
+        SubjectPathResolver resolver,
+        IReadOnlyList<HistoryChartSeries> series,
+        IReadOnlyList<HistoryChartSeriesConfiguration> configurations,
+        string? chartAggregation)
     {
-        var series = chart.Series;
-        var chartAggregation = chart.Aggregation;
-        var result = new HistoryChartSeriesInfo[series.Length];
-        for (var index = 0; index < series.Length; index++)
+        var result = new HistoryChartSeriesInfo[series.Count];
+        for (var index = 0; index < result.Length; index++)
         {
-            var entry = series[index];
-            var path = entry.Path;
-            var label = entry.Label;
-            var aggregation = entry.Aggregation;
-            var property = ResolveProperty(resolver, entry, path);
+            var (path, label, color, aggregation) = configurations[index];
+            var property = ResolveProperty(resolver, series[index], path);
             var metadata = property?.GetStateMetadata();
             var kind = property is null
                 ? HistoryChartSeriesKind.Missing
@@ -83,7 +95,7 @@ internal static class HistoryChartSeriesResolver
 
             result[index] = new HistoryChartSeriesInfo(
                 GetLabel(label, metadata, property, path),
-                entry.Color,
+                color,
                 property,
                 kind,
                 metadata?.Unit ?? StateUnit.Default,

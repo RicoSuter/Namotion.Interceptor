@@ -27,6 +27,10 @@ public class HistoryChartSeriesResolverTests
     private static HistoryChartSeriesInfo Band(string label, StateUnit unit = StateUnit.Default) =>
         new(label, null, null, HistoryChartSeriesKind.Band, unit, HasHistory: true, IsCumulative: false);
 
+    private static IReadOnlyList<HistoryChartSeriesInfo> Resolve(SubjectPathResolver resolver, HistoryChart chart) =>
+        HistoryChartSeriesResolver.Resolve(
+            resolver, chart.Series, chart.Series.Select(HistoryChartSeriesConfiguration.Read).ToArray(), chart.Aggregation);
+
     [Fact]
     public void WhenAChartIsCreated_ThenItHasTheDocumentedDefaults()
     {
@@ -346,7 +350,7 @@ public class HistoryChartSeriesResolverTests
         root.Chart!.Aggregation = "Maximum";
 
         // Act
-        var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart);
+        var series = Resolve(resolver, root.Chart);
 
         // Assert
         Assert.Equal(["Maximum", "Minimum", "Maximum"], series.Select(entry => entry.Aggregation));
@@ -357,7 +361,7 @@ public class HistoryChartSeriesResolverTests
     {
         // Arrange
         var (resolver, root) = CreateGraph(new HistoryChartSeries { Path = "/Temperature", Aggregation = "maximum" });
-        var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart!)[0];
+        var series = Resolve(resolver, root.Chart!)[0];
 
         // Act
         var settings = HistoryChartSeriesResolver.GetDialogSettings(series, "6h", "10m");
@@ -372,7 +376,7 @@ public class HistoryChartSeriesResolverTests
     {
         // Arrange
         var (resolver, root) = CreateGraph(new HistoryChartSeries { Path = "/Temperature", Aggregation = "" });
-        var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart!)[0];
+        var series = Resolve(resolver, root.Chart!)[0];
 
         // Act
         var settings = HistoryChartSeriesResolver.GetDialogSettings(series, "24h", "Raw");
@@ -387,7 +391,7 @@ public class HistoryChartSeriesResolverTests
     {
         // Arrange
         var (resolver, root) = CreateGraph(new HistoryChartSeries { Path = "/IsOn", Aggregation = "Count" });
-        var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart!)[0];
+        var series = Resolve(resolver, root.Chart!)[0];
 
         // Act
         var settings = HistoryChartSeriesResolver.GetDialogSettings(series, "7d", "10m");
@@ -436,7 +440,7 @@ public class HistoryChartSeriesResolverTests
             new HistoryChartSeries());
 
         // Act
-        var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart!);
+        var series = Resolve(resolver, root.Chart!);
 
         // Assert
         Assert.Equal(
@@ -464,7 +468,7 @@ public class HistoryChartSeriesResolverTests
             new HistoryChartSeries { Path = "/Level" });
 
         // Act
-        var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart!);
+        var series = Resolve(resolver, root.Chart!);
 
         // Assert
         Assert.All(series, entry => Assert.Equal(HistoryChartSeriesKind.Band, entry.Kind));
@@ -480,7 +484,7 @@ public class HistoryChartSeriesResolverTests
         root.Page = new ChartPageSubject { Chart = chart };
 
         // Act
-        var series = HistoryChartSeriesResolver.Resolve(resolver, chart);
+        var series = Resolve(resolver, chart);
 
         // Assert
         var entry = Assert.Single(series);
