@@ -23,7 +23,7 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     private readonly long _throttleTicks;
     private readonly long _sweepTicks = Stopwatch.Frequency;
     private readonly Action _drain;
-    private readonly Timer _timer;
+    private Timer? _timer;
     private readonly ILogger _logger;
 
     private volatile Dispatcher? _dispatcher;
@@ -37,10 +37,6 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
         _logger = logger;
         _throttleTicks = options.Value.ThrottleMilliseconds * Stopwatch.Frequency / 1000;
         _drain = Drain;
-        using (ExecutionContext.SuppressFlow())
-        {
-            _timer = new Timer(static state => ((ComponentTrackingDispatcher)state!).PostDrain(), this, Timeout.Infinite, Timeout.Infinite);
-        }
     }
 
     /// <summary>Gets the number of drains, for tests and measurements.</summary>
@@ -127,13 +123,42 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
         {
             try
             {
-                _timer.Change(Math.Max(1, due * 1000 / Stopwatch.Frequency), Timeout.Infinite);
+                GetTimer().Change(Math.Max(1, due * 1000 / Stopwatch.Frequency), Timeout.Infinite);
             }
             catch (ObjectDisposedException)
             {
                 // The circuit has ended.
             }
         }
+    }
+
+    // Created on the first throttled change, so that a scope that never sees one, such as one of prerendering, has none.
+    private Timer GetTimer()
+    {
+        var timer = Volatile.Read(ref _timer);
+        if (timer is not null)
+        {
+            return timer;
+        }
+
+        using (ExecutionContext.SuppressFlow())
+        {
+            timer = new Timer(static state => ((ComponentTrackingDispatcher)state!).PostDrain(), this, Timeout.Infinite, Timeout.Infinite);
+        }
+
+        var existing = Interlocked.CompareExchange(ref _timer, timer, null);
+        if (existing is not null)
+        {
+            timer.Dispose();
+            return existing;
+        }
+
+        if (_isDisposed)
+        {
+            timer.Dispose();
+        }
+
+        return timer;
     }
 
     private void PostDrain()
@@ -152,9 +177,15 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
             {
                 _ = dispatcher.InvokeAsync(_drain);
             }
-            catch (ObjectDisposedException)
+            catch (Exception exception)
             {
-                // The renderer has been disposed with its circuit.
+                // Runs inside the write of a property, which must not fail because a render cannot be scheduled, for
+                // example after the renderer has been disposed with its circuit.
+                Volatile.Write(ref _isDrainScheduled, 0);
+                if (exception is not ObjectDisposedException)
+                {
+                    _logger.LogError(exception, "Failed to schedule the render of the components whose tracked properties changed.");
+                }
             }
         }
     }
@@ -225,7 +256,7 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     public void Dispose()
     {
         _isDisposed = true;
-        _timer.Dispose();
+        Volatile.Read(ref _timer)?.Dispose();
         foreach (var entry in _entries.Values)
         {
             entry.Subscription?.Dispose();
