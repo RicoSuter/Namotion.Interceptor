@@ -106,7 +106,10 @@ internal static class ValueRangeResolver
         return new ValueRangeState(Math.Clamp(number, range.Minimum, range.Maximum), percent, range, null);
     }
 
-    private static bool IsPercent(RegisteredSubjectProperty? property) =>
+    /// <summary>
+    /// Gets whether the property has the unit <see cref="StateUnit.Percent"/>, whose values run from 0 to 1.
+    /// </summary>
+    internal static bool IsPercent(RegisteredSubjectProperty? property) =>
         property?.GetStateMetadata()?.Unit == StateUnit.Percent;
 
     // An attribute that external sources provide can hold anything, and a value that is no finite number is ignored.

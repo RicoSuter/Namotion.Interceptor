@@ -1,6 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Components.Controls;
@@ -55,7 +53,7 @@ internal static class SliderMath
     /// percent, which holds 0 to 1 and is shown as 0 to 100, otherwise 1.
     /// </summary>
     public static double GetScale(RegisteredSubjectProperty? property) =>
-        property?.GetStateMetadata()?.Unit == StateUnit.Percent ? PercentScale : 1;
+        ValueRangeResolver.IsPercent(property) ? PercentScale : 1;
 
     /// <summary>
     /// Gets the step when none is given: 1 for a property that holds whole numbers, otherwise a hundredth of the range.
