@@ -38,6 +38,7 @@ else
     private int _glowCounter;
     private volatile int _disposed;
     private volatile int _rerenderPending;
+    private volatile int _isRecording;
 
     private ConcurrentDictionary<PropertyReference, bool> _collectingProperties = [];
     private ConcurrentDictionary<PropertyReference, bool> _properties = [];
@@ -83,6 +84,10 @@ else
         {
             return builder =>
             {
+                // Reset before anything is read: a change that arrives from now on must render again, because this
+                // render may already have read the old value.
+                Interlocked.Exchange(ref _rerenderPending, 0);
+
                 // The fragment runs in the async flow that renders the batch, which can differ from the flow that asked
                 // for the render, and the descendants render later in the same synchronous loop of that flow. The scope
                 // therefore stays open until OnAfterRender, which runs once the whole batch has rendered.
@@ -98,6 +103,7 @@ else
                 }
 
                 _currentScope = ReadPropertyRecorder.Start(_collectingProperties);
+                Interlocked.Exchange(ref _isRecording, 1);
                 ChildContent?.Invoke(builder);
             };
         }
@@ -131,18 +137,21 @@ else
 
                         try
                         {
-                            // Check if any change in the batch requires a rerender
+                            ConcurrentDictionary<PropertyReference, bool> properties;
+                            ConcurrentDictionary<PropertyReference, bool>? collectingProperties;
+                            lock (_lock)
+                            {
+                                // Until OnAfterRender swaps them in, the reads of an open recording are only in the
+                                // collecting set, and a change of one of them must render again as well.
+                                properties = _properties;
+                                collectingProperties = _isRecording != 0 ? _collectingProperties : null;
+                            }
+
                             foreach (var change in changes)
                             {
-                                // Check if this property is directly tracked
-                                if (_properties.TryGetValue(change.Property, out _))
-                                {
-                                    TriggerRerender();
-                                    return;
-                                }
-
-                                // Check if the changed subject is a descendant of any tracked subject
-                                if (IsDescendantOfTrackedSubject(change.Property.Subject))
+                                if (properties.ContainsKey(change.Property) ||
+                                    collectingProperties?.ContainsKey(change.Property) == true ||
+                                    IsDescendantOfTrackedSubject(change.Property.Subject))
                                 {
                                     TriggerRerender();
                                     return;
@@ -173,8 +182,6 @@ else
         // Without an open scope the fragment did not run since the last swap, and the tracked properties still hold.
         if (_currentScope is not null)
         {
-            StopRecording();
-
             lock (_lock)
             {
                 // The previous set is cleared when the next render starts, not here, because the change callback
@@ -188,10 +195,10 @@ else
                 // Clear ancestor cache when tracked subjects change
                 _ancestorCache.Clear();
             }
-        }
 
-        // Reset rerender flag after render completes
-        Interlocked.Exchange(ref _rerenderPending, 0);
+            // After the swap, so that the change callback finds the reads of this render in one of the two sets.
+            StopRecording();
+        }
 
         base.OnAfterRender(firstRender);
 
@@ -211,6 +218,8 @@ else
             _currentScope.Dispose();
             _currentScope = null;
         }
+
+        _isRecording = 0;
     }
 
     /// <summary>

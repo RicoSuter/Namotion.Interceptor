@@ -57,6 +57,57 @@ public class TrackingScopeTests
     }
 
     [Fact]
+    public async Task WhenAPropertyChangesBeforeTheFirstBatchIsAcknowledged_ThenTheScopeRendersTheNewValue()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+        var log = new RenderLog();
+
+        await using var renderer = new TestRenderer(TestRenderMode.Server);
+        renderer.HoldAcknowledgements();
+        await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
+        await WaitAsync(() => log.Value("reader") == "Initial");
+
+        // Act
+        person.FirstName = "Changed";
+
+        // Assert
+        await WaitAsync(() => renderer.DeferredRenderRequests > 0);
+        renderer.ReleaseAcknowledgements();
+        await WaitAsync(() => log.Value("reader") == "Changed");
+        Assert.InRange(log.Renders("reader"), 2, 3);
+        Assert.Empty(renderer.Exceptions);
+    }
+
+    [Fact]
+    public async Task WhenAPropertyChangesAgainBeforeTheRenderOfTheFirstChangeIsAcknowledged_ThenTheScopeRendersTheSecondValue()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+        var log = new RenderLog();
+
+        await using var renderer = new TestRenderer(TestRenderMode.Server);
+        await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
+        await WaitAsync(() => log.Renders("reader") == 2 && renderer.UnacknowledgedBatchCount == 0);
+
+        renderer.HoldAcknowledgements();
+        person.FirstName = "First";
+        await WaitAsync(() => log.Value("reader") == "First");
+
+        // Act
+        person.FirstName = "Second";
+
+        // Assert
+        await WaitAsync(() => renderer.DeferredRenderRequests > 0);
+        renderer.ReleaseAcknowledgements();
+        await WaitAsync(() => log.Value("reader") == "Second");
+        Assert.Equal(4, log.Renders("reader"));
+        Assert.Empty(renderer.Exceptions);
+    }
+
+    [Fact]
     public async Task WhenTheScopeIsDisposedBeforeItsFirstBatchIsAcknowledged_ThenItStopsRecording()
     {
         // Arrange

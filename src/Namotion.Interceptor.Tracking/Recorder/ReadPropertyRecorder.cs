@@ -61,9 +61,7 @@ public class ReadPropertyRecorder : IReadInterceptor
 
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
     {
-        var result = next(ref context);
-
-        // Record to all active scopes in this async context
+        // Recorded before the value is read, so that a change written after the read finds the property recorded.
         var scopes = _activeScopes.Value;
         if (scopes is not null)
         {
@@ -76,6 +74,6 @@ public class ReadPropertyRecorder : IReadInterceptor
             }
         }
 
-        return result;
+        return next(ref context);
     }
 }
