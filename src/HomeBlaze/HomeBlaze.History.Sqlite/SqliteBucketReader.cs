@@ -163,7 +163,7 @@ internal static class SqliteBucketReader
     }
 
     // Replaces segments with the window's (path, partitionKey, tickWindow) slices: per leg, the window
-    // intersected with the leg's [ValidFrom, ValidTo), split across the partitions it overlaps, legs in chain
+    // intersected with the leg's [ValidFrom, ValidTo) and each overlapping partition's range, legs in chain
     // order and partitions in the given ascending-start order. Windows must be passed ascending; the return
     // value is the first partition a later window can still overlap, to pass back in as firstPartition.
     private static int CollectWindowSegments(
@@ -188,13 +188,17 @@ internal static class SqliteBucketReader
                 continue;
             }
 
-            var fromTicks = EpochTicks.ToEpochTicks(legFrom);
-            var toTicks = EpochTicks.ToEpochTicks(legTo);
             for (var index = firstPartition; index < partitions.Count && partitions[index].Start < legTo; index++)
             {
-                if (partitions[index].End > legFrom)
+                // Clipped to the partition's range, which holds every row the file can contain, so a calendar
+                // query walks only the buckets of its own partition instead of the whole window per partition.
+                var (_, partitionStart, partitionEnd) = partitions[index];
+                if (partitionEnd > legFrom)
                 {
-                    segments.Add(new ChainSegment(leg.Path, partitions[index].Key, fromTicks, toTicks));
+                    var segmentFrom = partitionStart > legFrom ? partitionStart : legFrom;
+                    var segmentTo = partitionEnd < legTo ? partitionEnd : legTo;
+                    segments.Add(new ChainSegment(
+                        leg.Path, partitions[index].Key, EpochTicks.ToEpochTicks(segmentFrom), EpochTicks.ToEpochTicks(segmentTo)));
                 }
             }
         }
