@@ -22,6 +22,36 @@ public static class HistoryToolFormatting
             : TimeZoneInfo.ConvertTime(value, timeZone).ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture);
 
     /// <summary>
+    /// Rounds <paramref name="value"/> to 12 significant digits, so the noise of a computed aggregate
+    /// (<c>500.18000000000757</c>) serializes as the value it stands for (<c>500.18</c>). Zero and non-finite values
+    /// are returned unchanged.
+    /// </summary>
+    internal static double RoundToSignificantDigits(double value)
+    {
+        const int significantDigits = 12;
+        if (value == 0 || !double.IsFinite(value))
+        {
+            return value;
+        }
+
+        var decimals = significantDigits - 1 - (int)Math.Floor(Math.Log10(Math.Abs(value)));
+        if (decimals is >= 0 and <= 15)
+        {
+            return Math.Round(value, decimals, MidpointRounding.AwayFromZero);
+        }
+
+        // Math.Round takes at most 15 decimals; a power of ten up to 10^22 is exact, so scaling keeps the rounding exact.
+        if (decimals < 0)
+        {
+            var factor = Math.Pow(10, -decimals);
+            return Math.Round(value / factor, MidpointRounding.AwayFromZero) * factor;
+        }
+
+        var scale = Math.Pow(10, decimals);
+        return Math.Round(value * scale, MidpointRounding.AwayFromZero) / scale;
+    }
+
+    /// <summary>
     /// Formats <paramref name="duration"/> as its non-zero day, hour, minute and second parts, for example
     /// <c>2h14m</c>. Returns <c>0s</c> for zero and <c>&lt;1s</c> for a positive duration under a second.
     /// </summary>

@@ -311,7 +311,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         foreach (var result in results)
         {
             series[result.Path] = result.Series is { } served
-                ? BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
+                ? BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, bucket is not null, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
                 : result.ErrorPayload;
         }
 
@@ -361,7 +361,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     }
 
     private static Dictionary<string, object?> BuildSeriesPayload(
-        string? valueType, string? unit, HistorySeries series, TimeZoneInfo? timeZone, bool includeOwnRanges)
+        string? valueType, string? unit, HistorySeries series, TimeZoneInfo? timeZone, bool isBucketed, bool includeOwnRanges)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal) { ["value_type"] = valueType };
         if (unit is not null)
@@ -382,17 +382,20 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         var points = new object?[series.Points.Length][];
         for (var i = 0; i < points.Length; i++)
         {
-            points[i] = ToPair(series.Points[i], timeZone);
+            points[i] = ToPair(series.Points[i], timeZone, isBucketed);
         }
 
         payload["points"] = points;
         return payload;
     }
 
-    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo? timeZone) =>
+    // Bucketed values are computed, so their floating point noise is rounded away; raw samples are returned as recorded.
+    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo? timeZone, bool isBucketed) =>
     [
         HistoryToolFormatting.FormatTimestamp(point.Timestamp, timeZone),
-        point.Number is { } number ? number : point.Json is { } json ? json : null
+        point.Number is { } number
+            ? isBucketed ? HistoryToolFormatting.RoundToSignificantDigits(number) : number
+            : point.Json is { } json ? json : null
     ];
 
     private static string[][] FormatRanges(ImmutableArray<HistoryCoverage> ranges) =>

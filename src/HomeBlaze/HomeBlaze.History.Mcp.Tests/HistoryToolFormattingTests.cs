@@ -105,4 +105,33 @@ public class HistoryToolFormattingTests
         // Assert
         Assert.Equal(expected, formatted);
     }
+
+    [Theory]
+    [InlineData(500.18000000000757, 500.18)]
+    [InlineData(345.39999999999964, 345.4)]
+    [InlineData(-12345.678901234567, -12345.6789012)]
+    [InlineData(0.30000000000000004, 0.3)]
+    [InlineData(1.2345678901234567e20, 1.23456789012e20)]
+    [InlineData(1.2345678901234567e-7, 1.23456789012e-7)]
+    [InlineData(123456789012.0, 123456789012.0)]
+    [InlineData(0d, 0d)]
+    [InlineData(double.PositiveInfinity, double.PositiveInfinity)]
+    public void WhenRoundingAComputedValue_ThenTwelveSignificantDigitsRemain(double value, double expected)
+    {
+        // Act
+        var rounded = HistoryToolFormatting.RoundToSignificantDigits(value);
+
+        // Assert
+        Assert.Equal(expected, rounded);
+    }
+
+    [Fact]
+    public void WhenRoundingNaN_ThenItStaysNaN()
+    {
+        // Act
+        var rounded = HistoryToolFormatting.RoundToSignificantDigits(double.NaN);
+
+        // Assert
+        Assert.True(double.IsNaN(rounded));
+    }
 }

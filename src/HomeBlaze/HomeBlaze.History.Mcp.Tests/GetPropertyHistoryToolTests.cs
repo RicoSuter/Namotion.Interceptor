@@ -556,4 +556,24 @@ public class GetPropertyHistoryToolTests
         Assert.Equal("WattHour", series.GetProperty("/Energy").GetProperty("unit").GetString());
         Assert.False(series.GetProperty("/Power").TryGetProperty("unit", out _));
     }
+
+    [Fact]
+    public async Task WhenBucketedValuesCarryFloatingPointNoise_ThenTheyAreRoundedButRawSamplesAreNot()
+    {
+        // Arrange
+        void Configure(TestHistoryStore store) => store.Points =
+            [new HistoryPoint(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), 500.18000000000757, null)];
+
+        // Act
+        var bucketed = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-01-01T00:00:00Z", to = "2026-01-01T01:00:00Z", bucket = "1h", aggregation = "SampleAverage" },
+            Configure);
+        var raw = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-01-01T00:00:00Z", to = "2026-01-01T01:00:00Z" },
+            Configure);
+
+        // Assert
+        Assert.Equal("500.18", bucketed.GetProperty("series").GetProperty("/Power").GetProperty("points")[0][1].GetRawText());
+        Assert.Equal("500.18000000000757", raw.GetProperty("series").GetProperty("/Power").GetProperty("points")[0][1].GetRawText());
+    }
 }
