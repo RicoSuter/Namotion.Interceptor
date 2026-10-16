@@ -49,7 +49,7 @@
                 <MudText Typo="Typo.body2" Class="@(content is null ? "flex-grow-1 ma-0" : "ma-0")" data-testid="value-label">@ValueReader.GetLabel(reading?.Property, row.Label, path)</MudText>
                 @if (content is not null)
                 {
-                    @* MudBlazor 9.2 has no text alignment utility other than this class of MudText. A flex layout is no alternative, because the bar of a Progress has to fill the room. *@
+                    @* MudBlazor has no text alignment utility other than this class of MudText. A flex layout is no alternative, because the bar of a Progress has to fill the room. *@
                     <div class="flex-grow-1 mud-typography-align-right" data-testid="value-content">
                         <SubjectComponent Subject="@content" Type="SubjectComponentType.Widget" />
                     </div>

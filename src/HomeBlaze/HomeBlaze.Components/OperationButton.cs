@@ -15,10 +15,16 @@ namespace HomeBlaze.Components;
 [InterceptorSubject]
 public partial class OperationButton : IConfigurable, ITitleProvider
 {
+    /// <summary>The colour of a button that sets none.</summary>
+    internal const MudBlazor.Color DefaultColor = MudBlazor.Color.Primary;
+
+    /// <summary>The variant of a button that sets none.</summary>
+    internal const MudBlazor.Variant DefaultVariant = MudBlazor.Variant.Filled;
+
     public OperationButton()
     {
-        Color = MudBlazor.Color.Primary;
-        Variant = MudBlazor.Variant.Filled;
+        Color = DefaultColor;
+        Variant = DefaultVariant;
     }
 
     /// <summary>

@@ -10,8 +10,9 @@
 
 @if (gauge is not null)
 {
-    // Read once per render and never kept: the read is what the tracking scope records.
-    var reading = ValueReader.Read(PathResolver, gauge, gauge.Path, gauge.Map, TimeZone);
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var path = gauge.Path;
+    var reading = ValueReader.Read(PathResolver, gauge, path, gauge.Map, TimeZone);
     var state = ValueRangeResolver.GetState(reading.Property, reading.Value, gauge.Minimum, gauge.Maximum);
     var size = gauge.Size;
 
@@ -21,7 +22,7 @@
     }
     else
     {
-        var label = ValueReader.GetLabel(reading.Property, gauge.Label, gauge.Path);
+        var label = ValueReader.GetLabel(reading.Property, gauge.Label, path);
         // A meter must have a value, so without one the gauge is a named group; Blazor leaves out the null attributes.
         var isMeter = state.AriaValue is not null;
 
@@ -39,41 +40,13 @@
                 <MudProgressCircular Value="100" Min="0" Max="100" StrokeWidth="4" Class="gauge-track" Style="width: 100%; height: 100%;" aria-hidden="true" />
                 <MudProgressCircular Value="@(state.Percent ?? 0)" Min="0" Max="100" StrokeWidth="4" Rounded="true" Color="@GaugeDisplay.GetColor(reading)" Class="gauge-value" Style="width: 100%; height: 100%;" aria-hidden="true" />
                 <div class="gauge-text">
-                    <ValueText Reading="@reading" Path="@gauge.Path" Typo="@GaugeDisplay.GetValueTypo(size)" />
+                    <ValueText Reading="@reading" Path="@path" Typo="@GaugeDisplay.GetValueTypo(size)" />
                 </div>
             </div>
             <MudText Typo="Typo.caption" Class="ma-0" data-testid="value-label">@label</MudText>
         </div>
     }
 }
-
-<style>
-    .gauge-ring {
-        position: relative;
-    }
-
-    .gauge-ring .mud-progress-circular {
-        position: absolute;
-        inset: 0;
-    }
-
-    .gauge-ring svg {
-        width: 100%;
-        height: 100%;
-    }
-
-    .gauge-ring .gauge-track {
-        opacity: 0.2;
-    }
-
-    .gauge-ring .gauge-text {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-</style>
 
 @code {
     [Parameter]

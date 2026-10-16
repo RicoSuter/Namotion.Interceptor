@@ -1258,7 +1258,6 @@ namespace HomeBlaze.Components.Controls
         public PropertyWriter(HomeBlaze.Services.RootManager rootManager, MudBlazor.ISnackbar snackbar, System.TimeProvider timeProvider) { }
         public void Dispose() { }
         public bool TryWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? value) { }
-        public static bool IsWritable(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property) { }
         public static bool IsWritable(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? currentValue) { }
     }
 }

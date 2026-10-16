@@ -25,16 +25,6 @@ public sealed class PropertyWriterTests : IDisposable
     private static RegisteredSubjectProperty GetProperty(IInterceptorSubject subject, string propertyName) =>
         subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
 
-    [Fact]
-    public void WhenPropertyIsMissing_ThenItIsNotWritable()
-    {
-        // Act
-        var isWritable = PropertyWriter.IsWritable(null);
-
-        // Assert
-        Assert.False(isWritable);
-    }
-
     [Theory]
     [InlineData(nameof(PersistedDevice.Speed), true)]
     [InlineData(nameof(PersistedDevice.CurrentSpeed), true)]
@@ -46,12 +36,10 @@ public sealed class PropertyWriterTests : IDisposable
         var property = GetProperty(_graph.Device, propertyName);
 
         // Act
-        var isWritable = PropertyWriter.IsWritable(property);
-        var isWritableWithReadValue = PropertyWriter.IsWritable(property, property.GetValue());
+        var isWritable = PropertyWriter.IsWritable(property, property.GetValue());
 
         // Assert
         Assert.Equal(expected, isWritable);
-        Assert.Equal(expected, isWritableWithReadValue);
     }
 
     [Fact]

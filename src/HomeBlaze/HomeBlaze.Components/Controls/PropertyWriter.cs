@@ -41,15 +41,8 @@ public sealed class PropertyWriter : IDisposable
     }
 
     /// <summary>
-    /// Gets whether a control may write the property: it exists, has a public setter and holds no operation.
-    /// </summary>
-    public static bool IsWritable(RegisteredSubjectProperty? property)
-    {
-        return property is not null && IsWritable(property, property.GetValue());
-    }
-
-    /// <summary>
-    /// Gets whether a control may write the property, given its current value that the caller has already read.
+    /// Gets whether a control may write the property: it has a public setter and its current value, which the caller
+    /// has already read, is no operation.
     /// </summary>
     public static bool IsWritable(RegisteredSubjectProperty property, object? currentValue)
     {
