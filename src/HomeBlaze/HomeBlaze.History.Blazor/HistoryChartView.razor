@@ -104,7 +104,7 @@
                         }
                         <td>@TimeZone.ToZoned(row.Segment.Start).ToString("g")</td>
                         <td>@HistoryChartPalette.DescribeSegment(row.Segment)</td>
-                        <td>@FormatDuration(row.Segment.Duration)</td>
+                        <td>@PropertyHistoryChartModel.FormatDuration(row.Segment.Duration)</td>
                     </tr>
                 }
                 </tbody>
@@ -618,14 +618,6 @@
                 .OrderByDescending(row => row.Segment.Start)
                 .ToArray()
             : [];
-    }
-
-    private static string FormatDuration(TimeSpan duration)
-    {
-        if (duration.TotalMinutes < 1) return $"{duration.TotalSeconds:0}s";
-        if (duration.TotalHours < 1) return $"{duration.TotalMinutes:0}m";
-        if (duration.TotalDays < 1) return $"{duration.TotalHours:0.#}h";
-        return $"{duration.TotalDays:0.#}d";
     }
 
     // The chart holds zoned times, so another time zone needs another build even without new data.

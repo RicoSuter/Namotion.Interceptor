@@ -196,13 +196,24 @@ public static class PropertyHistoryChartModel
             }
         }
 
-        var aggregation = offeredAggregations.Count > 0 ? offeredAggregations[0] : HistoryAggregations.Last;
-        if (TryGetAggregation(settings?.Aggregation, out var requested) && offeredAggregations.Contains(requested))
+        var aggregation = SelectAggregation(offeredAggregations, settings?.Aggregation);
+        return new DialogSelection(rangeIndex, customRange, periodIndex, aggregation);
+    }
+
+    /// <summary>
+    /// Selects the <paramref name="requested"/> aggregation when it is offered, otherwise the first offered one, or
+    /// <see cref="HistoryAggregations.Last"/> when none is offered.
+    /// </summary>
+    /// <param name="offered">The offered aggregations, see <see cref="GateAggregations"/>.</param>
+    /// <param name="requested">The aggregation asked for as written, see <see cref="TryGetAggregation"/>, or null.</param>
+    internal static string SelectAggregation(IReadOnlyList<string> offered, string? requested)
+    {
+        if (TryGetAggregation(requested, out var aggregation) && offered.Contains(aggregation))
         {
-            aggregation = requested;
+            return aggregation;
         }
 
-        return new DialogSelection(rangeIndex, customRange, periodIndex, aggregation);
+        return offered.Count > 0 ? offered[0] : HistoryAggregations.Last;
     }
 
     private static int FindRawPeriodIndex()
@@ -244,13 +255,19 @@ public static class PropertyHistoryChartModel
         return (from, to);
     }
 
-    /// <summary>Formats a bucket size as a short human label (for example "10s", "5m", "1h", "1d").</summary>
-    public static string FormatBucket(TimeSpan bucket)
+    /// <summary>Formats a bucket size as a short human label (for example "10s", "5m", "1h", "1d"), see <see cref="FormatDuration"/>.</summary>
+    public static string FormatBucket(TimeSpan bucket) => FormatDuration(bucket);
+
+    /// <summary>
+    /// Formats a duration as a short human label in its largest unit up to days: seconds and minutes as whole numbers,
+    /// hours and days with up to one decimal, for example "10s", "5m", "1.5h" or "2d".
+    /// </summary>
+    internal static string FormatDuration(TimeSpan duration)
     {
-        if (bucket.TotalSeconds < 60) return $"{(int)bucket.TotalSeconds}s";
-        if (bucket.TotalMinutes < 60) return $"{(int)bucket.TotalMinutes}m";
-        if (bucket.TotalHours < 24) return $"{(int)bucket.TotalHours}h";
-        return $"{(int)bucket.TotalDays}d";
+        if (duration.TotalMinutes < 1) return $"{duration.TotalSeconds:0}s";
+        if (duration.TotalHours < 1) return $"{duration.TotalMinutes:0}m";
+        if (duration.TotalDays < 1) return $"{duration.TotalHours:0.#}h";
+        return $"{duration.TotalDays:0.#}d";
     }
 
     /// <summary>Returns a short human description of an aggregation identifier, for a helper line under the select.</summary>

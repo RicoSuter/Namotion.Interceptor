@@ -277,12 +277,7 @@ internal static class HistoryChartSeriesResolver
 
         var offered = PropertyHistoryChartModel.GateAggregations(
             HistoryColumns.GetValueColumnFor(propertyType), isCumulative, storeAggregations);
-        if (PropertyHistoryChartModel.TryGetAggregation(requested, out var aggregation) && offered.Contains(aggregation))
-        {
-            return aggregation;
-        }
-
-        return offered.Count > 0 ? offered[0] : HistoryAggregations.Last;
+        return PropertyHistoryChartModel.SelectAggregation(offered, requested);
     }
 
     /// <summary>

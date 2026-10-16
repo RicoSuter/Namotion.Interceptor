@@ -414,7 +414,7 @@
             PropertyHistoryChartModel.TryGetRange(_resolvedRange, out var range);
             PropertyHistoryChartModel.TryGetPeriod(_resolvedBucket, out var period);
 
-            var stores = RootContext.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
+            var stores = HistoryChartQuery.GetStores(RootContext.TryGetService<ISubjectRegistry>());
             _hasStores = stores.Length > 0;
             if (stores.Length == 0)
             {
@@ -422,12 +422,7 @@
                 return;
             }
 
-            var storeAggregations = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var store in stores)
-            {
-                storeAggregations.UnionWith(store.SupportedAggregations);
-            }
-
+            var storeAggregations = HistoryChartQuery.GetSupportedAggregations(stores);
             var series = _series;
             var requests = new List<HistoryChartSeriesRequest>(series.Count);
             var requestSeries = new List<int>(series.Count);
@@ -499,7 +494,7 @@
                 return;
             }
 
-            _queryError = "Could not load history: " + exception.Message;
+            _queryError = HistoryChartQuery.GetLoadError(exception);
         }
 
         StateHasChanged();

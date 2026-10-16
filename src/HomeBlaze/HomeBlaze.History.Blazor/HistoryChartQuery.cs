@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.History.Blazor;
 
@@ -36,6 +37,25 @@ internal sealed record HistoryChartResult(HistoryChartData Data, IReadOnlyList<H
 /// </summary>
 internal static class HistoryChartQuery
 {
+    /// <summary>Gets the history stores that <paramref name="registry"/> knows, none without a registry.</summary>
+    public static IHistoryStore[] GetStores(ISubjectRegistry? registry) =>
+        registry?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
+
+    /// <summary>Gets the aggregations that at least one of the stores supports.</summary>
+    public static IReadOnlySet<string> GetSupportedAggregations(IEnumerable<IHistoryStore> stores)
+    {
+        var aggregations = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var store in stores)
+        {
+            aggregations.UnionWith(store.SupportedAggregations);
+        }
+
+        return aggregations;
+    }
+
+    /// <summary>Gets the text that a chart shows in place of its lines when a query failed.</summary>
+    public static string GetLoadError(Exception exception) => "Could not load history: " + exception.Message;
+
     /// <summary>
     /// Gets how much recorded history lies before <paramref name="to"/>: from the earliest instant a store
     /// covers, or null when no store covers anything before it. An auto bucket is clamped to it, so a range
@@ -220,7 +240,8 @@ internal static class HistoryChartQuery
         return groups;
     }
 
-    private static bool HasNumber(HistorySeries series)
+    /// <summary>Gets whether a point of the series holds a number.</summary>
+    public static bool HasNumber(HistorySeries series)
     {
         foreach (var point in series.Points)
         {

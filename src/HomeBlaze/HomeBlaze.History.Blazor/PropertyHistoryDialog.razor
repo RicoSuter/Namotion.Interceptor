@@ -145,14 +145,9 @@
     {
         TimeZone.Changed += OnTimeZoneChanged;
         var column = HistoryColumns.GetValueColumnFor(PropertyType);
-        var union = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var store in Registry.KnownSubjects.Keys.OfType<IHistoryStore>())
-        {
-            union.UnionWith(store.SupportedAggregations);
-        }
-
+        var supportedAggregations = HistoryChartQuery.GetSupportedAggregations(HistoryChartQuery.GetStores(Registry));
         var isDiscrete = PropertyHistoryChartModel.IsDiscrete(PropertyType, IsDiscreteState);
-        _aggregations = PropertyHistoryChartModel.GateAggregations(column, IsCumulative, union, isDiscrete);
+        _aggregations = PropertyHistoryChartModel.GateAggregations(column, IsCumulative, supportedAggregations, isDiscrete);
 
         var selection = PropertyHistoryChartModel.GetInitialSelection(Settings, _aggregations, isDiscrete);
         _rangeIndex = selection.RangeIndex;
@@ -225,7 +220,7 @@
             }
 
             var range = to - from;
-            var stores = Registry.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray();
+            var stores = HistoryChartQuery.GetStores(Registry);
             var bucket = PropertyHistoryChartModel.ResolveBucket(
                 PropertyHistoryChartModel.Periods[_periodIndex], range, HistoryChartQuery.GetAvailableCoverage(stores, to));
 
@@ -262,7 +257,7 @@
                 : $"Bucket too small for this range: only the newest {PropertyHistoryChartModel.MaxPoints} intervals are shown.";
 
             var series = result.Series[0];
-            if (UseStateTimeline || series.Points.Any(point => point.Number is not null))
+            if (UseStateTimeline || HistoryChartQuery.HasNumber(series))
             {
                 _chartData = result.Data;
                 _tableRows = null;
@@ -287,7 +282,7 @@
         }
         catch (Exception exception)
         {
-            _error = "Could not load history: " + exception.Message;
+            _error = HistoryChartQuery.GetLoadError(exception);
             ClearView();
         }
         finally
