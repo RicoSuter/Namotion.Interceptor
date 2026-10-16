@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Reflection;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -154,11 +153,7 @@ public class DemoPagesTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
-        var widgetTypes = typeof(Card).Assembly.GetTypes()
-            .Where(type => type.GetCustomAttribute<CategoryAttribute>()?.Category == "Dashboard"
-                && type.GetCustomAttribute<ExcludeFromCreationAttribute>() is null)
-            .Append(typeof(HistoryChart))
-            .ToList();
+        var widgetTypes = WidgetDocumentation.GetShippedWidgetTypes();
 
         // Act
         var page = await AddDemoPageAsync(fixture, "Dashboard.md");
