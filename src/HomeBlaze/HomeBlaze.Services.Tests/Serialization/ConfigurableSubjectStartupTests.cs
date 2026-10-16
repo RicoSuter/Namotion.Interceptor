@@ -3,6 +3,8 @@ using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -19,7 +21,7 @@ public class ConfigurableSubjectStartupTests
         using var probe = new ConfigurableStartupProbe();
         probe.Release.Set();
         var services = new ServiceCollection().AddSingleton(probe)
-            .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(Microsoft.Extensions.Logging.Abstractions.NullLogger<>));
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         var context = InterceptorSubjectContext.Create().WithHostedServices(services);
         services.AddSingleton(context);
         await using var provider = services.BuildServiceProvider();
@@ -65,7 +67,7 @@ public class ConfigurableSubjectStartupTests
         // Arrange
         using var probe = new ConfigurableStartupProbe();
         var services = new ServiceCollection().AddSingleton(probe)
-            .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(Microsoft.Extensions.Logging.Abstractions.NullLogger<>));
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         var context = InterceptorSubjectContext.Create().WithHostedServices(services);
         services.AddSingleton(context);
         using var provider = services.BuildServiceProvider();
@@ -97,6 +99,7 @@ public class ConfigurableSubjectStartupTests
             await handler.StopAsync(CancellationToken.None);
         }
     }
+
     [Fact]
     public async Task WhenConfigurationPopulationThrows_ThenTheCapturedStartIsStillReleased()
     {
@@ -104,7 +107,7 @@ public class ConfigurableSubjectStartupTests
         using var probe = new ConfigurableStartupProbe { FailPopulation = true };
         probe.Release.Set();
         var services = new ServiceCollection().AddSingleton(probe)
-            .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(Microsoft.Extensions.Logging.Abstractions.NullLogger<>));
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         var context = InterceptorSubjectContext.Create().WithHostedServices(services);
         services.AddSingleton(context);
         using var provider = services.BuildServiceProvider();
@@ -138,7 +141,7 @@ public class ConfigurableSubjectStartupTests
         using var probe = new ConfigurableStartupProbe();
         probe.Release.Set();
         var services = new ServiceCollection().AddSingleton(probe)
-            .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(Microsoft.Extensions.Logging.Abstractions.NullLogger<>));
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         var context = InterceptorSubjectContext.Create().WithHostedServices(services);
         services.AddSingleton(context);
         using var provider = services.BuildServiceProvider();

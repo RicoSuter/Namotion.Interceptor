@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Moq;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -20,17 +22,19 @@ public class ConfigurableSubjectSerializerReleaseTests
         """;
 
     private readonly ConfigurableSubjectSerializer _serializer;
+    private readonly TypeProvider _typeProvider = new();
     private readonly List<IInterceptorSubject> _attached = [];
+    private readonly Mock<ILogger<ConfigurableSubjectSerializer>> _logger = new();
     private int _attachCount;
 
     public ConfigurableSubjectSerializerReleaseTests()
     {
-        var typeProvider = new TypeProvider();
-        typeProvider.AddTypes(
+        _typeProvider.AddTypes(
         [
             typeof(ParentWithChildSubject),
             typeof(ChildSubject),
-            typeof(SubjectWithValidatedProperty)
+            typeof(SubjectWithValidatedProperty),
+            typeof(SubjectWithUnreadableConfiguration)
         ]);
 
         var context = InterceptorSubjectContext
@@ -48,7 +52,8 @@ public class ConfigurableSubjectSerializerReleaseTests
 
         var services = new ServiceCollection();
         services.AddSingleton<IInterceptorSubjectContext>(context);
-        _serializer = new ConfigurableSubjectSerializer(typeProvider, services.BuildServiceProvider());
+        services.AddSingleton(_logger.Object);
+        _serializer = new ConfigurableSubjectSerializer(_typeProvider, services.BuildServiceProvider());
     }
 
     [Fact]
@@ -160,6 +165,7 @@ public class ConfigurableSubjectSerializerReleaseTests
         Assert.Null(result);
         Assert.False(isCalled);
     }
+
     [Fact]
     public void WhenDefaultConfigurationIsRequested_ThenItHasTheConstructorValuesAndTheSubjectLeavesTheContext()
     {
@@ -198,5 +204,42 @@ public class ConfigurableSubjectSerializerReleaseTests
         // Assert
         Assert.Null(defaults);
         Assert.Equal(0, _attachCount);
+    }
+
+    [Fact]
+    public void WhenDefaultConfigurationCannotBeSerialized_ThenItIsNullAndTheFailureIsLoggedOnce()
+    {
+        // Act
+        var first = _serializer.GetDefaultConfiguration(typeof(SubjectWithUnreadableConfiguration));
+        var second = _serializer.GetDefaultConfiguration(typeof(SubjectWithUnreadableConfiguration));
+
+        // Assert
+        Assert.Null(first);
+        Assert.Null(second);
+        Assert.Equal(1, _attachCount);
+        Assert.Empty(_attached);
+        _logger.Verify(
+            logger => logger.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<InvalidOperationException>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public void WhenTypeIsAddedAfterItsDefaultConfigurationWasRequested_ThenItsDefaultConfigurationIsRead()
+    {
+        // Arrange
+        var before = _serializer.GetDefaultConfiguration(typeof(SubjectWithList));
+        _typeProvider.AddTypes([typeof(SubjectWithList)]);
+
+        // Act
+        var after = _serializer.GetDefaultConfiguration(typeof(SubjectWithList));
+
+        // Assert
+        Assert.Null(before);
+        Assert.NotNull(after);
     }
 }

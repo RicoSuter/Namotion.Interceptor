@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Buffers;
 using System.Text;
 using System.Text.Json;
@@ -13,6 +14,8 @@ public static class MarkdownBlockConfiguration
 {
     // Indented like the serializer writes it.
     private static readonly JsonWriterOptions IndentedWriterOptions = new() { Indented = true };
+
+    private static readonly IReadOnlySet<string> NoKeys = FrozenSet<string>.Empty;
 
     /// <summary>
     /// Serializes the configuration of <paramref name="subject"/> for the head line and the json block of its
@@ -48,40 +51,54 @@ public static class MarkdownBlockConfiguration
     {
         using var document = JsonDocument.Parse(configurationJson);
 
+        var hasDefault = false;
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (IsOmitted(property, defaults, keptKeys))
+            {
+                hasDefault = true;
+                break;
+            }
+        }
+
+        if (!hasDefault)
+        {
+            return configurationJson;
+        }
+
         var buffer = new ArrayBufferWriter<byte>(configurationJson.Length);
-        var isOmitted = false;
         using (var writer = new Utf8JsonWriter(buffer, IndentedWriterOptions))
         {
             writer.WriteStartObject();
             foreach (var property in document.RootElement.EnumerateObject())
             {
-                if (property.Name != ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName &&
-                    !keptKeys.Contains(property.Name) &&
-                    defaults.TryGetProperty(property.Name, out var defaultValue) &&
-                    JsonElement.DeepEquals(property.Value, defaultValue))
+                if (!IsOmitted(property, defaults, keptKeys))
                 {
-                    isOmitted = true;
-                    continue;
+                    property.WriteTo(writer);
                 }
-
-                property.WriteTo(writer);
             }
 
             writer.WriteEndObject();
         }
 
-        return isOmitted ? Encoding.UTF8.GetString(buffer.WrittenSpan) : configurationJson;
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
+    private static bool IsOmitted(JsonProperty property, JsonElement defaults, IReadOnlySet<string> keptKeys) =>
+        property.Name != ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName &&
+        !keptKeys.Contains(property.Name) &&
+        defaults.TryGetProperty(property.Name, out var defaultValue) &&
+        JsonElement.DeepEquals(property.Value, defaultValue);
+
     // The keys of the head line and of the json block, which the user may have written on purpose.
-    private static HashSet<string> GetWrittenKeys(MarkdownBlock? block)
+    private static IReadOnlySet<string> GetWrittenKeys(MarkdownBlock? block)
     {
-        var keys = new HashSet<string>(StringComparer.Ordinal);
         if (block?.Head is not { } head)
         {
-            return keys;
+            return NoKeys;
         }
 
+        var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var argument in head.Arguments)
         {
             keys.Add(argument.Key);
