@@ -105,7 +105,7 @@ public record HistorySeries(
 
 Queries require a non-empty path and aggregation, `From < To`, an optional bucket that is either a positive fixed size or a defined calendar unit, and a positive `MaxPoints`. Every entry point validates these invariants and honors cancellation.
 
-`GetSampleAtOrBeforeAsync` is coverage-scoped: it returns null when `asOf` is not covered and never a sample older than the start of the coverage range containing it. `GetLastNumericSampleBeforeAsync` returns the newest numeric reading strictly before an instant regardless of coverage, for `Delta`, whose counter reading bridges coverage gaps.
+`GetSampleAtOrBeforeAsync` is coverage-scoped: it returns null when `asOf` is not covered and never a sample older than the start of the coverage range containing it. `GetLastNumericSampleBeforeAsync` returns the newest finite numeric reading strictly before an instant regardless of coverage, for `Delta`, whose counter reading bridges coverage gaps.
 
 Stores return the newest `MaxPoints` results in ascending timestamp order. `IsTruncated` is true when older results were omitted. `HistorySeries.CoverageRanges` describes effective coverage within the requested range.
 
@@ -216,7 +216,7 @@ Move detection uses runtime object identity. Moves performed while HomeBlaze is 
 
 ## Query semantics
 
-A null bucket requests raw samples. A non-null bucket requests one point per bucket. A fixed bucket is epoch-aligned: alignment uses floor division anchored at the Unix epoch and is correct for timestamps before and after the epoch. A calendar bucket (`Day`, `Week`, `Month` or `Year`) starts at the local period starts in a time zone, with weeks starting Monday, so its length varies with the calendar and daylight saving time. SQLite has no constant width to group a calendar bucket by, so it queries calendar buckets one bucket at a time.
+A null bucket requests raw samples. A non-null bucket requests one point per bucket. A fixed bucket is epoch-aligned: alignment uses floor division anchored at the Unix epoch and is correct for timestamps before and after the epoch. A calendar bucket (`Day`, `Week`, `Month` or `Year`) starts at the local period starts in a time zone, with weeks starting Monday, so its length varies with the calendar and daylight saving time. A period starts at the earliest instant whose local date is on or after the period's first date: local midnight, the transition when the clocks skip midnight, or the earlier instant when midnight occurs twice. A period the clocks skip entirely, such as a day lost to a date line change, has no bucket. Buckets partition time by these start instants, so every instant falls into exactly one bucket, including the hour a fall-back across midnight repeats. The boundaries are computed only with UTC to local conversions, because .NET answers the local to UTC questions inconsistently around some transitions. SQLite has no constant width to group a calendar bucket by, so it queries calendar buckets one bucket at a time within each partition the bucket overlaps.
 
 Empty bucket behavior is:
 
@@ -245,7 +245,7 @@ Numeric aggregations on JSON properties throw `HistoryAggregationNotSupportedExc
 | `Minimum`, `Maximum`, `Sum` | numeric reductions over the bucket's samples |
 | `Count` | number of samples in the bucket |
 | `StandardDeviation` | sample standard deviation, null for fewer than two values |
-| `Delta` | Increase of a cumulative counter per bucket: every step between consecutive numeric samples, starting from the newest reading before the bucket, where a drop counts as a restart from zero. The reading survives coverage gaps, in a store and across stores, because a counter keeps counting while nothing records it; a partly covered bucket is therefore not nulled. A bucket with no samples is 0 when a reading is held and null otherwise; a fully uncovered bucket is null, and the increase during it is attributed to the next bucket with samples. The MCP tool only accepts it for properties whose State attribute has `IsCumulative`; the chart does not offer it. |
+| `Delta` | Increase of a cumulative counter per bucket: every step between consecutive numeric samples, starting from the newest reading before the bucket, where a drop counts as a restart from zero. NaN and infinite readings are skipped. The reading survives coverage gaps, in a store and across stores, because a counter keeps counting while nothing records it; a partly covered bucket is therefore not nulled. A bucket with no samples is 0 when a reading is held and null otherwise; a fully uncovered bucket is null, and the increase during it is attributed to the next bucket with samples. The MCP tool only accepts it for properties whose State attribute has `IsCumulative`; the chart does not offer it. |
 
 `HistoryAggregations.AlwaysAvailable` is `{ Last, Count }`; the capability check skips those.
 
@@ -357,24 +357,24 @@ Filling the start of a window needs the value held entering it, which a raw quer
 | Parameter | Required | Default | Notes |
 |---|---|---|---|
 | `paths` | yes | | one or more canonical property paths |
-| `from` | yes | | ISO 8601; bare timestamps treated as UTC |
-| `to` | no | now | ISO 8601 |
+| `from` | yes | | ISO 8601; without an offset it is local time in `time_zone`, an explicit `Z` or offset is honored |
+| `to` | no | now | ISO 8601, read like `from` |
 | `bucket` | no | null (raw) | a fixed size such as `5m`, `30s`, `1h`, `7d` (epoch-aligned), or `day`, `week`, `month`, `year` (local periods in `time_zone`; weeks start Monday) |
-| `time_zone` | no | server local zone | IANA id such as `Europe/Zurich`; only with a calendar bucket |
-| `aggregation` | no | `Last` | case-insensitive match against `HistoryAggregations`; `Delta` only for properties whose State attribute has `IsCumulative`, otherwise that path carries an error |
+| `time_zone` | no | server local zone | IANA id such as `Europe/Zurich`, for every query; blank counts as absent |
+| `aggregation` | no | `Last` | case-insensitive match against `HistoryAggregations`; `Delta` needs a bucket (else the call returns "Delta needs a bucket.") and only serves properties whose State attribute has `IsCumulative`, otherwise that path carries an error, and a path that does not resolve carries its own "Property not found" error |
 | `max_points` | no | 10000 raw, 1000 bucketed | maximum points per path; can only lower the default |
 | `coverage` | no | `summary` | `summary` or `ranges`; `ranges` also lists the covered ranges |
 
-The response carries the resolved `from` and `to`, one coverage summary and a per-path `series` map:
+The response carries the resolved `from` and `to`, the `time_zone`, one coverage summary and a per-path `series` map:
 
 - `coverage`: the covered fraction of the range (`ratio`, rounded toward zero so a range with a gap never reads as 1), the number of `gaps` and the `largest_gap` as a compact duration such as `2h14m`. With `coverage: "ranges"` it also lists the covered `ranges` as `[from, to]` pairs. It is the coverage of the first served series; a series whose coverage differs, for example because the point limit truncated it, carries its own `ranges` when ranges are requested.
-- per path: a value type hint (number / string / boolean / enum), points as `[timestamp, value]` pairs including explicit null gaps, and `truncated: true` when the point limit cut the series.
+- per path: a value type hint (number / string / boolean / enum), the `unit` when the property's State attribute has one other than `Default` (the `StateUnit` name, for example `WattHour`), points as `[timestamp, value]` pairs including explicit null gaps, and `truncated: true` when the point limit cut the series. `Delta` returns the counter's own unit, so a `WattHour` counter yields Wh per bucket. Bucketed values are computed, so they are rounded to 12 significant digits (`500.18000000000757` becomes `500.18`); raw samples are returned as recorded.
 
 When no path could be served, `coverage` is omitted.
 
-Timestamps are UTC (`2026-06-24T00:05:00Z`), except calendar bucket points, which carry the zone offset as described below, with fractional seconds only when they are not zero. Raw samples show no gaps, so an agent reading a raw state timeline with a `ratio` below 1 should request the ranges.
+One zone governs the whole call: it reads `from` and `to` when they carry no offset, aligns calendar buckets and formats every timestamp in the response. A local time the clocks skip resolves to the instant after the gap, and one that occurs twice to the earlier instant. The response always names the zone in `time_zone`; the default is the server's local zone, reported by its IANA id. Every timestamp (`from`, `to`, raw and fixed-bucket points, coverage ranges) is local time in the zone with its offset, for example `2026-01-01T00:00:00+01:00`, or `Z` when the offset is zero, with fractional seconds only when they are not zero. Offsets change with daylight saving, so a client compares instants, not strings. Raw samples show no gaps, so an agent reading a raw state timeline with a `ratio` below 1 should request the ranges.
 
-Calendar bucket points carry the offset of the zone, for example `2026-01-01T00:00:00+01:00`, and the response names the zone in `time_zone`. Days are 23 or 25 hours long across daylight saving changes; a skipped local midnight starts the day at the transition.
+Calendar bucket points carry their period in the zone instead of a timestamp: `2026-03-29` for a day, the ISO 8601 week `2026-W13` (numbered in its ISO week-numbering year), `2026-03` for a month and `2026` for a year. Days are 23 or 25 hours long across daylight saving changes; a skipped local midnight starts the day at the transition.
 
 Unknown or non-servable aggregations return a structured error with the `available` set; empty results and unknown paths are not errors. Aggregation input is normalized case-insensitively at the MCP boundary. Internal identifiers use ordinal comparison.
 
