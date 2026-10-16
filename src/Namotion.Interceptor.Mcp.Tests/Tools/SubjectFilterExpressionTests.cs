@@ -99,6 +99,76 @@ public class SubjectFilterExpressionTests
         Assert.Equal(expected, matches);
     }
 
+    [Theory]
+    [InlineData("IntValue == 5", true)]
+    [InlineData("IntValue < 6", true)]
+    [InlineData("IntValue > 5", false)]
+    [InlineData("LongValue == 5000000000", true)]
+    [InlineData("LongValue < 5000000001", true)]
+    [InlineData("LongValue > 5000000000", false)]
+    [InlineData("FloatValue == 0.1", true)]
+    [InlineData("FloatValue < 0.2", true)]
+    [InlineData("FloatValue > 0.1", false)]
+    public void WhenNumericClrTypesAreFiltered_ThenComparisonUsesTheirPrecision(string where, bool expected)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var numbers = new TestNumbers(context) { IntValue = 5, LongValue = 5_000_000_000, FloatValue = 0.1f };
+        Assert.True(SubjectFilterExpression.TryParse(where, out var expression, out _));
+
+        // Act
+        var matches = expression.Matches(numbers.TryGetRegisteredSubject()!, DefaultPathProvider.Instance);
+
+        // Assert
+        Assert.Equal(expected, matches);
+    }
+
+    [Fact]
+    public void WhenExpressionIsLongerThanLimit_ThenReturnsLengthError()
+    {
+        // Arrange
+        var where = "Name == " + new string('a', 1001 - "Name == ".Length);
+
+        // Act
+        var parsed = SubjectFilterExpression.TryParse(where, out var expression, out var error);
+
+        // Assert
+        Assert.False(parsed);
+        Assert.Null(expression);
+        Assert.Equal("where: expression is longer than 1000 characters at position 1000", error);
+    }
+
+    [Fact]
+    public void WhenParenthesesAreNestedBeyondLimit_ThenReturnsNestingError()
+    {
+        // Arrange
+        var where = new string('(', 33) + "Temperature > 0" + new string(')', 33);
+
+        // Act
+        var parsed = SubjectFilterExpression.TryParse(where, out var expression, out var error);
+
+        // Assert
+        Assert.False(parsed);
+        Assert.Null(expression);
+        Assert.Equal("where: expression is nested too deeply at position 32", error);
+    }
+
+    [Fact]
+    public void WhenParenthesesAreNestedAtLimit_ThenExpressionParsesAndMatches()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
+        var where = new string('(', 32) + "Temperature > 0" + new string(')', 32);
+
+        // Act
+        var parsed = SubjectFilterExpression.TryParse(where, out var expression, out _);
+
+        // Assert
+        Assert.True(parsed);
+        Assert.True(expression!.Matches(room.TryGetRegisteredSubject()!, DefaultPathProvider.Instance));
+    }
+
     [Fact]
     public void WhenPathProviderHidesProperty_ThenFilterDoesNotMatchIt()
     {

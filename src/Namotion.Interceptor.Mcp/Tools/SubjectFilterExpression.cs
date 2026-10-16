@@ -14,6 +14,9 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 internal sealed class SubjectFilterExpression
 {
+    private const int MaximumExpressionLength = 1000;
+    private const int MaximumNestingDepth = 32;
+
     private readonly Node _root;
 
     private SubjectFilterExpression(Node root)
@@ -83,6 +86,9 @@ internal sealed class SubjectFilterExpression
     /// </summary>
     private sealed class ComparisonNode(string propertyName, ComparisonOperator comparisonOperator, object? literal) : Node
     {
+        // Parsed once here instead of on every evaluation.
+        private readonly DateTimeOffset? _literalInstant = literal is string literalText ? TryParseInstant(literalText) : null;
+
         public override bool Matches(RegisteredSubject subject, PathProviderBase pathProvider)
         {
             var property = pathProvider.TryGetPropertyFromSegment(subject, propertyName);
@@ -94,10 +100,10 @@ internal sealed class SubjectFilterExpression
                 return false;
             }
 
-            return Compare(property.GetValue(), comparisonOperator, literal);
+            return Compare(property.GetValue());
         }
 
-        private static bool Compare(object? value, ComparisonOperator comparisonOperator, object? literal)
+        private bool Compare(object? value)
         {
             if (literal is null)
             {
@@ -123,12 +129,14 @@ internal sealed class SubjectFilterExpression
                 (string text, string literalText) => isEquality
                     ? string.Equals(text, literalText, StringComparison.OrdinalIgnoreCase) ? 0 : 1
                     : string.CompareOrdinal(text, literalText),
-                (DateTimeOffset instant, string literalText) => TryParseInstant(literalText) is { } literalInstant
+                (DateTimeOffset instant, string) => _literalInstant is { } literalInstant
                     ? instant.CompareTo(literalInstant)
                     : null,
-                (DateTime dateTime, string literalText) => TryParseInstant(literalText) is { } literalInstant
+                (DateTime dateTime, string) => _literalInstant is { } literalInstant
                     ? ToInstant(dateTime).CompareTo(literalInstant)
                     : null,
+                // Widening a float to double would make 0.1f differ from the literal 0.1.
+                (float single, double number) => single.CompareTo((float)number),
                 (_, double number) when IsNumber(value) =>
                     Convert.ToDouble(value, CultureInfo.InvariantCulture).CompareTo(number),
                 _ => null
@@ -163,9 +171,16 @@ internal sealed class SubjectFilterExpression
     private sealed class Parser(string text)
     {
         private int _position;
+        private int _nestingDepth;
 
         public Node Parse()
         {
+            if (text.Length > MaximumExpressionLength)
+            {
+                _position = MaximumExpressionLength;
+                throw CreateError($"expression is longer than {MaximumExpressionLength} characters");
+            }
+
             var node = ParseOr();
             SkipWhitespace();
             if (_position < text.Length)
@@ -200,14 +215,23 @@ internal sealed class SubjectFilterExpression
 
         private Node ParsePrimary()
         {
+            SkipWhitespace();
+            var openPosition = _position;
             if (TryConsumeSymbol("("))
             {
+                if (++_nestingDepth > MaximumNestingDepth)
+                {
+                    _position = openPosition;
+                    throw CreateError("expression is nested too deeply");
+                }
+
                 var node = ParseOr();
                 if (!TryConsumeSymbol(")"))
                 {
                     throw CreateError("expected ')'");
                 }
 
+                _nestingDepth--;
                 return node;
             }
 
