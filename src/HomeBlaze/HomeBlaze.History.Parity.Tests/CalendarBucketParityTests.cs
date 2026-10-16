@@ -14,23 +14,23 @@ public class CalendarBucketParityTests
     // Local midnight of 2026-10-24 in Zurich; the next day (DST end) is 25 hours long.
     private static readonly DateTimeOffset DstEndDayOne = new(2026, 10, 23, 22, 0, 0, TimeSpan.Zero);
 
-    // One sample per UTC hour with value = hour index: day one holds 0..23, the DST day 24..46, day three 47..70.
-    private static async Task<IParityStore> WithHourlySamplesAsync(ParityStoreFactory factory)
+    // One sample per UTC hour from start with value = hour index, up to and including lastIndex.
+    private static async Task<IParityStore> WithHourlySamplesAsync(ParityStoreFactory factory, DateTimeOffset start, int lastIndex)
     {
         var store = factory.Create();
-        for (var index = 0; index <= 70; index++)
+        for (var index = 0; index <= lastIndex; index++)
         {
-            store.Record("/a/Value", DayOne.AddHours(index), (double)index, typeof(double));
+            store.Record("/a/Value", start.AddHours(index), (double)index, typeof(double));
         }
 
         await store.FlushAsync();
         return store;
     }
 
-    public static TheoryData<ParityStoreFactory, string, double[]> DayCases()
+    public static TheoryData<ParityStoreFactory, string, double?[]> DayCases()
     {
-        var cases = new TheoryData<ParityStoreFactory, string, double[]>();
-        foreach (var factory in ParityStores.Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]))
+        var cases = new TheoryData<ParityStoreFactory, string, double?[]>();
+        foreach (var factory in ParityStores.Factories)
         {
             cases.Add(factory, HistoryAggregations.Count, [24, 23, 24]);
             cases.Add(factory, HistoryAggregations.First, [0, 24, 47]);
@@ -49,10 +49,10 @@ public class CalendarBucketParityTests
     [Theory]
     [MemberData(nameof(DayCases))]
     public async Task WhenDayBucketsSpanTheDstStart_ThenEveryAggregationUsesLocalDays(
-        ParityStoreFactory factory, string aggregation, double[] expected)
+        ParityStoreFactory factory, string aggregation, double?[] expected)
     {
-        // Arrange
-        using var store = await WithHourlySamplesAsync(factory);
+        // Arrange - day one holds 0..23, the DST day 24..46, day three 47..70.
+        using var store = await WithHourlySamplesAsync(factory, DayOne, 70);
         var query = new HistoryQuery("/a/Value", DayOne, End, HistoryBucket.Calendar(HistoryCalendarUnit.Day, Zurich), aggregation, MaxPoints: 1000);
 
         // Act
@@ -62,7 +62,7 @@ public class CalendarBucketParityTests
         Assert.Equal(
             [DayOne, new DateTimeOffset(2026, 3, 28, 23, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 3, 29, 22, 0, 0, TimeSpan.Zero)],
             series.Points.Select(point => point.Timestamp).ToArray());
-        ParityAssert.NumbersEqual(expected.Select(value => (double?)value).ToArray(), series);
+        ParityAssert.NumbersEqual(expected, series);
     }
 
     [Theory]
@@ -119,14 +119,14 @@ public class CalendarBucketParityTests
         ParityAssert.NumbersEqual([31d, 28d, 31d], series);
     }
 
-    public static TheoryData<ParityStoreFactory, string, double[]> DstEndDayCases()
+    public static TheoryData<ParityStoreFactory, string, double?[]> DstEndDayCases()
     {
         // One sample per UTC hour with value = hour index, each held for one hour: day one holds 0..23,
         // the 25-hour day 24..48, day three 49..72.
         // Sum: 0+..+23 = 276, 24+..+48 = 25 * 36 = 900, 49+..+72 = 24 * 60.5 = 1452.
         // TimeWeightedAverage: equal one-hour weights, so 276 / 24 = 11.5, 900 / 25 = 36, 1452 / 24 = 60.5.
-        var cases = new TheoryData<ParityStoreFactory, string, double[]>();
-        foreach (var factory in ParityStores.Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]))
+        var cases = new TheoryData<ParityStoreFactory, string, double?[]>();
+        foreach (var factory in ParityStores.Factories)
         {
             cases.Add(factory, HistoryAggregations.Count, [24, 25, 24]);
             cases.Add(factory, HistoryAggregations.First, [0, 24, 49]);
@@ -141,16 +141,10 @@ public class CalendarBucketParityTests
     [Theory]
     [MemberData(nameof(DstEndDayCases))]
     public async Task WhenDayBucketsSpanTheDstEnd_ThenTheLongDayHoldsTwentyFiveHours(
-        ParityStoreFactory factory, string aggregation, double[] expected)
+        ParityStoreFactory factory, string aggregation, double?[] expected)
     {
         // Arrange
-        using var store = factory.Create();
-        for (var index = 0; index <= 72; index++)
-        {
-            store.Record("/a/Value", DstEndDayOne.AddHours(index), (double)index, typeof(double));
-        }
-
-        await store.FlushAsync();
+        using var store = await WithHourlySamplesAsync(factory, DstEndDayOne, 72);
         var query = new HistoryQuery(
             "/a/Value",
             DstEndDayOne,
@@ -166,7 +160,7 @@ public class CalendarBucketParityTests
         Assert.Equal(
             [DstEndDayOne, new DateTimeOffset(2026, 10, 24, 22, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 10, 25, 23, 0, 0, TimeSpan.Zero)],
             series.Points.Select(point => point.Timestamp).ToArray());
-        ParityAssert.NumbersEqual(expected.Select(value => (double?)value).ToArray(), series);
+        ParityAssert.NumbersEqual(expected, series);
     }
 
     [Theory]
@@ -245,15 +239,15 @@ public class CalendarBucketParityTests
     private static HistoryQuery MonthQuery(string propertyPath, string aggregation) =>
         new(propertyPath, FebruaryStart, MayStart, HistoryBucket.Calendar(HistoryCalendarUnit.Month, Zurich), aggregation, MaxPoints: 1000);
 
-    public static TheoryData<ParityStoreFactory, string, double[]> MonthCases()
+    public static TheoryData<ParityStoreFactory, string, double?[]> MonthCases()
     {
         // 4 before the query; February 8 from mid-month (+336 h); March 10 from its local start (still February in UTC)
         // and 20 from +371.5 h; April 30 from its local start (still March in UTC) and 40 from +180 h.
         // Sum: 8, 10 + 20 = 30, 30 + 40 = 70. First and Last exclude the 4 from before the query.
         // TimeWeightedAverage: February (4 * 336 + 8 * 336) / 672 = 6, March (10 * 371.5 + 20 * 371.5) / 743 = 15,
         // April (30 * 180 + 40 * 540) / 720 = 37.5.
-        var cases = new TheoryData<ParityStoreFactory, string, double[]>();
-        foreach (var factory in ParityStores.Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]))
+        var cases = new TheoryData<ParityStoreFactory, string, double?[]>();
+        foreach (var factory in ParityStores.Factories)
         {
             cases.Add(factory, HistoryAggregations.Sum, [8, 30, 70]);
             cases.Add(factory, HistoryAggregations.First, [8, 10, 30]);
@@ -267,7 +261,7 @@ public class CalendarBucketParityTests
     [Theory]
     [MemberData(nameof(MonthCases))]
     public async Task WhenMonthBucketsSpanTheDstStart_ThenEveryAggregationUsesLocalMonths(
-        ParityStoreFactory factory, string aggregation, double[] expected)
+        ParityStoreFactory factory, string aggregation, double?[] expected)
     {
         // Arrange
         using var store = factory.Create();
@@ -284,7 +278,7 @@ public class CalendarBucketParityTests
 
         // Assert
         Assert.Equal([FebruaryStart, MarchStart, AprilStart], series.Points.Select(point => point.Timestamp).ToArray());
-        ParityAssert.NumbersEqual(expected.Select(value => (double?)value).ToArray(), series);
+        ParityAssert.NumbersEqual(expected, series);
     }
 
     // Counter readings: 100 before the query seeds February; 130 and 140 (local 23:30 on 28 February) in February;

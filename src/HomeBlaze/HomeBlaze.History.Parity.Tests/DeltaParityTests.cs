@@ -11,16 +11,19 @@ public class DeltaParityTests
     private static HistoryQuery Delta(DateTimeOffset from, DateTimeOffset to) =>
         new("/a/Energy", from, to, Bucket, HistoryAggregations.Delta, MaxPoints: 1000);
 
+    private static void Record(IParityStore store, double seconds, double? value, Type? type = null) =>
+        store.Record("/a/Energy", Base.AddSeconds(seconds), value, type ?? typeof(double));
+
     [Theory]
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
     public async Task WhenCounterIncreases_ThenEachBucketSumsItsIncreaseFromTheCarriedValue(ParityStoreFactory factory)
     {
         // Arrange - 100 before the query, then 110, 115 in [0,10) and 130 in [20,30); nothing in [10,20).
         using var store = factory.Create();
-        store.Record("/a/Energy", Base.AddSeconds(-5), 100d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(2), 110d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(4), 115d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(25), 130d, typeof(double));
+        Record(store, -5, 100d);
+        Record(store, 2, 110d);
+        Record(store, 4, 115d);
+        Record(store, 25, 130d);
         await store.FlushAsync();
 
         // Act
@@ -36,9 +39,9 @@ public class DeltaParityTests
     {
         // Arrange - 1000 then a restart to 3, then 8.
         using var store = factory.Create();
-        store.Record("/a/Energy", Base.AddSeconds(1), 1000d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(3), 3d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(5), 8d, typeof(double));
+        Record(store, 1, 1000d);
+        Record(store, 3, 3d);
+        Record(store, 5, 8d);
         await store.FlushAsync();
 
         // Act
@@ -54,7 +57,7 @@ public class DeltaParityTests
     {
         // Arrange - the only sample is in the second bucket.
         using var store = factory.Create();
-        store.Record("/a/Energy", Base.AddSeconds(12), 50d, typeof(double));
+        Record(store, 12, 50d);
         await store.FlushAsync();
 
         // Act
@@ -70,9 +73,9 @@ public class DeltaParityTests
     {
         // Arrange
         using var store = factory.Create();
-        store.Record("/a/Energy", Base.AddSeconds(1), 10d, typeof(double?));
-        store.Record("/a/Energy", Base.AddSeconds(2), null, typeof(double?));
-        store.Record("/a/Energy", Base.AddSeconds(3), 14d, typeof(double?));
+        Record(store, 1, 10d, typeof(double?));
+        Record(store, 2, null, typeof(double?));
+        Record(store, 3, 14d, typeof(double?));
         await store.FlushAsync();
 
         // Act
@@ -88,9 +91,9 @@ public class DeltaParityTests
     {
         // Arrange - coverage starts at 25, a sample recorded at 1 lies before it, 110 and 115 inside it.
         using var store = factory.CreateCoveredFrom(Base.AddSeconds(25));
-        store.Record("/a/Energy", Base.AddSeconds(1), 100d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(26), 110d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(28), 115d, typeof(double));
+        Record(store, 1, 100d);
+        Record(store, 26, 110d);
+        Record(store, 28, 115d);
         await store.FlushAsync();
 
         // Act
@@ -106,8 +109,8 @@ public class DeltaParityTests
     {
         // Arrange - coverage starts at 25, so [0,10) and [10,20) are uncovered; 100 lies before the query.
         using var store = factory.CreateCoveredFrom(Base.AddSeconds(25));
-        store.Record("/a/Energy", Base.AddSeconds(-5), 100d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(26), 110d, typeof(double));
+        Record(store, -5, 100d);
+        Record(store, 26, 110d);
         await store.FlushAsync();
 
         // Act
@@ -123,11 +126,11 @@ public class DeltaParityTests
     {
         // Arrange - 100 before the query, then 110 at 5, 120 at 15, 125 at 25 and 140 at 35.
         using var store = factory.Create();
-        store.Record("/a/Energy", Base.AddSeconds(-5), 100d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(5), 110d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(15), 120d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(25), 125d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(35), 140d, typeof(double));
+        Record(store, -5, 100d);
+        Record(store, 5, 110d);
+        Record(store, 15, 120d);
+        Record(store, 25, 125d);
+        Record(store, 35, 140d);
         await store.FlushAsync();
         var query = new HistoryQuery("/a/Energy", Base, Base.AddSeconds(40), Bucket, HistoryAggregations.Delta, MaxPoints: 2);
 
@@ -181,9 +184,9 @@ public class DeltaParityTests
     {
         // Arrange
         using var store = factory.Create();
-        store.Record("/a/Energy", Base.AddSeconds(-5), 100d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(2), 110d, typeof(double));
-        store.Record("/a/Energy", Base.AddSeconds(25), 130d, typeof(double));
+        Record(store, -5, 100d);
+        Record(store, 2, 110d);
+        Record(store, 25, 130d);
         await store.FlushAsync();
 
         // Act
@@ -203,7 +206,7 @@ public class DeltaParityTests
         using var store = factory.Create();
         store.Record("/old/Energy", Base.AddSeconds(1), 10d, typeof(double));
         store.RecordMove(Base.AddSeconds(5), "/old/Energy", "/a/Energy");
-        store.Record("/a/Energy", Base.AddSeconds(7), 16d, typeof(double));
+        Record(store, 7, 16d);
         await store.FlushAsync();
 
         // Act
@@ -219,8 +222,8 @@ public class DeltaParityTests
     {
         // Arrange
         using var store = factory.CreateCoveredFrom(Base.AddSeconds(25));
-        store.Record("/a/Energy", Base.AddSeconds(1), 100d, typeof(double?));
-        store.Record("/a/Energy", Base.AddSeconds(2), null, typeof(double?));
+        Record(store, 1, 100d, typeof(double?));
+        Record(store, 2, null, typeof(double?));
         await store.FlushAsync();
 
         // Act
@@ -259,7 +262,7 @@ public class DeltaParityTests
     public static TheoryData<ParityStoreFactory, double> NonFiniteCases()
     {
         var cases = new TheoryData<ParityStoreFactory, double>();
-        foreach (var factory in ParityStores.Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]))
+        foreach (var factory in ParityStores.Factories)
         {
             cases.Add(factory, double.NaN);
             cases.Add(factory, double.PositiveInfinity);

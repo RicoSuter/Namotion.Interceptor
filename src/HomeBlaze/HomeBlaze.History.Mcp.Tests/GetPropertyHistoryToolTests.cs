@@ -16,9 +16,6 @@ public class GetPropertyHistoryToolTests
     private static Task<JsonElement> InvokeAsync(object inputObject) =>
         InvokeAsync(inputObject, configureStore: null);
 
-    private static Task<JsonElement> InvokeAsync(object inputObject, string? unsupportedPath, bool withStore) =>
-        InvokeAsync(inputObject, withStore ? store => store.UnsupportedPath = unsupportedPath : null);
-
     private static async Task<JsonElement> InvokeAsync(object inputObject, Action<TestHistoryStore>? configureStore)
     {
         var context = InterceptorSubjectContext.Create()
@@ -170,8 +167,7 @@ public class GetPropertyHistoryToolTests
                 to = "2026-06-24T01:00:00Z",
                 aggregation = "SampleAverage"
             },
-            unsupportedPath: "/a/Text",
-            withStore: true);
+            store => store.UnsupportedPath = "/a/Text");
 
         // Assert - the whole call used to fail, throwing away the paths that could be served.
         Assert.False(json.TryGetProperty("error", out _));

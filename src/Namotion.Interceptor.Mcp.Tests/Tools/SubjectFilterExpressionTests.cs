@@ -33,13 +33,12 @@ public class SubjectFilterExpressionTests
     public void WhenRoomIsFiltered_ThenComparisonFollowsValueType(string where, bool expected)
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var context = CreateContext();
         var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
         room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
-        Assert.True(SubjectFilterExpression.TryParse(where, out var expression, out _));
 
         // Act
-        var matches = expression.Matches(room.TryGetRegisteredSubject()!, DefaultPathProvider.Instance);
+        var matches = Evaluate(where, room);
 
         // Assert
         Assert.Equal(expected, matches);
@@ -54,12 +53,11 @@ public class SubjectFilterExpressionTests
     public void WhenBooleanIsFiltered_ThenOnlyEqualityMatches(string where, bool expected)
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var context = CreateContext();
         var device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
-        Assert.True(SubjectFilterExpression.TryParse(where, out var expression, out _));
 
         // Act
-        var matches = expression.Matches(device.TryGetRegisteredSubject()!, DefaultPathProvider.Instance);
+        var matches = Evaluate(where, device);
 
         // Assert
         Assert.Equal(expected, matches);
@@ -82,7 +80,7 @@ public class SubjectFilterExpressionTests
     public void WhenEnumNullOrDateIsFiltered_ThenComparisonFollowsValueType(string where, bool expected)
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var context = CreateContext();
         var schedule = new TestSchedule(context)
         {
             Day = DayOfWeek.Monday,
@@ -90,10 +88,9 @@ public class SubjectFilterExpressionTests
             StartsAt = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero),
             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Unspecified)
         };
-        Assert.True(SubjectFilterExpression.TryParse(where, out var expression, out _));
 
         // Act
-        var matches = expression.Matches(schedule.TryGetRegisteredSubject()!, DefaultPathProvider.Instance);
+        var matches = Evaluate(where, schedule);
 
         // Assert
         Assert.Equal(expected, matches);
@@ -112,12 +109,11 @@ public class SubjectFilterExpressionTests
     public void WhenNumericClrTypesAreFiltered_ThenComparisonUsesTheirPrecision(string where, bool expected)
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var context = CreateContext();
         var numbers = new TestNumbers(context) { IntValue = 5, LongValue = 5_000_000_000, FloatValue = 0.1f };
-        Assert.True(SubjectFilterExpression.TryParse(where, out var expression, out _));
 
         // Act
-        var matches = expression.Matches(numbers.TryGetRegisteredSubject()!, DefaultPathProvider.Instance);
+        var matches = Evaluate(where, numbers);
 
         // Assert
         Assert.Equal(expected, matches);
@@ -139,12 +135,11 @@ public class SubjectFilterExpressionTests
     public void WhenValueIsNaN_ThenNoNumberComparisonMatches(string where)
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var context = CreateContext();
         var numbers = new TestNumbers(context) { FloatValue = float.NaN, DoubleValue = double.NaN };
-        Assert.True(SubjectFilterExpression.TryParse(where, out var expression, out _));
 
         // Act
-        var matches = expression.Matches(numbers.TryGetRegisteredSubject()!, DefaultPathProvider.Instance);
+        var matches = Evaluate(where, numbers);
 
         // Assert
         Assert.False(matches);
@@ -195,7 +190,7 @@ public class SubjectFilterExpressionTests
     public void WhenParenthesesAreNestedAtLimit_ThenExpressionParsesAndMatches()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var context = CreateContext();
         var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
         var where = new string('(', 32) + "Temperature > 0" + new string(')', 32);
 
@@ -211,12 +206,11 @@ public class SubjectFilterExpressionTests
     public void WhenPathProviderHidesProperty_ThenFilterDoesNotMatchIt()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var context = CreateContext();
         var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
-        Assert.True(SubjectFilterExpression.TryParse("Temperature > 0", out var expression, out _));
 
         // Act
-        var matches = expression.Matches(room.TryGetRegisteredSubject()!, new TemperatureHidingPathProvider());
+        var matches = Evaluate("Temperature > 0", room, new TemperatureHidingPathProvider());
 
         // Assert
         Assert.False(matches);
@@ -240,6 +234,15 @@ public class SubjectFilterExpressionTests
         Assert.False(parsed);
         Assert.Null(expression);
         Assert.Equal(expectedError, error);
+    }
+
+    private static IInterceptorSubjectContext CreateContext() =>
+        InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+
+    private static bool Evaluate(string where, IInterceptorSubject subject, PathProviderBase? pathProvider = null)
+    {
+        Assert.True(SubjectFilterExpression.TryParse(where, out var expression, out _));
+        return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider ?? DefaultPathProvider.Instance);
     }
 
     private sealed class TemperatureHidingPathProvider : PathProviderBase

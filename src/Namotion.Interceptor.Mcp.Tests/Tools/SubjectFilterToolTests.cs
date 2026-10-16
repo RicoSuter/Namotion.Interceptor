@@ -27,30 +27,20 @@ public class SubjectFilterToolTests
         Assert.Equal(["Heater", "Pump"], names);
     }
 
-    [Fact]
-    public async Task WhenSearchWhereIsInvalid_ThenReturnsError()
+    [Theory]
+    [InlineData("""{ "format": "json", "where": "IsOn = false" }""", "where: use '==' for equality at position 5")]
+    [InlineData("""{ "format": "json", "where": 1 }""", "Parameter 'where' must be a string.")]
+    [InlineData("""{ "format": "json", "properties": "IsOn" }""", "Parameter 'properties' must be an array of property names.")]
+    public async Task WhenSearchInputIsInvalid_ThenReturnsError(string input, string expectedError)
     {
         // Arrange
         var tool = CreateTool(CreateGroup(), "search");
 
         // Act
-        var json = await InvokeAsync(tool, new { format = "json", where = "IsOn = false" });
+        var json = await InvokeAsync(tool, JsonDocument.Parse(input).RootElement);
 
         // Assert
-        Assert.Equal("where: use '==' for equality at position 5", json.GetProperty("error").GetString());
-    }
-
-    [Fact]
-    public async Task WhenSearchWhereIsNotString_ThenReturnsError()
-    {
-        // Arrange
-        var tool = CreateTool(CreateGroup(), "search");
-
-        // Act
-        var json = await InvokeAsync(tool, new { format = "json", where = 1 });
-
-        // Assert
-        Assert.Equal("Parameter 'where' must be a string.", json.GetProperty("error").GetString());
+        Assert.Equal(expectedError, json.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -69,19 +59,6 @@ public class SubjectFilterToolTests
             var propertyNames = result.Value.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
             Assert.Equal(["IsOn"], propertyNames);
         }
-    }
-
-    [Fact]
-    public async Task WhenPropertiesIsNotArray_ThenReturnsError()
-    {
-        // Arrange
-        var tool = CreateTool(CreateGroup(), "search");
-
-        // Act
-        var json = await InvokeAsync(tool, new { format = "json", properties = "IsOn" });
-
-        // Assert
-        Assert.Equal("Parameter 'properties' must be an array of property names.", json.GetProperty("error").GetString());
     }
 
     [Fact]

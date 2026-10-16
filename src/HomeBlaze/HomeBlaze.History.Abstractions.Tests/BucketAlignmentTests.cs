@@ -148,11 +148,7 @@ public class BucketAlignmentTests
     public void WhenLocalMidnightIsSkipped_ThenDayStartsAtTheTransition()
     {
         // Arrange - a zone at +01:00 whose clocks jump from 00:00 to 01:00 on 2026-03-29.
-        var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
-            new DateTime(2026, 1, 1), new DateTime(2026, 12, 31), TimeSpan.FromHours(1),
-            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 0, 0, 0), 3, 29),
-            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 3, 0, 0), 10, 25));
-        var zone = TimeZoneInfo.CreateCustomTimeZone("Test/MidnightJump", TimeSpan.FromHours(1), "Midnight jump", "Standard", "Daylight", [rule]);
+        var zone = CreateZone("Test/MidnightJump", springHour: 0, autumnHour: 3);
         var bucket = HistoryBucket.Calendar(HistoryCalendarUnit.Day, zone);
 
         // Act
@@ -169,11 +165,7 @@ public class BucketAlignmentTests
     {
         // Arrange - a zone at +01:00 (+02:00 in summer) whose clocks go back from 01:00 to 00:00 on 2026-10-25,
         // so local midnight occurs at 22:00 UTC (+02:00) and again at 23:00 UTC (+01:00) on 2026-10-24.
-        var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
-            new DateTime(2026, 1, 1), new DateTime(2026, 12, 31), TimeSpan.FromHours(1),
-            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 2, 0, 0), 3, 29),
-            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 1, 0, 0), 10, 25));
-        var zone = TimeZoneInfo.CreateCustomTimeZone("Test/MidnightTwice", TimeSpan.FromHours(1), "Midnight twice", "Standard", "Daylight", [rule]);
+        var zone = CreateZone("Test/MidnightTwice", springHour: 2, autumnHour: 1);
         var bucket = HistoryBucket.Calendar(HistoryCalendarUnit.Day, zone);
 
         // Act
@@ -188,6 +180,16 @@ public class BucketAlignmentTests
         Assert.Equal(start, BucketAlignment.Start(start, bucket));
         Assert.Equal(Parse("2026-10-25T23:00:00Z"), next);
         Assert.Equal(start, previousNext);
+    }
+
+    // A zone at +01:00, +02:00 from local springHour on 2026-03-29 to local autumnHour on 2026-10-25.
+    private static TimeZoneInfo CreateZone(string id, int springHour, int autumnHour)
+    {
+        var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
+            new DateTime(2026, 1, 1), new DateTime(2026, 12, 31), TimeSpan.FromHours(1),
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, springHour, 0, 0), 3, 29),
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, autumnHour, 0, 0), 10, 25));
+        return TimeZoneInfo.CreateCustomTimeZone(id, TimeSpan.FromHours(1), id, "Standard", "Daylight", [rule]);
     }
 
     [Fact]

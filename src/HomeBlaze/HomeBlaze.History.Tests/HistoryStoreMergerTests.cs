@@ -674,16 +674,8 @@ public class HistoryStoreMergerTests
     public async Task WhenDeltaSpansTwoStores_ThenEachSegmentStartsFromTheNewestReadingBeforeIt()
     {
         // Arrange: the durable store covers [0,20) and holds 100 at 5; the live store covers [20,40) and holds 130 at 25.
-        var durable = new FakeHistoryStore
-        {
-            Priority = 10,
-            CurrentCoverage = new HistoryCoverage(At(0), At(20))
-        }.AddSample(At(5), 100);
-        var live = new FakeHistoryStore
-        {
-            Priority = 100,
-            CurrentCoverage = new HistoryCoverage(At(20), At(40))
-        }.AddSample(At(25), 130);
+        var durable = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(20)) }.AddSample(At(5), 100);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(20), At(40)) }.AddSample(At(25), 130);
         var query = new HistoryQuery("/a/Energy", At(0), At(40), TimeSpan.FromMinutes(20), HistoryAggregations.Delta);
 
         // Act
@@ -698,16 +690,8 @@ public class HistoryStoreMergerTests
     public async Task WhenDeltaSegmentFollowsAGap_ThenTheSeedStillBridgesIt()
     {
         // Arrange: nothing covers [20,30); the live store covers [30,40).
-        var durable = new FakeHistoryStore
-        {
-            Priority = 10,
-            CurrentCoverage = new HistoryCoverage(At(0), At(20))
-        }.AddSample(At(5), 100);
-        var live = new FakeHistoryStore
-        {
-            Priority = 100,
-            CurrentCoverage = new HistoryCoverage(At(30), At(40))
-        }.AddSample(At(35), 130);
+        var durable = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(20)) }.AddSample(At(5), 100);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(30), At(40)) }.AddSample(At(35), 130);
         var query = new HistoryQuery("/a/Energy", At(0), At(40), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
 
         // Act
@@ -723,16 +707,8 @@ public class HistoryStoreMergerTests
     {
         // Arrange: the durable store covers [0,27) and owns [20,30) (7 of 10 minutes); the live store covers [24,40)
         // and owns [30,40). The live reading at 29 lies inside the durable store's bucket, which never consumed it.
-        var durable = new FakeHistoryStore
-        {
-            Priority = 10,
-            CurrentCoverage = new HistoryCoverage(At(0), At(27))
-        }.AddSample(At(22), 120);
-        var live = new FakeHistoryStore
-        {
-            Priority = 100,
-            CurrentCoverage = new HistoryCoverage(At(24), At(40))
-        }.AddSample(At(29), 128).AddSample(At(35), 130);
+        var durable = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(27)) }.AddSample(At(22), 120);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(24), At(40)) }.AddSample(At(29), 128).AddSample(At(35), 130);
         var query = new HistoryQuery("/a/Energy", At(0), At(40), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
 
         // Act
@@ -749,21 +725,9 @@ public class HistoryStoreMergerTests
     {
         // Arrange: the live store owns [30,40) and holds 128 at 29 only, which lies in the durable store's bucket.
         // The archive store owns [40,50).
-        var durable = new FakeHistoryStore
-        {
-            Priority = 10,
-            CurrentCoverage = new HistoryCoverage(At(0), At(27))
-        }.AddSample(At(22), 120);
-        var live = new FakeHistoryStore
-        {
-            Priority = 100,
-            CurrentCoverage = new HistoryCoverage(At(24), At(40))
-        }.AddSample(At(29), 128);
-        var archive = new FakeHistoryStore
-        {
-            Priority = 50,
-            CurrentCoverage = new HistoryCoverage(At(40), At(50))
-        }.AddSample(At(45), 140);
+        var durable = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(27)) }.AddSample(At(22), 120);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(24), At(40)) }.AddSample(At(29), 128);
+        var archive = new FakeHistoryStore { Priority = 50, CurrentCoverage = new(At(40), At(50)) }.AddSample(At(45), 140);
         var query = new HistoryQuery("/a/Energy", At(0), At(50), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
 
         // Act
@@ -778,16 +742,8 @@ public class HistoryStoreMergerTests
     public async Task WhenDeltaFirstSegmentIsSeeded_ThenTheNewestReadingAcrossStoresWins()
     {
         // Arrange: the higher-priority store holds an older reading (90 at 2) than the lower-priority one (100 at 15).
-        var lowPriority = new FakeHistoryStore
-        {
-            Priority = 10,
-            CurrentCoverage = new HistoryCoverage(At(0), At(20))
-        }.AddSample(At(15), 100);
-        var highPriority = new FakeHistoryStore
-        {
-            Priority = 100,
-            CurrentCoverage = new HistoryCoverage(At(20), At(40))
-        }.AddSample(At(2), 90);
+        var lowPriority = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(20)) }.AddSample(At(15), 100);
+        var highPriority = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(20), At(40)) }.AddSample(At(2), 90);
         var query = new HistoryQuery("/a/Energy", At(20), At(40), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
 
         // Act

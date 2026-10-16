@@ -140,6 +140,9 @@ public static class ParityStores
             CreateCoveredFrom = start => new SqliteParityStore(start)
         },
     };
+
+    /// <summary>The factories of <see cref="Stores"/>, for building theory data that adds more columns.</summary>
+    public static IEnumerable<ParityStoreFactory> Factories => Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]);
 }
 
 /// <summary>Tolerance-aware comparison of a query result's numeric points against a golden sequence.</summary>

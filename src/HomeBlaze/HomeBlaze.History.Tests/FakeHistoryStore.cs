@@ -30,19 +30,7 @@ public sealed class FakeHistoryStore : IHistoryStore
     }
 
     public IReadOnlySet<string> SupportedAggregations { get; set; } =
-        new HashSet<string>(StringComparer.Ordinal)
-        {
-            HistoryAggregations.Last,
-            HistoryAggregations.First,
-            HistoryAggregations.SampleAverage,
-            HistoryAggregations.TimeWeightedAverage,
-            HistoryAggregations.Minimum,
-            HistoryAggregations.Maximum,
-            HistoryAggregations.Sum,
-            HistoryAggregations.Count,
-            HistoryAggregations.StandardDeviation,
-            HistoryAggregations.Delta
-        };
+        new HashSet<string>(HistoryAggregations.All, StringComparer.Ordinal);
 
     /// <summary>Records the queries this store received, for routing assertions.</summary>
     public List<HistoryQuery> ReceivedQueries { get; } = new();
