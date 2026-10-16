@@ -76,8 +76,7 @@ The slots of a widget are filled as [Content and Slots](../pages.md#content-and-
 
 A widget with a `Label` argument shows the label that is set. Without it, a widget that reads a property shows the title that the property declares, and the name of the property when it declares none. When the path leads nowhere:
 
-- **Controls, gauges and chart series**: A [Switch](switch.md), a [Slider](slider.md), a [Select](select.md), a [Control](control.md), a [Gauge](gauge.md) and a series of a [HistoryChart](history-chart.md) show the path.
-- **Value rows and tiles**: A row of a [ValueList](value-list.md) and a [ValueTile](value-tile.md) show no label.
+- **Controls, values and chart series**: A [Switch](switch.md), a [Slider](slider.md), a [Select](select.md), a [Control](control.md), a [Gauge](gauge.md), a row of a [ValueList](value-list.md), a [ValueTile](value-tile.md) and a series of a [HistoryChart](history-chart.md) show the path.
 - **Operations**: An [OperationButton](operation-button.md), and a `Control` for an operation, show the title of the method, and the path when the path leads nowhere.
 - **Table columns**: A column of a [SubjectTable](subject-table.md) without `Label` takes the title of the property from the first row that has the property, and the name of the property when no row has it.
 

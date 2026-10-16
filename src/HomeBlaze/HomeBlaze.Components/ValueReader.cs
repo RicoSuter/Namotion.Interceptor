@@ -105,16 +105,10 @@ public static class ValueReader
         ResolveProperty(resolver, widget, path)?.GetValue();
 
     /// <summary>
-    /// Gets the label of a value: the given one, otherwise the title the property declares, otherwise its name.
+    /// Gets the label of a value or a control: the given one, otherwise the title the property declares, otherwise its
+    /// name, and the path when the path leads nowhere.
     /// </summary>
-    public static string GetLabel(ValueReading? reading, string? label) =>
-        GetControlLabel(reading?.Property, label, path: null);
-
-    /// <summary>
-    /// Gets the label of a control: the given one, otherwise the title the property declares, otherwise its name,
-    /// and the path when the path leads nowhere.
-    /// </summary>
-    public static string GetControlLabel(RegisteredSubjectProperty? property, string? label, string? path)
+    public static string GetLabel(RegisteredSubjectProperty? property, string? label, string? path)
     {
         if (!string.IsNullOrEmpty(label))
         {

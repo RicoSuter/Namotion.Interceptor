@@ -731,9 +731,8 @@ namespace HomeBlaze.Components
     public static class ValueReader
     {
         public const string MissingText = "–";
-        public static string GetControlLabel(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, string? label, string? path) { }
         public static MudBlazor.Color GetIndicatorColor(HomeBlaze.Components.ValueReading reading, string? map) { }
-        public static string GetLabel(HomeBlaze.Components.ValueReading? reading, string? label) { }
+        public static string GetLabel(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, string? label, string? path) { }
         public static double? GetProgressPercent(object? value, double minimum, double maximum) { }
         public static HomeBlaze.Components.ValueReading Read(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path, string? map, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         public static HomeBlaze.Components.ValueReading ReadProperty(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, HomeBlaze.Components.ValueMap? valueMap, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }

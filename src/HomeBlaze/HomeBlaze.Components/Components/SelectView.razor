@@ -22,7 +22,7 @@ else
     <div class="select-widget" data-testid="select">
         <MudSelect T="string"
                    @key="_resetKey"
-                   Label="@ValueReader.GetControlLabel(property, Label, Path)"
+                   Label="@ValueReader.GetLabel(property, Label, Path)"
                    Value="@(value is Enum ? value.ToString() : null)"
                    ValueChanged="_chooseCallback"
                    ToStringFunc="_textFunc"

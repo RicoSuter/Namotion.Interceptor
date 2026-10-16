@@ -301,23 +301,26 @@ public class ValueReaderTests
     }
 
     [Fact]
-    public async Task WhenLabelIsNotGiven_ThenItIsTheTitleOrTheNameOfTheProperty()
+    public async Task WhenLabelIsNotGiven_ThenItIsTheTitleOrTheNameOfThePropertyOrThePath()
     {
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var reading = ValueReader.Read(resolver, page, "meter/Power", null, null);
+        var missing = ValueReader.Read(resolver, page, "meter/Missing", null, null);
 
         // Act
-        var given = ValueReader.GetLabel(reading, "Leistung");
-        var fromProperty = ValueReader.GetLabel(reading, null);
-        var withoutReading = ValueReader.GetLabel(null, null);
-        var fromTitle = ValueReader.GetLabel(ValueReader.Read(resolver, page, "meter/Flow", null, null), null);
+        var given = ValueReader.GetLabel(reading.Property, "Leistung", "meter/Power");
+        var fromProperty = ValueReader.GetLabel(reading.Property, null, "meter/Power");
+        var fromTitle = ValueReader.GetLabel(ValueReader.Read(resolver, page, "meter/Flow", null, null).Property, null, "meter/Flow");
+        var fromPath = ValueReader.GetLabel(missing.Property, null, "meter/Missing");
+        var withoutPath = ValueReader.GetLabel(null, null, null);
 
         // Assert
         Assert.Equal("Leistung", given);
         Assert.Equal("Power", fromProperty);
         Assert.Equal("Flow rate", fromTitle);
-        Assert.Equal(string.Empty, withoutReading);
+        Assert.Equal("meter/Missing", fromPath);
+        Assert.Equal(string.Empty, withoutPath);
     }
 
     [Fact]

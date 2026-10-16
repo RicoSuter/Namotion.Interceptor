@@ -34,7 +34,7 @@
                @key="_resetKey"
                Value="@(_pending ?? isOn)"
                ValueChanged="_toggleCallback"
-               Label="@ValueReader.GetControlLabel(property, Label, Path)"
+               Label="@ValueReader.GetLabel(property, Label, Path)"
                Color="Color.Primary"
                Disabled="@(IsEditing || _pending is not null || !canToggle)" />
 </div>

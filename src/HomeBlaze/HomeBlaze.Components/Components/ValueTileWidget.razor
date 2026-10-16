@@ -27,7 +27,7 @@
                     <MudIcon Icon="@icon" Size="Size.Small" />
                 }
 
-                <MudText Typo="Typo.caption" data-testid="value-label">@ValueReader.GetLabel(reading, tile.Label)</MudText>
+                <MudText Typo="Typo.caption" data-testid="value-label">@ValueReader.GetLabel(reading.Property, tile.Label, path)</MudText>
             </div>
             <ValueText Reading="@reading" Path="@path" Typo="Typo.h5" />
         </MudPaper>

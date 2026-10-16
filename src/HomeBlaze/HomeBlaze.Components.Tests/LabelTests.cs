@@ -5,7 +5,7 @@ using Xunit;
 
 namespace HomeBlaze.Components.Tests;
 
-public class ControlLabelTests
+public class LabelTests
 {
     private readonly IInterceptorSubjectContext _context = InterceptorSubjectContext
         .Create()
@@ -20,7 +20,7 @@ public class ControlLabelTests
         var property = card.TryGetRegisteredSubject()!.TryGetProperty(nameof(Card.Title));
 
         // Act
-        var label = ValueReader.GetControlLabel(property, "Pump", "card/Title");
+        var label = ValueReader.GetLabel(property, "Pump", "card/Title");
 
         // Assert
         Assert.Equal("Pump", label);
@@ -34,7 +34,7 @@ public class ControlLabelTests
         var property = card.TryGetRegisteredSubject()!.TryGetProperty(nameof(Card.Title));
 
         // Act
-        var label = ValueReader.GetControlLabel(property, null, "card/Title");
+        var label = ValueReader.GetLabel(property, null, "card/Title");
 
         // Assert
         Assert.Equal("Title", label);
@@ -44,7 +44,7 @@ public class ControlLabelTests
     public void WhenThePathLeadsNowhere_ThenItIsThePath()
     {
         // Act
-        var label = ValueReader.GetControlLabel(null, "", "pump/Missing");
+        var label = ValueReader.GetLabel(null, "", "pump/Missing");
 
         // Assert
         Assert.Equal("pump/Missing", label);

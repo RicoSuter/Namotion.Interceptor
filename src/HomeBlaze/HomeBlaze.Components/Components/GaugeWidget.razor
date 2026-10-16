@@ -21,7 +21,7 @@
     }
     else
     {
-        var label = ValueReader.GetControlLabel(reading.Property, gauge.Label, gauge.Path);
+        var label = ValueReader.GetLabel(reading.Property, gauge.Label, gauge.Path);
         // A meter must have a value, so without one the gauge is a named group; Blazor leaves out the null attributes.
         var isMeter = state.AriaValue is not null;
 

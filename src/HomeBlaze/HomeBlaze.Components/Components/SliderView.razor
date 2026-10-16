@@ -20,7 +20,7 @@ else
 {
     var value = property?.GetValue();
     var canWrite = isNumber && PropertyWriter.IsWritable(property!, value);
-    var label = ValueReader.GetControlLabel(property, Label, Path);
+    var label = ValueReader.GetLabel(property, Label, Path);
 
     @* The input events of the range input bubble here, so the text follows the thumb while the slider writes only on release.
        A drag that ends where it started writes nothing, so the pointer up clears the drag text as well. *@
