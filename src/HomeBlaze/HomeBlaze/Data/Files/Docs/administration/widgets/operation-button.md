@@ -63,7 +63,7 @@ A query with a label, an icon and a variant of its own. `GetDiagnostics` changes
 
 ## Behaviour and Limits
 
-- **As in the property panel**: The button invokes the method the same way the property panel of a subject does. A method with parameters shows a dialog for them, a method that asks for confirmation shows the confirmation dialog, a result is shown in a dialog, and a failure shows an error dialog.
+- **As in the property panel**: The button invokes the method the same way the property panel of a subject does. A method with parameters shows a dialog for them, a method that asks for confirmation shows the confirmation dialog, a result is shown in a dialog, and a failure shows an error dialog, also a request to a device that timed out.
 - **Operations and queries**: Both work. A query shows its result.
 - **Running**: While the method runs, the button is disabled and shows a spinner in place of its icon, so a second click has to wait for the first to end.
 - **Enabled state**: The button is disabled while the method is not enabled, and when the path leads nowhere. A path that leads nowhere is also the tooltip of the button.

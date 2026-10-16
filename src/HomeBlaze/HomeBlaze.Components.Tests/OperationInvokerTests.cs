@@ -252,17 +252,37 @@ public class OperationInvokerTests
     }
 
     [Fact]
-    public async Task WhenMethodIsCancelled_ThenNoDialogIsShownAndCancelledIsReturned()
+    public async Task WhenMethodThrowsOperationCanceledException_ThenErrorDialogIsShownAndFailedIsReturned()
     {
-        // Arrange
+        // Arrange: an HttpClient reports its timeout as a TaskCanceledException.
         var dialogService = new Mock<IDialogService>();
-        var method = new MethodMetadata(_ => throw new OperationCanceledException());
+        var method = new MethodMetadata(_ => throw new TaskCanceledException("The request timed out.")) { Title = "Turn On" };
 
         // Act
         var outcome = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
 
         // Assert
-        Assert.Equal(OperationOutcome.Cancelled, outcome);
+        Assert.Equal(OperationOutcome.Failed, outcome);
+        VerifyShown<MethodErrorDialog>(dialogService, Times.Once());
+    }
+
+    [Fact]
+    public async Task WhenLifetimeIsCancelledWhileMethodIsCancelled_ThenNoErrorDialogIsShown()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        using var lifetime = new CancellationTokenSource();
+        var method = new MethodMetadata(_ =>
+        {
+            lifetime.Cancel();
+            throw new OperationCanceledException();
+        });
+
+        // Act
+        var outcome = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, lifetime.Token);
+
+        // Assert
+        Assert.Equal(OperationOutcome.Failed, outcome);
         dialogService.VerifyNoOtherCalls();
     }
 

@@ -5,12 +5,12 @@ namespace HomeBlaze.Components.Operations;
 /// </summary>
 public enum OperationOutcome
 {
-    /// <summary>The user cancelled the prompt, the caller went away before the method started, or the method was cancelled.</summary>
+    /// <summary>The user cancelled the prompt, or the caller went away before the method started.</summary>
     Cancelled,
 
     /// <summary>The method ran and returned.</summary>
     Succeeded,
 
-    /// <summary>The method threw.</summary>
+    /// <summary>The method threw, also an <see cref="OperationCanceledException"/> such as the timeout of a request.</summary>
     Failed,
 }

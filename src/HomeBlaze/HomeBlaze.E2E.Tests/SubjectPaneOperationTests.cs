@@ -1,4 +1,5 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.E2E.Tests.Models;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
@@ -74,5 +75,37 @@ public class SubjectPaneOperationTests
         // Assert
         await Assertions.Expect(dialog).ToHaveCountAsync(0);
         await Assertions.Expect(operation).ToBeEnabledAsync();
+    }
+
+    [Fact]
+    public async Task WhenAnOperationThrowsOperationCanceledException_ThenItsErrorIsShown()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddSubjectToRootAsync<FailingOperationSubject>();
+        try
+        {
+            var page = await _fixture.CreatePageAsync();
+            await page.SetViewportSizeAsync(1280, 720);
+            await page.GotoAsync($"{_fixture.ServerAddress}browser/{name}");
+            await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+            var pane = page.Locator("#scrollContainer [data-testid='subject-pane']").Last;
+            var operation = Method(pane, "Time Out");
+            await Assertions.Expect(operation).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
+
+            // Act
+            await operation.ClickAsync();
+
+            // Assert
+            var dialog = page.Locator(".mud-dialog");
+            await Assertions.Expect(dialog).ToContainTextAsync("Time Out failed with an error.", new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(dialog).ToContainTextAsync("The request timed out.");
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "OK", Exact = true }).ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0);
+            await Assertions.Expect(operation).ToBeEnabledAsync();
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
     }
 }

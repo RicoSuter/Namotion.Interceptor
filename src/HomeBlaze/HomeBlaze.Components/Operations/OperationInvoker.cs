@@ -36,7 +36,8 @@ public static class OperationInvoker
 
     /// <summary>
     /// Shows the prompt of the method, invokes it with <see cref="CancellationToken.None"/>, and shows the result
-    /// dialog for a result that is not null or the error dialog for an exception. Never throws for a failing method.
+    /// dialog for a result that is not null or the error dialog for an exception, an <see cref="OperationCanceledException"/>
+    /// included. Never throws for a failing method.
     /// </summary>
     /// <remarks>
     /// Exceptions thrown by the dialog service itself propagate to the caller.
@@ -95,12 +96,9 @@ public static class OperationInvoker
         object? result;
         try
         {
-            // Navigating away must not abort an operation that a device has already started.
+            // Navigating away must not abort an operation that a device has already started. The method is not cancelled
+            // from here, so an OperationCanceledException is a failure of its own, such as a request that timed out.
             result = await method.InvokeAsync(parameters, serviceProvider, CancellationToken.None);
-        }
-        catch (OperationCanceledException)
-        {
-            return OperationOutcome.Cancelled;
         }
         catch (Exception exception)
         {
