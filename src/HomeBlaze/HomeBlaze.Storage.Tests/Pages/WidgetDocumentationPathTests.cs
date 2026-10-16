@@ -15,36 +15,26 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// say whether such a path is right, see <see cref="DocumentationSamplesTests"/>.
 /// </summary>
 [Collection(MarkdownPageFixture.StorageCollection)]
-public class WidgetDocumentationPathTests
+public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFixture>
 {
-    private const string Folder = "administration";
-    private const string WidgetsFolder = Folder + "/widgets";
+    private readonly DocumentationFolderFixture _folder;
 
-    // The sample of widget.md that shows the message for a path that leads nowhere.
-    private const string PathToNothing = "/Missing/Motor";
-
-    public static TheoryData<string> Pages()
+    public WidgetDocumentationPathTests(AdministrationFolderFixture fixture)
     {
-        var folder = Path.Combine(RepositoryPagesTests.FindRepositoryRoot(), DocumentationFolderFixture.DocumentationFolder, WidgetsFolder);
-        var data = new TheoryData<string>();
-        foreach (var file in Directory.EnumerateFiles(folder, "*.md").Order(StringComparer.Ordinal))
-        {
-            data.Add($"/{WidgetsFolder}/{Path.GetFileName(file)}");
-        }
-
-        return data;
+        _folder = fixture.Folder;
     }
+
+    public static TheoryData<string> Pages() => WidgetDocumentation.GetPagePaths();
 
     [Theory]
     [MemberData(nameof(Pages))]
-    public async Task WhenPageIsLoadedWithItsFolder_ThenEveryExpressionLeadsToAProperty(string pagePath)
+    public void WhenPageIsLoadedWithItsFolder_ThenEveryExpressionLeadsToAProperty(string pagePath)
     {
         // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
-        var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+        var resolver = _folder.Services.GetRequiredService<SubjectPathResolver>();
 
         // Act
-        var page = fixture.FindPage(pagePath);
+        var page = _folder.FindPage(pagePath);
 
         // Assert
         var pathsToNothing = DocumentationFolderFixture.FindSubjects(page)
@@ -57,19 +47,18 @@ public class WidgetDocumentationPathTests
 
     [Theory]
     [MemberData(nameof(Pages))]
-    public async Task WhenPageIsLoadedWithItsFolder_ThenEveryPathOfAWidgetLeadsToItsTarget(string pagePath)
+    public void WhenPageIsLoadedWithItsFolder_ThenEveryPathOfAWidgetLeadsToItsTarget(string pagePath)
     {
         // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(Folder);
-        var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+        var resolver = _folder.Services.GetRequiredService<SubjectPathResolver>();
 
         // Act
-        var page = fixture.FindPage(pagePath);
+        var page = _folder.FindPage(pagePath);
 
         // Assert
         var pathsToNothing = DocumentationFolderFixture.FindSubjects(page)
             .SelectMany(subject => FindPaths(subject)
-                .Where(path => path.Text != PathToNothing && !LeadsToTarget(path, subject, resolver))
+                .Where(path => path.Text != WidgetDocumentation.PathToNothing && !LeadsToTarget(path, subject, resolver))
                 .Select(path => $"{subject.GetType().Name}.{path.PropertyName}={path.Text}"));
 
         Assert.Empty(pathsToNothing);

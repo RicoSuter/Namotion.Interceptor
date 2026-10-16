@@ -7,33 +7,33 @@ using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using static HomeBlaze.Storage.Tests.Pages.WidgetDocumentation;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
 /// <summary>
-/// Loads the folder of the widget reference as the application does and checks that each widget page shows what its
-/// samples promise, with the two shared sample motors of the folder.
+/// Loads the folder of the widget reference with the folder around it as the application does and checks that each
+/// widget page shows what its samples promise, with the two shared sample motors of the folder.
 /// </summary>
 [Collection(MarkdownPageFixture.StorageCollection)]
-public class WidgetPagesTests
+public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
 {
-    // Relative to DocumentationFolderFixture.DocumentationFolder, as DocumentationFolderFixture.LoadAsync takes it.
-    private const string WidgetsFolder = "administration/widgets";
     private const string PumpPath = "../Pump";
     private const string FanPath = "../Fan";
     private const string MapPath = "../value-map.md/motorstate";
 
-    // The only path of the widget pages that leads to nothing, in the sample that shows the message for it.
-    private const string PathToNothing = "/Missing/Motor";
+    private readonly DocumentationFolderFixture _folder;
+
+    public WidgetPagesTests(AdministrationFolderFixture fixture)
+    {
+        _folder = fixture.Folder;
+    }
 
     [Fact]
-    public async Task WhenValueMapPageIsLoaded_ThenTheMapHasACaseWithTextPerMotorStatus()
+    public void WhenValueMapPageIsLoaded_ThenTheMapHasACaseWithTextPerMotorStatus()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        IPathScope page = fixture.FindPage(GetPagePath("value-map.md"));
+        IPathScope page = _folder.FindPage(GetPagePath("value-map.md"));
 
         // Assert
         var map = Assert.IsType<ValueMap>(page.TryGetNamedSubject("motorstate"));
@@ -45,15 +45,14 @@ public class WidgetPagesTests
     [InlineData("value-list.md")]
     [InlineData("value-tile.md")]
     [InlineData("indicator.md")]
-    public async Task WhenValueWidgetPageIsLoaded_ThenEveryMapIsTheMapOfTheValueMapPage(string fileName)
+    public void WhenValueWidgetPageIsLoaded_ThenEveryMapIsTheMapOfTheValueMapPage(string fileName)
     {
         // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-        var map = Assert.IsType<ValueMap>(((IPathScope)fixture.FindPage(GetPagePath("value-map.md"))).TryGetNamedSubject("motorstate"));
-        var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+        var map = Assert.IsType<ValueMap>(((IPathScope)_folder.FindPage(GetPagePath("value-map.md"))).TryGetNamedSubject("motorstate"));
+        var resolver = _folder.Services.GetRequiredService<SubjectPathResolver>();
 
         // Act
-        var widgets = DocumentationFolderFixture.FindSubjects(fixture.FindPage(GetPagePath(fileName)))
+        var widgets = DocumentationFolderFixture.FindSubjects(_folder.FindPage(GetPagePath(fileName)))
             .Select(subject => (Subject: subject, Map: subject switch
             {
                 ValueRow row => row.Map,
@@ -71,16 +70,13 @@ public class WidgetPagesTests
     }
 
     [Fact]
-    public async Task WhenValueWidgetPagesAreLoaded_ThenEachHasTheSamplesOfItsSection()
+    public void WhenValueWidgetPagesAreLoaded_ThenEachHasTheSamplesOfItsSection()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        var valueList = DocumentationFolderFixture.FindSubjects(fixture.FindPage(GetPagePath("value-list.md")));
-        var valueTile = DocumentationFolderFixture.FindSubjects(fixture.FindPage(GetPagePath("value-tile.md")));
-        var indicator = DocumentationFolderFixture.FindSubjects(fixture.FindPage(GetPagePath("indicator.md")));
-        var progress = DocumentationFolderFixture.FindSubjects(fixture.FindPage(GetPagePath("progress.md")));
+        var valueList = DocumentationFolderFixture.FindSubjects(_folder.FindPage(GetPagePath("value-list.md")));
+        var valueTile = DocumentationFolderFixture.FindSubjects(_folder.FindPage(GetPagePath("value-tile.md")));
+        var indicator = DocumentationFolderFixture.FindSubjects(_folder.FindPage(GetPagePath("indicator.md")));
+        var progress = DocumentationFolderFixture.FindSubjects(_folder.FindPage(GetPagePath("progress.md")));
 
         // Assert
         Assert.Equal((3, 1), (valueList.OfType<ValueList>().Count(), valueList.OfType<Progress>().Count()));
@@ -96,14 +92,13 @@ public class WidgetPagesTests
     [InlineData("value-tile.md")]
     [InlineData("indicator.md")]
     [InlineData("progress.md")]
-    public async Task WhenValueWidgetPageIsLoaded_ThenEveryValueWidgetReadsAPropertyOfASharedMotor(string fileName)
+    public void WhenValueWidgetPageIsLoaded_ThenEveryValueWidgetReadsAPropertyOfASharedMotor(string fileName)
     {
         // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-        var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+        var resolver = _folder.Services.GetRequiredService<SubjectPathResolver>();
 
         // Act
-        var page = fixture.FindPage(GetPagePath(fileName));
+        var page = _folder.FindPage(GetPagePath(fileName));
 
         // Assert
         var subjects = DocumentationFolderFixture.FindSubjects(page);
@@ -121,13 +116,10 @@ public class WidgetPagesTests
     }
 
     [Fact]
-    public async Task WhenFlowLayoutPageIsLoaded_ThenTheFlowLayoutsHaveTheWidthsAndTheCellsOfTheirSamples()
+    public void WhenFlowLayoutPageIsLoaded_ThenTheFlowLayoutsHaveTheWidthsAndTheCellsOfTheirSamples()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        var page = fixture.FindPage(GetPagePath("flow-layout.md"));
+        var page = _folder.FindPage(GetPagePath("flow-layout.md"));
 
         // Assert
         var subjects = DocumentationFolderFixture.FindSubjects(page);
@@ -136,13 +128,10 @@ public class WidgetPagesTests
     }
 
     [Fact]
-    public async Task WhenTabLayoutPageIsLoaded_ThenTheTabLayoutsHaveTheTabsAndThePositionsOfTheirSamples()
+    public void WhenTabLayoutPageIsLoaded_ThenTheTabLayoutsHaveTheTabsAndThePositionsOfTheirSamples()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        var page = fixture.FindPage(GetPagePath("tab-layout.md"));
+        var page = _folder.FindPage(GetPagePath("tab-layout.md"));
 
         // Assert
         var layouts = DocumentationFolderFixture.FindSubjects(page).OfType<TabLayout>().ToList();
@@ -186,13 +175,10 @@ public class WidgetPagesTests
     }
 
     [Fact]
-    public async Task WhenGridLayoutPageIsLoaded_ThenTheGridShowsTheMotorsAndItsLastCellHoldsText()
+    public void WhenGridLayoutPageIsLoaded_ThenTheGridShowsTheMotorsAndItsLastCellHoldsText()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        IPathScope page = fixture.FindPage(GetPagePath("grid-layout.md"));
+        IPathScope page = _folder.FindPage(GetPagePath("grid-layout.md"));
 
         // Assert
         var grid = Assert.IsType<GridLayout>(page.TryGetNamedSubject("motorgrid"));
@@ -208,13 +194,10 @@ public class WidgetPagesTests
     }
 
     [Fact]
-    public async Task WhenCanvasLayoutPageIsLoaded_ThenTheCanvasShowsTheMotorsInNodesThatFitANarrowWindow()
+    public void WhenCanvasLayoutPageIsLoaded_ThenTheCanvasShowsTheMotorsInNodesThatFitANarrowWindow()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        IPathScope page = fixture.FindPage(GetPagePath("canvas-layout.md"));
+        IPathScope page = _folder.FindPage(GetPagePath("canvas-layout.md"));
 
         // Assert
         var canvas = Assert.IsType<CanvasLayout>(page.TryGetNamedSubject("plan"));
@@ -229,13 +212,10 @@ public class WidgetPagesTests
     }
 
     [Fact]
-    public async Task WhenExpansionPanelsPageIsLoaded_ThenThePanelsHaveTheModesOfTheirSamplesAndUseTheSharedMap()
+    public void WhenExpansionPanelsPageIsLoaded_ThenThePanelsHaveTheModesOfTheirSamplesAndUseTheSharedMap()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        var page = fixture.FindPage(GetPagePath("expansion-panels.md"));
+        var page = _folder.FindPage(GetPagePath("expansion-panels.md"));
 
         // Assert
         var subjects = DocumentationFolderFixture.FindSubjects(page);
@@ -247,13 +227,10 @@ public class WidgetPagesTests
     }
 
     [Fact]
-    public async Task WhenCardPageIsLoaded_ThenItsCardsAreThoseOfTheSamples()
+    public void WhenCardPageIsLoaded_ThenItsCardsAreThoseOfTheSamples()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        var page = fixture.FindPage(GetPagePath("card.md"));
+        var page = _folder.FindPage(GetPagePath("card.md"));
 
         // Assert
         var cards = DocumentationFolderFixture.FindSubjects(page).OfType<Card>().ToList();
@@ -282,13 +259,10 @@ public class WidgetPagesTests
     }
 
     [Fact]
-    public async Task WhenAlertPageIsLoaded_ThenItsAlertsHaveTheSeveritiesOfTheSamples()
+    public void WhenAlertPageIsLoaded_ThenItsAlertsHaveTheSeveritiesOfTheSamples()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        var page = fixture.FindPage(GetPagePath("alert.md"));
+        var page = _folder.FindPage(GetPagePath("alert.md"));
 
         // Assert
         var alerts = DocumentationFolderFixture.FindSubjects(page).OfType<Alert>().ToList();
@@ -297,13 +271,10 @@ public class WidgetPagesTests
     }
 
     [Fact]
-    public async Task WhenWidgetPageIsLoaded_ThenOneWidgetShowsThePumpAndTheOtherLeadsNowhere()
+    public void WhenWidgetPageIsLoaded_ThenOneWidgetShowsThePumpAndTheOtherLeadsNowhere()
     {
-        // Arrange
-        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
-
         // Act
-        var page = fixture.FindPage(GetPagePath("widget.md"));
+        var page = _folder.FindPage(GetPagePath("widget.md"));
 
         // Assert
         var widgets = DocumentationFolderFixture.FindSubjects(page).OfType<Widget>().ToList();
@@ -311,7 +282,4 @@ public class WidgetPagesTests
         Assert.Equal("Pump", Assert.IsType<Motor>(widgets[0].ResolvedSubject).Name);
         Assert.Null(widgets[1].ResolvedSubject);
     }
-
-    // The path of a page of the folder in the storage, for example /administration/widgets/value-map.md.
-    private static string GetPagePath(string fileName) => $"/{WidgetsFolder}/{fileName}";
 }
