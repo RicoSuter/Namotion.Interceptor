@@ -13,8 +13,8 @@ A bar that shows where a number stands between a minimum and a maximum. Type nam
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Path` | Path (Number) | None | The [path](basics.md#paths) of the property whose value the bar shows |
-| `Minimum` | Number with a fraction | `0` | The value at which the bar is empty |
-| `Maximum` | Number with a fraction | `1` | The value at which the bar is full |
+| `Minimum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the bar is empty, in the unit of the property |
+| `Maximum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the bar is full, in the unit of the property |
 | `Color` | Colour | `Primary` | The [colour](basics.md#colours) of the bar |
 
 ## Slots
@@ -42,8 +42,9 @@ Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so
 
 ## Behaviour and Limits
 
-- **The range**: The bar is empty at `Minimum` and full at `Maximum`. A value outside the range gives an empty or a full bar. The default range from 0 to 1 is what a property with the unit percent holds. A value from 0 to 100 needs `Maximum=100`. Unlike a [Slider](slider.md) and a [Gauge](gauge.md), a bar does not read the range of its property, see [Ranges](basics.md#ranges).
-- **No bar**: Besides a [missing value](basics.md#missing-values), a value that is no number and a range in which `Maximum` is not above `Minimum` show the dash in place of the bar.
+- **The range**: [Ranges](basics.md#ranges) has where the ends of the range come from and the messages for a missing or an empty range, the same as for a [Gauge](gauge.md) and a [Slider](slider.md). A property with the unit percent runs from 0 to 1 without `Minimum` and `Maximum`.
+- **Outside the range**: A value below the minimum gives an empty bar and a value above the maximum a full one.
+- **No bar**: A [missing value](basics.md#missing-values), a path that leads nowhere and a value that is no number show the dash in place of the bar.
 - **No text**: The bar has no text. Show the number with an expression, or put the bar into a row of a [ValueList](value-list.md), where the value stands next to it.
 - **Width**: Alone, a bar is as wide as the place it stands in. In a row of a value list it fills the room between the label and the value, and it is at least 48 pixels wide.
 

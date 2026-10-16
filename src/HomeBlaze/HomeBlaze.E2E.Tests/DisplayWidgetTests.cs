@@ -102,6 +102,18 @@ public class DisplayWidgetTests
     }
 
     [Fact]
+    public async Task WhenRangeOfAProgressIsInverted_ThenItShowsTheArgumentErrorInItsPlace()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("widget-argument-error").Filter(new() { HasText = "Maximum must be above Minimum" }))
+            .ToHaveTextAsync(["Maximum must be above Minimum: 2000 to 0"], new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("progress")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenMapOfAGaugeOrOfATableColumnCannotBeResolved_ThenEachShowsOneArgumentErrorInItsPlace()
     {
         // Arrange & Act

@@ -12,7 +12,7 @@
 {
     // Read once per render and never kept: the read is what the tracking scope records.
     var reading = ValueReader.Read(PathResolver, gauge, gauge.Path, gauge.Map, TimeZone);
-    var state = GaugeDisplay.GetState(reading, gauge.Minimum, gauge.Maximum);
+    var state = ValueRangeResolver.GetState(reading.Property, reading.Value, gauge.Minimum, gauge.Maximum);
     var size = gauge.Size;
 
     if ((reading.MapError ?? state.Error) is { } error)

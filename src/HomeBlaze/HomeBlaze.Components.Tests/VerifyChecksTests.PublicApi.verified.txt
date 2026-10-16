@@ -404,9 +404,9 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public MudBlazor.Color Color { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        public double Maximum { get; set; }
+        public double? Maximum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        public double Minimum { get; set; }
+        public double? Minimum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Number)]
         public string? Path { get; set; }

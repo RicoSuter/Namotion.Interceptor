@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Inputs;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -75,6 +76,34 @@ internal static class ValueRangeResolver
 
         ends = new ValueRange(resolvedMinimum.Value, resolvedMaximum.Value);
         return true;
+    }
+
+    /// <summary>
+    /// Gets where a value stands in the range of a number widget, the range by <see cref="TryResolve"/>. Only a number
+    /// needs a range: a path that leads nowhere, which every value widget shows as missing, and a property that holds no
+    /// number give no range and no error when no range is found. An empty range is an error also for them.
+    /// </summary>
+    /// <param name="property">The property of the value, or null when the path leads nowhere.</param>
+    /// <param name="value">The value of the property, read once by the caller.</param>
+    /// <param name="minimum">The <c>Minimum</c> argument of the widget.</param>
+    /// <param name="maximum">The <c>Maximum</c> argument of the widget.</param>
+    public static ValueRangeState GetState(RegisteredSubjectProperty? property, object? value, double? minimum, double? maximum)
+    {
+        if (!TryResolve(property, minimum, maximum, out var range, out var error))
+        {
+            var isNumber = property is not null && SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number);
+            return !isNumber && error == MissingRangeError
+                ? default
+                : new ValueRangeState(null, null, null, error);
+        }
+
+        var percent = ValueReader.GetProgressPercent(value, range.Minimum, range.Maximum);
+        if (percent is null || !NumberValues.TryGetNumber(value, out var number))
+        {
+            return new ValueRangeState(null, null, range, null);
+        }
+
+        return new ValueRangeState(Math.Clamp(number, range.Minimum, range.Maximum), percent, range, null);
     }
 
     private static bool IsPercent(RegisteredSubjectProperty? property) =>

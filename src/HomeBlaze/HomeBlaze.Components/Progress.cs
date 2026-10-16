@@ -17,7 +17,6 @@ public partial class Progress : IConfigurable, ITitleProvider
 {
     public Progress()
     {
-        Maximum = 1;
         Color = MudBlazor.Color.Primary;
     }
 
@@ -29,16 +28,16 @@ public partial class Progress : IConfigurable, ITitleProvider
     public partial string? Path { get; set; }
 
     /// <summary>
-    /// The value at which the bar is empty.
+    /// The value at which the bar is empty. Without it the range comes from the property, see <see cref="ValueRangeResolver"/>.
     /// </summary>
     [Configuration]
-    public partial double Minimum { get; set; }
+    public partial double? Minimum { get; set; }
 
     /// <summary>
-    /// The value at which the bar is full.
+    /// The value at which the bar is full. Without it the range comes from the property, see <see cref="ValueRangeResolver"/>.
     /// </summary>
     [Configuration]
-    public partial double Maximum { get; set; }
+    public partial double? Maximum { get; set; }
 
     /// <summary>
     /// The colour of the bar.

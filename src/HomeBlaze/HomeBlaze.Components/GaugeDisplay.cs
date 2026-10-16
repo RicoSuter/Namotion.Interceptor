@@ -1,6 +1,4 @@
 using System.Globalization;
-using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Components.Inputs;
 using MudBlazor;
 
 namespace HomeBlaze.Components;
@@ -14,30 +12,6 @@ internal static class GaugeDisplay
     private static readonly string SmallRingStyle = CreateRingStyle(GaugeSize.Small);
     private static readonly string MediumRingStyle = CreateRingStyle(GaugeSize.Medium);
     private static readonly string LargeRingStyle = CreateRingStyle(GaugeSize.Large);
-
-    /// <summary>
-    /// Gets the state of a gauge: its range by <see cref="ValueRangeResolver"/> and where the value stands in it.
-    /// Only a number needs a range: a path that leads nowhere, as every value widget shows a dash for it, and a property
-    /// that holds no number give an empty ring without an error when no range is found.
-    /// </summary>
-    public static GaugeState GetState(ValueReading reading, double? minimum, double? maximum)
-    {
-        if (!ValueRangeResolver.TryResolve(reading.Property, minimum, maximum, out var range, out var error))
-        {
-            var isNumber = reading.Property is { } property && SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number);
-            return !isNumber && error == ValueRangeResolver.MissingRangeError
-                ? default
-                : new GaugeState(null, null, null, error);
-        }
-
-        var percent = ValueReader.GetProgressPercent(reading.Value, range.Minimum, range.Maximum);
-        if (percent is null || !NumberValues.TryGetNumber(reading.Value, out var value))
-        {
-            return new GaugeState(null, null, range, null);
-        }
-
-        return new GaugeState(Math.Clamp(value, range.Minimum, range.Maximum), percent, range, null);
-    }
 
     /// <summary>
     /// Gets the colour of the ring: that of the matched case of the map, otherwise the primary colour.

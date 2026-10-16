@@ -45,6 +45,9 @@ title: Displays Demo
 ::: Column Property=Status Label="Broken State" Map=nocolumnmap
 ::
 
+:: HomeBlaze.Components.Progress Path=dispmotor/TargetSpeed Minimum=2000 Maximum=0
+::
+
 :: HomeBlaze.Components.Responsive Show=NotPhone
 Wide screen text
 ::

@@ -38,7 +38,7 @@ public class GaugeDisplayTests
         var reading = CreateReading(subject, nameof(MeasuredSubject.Speed));
 
         // Act
-        var state = GaugeDisplay.GetState(reading, 0, 2000);
+        var state = ValueRangeResolver.GetState(reading.Property, reading.Value, 0, 2000);
 
         // Assert
         Assert.Equal(25d, state.Percent);
@@ -55,7 +55,7 @@ public class GaugeDisplayTests
         var reading = CreateReading(subject, nameof(MeasuredSubject.TargetSpeed));
 
         // Act
-        var state = GaugeDisplay.GetState(reading, null, null);
+        var state = ValueRangeResolver.GetState(reading.Property, reading.Value, null, null);
 
         // Assert
         Assert.Equal(50d, state.Percent);
@@ -71,7 +71,7 @@ public class GaugeDisplayTests
         var reading = CreateReading(subject, nameof(MeasuredSubject.Load));
 
         // Act
-        var state = GaugeDisplay.GetState(reading, null, null);
+        var state = ValueRangeResolver.GetState(reading.Property, reading.Value, null, null);
 
         // Assert
         Assert.Equal(25d, state.Percent);
@@ -86,7 +86,7 @@ public class GaugeDisplayTests
         var reading = CreateReading(subject, nameof(MeasuredSubject.Speed));
 
         // Act
-        var state = GaugeDisplay.GetState(reading, null, null);
+        var state = ValueRangeResolver.GetState(reading.Property, reading.Value, null, null);
 
         // Assert
         Assert.Equal("Needs a range: set Minimum and Maximum", state.Error);
@@ -103,7 +103,7 @@ public class GaugeDisplayTests
         var reading = CreateReading(subject, nameof(MeasuredSubject.Speed));
 
         // Act
-        var state = GaugeDisplay.GetState(reading, minimum, maximum);
+        var state = ValueRangeResolver.GetState(reading.Property, reading.Value, minimum, maximum);
 
         // Assert
         Assert.Equal(expected, state.Error);
@@ -124,7 +124,7 @@ public class GaugeDisplayTests
         var reading = CreateReading(subject, nameof(MeasuredSubject.Load));
 
         // Act
-        var state = GaugeDisplay.GetState(reading, null, null);
+        var state = ValueRangeResolver.GetState(reading.Property, reading.Value, null, null);
 
         // Assert
         Assert.Equal(expected, state.AriaValue);
@@ -133,11 +133,8 @@ public class GaugeDisplayTests
     [Fact]
     public void WhenPathLeadsNowhere_ThenStateHasNoErrorAndAnEmptyRing()
     {
-        // Arrange
-        var reading = ValueReading.Missing;
-
         // Act
-        var state = GaugeDisplay.GetState(reading, null, null);
+        var state = ValueRangeResolver.GetState(null, null, null, null);
 
         // Assert
         Assert.Null(state.Error);
@@ -154,7 +151,7 @@ public class GaugeDisplayTests
         var reading = CreateReading(subject, nameof(MeasuredSubject.Name));
 
         // Act
-        var state = GaugeDisplay.GetState(reading, null, null);
+        var state = ValueRangeResolver.GetState(reading.Property, reading.Value, null, null);
 
         // Assert
         Assert.Null(state.Error);
@@ -166,7 +163,7 @@ public class GaugeDisplayTests
     public void WhenPathLeadsNowhereAndTheRangeIsEmpty_ThenStateHasTheRangeError()
     {
         // Act
-        var state = GaugeDisplay.GetState(ValueReading.Missing, 10, 0);
+        var state = ValueRangeResolver.GetState(null, null, 10, 0);
 
         // Assert
         Assert.Equal("Maximum must be above Minimum: 10 to 0", state.Error);
@@ -180,7 +177,7 @@ public class GaugeDisplayTests
         var reading = CreateReading(subject, nameof(MeasuredSubject.Pressure));
 
         // Act
-        var state = GaugeDisplay.GetState(reading, 0, 10);
+        var state = ValueRangeResolver.GetState(reading.Property, reading.Value, 0, 10);
 
         // Assert
         Assert.Null(state.Percent);
