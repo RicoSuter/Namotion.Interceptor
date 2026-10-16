@@ -16,11 +16,11 @@ The reference of each widget has its arguments, its slots and its samples. Some 
 
 | Widget | Purpose |
 |--------|---------|
-| [FlowLayout](../page-widgets.md#flowlayout) | Lays its cells out from left to right and wraps them to as many rows as the screen needs |
-| [TabLayout](../page-widgets.md#tablayout) | Shows one of several tabs at a time |
-| [GridLayout](../page-widgets.md#gridlayout) | A grid with a fixed number of rows and columns |
-| [CanvasLayout](../page-widgets.md#canvaslayout) | An area on which subjects are placed at any position |
-| [ExpansionPanels](../page-widgets.md#expansionpanels) | Page content in panels that open and close |
+| [FlowLayout](flow-layout.md) | Lays its cells out from left to right and wraps them to as many rows as the screen needs |
+| [TabLayout](tab-layout.md) | Shows one of several tabs at a time |
+| [GridLayout](grid-layout.md) | A grid with a fixed number of rows and columns |
+| [CanvasLayout](canvas-layout.md) | An area on which subjects are placed at any position |
+| [ExpansionPanels](expansion-panels.md) | Page content in panels that open and close |
 | [Responsive](responsive.md) | Shows its content only on phones, tablets or desktops |
 
 ## Content

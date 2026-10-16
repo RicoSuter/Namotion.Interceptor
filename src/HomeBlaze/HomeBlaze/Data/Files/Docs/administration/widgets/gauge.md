@@ -73,7 +73,7 @@ A map on the same page gives the text in the centre and the colour of the ring f
 :: HomeBlaze.Components.Gauge Path=../Fan/TargetSpeed Map=gaugetarget Label="Fan target"
 ::
 
-The three sizes next to each other in a [FlowLayout](../page-widgets.md#flowlayout), whose columns fit the large ring, see [Gauge Rows](#gauge-rows):
+The three sizes next to each other in a [FlowLayout](flow-layout.md), whose columns fit the large ring, see [Gauge Rows](#gauge-rows):
 
 <!-- sample: live -->
 ~~~~markdown
@@ -98,7 +98,7 @@ The three sizes next to each other in a [FlowLayout](../page-widgets.md#flowlayo
 
 ## Gauge Rows
 
-A gauge has a fixed size and stands at the start of its column, so a row of gauges in a [FlowLayout](../page-widgets.md#flowlayout) looks even when the columns are only a little wider than the rings. The rings are 72 pixels (`Small`), 112 pixels (`Medium`) and 160 pixels (`Large`) wide; a `MinWidth` of the ring size plus 8 pixels fits them: 80 for `Small`, 120 for `Medium` and 168 for `Large`, and the size of the largest ring for a row of mixed sizes. The gap of 16 pixels between the columns comes on top. A wider column leaves more room after each gauge than between the gauges. A label that is wider than the ring needs a wider column.
+A gauge has a fixed size and stands at the start of its column, so a row of gauges in a [FlowLayout](flow-layout.md) looks even when the columns are only a little wider than the rings. The rings are 72 pixels (`Small`), 112 pixels (`Medium`) and 160 pixels (`Large`) wide; a `MinWidth` of the ring size plus 8 pixels fits them: 80 for `Small`, 120 for `Medium` and 168 for `Large`, and the size of the largest ring for a row of mixed sizes. The gap of 16 pixels between the columns comes on top. A wider column leaves more room after each gauge than between the gauges. A label that is wider than the ring needs a wider column.
 
 ## Behaviour and Limits
 
