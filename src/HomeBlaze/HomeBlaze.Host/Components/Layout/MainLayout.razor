@@ -145,7 +145,9 @@
 
     // Three levels with equal steps in lightness: the drawer, the page background and the surfaces of cards,
     // tiles and tab bars. The secondary text and the primary colour of the light palette are darker than the
-    // defaults, which are below 4.5:1 on the page background and on the active drawer link.
+    // defaults, which are below 4.5:1 on the page background and on the active drawer link. The status colours
+    // are darker for the same reason: as text on the page and on alerts, and behind the white text of filled
+    // buttons and chips. The outline of inputs reaches 3:1 on cards.
     private readonly PaletteLight _lightPalette = new()
     {
         Primary = "#3f2ddd",
@@ -153,18 +155,32 @@
         Background = "#e9eaee",
         BackgroundGray = "#d5d5dc",
         DrawerBackground = "#d5d5dc",
-        TextSecondary = "rgba(0,0,0,0.6)"
+        TextSecondary = "rgba(0,0,0,0.6)",
+        Info = "#0a6ab6",
+        InfoDarken = "#085592",
+        Success = "#007932",
+        SuccessDarken = "#005322",
+        Warning = "#965a00",
+        WarningDarken = "#704300",
+        Error = "#cd180b",
+        ErrorDarken = "#a91409",
+        LinesInputs = "rgba(0,0,0,0.45)",
+        Divider = "rgba(0,0,0,0.12)"
     };
 
     // Links on pages use the lightened primary colour, which is lighter than the computed default so that it
-    // reaches 4.5:1 on the surface of cards.
+    // reaches 4.5:1 on the surface of cards, as does the secondary text. The outline of inputs reaches 3:1 on
+    // cards. The darker status tones keep their defaults for the hover of filled buttons, so the text of alerts
+    // gets its light tones in app.css.
     private readonly PaletteDark _darkPalette = new()
     {
         PrimaryLighten = "#a29aef",
         Background = "#2a2b32",
         BackgroundGray = "#1f1f25",
         AppbarBackground = "#1f1f25",
-        DrawerBackground = "#1f1f25"
+        DrawerBackground = "#1f1f25",
+        TextSecondary = "rgba(255,255,255,0.55)",
+        LinesInputs = "rgba(255,255,255,0.4)"
     };
 
     public string DarkLightModeButtonIcon => _isDarkMode switch

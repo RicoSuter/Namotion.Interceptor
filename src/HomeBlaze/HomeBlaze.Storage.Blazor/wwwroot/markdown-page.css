@@ -94,3 +94,10 @@
 .flow-layout-item .card-widget:not(.card-widget-sized) > .mud-card-content {
     flex-grow: 1;
 }
+
+/* MudBlazor removes the outline of a focused link, so a link on a page that has the keyboard focus gets a ring of its own. */
+.markdown-content a:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+    border-radius: 2px;
+}
