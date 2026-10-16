@@ -1,5 +1,6 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Services
+@using Namotion.Interceptor.Tracking.Change
 
 @implements IAsyncDisposable
 
@@ -8,7 +9,7 @@
 @inject ISnackbar Snackbar
 @inject DeveloperModeService DeveloperMode
 
-<TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+<TrackingScope Context="TrackedContext" ShowDebugInfo="DeveloperMode.IsEnabled">
     @if (Subject != null)
     {
         @* A hosted form may change its validity without raising IsValidChanged, so the panel reads it again after
@@ -66,6 +67,11 @@
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
+
+    // A subject created without the root context, such as one whose constructor takes services, has no change
+    // tracking until it is added to the graph, and TrackingScope fails to subscribe to such a context.
+    private IInterceptorSubjectContext? TrackedContext =>
+        Subject?.Context is { } context && context.TryGetService<PropertyChangeInterceptor>() is not null ? context : null;
 
     private SubjectComponentType? HostedComponentType
     {

@@ -31,6 +31,11 @@ public class PlaywrightFixture : IAsyncLifetime
     /// </summary>
     public IServiceProvider ServerServices => _factory?.ServerServices ?? throw new InvalidOperationException("Server not started");
 
+    /// <summary>
+    /// The warnings and errors that the server under test logs.
+    /// </summary>
+    public ServerLogRecorder ServerLog => _factory?.ServerLog ?? throw new InvalidOperationException("Server not started");
+
     public async Task InitializeAsync()
     {
         // Start the test server with Kestrel. It learns the test subjects and the widget before it loads anything.

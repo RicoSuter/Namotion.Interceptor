@@ -7,6 +7,7 @@ using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Blazor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit.Abstractions;
@@ -611,6 +612,29 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(NameInput(page)).ToHaveValueAsync("SqliteHistoryStoreSubject");
         await Assertions.Expect(sqliteOnlyField).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(inMemoryOnlyField).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenATypeWhoseConstructorTakesServicesIsPicked_ThenItsFormLogsNoTrackingWarning()
+    {
+        // Arrange - such a subject is created without the root context, and so without change tracking.
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        var logCount = _fixture.ServerLog.Count;
+
+        // Act
+        await PickTypeAsync(page, "inmemoryhistorystoresubject");
+        var field = Dialog(page).GetByLabel("Max Points Per Property");
+        await Assertions.Expect(field).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await field.FillAsync("500");
+        await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Assert - the tracking scope of the form subscribes while it renders, so a warning is logged by now.
+        var trackingScopeEntries = _fixture.ServerLog.GetEntriesSince(logCount)
+            .Where(entry => entry.Category == typeof(TrackingScope).FullName)
+            .Select(entry => entry.Message)
+            .ToArray();
+        Assert.Empty(trackingScopeEntries);
     }
 
     [Fact]
