@@ -1,7 +1,8 @@
 /* The spacing of the blocks of a markdown page: only containers and the page create space, and a widget has no outer
    margin of its own. See "Spacing" in the widget basics. */
 
-/* The title makes room for the time of the last change and the button of the edit modes, which stand in its corner. */
+/* The title makes room for the time of the last change and the button of the edit modes, which stand in its corner. The
+   width follows the page head in the view modes, see GetPageHeadStyle in Pages.razor of the app, and changes with it. */
 .markdown-content > h1:first-of-type {
     padding-right: 11rem;
 }
@@ -62,8 +63,9 @@
 }
 
 /* The content of a grid cell or a canvas node has the room of a card body at the edges, because the cell or the node
-   draws a frame. A card that is the only content fills the cell or the node instead (see card-widget.css). */
-.markdown-content :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:not(:has(> .subject-component-wrapper:only-child > .card-widget)) {
+   draws a frame. A card that is the only content fills the cell or the node instead, by the rules and the selector in
+   card-widget.css of HomeBlaze.Components. */
+.markdown-content :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:not(:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget)) {
     padding: 12px;
 }
 
@@ -84,10 +86,10 @@
    aspect ratio of its own wins, and a card that shares its item with other blocks keeps its own height. */
 .flow-layout-item > .subject-component-wrapper:has(> .card-widget:not(.card-widget-sized)),
 .flow-layout-item > .subject-component-wrapper > .card-widget:not(.card-widget-sized),
-.flow-layout-item > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:only-child > .card-widget:not(.card-widget-sized)),
-.flow-layout-item > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:only-child > .card-widget:not(.card-widget-sized)),
-.flow-layout-item > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child:has(> .card-widget:not(.card-widget-sized)),
-.flow-layout-item > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child > .card-widget:not(.card-widget-sized) {
+.flow-layout-item > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget:not(.card-widget-sized)),
+.flow-layout-item > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget:not(.card-widget-sized)),
+.flow-layout-item > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> .card-widget:not(.card-widget-sized)),
+.flow-layout-item > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget:not(.card-widget-sized) {
     height: 100%;
 }
 

@@ -20,19 +20,21 @@
 /* A card with a height, and a card that fills a grid cell or a canvas node: the header, the picture and the footer keep
    their size, and the body takes the rest and scrolls. Without min-height: 0 an aspect ratio would let the content make
    the card higher. A card fills a cell or a node when it is its child, as in a layout of a configuration file, or the
-   only block of its content on a page. */
+   only block of its content on a page. A block that shows nothing has an empty wrapper, which markdown-page.css hides, so
+   only the wrappers that are not empty count, unlike with :only-child. The padding of the content that such a card fills
+   is left out in markdown-page.css, with the same selector. */
 .card-widget.card-widget-sized,
-:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child) > .card-widget {
+:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .card-widget {
     min-height: 0;
 }
 
 .card-widget.card-widget-sized > *,
-:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child) > .card-widget > * {
+:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .card-widget > * {
     flex-shrink: 0;
 }
 
 .card-widget.card-widget-sized > .mud-card-content,
-:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child) > .card-widget > .mud-card-content {
+:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .card-widget > .mud-card-content {
     flex: 1 1 0;
     min-height: 0;
     overflow-y: auto;
@@ -42,13 +44,13 @@
    style gives. It ignores its aspect ratio, which the inline style also gives, so it is as wide as the cell or the node
    too. The cell or the node is the frame, so the card draws none. */
 :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .card-widget),
-:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:only-child > .card-widget),
-:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:only-child > .card-widget),
-:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child:has(> .card-widget) {
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget),
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget),
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> .card-widget) {
     height: 100%;
 }
 
-:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child) > .card-widget {
+:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .card-widget {
     height: 100%;
     aspect-ratio: auto !important;
     border: 0;
