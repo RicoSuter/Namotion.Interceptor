@@ -115,6 +115,15 @@ public class HistoryToolParsingTests
         Assert.Equal(DateTimeOffset.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), result);
     }
 
+    [Theory]
+    [InlineData("0001-01-01T00:00:00")]
+    [InlineData("not a time")]
+    public void WhenTimestampCannotBeResolved_ThenFormatException(string raw)
+    {
+        // Act & Assert - the tool turns a FormatException into a structured error.
+        Assert.Throws<FormatException>(() => HistoryToolParsing.ParseTimestamp(raw, Zurich));
+    }
+
     private static readonly TimeZoneInfo Zurich = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
 
     [Theory]
