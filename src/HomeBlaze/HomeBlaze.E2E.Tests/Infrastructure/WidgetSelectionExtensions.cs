@@ -14,10 +14,7 @@ internal static class WidgetSelectionExtensions
     /// </summary>
     public static async Task SwitchToInlineModeAsync(this IPage page)
     {
-        var editMenu = page.GetByTestId("edit-mode-menu");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await editMenu.ClickAsync();
-        await page.Locator(".mud-popover-open").GetByText("Inline", new() { Exact = true }).ClickAsync();
+        await page.SelectEditModeAsync("Inline", Timeout);
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 

@@ -428,7 +428,7 @@ public class CanvasLayoutTests
         // Arrange: the inline mode keeps the widget of the page, so that this is the diagram that was read-only.
         var page = await OpenCanvasPageAsync();
         await MarkCanvasAsync(page);
-        await SelectModeAsync(page, "Inline");
+        await page.SelectEditModeAsync("Inline");
         await Assertions.Expect(page.Locator(".canvas-layout-container.editing")).ToBeVisibleAsync(new() { Timeout = Timeout });
         Assert.True(await IsCanvasMarkedAsync(page), "The canvas was built again, so the test would not show that the diagram of the viewed page is changed");
 
@@ -454,7 +454,7 @@ public class CanvasLayoutTests
         // Arrange: the inline mode keeps the widget of the page, so that this is the diagram that could be edited.
         var page = await OpenCanvasPageAsync(withTextBelow: true, editMode: "Inline");
         await MarkCanvasAsync(page);
-        await SelectModeAsync(page, "View");
+        await page.SelectEditModeAsync("View");
         await Assertions.Expect(page.Locator(".canvas-layout-container:not(.editing)")).ToBeVisibleAsync(new() { Timeout = Timeout });
         Assert.True(await IsCanvasMarkedAsync(page), "The canvas was built again, so the test would not show that the diagram that was edited is read-only");
 
@@ -519,8 +519,7 @@ public class CanvasLayoutTests
 
         if (editMode is not null)
         {
-            await Assertions.Expect(page.GetByTestId("edit-mode-menu")).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await SelectModeAsync(page, editMode);
+            await page.SelectEditModeAsync(editMode, Timeout);
             await Assertions.Expect(page.Locator(".canvas-layout-container.editing")).ToBeVisibleAsync(new() { Timeout = Timeout });
         }
 
@@ -532,17 +531,11 @@ public class CanvasLayoutTests
         return page;
     }
 
-    private static async Task SelectModeAsync(IPage page, string mode)
-    {
-        await page.GetByTestId("edit-mode-menu").ClickAsync();
-        await page.Locator(".mud-popover-open").GetByText(mode, new() { Exact = true }).ClickAsync();
-    }
-
     // Opens the menu of the edit modes and closes it with the mode that is already selected. Each step is a round
     // trip with a visible result, and the second one comes after every event that the mouse caused before.
     private static async Task WaitForServerAsync(IPage page, string currentMode = "View")
     {
-        await SelectModeAsync(page, currentMode);
+        await page.SelectEditModeAsync(currentMode);
         await Assertions.Expect(page.Locator(".mud-popover-open")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 

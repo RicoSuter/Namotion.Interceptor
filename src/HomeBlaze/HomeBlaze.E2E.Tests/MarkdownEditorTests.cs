@@ -30,10 +30,7 @@ public class MarkdownEditorTests
         await page.WaitUntilInteractiveAsync();
 
         // Open Split mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
+        await page.SelectEditModeAsync("Split");
 
         // Wait for Monaco editor to appear
         var monacoEditor = page.Locator(".monaco-editor");
@@ -66,10 +63,7 @@ public class MarkdownEditorTests
         await page.WaitUntilInteractiveAsync();
 
         // Open Split mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
+        await page.SelectEditModeAsync("Split");
 
         // Wait for Monaco editor
         var monacoEditor = page.Locator(".monaco-editor");
@@ -106,10 +100,7 @@ public class MarkdownEditorTests
 
         // Act
         // Open Inline mode via dropdown menu (enables IsEditing on widgets)
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Inline").ClickAsync();
+        await page.SelectEditModeAsync("Inline");
         var actionBar = await page.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
 
         // Assert
@@ -130,10 +121,7 @@ public class MarkdownEditorTests
         await Assertions.Expect(indicatorWrapper).ToBeVisibleAsync(new() { Timeout = 30000 });
 
         // Act
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Inline").ClickAsync();
+        await page.SelectEditModeAsync("Inline");
 
         var actionBar = await indicatorWrapper.SelectWidgetAsync();
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
@@ -163,10 +151,7 @@ public class MarkdownEditorTests
 
         // Act
         // Open Split mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
+        await page.SelectEditModeAsync("Split");
 
         // Wait for Monaco editor
         var monacoEditor = page.Locator(".monaco-editor");

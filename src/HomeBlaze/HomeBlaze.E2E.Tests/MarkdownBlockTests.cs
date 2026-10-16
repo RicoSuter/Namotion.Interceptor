@@ -601,7 +601,7 @@ public class MarkdownBlockTests
         await Assertions.Expect(card).ToContainTextAsync("/ 1200 RPM", new() { Timeout = 30000 });
 
         // Act
-        await SelectEditModeAsync(page, "Inline");
+        await page.SelectEditModeAsync("Inline");
         var actionBar = await card.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
 
@@ -609,7 +609,7 @@ public class MarkdownBlockTests
         await dialog.GetByLabel("Target Speed (RPM)").FillAsync("1500");
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
         await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await SelectEditModeAsync(page, "View");
+        await page.SelectEditModeAsync("View");
 
         // Assert
         await Assertions.Expect(card).ToContainTextAsync("/ 1500 RPM", new() { Timeout = 30000 });
@@ -651,7 +651,7 @@ public class MarkdownBlockTests
         var card = GetCard(page, "Short Card");
         await Assertions.Expect(card).ToContainTextAsync("/ 1200 RPM", new() { Timeout = 30000 });
         await Assertions.Expect(GetCard(page, "Other Card")).ToContainTextAsync("The text of the other card.");
-        await SelectEditModeAsync(page, "Split");
+        await page.SelectEditModeAsync("Split");
 
         // The editor only knows its block regions once the decorations are applied.
         await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -669,7 +669,7 @@ public class MarkdownBlockTests
         // Assert: the editor has the new value, which it shows only after it wrote the page
         var writtenHeadLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "TargetSpeed=1500" });
         await Assertions.Expect(writtenHeadLine).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await SelectEditModeAsync(page, "View");
+        await page.SelectEditModeAsync("View");
         await Assertions.Expect(card).ToContainTextAsync("/ 1500 RPM", new() { Timeout = 30000 });
         await Assertions.Expect(GetCard(page, "Other Card")).ToContainTextAsync("The text of the other card.");
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
@@ -689,7 +689,7 @@ public class MarkdownBlockTests
         await WriteScratchPageAsync(source);
 
         var page = await OpenPageAsync(ScratchPage);
-        await SelectEditModeAsync(page, "Split");
+        await page.SelectEditModeAsync("Split");
 
         // The editor only knows its block regions once the decorations are applied.
         await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -741,7 +741,7 @@ public class MarkdownBlockTests
 
         var page = await OpenPageAsync(ScratchPage);
         await Assertions.Expect(page.GetByText("Text before the block")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await SelectEditModeAsync(page, "Split");
+        await page.SelectEditModeAsync("Split");
 
         var textLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "Text before the block" });
         await Assertions.Expect(textLine).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -799,7 +799,7 @@ public class MarkdownBlockTests
         var page = await OpenPageAsync(ScratchPage);
         var card = GetCard(page, "Outer Card");
         await Assertions.Expect(card.GetByText("Text inside the card")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await SelectEditModeAsync(page, "Split");
+        await page.SelectEditModeAsync("Split");
 
         var jsonLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "\"Title\": \"Outer Card\"" });
         await Assertions.Expect(jsonLine).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -820,7 +820,7 @@ public class MarkdownBlockTests
         // Assert: the block is in the file after the json block with the fence of a block inside the card,
         // and the card shows it and still has its title
         await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = 30000 });
-        await SelectEditModeAsync(page, "View");
+        await page.SelectEditModeAsync("View");
         await Assertions.Expect(card).ToContainTextAsync("Inner Motor", new() { Timeout = 30000 });
         await Assertions.Expect(card.GetByText("Text inside the card")).ToBeVisibleAsync();
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
@@ -844,7 +844,7 @@ public class MarkdownBlockTests
 
         var page = await OpenPageAsync(ScratchPage);
         await Assertions.Expect(page.GetByText("Text before the block")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await SelectEditModeAsync(page, "Split");
+        await page.SelectEditModeAsync("Split");
 
         var textLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "Text before the block" });
         await Assertions.Expect(textLine).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -929,12 +929,6 @@ public class MarkdownBlockTests
     private static ILocator GetSelectedTab(ILocator tabLayout)
     {
         return tabLayout.GetByRole(AriaRole.Tab, new() { Selected = true });
-    }
-
-    private static async Task SelectEditModeAsync(IPage page, string mode)
-    {
-        await page.GetByTestId("edit-mode-menu").ClickAsync();
-        await page.Locator(".mud-popover-open").GetByText(mode, new() { Exact = true }).ClickAsync();
     }
 
     private static string GetPagePath(string name)

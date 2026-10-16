@@ -43,10 +43,7 @@ public class PageEditTests
         await page.WaitUntilInteractiveAsync();
 
         // Act - Open Split mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
+        await page.SelectEditModeAsync("Split");
 
         // Assert - Split view should be visible
         var splitter = page.Locator("[data-testid='edit-splitter']");
@@ -63,10 +60,7 @@ public class PageEditTests
         await page.WaitUntilInteractiveAsync();
 
         // Act - Open Split mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
+        await page.SelectEditModeAsync("Split");
 
         // Wait for split view to appear
         var splitter = page.Locator("[data-testid='edit-splitter']");
@@ -87,18 +81,14 @@ public class PageEditTests
         await page.WaitUntilInteractiveAsync();
 
         // Act - Open Split mode
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
+        await page.SelectEditModeAsync("Split");
 
         // Verify split view is open
         var splitter = page.Locator("[data-testid='edit-splitter']");
         await Assertions.Expect(splitter).ToBeVisibleAsync(new() { Timeout = 30000 });
 
         // Switch to View mode
-        await editMenu.ClickAsync();
-        await page.GetByText("View").ClickAsync();
+        await page.SelectEditModeAsync("View");
 
         // Assert - Split view should no longer be visible
         await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -114,10 +104,7 @@ public class PageEditTests
         await page.WaitUntilInteractiveAsync();
 
         // Act - Open Source mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Source").ClickAsync();
+        await page.SelectEditModeAsync("Source");
 
         // Assert - Monaco editor should be visible (not in split view)
         var monacoEditor = page.Locator(".monaco-editor");
@@ -139,7 +126,7 @@ public class PageEditTests
         // Act & Assert: Split to Source once ended the circuit, because both modes had an outlet of the edit actions.
         foreach (var mode in new[] { "Split", "Source", "Split", "Inline", "Source", "View" })
         {
-            await SelectEditModeAsync(page, mode);
+            await page.SelectEditModeAsync(mode);
 
             if (mode is "Split" or "Source")
             {
@@ -182,7 +169,7 @@ public class PageEditTests
     {
         // Arrange
         var page = await OpenWidgetsDemoPageAsync(width);
-        await SelectEditModeAsync(page, "Split");
+        await page.SelectEditModeAsync("Split");
         await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeAttachedAsync(new() { Timeout = 30000 });
         if (previewPercent is { } percent)
         {
@@ -258,14 +245,6 @@ public class PageEditTests
         return page;
     }
 
-    private static async Task SelectEditModeAsync(IPage page, string mode)
-    {
-        var editMenu = page.GetByTestId("edit-mode-menu");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.Locator(".mud-popover-open").GetByText(mode, new() { Exact = true }).ClickAsync();
-    }
-
     [Fact]
     public async Task WhenTheFormOfThePageEditorIsInvalid_ThenSaveIsDisabledUntilItIsCorrected()
     {
@@ -281,10 +260,7 @@ public class PageEditTests
             // The edit menu is prerendered, and a click before the circuit is connected is lost.
             await page.WaitUntilInteractiveAsync();
 
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editMenu.ClickAsync();
-            await page.GetByText("Split").ClickAsync();
+            await page.SelectEditModeAsync("Split");
 
             var saveButton = page.Locator("[data-testid='save-button'] button");
             var limitInput = page.GetByLabel("Limit");

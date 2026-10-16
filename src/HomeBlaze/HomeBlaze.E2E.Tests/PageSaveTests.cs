@@ -48,10 +48,7 @@ public class PageSaveTests
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
             await page.WaitUntilInteractiveAsync();
 
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editMenu.ClickAsync();
-            await page.GetByText("Source").ClickAsync();
+            await page.SelectEditModeAsync("Source");
 
             var editorContent = page.Locator(".monaco-editor .view-lines");
             await Assertions.Expect(editorContent).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -98,10 +95,7 @@ public class PageSaveTests
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
             await page.WaitUntilInteractiveAsync();
 
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editMenu.ClickAsync();
-            await page.GetByText("Inline").ClickAsync();
+            await page.SelectEditModeAsync("Inline");
 
             var actionBar = await page.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
             await actionBar.GetByTestId("edit-subject-button").ClickAsync();
@@ -144,10 +138,7 @@ public class PageSaveTests
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
             await page.WaitUntilInteractiveAsync();
 
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editMenu.ClickAsync();
-            await page.GetByText("Inline").ClickAsync();
+            await page.SelectEditModeAsync("Inline");
 
             var actionBar = await page.GetByText("Sentence Card", new() { Exact = true }).SelectWidgetAsync();
             await actionBar.GetByTestId("edit-subject-button").ClickAsync();

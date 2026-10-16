@@ -32,10 +32,7 @@ internal static class LayoutPageExtensions
         // The edit menu is prerendered, and a click before the circuit is connected is lost.
         await page.WaitUntilInteractiveAsync();
 
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.Locator(".mud-popover-open").GetByText(editMode, new() { Exact = true }).ClickAsync();
+        await page.SelectEditModeAsync(editMode);
 
         return page;
     }
