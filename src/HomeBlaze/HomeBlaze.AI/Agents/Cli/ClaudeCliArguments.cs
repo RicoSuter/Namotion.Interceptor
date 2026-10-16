@@ -113,7 +113,8 @@ internal static class ClaudeCliArguments
 
         if (!string.IsNullOrWhiteSpace(options.ResumeSessionId))
         {
-            arguments.AddRange(["--resume", options.ResumeSessionId]);
+            // One argument: as a separate value, a stored id that starts with '-' would be read as the next flag.
+            arguments.Add("--resume=" + options.ResumeSessionId);
         }
 
         if (options.MaxTurns is { } maxTurns)

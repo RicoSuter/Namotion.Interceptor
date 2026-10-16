@@ -17,7 +17,8 @@ namespace HomeBlaze.AI.Agents.Anthropic;
 /// <remarks>
 /// The Anthropic client turns server tool blocks into contents that it drops when the messages are sent again, and its
 /// streamed server tool call keeps only a search query, not the URL of a fetch. Without the blocks, a request after a
-/// HomeBlaze tool call would lose the search results the model already used.
+/// HomeBlaze tool call, or the continuation of a paused response, would lose the search results the model already
+/// used. This covers every server tool block, including those of the code execution the web tools filter results with.
 /// </remarks>
 internal sealed class AnthropicServerToolClient : DelegatingChatClient
 {
@@ -53,38 +54,47 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
         var requestOptions = options is null
             ? null
             : AnthropicChatOptions.WithBackendToolUses(options, _backendTools, _maxBackendToolUses);
-        while (true)
+        // Also when a request throws or the caller stops early, so that a web call already made shows in the turn.
+        try
         {
-            var updates = new List<ChatResponseUpdate>();
-            await foreach (var update in base.GetStreamingResponseAsync(requestMessages, requestOptions, cancellationToken))
+            while (true)
             {
-                tracker.Observe(update);
-                updates.Add(update);
-                yield return update;
-            }
+                var updates = new List<ChatResponseUpdate>();
+                await foreach (var update in base.GetStreamingResponseAsync(requestMessages, requestOptions, cancellationToken))
+                {
+                    tracker.Observe(update);
+                    updates.Add(update);
+                    yield return update;
+                }
 
-            // The caller sends these contents back only after the stream ended, so they are complete in time.
+                // The caller sends these contents back only after the stream ended, so they are complete in time.
+                var finishReason = updates.LastOrDefault(update => update.FinishReason is not null)?.FinishReason;
+                if (finishReason?.Value != PauseTurnReason)
+                {
+                    yield break;
+                }
+
+                if (continuations++ >= MaximumContinuations)
+                {
+                    throw new AgentTurnException(
+                        AgentFailureKind.Transient,
+                        $"The model paused the turn too often: it was still not done after {MaximumContinuations} continuations.");
+                }
+
+                // A call still waiting for its result gets it in the continuation, so it is recorded only then.
+                tracker.PreparePendingCallsForResend();
+                requestMessages = [.. requestMessages, .. updates.ToChatResponse().Messages];
+            }
+        }
+        finally
+        {
             tracker.CompletePendingCalls();
-            var finishReason = updates.LastOrDefault(update => update.FinishReason is not null)?.FinishReason;
-            if (finishReason?.Value != PauseTurnReason)
-            {
-                yield break;
-            }
-
-            if (continuations++ >= MaximumContinuations)
-            {
-                throw new AgentTurnException(
-                    AgentFailureKind.Transient,
-                    $"The model paused the turn too often: it was still not done after {MaximumContinuations} continuations.");
-            }
-
-            requestMessages = [.. requestMessages, .. updates.ToChatResponse().Messages];
         }
     }
 
     /// <summary>
-    /// Pairs server tool calls with their results, records them and replaces the raw response blocks of both with
-    /// the request blocks the Anthropic client sends as they are.
+    /// Pairs web tool calls with their results and records them, and replaces the raw response blocks of every server
+    /// tool call and result with the request blocks the Anthropic client sends as they are.
     /// </summary>
     private sealed class ServerToolTracker(AgentToolSet tools)
     {
@@ -92,6 +102,11 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
 
         // The streamed input of each content block of the current response, by block index.
         private readonly Dictionary<long, StringBuilder> _streamedInputs = [];
+
+        // Server tool calls and results, such as a web search or the code execution the web tools filter results
+        // with; graph tool calls and results are function contents, which the Anthropic client sends again itself.
+        private static bool IsServerToolContent(AIContent content) =>
+            content is (ToolCallContent and not FunctionCallContent) or (ToolResultContent and not FunctionResultContent);
 
         public void Observe(ChatResponseUpdate update)
         {
@@ -115,20 +130,33 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
 
             foreach (var content in update.Contents)
             {
-                switch (content)
+                if (IsServerToolContent(content))
                 {
-                    case WebSearchToolCallContent call when call.RawRepresentation is JsonModel block:
-                        _pendingCalls[call.CallId] = new PendingCall(call, block.RawData, GetStreamedInput(stoppedBlockIndex));
-                        break;
-                    case WebSearchToolResultContent result when result.RawRepresentation is JsonModel block:
-                        result.RawRepresentation = new ContentBlockParam(ToElement(block.RawData));
-                        if (_pendingCalls.Remove(result.CallId, out var pendingCall))
-                        {
-                            Complete(pendingCall, block.RawData);
-                        }
-
-                        break;
+                    ObserveServerToolContent(content, stoppedBlockIndex);
                 }
+            }
+        }
+
+        private void ObserveServerToolContent(AIContent content, long? stoppedBlockIndex)
+        {
+            switch (content)
+            {
+                case WebSearchToolCallContent call when call.RawRepresentation is JsonModel block:
+                    _pendingCalls[call.CallId] = new PendingCall(call, block.RawData, GetStreamedInput(stoppedBlockIndex));
+                    break;
+                case ToolCallContent call when call.RawRepresentation is JsonModel block:
+                    // Not recorded: the code execution of the web tools is part of their calls.
+                    var input = GetDeclaredInput(block.RawData, GetStreamedInput(stoppedBlockIndex)) ?? WriteObject(_ => { });
+                    call.RawRepresentation = new ContentBlockParam(ToElement(block.RawData, replacedInput: input));
+                    break;
+                case ToolResultContent result when result.RawRepresentation is JsonModel block:
+                    result.RawRepresentation = new ContentBlockParam(ToElement(block.RawData));
+                    if (_pendingCalls.Remove(result.CallId, out var pendingCall))
+                    {
+                        Complete(pendingCall, block.RawData);
+                    }
+
+                    break;
             }
         }
 
@@ -150,6 +178,7 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
             }
         }
 
+        /// <summary>Records the calls still waiting for a result as failed, at the end of the turn.</summary>
         public void CompletePendingCalls()
         {
             foreach (var pendingCall in _pendingCalls.Values)
@@ -160,6 +189,16 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
             _pendingCalls.Clear();
         }
 
+        /// <summary>Gives the calls still waiting for a result their request block, without recording them.</summary>
+        public void PreparePendingCallsForResend()
+        {
+            foreach (var pendingCall in _pendingCalls.Values)
+            {
+                var (call, block, streamedInput) = pendingCall;
+                call.RawRepresentation = new ContentBlockParam(ToElement(block, replacedInput: GetInput(call, block, streamedInput, result: null)));
+            }
+        }
+
         private void Complete(PendingCall pendingCall, IReadOnlyDictionary<string, JsonElement>? result)
         {
             var (call, block, streamedInput) = pendingCall;
@@ -167,28 +206,38 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
                 ? nameElement.GetString()!
                 : "web_search";
             var input = GetInput(call, block, streamedInput, result);
-            call.RawRepresentation = new ContentBlockParam(ToElement(block, replacedInput: input));
+
+            // A call sent with a continuation keeps the block it was sent with, so the next request repeats it unchanged.
+            if (call.RawRepresentation is not ContentBlockParam)
+            {
+                call.RawRepresentation = new ContentBlockParam(ToElement(block, replacedInput: input));
+            }
 
             var (preview, isError) = result is null ? ("No result.", true) : DescribeResult(result);
             tools.RecordBackendCall(name, input.GetRawText(), preview, isError);
         }
 
-        // The streamed call block holds an empty input, so the input comes from the streamed input deltas; without
-        // them the query survives in the content, and the URL of a fetch in a successful result.
-        private static JsonElement GetInput(
-            WebSearchToolCallContent call,
-            IReadOnlyDictionary<string, JsonElement> block,
-            JsonElement? streamedInput,
-            IReadOnlyDictionary<string, JsonElement>? result)
+        // The streamed call block holds an empty input, so the input comes from the streamed input deltas.
+        private static JsonElement? GetDeclaredInput(IReadOnlyDictionary<string, JsonElement> block, JsonElement? streamedInput)
         {
             if (block.TryGetValue("input", out var input) && input.ValueKind == JsonValueKind.Object && input.EnumerateObject().Any())
             {
                 return input;
             }
 
-            if (streamedInput is { } streamed && streamed.EnumerateObject().Any())
+            return streamedInput is { } streamed && streamed.EnumerateObject().Any() ? streamed : null;
+        }
+
+        // Without a declared input the query survives in the content, and the URL of a fetch in a successful result.
+        private static JsonElement GetInput(
+            WebSearchToolCallContent call,
+            IReadOnlyDictionary<string, JsonElement> block,
+            JsonElement? streamedInput,
+            IReadOnlyDictionary<string, JsonElement>? result)
+        {
+            if (GetDeclaredInput(block, streamedInput) is { } declared)
             {
-                return streamed;
+                return declared;
             }
 
             if (call.Queries is [var query, ..])

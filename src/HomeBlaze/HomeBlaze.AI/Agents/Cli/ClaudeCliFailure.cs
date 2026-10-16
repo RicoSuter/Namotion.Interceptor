@@ -18,13 +18,13 @@ internal static class ClaudeCliFailure
     /// <param name="maxTurns">The model rounds the run was given with <c>--max-turns</c>, named in the failure when it ran out of them.</param>
     public static AgentTurnException? Classify(ClaudeCliRunResult result, int maxTurns)
     {
-        if (!result.IsError && result.ExitCode == 0 && result.ResultText is not null)
+        if (result.Result is { IsError: false, Text: not null } && result.ExitCode == 0)
         {
             return null;
         }
 
         // The result line of a run stopped by --max-turns has no text, so it would otherwise read as a missing result.
-        if (result.ResultSubtype == "error_max_turns")
+        if (result.Result?.Subtype == "error_max_turns")
         {
             return new AgentTurnException(
                 AgentFailureKind.Transient,
@@ -32,7 +32,7 @@ internal static class ClaudeCliFailure
         }
 
         var message = GetMessage(result);
-        var resultText = result.ResultText ?? string.Empty;
+        var resultText = result.Result?.Text ?? string.Empty;
 
         // Overload is checked first: a capacity problem must back off and retry, not pause the agent.
         if (IsOverloaded(result, resultText))
@@ -57,9 +57,9 @@ internal static class ClaudeCliFailure
 
     private static string GetMessage(ClaudeCliRunResult result)
     {
-        if (!string.IsNullOrWhiteSpace(result.ResultText))
+        if (result.Result?.Text is { } resultText && !string.IsNullOrWhiteSpace(resultText))
         {
-            return result.ResultText.Trim();
+            return resultText.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(result.StandardError))
@@ -81,7 +81,7 @@ internal static class ClaudeCliFailure
         resultText.Contains("Invalid API key", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsUsageLimitReached(ClaudeCliRunResult result, string message) =>
-        result.RateLimit?.Status == "rejected" ||
+        result.RateLimit?.RateLimit.Status == "rejected" ||
         result.ErrorCode?.Contains("rate_limit", StringComparison.OrdinalIgnoreCase) == true ||
         message.Contains("usage limit", StringComparison.OrdinalIgnoreCase);
 
@@ -89,9 +89,9 @@ internal static class ClaudeCliFailure
     {
         // A rejecting line names the limit that rejected the run, such as a per-model weekly limit that the five-hour
         // and seven-day windows do not show.
-        var isRejected = result.RateLimit?.Status == "rejected";
-        var resetTime = (isRejected ? result.LimitResetsAt : null) ?? GetWindowResetTime(result.RateLimit);
-        var limitName = isRejected ? GetLimitName(result.LimitType) : null;
+        var rejectingLimit = result.RateLimit is { RateLimit.Status: "rejected" } limitEvent ? limitEvent : null;
+        var resetTime = rejectingLimit?.LimitResetsAt ?? GetWindowResetTime(result.RateLimit?.RateLimit);
+        var limitName = GetLimitName(rejectingLimit?.LimitType);
         var limit = limitName is null ? "The Claude usage limit" : "The Claude " + limitName + " usage limit";
         return new AgentTurnException(
             AgentFailureKind.UsageLimit,

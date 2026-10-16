@@ -77,9 +77,7 @@ public class AgentOperationAccessTests
 
     private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool forAgents)
     {
-        var configuration = forAgents
-            ? HomeBlazeMcpConfigurationFactory.CreateForAgents(services, () => root, isReadOnly: false)
-            : HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, forAgents);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 }

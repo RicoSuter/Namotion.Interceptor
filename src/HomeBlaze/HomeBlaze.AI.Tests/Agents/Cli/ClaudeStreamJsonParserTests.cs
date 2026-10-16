@@ -19,7 +19,9 @@ public class ClaudeStreamJsonParserTests
         var events = ParseFixture("success.jsonl");
 
         // Assert
-        Assert.Equal("d57c5029-b6b6-4e1a-8767-6df4d71bb4ba", Assert.IsType<ClaudeInitEvent>(events[0]).SessionId);
+        var init = Assert.IsType<ClaudeInitEvent>(events[0]);
+        Assert.Equal("d57c5029-b6b6-4e1a-8767-6df4d71bb4ba", init.SessionId);
+        Assert.Equal("none", init.ApiKeySource);
         Assert.Equal(["Hello", " world"], events.OfType<ClaudeTextDeltaEvent>().Select(delta => delta.Text));
         var rateLimit = Assert.Single(events.OfType<ClaudeRateLimitEvent>()).RateLimit;
         Assert.Equal("allowed", rateLimit.Status);
@@ -148,6 +150,17 @@ public class ClaudeStreamJsonParserTests
         Assert.Equal(0.64, limit.RateLimit.SevenDayUtilization);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1792000800), limit.LimitResetsAt);
         Assert.Equal("seven_day_opus", limit.LimitType);
+        Assert.Equal("rate_limit", Assert.Single(events.OfType<ClaudeAssistantErrorEvent>()).Code);
+    }
+
+    [Fact]
+    public void WhenTheCliUsesAnApiKey_ThenTheInitLineNamesItsSource()
+    {
+        // Act
+        var events = ParseFixture("api-key-source.jsonl");
+
+        // Assert
+        Assert.Equal("/login managed key", Assert.IsType<ClaudeInitEvent>(events[0]).ApiKeySource);
     }
 
     [Fact]

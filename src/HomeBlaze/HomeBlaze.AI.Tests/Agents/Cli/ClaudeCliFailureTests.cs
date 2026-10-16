@@ -18,10 +18,17 @@ public class ClaudeCliFailureTests
         string? resultText = "Done",
         bool isError = false,
         string? errorCode = null,
-        AgentRateLimit? rateLimit = null,
+        ClaudeRateLimitEvent? rateLimit = null,
         string standardError = "",
         string? subtype = null) =>
-        new(exitCode, "session", resultText, isError, subtype ?? (isError ? "error_during_execution" : "success"), errorCode, null, rateLimit, standardError);
+        new(
+            exitCode,
+            "session",
+            new ClaudeResultEvent("session", subtype ?? (isError ? "error_during_execution" : "success"), isError, resultText, null),
+            errorCode,
+            rateLimit,
+            standardError,
+            StreamedText: null);
 
     [Fact]
     public void WhenTheRunSucceeded_ThenNoFailureIsReturned()
@@ -97,7 +104,7 @@ public class ClaudeCliFailureTests
         var rateLimit = new AgentRateLimit("rejected", fiveHourUtilization, FiveHourReset, sevenDayUtilization, SevenDayReset);
 
         // Act
-        var failure = Classify(CreateResult(exitCode: 1, resultText: "Limit reached", isError: true, rateLimit: rateLimit));
+        var failure = Classify(CreateResult(exitCode: 1, resultText: "Limit reached", isError: true, rateLimit: new ClaudeRateLimitEvent(rateLimit)));
 
         // Assert
         Assert.NotNull(failure);
@@ -123,7 +130,7 @@ public class ClaudeCliFailureTests
         var rateLimit = new AgentRateLimit("rejected", 1, FiveHourReset, 0.5, SevenDayReset);
 
         // Act
-        var failure = Classify(CreateResult(exitCode: 1, resultText: "API Error: Repeated 529 Overloaded errors", isError: true, rateLimit: rateLimit));
+        var failure = Classify(CreateResult(exitCode: 1, resultText: "API Error: Repeated 529 Overloaded errors", isError: true, rateLimit: new ClaudeRateLimitEvent(rateLimit)));
 
         // Assert
         Assert.NotNull(failure);
@@ -148,11 +155,8 @@ public class ClaudeCliFailureTests
     {
         // Arrange
         var rateLimit = new AgentRateLimit("rejected", 0.31, FiveHourReset, 0.64, SevenDayReset);
-        var result = CreateResult(exitCode: 1, resultText: "You've hit your weekly Opus limit", isError: true, rateLimit: rateLimit) with
-        {
-            LimitResetsAt = OpusReset,
-            LimitType = "seven_day_opus"
-        };
+        var result = CreateResult(
+            exitCode: 1, resultText: "You've hit your weekly Opus limit", isError: true, rateLimit: new ClaudeRateLimitEvent(rateLimit, OpusReset, "seven_day_opus"));
 
         // Act
         var failure = Classify(result);
@@ -169,11 +173,8 @@ public class ClaudeCliFailureTests
     {
         // Arrange
         var rateLimit = new AgentRateLimit("allowed_warning", 1, FiveHourReset, 0.5, SevenDayReset);
-        var result = CreateResult(exitCode: 1, resultText: "Claude AI usage limit reached", isError: true, rateLimit: rateLimit) with
-        {
-            LimitResetsAt = OpusReset,
-            LimitType = "seven_day_opus"
-        };
+        var result = CreateResult(
+            exitCode: 1, resultText: "Claude AI usage limit reached", isError: true, rateLimit: new ClaudeRateLimitEvent(rateLimit, OpusReset, "seven_day_opus"));
 
         // Act
         var failure = Classify(result);

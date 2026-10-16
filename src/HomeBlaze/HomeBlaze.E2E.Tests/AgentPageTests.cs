@@ -7,6 +7,7 @@ using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -339,7 +340,7 @@ public class AgentPageTests
     }
 
     [Fact]
-    public async Task WhenEditingACliAgent_ThenTheWebToolsAreOfferedWithTheWebWarning()
+    public async Task WhenEditingACliAgent_ThenTheWebAndMarkdownToolsAreOfferedWithTheirWarnings()
     {
         // Act
         var dialog = await OpenEditDialogAsync(ResultAgentPath);
@@ -350,15 +351,7 @@ public class AgentPageTests
         await Assertions.Expect(webSearch.GetByTestId("agent-edit-tool-web-warning")).ToHaveTextAsync("Loads untrusted web content");
         await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-web_fetch")).ToContainTextAsync("Loads a web page.");
         await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-browse").GetByTestId("agent-edit-tool-web-warning")).ToHaveCountAsync(0);
-    }
 
-    [Fact]
-    public async Task WhenEditingAnAgent_ThenTheMarkdownToolsAreOfferedWithThePagesWarning()
-    {
-        // Act
-        var dialog = await OpenEditDialogAsync(ResultAgentPath);
-
-        // Assert
         var editMarkdown = dialog.GetByTestId("agent-edit-tool-edit_markdown");
         await Assertions.Expect(editMarkdown).ToContainTextAsync("Replaces a passage of a Markdown page or document.", new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(editMarkdown.GetByTestId("agent-edit-tool-pages-warning")).ToHaveTextAsync("Changes pages and documents");
@@ -396,7 +389,7 @@ public class AgentPageTests
                 }, CancellationToken.None);
             }
 
-            agent.CliPath = await WriteFakeCliAsync(
+            agent.CliPath = WriteFakeCli(
                 scriptDirectory, "#!/bin/sh\ncat > /dev/null\ncat <<'EOF'\n" + InitLine + "\n" + ResultLine(reply) + "\nEOF\n");
 
             await page.ReloadAsync();
@@ -435,6 +428,10 @@ public class AgentPageTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/{AgentPath}");
         await Assertions.Expect(page.GetByTestId("agent-chat-input")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+
+        // The prerendered tabs are visible before the circuit connects, and a click then never reaches the component;
+        // the timeline stays hidden until the first interactive render.
+        await Assertions.Expect(page.GetByTestId("agent-timeline")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
         var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + AgentPath, PathStyle.Canonical));
         var table = page.GetByTestId("agent-memory");
@@ -468,11 +465,10 @@ public class AgentPageTests
         $$$"""{"type":"result","subtype":"success","is_error":false,"result":"{{{result}}}","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""";
 
     [UnsupportedOSPlatform("windows")]
-    private static async Task<string> WriteFakeCliAsync(string directory, string script)
+    private static string WriteFakeCli(string directory, string script)
     {
         var scriptPath = Path.Combine(directory, "claude");
-        await File.WriteAllTextAsync(scriptPath, script);
-        File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        ExecutableScripts.Write(scriptPath, script);
         return scriptPath;
     }
 
@@ -640,7 +636,7 @@ public class AgentPageTests
         var scriptDirectory = Directory.CreateTempSubdirectory("e2e-fake-claude").FullName;
         try
         {
-            var scriptPath = await WriteFakeCliAsync(scriptDirectory, createScript(scriptDirectory));
+            var scriptPath = WriteFakeCli(scriptDirectory, createScript(scriptDirectory));
 
             // The page shows the chat only once the storage has loaded the agent, which can still be under way
             // right after the host started, so the agent is resolved after that.

@@ -7,9 +7,9 @@
    without a jump. *@
 <div class="py-2 my-2 relative" style="max-width: min(100%, 56rem);" data-testid="agent-streaming">
     <AgentMarkdown>
-        @foreach (var segment in _stableSegments)
+        @foreach (var segmentHtml in _stableSegments)
         {
-            @segment.Html
+            @segmentHtml
         }
         @_tailHtml
     </AgentMarkdown>
@@ -19,8 +19,8 @@
 @code {
     private LlmAgentBase? _subscribed;
     private int _isRenderPending;
-    private readonly List<(string Text, MarkupString Html)> _stableSegments = [];
-    private int _stableLength;
+    private readonly List<MarkupString> _stableSegments = [];
+    private string _stableText = string.Empty;
     private MarkupString _tailHtml;
 
     [Parameter, EditorRequired]
@@ -58,44 +58,23 @@
     private void UpdateHtml()
     {
         var text = Agent.StreamingText;
-        if (!StartsWithStableSegments(text))
+        if (!text.StartsWith(_stableText, StringComparison.Ordinal))
         {
             // A new turn started streaming while this bubble stayed on the page.
             _stableSegments.Clear();
-            _stableLength = 0;
+            _stableText = string.Empty;
         }
 
         // The previous boundary is a line start outside a fenced block, so the scan can resume there.
-        var stableLength = _stableLength + AgentStreamingMarkdown.FindStableLength(text.AsSpan(_stableLength));
-        if (stableLength > _stableLength)
+        var previousLength = _stableText.Length;
+        var stableLength = previousLength + AgentStreamingMarkdown.FindStableLength(text.AsSpan(previousLength));
+        if (stableLength > previousLength)
         {
-            var segment = text[_stableLength..stableLength];
-            _stableSegments.Add((segment, new MarkupString(AgentMarkdownRenderer.ToHtml(segment))));
-            _stableLength = stableLength;
+            _stableSegments.Add(new MarkupString(AgentMarkdownRenderer.ToHtml(text[previousLength..stableLength])));
+            _stableText = text[..stableLength];
         }
 
-        _tailHtml = _stableLength < text.Length ? new MarkupString(AgentMarkdownRenderer.ToHtml(text[_stableLength..])) : default;
-    }
-
-    private bool StartsWithStableSegments(string text)
-    {
-        if (text.Length < _stableLength)
-        {
-            return false;
-        }
-
-        var position = 0;
-        foreach (var (segment, _) in _stableSegments)
-        {
-            if (!text.AsSpan(position, segment.Length).SequenceEqual(segment))
-            {
-                return false;
-            }
-
-            position += segment.Length;
-        }
-
-        return true;
+        _tailHtml = stableLength < text.Length ? new MarkupString(AgentMarkdownRenderer.ToHtml(text[stableLength..])) : default;
     }
 
     public void Dispose()

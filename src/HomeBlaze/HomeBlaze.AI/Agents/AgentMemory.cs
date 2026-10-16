@@ -11,7 +11,7 @@ namespace HomeBlaze.AI.Agents;
 /// <summary>
 /// The agent-owned memory: key-value entries whose keys are slash paths, included in the system prompt of every turn.
 /// </summary>
-[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Validation, the update_memory tool and file persistence with legacy migration form one consistency unit under the memory's write lock.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Validation, the update_memory tool and file persistence form one consistency unit under the memory's write lock.")]
 public sealed class AgentMemory
 {
     /// <summary>The maximum total size of all keys and values in UTF-8 bytes.</summary>
@@ -28,9 +28,6 @@ public sealed class AgentMemory
 
     /// <summary>The name of the tool through which the model changes its memory.</summary>
     public const string ToolName = "update_memory";
-
-    /// <summary>The key a memory document of the earlier Markdown format is migrated into.</summary>
-    public const string LegacyKey = "notes/legacy";
 
     /// <summary>The version written to the memory file.</summary>
     private const int FileVersion = 1;
@@ -83,7 +80,6 @@ public sealed class AgentMemory
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    private readonly string? _legacyFilePath;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
@@ -95,12 +91,10 @@ public sealed class AgentMemory
 
     /// <param name="filePath">The JSON file, or null to keep memory in-process only.</param>
     /// <param name="timeProvider">The clock for the update time of entries.</param>
-    /// <param name="logger">Receives migration and damaged-file messages.</param>
-    /// <param name="legacyFilePath">A Markdown memory file of the earlier format, migrated when <paramref name="filePath"/> does not exist yet.</param>
-    public AgentMemory(string? filePath, TimeProvider timeProvider, ILogger? logger = null, string? legacyFilePath = null)
+    /// <param name="logger">Receives damaged-file messages.</param>
+    public AgentMemory(string? filePath, TimeProvider timeProvider, ILogger? logger = null)
     {
         FilePath = filePath;
-        _legacyFilePath = legacyFilePath;
         _timeProvider = timeProvider;
         _logger = logger;
         _isLoaded = filePath is null;
@@ -157,9 +151,8 @@ public sealed class AgentMemory
     }
 
     /// <summary>
-    /// Loads the memory file, or migrates the legacy Markdown file into <see cref="LegacyKey"/> when only that exists.
-    /// A damaged file is logged and kept aside as <c>.damaged</c>; its valid entries are kept, or the memory starts
-    /// empty when it cannot be parsed at all.
+    /// Loads the memory file; a missing file is an empty memory. A damaged file is logged and kept aside as
+    /// <c>.damaged</c>; its valid entries are kept, or the memory starts empty when it cannot be parsed at all.
     /// </summary>
     public async Task LoadAsync(CancellationToken cancellationToken)
     {
@@ -277,7 +270,7 @@ public sealed class AgentMemory
         null => null,
         { Length: 0 } => "The value is empty; remove the key instead.",
         { Length: > MaxValueLength } =>
-            $"The value has {value.Length} characters; the limit is {MaxValueLength}. Split it across several keys such as notes/legacy/1.",
+            $"The value has {value.Length} characters; the limit is {MaxValueLength}. Split it across several keys such as notes/heating/1.",
         _ => null
     };
 
@@ -422,24 +415,7 @@ public sealed class AgentMemory
             return;
         }
 
-        if (File.Exists(FilePath))
-        {
-            _snapshot = await ReadFileAsync(FilePath, cancellationToken);
-            if (_legacyFilePath is not null && File.Exists(_legacyFilePath))
-            {
-                // Left behind by a migration that was interrupted after writing the new file.
-                RetireLegacyFile(_legacyFilePath);
-            }
-        }
-        else if (_legacyFilePath is not null && File.Exists(_legacyFilePath))
-        {
-            _snapshot = await MigrateLegacyFileAsync(FilePath, _legacyFilePath, cancellationToken);
-        }
-        else
-        {
-            _snapshot = AgentMemorySnapshot.Empty;
-        }
-
+        _snapshot = await ReadFileAsync(FilePath, cancellationToken);
         _isLoaded = true;
     }
 
@@ -452,7 +428,6 @@ public sealed class AgentMemory
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            // Deleted between the existence check and this read; treat it as never written.
             return AgentMemorySnapshot.Empty;
         }
 
@@ -490,7 +465,7 @@ public sealed class AgentMemory
         skippedCount = 0;
         foreach (var entry in fileEntries ?? [])
         {
-            // Entries loaded from the file are not held to the value and size limits, so a migrated document stays whole.
+            // Entries loaded from the file are not held to the value and size limits, so an entry over them is kept instead of dropped.
             if (entry?.Key is null || entry.Value is null || ValidateKey(entry.Key, out var key) is not null)
             {
                 skippedCount++;
@@ -512,37 +487,6 @@ public sealed class AgentMemory
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             _logger?.LogWarning(exception, "The damaged memory file {Path} could not be kept aside.", filePath);
-        }
-    }
-
-    private async Task<AgentMemorySnapshot> MigrateLegacyFileAsync(string filePath, string legacyFilePath, CancellationToken cancellationToken)
-    {
-        var content = (await File.ReadAllTextAsync(legacyFilePath, cancellationToken)).Trim();
-        var updated = new DateTimeOffset(File.GetLastWriteTimeUtc(legacyFilePath), TimeSpan.Zero);
-        var entries = ImmutableSortedDictionary.Create<string, AgentMemoryEntry>(AgentMemoryKeyComparer.Instance);
-        if (content.Length > 0)
-        {
-            entries = entries.Add(LegacyKey, new AgentMemoryEntry(LegacyKey, content, updated));
-        }
-
-        // The new file is written before the old one is moved away, so an interruption loses nothing; the next load
-        // then finds the new file and retires the old one.
-        var snapshot = new AgentMemorySnapshot(entries);
-        await WriteFileAsync(filePath, snapshot, cancellationToken);
-        RetireLegacyFile(legacyFilePath);
-        _logger?.LogInformation("The memory file {LegacyPath} was migrated to {Path} under the key {Key}.", legacyFilePath, filePath, LegacyKey);
-        return snapshot;
-    }
-
-    private void RetireLegacyFile(string legacyFilePath)
-    {
-        try
-        {
-            File.Move(legacyFilePath, legacyFilePath + ".migrated", overwrite: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            _logger?.LogWarning(exception, "The migrated memory file {Path} could not be renamed; it is ignored while the new file exists.", legacyFilePath);
         }
     }
 

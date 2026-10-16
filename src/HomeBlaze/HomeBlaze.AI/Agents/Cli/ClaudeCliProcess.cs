@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.AI.Agents.Cli;
 
@@ -14,14 +15,9 @@ internal sealed record ClaudeCliInvocation(string FileName, IReadOnlyList<string
 /// <summary>What a CLI invocation produced.</summary>
 /// <param name="ExitCode">Exit code of the process.</param>
 /// <param name="SessionId">Session id from the result, or from the init line when no result was written.</param>
-/// <param name="ResultText">Text of the result line.</param>
-/// <param name="IsError">Whether the result line is marked as an error.</param>
-/// <param name="ResultSubtype">
-/// Subtype of the result line, for example <c>success</c>, <c>error_during_execution</c> or <c>error_max_turns</c>.
-/// </param>
+/// <param name="Result">The result line, or null when none was written.</param>
 /// <param name="ErrorCode">Error code of the last assistant line that carried one, for example <c>authentication_failed</c>.</param>
-/// <param name="Usage">Token usage of the result line.</param>
-/// <param name="RateLimit">The last reported subscription utilization.</param>
+/// <param name="RateLimit">The last rate limit line.</param>
 /// <param name="StandardError">Standard error, truncated to a size limit.</param>
 /// <param name="StreamedText">
 /// The streamed answer text, with a blank line between text segments of different content blocks, or null when no
@@ -30,26 +26,11 @@ internal sealed record ClaudeCliInvocation(string FileName, IReadOnlyList<string
 internal sealed record ClaudeCliRunResult(
     int ExitCode,
     string? SessionId,
-    string? ResultText,
-    bool IsError,
-    string? ResultSubtype,
+    ClaudeResultEvent? Result,
     string? ErrorCode,
-    AgentUsage? Usage,
-    AgentRateLimit? RateLimit,
+    ClaudeRateLimitEvent? RateLimit,
     string StandardError,
-    string? StreamedText = null)
-{
-    /// <summary>
-    /// The reset time of the limit the last rate limit line names at its top level; on a rejected status, the limit
-    /// that rejected the run.
-    /// </summary>
-    public DateTimeOffset? LimitResetsAt { get; init; }
-
-    /// <summary>
-    /// The type of the limit the last rate limit line names, for example <c>five_hour</c> or <c>seven_day_opus</c>.
-    /// </summary>
-    public string? LimitType { get; init; }
-}
+    string? StreamedText);
 
 /// <summary>
 /// Runs the Claude CLI, streams its text deltas and collects its result. Cancellation kills the whole process tree.
@@ -66,7 +47,21 @@ internal static class ClaudeCliProcess
 
     // These reroute requests or hand the credentials and billing to a host, like the prefixes above.
     private static readonly string[] RemovedEnvironmentVariableNames =
-        ["CLAUDE_CODE_API_BASE_URL", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"];
+    [
+        "CLAUDE_CODE_API_BASE_URL",
+        "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+        "CLAUDE_CODE_HOST_AUTH_ENV_VAR",
+        "CLAUDE_CODE_HOST_CREDS_FILE"
+    ];
+
+    // The CLI reads Anthropic profiles from this directory instead of ~/.config/anthropic, so an empty one leaves none.
+    private const string ConfigDirectoryVariable = "ANTHROPIC_CONFIG_DIR";
+
+    private const string ConfigDirectoryName = ".anthropic-config";
+
+    // The init line names this API key source when the CLI uses none, as with the subscription login.
+    private const string NoApiKeySource = "none";
 
     // Windows matches variable names case-insensitively, so the CLI would read anthropic_api_key there too.
     private static readonly StringComparison EnvironmentVariableComparison =
@@ -77,18 +72,23 @@ internal static class ClaudeCliProcess
     /// </summary>
     /// <param name="invocation">The invocation.</param>
     /// <param name="progress">Receives the streamed text.</param>
-    /// <param name="cancellationToken">Kills the process tree when cancelled.</param>
     /// <param name="backendToolCalls">
     /// Records each finished call of a built-in CLI tool, such as <c>WebSearch</c> as <c>web_search</c>, when its result
-    /// arrives; calls of MCP tools are not recorded here, since the MCP route records them.
+    /// arrives, or null to record none; calls of MCP tools are not recorded here, since the MCP route records them.
     /// </param>
-    /// <exception cref="AgentTurnException">The CLI could not be started (<see cref="AgentFailureKind.Configuration"/>).</exception>
+    /// <param name="logger">Receives a warning when the init line names no API key source, so the billing check cannot run.</param>
+    /// <param name="cancellationToken">Kills the process tree when cancelled.</param>
+    /// <exception cref="AgentTurnException">
+    /// The CLI could not be started, or its init line names an API key source, so it would bill the API instead of the
+    /// subscription; the process tree has then been killed (both <see cref="AgentFailureKind.Configuration"/>).
+    /// </exception>
     /// <exception cref="OperationCanceledException">The token was cancelled; the process tree has been killed.</exception>
     public static async Task<ClaudeCliRunResult> RunAsync(
         ClaudeCliInvocation invocation,
         IProgress<AgentTurnUpdate> progress,
-        CancellationToken cancellationToken,
-        AgentToolSet? backendToolCalls = null)
+        AgentToolSet? backendToolCalls,
+        ILogger logger,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var process = StartProcess(invocation);
@@ -105,7 +105,7 @@ internal static class ClaudeCliProcess
             standardErrorTask = ReadLimitedAsync(process.StandardError, cancellationToken);
             standardInputTask = WriteStandardInputAsync(process.StandardInput, invocation.StandardInput, cancellationToken);
 
-            var output = new OutputCollector(backendToolCalls);
+            var output = new OutputCollector(backendToolCalls, logger);
             while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
             {
                 output.Apply(ClaudeStreamJsonParser.Parse(line), progress);
@@ -191,6 +191,8 @@ internal static class ClaudeCliProcess
             startInfo.Environment.Remove(name);
         }
 
+        startInfo.Environment[ConfigDirectoryVariable] = CreateConfigDirectory(invocation.WorkingDirectory);
+
         var process = new Process { StartInfo = startInfo };
         try
         {
@@ -210,6 +212,27 @@ internal static class ClaudeCliProcess
                 $"The Claude CLI '{invocation.FileName}' could not be started ({exception.Message}). Install Claude Code for the HomeBlaze user and log in, or set the CLI path.",
                 innerException: exception);
         }
+    }
+
+    private static string CreateConfigDirectory(string workingDirectory)
+    {
+        // Recreated for every run, so nothing left in it, such as a profile, applies.
+        var path = Path.Combine(workingDirectory, ConfigDirectoryName);
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(path);
+        }
+        else
+        {
+            Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return path;
     }
 
     /// <summary>Whether the variable is removed from the CLI environment because it would reroute requests or switch billing away from the subscription.</summary>
@@ -328,7 +351,7 @@ internal static class ClaudeCliProcess
         return builder.ToString();
     }
 
-    private sealed class OutputCollector(AgentToolSet? backendToolCalls)
+    private sealed class OutputCollector(AgentToolSet? backendToolCalls, ILogger logger)
     {
         private const string McpToolPrefix = "mcp__";
 
@@ -336,9 +359,7 @@ internal static class ClaudeCliProcess
         private Dictionary<string, ClaudeToolUse>? _pendingBuiltInToolUses;
         private string? _sessionId;
         private string? _errorCode;
-        private AgentRateLimit? _rateLimit;
-        private DateTimeOffset? _limitResetsAt;
-        private string? _limitType;
+        private ClaudeRateLimitEvent? _rateLimit;
         private ClaudeResultEvent? _result;
 
         public void Apply(ClaudeStreamEvent? streamEvent, IProgress<AgentTurnUpdate> progress)
@@ -352,6 +373,13 @@ internal static class ClaudeCliProcess
                     ReportBuiltInToolCalls(results.Results);
                     break;
                 case ClaudeInitEvent init:
+                    ThrowIfBillingTheApi(init.ApiKeySource);
+                    if (init.ApiKeySource is null)
+                    {
+                        logger.LogWarning(
+                            "The init line of the Claude CLI names no API key source, so HomeBlaze cannot check that the CLI uses the subscription login instead of billing the API.");
+                    }
+
                     _sessionId = init.SessionId;
                     break;
                 case ClaudeBlockStartEvent:
@@ -361,9 +389,7 @@ internal static class ClaudeCliProcess
                     _answer.Append(delta.Text, progress);
                     break;
                 case ClaudeRateLimitEvent limit:
-                    _rateLimit = limit.RateLimit;
-                    _limitResetsAt = limit.LimitResetsAt;
-                    _limitType = limit.LimitType;
+                    _rateLimit = limit;
                     break;
                 case ClaudeAssistantErrorEvent error:
                     _errorCode = error.Code;
@@ -374,21 +400,20 @@ internal static class ClaudeCliProcess
             }
         }
 
-        public ClaudeCliRunResult ToResult(int exitCode, string standardError) => new(
-            exitCode,
-            _result?.SessionId ?? _sessionId,
-            _result?.Text,
-            _result?.IsError ?? false,
-            _result?.Subtype,
-            _errorCode,
-            _result?.Usage,
-            _rateLimit,
-            standardError,
-            _answer.Text)
+        public ClaudeCliRunResult ToResult(int exitCode, string standardError) =>
+            new(exitCode, _result?.SessionId ?? _sessionId, _result, _errorCode, _rateLimit, standardError, _answer.Text);
+
+        // The environment filter cannot see a Console login or an apiKeyHelper of the managed settings. The init line
+        // comes before the first model request; throwing kills the process before that request completes.
+        private static void ThrowIfBillingTheApi(string? apiKeySource)
         {
-            LimitResetsAt = _limitResetsAt,
-            LimitType = _limitType
-        };
+            if (apiKeySource is not null && apiKeySource != NoApiKeySource)
+            {
+                throw new AgentTurnException(
+                    AgentFailureKind.Configuration,
+                    $"The Claude CLI is not using the Claude subscription login: it takes an API key from '{apiKeySource}', which would bill the API. Remove that key source, for example a Console login with claude /logout or an apiKeyHelper in the managed settings, and log in with the subscription.");
+            }
+        }
 
         private void RememberBuiltInToolUses(IReadOnlyList<ClaudeToolUse> toolUses)
         {

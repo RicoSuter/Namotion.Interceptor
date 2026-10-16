@@ -12,9 +12,17 @@ internal sealed class AgentAnswerText
 
     private StringBuilder? _text;
     private bool _isNewSegment;
+    private int _finalSegmentStart;
 
     /// <summary>The answer so far, or null when no text was streamed.</summary>
     public string? Text => _text?.ToString();
+
+    /// <summary>
+    /// The text since the last <see cref="StartSegment"/>, without the separator; empty when no text followed it.
+    /// </summary>
+    public string FinalSegment => _isNewSegment || _text is null
+        ? string.Empty
+        : _text.ToString(_finalSegmentStart, _text.Length - _finalSegmentStart);
 
     /// <summary>Marks that the next text starts a new segment, for example after a tool call.</summary>
     public void StartSegment() => _isNewSegment = true;
@@ -28,13 +36,18 @@ internal sealed class AgentAnswerText
         }
 
         _text ??= new StringBuilder();
-        if (_isNewSegment && _text.Length > 0)
+        if (_isNewSegment)
         {
-            _text.Append(SegmentSeparator);
-            progress.Report(new AgentTextDelta(SegmentSeparator));
+            if (_text.Length > 0)
+            {
+                _text.Append(SegmentSeparator);
+                progress.Report(new AgentTextDelta(SegmentSeparator));
+            }
+
+            _finalSegmentStart = _text.Length;
+            _isNewSegment = false;
         }
 
-        _isNewSegment = false;
         _text.Append(text);
         progress.Report(new AgentTextDelta(text));
     }

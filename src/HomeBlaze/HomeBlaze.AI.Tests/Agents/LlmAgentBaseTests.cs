@@ -85,7 +85,7 @@ public class LlmAgentBaseTests
         // Assert
         Assert.Null(value);
         Assert.Null(relativeValue);
-        Assert.NotNull(resolver.ResolveProperty("/Agent/StreamingText", PathStyle.Canonical));
+        Assert.NotNull(resolver.ResolveScopedProperty("/Agent/StreamingText", PathStyle.Canonical, test.Root));
         release.SetResult();
         await send;
     }
@@ -289,26 +289,6 @@ public class LlmAgentBaseTests
         // Assert
         Assert.Contains("""{"key":"alerts/freezer","value":"remember the freezer",""", test.Agent.Requests[1].SystemPrompt);
         Assert.Contains("remember the freezer", await File.ReadAllTextAsync(test.GetDataFilePath(AgentStorage.MemorySuffix)));
-    }
-
-    [Fact]
-    public async Task WhenAnOldMarkdownMemoryExists_ThenTheAgentMigratesItAndShowsItInThePrompt()
-    {
-        // Arrange
-        await using var test = await StartAsync();
-        await test.StopAgentAsync();
-        var legacyPath = test.GetDataFilePath(AgentStorage.LegacyMemorySuffix);
-        Directory.CreateDirectory(Path.GetDirectoryName(legacyPath)!);
-        await File.WriteAllTextAsync(legacyPath, "- remember the freezer");
-
-        // Act
-        await test.RestartAgentAsync();
-        await test.RunNowAndWaitAsync();
-
-        // Assert
-        Assert.Contains("""{"key":"notes/legacy","value":"- remember the freezer",""", test.Agent.Requests[0].SystemPrompt);
-        Assert.True(File.Exists(test.GetDataFilePath(AgentStorage.MemorySuffix)));
-        Assert.True(File.Exists(legacyPath + ".migrated"));
     }
 
     [Fact]
@@ -558,8 +538,8 @@ public class LlmAgentBaseTests
         release.SetResult();
         await second;
         Assert.Equal(2, test.Agent.Requests.Count);
-        await test.Agent.ChatTurnUpkeep;
-        Assert.Equal(2, upkeepCount);
+        await test.Agent.WaitForTurnGateAsync();
+        Assert.Equal(2, Volatile.Read(ref upkeepCount));
     }
 
     [Fact]
@@ -577,7 +557,6 @@ public class LlmAgentBaseTests
         await test.Agent.SendMessageAsync("Second", CancellationToken.None);
 
         // Assert
-        await test.Agent.ChatTurnUpkeep;
         Assert.Equal(2, test.Agent.Requests.Count);
         Assert.Equal(
             [AgentTimelineEntryKind.User, AgentTimelineEntryKind.Assistant, AgentTimelineEntryKind.User, AgentTimelineEntryKind.Assistant],
@@ -591,6 +570,7 @@ public class LlmAgentBaseTests
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var wasCancelled = false;
+        var hasEnded = false;
         await using var test = await StartAsync(agent =>
         {
             agent.Handler = (_, _, _) => Task.FromResult(new AgentTurnResult("Answer", null, null));
@@ -599,6 +579,7 @@ public class LlmAgentBaseTests
                 started.SetResult();
                 await release.Task;
                 wasCancelled = cancellationToken.IsCancellationRequested;
+                hasEnded = true;
             };
         });
         await test.Agent.SendMessageAsync("First", CancellationToken.None);
@@ -612,8 +593,46 @@ public class LlmAgentBaseTests
         release.SetResult();
         await stop;
         Assert.True(wasCancelled);
-        Assert.True(test.Agent.ChatTurnUpkeep.IsCompletedSuccessfully);
+        Assert.True(hasEnded);
         Assert.Equal(ServiceStatus.Stopped, test.Agent.Status);
+    }
+
+    [Fact]
+    public async Task WhenTheAgentStopsWhileAChatThatIgnoresCancellationIsAnswered_ThenTheStopWaitsForTheChatAndItsUpkeep()
+    {
+        // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var isStopPendingWhenTheUpkeepRuns = false;
+        Task? stop = null;
+        await using var test = await StartAsync(agent =>
+        {
+            agent.Handler = async (_, _, _) =>
+            {
+                // Ignores cancellation, so the chat is answered after the stop began.
+                await release.Task;
+                return new AgentTurnResult("late", null, null);
+            };
+            agent.ChatTurnCompletedHandler = _ =>
+            {
+                isStopPendingWhenTheUpkeepRuns = stop is { IsCompleted: false };
+                return Task.CompletedTask;
+            };
+        });
+        var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
+
+        // Act
+        stop = test.StopAgentAsync();
+        var isStoppedBeforeTheAnswer = stop.IsCompleted;
+        release.SetResult();
+        await chat;
+        await stop;
+
+        // Assert
+        Assert.False(isStoppedBeforeTheAnswer);
+        Assert.True(isStopPendingWhenTheUpkeepRuns);
+        Assert.Equal(ServiceStatus.Stopped, test.Agent.Status);
+        Assert.Equal("late", test.Agent.Timeline.Entries[^1].Text);
     }
 
     [Fact]
@@ -705,7 +724,7 @@ public class LlmAgentBaseTests
         });
         var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
-        await test.StopAgentAsync();
+        await StopWithoutWaitingAsync(test.Agent);
         test.Agent.Dispose();
 
         // Act
@@ -798,16 +817,7 @@ public class LlmAgentBaseTests
         test.Agent.RunNow();
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
         var staleRun = test.Agent.ExecuteTask!;
-        using var expired = new CancellationTokenSource();
-        await expired.CancelAsync();
-        try
-        {
-            await ((IHostedService)test.Agent).StopAsync(expired.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            // The stop gave up waiting for the run, which is the situation under test.
-        }
+        await StopWithoutWaitingAsync(test.Agent);
 
         // Act
         await ((IHostedService)test.Agent).StartAsync(CancellationToken.None);
@@ -839,18 +849,14 @@ public class LlmAgentBaseTests
         test.Agent.RunNow();
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
         var staleRun = test.Agent.ExecuteTask!;
-        using var expired = new CancellationTokenSource();
-        await expired.CancelAsync();
-        try
-        {
-            await ((IHostedService)test.Agent).StopAsync(expired.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            // The stop gave up waiting for the run, which is the situation under test.
-        }
+        await StopWithoutWaitingAsync(test.Agent);
 
-        test.Agent.StartingHandler = _ => finishStarting.Task;
+        var restartIsStarting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        test.Agent.StartingHandler = _ =>
+        {
+            restartIsStarting.TrySetResult();
+            return finishStarting.Task;
+        };
 
         // Act
         await ((IHostedService)test.Agent).StartAsync(CancellationToken.None);
@@ -858,13 +864,18 @@ public class LlmAgentBaseTests
         var chat = await Assert.ThrowsAsync<InvalidOperationException>(() => test.Agent.SendMessageAsync("hello", CancellationToken.None));
         test.Agent.RunNow();
         release.SetResult();
-        await staleRun;
+
+        // The restart starts only once the stale turn ended and released the turn gate.
+        await restartIsStarting.Task;
 
         // Assert
         Assert.Equal(LlmAgentBase.NotRunningText, chat.Message);
         Assert.Equal(ServiceStatus.Starting, test.Agent.Status);
         Assert.DoesNotContain(test.Agent.Timeline.Entries, entry => entry.Kind == AgentTimelineEntryKind.User);
         finishStarting.SetResult();
+
+        // The stale run waits for the turn gate, which the restart holds until it started.
+        await staleRun;
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent is { Status: ServiceStatus.Running, StatusMessage: "Idle" });
     }
 
@@ -1085,22 +1096,6 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
-    public async Task WhenTheStatsFileHasNoLastActivity_ThenItIsTakenFromTheNewestTimelineEntry()
-    {
-        // Arrange
-        await using var test = await StartAsync();
-        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
-        await test.StopAgentAsync();
-        await File.WriteAllTextAsync(test.GetDataFilePath(AgentStorage.StatsSuffix), """{"backgroundRunCount":0}""");
-
-        // Act
-        await test.RestartAgentAsync();
-
-        // Assert
-        Assert.Equal(test.Agent.Timeline.Entries[^1].Timestamp, test.Agent.LastActivityTime);
-    }
-
-    [Fact]
     public async Task WhenTheAgentRestarts_ThenTheRunCountComesFromTheStatsFileAndTheLastRunFromTheTimeline()
     {
         // Arrange
@@ -1126,28 +1121,6 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
-    public async Task WhenTheAgentRestartsWithoutAStatsFile_ThenTheRunCountIsTakenFromTheTimeline()
-    {
-        // Arrange
-        await using var test = await StartAsync();
-        await test.RunNowAndWaitAsync();
-        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
-        var statsPath = test.GetDataFilePath(AgentStorage.StatsSuffix);
-        await test.StopAgentAsync();
-        await File.WriteAllTextAsync(statsPath, """{"backgroundRunCount":7}""");
-        // A restart loads the count 7, so the count after the next restart can only come from the timeline.
-        await test.RestartAgentAsync();
-        await test.StopAgentAsync();
-        File.Delete(statsPath);
-
-        // Act
-        await test.RestartAgentAsync();
-
-        // Assert
-        Assert.Equal(1, test.Agent.RunCount);
-    }
-
-    [Fact]
     public async Task WhenANewConversationStarts_ThenTheRunCountLastRunAndLastActivityAreKept()
     {
         // Arrange
@@ -1167,6 +1140,139 @@ public class LlmAgentBaseTests
         Assert.Equal(lastRun, test.Agent.LastRunTime);
         Assert.NotNull(lastActivity);
         Assert.Equal(lastActivity, test.Agent.LastActivityTime);
+    }
+
+    [Fact]
+    public async Task WhenABackgroundRunFailsAfterAToolCall_ThenItsErrorEntryRecordsTheCall()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = async (request, _, cancellationToken) =>
+        {
+            await CallGetPropertyAsync(request, cancellationToken);
+            throw new AgentTurnException(AgentFailureKind.Transient, "backend broke");
+        });
+
+        // Act
+        await test.RunNowAndWaitAsync();
+
+        // Assert
+        var entry = Assert.Single(test.Agent.Timeline.Entries);
+        Assert.Equal(AgentTimelineEntryKind.Error, entry.Kind);
+        Assert.Equal("manual", entry.Trigger);
+        Assert.Equal("get_property", Assert.Single(entry.ToolCalls).Name);
+    }
+
+    [Fact]
+    public async Task WhenTheAgentStopsDuringABackgroundRunAfterAToolCall_ThenTheCancelledEntryRecordsTheCall()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = async (request, progress, cancellationToken) =>
+        {
+            await CallGetPropertyAsync(request, cancellationToken);
+            return await WaitForCancellationAsync(request, progress, cancellationToken);
+        });
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Requests.Count == 1 && test.Agent.Requests[0].Tools.Calls.Count == 1);
+
+        // Act
+        await test.StopAgentAsync();
+
+        // Assert
+        var entry = Assert.Single(test.Agent.Timeline.Entries);
+        Assert.Equal(LlmAgentBase.CancelledText, entry.Text);
+        Assert.Equal("get_property", Assert.Single(entry.ToolCalls).Name);
+    }
+
+    [Fact]
+    public async Task WhenAChatTurnFailsAfterAToolCall_ThenItsErrorEntryRecordsTheCall()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = async (request, _, cancellationToken) =>
+        {
+            await CallGetPropertyAsync(request, cancellationToken);
+            throw new AgentTurnException(AgentFailureKind.UsageLimit, "Usage limit reached");
+        });
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        var entry = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(AgentTimelineEntryKind.Error, entry.Kind);
+        Assert.Equal("Usage limit reached", entry.Text);
+        Assert.Equal("get_property", Assert.Single(entry.ToolCalls).Name);
+    }
+
+    [Fact]
+    public async Task WhenTheCallerCancelsAChatAfterAToolCall_ThenTheCancelledEntryRecordsTheCall()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = async (request, progress, cancellationToken) =>
+        {
+            await CallGetPropertyAsync(request, cancellationToken);
+            return await WaitForCancellationAsync(request, progress, cancellationToken);
+        });
+        using var cancellation = new CancellationTokenSource();
+        var chat = test.Agent.SendMessageAsync("Hello", cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Requests.Count == 1 && test.Agent.Requests[0].Tools.Calls.Count == 1);
+
+        // Act
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => chat);
+
+        // Assert
+        var entry = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(LlmAgentBase.CancelledText, entry.Text);
+        Assert.Equal("get_property", Assert.Single(entry.ToolCalls).Name);
+    }
+
+    [Fact]
+    public async Task WhenAToolOfAnEndedTurnIsCalled_ThenItReturnsAnErrorAndRunsNothing()
+    {
+        // Arrange
+        AgentToolSet? turnTools = null;
+        await using var test = await StartAsync(agent =>
+        {
+            agent.AllowedTools = ["set_property"];
+            agent.Handler = async (request, _, cancellationToken) =>
+            {
+                turnTools = request.Tools;
+                await SetTemperatureAsync(request.Tools, 20, cancellationToken);
+                return new AgentTurnResult("Done.", null, null);
+            };
+        });
+        await test.Agent.SendMessageAsync("Set it to 20", CancellationToken.None);
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await SetTemperatureAsync(turnTools!, 30, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(AgentToolSet.ClosedMessage, result.GetProperty("error").GetString());
+        Assert.Equal(20, test.Root.Temperature);
+        Assert.Single(turnTools!.Calls);
+    }
+
+    private static Task<object?> CallGetPropertyAsync(AgentTurnRequest request, CancellationToken cancellationToken) =>
+        request.Tools.Tools.First(tool => tool.Name == "get_property")
+            .Handler(JsonSerializer.SerializeToElement(new { path = "/Temperature" }), cancellationToken);
+
+    private static Task<object?> SetTemperatureAsync(AgentToolSet tools, decimal value, CancellationToken cancellationToken) =>
+        tools.Tools.First(tool => tool.Name == "set_property")
+            .Handler(JsonSerializer.SerializeToElement(new { path = "/Temperature", value }), cancellationToken);
+
+    /// <summary>Stops the agent without waiting for a turn that ignores cancellation.</summary>
+    private static async Task StopWithoutWaitingAsync(LlmAgentBase agent)
+    {
+        using var expired = new CancellationTokenSource();
+        await expired.CancelAsync();
+        try
+        {
+            await ((IHostedService)agent).StopAsync(expired.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The stop gave up waiting for the turn.
+        }
     }
 
     private static async Task<AgentTurnResult> WaitForCancellationAsync(

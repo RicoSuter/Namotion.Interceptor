@@ -51,7 +51,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     // Never disposed: its wait handle is never created, and a chat that unwinds after the agent was disposed still
     // releases it.
     private readonly SemaphoreSlim _turnGate = new(1, 1);
-    private Task _chatTurnUpkeep = Task.CompletedTask;
     private readonly Lock _streamingLock = new();
     private readonly StringBuilder _streamingText = new();
 
@@ -275,7 +274,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// agent stopping is recorded as an error entry with <see cref="CancelledText"/>, so background findings
     /// stay pending for the next message; only cancellation through <paramref name="cancellationToken"/> throws.
     /// Returns once the reply is recorded; <see cref="OnChatTurnCompletedAsync"/> may still run, and the next turn
-    /// waits for it.
+    /// and a stop of the agent wait for it.
     /// </summary>
     /// <exception cref="InvalidOperationException">The agent is not running; the message is not recorded.</exception>
     public async Task SendMessageAsync(string text, CancellationToken cancellationToken)
@@ -308,66 +307,76 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 Text = text
             });
 
-            var turnToken = turnCancellation.Token;
-            if (!await TryEnterGateForChatAsync(turnToken))
+            await RunChatTurnAsync(text, turnCancellation.Token, lifetimeToken, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Enters the turn gate and answers a chat message whose user entry is recorded; see <see cref="SendMessageAsync"/>.
+    /// </summary>
+    private async Task RunChatTurnAsync(string text, CancellationToken turnToken, CancellationToken lifetimeToken, CancellationToken cancellationToken)
+    {
+        if (!await TryEnterGateForChatAsync(turnToken))
+        {
+            await AppendAsync(CreateErrorEntry(CancelledText, tools: null));
+            cancellationToken.ThrowIfCancellationRequested();
+            return;
+        }
+
+        AgentToolSet? tools = null;
+        var isIdle = false;
+        var isAnswered = false;
+        try
+        {
+            var started = BeginTurn(AnsweringStatusMessage);
+            await WriteRunStatisticsAsync();
+            var progress = CreateProgress();
+            var allowedTools = AllowedTools;
+            tools = CreateToolSet(allowedTools, progress);
+            var message = AgentPromptBuilder.BuildChatMessage(text, Timeline.GetFindingsSinceLastReply());
+            var result = await RunTurnAsync(AgentTurnKind.Chat, message, allowedTools, tools, progress, turnToken);
+            ClearStreamingText();
+            await AppendAsync(new AgentTimelineEntry
             {
-                await AppendErrorAsync(CancelledText);
-                cancellationToken.ThrowIfCancellationRequested();
-                return;
+                Kind = AgentTimelineEntryKind.Assistant,
+                Timestamp = _services.TimeProvider.GetUtcNow(),
+                Text = result.Text,
+                ToolCalls = tools.Calls,
+                Duration = _services.TimeProvider.GetUtcNow() - started,
+                Usage = result.Usage
+            });
+
+            // A working chat turn proves the backend works again, so it lifts pauses like a background run.
+            lock (_stateLock)
+            {
+                _scheduler?.ReportSuccess();
             }
 
-            var isIdle = false;
-            var isAnswered = false;
-            try
+            isIdle = true;
+            isAnswered = true;
+        }
+        catch (OperationCanceledException) when (turnToken.IsCancellationRequested)
+        {
+            await AppendAsync(CreateErrorEntry(CancelledText, tools));
+            isIdle = true;
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (Exception exception)
+        {
+            var turnException = ToTurnException(exception);
+            await HandleFailureAsync(turnException, CreateErrorEntry(turnException.Message, tools));
+        }
+        finally
+        {
+            EndTurn(isIdle);
+            if (isAnswered)
             {
-                var started = BeginTurn(AnsweringStatusMessage);
-                await WriteRunStatisticsAsync();
-                var progress = CreateProgress();
-                var tools = CreateToolSet(progress);
-                var message = AgentPromptBuilder.BuildChatMessage(text, Timeline.GetFindingsSinceLastReply());
-                var result = await RunTurnAsync(AgentTurnKind.Chat, message, tools, progress, turnToken);
-                ClearStreamingText();
-                await AppendAsync(new AgentTimelineEntry
-                {
-                    Kind = AgentTimelineEntryKind.Assistant,
-                    Timestamp = _services.TimeProvider.GetUtcNow(),
-                    Text = result.Text,
-                    ToolCalls = tools.Calls,
-                    Duration = _services.TimeProvider.GetUtcNow() - started,
-                    Usage = result.Usage
-                });
-
-                // A working chat turn proves the backend works again, so it lifts pauses like a background run.
-                lock (_stateLock)
-                {
-                    _scheduler?.ReportSuccess();
-                }
-
-                isIdle = true;
-                isAnswered = true;
+                // Takes over the gate, so the next turn and a stop wait for the upkeep but this sender does not.
+                _ = Task.Run(() => RunChatTurnUpkeepAsync(lifetimeToken), CancellationToken.None);
             }
-            catch (OperationCanceledException) when (turnToken.IsCancellationRequested)
+            else
             {
-                await AppendErrorAsync(CancelledText);
-                isIdle = true;
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-            catch (Exception exception)
-            {
-                await HandleFailureAsync(ToTurnException(exception));
-            }
-            finally
-            {
-                EndTurn(isIdle);
-                if (isAnswered)
-                {
-                    // Takes over the gate, so the next turn waits for the upkeep but this sender does not.
-                    Volatile.Write(ref _chatTurnUpkeep, Task.Run(() => RunChatTurnUpkeepAsync(lifetimeToken), CancellationToken.None));
-                }
-                else
-                {
-                    _turnGate.Release();
-                }
+                _turnGate.Release();
             }
         }
     }
@@ -426,20 +435,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// <see cref="JsonException"/>; returns null when there is no file or it cannot be read or parsed. Failures are
     /// logged, so a damaged file only loses the chat context.
     /// </summary>
-    protected async Task<T?> ReadSessionAsync<T>(Func<string, T?> parse, CancellationToken cancellationToken)
-        where T : class
-    {
-        var content = await TryReadDataFileAsync(AgentStorage.SessionSuffix, SessionReadConsequence, cancellationToken);
-        try
-        {
-            return content is null ? null : parse(content);
-        }
-        catch (JsonException exception)
-        {
-            _logger.LogWarning(exception, "The session file of agent {Agent} could not be read; {Consequence}.", Title, SessionReadConsequence);
-            return null;
-        }
-    }
+    protected Task<T?> ReadSessionAsync<T>(Func<string, T?> parse, CancellationToken cancellationToken)
+        where T : class =>
+        TryReadJsonDataFileAsync(AgentStorage.SessionSuffix, parse, "a new session starts", cancellationToken);
 
     /// <summary>
     /// Writes the backend's session file atomically; null deletes it. Write failures are logged, not thrown, so the
@@ -491,8 +489,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
         await lifetime.CancelAsync();
 
-        // Cancelled with the lifetime above; waited for, so that no upkeep writes the session after the agent stopped.
-        await ChatTurnUpkeep;
+        // Chat turns and their upkeep hold the gate and are cancelled with the lifetime above; waited for, so that
+        // none runs on after the agent stopped. A turn that ignores the cancellation keeps the stop waiting, as a
+        // background run does. A chat still waiting for the gate sees the cancelled lifetime and only appends its
+        // cancelled entry, without the gate.
+        await WaitForTurnGateAsync();
         lock (_stateLock)
         {
             // A run that outlived its stop, after a restart already began a newer one, must not clear or
@@ -612,8 +613,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         {
             _storageDirectory = Path.Combine(dataDirectory, "Agents");
             _storageName = AgentStorage.GetName(path);
-            AgentStorage.MigrateLegacyName(
-                _storageDirectory, path, otherPath => resolver!.ResolveSubject(otherPath, PathStyle.Canonical) is not null, _logger);
             WorkingDirectory = Path.Combine(_storageDirectory, _storageName + AgentStorage.WorkingDirectorySuffix);
         }
         else
@@ -629,7 +628,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         var memoryPath = GetStoragePath(AgentStorage.MemorySuffix);
         var memory = memoryPath is not null && Memory.FilePath == memoryPath
             ? Memory
-            : new AgentMemory(memoryPath, _services.TimeProvider, _logger, legacyFilePath: GetStoragePath(AgentStorage.LegacyMemorySuffix));
+            : new AgentMemory(memoryPath, _services.TimeProvider, _logger);
         await memory.LoadAsync(cancellationToken);
         if (!ReferenceEquals(memory, Memory))
         {
@@ -644,20 +643,19 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         RaiseStateChanged();
     }
 
-    private const string SessionReadConsequence = "a new session starts";
-    private const string StatsReadConsequence = "the run statistics are taken from the timeline";
-
     private string? GetStoragePath(string suffix) =>
         _storageDirectory is null ? null : Path.Combine(_storageDirectory, _storageName + suffix);
 
     /// <summary>
-    /// Reads a data file of this agent, or null when the agent has no storage, the file does not exist or it cannot be
-    /// read; read failures are logged.
+    /// Reads a data file of this agent and parses it, or returns null when the agent has no storage, the file does not
+    /// exist, or it cannot be read or parsed; read and parse failures are logged.
     /// </summary>
     /// <param name="suffix">The suffix of the file name.</param>
+    /// <param name="parse">Parses the content; may throw <see cref="JsonException"/>.</param>
     /// <param name="consequence">What happens when the file cannot be read, for the warning.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    private async Task<string?> TryReadDataFileAsync(string suffix, string consequence, CancellationToken cancellationToken)
+    private async Task<T?> TryReadJsonDataFileAsync<T>(string suffix, Func<string, T?> parse, string consequence, CancellationToken cancellationToken)
+        where T : class
     {
         var path = GetStoragePath(suffix);
         if (path is null)
@@ -667,13 +665,13 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
         try
         {
-            return await File.ReadAllTextAsync(path, cancellationToken);
+            return parse(await File.ReadAllTextAsync(path, cancellationToken));
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             return null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
             _logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be read; {Consequence}.", path, Title, consequence);
             return null;
@@ -790,13 +788,15 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     {
         await _turnGate.WaitAsync(cancellationToken);
         DateTimeOffset? started = null;
+        AgentToolSet? tools = null;
         var isCounted = false;
         var isIdle = false;
         try
         {
             started = BeginTurn(BackgroundRunStatusMessage);
             var progress = CreateProgress();
-            var tools = CreateToolSet(progress);
+            var allowedTools = AllowedTools;
+            tools = CreateToolSet(allowedTools, progress);
             var message = AgentPromptBuilder.BuildBackgroundMessage(
                 reason,
                 Timeline.GetRecentBackgroundResults(RecentResultCount),
@@ -804,7 +804,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 await FetchWatchedStateAsync(cancellationToken),
                 started.Value);
 
-            var result = await RunTurnAsync(AgentTurnKind.Background, message, tools, progress, cancellationToken);
+            var result = await RunTurnAsync(AgentTurnKind.Background, message, allowedTools, tools, progress, cancellationToken);
             var isQuiet = AgentPromptBuilder.IsQuiet(result.FinalText);
             ClearStreamingText();
             await AppendAsync(new AgentTimelineEntry
@@ -838,7 +838,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         {
             if (started is { } cancelledStart && !isCounted)
             {
-                await AppendAsync(CreateBackgroundErrorEntry(CancelledText, reason, cancelledStart));
+                await AppendAsync(CreateBackgroundErrorEntry(CancelledText, reason, cancelledStart, tools));
                 await CountBackgroundRunAsync(cancelledStart);
             }
 
@@ -852,11 +852,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 if (started is { } failedStart && !isCounted)
                 {
                     await CountBackgroundRunAsync(failedStart);
-                    await HandleFailureAsync(turnException, CreateBackgroundErrorEntry(turnException.Message, reason, failedStart));
+                    await HandleFailureAsync(turnException, CreateBackgroundErrorEntry(turnException.Message, reason, failedStart, tools));
                 }
                 else
                 {
-                    await HandleFailureAsync(turnException);
+                    // Not started, or its entry with the tool calls is already recorded.
+                    await HandleFailureAsync(turnException, CreateErrorEntry(turnException.Message, tools: null));
                 }
             }
             catch (Exception handlerException)
@@ -871,8 +872,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
     }
 
-    /// <summary>The upkeep after the last answered chat turn; it never faults.</summary>
-    internal Task ChatTurnUpkeep => Volatile.Read(ref _chatTurnUpkeep);
+    /// <summary>Waits until no turn, upkeep or start holds the turn gate; it never faults.</summary>
+    internal async Task WaitForTurnGateAsync()
+    {
+        await _turnGate.WaitAsync(CancellationToken.None);
+        _turnGate.Release();
+    }
 
     // Runs while the caller holds the turn gate for it, and releases it.
     private async Task RunChatTurnUpkeepAsync(CancellationToken cancellationToken)
@@ -895,13 +900,27 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
     }
 
-    private AgentTimelineEntry CreateBackgroundErrorEntry(string text, string trigger, DateTimeOffset started) => new()
+    /// <summary>The error entry of a background run, with the calls of its tool set when it has one.</summary>
+    private AgentTimelineEntry CreateBackgroundErrorEntry(string text, string trigger, DateTimeOffset started, AgentToolSet? tools) => new()
     {
         Kind = AgentTimelineEntryKind.Error,
         Timestamp = started,
         Text = text,
         Trigger = trigger,
+        ToolCalls = tools?.Calls ?? [],
         Duration = _services.TimeProvider.GetUtcNow() - started
+    };
+
+    /// <summary>
+    /// The error entry of a chat turn or a failure outside a turn, with the calls of the tool set of the turn when it
+    /// has one, so a change the turn made before it failed stays recorded.
+    /// </summary>
+    private AgentTimelineEntry CreateErrorEntry(string text, AgentToolSet? tools) => new()
+    {
+        Kind = AgentTimelineEntryKind.Error,
+        Timestamp = _services.TimeProvider.GetUtcNow(),
+        Text = text,
+        ToolCalls = tools?.Calls ?? []
     };
 
     /// <summary>Counts a background run and persists the count; the caller holds the turn gate.</summary>
@@ -922,35 +941,31 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         CancellationToken.None);
 
     /// <summary>
-    /// Restores the run count and the last activity from the stats file, or from the timeline when the file or the
-    /// value is missing, and the last run from the timeline; the caller holds the turn gate.
+    /// Restores the run count and the last activity from the stats file, none when it is missing, and the last run
+    /// from the timeline; the caller holds the turn gate.
     /// </summary>
     private async Task RestoreRunStatisticsAsync(CancellationToken cancellationToken)
     {
-        var statistics = await ReadRunStatisticsAsync(cancellationToken);
+        var statistics = await TryReadJsonDataFileAsync(
+            AgentStorage.StatsSuffix,
+            content => JsonSerializer.Deserialize(content, AgentJsonContext.Default.AgentStats),
+            "the run count starts at zero and the last activity is unknown",
+            cancellationToken);
         LastRunTime = Timeline.GetLastBackgroundRunTime();
-        RunCount = statistics?.BackgroundRunCount ?? Timeline.Entries.Count(AgentTimeline.IsBackgroundRun);
-        LastActivityTime = statistics?.LastActivityTime ?? Timeline.GetLastActivityTime();
+        RunCount = statistics?.BackgroundRunCount ?? 0;
+        LastActivityTime = statistics?.LastActivityTime;
     }
 
-    private async Task<AgentStats?> ReadRunStatisticsAsync(CancellationToken cancellationToken)
-    {
-        var content = await TryReadDataFileAsync(AgentStorage.StatsSuffix, StatsReadConsequence, cancellationToken);
-        try
-        {
-            return content is null ? null : JsonSerializer.Deserialize(content, AgentJsonContext.Default.AgentStats);
-        }
-        catch (JsonException exception)
-        {
-            _logger.LogWarning(exception, "The stats file of agent {Agent} could not be read; {Consequence}.", Title, StatsReadConsequence);
-            return null;
-        }
-    }
-
+    /// <summary>Runs a turn and closes its tool set when it ends, so a tool call that arrives later runs nothing.</summary>
     private async Task<AgentTurnResult> RunTurnAsync(
-        AgentTurnKind kind, string message, AgentToolSet tools, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
+        AgentTurnKind kind,
+        string message,
+        string[] allowedTools,
+        AgentToolSet tools,
+        IProgress<AgentTurnUpdate> progress,
+        CancellationToken cancellationToken)
     {
-        var request = CreateTurnRequest(kind, message, tools);
+        var request = CreateTurnRequest(kind, message, allowedTools, tools);
         var turnTimeout = GetEffectiveTurnTimeout();
         using var timeout = turnTimeout is { } limit ? new CancellationTokenSource(limit, _services.TimeProvider) : null;
         using var turnCancellation = timeout is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
@@ -969,12 +984,15 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         {
             throw new AgentTurnException(AgentFailureKind.Transient, $"The turn did not finish within {turnTimeout}.");
         }
+        finally
+        {
+            tools.Close();
+        }
     }
 
-    private AgentTurnRequest CreateTurnRequest(AgentTurnKind kind, string message, AgentToolSet tools)
+    private AgentTurnRequest CreateTurnRequest(AgentTurnKind kind, string message, string[] allowedTools, AgentToolSet tools)
     {
         var isBackground = kind == AgentTurnKind.Background;
-        var allowedTools = AllowedTools;
         var backendTools = SupportedBackendTools.Where(tool => allowedTools.Contains(tool.Name)).ToList();
         return new AgentTurnRequest(
             kind,
@@ -1055,9 +1073,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private static string? TryGetError(JsonElement result) =>
         result.ValueKind == JsonValueKind.Object && result.TryGetProperty("error", out var error) ? error.ToString() : null;
 
-    private AgentToolSet CreateToolSet(IProgress<AgentTurnUpdate> progress)
+    private AgentToolSet CreateToolSet(string[] allowedTools, IProgress<AgentTurnUpdate> progress)
     {
-        var allowedTools = AllowedTools;
         var canEditPageLayout = AgentToolSet.CanEditPageLayout(allowedTools);
         var available = _services.ToolSource.CreateTools(AgentToolSet.IsReadOnly(allowedTools))
             .Select(tool => WithPageLayoutPermission(tool, grantsPageLayout: canEditPageLayout && AgentToolSet.WritesPages(tool.Name)))
@@ -1173,15 +1190,21 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     /// <summary>
     /// Enters the turn gate for a chat turn, showing a waiting message while another turn holds it. Returns
-    /// false, with the waiting message removed again, when <paramref name="cancellationToken"/> is cancelled first.
+    /// false, with the gate released and the waiting message removed again, when <paramref name="cancellationToken"/>
+    /// is cancelled first.
     /// </summary>
     private async Task<bool> TryEnterGateForChatAsync(CancellationToken cancellationToken)
     {
-        if (await _turnGate.WaitAsync(0, CancellationToken.None))
+        if (!await _turnGate.WaitAsync(0, CancellationToken.None))
         {
-            return true;
+            return await WaitForGateForChatAsync(cancellationToken);
         }
 
+        return IsStillWantedAfterEntering(cancellationToken);
+    }
+
+    private async Task<bool> WaitForGateForChatAsync(CancellationToken cancellationToken)
+    {
         string? replacedStatusMessage = null;
         var showsWaitingMessage = false;
         lock (_stateLock)
@@ -1197,21 +1220,38 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         try
         {
             await _turnGate.WaitAsync(cancellationToken);
-            return true;
+            if (IsStillWantedAfterEntering(cancellationToken))
+            {
+                return true;
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            lock (_stateLock)
-            {
-                // Only undone while still shown: the background run may have replaced it meanwhile.
-                if (showsWaitingMessage && _scheduler is not null && StatusMessage == WaitingStatusMessage)
-                {
-                    StatusMessage = replacedStatusMessage;
-                }
-            }
-
-            return false;
+            // The waiting message is removed below.
         }
+
+        lock (_stateLock)
+        {
+            // Only undone while still shown: the background run may have replaced it meanwhile.
+            if (showsWaitingMessage && _scheduler is not null && StatusMessage == WaitingStatusMessage)
+            {
+                StatusMessage = replacedStatusMessage;
+            }
+        }
+
+        return false;
+    }
+
+    // A stop waits for the gate only once, so a chat that enters after it sees its cancelled token and must not run.
+    private bool IsStillWantedAfterEntering(CancellationToken cancellationToken)
+    {
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            return true;
+        }
+
+        _turnGate.Release();
+        return false;
     }
 
     private AgentTurnException ToTurnException(Exception exception)
@@ -1225,7 +1265,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         return new AgentTurnException(AgentFailureKind.Transient, exception.Message, innerException: exception);
     }
 
-    private async Task HandleFailureAsync(AgentTurnException exception, AgentTimelineEntry? errorEntry = null)
+    private async Task HandleFailureAsync(AgentTurnException exception, AgentTimelineEntry errorEntry)
     {
         _logger.LogWarning("The turn of agent {Agent} failed: {Message}", Title, exception.Message);
         lock (_stateLock)
@@ -1234,20 +1274,13 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
 
         // Recorded before the status changes, so a reader that sees the failure status also sees the entry.
-        await (errorEntry is null ? AppendErrorAsync(exception.Message) : AppendAsync(errorEntry));
+        await AppendAsync(errorEntry);
         SetStatusIfStarted(
             exception.Kind is AgentFailureKind.Configuration or AgentFailureKind.UsageLimit
                 ? ServiceStatus.Unavailable
                 : ServiceStatus.Error,
             exception.Message);
     }
-
-    private Task AppendErrorAsync(string text) => AppendAsync(new AgentTimelineEntry
-    {
-        Kind = AgentTimelineEntryKind.Error,
-        Timestamp = _services.TimeProvider.GetUtcNow(),
-        Text = text
-    });
 
     private async Task AppendAsync(AgentTimelineEntry entry)
     {
@@ -1278,8 +1311,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     }
 }
 
-// LastActivityTime is missing in files written before it existed and then reads as null.
-internal sealed record AgentStats(int BackgroundRunCount, DateTimeOffset? LastActivityTime = null);
+internal sealed record AgentStats(int BackgroundRunCount, DateTimeOffset? LastActivityTime);
 
 /// <summary>The input of the browse tool for the state of a watch path.</summary>
 internal sealed record AgentBrowseInput(string Path, int Depth, bool IncludeProperties, string Format);

@@ -45,10 +45,13 @@
         </div>
         break;
     case AgentTimelineEntryKind.Error:
-        <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2" Class="py-2 my-2 mud-error-text" data-testid="agent-error">
-            <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Color="Color.Error" Size="Size.Small" Class="mt-1" />
-            <MudText Style="white-space: pre-wrap; overflow-wrap: anywhere;">@Entry.Text</MudText>
-        </MudStack>
+        <div class="py-2 my-2" data-testid="agent-error">
+            <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2" Class="mud-error-text">
+                <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Color="Color.Error" Size="Size.Small" Class="mt-1" />
+                <MudText Style="white-space: pre-wrap; overflow-wrap: anywhere;">@Entry.Text</MudText>
+            </MudStack>
+            <AgentToolCalls Calls="Entry.ToolCalls" />
+        </div>
         break;
     case AgentTimelineEntryKind.Divider:
         <MudDivider Class="mt-4 mb-1" />

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Anthropic;
+using Anthropic.Core;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Anthropic;
 using Microsoft.Extensions.AI;
@@ -111,24 +112,8 @@ public class AnthropicChatOptionsTests
         Assert.Equal("""{"name":"web_fetch","type":"web_fetch_20260209","max_uses":7}""", tools[2].GetRawText());
     }
 
-    [Fact]
-    public async Task WhenNoWebToolIsAllowed_ThenTheRequestCarriesNoServerTool()
-    {
-        // Arrange
-        var handler = new AnthropicStubHandler(HttpStatusCode.BadRequest, AnthropicStubHandler.ErrorBody("invalid_request_error", "captured"));
-        using var client = CreateClient(handler);
-        var options = AnthropicChatOptions.WithBackendToolUses(AnthropicChatOptions.Create(Model, 1000, null, [CreateTool("browse")]), [], maxBackendToolUses: 7);
-
-        // Act
-        await Assert.ThrowsAnyAsync<Exception>(() => client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], options));
-
-        // Assert
-        var tool = Assert.Single(JsonDocument.Parse(Assert.Single(handler.Requests).Body).RootElement.GetProperty("tools").EnumerateArray());
-        Assert.Equal("browse", tool.GetProperty("name").GetString());
-    }
-
     private static IChatClient CreateClient(HttpMessageHandler handler) =>
-        new AnthropicClient { ApiKey = "test-key", HttpClient = new HttpClient(handler), MaxRetries = 0 }
+        new AnthropicClient(new ClientOptions { ApiKey = "test-key", AuthToken = null, HttpClient = new HttpClient(handler), MaxRetries = 0 })
             .AsIChatClient(defaultModelId: null, defaultMaxOutputTokens: 4000);
 
     private static McpToolInfo CreateTool(string name) => new()

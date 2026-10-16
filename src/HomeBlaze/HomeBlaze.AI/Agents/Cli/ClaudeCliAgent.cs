@@ -57,25 +57,37 @@ public partial class ClaudeCliAgent : LlmAgentBase
         Directory.CreateDirectory(WorkingDirectory);
         using var registration = Services.TokenRegistry.Register(request.Tools);
         var turnId = Guid.NewGuid().ToString("N");
-        var setup = new ClaudeCliTurnSetup(
-            Path.Combine(WorkingDirectory, ".system-prompt-" + turnId + ".md"),
-            Path.Combine(WorkingDirectory, ".mcp-" + turnId + ".json"),
-            GetModelRoundLimit());
+        var systemPromptPath = Path.Combine(WorkingDirectory, ".system-prompt-" + turnId + ".md");
+        var mcpConfigurationPath = Path.Combine(WorkingDirectory, ".mcp-" + turnId + ".json");
+        var maxTurns = GetModelRoundLimit();
         try
         {
-            await OwnerOnlyFile.WriteAsync(setup.SystemPromptPath, request.SystemPrompt, cancellationToken);
-            await OwnerOnlyFile.WriteAsync(setup.McpConfigurationPath, ClaudeCliArguments.BuildMcpConfiguration(endpoint, registration.Token), cancellationToken);
+            await OwnerOnlyFile.WriteAsync(systemPromptPath, request.SystemPrompt, cancellationToken);
+            await OwnerOnlyFile.WriteAsync(mcpConfigurationPath, ClaudeCliArguments.BuildMcpConfiguration(endpoint, registration.Token), cancellationToken);
 
             var isChat = request.Kind == AgentTurnKind.Chat;
-            var result = await RunCliAsync(request, setup, isChat ? _sessionId : null, progress, cancellationToken);
+            var options = new ClaudeCliOptions(
+                systemPromptPath,
+                mcpConfigurationPath,
+                request.Model,
+                request.Effort,
+                FallbackModel,
+                isChat ? _sessionId : null,
+                PersistSession: isChat)
+            {
+                BackendTools = request.BackendTools,
+                MaxTurns = maxTurns
+            };
+
+            var result = await RunCliAsync(request, options, progress, cancellationToken);
             if (isChat && _sessionId is not null && ClaudeCliFailure.IsSessionMissing(result))
             {
                 await ResetSessionAsync(cancellationToken);
                 await AppendDividerAsync("Session restarted");
-                result = await RunCliAsync(request, setup, null, progress, cancellationToken);
+                result = await RunCliAsync(request, options with { ResumeSessionId = null }, progress, cancellationToken);
             }
 
-            if (ClaudeCliFailure.Classify(result, setup.MaxTurns) is { } failure)
+            if (ClaudeCliFailure.Classify(result, maxTurns) is { } failure)
             {
                 throw failure;
             }
@@ -89,17 +101,17 @@ public partial class ClaudeCliAgent : LlmAgentBase
         }
         finally
         {
-            DeleteTurnFile(setup.SystemPromptPath);
-            DeleteTurnFile(setup.McpConfigurationPath);
+            DeleteTurnFile(systemPromptPath);
+            DeleteTurnFile(mcpConfigurationPath);
         }
     }
 
     // The result line holds only the text after the last tool call; the timeline keeps the whole answer.
     private static AgentTurnResult ToTurnResult(ClaudeCliRunResult result)
     {
-        var finalText = result.ResultText ?? string.Empty;
+        var finalText = result.Result?.Text ?? string.Empty;
         var text = string.IsNullOrEmpty(result.StreamedText) ? finalText : result.StreamedText;
-        return new AgentTurnResult(text, result.Usage, result.RateLimit) { FinalText = finalText };
+        return new AgentTurnResult(text, result.Result?.Usage, result.RateLimit?.RateLimit) { FinalText = finalText };
     }
 
     private async Task RememberSessionAsync(string? sessionId, CancellationToken cancellationToken)
@@ -116,23 +128,11 @@ public partial class ClaudeCliAgent : LlmAgentBase
     }
 
     private Task<ClaudeCliRunResult> RunCliAsync(
-        AgentTurnRequest request, ClaudeCliTurnSetup setup, string? resumeSessionId, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
+        AgentTurnRequest request, ClaudeCliOptions options, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
-        var options = new ClaudeCliOptions(
-            setup.SystemPromptPath,
-            setup.McpConfigurationPath,
-            request.Model,
-            request.Effort,
-            FallbackModel,
-            resumeSessionId,
-            PersistSession: request.Kind == AgentTurnKind.Chat)
-        {
-            BackendTools = request.BackendTools,
-            MaxTurns = setup.MaxTurns
-        };
         var invocation = new ClaudeCliInvocation(CliPath, ClaudeCliArguments.Build(options), WorkingDirectory, request.UserMessage);
         // Built-in tool calls are recorded only when backend tools are allowed; the CLI gets no other built-in tool.
-        return ClaudeCliProcess.RunAsync(invocation, progress, cancellationToken, request.BackendTools.Count > 0 ? request.Tools : null);
+        return ClaudeCliProcess.RunAsync(invocation, progress, request.BackendTools.Count > 0 ? request.Tools : null, _logger, cancellationToken);
     }
 
     private void DeleteTurnFile(string path)
@@ -147,9 +147,6 @@ public partial class ClaudeCliAgent : LlmAgentBase
             _logger.LogWarning(exception, "The turn file {Path} of agent {Agent} could not be deleted.", path, Title);
         }
     }
-
-    /// <summary>What the runs of one turn share: its owner-only files and its model round limit.</summary>
-    private sealed record ClaudeCliTurnSetup(string SystemPromptPath, string McpConfigurationPath, int MaxTurns);
 }
 
 /// <summary>The session file of a <see cref="ClaudeCliAgent"/>.</summary>

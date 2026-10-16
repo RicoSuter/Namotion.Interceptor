@@ -5,8 +5,13 @@ namespace HomeBlaze.AI.Agents.Cli;
 /// <summary>An event of the Claude CLI stream-json output that agents use.</summary>
 internal abstract record ClaudeStreamEvent;
 
-/// <summary>The session started; carries the id to resume it.</summary>
-internal sealed record ClaudeInitEvent(string SessionId) : ClaudeStreamEvent;
+/// <summary>The session started.</summary>
+/// <param name="SessionId">The id to resume the session.</param>
+/// <param name="ApiKeySource">
+/// Where the CLI takes an API key from, for example <c>/login managed key</c> or <c>apiKeyHelper</c>; <c>none</c> when it
+/// uses no API key, as with the subscription login.
+/// </param>
+internal sealed record ClaudeInitEvent(string? SessionId, string? ApiKeySource) : ClaudeStreamEvent;
 
 /// <summary>A chunk of answer text.</summary>
 internal sealed record ClaudeTextDeltaEvent(string Text) : ClaudeStreamEvent;
@@ -53,8 +58,7 @@ internal sealed record ClaudeResultEvent(string? SessionId, string Subtype, bool
 /// </summary>
 internal static class ClaudeStreamJsonParser
 {
-    // DateTimeOffset.FromUnixTimeSeconds throws outside this range.
-    private const long MinimumUnixSeconds = -62_135_596_800;
+    // DateTimeOffset.FromUnixTimeSeconds throws above this value.
     private const long MaximumUnixSeconds = 253_402_300_799;
 
     /// <summary>
@@ -99,8 +103,8 @@ internal static class ClaudeStreamJsonParser
 
         if (type.ValueEquals("system"u8))
         {
-            return HasString(root, "subtype"u8, "init"u8) && GetString(root, "session_id"u8) is { } sessionId
-                ? new ClaudeInitEvent(sessionId)
+            return HasString(root, "subtype"u8, "init"u8)
+                ? new ClaudeInitEvent(GetString(root, "session_id"u8), GetString(root, "apiKeySource"u8))
                 : null;
         }
 
@@ -252,11 +256,9 @@ internal static class ClaudeStreamJsonParser
     }
 
     private static DateTimeOffset? GetResetsAt(JsonElement element) =>
-        TryGetNumber(element, "resetsAt"u8, out var reset) && reset.TryGetInt64(out var seconds) && IsInUnixSecondsRange(seconds)
+        TryGetNumber(element, "resetsAt"u8, out var reset) && reset.TryGetInt64(out var seconds) && seconds is >= 0 and <= MaximumUnixSeconds
             ? DateTimeOffset.FromUnixTimeSeconds(seconds)
             : null;
-
-    private static bool IsInUnixSecondsRange(long seconds) => seconds >= MinimumUnixSeconds && seconds <= MaximumUnixSeconds;
 
     private static ClaudeResultEvent ParseResult(JsonElement root)
     {

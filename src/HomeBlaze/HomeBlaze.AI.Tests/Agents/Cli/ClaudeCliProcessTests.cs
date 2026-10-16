@@ -1,5 +1,6 @@
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Cli;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
@@ -16,17 +17,48 @@ public class ClaudeCliProcessTests
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hello there");
 
         // Act
-        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(updates.Add), CancellationToken.None);
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(updates.Add), null, NullLogger.Instance, CancellationToken.None);
 
         // Assert
         Assert.Equal(0, result.ExitCode);
-        Assert.False(result.IsError);
-        Assert.Equal("Hello world", result.ResultText);
+        Assert.False(result.Result!.IsError);
+        Assert.Equal("Hello world", result.Result.Text);
         Assert.Equal("d57c5029-b6b6-4e1a-8767-6df4d71bb4ba", result.SessionId);
-        Assert.Equal(382, result.Usage!.InputTokens);
-        Assert.Equal(0.73, result.RateLimit!.SevenDayUtilization);
+        Assert.Equal(382, result.Result.Usage!.InputTokens);
+        Assert.Equal(0.73, result.RateLimit!.RateLimit.SevenDayUtilization);
         Assert.Equal(["Hello", " world"], updates.OfType<AgentTextDelta>().Select(delta => delta.Text));
         Assert.Equal("hello there", cli.LastStandardInput);
+    }
+
+    [UnixFact]
+    public async Task WhenTheInitLineNamesNoApiKeySource_ThenTheRunSucceedsWithAWarning()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("no-api-key-source.jsonl");
+        var logger = new RecordingLogger();
+        var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
+
+        // Act
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, logger, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Hello world", result.Result!.Text);
+        Assert.Contains("names no API key source", Assert.Single(logger.Warnings));
+    }
+
+    [UnixFact]
+    public async Task WhenTheInitLineNamesNoApiKeyInUse_ThenNoWarningIsLogged()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("success.jsonl");
+        var logger = new RecordingLogger();
+        var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
+
+        // Act
+        await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, logger, CancellationToken.None);
+
+        // Assert
+        Assert.Empty(logger.Warnings);
     }
 
     [UnixFact]
@@ -37,11 +69,11 @@ public class ClaudeCliProcessTests
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
 
         // Act
-        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None);
 
         // Assert
         Assert.Equal(1, result.ExitCode);
-        Assert.True(result.IsError);
+        Assert.True(result.Result!.IsError);
         Assert.Equal("authentication_failed", result.ErrorCode);
     }
 
@@ -50,14 +82,14 @@ public class ClaudeCliProcessTests
     {
         // Arrange
         using var cli = FakeClaudeCli.Create("success.jsonl", resumeFixture: "resume-missing.jsonl");
-        var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p", "--resume", "x"], cli.Directory, "hi");
+        var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p", "--resume=x"], cli.Directory, "hi");
 
         // Act
-        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None);
 
         // Assert
         Assert.Equal(1, result.ExitCode);
-        Assert.Equal("error_during_execution", result.ResultSubtype);
+        Assert.Equal("error_during_execution", result.Result!.Subtype);
         Assert.Contains("No conversation found with session ID", result.StandardError);
     }
 
@@ -70,7 +102,7 @@ public class ClaudeCliProcessTests
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, input);
 
         // Act
-        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
+        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None);
 
         // Assert
         Assert.Equal(0, result.ExitCode);
@@ -85,7 +117,7 @@ public class ClaudeCliProcessTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
-            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None));
         Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
     }
 
@@ -97,7 +129,7 @@ public class ClaudeCliProcessTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
-            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None));
         Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
         Assert.Equal("The Claude CLI path is not set.", exception.Message);
     }
@@ -114,27 +146,27 @@ public class ClaudeCliProcessTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
-            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None));
         Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
         Assert.Contains("claude.exe", exception.Message);
     }
 
     [UnixFact]
-    public async Task WhenAPerModelLimitRejectsTheRun_ThenItsResetTimeAndTypeAreReturned()
+    public async Task WhenTheInitLineNamesAnApiKeySource_ThenTheProcessIsKilledBeforeItAnswersAndAConfigurationErrorNamesTheSource()
     {
-        // Arrange
-        using var cli = FakeClaudeCli.Create("usage-limit-opus.jsonl", exitCode: 1);
+        // Arrange - the fake CLI holds back everything after the init line for longer than the test waits.
+        using var cli = FakeClaudeCli.Create("api-key-source.jsonl", sleepAfterFirstLineSeconds: 60);
+        var updates = new List<AgentTurnUpdate>();
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
 
-        // Act
-        var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
-
-        // Assert
-        Assert.Equal("rejected", result.RateLimit!.Status);
-        Assert.Equal(0.64, result.RateLimit.SevenDayUtilization);
-        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1792000800), result.LimitResetsAt);
-        Assert.Equal("seven_day_opus", result.LimitType);
-        Assert.Equal("rate_limit", result.ErrorCode);
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
+            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(updates.Add), null, NullLogger.Instance, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
+        Assert.Contains("'/login managed key'", exception.Message);
+        Assert.Empty(updates);
+        await AsyncTestHelpers.WaitUntilAsync(() => !cli.IsLastProcessRunning);
     }
 
     [UnixFact]
@@ -147,7 +179,7 @@ public class ClaudeCliProcessTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
-            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+            ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None));
         Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
         Assert.Contains(workingDirectory, exception.Message);
         Assert.Empty(cli.Invocations);
@@ -160,7 +192,7 @@ public class ClaudeCliProcessTests
         using var cli = FakeClaudeCli.Create("success.jsonl", sleepSeconds: 30);
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
         using var cancellation = new CancellationTokenSource();
-        var run = ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), cancellation.Token);
+        var run = ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, cancellation.Token);
         await AsyncTestHelpers.WaitUntilAsync(() => cli.LastProcessId is not null);
 
         // Act

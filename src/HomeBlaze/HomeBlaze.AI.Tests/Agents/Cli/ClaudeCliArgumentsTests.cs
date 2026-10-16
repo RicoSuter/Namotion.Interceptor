@@ -36,7 +36,8 @@ public class ClaudeCliArgumentsTests
         Assert.Equal("opus", ValueAfter(arguments, "--model"));
         Assert.Equal("xhigh", ValueAfter(arguments, "--effort"));
         Assert.Equal("sonnet", ValueAfter(arguments, "--fallback-model"));
-        Assert.Equal("session-1", ValueAfter(arguments, "--resume"));
+        Assert.Contains("--resume=session-1", arguments);
+        Assert.DoesNotContain("--resume", arguments);
         Assert.Equal("35", ValueAfter(arguments, "--max-turns"));
         Assert.DoesNotContain("--no-session-persistence", arguments);
         Assert.DoesNotContain("--bare", arguments);
@@ -54,7 +55,21 @@ public class ClaudeCliArgumentsTests
         var arguments = ClaudeCliArguments.Build(options);
 
         // Assert
-        Assert.DoesNotContain("--resume", arguments);
+        Assert.DoesNotContain(arguments, argument => argument.StartsWith("--resume", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WhenTheResumeSessionIdStartsWithADash_ThenItStaysTheValueOfTheResumeArgument()
+    {
+        // Arrange
+        var options = new ClaudeCliOptions("/tmp/prompt.md", "/tmp/mcp.json", null, null, null, "--dangerously-skip-permissions", PersistSession: true);
+
+        // Act
+        var arguments = ClaudeCliArguments.Build(options);
+
+        // Assert
+        Assert.Contains("--resume=--dangerously-skip-permissions", arguments);
+        Assert.DoesNotContain("--dangerously-skip-permissions", arguments);
     }
 
     [Fact]
@@ -70,27 +85,12 @@ public class ClaudeCliArgumentsTests
         Assert.Equal("Bearer TOKEN", server.GetProperty("headers").GetProperty("Authorization").GetString());
     }
 
-    [Fact]
-    public void WhenNoBackendToolIsAllowed_ThenNoBuiltInToolIsAvailableAndOnlyTheMcpServerIsAllowed()
-    {
-        // Arrange
-        var options = new ClaudeCliOptions("/tmp/prompt.md", "/tmp/mcp.json", null, null, null, null, PersistSession: false);
-
-        // Act
-        var arguments = ClaudeCliArguments.Build(options);
-
-        // Assert
-        Assert.Equal(
-            ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--system-prompt-file", "/tmp/prompt.md",
-             "--system-prompt-snapshot", "off", "--tools", "", "--strict-mcp-config", "--mcp-config", "/tmp/mcp.json",
-             "--allowedTools", "mcp__homeblaze", "--setting-sources", "", "--no-session-persistence"],
-            arguments);
-    }
-
     [Theory]
-    [InlineData(new[] { "web_fetch", "web_search", "Bash", "unknown" }, "WebSearch,WebFetch")]
-    [InlineData(new[] { "web_search" }, "WebSearch")]
-    public void WhenWebToolsAreAllowed_ThenOnlyTheyAreBuiltInToolsAndRunWithoutAPrompt(string[] backendTools, string expectedCliTools)
+    [InlineData(new string[0], "", "mcp__homeblaze")]
+    [InlineData(new[] { "web_fetch", "web_search", "Bash", "unknown" }, "WebSearch,WebFetch", "mcp__homeblaze,WebSearch,WebFetch")]
+    [InlineData(new[] { "web_search" }, "WebSearch", "mcp__homeblaze,WebSearch")]
+    public void WhenBackendToolsAreAllowed_ThenOnlyTheWebToolsAmongThemAreBuiltInToolsAndRunWithoutAPrompt(
+        string[] backendTools, string expectedCliTools, string expectedAllowedTools)
     {
         // Arrange
         var options = new ClaudeCliOptions("/tmp/prompt.md", "/tmp/mcp.json", null, null, null, null, PersistSession: false)
@@ -105,7 +105,7 @@ public class ClaudeCliArgumentsTests
         Assert.Equal(
             ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--system-prompt-file", "/tmp/prompt.md",
              "--system-prompt-snapshot", "off", "--tools", expectedCliTools, "--strict-mcp-config", "--mcp-config", "/tmp/mcp.json",
-             "--allowedTools", "mcp__homeblaze," + expectedCliTools, "--setting-sources", "", "--no-session-persistence"],
+             "--allowedTools", expectedAllowedTools, "--setting-sources", "", "--no-session-persistence"],
             arguments);
     }
 

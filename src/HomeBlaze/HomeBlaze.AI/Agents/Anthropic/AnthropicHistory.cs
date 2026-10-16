@@ -6,7 +6,14 @@ using Microsoft.Extensions.AI;
 namespace HomeBlaze.AI.Agents.Anthropic;
 
 /// <summary>
-/// The outcome of <see cref="AnthropicHistory.CompactAsync"/>.
+/// The result of <see cref="AnthropicHistory.CompactAsync"/>.
+/// </summary>
+/// <param name="Outcome">Whether the history was compacted.</param>
+/// <param name="Usage">The usage of the summarizing call, or null when no call was made or it reported none.</param>
+internal readonly record struct AnthropicCompaction(AnthropicCompactionOutcome Outcome, UsageDetails? Usage);
+
+/// <summary>
+/// Whether <see cref="AnthropicHistory.CompactAsync"/> compacted the history.
 /// </summary>
 internal enum AnthropicCompactionOutcome
 {
@@ -92,18 +99,19 @@ internal sealed class AnthropicHistory
     /// before a plain user message, so a tool call and its result are never separated, and keeps the longest tail
     /// whose estimated size is at most <paramref name="keepFraction"/> of the history, but at least the last
     /// exchange. The history is left unchanged when the call fails, returns no text or runs out of output tokens.
+    /// Returns the outcome with the usage of the call.
     /// </summary>
     /// <param name="client">The client of the summarizing call.</param>
     /// <param name="options">The options of the summarizing call, for example its model and output token limit.</param>
     /// <param name="keepFraction">The share of the history, by estimated size, to keep unsummarized.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public async Task<AnthropicCompactionOutcome> CompactAsync(
+    public async Task<AnthropicCompaction> CompactAsync(
         IChatClient client, ChatOptions? options = null, double keepFraction = 0.5, CancellationToken cancellationToken = default)
     {
         var split = FindSplit(keepFraction);
         if (split <= 0)
         {
-            return AnthropicCompactionOutcome.NothingToCompact;
+            return new AnthropicCompaction(AnthropicCompactionOutcome.NothingToCompact, Usage: null);
         }
 
         var transcript = new StringBuilder();
@@ -126,12 +134,12 @@ internal sealed class AnthropicHistory
         var summary = response.Text;
         if (string.IsNullOrWhiteSpace(summary) || response.FinishReason == ChatFinishReason.Length)
         {
-            return AnthropicCompactionOutcome.SummaryIncomplete;
+            return new AnthropicCompaction(AnthropicCompactionOutcome.SummaryIncomplete, response.Usage);
         }
 
         Summary = summary;
         _messages.RemoveRange(0, split);
-        return AnthropicCompactionOutcome.Compacted;
+        return new AnthropicCompaction(AnthropicCompactionOutcome.Compacted, response.Usage);
     }
 
     /// <summary>Serializes the summary and messages for the session file.</summary>
@@ -190,8 +198,11 @@ internal sealed class AnthropicHistory
         {
             switch (content)
             {
-                // Server tool blocks hold the fetched web content; later turns get the answer that used it.
-                case TextReasoningContent or WebSearchToolCallContent or WebSearchToolResultContent:
+                // Server tool blocks, of the web tools and of the code execution they filter results with, hold the
+                // fetched web content; later turns get the answer that used it. Reasoning is dropped as described above.
+                case TextReasoningContent:
+                case ToolCallContent and not FunctionCallContent:
+                case ToolResultContent and not FunctionResultContent:
                     break;
                 case FunctionResultContent result:
                     contents.Add(NormalizeToolResult(result));
@@ -291,7 +302,7 @@ internal sealed class AnthropicHistory
             total += lengths[index];
         }
 
-        var keepLimit = Math.Clamp(keepFraction, 0, 1) * total;
+        var keepLimit = double.Clamp(keepFraction, 0, 1) * total;
         var lastPlainUserMessage = 0;
         long tail = 0;
         var split = 0;

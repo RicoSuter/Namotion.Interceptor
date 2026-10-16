@@ -201,12 +201,10 @@
 
     private LlmAgentBase? Agent => Subject as LlmAgentBase;
 
-    private string ModelHelperText => Agent switch
-    {
-        ClaudeCliAgent => "Empty: CLI default. Aliases such as opus, sonnet or haiku work.",
-        AnthropicAgent => "Required. A model id such as claude-sonnet-5.",
-        _ => "Empty: default model."
-    };
+    // Registered only for the CLI and the Anthropic agent.
+    private string ModelHelperText => Agent is AnthropicAgent
+        ? "Required. A model id such as claude-sonnet-5."
+        : "Empty: CLI default. Aliases such as opus, sonnet or haiku work.";
 
     protected override void OnInitialized()
     {

@@ -9,7 +9,8 @@ namespace HomeBlaze.AI.Agents;
 
 /// <summary>
 /// The tools of one turn: the agent's allowed graph tools plus update_memory, each wrapped to enforce the
-/// turn's tool-call budget and record the call. Both backends call tools only through this set.
+/// turn's tool-call budget and record the call. Both backends call tools only through this set. Once the turn ends,
+/// the set is closed and every call returns an error without running the tool.
 /// </summary>
 public sealed class AgentToolSet
 {
@@ -37,6 +38,9 @@ public sealed class AgentToolSet
 
     private const int PreviewLength = 2000;
 
+    /// <summary>The error a call of a closed tool set returns.</summary>
+    internal const string ClosedMessage = "The turn has ended; the tool was not run.";
+
     // Display only: previews are for the timeline and audit, never sent back to the model, so relaxed escaping
     // keeps non-ASCII characters readable and the enum converter matches what the model actually received.
     private static readonly JsonSerializerOptions PreviewSerializerOptions = new()
@@ -48,6 +52,7 @@ public sealed class AgentToolSet
     private readonly int _maxToolCalls;
     private readonly IProgress<AgentTurnUpdate>? _progress;
     private int _callCount;
+    private volatile bool _isClosed;
     private ImmutableList<AgentToolCall> _calls = ImmutableList<AgentToolCall>.Empty;
 
     private AgentToolSet(int maxToolCalls, IProgress<AgentTurnUpdate>? progress)
@@ -62,6 +67,13 @@ public sealed class AgentToolSet
 
     /// <summary>The calls made so far, in completion order.</summary>
     public IReadOnlyList<AgentToolCall> Calls => Volatile.Read(ref _calls);
+
+    /// <summary>
+    /// Closes the set when its turn ends. A call that started before keeps running; a call that starts later returns
+    /// an error and is not recorded, for example one that passed the authentication of the agent MCP route just before
+    /// the token was revoked.
+    /// </summary>
+    internal void Close() => _isClosed = true;
 
     /// <summary>
     /// Whether the allowed names grant the permission to edit page layout: <see cref="EditPageLayoutPermission"/> together
@@ -112,6 +124,11 @@ public sealed class AgentToolSet
     {
         Handler = async (input, cancellationToken) =>
         {
+            if (_isClosed)
+            {
+                return new { error = ClosedMessage };
+            }
+
             var arguments = Truncate(input.GetRawText());
             if (countsAgainstBudget && Interlocked.Increment(ref _callCount) > _maxToolCalls)
             {

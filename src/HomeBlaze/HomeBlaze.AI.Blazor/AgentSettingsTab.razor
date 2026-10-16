@@ -66,24 +66,21 @@
         </MudGrid>
     </section>
 
-    @if (Agent is ClaudeCliAgent or AnthropicAgent)
-    {
-        <section class="mb-5">
-            <MudText Typo="Typo.subtitle1" Class="mb-1" Style="font-weight: 500;">Connection</MudText>
-            <MudGrid Spacing="0">
-                @if (Agent is ClaudeCliAgent cliConnection)
-                {
-                    @SettingRow("CLI path", cliConnection.CliPath)
-                }
-                @if (Agent is AnthropicAgent anthropicAgent)
-                {
-                    @SettingRow("API key", string.IsNullOrWhiteSpace(anthropicAgent.ApiKey) ? "not set" : "set")
-                    @SettingRow("Max output tokens", anthropicAgent.MaxTokens.ToString())
-                    @SettingRow("History token budget", anthropicAgent.HistoryTokenBudget > 0 ? anthropicAgent.HistoryTokenBudget.ToString() : "never summarize")
-                }
-            </MudGrid>
-        </section>
-    }
+    <section class="mb-5">
+        <MudText Typo="Typo.subtitle1" Class="mb-1" Style="font-weight: 500;">Connection</MudText>
+        <MudGrid Spacing="0">
+            @if (Agent is ClaudeCliAgent cliConnection)
+            {
+                @SettingRow("CLI path", cliConnection.CliPath)
+            }
+            @if (Agent is AnthropicAgent anthropicAgent)
+            {
+                @SettingRow("API key", string.IsNullOrWhiteSpace(anthropicAgent.ApiKey) ? "not set" : "set")
+                @SettingRow("Max output tokens", anthropicAgent.MaxTokens.ToString())
+                @SettingRow("History token budget", anthropicAgent.HistoryTokenBudget > 0 ? anthropicAgent.HistoryTokenBudget.ToString() : "never summarize")
+            }
+        </MudGrid>
+    </section>
 
     <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">Change settings with the subject's Edit action.</MudText>
 </div>

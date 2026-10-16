@@ -5,7 +5,8 @@ using System.Security.Principal;
 namespace HomeBlaze.AI.Agents.Cli;
 
 /// <summary>
-/// Writes files that only the user HomeBlaze runs as may read, for content such as turn tokens and agent memory.
+/// Writes the turn files of the CLI, the system prompt and the MCP configuration with the turn token, so that only the
+/// user HomeBlaze runs as may read them.
 /// </summary>
 internal static class OwnerOnlyFile
 {

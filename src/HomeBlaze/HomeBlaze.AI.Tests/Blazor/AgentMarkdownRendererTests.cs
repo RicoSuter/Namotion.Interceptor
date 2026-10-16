@@ -209,4 +209,25 @@ public class AgentMarkdownRendererTests
         // Assert
         Assert.Equal(expected, text);
     }
+
+    [Theory]
+    [InlineData('>', 200, 0)]
+    [InlineData('*', 500, 500)]
+    public void WhenMarkdownIsNestedBeyondTheDepthLimit_ThenItIsRenderedAsEncodedText(char character, int openingCount, int closingCount)
+    {
+        // Arrange
+        var markdown = new string(character, openingCount) + "<b>deep</b>" + new string(character, closingCount) + "\nnext";
+
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml(markdown);
+        var text = AgentMarkdownRenderer.ToPlainText(markdown);
+
+        // Assert
+        Assert.StartsWith("<p style=\"white-space: pre-wrap;\">", html);
+        Assert.Contains("&lt;b&gt;deep&lt;/b&gt;", html);
+        Assert.Contains("\nnext</p>", html);
+        Assert.DoesNotContain("<b>", html);
+        Assert.Contains("<b>deep</b>", text);
+        Assert.EndsWith(" next", text);
+    }
 }

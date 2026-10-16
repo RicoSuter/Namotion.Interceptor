@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Testing;
+
 namespace HomeBlaze.AI.Tests.Agents.Cli;
 
 /// <summary>
@@ -6,6 +8,8 @@ namespace HomeBlaze.AI.Tests.Agents.Cli;
 /// </summary>
 internal sealed class FakeClaudeCli : IDisposable
 {
+    private const string ResumePrefix = "--resume=";
+
     private FakeClaudeCli(string directory, string scriptPath)
     {
         Directory = directory;
@@ -85,6 +89,10 @@ internal sealed class FakeClaudeCli : IDisposable
         return index >= 0 && index + 1 < arguments.Count ? arguments[index + 1] : null;
     }
 
+    /// <summary>The session id of the <c>--resume=</c> argument, or null when the run resumes no session.</summary>
+    public static string? ResumedSessionId(IReadOnlyList<string> arguments) =>
+        arguments.FirstOrDefault(argument => argument.StartsWith(ResumePrefix, StringComparison.Ordinal))?[ResumePrefix.Length..];
+
     public void Dispose()
     {
         try
@@ -101,10 +109,11 @@ internal sealed class FakeClaudeCli : IDisposable
     /// Creates the script.
     /// </summary>
     /// <param name="fixture">Fixture file name replayed on standard output.</param>
-    /// <param name="resumeFixture">Fixture replayed instead when the arguments contain --resume, with exit code 1 and the missing-session message.</param>
+    /// <param name="resumeFixture">Fixture replayed instead when the arguments contain --resume=, with exit code 1 and the missing-session message.</param>
     /// <param name="exitCode">Exit code after replaying <paramref name="fixture"/>.</param>
     /// <param name="sleepSeconds">Seconds to sleep before replaying, to test timeouts.</param>
-    public static FakeClaudeCli Create(string fixture, string? resumeFixture = null, int exitCode = 0, int sleepSeconds = 0)
+    /// <param name="sleepAfterFirstLineSeconds">Seconds to sleep after the first line of the fixture, to test that the process is killed early.</param>
+    public static FakeClaudeCli Create(string fixture, string? resumeFixture = null, int exitCode = 0, int sleepSeconds = 0, int sleepAfterFirstLineSeconds = 0)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -116,7 +125,7 @@ internal sealed class FakeClaudeCli : IDisposable
         var resumeBranch = resumeFixture is null
             ? string.Empty
             : $"""
-              case " $* " in *" --resume "*)
+              case " $* " in *" --resume="*)
                 cat '{Path.Combine(fixtures, resumeFixture)}'
                 echo 'No conversation found with session ID: x' >&2
                 exit 1;;
@@ -146,13 +155,14 @@ internal sealed class FakeClaudeCli : IDisposable
             cat > '{directory}/stdin.txt'
             if [ {sleepSeconds} -gt 0 ]; then sleep {sleepSeconds}; fi
             {resumeBranch}
-            cat '{Path.Combine(fixtures, fixture)}'
+            head -n 1 '{Path.Combine(fixtures, fixture)}'
+            if [ {sleepAfterFirstLineSeconds} -gt 0 ]; then sleep {sleepAfterFirstLineSeconds}; fi
+            tail -n +2 '{Path.Combine(fixtures, fixture)}'
             exit {exitCode}
             """;
 
         var scriptPath = Path.Combine(directory, "claude");
-        File.WriteAllText(scriptPath, script.Replace("\r\n", "\n"));
-        File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        ExecutableScripts.Write(scriptPath, script.Replace("\r\n", "\n"));
         return new FakeClaudeCli(directory, scriptPath);
     }
 }

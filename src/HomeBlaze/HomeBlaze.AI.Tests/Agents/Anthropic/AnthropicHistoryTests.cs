@@ -150,7 +150,7 @@ public class AnthropicHistoryTests
         var outcome = await history.CompactAsync(summarizer, options, cancellationToken: CancellationToken.None);
 
         // Assert
-        Assert.Equal(AnthropicCompactionOutcome.Compacted, outcome);
+        Assert.Equal(AnthropicCompactionOutcome.Compacted, outcome.Outcome);
         Assert.Equal("summary of 0 and 1", history.Summary);
         Assert.Equal("question 2", history.Messages[0].Text);
         Assert.Equal(8, history.Messages.Count);
@@ -220,7 +220,7 @@ public class AnthropicHistoryTests
         var outcome = await history.CompactAsync(summarizer, cancellationToken: CancellationToken.None);
 
         // Assert
-        Assert.Equal(AnthropicCompactionOutcome.SummaryIncomplete, outcome);
+        Assert.Equal(AnthropicCompactionOutcome.SummaryIncomplete, outcome.Outcome);
         Assert.Null(history.Summary);
         Assert.Equal(16, history.Messages.Count);
     }
@@ -249,7 +249,8 @@ public class AnthropicHistoryTests
         var outcome = await history.CompactAsync(summarizer, cancellationToken: CancellationToken.None);
 
         // Assert
-        Assert.Equal(AnthropicCompactionOutcome.NothingToCompact, outcome);
+        Assert.Equal(AnthropicCompactionOutcome.NothingToCompact, outcome.Outcome);
+        Assert.Null(outcome.Usage);
         Assert.Null(summarizer.LastOptions);
         Assert.Equal(string.Empty, summarizer.LastPrompt);
         Assert.Equal(4, history.Messages.Count);

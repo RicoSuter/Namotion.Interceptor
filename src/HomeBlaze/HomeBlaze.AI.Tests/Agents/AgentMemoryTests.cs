@@ -10,14 +10,12 @@ public sealed class AgentMemoryTests : IDisposable
 
     private readonly string _directory;
     private readonly string _path;
-    private readonly string _legacyPath;
     private readonly ManualTimeProvider _time = new(Start);
 
     public AgentMemoryTests()
     {
         _directory = Directory.CreateTempSubdirectory("agent-memory").FullName;
         _path = Path.Combine(_directory, "agent.memory.json");
-        _legacyPath = Path.Combine(_directory, "agent.memory.md");
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
@@ -212,7 +210,7 @@ public sealed class AgentMemoryTests : IDisposable
 
         // Assert
         Assert.Contains(AgentMemory.MaxValueLength.ToString(), result.Error);
-        Assert.Contains("notes/legacy/1", result.Error);
+        Assert.Contains("notes/heating/1", result.Error);
         Assert.Empty(memory.GetSnapshot().Entries);
     }
 
@@ -264,27 +262,6 @@ public sealed class AgentMemoryTests : IDisposable
         // Assert
         Assert.Equal(memory.GetSnapshot().Entries.AsEnumerable(), reloaded.GetSnapshot().Entries.AsEnumerable());
         Assert.Empty(Directory.GetFiles(_directory, "*.tmp"));
-    }
-
-    [Fact]
-    public async Task WhenAnOldMarkdownMemoryExists_ThenItIsMigratedOnceIntoALegacyEntry()
-    {
-        // Arrange
-        await File.WriteAllTextAsync(_legacyPath, "# Memory\n- alerted about the freezer\n");
-        File.SetLastWriteTimeUtc(_legacyPath, Start.UtcDateTime);
-        var memory = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
-
-        // Act
-        await memory.LoadAsync(CancellationToken.None);
-        var reloaded = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
-        await reloaded.LoadAsync(CancellationToken.None);
-
-        // Assert
-        var entry = Assert.Single(memory.GetSnapshot().Entries);
-        Assert.Equal(new AgentMemoryEntry(AgentMemory.LegacyKey, "# Memory\n- alerted about the freezer", Start), entry);
-        Assert.False(File.Exists(_legacyPath));
-        Assert.True(File.Exists(_legacyPath + ".migrated"));
-        Assert.Equal(memory.GetSnapshot().Entries.AsEnumerable(), reloaded.GetSnapshot().Entries.AsEnumerable());
     }
 
     [Fact]
@@ -350,40 +327,10 @@ public sealed class AgentMemoryTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenUpdatingBeforeTheLegacyFileWasMigrated_ThenTheMigrationRunsFirst()
-    {
-        // Arrange
-        await File.WriteAllTextAsync(_legacyPath, "- old note");
-        var memory = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
-
-        // Act
-        await memory.UpdateAsync([AgentMemoryChange.Set("trends/power", "rising")], CancellationToken.None);
-
-        // Assert
-        Assert.Equal([AgentMemory.LegacyKey, "trends/power"], memory.GetSnapshot().Entries.Select(entry => entry.Key));
-    }
-
-    [Fact]
-    public async Task WhenTheLegacyFileIsOverTheLimits_ThenItIsMigratedWhole()
-    {
-        // Arrange
-        var content = string.Join('\n', Enumerable.Range(0, 1000).Select(index => $"- note {index}"));
-        await File.WriteAllTextAsync(_legacyPath, content);
-        var memory = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
-
-        // Act
-        await memory.LoadAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(content, Assert.Single(memory.GetSnapshot().Entries).Value);
-        Assert.True(memory.GetSnapshot().Size > AgentMemory.MaxSize);
-    }
-
-    [Fact]
     public async Task WhenTheMemoryIsOverTheSizeLimit_ThenAShrinkingChangeSucceedsAndAGrowingOneIsRejected()
     {
         // Arrange
-        await WriteMemoryFileAsync(("notes/legacy", new string('x', AgentMemory.MaxSize)), ("notes/small", "abc"));
+        await WriteMemoryFileAsync(("notes/large", new string('x', AgentMemory.MaxSize)), ("notes/small", "abc"));
         var memory = new AgentMemory(_path, _time);
         await memory.LoadAsync(CancellationToken.None);
 
@@ -395,7 +342,7 @@ public sealed class AgentMemoryTests : IDisposable
         Assert.True(shrinking.Succeeded);
         Assert.False(growing.Succeeded);
         Assert.Contains($"currently {memory.GetSnapshot().Size}", growing.Error);
-        Assert.Equal([AgentMemory.LegacyKey], memory.GetSnapshot().Entries.Select(entry => entry.Key));
+        Assert.Equal(["notes/large"], memory.GetSnapshot().Entries.Select(entry => entry.Key));
     }
 
     [Fact]
@@ -425,23 +372,6 @@ public sealed class AgentMemoryTests : IDisposable
         // Act & Assert
         await Assert.ThrowsAnyAsync<IOException>(() => memory.UpdateAsync([AgentMemoryChange.Set("alerts/freezer", "notified")], CancellationToken.None));
         Assert.Same(before, memory.GetSnapshot());
-    }
-
-    [Fact]
-    public async Task WhenBothTheFileAndTheLegacyFileExist_ThenTheLegacyFileIsRetiredWithoutMigratingAgain()
-    {
-        // Arrange
-        await WriteMemoryFileAsync(("alerts/freezer", "notified"));
-        await File.WriteAllTextAsync(_legacyPath, "- old note");
-        var memory = new AgentMemory(_path, _time, legacyFilePath: _legacyPath);
-
-        // Act
-        await memory.LoadAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(["alerts/freezer"], memory.GetSnapshot().Entries.Select(entry => entry.Key));
-        Assert.False(File.Exists(_legacyPath));
-        Assert.True(File.Exists(_legacyPath + ".migrated"));
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using Markdig;
 using Markdig.Renderers.Html;
@@ -9,14 +10,28 @@ namespace HomeBlaze.AI.Blazor;
 /// <summary>
 /// Renders untrusted agent output from Markdown to HTML that is safe to insert into the page: raw HTML is escaped,
 /// links with a target other than an absolute http, https or mailto URL are reduced to their text, and images are
-/// rendered as links so nothing loads without a click.
+/// rendered as links so nothing loads without a click. Markdown that Markdig refuses, such as elements nested beyond
+/// its depth limit, is shown as encoded text instead.
 /// </summary>
 internal static class AgentMarkdownRenderer
 {
     private static readonly MarkdownPipeline Pipeline = CreatePipeline();
 
-    /// <summary>Converts Markdown to sanitized HTML.</summary>
+    /// <summary>Converts Markdown to sanitized HTML, or to the encoded text with its line breaks kept when Markdig refuses it.</summary>
     public static string ToHtml(string markdown)
+    {
+        try
+        {
+            return RenderHtml(markdown);
+        }
+        catch (ArgumentException)
+        {
+            // Thrown for input nested beyond the depth limit; escaping it would end the circuit of every page that shows it.
+            return "<p style=\"white-space: pre-wrap;\">" + WebUtility.HtmlEncode(markdown) + "</p>";
+        }
+    }
+
+    private static string RenderHtml(string markdown)
     {
         var document = Markdown.Parse(markdown, Pipeline);
         foreach (var link in document.Descendants<LinkInline>().ToList())
@@ -40,11 +55,21 @@ internal static class AgentMarkdownRenderer
 
     /// <summary>
     /// Converts Markdown to plain text on one line: the text of the rendered elements without markup, link targets
-    /// or images, with line breaks and runs of whitespace collapsed to single spaces.
+    /// or images, with line breaks and runs of whitespace collapsed to single spaces. Markdown that Markdig refuses is
+    /// returned as it is, with whitespace collapsed the same way.
     /// </summary>
     public static string ToPlainText(string markdown)
     {
-        var text = Markdown.ToPlainText(markdown, Pipeline);
+        string text;
+        try
+        {
+            text = Markdown.ToPlainText(markdown, Pipeline);
+        }
+        catch (ArgumentException)
+        {
+            text = markdown;
+        }
+
         var builder = new StringBuilder(text.Length);
         var isSpacePending = false;
         foreach (var character in text)

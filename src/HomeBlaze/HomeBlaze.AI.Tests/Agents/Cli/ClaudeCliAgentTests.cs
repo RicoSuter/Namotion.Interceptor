@@ -50,8 +50,8 @@ public class ClaudeCliAgentTests
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
 
         // Assert
-        Assert.Null(ValueAfter(cli.Invocations[0], "--resume"));
-        Assert.Equal("d57c5029-b6b6-4e1a-8767-6df4d71bb4ba", ValueAfter(cli.Invocations[1], "--resume"));
+        Assert.Null(ResumedSessionId(cli.Invocations[0]));
+        Assert.Equal("d57c5029-b6b6-4e1a-8767-6df4d71bb4ba", ResumedSessionId(cli.Invocations[1]));
         Assert.Equal("opus", ValueAfter(cli.Invocations[1], "--model"));
         Assert.Equal("Hello world", test.Agent.Timeline.Entries[^1].Text);
         Assert.Contains("d57c5029", await File.ReadAllTextAsync(SessionPath(test)));
@@ -114,7 +114,7 @@ public class ClaudeCliAgentTests
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
 
         // Assert
-        Assert.Equal("stored-session", ValueAfter(cli.Invocations[1], "--resume"));
+        Assert.Equal("stored-session", ResumedSessionId(cli.Invocations[1]));
     }
 
     [UnixFact]
@@ -132,7 +132,7 @@ public class ClaudeCliAgentTests
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
 
         // Assert
-        Assert.Null(ValueAfter(cli.Invocations[1], "--resume"));
+        Assert.Null(ResumedSessionId(cli.Invocations[1]));
         Assert.Equal("Hello world", test.Agent.Timeline.Entries[^1].Text);
     }
 
@@ -152,8 +152,8 @@ public class ClaudeCliAgentTests
         await test.Agent.SendMessageAsync("third", CancellationToken.None);
 
         // Assert
-        Assert.Null(ValueAfter(cli.Invocations[1], "--resume"));
-        Assert.Equal("d57c5029-b6b6-4e1a-8767-6df4d71bb4ba", ValueAfter(cli.Invocations[2], "--resume"));
+        Assert.Null(ResumedSessionId(cli.Invocations[1]));
+        Assert.Equal("d57c5029-b6b6-4e1a-8767-6df4d71bb4ba", ResumedSessionId(cli.Invocations[2]));
         Assert.DoesNotContain(test.Agent.Timeline.Entries, entry => entry.Kind == AgentTimelineEntryKind.Error);
         Assert.Equal(ServiceStatus.Running, test.Agent.Status);
     }
@@ -173,7 +173,7 @@ public class ClaudeCliAgentTests
 
         // Assert
         Assert.Contains(test.Agent.Timeline.Entries, entry => entry is { Kind: AgentTimelineEntryKind.Divider, Text: "New conversation" });
-        Assert.Null(ValueAfter(cli.Invocations[1], "--resume"));
+        Assert.Null(ResumedSessionId(cli.Invocations[1]));
         Assert.DoesNotContain(test.Agent.Timeline.Entries, entry => entry.Kind == AgentTimelineEntryKind.Error);
     }
 
@@ -213,7 +213,7 @@ public class ClaudeCliAgentTests
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
 
         // Assert
-        Assert.Null(ValueAfter(cli.Invocations[1], "--resume"));
+        Assert.Null(ResumedSessionId(cli.Invocations[1]));
     }
 
     [UnixFact]
@@ -229,7 +229,7 @@ public class ClaudeCliAgentTests
         // Assert
         var arguments = Assert.Single(cli.Invocations);
         Assert.Contains("--no-session-persistence", arguments);
-        Assert.Null(ValueAfter(arguments, "--resume"));
+        Assert.Null(ResumedSessionId(arguments));
         Assert.Equal("haiku", ValueAfter(arguments, "--model"));
         Assert.Contains(Endpoint.ToString(), cli.LastMcpConfiguration);
         Assert.Contains("Bearer ", cli.LastMcpConfiguration);
@@ -267,7 +267,7 @@ public class ClaudeCliAgentTests
 
         // Assert
         Assert.Equal(3, cli.Invocations.Count);
-        Assert.Null(ValueAfter(cli.Invocations[2], "--resume"));
+        Assert.Null(ResumedSessionId(cli.Invocations[2]));
         Assert.Contains(test.Agent.Timeline.Entries, entry => entry is { Kind: AgentTimelineEntryKind.Divider, Text: "Session restarted" });
         Assert.Equal(AgentTimelineEntryKind.Assistant, test.Agent.Timeline.Entries[^1].Kind);
         Assert.Contains("d57c5029", await File.ReadAllTextAsync(SessionPath(test)));
@@ -415,5 +415,22 @@ public class ClaudeCliAgentTests
 
         // Assert
         Assert.Equal("The Claude weekly Opus usage limit is reached until 2026-10-14 18:00 UTC.", test.Agent.StatusMessage);
+    }
+
+    [UnixFact]
+    public async Task WhenTheCliWouldBillAnApiKey_ThenTheAgentIsUnavailableAndNamesTheKeySource()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("api-key-source.jsonl");
+        await using var test = await StartAsync(cli);
+
+        // Act
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable);
+
+        // Assert
+        Assert.Contains("not using the Claude subscription login", test.Agent.StatusMessage);
+        Assert.Contains("'/login managed key'", test.Agent.StatusMessage);
+        Assert.Empty(GetTurnFiles(test));
     }
 }

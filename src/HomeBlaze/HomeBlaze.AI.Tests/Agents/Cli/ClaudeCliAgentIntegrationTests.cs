@@ -13,7 +13,8 @@ using Xunit.Abstractions;
 namespace HomeBlaze.AI.Tests.Agents.Cli;
 
 /// <summary>
-/// Runs one turn against the real, logged-in Claude CLI, which spends a small amount of the local subscription.
+/// Runs two turns against the real, logged-in Claude CLI, the second resuming the session of the first, which spends a
+/// small amount of the local subscription.
 /// </summary>
 [Trait("Category", "Integration")]
 public class ClaudeCliAgentIntegrationTests
@@ -26,7 +27,7 @@ public class ClaudeCliAgentIntegrationTests
     }
 
     [ClaudeCliFact]
-    public async Task WhenAskingForAPropertyValue_ThenTheRealCliCallsTheToolAndAnswers()
+    public async Task WhenAskingForAPropertyValueAndThenAFollowUp_ThenTheRealCliCallsTheToolAndAnswersBothInOneSession()
     {
         // Arrange
         var registry = new AgentTurnTokenRegistry();
@@ -57,13 +58,20 @@ public class ClaudeCliAgentIntegrationTests
 
         // Act
         await test.Agent.SendMessageAsync("What is the value of /Temperature? Use the get_property tool.", CancellationToken.None);
+        var firstReply = test.Agent.Timeline.Entries[^1];
+        await test.Agent.SendMessageAsync("And the value plus 1?", CancellationToken.None);
 
         // Assert
         test.WriteTimeline(_output);
 
-        var reply = test.Agent.Timeline.Entries[^1];
-        Assert.Equal(AgentTimelineEntryKind.Assistant, reply.Kind);
-        Assert.Contains("21.5", reply.Text);
-        Assert.Contains(reply.ToolCalls, call => call.Name == "get_property" && !call.IsError);
+        Assert.Equal(AgentTimelineEntryKind.Assistant, firstReply.Kind);
+        Assert.Contains("21.5", firstReply.Text);
+        Assert.Contains(firstReply.ToolCalls, call => call.Name == "get_property" && !call.IsError);
+
+        // Answered from the resumed session, which holds the value of the first turn.
+        var secondReply = test.Agent.Timeline.Entries[^1];
+        Assert.Equal(AgentTimelineEntryKind.Assistant, secondReply.Kind);
+        Assert.Contains("22.5", secondReply.Text);
+        Assert.DoesNotContain(test.Agent.Timeline.Entries, entry => entry.Kind is AgentTimelineEntryKind.Error or AgentTimelineEntryKind.Divider);
     }
 }

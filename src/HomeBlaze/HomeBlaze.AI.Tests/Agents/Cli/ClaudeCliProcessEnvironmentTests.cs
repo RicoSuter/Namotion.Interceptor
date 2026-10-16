@@ -1,5 +1,6 @@
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Cli;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
@@ -23,7 +24,9 @@ public class ClaudeCliProcessEnvironmentTests
         "CLAUDE_CODE_USE_GATEWAY",
         "CLAUDE_CODE_API_BASE_URL",
         "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
-        "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"
+        "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+        "CLAUDE_CODE_HOST_AUTH_ENV_VAR",
+        "CLAUDE_CODE_HOST_CREDS_FILE"
     ];
 
     private const string KeptVariable = "CLAUDE_CODE_OAUTH_TOKEN";
@@ -45,7 +48,7 @@ public class ClaudeCliProcessEnvironmentTests
             Environment.SetEnvironmentVariable(KeptVariable, "subscription-token");
 
             // Act
-            var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None);
+            var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None);
 
             // Assert
             Assert.Equal(0, result.ExitCode);
@@ -66,6 +69,41 @@ public class ClaudeCliProcessEnvironmentTests
         }
     }
 
+    [UnixFact]
+    public async Task WhenTheProcessPointsToAnAnthropicConfigDirectory_ThenTheCliGetsAnEmptyOwnerOnlyOneOfTheAgentInstead()
+    {
+        // Arrange - a profile left in the folder of the agent by an earlier run must not apply.
+        using var cli = FakeClaudeCli.Create("success.jsonl");
+        var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
+        var leftoverDirectory = Directory.CreateDirectory(Path.Combine(cli.Directory, ".anthropic-config", "configs"));
+        await File.WriteAllTextAsync(Path.Combine(leftoverDirectory.FullName, "default.json"), "{}");
+        var previousValue = Environment.GetEnvironmentVariable("ANTHROPIC_CONFIG_DIR");
+        try
+        {
+            Environment.SetEnvironmentVariable("ANTHROPIC_CONFIG_DIR", "/set-by-test");
+
+            // Act
+            var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None);
+
+            // Assert
+            Assert.Equal(0, result.ExitCode);
+            var configDirectory = Assert.Single(
+                cli.LastEnvironment, line => line.StartsWith("ANTHROPIC_CONFIG_DIR=", StringComparison.Ordinal))["ANTHROPIC_CONFIG_DIR=".Length..];
+            Assert.Equal(cli.Directory, Path.GetDirectoryName(configDirectory));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(configDirectory));
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Equal(
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                    File.GetUnixFileMode(configDirectory));
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ANTHROPIC_CONFIG_DIR", previousValue);
+        }
+    }
+
     [Theory]
     [InlineData("ANTHROPIC_API_KEY", StringComparison.Ordinal, true)]
     [InlineData("ANTHROPIC_SOME_FUTURE_PROVIDER", StringComparison.Ordinal, true)]
@@ -73,6 +111,8 @@ public class ClaudeCliProcessEnvironmentTests
     [InlineData("CLAUDE_CODE_API_BASE_URL", StringComparison.Ordinal, true)]
     [InlineData("CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", StringComparison.Ordinal, true)]
     [InlineData("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", StringComparison.Ordinal, true)]
+    [InlineData("CLAUDE_CODE_HOST_AUTH_ENV_VAR", StringComparison.Ordinal, true)]
+    [InlineData("claude_code_host_creds_file", StringComparison.OrdinalIgnoreCase, true)]
     [InlineData("CLAUDE_CODE_API_BASE_URL_SUFFIX", StringComparison.Ordinal, false)]
     [InlineData("claude_code_api_base_url", StringComparison.Ordinal, false)]
     [InlineData("claude_code_api_base_url", StringComparison.OrdinalIgnoreCase, true)]
