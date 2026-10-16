@@ -1,0 +1,21 @@
+episode: valid
+title: Valid fixture
+chapters:
+  - id: one
+    title: One
+    beats:
+      - id: code
+        narration: A class.
+        visual: Code card.
+        components: [CodeCard]
+        code: {file: Sample.cs, region: Greeting}
+      - id: demo
+        narration: The browser.
+        visual: Browser clip.
+        components: [BrowserFrame]
+        demo: home
+      - id: shell
+        hold: 1
+        visual: Terminal.
+        components: [Terminal]
+        terminal: version

@@ -1,0 +1,56 @@
+# Status: awaiting approval
+# The episode id must equal the episode folder name.
+episode: nn-example
+title: Example feature
+chapters:
+  - id: hook
+    title: Example feature
+    beats:
+      - id: hook-title
+        narration: Your coffee machine knows its temperature. Let us make every screen know it too.
+        visual: A chapter card; the title letters rise in over a soft gradient wash.
+        components: [ChapterCard]
+      - id: hook-glimpse
+        narration: By the end, this status page updates live while the boiler heats up.
+        visual: The status page clip plays in a browser window that springs in; the camera eases toward the temperature.
+        components: [BrowserFrame, Camera]
+        demo: status
+  - id: setup
+    title: Setup
+    beats:
+      - id: setup-title
+        narration: First, the setup.
+        hold: 0.6
+        visual: Chapter card with the kicker Chapter 1.
+        components: [ChapterCard]
+      - id: setup-context
+        narration: Everything starts with a context. It holds the features your objects use.
+        visual: The card exits; a code card springs in and the context code types in.
+        components: [CodeCard]
+        code: {file: sample/Program.cs, region: Context}
+      - id: setup-feature
+        narration: One more line adds the feature to every object in this context.
+        visual: The code morphs into the next version; the new line stays bright, the camera leans in.
+        components: [CodeCard, Camera]
+        code: {file: sample/Program.cs, region: ContextWithFeature}
+  - id: live
+    title: Live
+    beats:
+      - id: live-run
+        narration: Start the sample.
+        hold: 1.2
+        visual: A terminal types the command and streams the startup log.
+        components: [Terminal]
+        terminal: run-sample
+      - id: live-flow
+        narration: The simulator heats the boiler, and each change travels to the status page.
+        visual: Flow diagram nodes spring in step by step; particles travel along the edges as the camera follows.
+        components: [FlowDiagram, Camera]
+  - id: recap
+    title: Recap
+    beats:
+      - id: recap-title
+        narration: That is all it takes to keep every screen in sync.
+        hold: 1
+        visual: A closing chapter card in green tones.
+        components: [ChapterCard]

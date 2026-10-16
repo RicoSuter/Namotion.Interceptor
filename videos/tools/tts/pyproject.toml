@@ -1,0 +1,31 @@
+[project]
+name = "video-tts"
+version = "0.1.0"
+requires-python = "==3.11.*"
+dependencies = [
+    # The spaCy model of Kokoro's English phonemizer, locked here instead of downloaded on first use.
+    "en-core-web-sm",
+    "kokoro==0.9.4",
+    "numpy",
+    "soundfile>=0.13",
+]
+
+[project.optional-dependencies]
+chatterbox = [
+    "chatterbox-tts==0.1.7",
+    # perth (Chatterbox's watermarker) imports pkg_resources, which setuptools 81 removed.
+    "setuptools<81",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
