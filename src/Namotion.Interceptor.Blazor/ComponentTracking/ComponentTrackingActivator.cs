@@ -1,8 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection.Metadata;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+
+[assembly: MetadataUpdateHandler(typeof(Namotion.Interceptor.Blazor.ComponentTracking.ComponentTrackingActivator))]
 
 namespace Namotion.Interceptor.Blazor.ComponentTracking;
 
@@ -15,18 +18,24 @@ internal sealed class ComponentTrackingActivator : IComponentActivator
     private static readonly ConcurrentDictionary<Type, ObjectFactory> _factories = new();
 
     private readonly IServiceProvider _serviceProvider;
-    private readonly ComponentTrackingDispatcher _dispatcher;
+    private ComponentTrackingDispatcher? _dispatcher;
 
-    public ComponentTrackingActivator(IServiceProvider serviceProvider, ComponentTrackingDispatcher dispatcher, ILogger<ComponentTrackingActivator> logger)
+    public ComponentTrackingActivator(IServiceProvider serviceProvider, ILogger<ComponentTrackingActivator> logger)
     {
         _serviceProvider = serviceProvider;
-        _dispatcher = dispatcher;
         if (!ComponentBaseAccessors.IsSupported)
         {
             logger.LogError(
                 "Component tracking is not supported by this version of Microsoft.AspNetCore.Components: a private member of ComponentBase changed. Components render as without tracking.");
         }
     }
+
+    /// <summary>
+    /// Gets the dispatcher of the scope, created on the first interactive render, so that a renderer that never renders
+    /// interactively, such as an <c>HtmlRenderer</c> on the root service provider, never resolves the scoped service.
+    /// </summary>
+    internal ComponentTrackingDispatcher Dispatcher =>
+        _dispatcher ??= _serviceProvider.GetRequiredService<ComponentTrackingDispatcher>();
 
     public IComponent CreateInstance([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type componentType)
     {
@@ -35,18 +44,22 @@ internal sealed class ComponentTrackingActivator : IComponentActivator
             throw new ArgumentException($"The type {componentType.FullName} does not implement {nameof(IComponent)}.", nameof(componentType));
         }
 
-        var factory = _factories.GetOrAdd(componentType, static type => ActivatorUtilities.CreateFactory(type, Type.EmptyTypes));
-        var component = (IComponent)factory(_serviceProvider, []);
-        Track(component, _dispatcher);
-        return component;
-    }
+        if (!_factories.TryGetValue(componentType, out var factory))
+        {
+            factory = ActivatorUtilities.CreateFactory(componentType, Type.EmptyTypes);
+            _factories.TryAdd(componentType, factory);
+        }
 
-    internal static void Track(IComponent component, ComponentTrackingDispatcher dispatcher)
-    {
+        var component = (IComponent)factory(_serviceProvider, []);
         if (component is ComponentBase componentBase && ComponentBaseAccessors.IsSupported)
         {
             ref var renderFragment = ref ComponentBaseAccessors.RenderFragmentOf(componentBase);
-            renderFragment = new ComponentReadTracker(componentBase, renderFragment, dispatcher).Render;
+            renderFragment = new ComponentReadTracker(componentBase, renderFragment, this).Render;
         }
+
+        return component;
     }
+
+    /// <summary>Called by hot reload, after which a component type can have other constructors.</summary>
+    public static void ClearCache(Type[]? updatedTypes) => _factories.Clear();
 }

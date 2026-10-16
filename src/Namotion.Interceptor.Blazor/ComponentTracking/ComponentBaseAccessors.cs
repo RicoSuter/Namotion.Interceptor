@@ -46,6 +46,15 @@ internal static class ComponentBaseAccessors
             _ = RendererOf(ref renderHandle);
             var frame = default(RenderTreeFrame);
             _ = AttributeValueOf(ref frame);
+            try
+            {
+                _ = GetComponentState(null!, component);
+            }
+            catch (NullReferenceException)
+            {
+                // The method exists: it was called on the null renderer of the probe.
+            }
+
             return true;
         }
         catch (MissingMemberException)

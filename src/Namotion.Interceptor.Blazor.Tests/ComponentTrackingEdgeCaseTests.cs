@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.Sections;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
+using Microsoft.AspNetCore.Components.Web.HtmlRendering;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 using Namotion.Interceptor.Blazor.ComponentTracking;
@@ -346,6 +347,148 @@ public class ComponentTrackingEdgeCaseTests
         await WaitAsync(() => log.Value("reader") == "Changed");
     }
 
+    [Theory]
+    [InlineData(TestRenderMode.WebAssembly)]
+    [InlineData(TestRenderMode.Server)]
+    public async Task WhenTheOwnerOfSectionContentRendersAgain_ThenTheComponentsInTheSectionKeepTheirState(TestRenderMode mode)
+    {
+        // Arrange: the outlet keys what it renders by the content, so content that changes identity is created anew.
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+        var log = new RenderLog();
+        RenderFragment sectionContent = builder =>
+        {
+            builder.OpenComponent<InitializationCounter>(0);
+            builder.AddComponentParameter(1, nameof(InitializationCounter.Log), log);
+            builder.CloseComponent();
+        };
+
+        await using var renderer = CreateRenderer(mode);
+        await RenderAsync(renderer, Fragments.Both(
+            builder =>
+            {
+                builder.OpenComponent<SectionOutlet>(0);
+                builder.AddComponentParameter(1, nameof(SectionOutlet.SectionName), "head");
+                builder.CloseComponent();
+            },
+            Box.Of(builder =>
+            {
+                builder.AddContent(0, person.FirstName);
+                log.Record("owner", person.FirstName);
+                builder.OpenComponent<SectionContent>(1);
+                builder.AddComponentParameter(2, nameof(SectionContent.SectionName), "head");
+                builder.AddComponentParameter(3, nameof(SectionContent.ChildContent), sectionContent);
+                builder.CloseComponent();
+            })));
+        await WaitAsync(() => log.Renders(InitializationCounter.Key) == 1);
+        await SettleAsync(renderer);
+
+        // Act
+        person.FirstName = "Changed";
+        await WaitAsync(() => log.Value("owner") == "Changed");
+        person.FirstName = "Again";
+        await WaitAsync(() => log.Value("owner") == "Again");
+        await SettleAsync(renderer);
+
+        // Assert
+        Assert.Equal(1, log.Renders(InitializationCounter.Key));
+    }
+
+    [Theory]
+    [InlineData(TestRenderMode.WebAssembly)]
+    [InlineData(TestRenderMode.Server)]
+    public async Task WhenAPropertyIsWrittenOnAnotherThread_ThenTheRenderDoesNotRunInsideTheWrite(TestRenderMode mode)
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+        var log = new RenderLog();
+
+        await using var renderer = CreateRenderer(mode);
+        await RenderAsync(renderer, Fragments.Read("reader", person, log));
+        await SettleAsync(renderer);
+        var before = log.Renders("reader");
+
+        // Act
+        var rendersDuringWrite = -1;
+        var writer = new Thread(() =>
+        {
+            person.FirstName = "Changed";
+            rendersDuringWrite = log.Renders("reader") - before;
+        });
+        writer.Start();
+        writer.Join();
+        await WaitAsync(() => log.Value("reader") == "Changed");
+
+        // Assert
+        Assert.Equal(0, rendersDuringWrite);
+    }
+
+    [Theory]
+    [InlineData(TestRenderMode.WebAssembly)]
+    [InlineData(TestRenderMode.Server)]
+    public async Task WhenCascadedContentIsRenderedByATrackedComponent_ThenThatComponentUpdates(TestRenderMode mode)
+    {
+        // Arrange: a fixed cascading value never notifies its subscribers, so only the component that renders the
+        // content can keep it current.
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+        var log = new RenderLog();
+        var header = Fragments.Inline("cascaded", person, log);
+
+        await using var renderer = CreateRenderer(mode);
+        await RenderAsync(renderer, Box.Of(builder =>
+        {
+            builder.OpenComponent<CascadingValue<RenderFragment>>(0);
+            builder.AddComponentParameter(1, nameof(CascadingValue<RenderFragment>.Value), header);
+            builder.AddComponentParameter(2, nameof(CascadingValue<RenderFragment>.IsFixed), true);
+            builder.AddComponentParameter(3, nameof(CascadingValue<RenderFragment>.ChildContent), (RenderFragment)(child =>
+            {
+                child.OpenComponent<CascadedContentRenderer>(0);
+                child.CloseComponent();
+            }));
+            builder.CloseComponent();
+        }));
+        await WaitAsync(() => log.Value("cascaded") == "Initial");
+        await SettleAsync(renderer);
+
+        // Act
+        person.FirstName = "Changed";
+
+        // Assert
+        await WaitAsync(() => log.Value("cascaded") == "Changed");
+        person.FirstName = "Again";
+        await WaitAsync(() => log.Value("cascaded") == "Again");
+    }
+
+    [Fact]
+    public async Task WhenAStaticRendererUsesTheRootServiceProvider_ThenItRendersWithoutTheScopedDispatcher()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Static" };
+        var log = new RenderLog();
+        await using var services = new ServiceCollection()
+            .AddSingleton<Microsoft.Extensions.Logging.ILoggerFactory>(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
+            .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(Microsoft.Extensions.Logging.Abstractions.NullLogger<>))
+            .AddComponentTracking()
+            .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        await using var htmlRenderer = new HtmlRenderer(services, services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>());
+
+        // Act
+        var html = await htmlRenderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var output = await htmlRenderer.RenderComponentAsync<Host>(ParameterView.FromDictionary(new Dictionary<string, object?>
+            {
+                [nameof(Host.Content)] = Fragments.Read("reader", person, log)
+            }));
+            return output.ToHtmlString();
+        });
+
+        // Assert
+        Assert.Equal("Static", html);
+    }
+
     private static RenderFragment Keyed((Person Person, string Key)[] readers, RenderLog log) => builder =>
     {
         foreach (var (person, key) in readers)
@@ -454,6 +597,26 @@ public sealed class TemplatedList : ComponentBase
             builder.AddContent(0, ItemTemplate?.Invoke(item));
         }
     }
+}
+
+/// <summary>Counts how often it is created, which it is again when the component that renders it disposes it.</summary>
+public sealed class InitializationCounter : ComponentBase
+{
+    public const string Key = "initialized";
+
+    [Parameter]
+    public RenderLog Log { get; set; } = null!;
+
+    protected override void OnInitialized() => Log.Record(Key, null);
+}
+
+/// <summary>Renders the content that a cascading value provides, as a header slot of a layout does.</summary>
+public sealed class CascadedContentRenderer : ComponentBase
+{
+    [CascadingParameter]
+    public RenderFragment? Header { get; set; }
+
+    protected override void BuildRenderTree(RenderTreeBuilder builder) => builder.AddContent(0, Header);
 }
 
 /// <summary>Fails to render while the first name has <see cref="FailingValue"/>.</summary>

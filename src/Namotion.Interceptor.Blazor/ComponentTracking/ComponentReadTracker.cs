@@ -17,7 +17,17 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
 {
     private readonly ComponentBase _component;
     private readonly RenderFragment _renderFragment;
-    private readonly ComponentTrackingDispatcher _dispatcher;
+    private readonly ComponentTrackingActivator _activator;
+    private ComponentTrackingDispatcher? _dispatcher;
+
+    [ThreadStatic]
+    private static ComponentReadTracker? _current;
+
+    // The wrappers of content that this component passes to components that are not a ComponentBase, by the content
+    // they wrap, for this render and the one before. A wrapper is reused while its content is equal, so that a
+    // component that compares or keys by its content, as SectionOutlet does, sees the same delegate.
+    private Dictionary<RenderFragment, RenderFragment>? _contentWrappers;
+    private Dictionary<RenderFragment, RenderFragment>? _previousContentWrappers;
 
     // The properties acquired from the dispatcher, the reads of the render in progress or the last one, and the reads of
     // content that components which are not a ComponentBase rendered for this one after its last render, and before it.
@@ -29,15 +39,35 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
     private bool? _isInteractive;
     private Renderer? _renderer;
 
-    public ComponentReadTracker(ComponentBase component, RenderFragment renderFragment, ComponentTrackingDispatcher dispatcher)
+    public ComponentReadTracker(ComponentBase component, RenderFragment renderFragment, ComponentTrackingActivator activator)
     {
         _component = component;
         _renderFragment = renderFragment;
-        _dispatcher = dispatcher;
+        _activator = activator;
         Render = RenderCore;
     }
 
     public RenderFragment Render { get; }
+
+    /// <summary>Gets the tracker whose component renders on the current thread, if any.</summary>
+    internal static ComponentReadTracker? Current => _current;
+
+    /// <summary>Gets the wrapper of the given content that records into this component, reusing the one of the last render.</summary>
+    internal RenderFragment GetContentWrapper(RenderFragment content)
+    {
+        if (_contentWrappers?.TryGetValue(content, out var wrapper) == true)
+        {
+            return wrapper;
+        }
+
+        if (_previousContentWrappers is null || !_previousContentWrappers.TryGetValue(content, out wrapper))
+        {
+            wrapper = FragmentOwnership.Wrap(this, content);
+        }
+
+        (_contentWrappers ??= [])[content] = wrapper;
+        return wrapper;
+    }
 
     internal bool IsRenderRequested { get; set; }
 
@@ -62,7 +92,7 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
         if ((_acquired ??= []).Add(property))
         {
             // Before the value is read, so that a change written after the read is delivered.
-            _dispatcher.Acquire(property, this);
+            _dispatcher!.Acquire(property, this);
         }
     }
 
@@ -95,7 +125,7 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
         {
             foreach (var property in _acquired)
             {
-                _dispatcher.Release(property, this);
+                _dispatcher!.Release(property, this);
             }
         }
 
@@ -117,15 +147,26 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
             return;
         }
 
-        _dispatcher.OnRenderStarting(this);
+        _dispatcher!.OnRenderStarting(this);
         _renderReads?.Clear();
         (_previousContentReads, _contentReads) = (_contentReads, _previousContentReads);
         _contentReads?.Clear();
+        (_previousContentWrappers, _contentWrappers) = (_contentWrappers, _previousContentWrappers);
+        _contentWrappers?.Clear();
 
         var start = builder.GetFrames().Count;
-        using (ReadPropertyRecorder.RecordOnCurrentThread(this))
+        var previous = _current;
+        _current = this;
+        try
         {
-            _renderFragment(builder);
+            using (ReadPropertyRecorder.RecordOnCurrentThread(this))
+            {
+                _renderFragment(builder);
+            }
+        }
+        finally
+        {
+            _current = previous;
         }
 
         // Not reached by a render that throws, which keeps what it acquired for the output that the renderer keeps.
@@ -155,7 +196,7 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
             foreach (var property in unread)
             {
                 _acquired.Remove(property);
-                _dispatcher.Release(property, this);
+                _dispatcher!.Release(property, this);
             }
         }
     }
@@ -166,8 +207,12 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
         {
             ref var renderHandle = ref ComponentBaseAccessors.RenderHandleOf(_component);
             _isInteractive = renderHandle.RendererInfo.IsInteractive;
-            _renderer = ComponentBaseAccessors.RendererOf(ref renderHandle);
-            _dispatcher.Attach(renderHandle.Dispatcher);
+            if (_isInteractive == true)
+            {
+                _renderer = ComponentBaseAccessors.RendererOf(ref renderHandle);
+                _dispatcher = _activator.Dispatcher;
+                _dispatcher.Attach(renderHandle.Dispatcher);
+            }
         }
 
         return _isInteractive == true;

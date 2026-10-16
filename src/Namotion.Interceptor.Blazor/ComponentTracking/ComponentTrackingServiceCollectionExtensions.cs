@@ -18,7 +18,7 @@ public static class ComponentTrackingServiceCollectionExtensions
         }
 
         services.AddScoped<ComponentTrackingDispatcher>();
-        services.AddScoped<IComponentActivator, ComponentTrackingActivator>();
+        services.AddTransient<IComponentActivator, ComponentTrackingActivator>();
         return services;
     }
 }

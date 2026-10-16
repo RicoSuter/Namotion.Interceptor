@@ -24,7 +24,7 @@ Blazor has no public hook around a component's render, neither in .NET 10 nor on
 - **`ComponentBase._renderFragment`**, the private delegate that `StateHasChanged` passes to `RenderHandle.Render` and that calls `BuildRenderTree`. A comment in `ComponentBase` says that the class invokes `BuildRenderTree` only through it. The field is unchanged since 2019 (.NET Core 3.0) up to the main branch.
 - **`UnsafeAccessor`**, which reads and writes a private member without reflection, works with Native AOT and trimming, and costs nothing at run time.
 
-`ComponentTrackingActivator` creates each component as the default activator does and replaces the `_renderFragment` of every `ComponentBase` with the `Render` method of a `ComponentReadTracker`, which sets itself as the read target of the thread, invokes the original fragment and restores the previous target.
+`ComponentTrackingActivator` (transient, so that a renderer on the root service provider can resolve it) creates each component as the default activator does and replaces the `_renderFragment` of every `ComponentBase` with the `Render` method of a `ComponentReadTracker`, which sets itself as the read target of the thread, invokes the original fragment and restores the previous target.
 
 The private members, all verified once by `ComponentBaseAccessors.IsSupported`:
 
@@ -51,7 +51,7 @@ A tracker acquires a property from the dispatcher on its first read, **before** 
 
 ### Content of Components That Are Not a ComponentBase
 
-`CascadingValue`, `DynamicComponent`, `LayoutView`, `RouteView`, `SectionContent` and `SectionOutlet` implement `IComponent` directly, so their renders are not wrapped. After a tracked render, `FragmentOwnership` walks the frames that the render added and wraps each `RenderFragment` attribute of such a component, so that the content records into the component that created it. That component renders again on a change, which renders the child with the content again: all of these render on every `SetParametersAsync`. The wrapped content walks its own frames as well, so nested cascading values work. A template (`RenderFragment<T>`) passed to such a component is not wrapped, because wrapping a delegate of an unknown type argument needs code generation at run time; the framework has no such component apart from `Router`.
+`CascadingValue`, `DynamicComponent`, `LayoutView`, `RouteView`, `SectionContent` and `SectionOutlet` implement `IComponent` directly, so their renders are not wrapped. After a tracked render, `FragmentOwnership` walks the frames that the render added and wraps each `RenderFragment` attribute of such a component, so that the content records into the component that created it, unless a tracked component renders it, as a component that receives the content as a cascading value does, which then records it itself. A wrapper is reused while the content it wraps is equal, so a component that keys or compares by the content, as `SectionOutlet` keys what it renders, keeps its subtree. That component renders again on a change, which renders the child with the content again: all of these render on every `SetParametersAsync`. The wrapped content walks its own frames as well, so nested cascading values work. A template (`RenderFragment<T>`) passed to such a component is not wrapped, because wrapping a delegate of an unknown type argument needs code generation at run time; the framework has no such component apart from `Router`.
 
 ### Prerendering
 
@@ -59,7 +59,7 @@ While the renderer is not interactive (`RendererInfo.IsInteractive` is false), t
 
 ## Change Dispatcher
 
-`ComponentTrackingDispatcher` is a scoped service: one per circuit, and one per application on WebAssembly. Everything except a pending flag per property, a queue and the drain flag runs on the renderer's dispatcher, so the index needs no locks.
+`ComponentTrackingDispatcher` is a scoped service: one per circuit, and one per application on WebAssembly. The activator resolves it on the first interactive render, so a renderer that only renders statically never creates one. Everything except a pending flag per property, a queue and the drain flag runs on the renderer's dispatcher, so the index needs no locks.
 
 ```
 Render (renderer's dispatcher)            Write (any thread)                Drain (renderer's dispatcher)
@@ -72,7 +72,7 @@ Render (renderer's dispatcher)            Write (any thread)                Drai
 
 - **Index:** `Dictionary<PropertyReference, Entry>`. An entry holds the inline subscription of its property and the trackers that read it, and is itself the `IPropertyChangeObserver`.
 - **Change path:** `OnChange` sets the entry's pending flag and, when it was clear, enqueues the entry and schedules a drain. The queue holds each watched property at most once, so it is bounded by the number of watched properties however fast changes arrive or however long the circuit stalls.
-- **Throttle:** a drain runs at once when the last one is older than `ThrottleMilliseconds`, otherwise at the end of the interval, through one reused timer, in a suppressed execution context so that no async-flow scope of the writer records the renders.
+- **Throttle:** a drain runs as soon as possible when the last one is older than `ThrottleMilliseconds`, otherwise at the end of the interval, through one timer that is created on first use. It is always posted from the thread pool or the timer, never from the writer: the dispatcher of an idle renderer runs a posted action on the calling thread, which would render inside the setter and in the writer's async flow.
 - **One batch per drain:** a render request outside a batch renders at once, one batch per component. The drain therefore renders the first tracker, and the start of its render requests the rest, which then join the batch in progress. A component that is requested twice, or that its parent renders in the same batch, renders once.
 - **Rendering past `ShouldRender`:** a tracked change renders the component as `StateHasChanged` does, without asking `ShouldRender`. A component that renders only when its data changes cannot know that a value its render read has changed, and would otherwise show it stale.
 - **Disposal:** the renderer tells no one when it disposes a component. At most once a second, at a render or a drain, the dispatcher releases the properties of trackers whose component the renderer no longer knows. A render request for a component disposed in between is skipped. When the circuit's scope ends, the dispatcher disposes every subscription.

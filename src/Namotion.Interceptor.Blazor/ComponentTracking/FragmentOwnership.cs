@@ -33,7 +33,7 @@ internal static class FragmentOwnership
             {
                 if (array[attribute].AttributeValue is RenderFragment fragment && fragment.Target is not OwnedFragment)
                 {
-                    ComponentBaseAccessors.AttributeValueOf(ref array[attribute]) = (RenderFragment)new OwnedFragment(owner, fragment).Render;
+                    ComponentBaseAccessors.AttributeValueOf(ref array[attribute]) = owner.GetContentWrapper(fragment);
                 }
             }
         }
@@ -42,12 +42,23 @@ internal static class FragmentOwnership
     private static bool IsTracked(Type componentType) =>
         _isTracked.GetOrAdd(componentType, static type => typeof(ComponentBase).IsAssignableFrom(type));
 
+    /// <summary>Wraps content so that it records into the given component where no tracked component renders it.</summary>
+    internal static RenderFragment Wrap(ComponentReadTracker owner, RenderFragment content) => new OwnedFragment(owner, content).Render;
+
     private sealed class OwnedFragment(ComponentReadTracker owner, RenderFragment fragment) : IReadPropertyRecorderTarget
     {
         public void OnRead(PropertyReference property) => owner.OnContentRead(property);
 
         public void Render(RenderTreeBuilder builder)
         {
+            if (ComponentReadTracker.Current is not null)
+            {
+                // A tracked component renders the content, for example a cascaded fragment or the body of a layout. It
+                // records the reads itself, renders again on their change, and takes ownership of nested content.
+                fragment(builder);
+                return;
+            }
+
             var start = builder.GetFrames().Count;
             using (ReadPropertyRecorder.RecordOnCurrentThread(this))
             {

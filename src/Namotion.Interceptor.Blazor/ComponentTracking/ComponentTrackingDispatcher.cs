@@ -117,7 +117,9 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
         var due = Volatile.Read(ref _lastDrainTimestamp) + _throttleTicks - Stopwatch.GetTimestamp();
         if (due <= 0)
         {
-            PostDrain();
+            // Never inline: the dispatcher of an idle renderer runs a posted action on the calling thread, which here is
+            // the writer of the property, inside its setter and its async flow.
+            ThreadPool.UnsafeQueueUserWorkItem(static dispatcher => dispatcher.PostDrain(), this, preferLocal: false);
         }
         else
         {
@@ -170,22 +172,19 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
             return;
         }
 
-        // The renders must not run in the writer's async flow, whose recorder scopes would record them.
-        using (ExecutionContext.SuppressFlow())
+        // Runs on the thread pool or the timer, without the execution context of the writer.
+        try
         {
-            try
+            _ = dispatcher.InvokeAsync(_drain);
+        }
+        catch (Exception exception)
+        {
+            // A post that fails, for example after the renderer has been disposed with its circuit, must not leave the
+            // flag set, which would keep every later change from scheduling a drain.
+            Volatile.Write(ref _isDrainScheduled, 0);
+            if (exception is not ObjectDisposedException)
             {
-                _ = dispatcher.InvokeAsync(_drain);
-            }
-            catch (Exception exception)
-            {
-                // Runs inside the write of a property, which must not fail because a render cannot be scheduled, for
-                // example after the renderer has been disposed with its circuit.
-                Volatile.Write(ref _isDrainScheduled, 0);
-                if (exception is not ObjectDisposedException)
-                {
-                    _logger.LogError(exception, "Failed to schedule the render of the components whose tracked properties changed.");
-                }
+                _logger.LogError(exception, "Failed to schedule the render of the components whose tracked properties changed.");
             }
         }
     }
