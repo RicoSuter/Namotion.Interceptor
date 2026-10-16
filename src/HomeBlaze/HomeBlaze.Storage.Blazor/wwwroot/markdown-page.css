@@ -101,3 +101,24 @@
     outline-offset: 2px;
     border-radius: 2px;
 }
+
+/* A table that is wider than its place scrolls sideways inside its box (see MarkdownSegmentBuilder) instead of widening
+   the page. The box takes the margins of the table, so the spacing rules above apply to it as to any block. */
+.markdown-content .markdown-table {
+    overflow-x: auto;
+    margin: 1rem 0;
+
+    & > table {
+        margin: 0;
+    }
+}
+
+/* Code in the text wraps where it would leave the page. Code in a table cell, such as a long type name, may wrap at any
+   point, so that the other columns keep a readable width; that rule comes second and wins at the same specificity. */
+.markdown-content :not(pre) > code {
+    overflow-wrap: break-word;
+}
+
+.markdown-content td code {
+    overflow-wrap: anywhere;
+}

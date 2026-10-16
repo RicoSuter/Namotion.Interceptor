@@ -125,3 +125,28 @@ In a cell.
 ::: Node X=20 Y=20 Width=300 Height=120
 Text in a node.
 ::
+
+Text before the code table.
+
+| Widget | Type name | What it does |
+|--------|-----------|--------------|
+| ExpansionPanels | `HomeBlaze.Components.ExpansionPanels` | Page content in panels that open and close |
+| HistoryChart | `HomeBlaze.History.Blazor.HistoryChart` | The recorded history of numbers as lines and of states as bands |
+
+Text after the code table, with code that is wider than a phone: `Href="../Docs/administration/widgets/expansion-panels.md#behaviour-and-limits"`.
+
+| Name | Word |
+|------|------|
+| Unbreakable | Averyveryverylongwordwithoutanyplacetobreakthatisfarwiderthanthescreenofaphone |
+
+:: HomeBlaze.Components.Card Title="Table Card"
+| Name | Value |
+|------|-------|
+| First | One |
+
+A paragraph between two tables.
+
+| Name | Value |
+|------|-------|
+| Second | Two |
+::

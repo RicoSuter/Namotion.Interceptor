@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.RegularExpressions;
+using Markdig.Extensions.Tables;
 using Markdig.Renderers;
 using Markdig.Renderers.Html;
 using Markdig.Renderers.Html.Inlines;
@@ -125,6 +126,11 @@ public static partial class MarkdownSegmentBuilder
             var literalRenderer = new LiteralCodeInlineRenderer(literalCode);
             literalRenderer.TryWriters.AddRange(codeInlineRenderer.TryWriters);
             renderer.ObjectRenderers.Replace<CodeInlineRenderer>(literalRenderer);
+        }
+
+        if (renderer.ObjectRenderers.FindExact<HtmlTableRenderer>() is not null)
+        {
+            renderer.ObjectRenderers.Replace<HtmlTableRenderer>(new ScrollableTableRenderer());
         }
 
         renderer.Render(page.Document);
@@ -282,6 +288,20 @@ public static partial class MarkdownSegmentBuilder
                 base.Write(renderer, block);
                 literalCode.End(renderer, output);
             }
+        }
+    }
+
+    // The box, and not the table, scrolls sideways (see markdown-page.css): a table whose display is changed loses its
+    // table semantics in some browsers.
+    private sealed class ScrollableTableRenderer : HtmlTableRenderer
+    {
+        protected override void Write(HtmlRenderer renderer, Table table)
+        {
+            renderer.EnsureLine();
+            renderer.WriteLine("<div class=\"markdown-table\">");
+            base.Write(renderer, table);
+            renderer.EnsureLine();
+            renderer.WriteLine("</div>");
         }
     }
 

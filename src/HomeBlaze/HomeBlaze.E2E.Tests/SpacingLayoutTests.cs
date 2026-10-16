@@ -364,4 +364,60 @@ public class SpacingLayoutTests
         Assert.Equal(edges[0], edges[2], Tolerance);
         Assert.Equal(edges[0], edges[3], Tolerance);
     }
+
+    [Fact]
+    public async Task WhenATableStandsBetweenParagraphs_ThenItKeepsTheSpacingOfBlocks()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await Assertions.Expect(GetCard(page, "Table Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var gaps = await page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const paragraphs = [...document.querySelectorAll('.markdown-content p')];
+                const paragraph = text => paragraphs.find(p => p.textContent.startsWith(text)).getBoundingClientRect();
+                const box = text => [...document.querySelectorAll('.markdown-table')].find(b => b.textContent.includes(text)).getBoundingClientRect();
+                return [
+                    box('HomeBlaze.Components.ExpansionPanels').top - paragraph('Text before the code table.').bottom,
+                    paragraph('Text after the code table').top - box('HomeBlaze.Components.ExpansionPanels').bottom,
+                    paragraph('A paragraph between two tables.').top - box('First').bottom,
+                    box('Second').top - paragraph('A paragraph between two tables.').bottom
+                ];
+            }
+            """);
+
+        // Assert
+        Assert.All(gaps, gap => Assert.Equal(BlockSpacing, gap, Tolerance));
+    }
+
+    [Fact]
+    public async Task WhenATableIsWiderThanAPhone_ThenItScrollsInsideItsBoxAndThePageDoesNot()
+    {
+        // Arrange
+        var page = await OpenPageAsync(width: 400);
+        await Assertions.Expect(GetCard(page, "Table Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var widths = await page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const box = text => [...document.querySelectorAll('.markdown-table')].find(b => b.textContent.includes(text));
+                const codeTable = box('HomeBlaze.Components.ExpansionPanels');
+                const wideTable = box('Unbreakable');
+                return [
+                    document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                    codeTable.scrollWidth - codeTable.clientWidth,
+                    wideTable.scrollWidth - wideTable.clientWidth
+                ];
+            }
+            """);
+
+        // Assert: code in the text and in a cell wraps, so a table of type names fits, and only a word that cannot wrap makes
+        // its box scroll.
+        Assert.Equal(0, widths[0], Tolerance);
+        Assert.Equal(0, widths[1], Tolerance);
+        Assert.True(widths[2] > 0, $"The box of the table with the long word does not scroll: {widths[2]}");
+    }
 }
