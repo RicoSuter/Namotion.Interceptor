@@ -34,8 +34,8 @@
                would end the circuit. *@
             <div class="d-flex align-center gap-2" style="@GetPageHeadStyle()" data-testid="page-head">
                 <SectionOutlet SectionName="EditActions" />
-                @* Next to the actions, the bar of the editor is too narrow for the time on a phone. *@
-                <div class="@(ShowEditor ? "d-none d-sm-flex" : "d-flex")">
+                @* Next to the actions, the bar of the editor is too narrow for the time on a screen below md. *@
+                <div class="@(ShowEditor ? "d-none d-md-flex" : "d-flex")">
                     <SectionOutlet SectionName="PageHeadInfo" />
                 </div>
                 @if (CanEdit())
@@ -60,7 +60,7 @@
                         </StartContent>
                         <EndContent>
                             <div class="d-flex flex-column" style="height: 100%; width: 100%">
-                                <div style="@EditorBarStyle"></div>
+                                <div style="@EditorBarStyle" data-testid="editor-bar"></div>
                                 <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                                     <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
                                         <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>
@@ -82,7 +82,7 @@
             else if (_editMode == PageEditMode.Source && CanEdit())
             {
                 <div class="d-flex flex-column" style="height: calc(100vh - 80px); width: 100%">
-                    <div style="@EditorBarStyle"></div>
+                    <div style="@EditorBarStyle" data-testid="editor-bar"></div>
                     <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                         <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
                             <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>

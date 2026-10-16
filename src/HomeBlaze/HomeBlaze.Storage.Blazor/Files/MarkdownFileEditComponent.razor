@@ -32,24 +32,33 @@
 }
 else
 {
+    @* The actions stand in the page head at the end of the bar above the editor, which on a screen below md is too narrow
+       for their labels. *@
     <SectionContent SectionName="EditActions">
         <MudButton Variant="Variant.Filled"
                    Color="Color.Primary"
                    Size="Size.Small"
+                   Class="editor-action"
                    StartIcon="@Icons.Material.Filled.Add"
                    OnClick="OnCreateClick"
+                   title="Create"
+                   aria-label="Create"
                    data-testid="create-subject-button">
-            Create
+            <span class="editor-action-label">Create</span>
         </MudButton>
         @if (_activeRegion != null)
         {
+            var editLabel = _activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression";
             <MudButton Variant="Variant.Filled"
                        Color="Color.Primary"
                        Size="Size.Small"
+                       Class="editor-action"
                        StartIcon="@Icons.Material.Filled.Edit"
                        OnClick="OnEditButtonClick"
+                       title="@editLabel"
+                       aria-label="@editLabel"
                        data-testid="@(_activeRegion.Type == DecorationRegionType.SubjectBlock ? "edit-subject-button" : "edit-expression-button")">
-                @(_activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression")
+                <span class="editor-action-label">@editLabel</span>
             </MudButton>
         }
     </SectionContent>
@@ -67,6 +76,31 @@ else
     .monaco-editor-container {
         height: calc(100vh - 200px);
         width: 100%;
+    }
+
+    /* A long block name is cut off, and the title of the button shows it in full. */
+    .editor-action-label {
+        display: inline-block;
+        max-width: 12rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
+    }
+
+    /* Below md (960px) the actions show only their icons. */
+    @@media (max-width: 959.98px) {
+        .editor-action-label {
+            display: none;
+        }
+
+        .editor-action .mud-button-icon-start {
+            margin: 0;
+        }
+
+        .editor-action.mud-button-root {
+            min-width: 0;
+        }
     }
 
     /* Decoration styles for subject blocks and expressions */

@@ -168,19 +168,44 @@ public class PageEditTests
         }
     }
 
-    [Fact]
-    public async Task WhenTheSplitModeIsNarrow_ThenTheCreateButtonCanBeClicked()
+    [Theory]
+    [InlineData(400)]
+    [InlineData(768)]
+    public async Task WhenTheSplitModeIsNarrow_ThenThePageHeadStaysInTheEditorBarAndItsButtonsCanBeClicked(int width)
     {
         // Arrange
-        var page = await OpenWidgetsDemoPageAsync(width: 400);
+        var page = await OpenWidgetsDemoPageAsync(width);
         await SelectEditModeAsync(page, "Split");
-        var createButton = page.GetByTestId("create-subject-button");
-        await Assertions.Expect(createButton).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeAttachedAsync(new() { Timeout = 30000 });
 
-        // Act: not forced, so that the click fails when another element covers the button.
-        await createButton.ClickAsync(new() { Timeout = 10000 });
+        // Act: the cursor in the motor block adds its edit button, which makes the head as wide as it gets. It is placed
+        // through the editor, because a narrow editor wraps the block out of view.
+        await page.EvaluateAsync(
+            """
+            () => {
+                const editor = blazorMonaco.editor.getEditor('markdown-editor');
+                const line = editor.getModel().getLinesContent().findIndex(text => text.startsWith(':: HomeBlaze.Samples.Motor')) + 1;
+                editor.focus();
+                editor.setPosition({ lineNumber: line, column: 4 });
+            }
+            """);
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Edit mymotor" })).ToBeVisibleAsync(new() { Timeout = 30000 });
 
-        // Assert
+        // Assert: the bottoms agree only while the head is placed with the margin that MudSplitter gives its content.
+        var boxes = await page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const head = document.querySelector('[data-testid=page-head]').getBoundingClientRect();
+                const bar = document.querySelector('[data-testid=edit-splitter] [data-testid=editor-bar]').getBoundingClientRect();
+                return [head.left, head.right, head.bottom, bar.left, bar.right, bar.bottom];
+            }
+            """);
+        Assert.True(boxes[0] >= boxes[3] - 0.5, $"The head starts at {boxes[0]} px, left of the editor bar at {boxes[3]} px");
+        Assert.True(boxes[1] <= boxes[4] + 0.5, $"The head ends at {boxes[1]} px, right of the editor bar at {boxes[4]} px");
+        Assert.Equal(boxes[5], boxes[2], 1.0);
+
+        // Not forced, so that the click fails when another element covers the button.
+        await page.GetByTestId("create-subject-button").ClickAsync(new() { Timeout = 10000 });
         await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
