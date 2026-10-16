@@ -19,11 +19,13 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
     private readonly RenderFragment _renderFragment;
     private readonly ComponentTrackingDispatcher _dispatcher;
 
-    // The reads since the start of the last render, and those of the period before it. A property is acquired from
-    // the dispatcher while it is in either set, so that reads of content rendered after this component's own render
-    // (by components that are not a ComponentBase) stay acquired until the next render reads them again.
-    private HashSet<PropertyReference>? _previousReads;
-    private HashSet<PropertyReference>? _currentReads;
+    // The properties acquired from the dispatcher, the reads of the render in progress or the last one, and the reads of
+    // content that components which are not a ComponentBase rendered for this one after its last render, and before it.
+    // Content rendered after the render reads after it, so its reads stay acquired until the render after the next one.
+    private HashSet<PropertyReference>? _acquired;
+    private HashSet<PropertyReference>? _renderReads;
+    private HashSet<PropertyReference>? _contentReads;
+    private HashSet<PropertyReference>? _previousContentReads;
     private bool? _isInteractive;
     private Renderer? _renderer;
 
@@ -44,8 +46,20 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
 
     public void OnRead(PropertyReference property)
     {
-        _currentReads ??= [];
-        if (_currentReads.Add(property) && _previousReads?.Contains(property) != true)
+        (_renderReads ??= []).Add(property);
+        Acquire(property);
+    }
+
+    /// <summary>Records a read of content that this component passed to a component that is not a ComponentBase.</summary>
+    public void OnContentRead(PropertyReference property)
+    {
+        (_contentReads ??= []).Add(property);
+        Acquire(property);
+    }
+
+    private void Acquire(PropertyReference property)
+    {
+        if ((_acquired ??= []).Add(property))
         {
             // Before the value is read, so that a change written after the read is delivered.
             _dispatcher.Acquire(property, this);
@@ -77,10 +91,18 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
 
     public void ReleaseAll()
     {
-        Release(_previousReads, keep: null);
-        Release(_currentReads, keep: null);
-        _previousReads = null;
-        _currentReads = null;
+        if (_acquired is not null)
+        {
+            foreach (var property in _acquired)
+            {
+                _dispatcher.Release(property, this);
+            }
+        }
+
+        _acquired = null;
+        _renderReads = null;
+        _contentReads = null;
+        _previousContentReads = null;
     }
 
     private void RenderCore(RenderTreeBuilder builder)
@@ -96,7 +118,9 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
         }
 
         _dispatcher.OnRenderStarting(this);
-        Rotate();
+        _renderReads?.Clear();
+        (_previousContentReads, _contentReads) = (_contentReads, _previousContentReads);
+        _contentReads?.Clear();
 
         var start = builder.GetFrames().Count;
         using (ReadPropertyRecorder.RecordOnCurrentThread(this))
@@ -104,32 +128,33 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
             _renderFragment(builder);
         }
 
+        // Not reached by a render that throws, which keeps what it acquired for the output that the renderer keeps.
         FragmentOwnership.TakeOwnership(builder, start, this);
+        ReleaseUnread();
     }
 
-    private void Rotate()
+    // Releases what neither this render nor the content rendered after the last one read.
+    private void ReleaseUnread()
     {
-        if (_previousReads is null && _currentReads is null)
+        if (_acquired is null)
         {
             return;
         }
 
-        Release(_previousReads, keep: _currentReads);
-        _previousReads?.Clear();
-        (_previousReads, _currentReads) = (_currentReads, _previousReads);
-    }
-
-    private void Release(HashSet<PropertyReference>? reads, HashSet<PropertyReference>? keep)
-    {
-        if (reads is null)
+        List<PropertyReference>? unread = null;
+        foreach (var property in _acquired)
         {
-            return;
-        }
-
-        foreach (var property in reads)
-        {
-            if (keep?.Contains(property) != true)
+            if (_renderReads?.Contains(property) != true && _previousContentReads?.Contains(property) != true)
             {
+                (unread ??= []).Add(property);
+            }
+        }
+
+        if (unread is not null)
+        {
+            foreach (var property in unread)
+            {
+                _acquired.Remove(property);
                 _dispatcher.Release(property, this);
             }
         }

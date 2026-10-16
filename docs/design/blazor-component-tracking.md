@@ -45,13 +45,13 @@ From .NET 11 on, `IComponentPropertyActivator` (dotnet/aspnetcore#64595) is a se
 
 Content that a parent passes to a child, such as `<MudText>@motor.Speed</MudText>` or a grid's cell template, is invoked in the child's render and recorded by the child. On a change, only the child renders, and its render invokes the same content again.
 
-### Rotating Sets
+### Acquiring and Releasing
 
-A tracker keeps two sets: the reads since the start of its last render (current), and those of the period before (previous). A property is acquired from the dispatcher while it is in either set. At the start of a render, the tracker releases what is in the previous set and not in the current one, and rotates. The first read of a property that the previous set does not hold acquires it **before** the value is read. Reads of content rendered after the component's own render, see below, therefore stay acquired until the next render reads them again, and a render that throws loses no acquired property. The sets are allocated on the first read, so a component that reads no subject costs one tracker and one delegate.
+A tracker acquires a property from the dispatcher on its first read, **before** the value is read, and keeps the reads of its render in progress. At the end of the render it releases what neither this render nor the content rendered for it since its last render read, so a property that a render stops reading no longer renders the component. Reads of content that a component which is not a `ComponentBase` renders for it, see below, happen after its render, so they stay acquired until the render after the next one. A render that throws releases nothing, as the renderer keeps its last output. A component that reads no subject costs one tracker and one delegate, and the sets are allocated on its first read.
 
 ### Content of Components That Are Not a ComponentBase
 
-`CascadingValue`, `DynamicComponent`, `LayoutView`, `RouteView`, `SectionContent` and `SectionOutlet` implement `IComponent` directly, so their renders are not wrapped. After a tracked render, `FragmentOwnership` walks the frames that the render added and wraps each `RenderFragment` attribute of such a component, so that the content records into the component that created it. That component renders again on a change, which renders the child with the content again: all of these render on every `SetParametersAsync`. The wrapped content walks its own frames as well, so nested cascading values work.
+`CascadingValue`, `DynamicComponent`, `LayoutView`, `RouteView`, `SectionContent` and `SectionOutlet` implement `IComponent` directly, so their renders are not wrapped. After a tracked render, `FragmentOwnership` walks the frames that the render added and wraps each `RenderFragment` attribute of such a component, so that the content records into the component that created it. That component renders again on a change, which renders the child with the content again: all of these render on every `SetParametersAsync`. The wrapped content walks its own frames as well, so nested cascading values work. A template (`RenderFragment<T>`) passed to such a component is not wrapped, because wrapping a delegate of an unknown type argument needs code generation at run time; the framework has no such component apart from `Router`.
 
 ### Prerendering
 
@@ -88,7 +88,7 @@ Per-property inline subscriptions deliver every write that commits after `Subscr
 | Component activation | one tracker and one delegate | |
 | Read in a render | one thread-local read, two hash set operations | first read of a property in a circuit: entry and subscription |
 | End of a render | one pass over its frames | content of a non-`ComponentBase` component: one delegate per fragment |
-| Start of a render | one pass over the previous set | released properties: subscription disposal |
+| End of a render | one pass over the acquired properties | released properties: subscription disposal |
 | Change of a watched property | one interlocked exchange, enqueue at most once per drain | |
 | Change of an unwatched property | nothing for the circuit | |
 | Drain | one queue pass and one `InvokeAsync` per interval | |
