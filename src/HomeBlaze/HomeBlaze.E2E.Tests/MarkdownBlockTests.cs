@@ -303,7 +303,8 @@ public class MarkdownBlockTests
         await GetTab(tabs, "Motor").ClickAsync();
 
         // Assert: the temperature of the motor has noise, so every simulation step gives a new value.
-        var panel = tabs.GetByTestId("tab-panel").Nth(1);
+        // Only the panel of the selected tab is rendered.
+        var panel = tabs.GetByTestId("tab-panel");
         await Assertions.Expect(panel).ToContainTextAsync("Test Motor", new() { Timeout = 30000 });
         var firstText = await panel.InnerTextAsync();
         await Assertions.Expect(panel).Not.ToHaveTextAsync(firstText, new() { Timeout = 30000, UseInnerText = true });
@@ -411,7 +412,8 @@ public class MarkdownBlockTests
 
         await GetTab(tabs, "Beta").ClickAsync();
         await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
-        var narrowPanel = (await GetBoxesAsync(tabs.GetByTestId("tab-panel").Nth(1))).Single();
+        // Only the panel of the selected tab is rendered.
+        var narrowPanel = (await GetBoxesAsync(tabs.GetByTestId("tab-panel"))).Single();
 
         // Assert: the tabs stand below each other at a side and next to each other above or below the content.
         Assert.True(isAtASide ? buttons[1].Top >= buttons[0].Bottom : buttons[1].Left >= buttons[0].Right, $"{buttons[0]} {buttons[1]}");

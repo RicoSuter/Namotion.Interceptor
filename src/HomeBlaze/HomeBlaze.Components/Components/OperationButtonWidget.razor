@@ -8,7 +8,7 @@
 
 @if (button is not null)
 {
-    // Read once per render and never kept: the reads are what the tracking scope records.
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = button.Path;
     <OperationButtonView Property="@ValueReader.ResolveProperty(PathResolver, button, path)"
                          Path="@path"

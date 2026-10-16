@@ -4,6 +4,7 @@ using HomeBlaze.Host.TimeZones;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using MudBlazor.Services;
+using Namotion.Interceptor.Blazor.ComponentTracking;
 
 namespace HomeBlaze.Host;
 
@@ -23,6 +24,9 @@ public static class ServiceCollectionExtensions
 
         // MudBlazor services
         services.AddMudServices();
+
+        // Every component renders again when a property that its render read changes.
+        services.AddComponentTracking();
 
         services.AddHttpContextAccessor();
         services.AddScoped<TimeZoneInterop>();

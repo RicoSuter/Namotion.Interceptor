@@ -4,7 +4,7 @@
 @inject ITimeZoneDisplay TimeZone
 
 @{
-    // Read once per render and never kept in a field: the read is what the tracking scope records.
+    // Read once per render and never kept in a field: its render records the read, so that it renders again when it changes.
     // The readings come first because a row without an icon needs to know whether another row has one.
     // Every option of a row is read once, because each read is intercepted and recorded.
     var rows = (Subject as ValueList)?.Values ?? [];

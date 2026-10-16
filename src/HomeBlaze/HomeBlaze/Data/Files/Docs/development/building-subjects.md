@@ -531,7 +531,7 @@ public partial class Server
 - The property attribute name (e.g., `"Start"`) must match the method name without the `Async` suffix
 - The `IsEnabled` property should be `[Derived]` so it automatically updates when dependencies change
 - When `IsEnabled` is `false`, the button is disabled in the UI
-- This uses the `TrackingScope` for automatic re-rendering when the derived property changes
+- The button renders again by itself when the derived property changes, because its render read it
 
 ## Categories
 
@@ -1405,8 +1405,8 @@ A widget component renders a slot with `SubjectComponent` and does not need to k
 Rules for rendering:
 
 - **`null` renders nothing**: `SubjectComponent` with a slot that is `null` renders nothing. Test for `null` only when the widget shows something around the slot, like the divider of the card. A slot block without content gives a value that is not `null` and renders nothing.
-- **Read in the render, keep nothing**: Read slot properties inside the render and do not keep their values in fields. The page renders again when a property changes that was read while it rendered, and a change of the page text assigns new values and new arrays.
-- **Content that renders later is not tracked**: Content inside a child component that renders on its own later is not tracked that way, for example a tab panel that is only created when it is first opened. `TabLayout` keeps all its panels alive for this reason.
+- **Read in the render, keep nothing**: Read slot properties inside the render and do not keep their values in fields. Each component renders again when a property changes that its own render read, wherever and whenever it renders, and a change of the page text assigns new values and new arrays.
+- **Not in lifecycle methods**: A value read in `OnInitialized`, `OnParametersSet`, after an `await` or in an event handler is not tracked, because a change renders the component again without running these methods. Read values that the markup shows in the render.
 - **Identity of typed values**: A typed value whose block has a `#name` stays the same instance when the page text changes, so a component can compare instances to keep its state. `TabLayoutWidget.razor` keeps the selected tab this way and compares it with the tabs of the current render only.
 
 #### A Subject on a Page: Identity and Lifecycle

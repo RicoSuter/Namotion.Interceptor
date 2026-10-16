@@ -319,9 +319,9 @@ public class HistoryChartWidgetTests
         var page = await OpenPageAsync(width);
         var chart = GetChart(page, "Tab speed");
 
-        // The chart has drawn its lines box while its tab is hidden.
-        await Assertions.Expect(chart.GetByTestId("history-chart-lines")).ToBeAttachedAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(chart).ToBeHiddenAsync();
+        // A hidden tab is not rendered, so the chart is first drawn when its tab is shown.
+        await Assertions.Expect(page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Speed" })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(chart).ToHaveCountAsync(0);
 
         // Act
         await page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Speed" }).ClickAsync();

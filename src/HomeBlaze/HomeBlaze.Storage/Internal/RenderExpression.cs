@@ -68,7 +68,7 @@ public partial class RenderExpression : ITitleProvider
     /// <param name="timeZone">The time zone of the viewer for dates, or null for the time zone of the server.</param>
     public string GetText(ITimeZoneDisplay? timeZone) =>
         // The property is read here and not through Value, which would resolve the path a second time.
-        // The tracking scope of a render records this read like it records one of Value.
+        // The render that reads it records this read like it records one of Value.
         GetText(ResolveProperty(), Format, timeZone);
 
     /// <summary>

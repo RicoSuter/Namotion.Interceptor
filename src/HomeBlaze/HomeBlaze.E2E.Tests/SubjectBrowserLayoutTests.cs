@@ -298,7 +298,7 @@ public class SubjectBrowserLayoutTests
 
     [Theory]
     [InlineData(false)]
-    [InlineData(true)] // Developer mode puts an element of the tracking scope around the content of a pane.
+    [InlineData(true)]
     public async Task WhenAPaneHasMoreContentThanFits_ThenTheContentScrollsInsideThePane(bool isDeveloperMode)
     {
         // Arrange
@@ -320,11 +320,6 @@ public class SubjectBrowserLayoutTests
                 }
                 """);
             Assert.True(isBounded, "The content of the root pane should be taller than the pane and end inside it.");
-
-            // The element developer mode adds is the one with the tooltip, and it has to be between pane and content.
-            var wrapperCount = await page.Locator(
-                "#scrollContainer [data-testid='subject-pane'] div[title]:has([data-testid='subject-pane-content'])").CountAsync();
-            Assert.Equal(isDeveloperMode ? 1 : 0, wrapperCount);
         }
         finally
         {

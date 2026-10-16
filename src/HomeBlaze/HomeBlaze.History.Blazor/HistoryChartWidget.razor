@@ -19,9 +19,8 @@
 
 @if (Subject is HistoryChart chart)
 {
-    // The configuration and the current values are read on every render: these reads are what the page tracking scope
-    // records, so a change of a charted value renders the legend again. The legends in the chart view are read in the
-    // same render batch.
+    // The configuration is read on every render, so that the widget renders again when it changes. The current values
+    // in the legends are read by the chart view that renders them, which renders again when one changes.
     Resolve(chart);
 
     <div data-testid="history-chart">
@@ -293,7 +292,7 @@
             refreshInterval == _resolvedRefreshInterval &&
             entries.Length == _resolvedConfiguration.Length;
 
-        // Every entry is read once, also after one differs, so the tracking scope records all of them. While they are
+        // Every entry is read once, also after one differs, so the render records all of them. While they are
         // current nothing is allocated.
         var configurations = isCurrent ? null : new HistoryChartSeriesConfiguration[entries.Length];
         for (var index = 0; index < entries.Length; index++)
@@ -371,9 +370,8 @@
     // Runs on a timer thread under the lock of the throttle (see the remarks of HistoryRefreshThrottle).
     private void OnRefreshDue() => QueueRefresh();
 
-    // Every query starts on the thread pool without an execution context, never inline: after a render the execution
-    // context is the one of the render, which can hold the read recorder of the page tracking scope, and InvokeAsync
-    // runs inline on an idle dispatcher, so from the throttle callback the query would run under the lock of the throttle.
+    // Every query starts on the thread pool without an execution context, never inline: InvokeAsync runs inline on an
+    // idle dispatcher, so from the throttle callback the query would run under the lock of the throttle.
     private void QueueRefresh()
     {
         if (_isDisposed)

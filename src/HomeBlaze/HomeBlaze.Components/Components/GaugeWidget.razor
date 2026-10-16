@@ -10,7 +10,7 @@
 
 @if (gauge is not null)
 {
-    // Read once per render and never kept: the reads are what the tracking scope records.
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = gauge.Path;
     var reading = ValueReader.Read(PathResolver, gauge, path, gauge.Map, TimeZone);
     var state = ValueRangeResolver.GetState(reading.Property, reading.Value, gauge.Minimum, gauge.Maximum);

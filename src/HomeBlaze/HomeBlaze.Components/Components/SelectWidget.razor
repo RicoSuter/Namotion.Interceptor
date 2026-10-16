@@ -8,7 +8,7 @@
 
 @if (select is not null)
 {
-    // Read once per render and never kept: the reads are what the tracking scope records.
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = select.Path;
     var map = ValueReader.ResolveMap(PathResolver, select, select.Map, out var mapError);
     if (mapError is not null)
