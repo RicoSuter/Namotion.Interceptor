@@ -262,7 +262,7 @@ public class HistoryChartWidgetTests
         // Assert
         await Assertions.Expect(error).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Assertions.Expect(error).ToHaveTextAsync(
-            "Unknown aggregation 'Median': use one of TimeWeightedAverage, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count");
+            "Unknown aggregation 'Median': use one of TimeWeightedAverage, Average, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count");
     }
 
     [Fact]

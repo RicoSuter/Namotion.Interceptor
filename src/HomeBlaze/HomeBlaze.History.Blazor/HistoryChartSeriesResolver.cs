@@ -53,6 +53,11 @@ public sealed record HistoryChartSeriesInfo(
 /// </summary>
 public static class HistoryChartSeriesResolver
 {
+    private static readonly string AggregationChoices = string.Join(", ", HistoryAggregations.All.SelectMany(aggregation =>
+        aggregation == HistoryAggregations.TimeWeightedAverage
+            ? new[] { aggregation, PropertyHistoryChartModel.AverageAlias }
+            : new[] { aggregation }));
+
     /// <summary>
     /// Resolves the path of every series relative to the series. Reads the properties of the series, so a
     /// caller in a tracking scope renders again when one changes.
@@ -92,8 +97,8 @@ public static class HistoryChartSeriesResolver
 
     /// <summary>
     /// Gets the widget argument error of a chart, or null: an unknown range, bucket or aggregation, or a recorded
-    /// line whose unit differs from that of the first recorded line. An aggregation that the property or the stores
-    /// do not offer is no error, see <see cref="GetAggregationNote"/>.
+    /// line whose unit differs from that of the first recorded line. A line that counts samples has no unit. An
+    /// aggregation that the property or the stores do not offer is no error, see <see cref="GetAggregationNote"/>.
     /// </summary>
     public static string? FindArgumentError(
         string? range, string? bucket, string? aggregation, IReadOnlyList<HistoryChartSeriesInfo> series)
@@ -104,7 +109,7 @@ public static class HistoryChartSeriesResolver
             return $"Unknown range '{range}': use one of {choices}";
         }
 
-        if (!PropertyHistoryChartModel.TryGetPeriod(bucket, out _))
+        if (!PropertyHistoryChartModel.TryGetPeriod(bucket, out var period))
         {
             var choices = string.Join(", ", PropertyHistoryChartModel.Periods.Select(period => period.ShortName));
             return $"Unknown bucket '{bucket}': use one of {choices}";
@@ -112,7 +117,7 @@ public static class HistoryChartSeriesResolver
 
         if (!string.IsNullOrEmpty(aggregation) && !PropertyHistoryChartModel.TryGetAggregation(aggregation, out _))
         {
-            return $"Unknown aggregation '{aggregation}': use one of {string.Join(", ", HistoryAggregations.All)}";
+            return $"Unknown aggregation '{aggregation}': use one of {AggregationChoices}";
         }
 
         // The chart's own is checked above, so an unknown aggregation of a series is the series' own.
@@ -120,11 +125,12 @@ public static class HistoryChartSeriesResolver
         {
             if (!string.IsNullOrEmpty(entry.Aggregation) && !PropertyHistoryChartModel.TryGetAggregation(entry.Aggregation, out _))
             {
-                return $"Unknown aggregation '{entry.Aggregation}' of series '{entry.Label}': use one of {string.Join(", ", HistoryAggregations.All)}";
+                return $"Unknown aggregation '{entry.Aggregation}' of series '{entry.Label}': use one of {AggregationChoices}";
             }
         }
 
         HistoryChartSeriesInfo? first = null;
+        var firstIsCount = false;
         foreach (var entry in series)
         {
             if (entry.Kind != HistoryChartSeriesKind.Line || !entry.HasHistory)
@@ -132,14 +138,19 @@ public static class HistoryChartSeriesResolver
                 continue;
             }
 
+            // Every line offers Count, so a line that asks for it draws a count of samples, except in a raw query.
+            var isCount = !period.IsRaw &&
+                PropertyHistoryChartModel.TryGetAggregation(entry.Aggregation, out var requested) &&
+                requested == HistoryAggregations.Count;
             if (first is null)
             {
                 first = entry;
+                firstIsCount = isCount;
             }
-            else if (entry.Unit != first.Unit)
+            else if (GetCheckedUnit(entry.Unit, isCount) != GetCheckedUnit(first.Unit, firstIsCount))
             {
-                return $"Series '{entry.Label}' ({DescribeUnit(entry.Unit)}) has another unit than " +
-                    $"'{first.Label}' ({DescribeUnit(first.Unit)}): show it in a second chart";
+                return $"Series '{entry.Label}' ({DescribeUnit(entry.Unit, isCount)}) has another unit than " +
+                    $"'{first.Label}' ({DescribeUnit(first.Unit, firstIsCount)}): show it in a second chart";
             }
         }
 
@@ -236,25 +247,22 @@ public static class HistoryChartSeriesResolver
 
     /// <summary>
     /// Gets the selections the history dialog of a series opens with: the range of the chart, and for a line also its
-    /// bucket and the aggregation it shows when bucketed. A band keeps the state timeline of the dialog.
+    /// bucket and the aggregation it asks for, which the dialog gates like <see cref="ChooseAggregation"/>. A band keeps
+    /// the state timeline of the dialog.
     /// </summary>
     /// <param name="series">The series.</param>
     /// <param name="range">The range of the chart as written.</param>
     /// <param name="bucket">The bucket of the chart as written.</param>
-    /// <param name="storeAggregations">The aggregations the history stores support together.</param>
-    public static PropertyHistoryDialogSettings GetDialogSettings(
-        HistoryChartSeriesInfo series, string? range, string? bucket, IReadOnlySet<string> storeAggregations)
+    public static PropertyHistoryDialogSettings GetDialogSettings(HistoryChartSeriesInfo series, string? range, string? bucket)
     {
         TimeSpan? span = PropertyHistoryChartModel.TryGetRange(range, out var rangeSpan) ? rangeSpan : null;
-        if (series.Kind != HistoryChartSeriesKind.Line || series.Property is not { } property)
+        if (series.Kind != HistoryChartSeriesKind.Line)
         {
             return new PropertyHistoryDialogSettings(span);
         }
 
         PropertyHistoryChartModel.ChartPeriod? period = PropertyHistoryChartModel.TryGetPeriod(bucket, out var chartPeriod) ? chartPeriod : null;
-        var aggregation = ChooseAggregation(
-            property.Type, isBand: false, series.IsCumulative, isRaw: false, storeAggregations, series.Aggregation);
-        return new PropertyHistoryDialogSettings(span, period, aggregation);
+        return new PropertyHistoryDialogSettings(span, period, string.IsNullOrEmpty(series.Aggregation) ? null : series.Aggregation);
     }
 
     // Same order as GetDisplayName, reusing the metadata that Resolve already looked up.
@@ -273,7 +281,10 @@ public static class HistoryChartSeriesResolver
         return !string.IsNullOrEmpty(metadata?.Title) ? metadata.Title : property.Name;
     }
 
-    private static string DescribeUnit(StateUnit unit) => StateUnitExtensions.GetUnitSuffix(unit) ?? "no unit";
+    private static StateUnit GetCheckedUnit(StateUnit unit, bool isCount) => isCount ? StateUnit.Default : unit;
+
+    private static string DescribeUnit(StateUnit unit, bool isCount) =>
+        isCount ? "count" : StateUnitExtensions.GetUnitSuffix(unit) ?? "no unit";
 
     // The path is written by the author of a page, and a malformed one must not take the page down.
     private static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, HistoryChartSeries series, string? path)

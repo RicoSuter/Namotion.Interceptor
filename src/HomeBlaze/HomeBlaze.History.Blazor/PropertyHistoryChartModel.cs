@@ -109,9 +109,21 @@ public static class PropertyHistoryChartModel
         return false;
     }
 
-    /// <summary>Finds an aggregation of <see cref="HistoryAggregations.All"/> by its name, ignoring case.</summary>
+    /// <summary>The name that <see cref="TryGetAggregation"/> takes for <see cref="HistoryAggregations.TimeWeightedAverage"/> as well.</summary>
+    internal const string AverageAlias = "Average";
+
+    /// <summary>
+    /// Finds an aggregation of <see cref="HistoryAggregations.All"/> by its name, or the time-weighted average by
+    /// <see cref="AverageAlias"/>, ignoring case.
+    /// </summary>
     public static bool TryGetAggregation(string? name, out string aggregation)
     {
+        if (string.Equals(name, AverageAlias, StringComparison.OrdinalIgnoreCase))
+        {
+            aggregation = HistoryAggregations.TimeWeightedAverage;
+            return true;
+        }
+
         foreach (var candidate in HistoryAggregations.All)
         {
             if (string.Equals(candidate, name, StringComparison.OrdinalIgnoreCase))

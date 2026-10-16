@@ -167,7 +167,7 @@ namespace HomeBlaze.History.Blazor
         public static string? FindArgumentError(string? range, string? bucket, string? aggregation, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
         public static int FindFirstRecordedLine(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
         public static string? GetAggregationNote(HomeBlaze.History.Blazor.HistoryChartSeriesInfo series, bool isRaw, string chosen) { }
-        public static HomeBlaze.History.Blazor.PropertyHistoryDialogSettings GetDialogSettings(HomeBlaze.History.Blazor.HistoryChartSeriesInfo series, string? range, string? bucket, System.Collections.Generic.IReadOnlySet<string> storeAggregations) { }
+        public static HomeBlaze.History.Blazor.PropertyHistoryDialogSettings GetDialogSettings(HomeBlaze.History.Blazor.HistoryChartSeriesInfo series, string? range, string? bucket) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> Resolve(HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.History.Blazor.HistoryChart chart) { }
     }
     public readonly struct HistoryChartValueAxis : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartValueAxis>

@@ -144,7 +144,7 @@ public class HistoryChartSeriesResolverTests
 
         // Assert
         Assert.Equal(
-            "Unknown aggregation 'Median': use one of TimeWeightedAverage, SampleAverage, Minimum, Maximum, Sum, " +
+            "Unknown aggregation 'Median': use one of TimeWeightedAverage, Average, SampleAverage, Minimum, Maximum, Sum, " +
             "StandardDeviation, Last, First, Count",
             error);
     }
@@ -166,10 +166,48 @@ public class HistoryChartSeriesResolverTests
     [InlineData("")]
     [InlineData("maximum")]
     [InlineData("TIMEWEIGHTEDAVERAGE")]
+    [InlineData("average")]
     public void WhenTheAggregationIsEmptyOrKnownInAnyCase_ThenThereIsNoError(string? aggregation)
     {
         // Act
         var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", aggregation, [Line("Pump", aggregation: aggregation)]);
+
+        // Assert
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void WhenALineCountsSamplesNextToALineWithAUnit_ThenTheErrorCallsItACount()
+    {
+        // Arrange
+        HistoryChartSeriesInfo[] series =
+        [
+            Line("Temperature", StateUnit.DegreeCelsius),
+            Line("Samples", StateUnit.DegreeCelsius, aggregation: "count")
+        ];
+
+        // Act
+        var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", null, series);
+
+        // Assert
+        Assert.Equal("Series 'Samples' (count) has another unit than 'Temperature' (°C): show it in a second chart", error);
+    }
+
+    [Theory]
+    [InlineData("Auto", StateUnit.Default)]
+    [InlineData("Raw", StateUnit.DegreeCelsius)]
+    public void WhenALineCountsSamplesInBucketsOrIsQueriedRaw_ThenItSharesTheChartWithLinesOfTheMatchingUnit(
+        string bucket, StateUnit otherUnit)
+    {
+        // Arrange
+        HistoryChartSeriesInfo[] series =
+        [
+            Line("Samples", StateUnit.DegreeCelsius, aggregation: HistoryAggregations.Count),
+            Line("Other", otherUnit)
+        ];
+
+        // Act
+        var error = HistoryChartSeriesResolver.FindArgumentError("24h", bucket, null, series);
 
         // Assert
         Assert.Null(error);
@@ -278,19 +316,23 @@ public class HistoryChartSeriesResolverTests
         Assert.Equal("Sum not available, shows Average", note);
     }
 
-    [Fact]
-    public void WhenTheRequestedAggregationIsShownOrDoesNotApply_ThenThereIsNoNote()
+    [Theory]
+    [InlineData(HistoryChartSeriesKind.Line, "maximum", false, HistoryAggregations.Maximum)]
+    [InlineData(HistoryChartSeriesKind.Line, "average", false, HistoryAggregations.TimeWeightedAverage)]
+    [InlineData(HistoryChartSeriesKind.Line, "maximum", true, HistoryAggregations.Last)]
+    [InlineData(HistoryChartSeriesKind.Band, "maximum", false, HistoryAggregations.Last)]
+    [InlineData(HistoryChartSeriesKind.Line, null, false, HistoryAggregations.TimeWeightedAverage)]
+    public void WhenTheRequestedAggregationIsShownOrDoesNotApply_ThenThereIsNoNote(
+        HistoryChartSeriesKind kind, string? requested, bool isRaw, string chosen)
     {
         // Arrange
-        var line = Line("Pump", aggregation: "maximum");
-        var band = new HistoryChartSeriesInfo(
-            "Status", null, null, HistoryChartSeriesKind.Band, StateUnit.Default, true, false, HistoryAggregations.Maximum);
+        var series = new HistoryChartSeriesInfo("Pump", null, null, kind, StateUnit.Default, true, false, requested);
 
-        // Act & Assert
-        Assert.Null(HistoryChartSeriesResolver.GetAggregationNote(line, isRaw: false, HistoryAggregations.Maximum));
-        Assert.Null(HistoryChartSeriesResolver.GetAggregationNote(line, isRaw: true, HistoryAggregations.Last));
-        Assert.Null(HistoryChartSeriesResolver.GetAggregationNote(band, isRaw: false, HistoryAggregations.Last));
-        Assert.Null(HistoryChartSeriesResolver.GetAggregationNote(Line("Fan"), isRaw: false, HistoryAggregations.TimeWeightedAverage));
+        // Act
+        var note = HistoryChartSeriesResolver.GetAggregationNote(series, isRaw, chosen);
+
+        // Assert
+        Assert.Null(note);
     }
 
     [Fact]
@@ -318,27 +360,26 @@ public class HistoryChartSeriesResolverTests
         var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart!)[0];
 
         // Act
-        var settings = HistoryChartSeriesResolver.GetDialogSettings(series, "6h", "10m", AllAggregations);
+        var settings = HistoryChartSeriesResolver.GetDialogSettings(series, "6h", "10m");
 
         // Assert
         PropertyHistoryChartModel.TryGetPeriod("10m", out var period);
-        Assert.Equal(new PropertyHistoryDialogSettings(TimeSpan.FromHours(6), period, HistoryAggregations.Maximum), settings);
+        Assert.Equal(new PropertyHistoryDialogSettings(TimeSpan.FromHours(6), period, "maximum"), settings);
     }
 
     [Fact]
-    public void WhenTheDialogSettingsOfALineWithAnUnofferedAggregationAreBuilt_ThenTheyHoldTheAggregationTheLineFallsBackTo()
+    public void WhenTheDialogSettingsOfALineWithoutAnAggregationAreBuilt_ThenTheDialogChoosesItsDefault()
     {
         // Arrange
-        var (resolver, root) = CreateGraph(new HistoryChartSeries { Path = "/Energy", Aggregation = "Sum" });
+        var (resolver, root) = CreateGraph(new HistoryChartSeries { Path = "/Temperature", Aggregation = "" });
         var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart!)[0];
 
         // Act
-        var settings = HistoryChartSeriesResolver.GetDialogSettings(series, "24h", "Raw", AllAggregations);
+        var settings = HistoryChartSeriesResolver.GetDialogSettings(series, "24h", "Raw");
 
         // Assert
-        Assert.True(series.IsCumulative);
         Assert.True(settings.Period!.Value.IsRaw);
-        Assert.Equal(HistoryAggregations.Last, settings.Aggregation);
+        Assert.Null(settings.Aggregation);
     }
 
     [Fact]
@@ -349,7 +390,7 @@ public class HistoryChartSeriesResolverTests
         var series = HistoryChartSeriesResolver.Resolve(resolver, root.Chart!)[0];
 
         // Act
-        var settings = HistoryChartSeriesResolver.GetDialogSettings(series, "7d", "10m", AllAggregations);
+        var settings = HistoryChartSeriesResolver.GetDialogSettings(series, "7d", "10m");
 
         // Assert
         Assert.Equal(new PropertyHistoryDialogSettings(TimeSpan.FromDays(7)), settings);

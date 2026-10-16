@@ -113,9 +113,6 @@
     // Per series of the shown data, what the legend says about a line that shows another aggregation than it asks for.
     private string?[] _aggregationNotes = [];
 
-    // The aggregations the history stores support together, found by the last query.
-    private IReadOnlySet<string> _storeAggregations = new HashSet<string>();
-
     // One fragment per band of the shown data, built with it, so a render allocates none.
     private RenderFragment[] _bandHeaders = [];
 
@@ -243,7 +240,7 @@
             return;
         }
 
-        var settings = HistoryChartSeriesResolver.GetDialogSettings(entry, _resolvedRange, _resolvedBucket, _storeAggregations);
+        var settings = HistoryChartSeriesResolver.GetDialogSettings(entry, _resolvedRange, _resolvedBucket);
         await PropertyHistoryDialog.ShowAsync(DialogService, registry, PathResolver, property, entry.Label, settings);
     }
 
@@ -422,8 +419,6 @@
             {
                 storeAggregations.UnionWith(store.SupportedAggregations);
             }
-
-            _storeAggregations = storeAggregations;
 
             var series = _series;
             var requests = new List<HistoryChartSeriesRequest>(series.Count);

@@ -6,6 +6,8 @@ namespace HomeBlaze.History.Blazor.Tests;
 
 public class PropertyHistoryChartModelTests
 {
+    private static readonly IReadOnlyList<string> NumberAggregations = HistoryAggregations.All;
+
     [Theory]
     [InlineData(1, 0, 0, 30)]    // 1h range / 200 = 18s -> 30s
     [InlineData(168, 1, 0, 0)]   // 7d range / 200 = ~50m -> 1h
@@ -646,6 +648,7 @@ public class PropertyHistoryChartModelTests
     [InlineData("Maximum", HistoryAggregations.Maximum)]
     [InlineData("timeweightedaverage", HistoryAggregations.TimeWeightedAverage)]
     [InlineData("STANDARDDEVIATION", HistoryAggregations.StandardDeviation)]
+    [InlineData("average", HistoryAggregations.TimeWeightedAverage)]
     public void WhenAnAggregationNameIsKnownInAnyCase_ThenTryGetAggregationReturnsItsIdentifier(string name, string expected)
     {
         // Act
@@ -660,7 +663,6 @@ public class PropertyHistoryChartModelTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("Median")]
-    [InlineData("Average")]
     public void WhenAnAggregationNameIsUnknown_ThenTryGetAggregationFails(string? name)
     {
         // Act
@@ -669,8 +671,6 @@ public class PropertyHistoryChartModelTests
         // Assert
         Assert.False(found);
     }
-
-    private static readonly IReadOnlyList<string> NumberAggregations = HistoryAggregations.All;
 
     [Fact]
     public void WhenTheDialogOpensWithoutSettings_ThenItShowsTheLastHourAutoAndTheFirstOfferedAggregation()
@@ -744,10 +744,11 @@ public class PropertyHistoryChartModelTests
     }
 
     [Fact]
-    public void WhenTheDialogOpensWithAnAggregationItDoesNotOffer_ThenItSelectsItsDefault()
+    public void WhenTheDialogOfACounterOpensWithSum_ThenItSelectsItsDefault()
     {
         // Arrange
-        string[] offered = [HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count];
+        var offered = PropertyHistoryChartModel.GateAggregations(
+            HistoryColumns.GetValueColumnFor(typeof(double)), isCumulative: true, new HashSet<string>(HistoryAggregations.All));
         var settings = new PropertyHistoryDialogSettings(Aggregation: HistoryAggregations.Sum);
 
         // Act
