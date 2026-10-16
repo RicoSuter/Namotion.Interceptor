@@ -12,16 +12,16 @@ A ring that shows where a number stands between a minimum and a maximum, with th
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Number) | None | The path of the property whose value the gauge shows. The picker offers numbers only |
-| `Label` | Text | The title of the property, then its name | The text below the ring. Without it the gauge shows the title that the property declares, the name of the property when it declares none, and the path when the path leads nowhere |
-| `Minimum` | Number with a fraction | From the property | The value at which the ring is empty |
-| `Maximum` | Number with a fraction | From the property | The value at which the ring is full |
+| `Path` | Path (Number) | None | The [path](basics.md#paths) of the property whose value the gauge shows |
+| `Label` | Text | From the property, see [Labels](basics.md#labels) | The text below the ring |
+| `Minimum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the ring is empty |
+| `Maximum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the ring is full |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the text in the centre and the colour of the ring, see [ValueMap](value-map.md) |
 | `Size` | `Small`, `Medium` or `Large` | `Medium` | The size of the ring: 72, 112 or 160 pixels |
 
 ## Slots
 
-The gauge has no slots.
+A `Gauge` has no slots.
 
 ## Samples
 
@@ -102,16 +102,15 @@ A gauge has a fixed size and stands at the start of its column, so a row of gaug
 
 ## Behaviour and Limits
 
-- **The range**: `Minimum` and `Maximum` come first. Without them the gauge takes the `Minimum` and `Maximum` attributes of the property when they are numbers, and for a property with the unit percent the range 0 to 1. A property without any of them shows the error "Needs a range: set Minimum and Maximum" in place of the gauge, and a `Maximum` that is not above `Minimum` shows "Maximum must be above Minimum" with both ends, see [Value Widget Errors](../page-errors.md#value-widget-errors). The same rules hold for [Slider](slider.md).
+- **The range**: [Ranges](basics.md#ranges) has where the ends of the range come from and the messages for a missing or an empty range.
 - **Outside the range**: A value below the minimum gives an empty ring and a value above the maximum a full one. The centre still shows the value.
-- **A missing value**: A value that is not set and a path that leads nowhere show a dash in the centre and an empty ring, with the path as tooltip, as every value widget does, see [Basics](basics.md).
+- **A missing value**: The dash of a [missing value](basics.md#missing-values) stands in the centre, and the ring is empty.
 - **The text in the centre**: The formatted value with its unit, or the text of the matched case of the map.
 - **The colour**: The colour of the matched case of the map, otherwise the primary colour of the theme.
 - **Accessibility**: The gauge is a meter for screen readers, with the label as its name, the value kept inside the range and the range as its numbers, and the text in the centre as its spoken value. A gauge without a value is read as a group with its label.
-- **Live**: The ring and the text change on the page when the property changes.
 
 ## Related
 
 - [Basics](basics.md) - Paths, value widgets, missing values and colours
-- [Overview](overview.md) - All widgets
+- [Overview](overview.md) - All widgets by group
 - [Slider](slider.md) - Sets a number with the same range rules

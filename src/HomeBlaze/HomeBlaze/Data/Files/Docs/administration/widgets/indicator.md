@@ -12,7 +12,7 @@ Shows a state as a coloured chip, or as an icon alone. Type name: `HomeBlaze.Com
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value) | None | The [path](basics.md#value-widgets) of the property whose value the indicator shows |
+| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the indicator shows |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the indicator its text, colour and icon, see [ValueMap](value-map.md) |
 | `Icon` | Text | None | The [icon](basics.md#icons) |
 | `Kind` | `Chip` or `Icon` | `Chip` | `Chip` is a chip with the icon and the text. `Icon` is the icon alone, with the text as its tooltip |
@@ -80,13 +80,13 @@ The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
 - **Text, colour and icon**: They come from the matching case of the map, see [ValueMap](value-map.md). `Icon` is the icon that stays when no case gives one.
 - **Without a map**: A boolean that is true has the colour `Primary`, and every other value has `Default`. With a map the colour comes from the case alone.
 - **No icon**: A chip without an icon shows its text only. An indicator of the kind `Icon` without an icon shows a plain circle.
-- **A missing value**: The chip shows a dash. The icon form shows its icon in the default colour. Both have the path as tooltip, see [Value Widgets](basics.md#value-widgets). A chip with a value has no tooltip.
-- **A small distance to its surroundings**: An indicator keeps a distance of 4 pixels to what stands next to it, so that several of them in a row do not touch.
+- **A missing value**: The chip shows a dash, see [Missing Values](basics.md#missing-values). The icon form shows its icon in the default colour, with the path as tooltip. A chip with a value has no tooltip.
+- **A small distance to its surroundings**: An indicator keeps 4 pixels to what stands next to it, the one exception of [Spacing](basics.md#spacing).
 
 ## Related
 
 - [Basics](basics.md) - Type names, paths, value widgets, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [ValueMap](value-map.md) - The text, colour and icon of a value
 - [Card](card.md) - A titled box with a header corner for an indicator
 - [Gauge](gauge.md) - One value in a ring between a minimum and a maximum

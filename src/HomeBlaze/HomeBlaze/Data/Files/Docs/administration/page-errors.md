@@ -92,10 +92,12 @@ A map that cannot be found, or an argument that a widget cannot use, does not ta
 | `Cannot resolve map: motorstat` | The `Map` of a `ValueList` row, a `ValueTile`, an `Indicator`, a `Select`, a `Control`, a `Gauge` or a `Column` of a `SubjectTable` leads to no subject, or to a subject that is no `ValueMap`. The message shows the map as written | Check the name or the path in `Map`. The name is that of the block of the map, and a map on another page is reached through that page, see [ValueMap](widgets/value-map.md) |
 | `Set both On and Off, or neither` | A `Switch` has only one of `On` and `Off` | Set both, so that the switch invokes an operation per state, or remove both, so that it writes its property, see [Switch](widgets/switch.md) |
 | `On needs an operation without input: pump/SetTargetSpeed` | `On` of a `Switch` leads to an operation with a parameter that needs input. `Off` gives the same message with its own name. The message shows the path as written | Use an operation whose parameters need no input, see [Switch](widgets/switch.md) |
-| `Needs a range: set Minimum and Maximum` | A `Slider` or a `Gauge` sets no `Minimum` and `Maximum`, and its property has neither the attributes `Minimum` and `Maximum` nor the unit percent | Set `Minimum` and `Maximum` on the block, see [Slider](widgets/slider.md) and [Gauge](widgets/gauge.md) |
-| `Maximum must be above Minimum: 0.8 to 0.2` | The range of a `Slider` or a `Gauge` is empty or reversed, from its arguments or from the attributes of its property. The message shows the minimum and the maximum it found | Set a `Maximum` above the `Minimum` |
+| `Needs a range: set Minimum and Maximum` | A `Slider` or a `Gauge` finds no end of its range, neither in its arguments nor on its property, see [Ranges](widgets/basics.md#ranges) | Set `Minimum` and `Maximum` on the block |
+| `Maximum must be above Minimum: 0.8 to 0.2` | The range of a `Slider` or a `Gauge` is empty or reversed, from its arguments or from the attributes of its property, see [Ranges](widgets/basics.md#ranges). The message shows the minimum and the maximum it found | Set a `Maximum` above the `Minimum` |
 | `Step must be above 0: 0` | The `Step` of a `Slider` is 0 or less. The message shows the step as written | Set a step above 0, or remove `Step` for the default |
 | `Step must be a whole number for a whole number property: 0.5` | A `Slider` of a property that holds whole numbers has a `Step` with a fraction | Use a whole number, or remove `Step` for the default of 1 |
+| `Height must be above 0: 0` | The `Height` of a `Card` is 0 or less. The message shows the height as written | Set a height above 0, or remove `Height` for a card as high as its content, see [Card](widgets/card.md) |
+| `AspectRatio must look like 4:3: wide` | The `AspectRatio` of a `Card` is not two numbers above 0 with a colon between them. The message shows the value as written | Write the width and the height as `W:H`, for example `4:3` |
 | `Cannot select a value of the flags enum MotorFeatures` | The property of a `Select` holds an enum whose values combine as flags. The message shows the name of the enum | Show the value with a value widget instead, see [Select](widgets/select.md) |
 | `Needs a Source: a folder or a property that holds subjects` | A `SubjectTable` has no `Source` | Set `Source` to a folder, a page or a property that holds subjects, see [SubjectTable](widgets/subject-table.md) |
 | `Cannot list subjects of: ../Motors` | The `Source` of a `SubjectTable` leads nowhere, to a subject that is no folder or page, or to a property that holds no subjects. The message shows the source as written | Check the path in `Source`. A path to a folder or a page lists what it holds, a path to a property lists its subjects |
@@ -127,10 +129,10 @@ These notices are no error boxes. They come from a widget while it is shown:
 
 | Notice | Cause |
 |--------|-------|
-| Cannot resolve path | The `Path` of a `Widget` block leads to no subject |
-| Cannot show path | The `Path` of a `Widget` block leads to the widget itself or to a block that contains it |
-| No Widget component for | The type of the block, or of the subject that a `Widget` shows, has no widget |
-| A dash in place of a value | The `Path` of a `ValueList` row, a `ValueTile`, an `Indicator` or a `Progress` leads nowhere, or the value is not set. The path is the tooltip of the dash, see [Value Widgets](widgets/basics.md#value-widgets). A `Progress` shows it also for a value that is no number |
+| `Cannot resolve path` | The `Path` of a `Widget` block leads to no subject |
+| `Cannot show path` | The `Path` of a `Widget` block leads to the widget itself or to a block that contains it |
+| `No Widget component for` | The type of the block, or of the subject that a `Widget` shows, has no widget |
+| A dash in place of a value | The `Path` of a `ValueList` row, a `ValueTile`, an `Indicator`, a `Progress` or a `Gauge` leads nowhere, the `Property` of a `SubjectTable` column is not a property of the row, or the value is not set. The path is the tooltip of the dash, see [Missing Values](widgets/basics.md#missing-values). A `Progress` shows it also for a value that is no number |
 
 ---
 

@@ -605,7 +605,7 @@ This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for 
 
 ### Range Attributes
 
-`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range. A widget that shows or sets a number within a range uses its own `Minimum` and `Maximum` arguments first, then these attributes when their value is a number, and the range 0 to 1 for a property with `StateUnit.Percent`. Unlike the other names of `KnownAttributes`, they have no `HB:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
+`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range, declared as above. A widget that shows or sets a number within a range reads them when the page sets no range of its own, and only when their value is a number; [Ranges](../administration/widgets/basics.md#ranges) has the order in which the widget looks for each end, including the range 0 to 1 of a property with `StateUnit.Percent`. Unlike the other names of `KnownAttributes`, they have no `HB:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
 
 ## Complete Example: Motor
 

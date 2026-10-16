@@ -58,6 +58,6 @@ The fan is {{ ../Fan/Status }}. Check it when it stays below its target of {{ ..
 ## Related
 
 - [Basics](basics.md) - Type names, paths, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [Card](card.md) - A titled box around page content
 - [Indicator](indicator.md) - A state that changes, as a chip or an icon

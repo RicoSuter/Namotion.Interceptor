@@ -129,25 +129,18 @@ The fan is {{ ../Fan/Status }} and runs at {{ ../Fan/CurrentSpeed }} of {{ ../Fa
 
 ## Behaviour and Limits
 
-How `MinWidth` works and how to choose it:
-
 - **A number of pixels**: `MinWidth` is a plain number, without a unit. The layout puts as many columns into a row as fit with at least that width each, and then makes all columns equally wide to fill the row. There are 16 pixels between two cells.
 - **Smaller means more columns**: With `MinWidth=120` many cells fit into one row. With `MinWidth=600` two cells stand next to each other only on a wide screen.
 - **At least as wide as the widest widget**: A cell can get as narrow as `MinWidth`, and a widget that needs more room then paints over the next cell. The sample motor widget needs 280 pixels, and 304 pixels inside a card, so 320 fits it.
 - **Narrow screens**: On a screen that is narrower than `MinWidth` there is one column, as wide as the screen.
 - **Cards and gauges**: [Spacing](basics.md#spacing) has the height of the cards of a row, and [Gauge Rows](gauge.md#gauge-rows) the `MinWidth` for a row of gauges.
-
-Limits:
-
-- All cells have the same width. A cell cannot span two columns.
-- A row is not stretched: with fewer cells than columns fit, the rest of the row stays empty.
-- An `Item` holds content only. It takes no arguments and no `#name`.
-- A `FlowLayout` has no default slot. Content outside of an `Item` block is an error.
+- **Equal widths**: All cells have the same width. A cell cannot span two columns.
+- **No stretched rows**: With fewer cells than columns fit, the rest of the row stays empty.
 
 ## Related
 
 - [Basics](basics.md) - Type names, paths, spacing, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [Card](card.md) - A titled box, the usual content of a cell
 - [GridLayout](grid-layout.md) - Fixed rows and columns, with cells that span several
 - [Responsive](responsive.md) - Content that is shown only at some widths of the screen

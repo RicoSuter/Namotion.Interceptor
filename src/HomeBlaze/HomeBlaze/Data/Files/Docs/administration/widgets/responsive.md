@@ -84,5 +84,5 @@ A table of the sample motors on desktops and a list of their speeds on smaller s
 ## Related
 
 - [Basics](basics.md) - Type names, paths and the rules that all widgets share
-- [Overview](overview.md) - All widgets
+- [Overview](overview.md) - All widgets by group
 - [SubjectTable](subject-table.md) - The table of the second sample

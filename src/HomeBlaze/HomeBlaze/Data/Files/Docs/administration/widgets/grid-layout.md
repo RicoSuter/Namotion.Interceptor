@@ -19,14 +19,14 @@ A grid with a fixed number of rows and columns. Type name: `HomeBlaze.Components
 
 | Slot | Blocks | Holds |
 |------|--------|-------|
-| `Cell` | Any number | One cell per block. A `Cell` block creates a subject, so it takes arguments and an optional `#name`. Its content is what the cell shows: any page content |
+| `Cell` | Any number | One cell per block: any page content, which the cell shows |
 
 The arguments of a `Cell` block:
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Row` | Whole number | Not set | The row of the cell, counted from 0. Without it the grid places the cell itself |
-| `Column` | Whole number | Not set | The column of the cell, counted from 0. Without it the grid places the cell itself |
+| `Row` | Whole number | Automatic | The row of the cell, counted from 0. Without it the grid places the cell itself |
+| `Column` | Whole number | Automatic | The column of the cell, counted from 0. Without it the grid places the cell itself |
 | `RowSpan` | Whole number | `1` | How many rows the cell covers |
 | `ColumnSpan` | Whole number | `1` | How many columns the cell covers |
 
@@ -57,16 +57,15 @@ The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/Targ
 
 ## Behaviour and Limits
 
-- All rows have the same height and all columns the same width, and the grid is at least 400 pixels high.
-- A [Card](card.md) in a cell fills the cell and ignores its `AspectRatio`, unless it has a `Height` of its own. Its body scrolls when its content does not fit.
-- The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
-- Give a cell a `#name` to keep it and everything in it when cells are added or removed, see [What an Edit of the Page Keeps](../pages.md#what-an-edit-of-the-page-keeps).
-- In a configuration file of its own, a `GridLayout` has its cells as the list `cells`, each with one subject as `child`. On a page they are always `Cell` blocks as above, and the [`json` block](../pages.md#the-json-block) cannot set them.
-- While the page is in edit mode, each cell has buttons to edit and remove it, which show while the grid or a widget in one of its cells is selected. A click on a cell without a widget, or on a free place, selects the grid, and once the grid itself is selected, a click on the plus in a free place adds a cell there, see [Editing in the Page Editor](../pages.md#editing-in-the-page-editor).
+- **Equal rows and columns**: All rows have the same height and all columns the same width, and the grid is at least 400 pixels high.
+- **Cards**: A [Card](card.md) in a cell fills the cell and ignores its `AspectRatio`, unless it has a `Height` of its own. Its body scrolls when its content does not fit.
+- **Fixed columns**: The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
+- **Names**: Give a cell a `#name` to keep it and everything in it when cells are added or removed, see [What an Edit of the Page Keeps](../pages.md#what-an-edit-of-the-page-keeps).
+- **Edit mode**: While the page is in edit mode, each cell has buttons to edit and remove it, which show while the grid or a widget in one of its cells is selected. A click on a cell without a widget, or on a free place, selects the grid, and once the grid itself is selected, a click on the plus in a free place adds a cell there, see [Editing in the Page Editor](../pages.md#editing-in-the-page-editor).
 
 ## Related
 
 - [Basics](basics.md) - Type names, paths, spacing, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [FlowLayout](flow-layout.md) - Cells that wrap to the width of the screen
 - [CanvasLayout](canvas-layout.md) - Content at any position in pixels

@@ -12,8 +12,8 @@ A small box with a label and one large value. Type name: `HomeBlaze.Components.V
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value) | None | The [path](basics.md#value-widgets) of the property whose value the tile shows |
-| `Label` | Text | The title of the property | The small text above the value. Without it the tile shows the title that the property declares, and the name of the property when it declares none |
+| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the tile shows |
+| `Label` | Text | From the property, see [Labels](basics.md#labels) | The small text above the value |
 | `Icon` | Text | None | The [icon](basics.md#icons) next to the label |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, colour and icon, see [ValueMap](value-map.md) |
 
@@ -49,12 +49,11 @@ Three tiles in a `FlowLayout`. The first has a label of its own and an icon, the
 ## Behaviour and Limits
 
 - **Colour and icon of a case**: A matching case gives the value its colour and the tile its icon, see [ValueMap](value-map.md).
-- **No distance to its surroundings**: A tile adds no distance above, below or beside itself. It is meant to stand in a layout such as `FlowLayout`, which does the spacing.
-- **As wide as its place**: A tile is as wide as the place it stands in.
+- **Spacing**: A tile adds no distance around itself and is as wide as its place, see [Spacing](basics.md#spacing). It is meant to stand in a layout such as `FlowLayout`, which does the spacing.
 
 ## Related
 
 - [Basics](basics.md) - Type names, paths, value widgets, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [ValueMap](value-map.md) - The text, colour and icon of a value
 - [Gauge](gauge.md) - One value in a ring between a minimum and a maximum

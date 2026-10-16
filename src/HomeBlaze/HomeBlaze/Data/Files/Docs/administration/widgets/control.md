@@ -12,10 +12,10 @@ Shows the control that fits its target: a button, a switch, an indicator, a sele
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value or Operation) | None | The path of the property or the operation that the control is for |
-| `Label` | Text | The title of the property or of the method | The label of the control |
-| `Minimum` | Number with a fraction | See [Slider](slider.md) | The value at the left end of a slider |
-| `Maximum` | Number with a fraction | See [Slider](slider.md) | The value at the right end of a slider |
+| `Path` | Path (Value or Operation) | None | The [path](basics.md#paths) of the property or the operation that the control is for |
+| `Label` | Text | From the property or the method, see [Labels](basics.md#labels) | The label of the control |
+| `Minimum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at the left end of a slider |
+| `Maximum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at the right end of a slider |
 | `Step` | Number with a fraction | See [Slider](slider.md) | The distance between two positions of a slider |
 | `Map` | Name or path of a `ValueMap` | None | The map for a select, an indicator or a value row, see [ValueMap](value-map.md) |
 
@@ -27,12 +27,12 @@ The control passes on the arguments that the chosen widget takes and ignores the
 | A boolean that can be written, also one that can hold no value | [Switch](switch.md) |
 | A boolean that cannot be written | A row with the label and an indicator |
 | An enum that can be written and whose values do not combine as flags | [Select](select.md) |
-| A number that can be written and has a range, from the arguments, from the attributes `Minimum` and `Maximum` or from the unit percent | [Slider](slider.md) |
+| A number that can be written and has a [range](basics.md#ranges) | [Slider](slider.md) |
 | Anything else, and a path that leads nowhere | A row with the label and the value |
 
 ## Slots
 
-The control has no slots.
+A `Control` has no slots.
 
 ## Samples
 
@@ -76,7 +76,6 @@ A control with a label and a range of its own, which gives the load of the fan a
 - **As the widget it renders**: A chosen widget behaves exactly as on its own page, with its rules for writes, saving, confirmation, enabled state and messages, see [Basics](basics.md#control-writes).
 - **No range, no slider**: A number without a range gets a value row and no message. Set `Minimum` and `Maximum` for a slider.
 - **Flags enums**: An enum whose values combine as flags gets a value row.
-- **Edit mode**: While the page is edited, the chosen control is disabled.
 
 ## Related
 

@@ -20,8 +20,8 @@ A titled box around page content. Type name: `HomeBlaze.Components.Card`. Slot b
 | `Outlined` | Yes or no | `true` | A border around the card instead of a shadow. `false` gives a card with a shadow, see `Elevation` |
 | `Elevation` | Whole number | `2` | The depth of the shadow of a card that is not outlined. `0` is no shadow. An outlined card has no shadow, whatever the value is |
 | `Image` | Text | None | A picture between the header and the body, 200 pixels high. Written like `Href` |
-| `Height` | Whole number | None | The height of the whole card in pixels, above 0. Without it, and without `AspectRatio`, the card is as high as its content. `Height` wins when both are set. A value of 0 or less shows an error in place of the card |
-| `AspectRatio` | Text | None | The width and the height of the card in the form `W:H`, for example `4:3` or `1:1`, so that the height of the card follows its width. A value in another form shows an error in place of the card |
+| `Height` | Whole number | None | The height of the whole card in pixels, above 0. Without it, and without `AspectRatio`, the card is as high as its content. `Height` wins when both are set. A value of 0 or less shows `Height must be above 0` in place of the card, see [Value Widget Errors](../page-errors.md#value-widget-errors) |
+| `AspectRatio` | Text | None | The width and the height of the card in the form `W:H`, for example `4:3` or `1:1`, so that the height of the card follows its width. A value in another form shows `AspectRatio must look like 4:3` in place of the card, see [Value Widget Errors](../page-errors.md#value-widget-errors) |
 
 ## Slots
 
@@ -146,19 +146,18 @@ Target speed: {{ ../Pump/TargetSpeed }} RPM
 
 ## Behaviour and Limits
 
-- The header is shown when the card has a title, a subtitle, an icon or a `HeaderRight`.
-- The icon and the content of `HeaderRight` stand on the line of the title, also when the subtitle takes several lines.
-- The title of a card with `Href` looks like the title of any card and is underlined when the pointer is on it.
-- [Spacing](basics.md#spacing) has the room inside a card and around it.
-- A card is as wide as the place it stands in. Put cards into a [FlowLayout](flow-layout.md) to place them next to each other.
-- A card with a `Height` or an `AspectRatio` keeps the size of its header, its picture and its footer, and its body takes the rest of the height. A body that does not fit scrolls.
-- A card that is the subject of a [GridLayout](grid-layout.md) cell or a [CanvasLayout](canvas-layout.md) node fills it and ignores `AspectRatio`. A `Height` of its own still wins. The cell or the node is the frame, so the card has no border and no shadow there, and its body scrolls like that of a card with a height.
-- A card has no other parts than the header, the picture, the body and the footer. It has no buttons.
+- **The header**: The header is shown when the card has a title, a subtitle, an icon or a `HeaderRight`. The icon and the content of `HeaderRight` stand on the line of the title, also when the subtitle takes several lines.
+- **A title with a link**: The title of a card with `Href` looks like the title of any card and is underlined when the pointer is on it.
+- **Spacing**: [Spacing](basics.md#spacing) has the room inside a card and around it.
+- **Width**: A card is as wide as the place it stands in. Put cards into a [FlowLayout](flow-layout.md) to place them next to each other.
+- **A fixed height**: A card with a `Height` or an `AspectRatio` keeps the size of its header, its picture and its footer, and its body takes the rest of the height. A body that does not fit scrolls.
+- **In a cell or a node**: A card that is the subject of a [GridLayout](grid-layout.md) cell or a [CanvasLayout](canvas-layout.md) node fills it and ignores `AspectRatio`. A `Height` of its own still wins. The cell or the node is the frame, so the card has no border and no shadow there, and its body scrolls like that of a card with a height.
+- **Parts**: A card has no other parts than the header, the picture, the body and the footer. It has no buttons.
 
 ## Related
 
 - [Basics](basics.md) - Type names, paths, spacing, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [FlowLayout](flow-layout.md) - Cards next to each other that wrap to the width of the screen
 - [Alert](alert.md) - A highlighted box for a note or a warning
 - [Indicator](indicator.md) - A state as a chip or an icon, for example in the header of a card

@@ -18,7 +18,7 @@ Page content in panels that open and close. Each panel has a title line that sta
 
 | Slot | Blocks | Holds |
 |------|--------|-------|
-| `Panel` | Any number | One panel per block. A `Panel` block creates a subject, so it takes arguments, an optional `#name` and any page content |
+| `Panel` | Any number | One panel per block: any page content |
 
 The arguments of a `Panel` block:
 
@@ -80,11 +80,10 @@ With `Single=true` only one panel is open at a time. Each panel holds a value li
 
 - **All panels are rendered**: The content of a closed panel is rendered and kept up to date as well, so a value in a closed panel is current when the panel opens.
 - **Opening and closing**: `Expanded` sets the state when the page loads. What the viewer opens and closes is not written to the page. It is kept for as long as the panel keeps its subject when the page is edited. That holds when the `ExpansionPanels` block and the panel both keep their subjects, which a name on each of them does, see [What an Edit of the Page Keeps](../pages.md#what-an-edit-of-the-page-keeps).
-- **Panels only**: An `ExpansionPanels` has no default slot. Content outside of a `Panel` block is an error.
 
 ## Related
 
 - [Basics](basics.md) - Type names, paths, spacing, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [TabLayout](tab-layout.md) - One of several tabs at a time
 - [ValueList](value-list.md) - Rows with a label and a value

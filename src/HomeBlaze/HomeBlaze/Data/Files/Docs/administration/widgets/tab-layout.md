@@ -18,7 +18,7 @@ Shows one of several tabs at a time. Type name: `HomeBlaze.Components.TabLayout`
 
 | Slot | Blocks | Holds |
 |------|--------|-------|
-| `Tab` | Any number | One tab per block. A `Tab` block creates a subject, so it takes arguments, an optional `#name` and any page content |
+| `Tab` | Any number | One tab per block: any page content |
 
 The arguments of a `Tab` block:
 
@@ -29,7 +29,7 @@ The arguments of a `Tab` block:
 
 ## Samples
 
-Two tabs with a name and an icon, and a third tab without a name and without an icon that holds plain text:
+Two tabs with a `#name` and an icon, and a third tab without a `#name` and without an icon that holds plain text:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -169,12 +169,11 @@ The tab bar at the left of the content:
 - **Tabs at a side need a wide window**: With `Position=Left` or `Position=Right` the tab bar is at the top while the browser window is narrower than 600 pixels, because the content would have too little room beside it. The width of the window counts, not that of the place the layout stands in. Content that cannot get as narrow as the room beside the tab bar, like a wide table, scrolls inside the tab.
 - **All tabs are rendered**: Every tab is rendered and kept up to date, also the hidden ones. A subject in a hidden tab keeps running, and a hidden tab costs as much as a visible one.
 - **The first tab is selected**: When the page opens, the first tab is shown. The selection is not saved and there is no argument for it.
-- **Names keep the selection**: When the page text changes while the page is open, a tab with a name stays selected, also when tabs are added, removed or moved. A tab without a name is known by its position only, so the selection stays at the position. When the selected tab is gone, the first tab is selected.
-- **Tabs only**: A `TabLayout` has no default slot. Content outside of a `Tab` block is an error.
+- **Names keep the selection**: When the page text changes while the page is open, a tab with a `#name` stays selected, also when tabs are added, removed or moved. A tab without a `#name` is known by its position only, so the selection stays at the position. When the selected tab is gone, the first tab is selected.
 
 ## Related
 
 - [Basics](basics.md) - Type names, paths, spacing, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [ExpansionPanels](expansion-panels.md) - Page content in panels that open and close
 - [Card](card.md) - A titled box around page content, also around tabs

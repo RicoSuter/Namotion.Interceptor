@@ -14,7 +14,7 @@ The rules that all widgets of a markdown page share. The [overview](overview.md)
 
 A block names its type with the full type name: the namespace and the name of the class, for example `HomeBlaze.Components.Card`. The namespace is the name of the library that ships the type. The widgets of this reference are in `HomeBlaze.Components`, except `HomeBlaze.History.Blazor.HistoryChart`, which ships with the history library. The sample motor is `HomeBlaze.Samples.Motor`, and a device has the namespace of its device library. The name is case-sensitive.
 
-A block that fills a slot of a widget is written with the name of the slot instead, for example `Tab` inside a `TabLayout` or `Case` inside a `ValueMap`. Such a slot block is only allowed directly inside its widget.
+A block that fills a slot of a widget is written with the name of the slot instead, for example `Tab` inside a `TabLayout` or `Case` inside a `ValueMap`. Such a slot block is only allowed directly inside its widget, see [Slot Blocks](#slot-blocks).
 
 ## Sample Motors
 
@@ -37,13 +37,13 @@ The pump runs at {{ ../Pump/CurrentSpeed }} of {{ ../Pump/TargetSpeed }} RPM.
 
 ## Paths
 
-A widget refers to a subject or to a property by its path. A relative path starts at the page, wherever the block stands on the page, see [Paths on Markdown Pages](../paths.md#paths-on-markdown-pages).
+A widget refers to a subject, a property or an operation by its path. The path is written like the path of an [expression](../pages.md#expression-paths): relative to the page, where the first segment can be the name of a block, or absolute. A relative path starts at the page, wherever the block stands on the page, see [Paths on Markdown Pages](../paths.md#paths-on-markdown-pages).
 
 | Path | Leads to |
 |------|----------|
 | `motor/CurrentSpeed` | A property of the block named `motor` on the same page |
 | `../Pump/CurrentSpeed` | A property of the subject file `Pump.json` in the folder of the page. `../` is the folder that contains the page |
-| `/Demo/Conveyor/CurrentSpeed` | The same property from every page, from the root |
+| `/Docs/administration/widgets/Pump/CurrentSpeed` | The same property from every page, from the root |
 
 A subject file is a segment without its extension, so `Pump.json` is `Pump`. A page keeps its extension, for example `/Docs/home.md`.
 
@@ -64,18 +64,48 @@ Each path argument says what it can lead to, and the arguments table of each wid
 
 A property that does not match is shown greyed out and cannot be selected. Operations are listed only for an argument that takes one. For a path to a subject, such as the `Map` of a value widget, the tree offers the subjects of the matching type.
 
-## Missing Values
+## Slot Blocks
 
-A value widget shows a dash for a value that is not set and for a path that leads nowhere, and no error box. [Value Widgets](#value-widgets) has the rules for values.
+The slots of a widget are filled as [Content and Slots](../pages.md#content-and-slots) describes. The table under Slots on the page of each widget lists them: `Default slot` for the slot that takes the loose content of the block, `One` for a slot that takes one block and `Any number` for a slot that takes a list of blocks.
+
+- **Blocks that create a subject**: A slot block whose arguments its widget page lists, like `Tab` or `Case`, creates a subject. It takes those arguments, an optional `#name` and a `json` block, like a widget block. A name keeps the subject when the page is edited, see [What an Edit of the Page Keeps](../pages.md#what-an-edit-of-the-page-keeps). Every other slot block, like `Item` or `Footer`, holds content only and takes no arguments, no `#name` and no `json` block.
+- **No default slot**: A widget whose table has no `Default slot` takes content only inside its slot blocks. Content outside of them is an error, see [Slot and Name Errors](../page-errors.md#slot-and-name-errors).
+- **Configuration file**: In a configuration file of its own, a widget has the blocks of a slot that takes any number of them as a list, named like the slot property in camel case, such as `cells` of a `GridLayout`, `nodes` of a `CanvasLayout`, `columns` of a `SubjectTable` and `series` of a `HistoryChart`. An entry of a block that creates a subject has the arguments of the block in camel case, and the content of a `Cell` or a `Node` is its subject `child`. On a page they are always slot blocks, and neither an argument nor the [`json` block](../pages.md#the-json-block) can set them.
+
+## Labels
+
+A widget with a `Label` argument shows the label that is set. Without it, a widget that reads a property shows the title that the property declares, and the name of the property when it declares none. When the path leads nowhere:
+
+- **Controls, gauges and chart series**: A [Switch](switch.md), a [Slider](slider.md), a [Select](select.md), a [Control](control.md), a [Gauge](gauge.md) and a series of a [HistoryChart](history-chart.md) show the path.
+- **Value rows and tiles**: A row of a [ValueList](value-list.md) and a [ValueTile](value-tile.md) show no label.
+- **Operations**: An [OperationButton](operation-button.md), and a `Control` for an operation, show the title of the method, and the path when the path leads nowhere.
+- **Table columns**: A column of a [SubjectTable](subject-table.md) without `Label` takes the title of the property from the first row that has the property, and the name of the property when no row has it.
 
 ## Value Widgets
 
-`ValueList`, `ValueTile`, `Indicator`, `Progress` and `Gauge` show values of properties, and `ValueMap` says what text, colour and icon a value gets. The pages of these widgets refer to the rules in this section.
+`ValueList`, `ValueTile`, `Indicator`, `Progress`, `Gauge` and `SubjectTable` show values of properties, and `ValueMap` says what text, colour and icon a value gets. The pages of these widgets refer to the rules in this section.
 
-- **The path**: `Path` is the path of a property. It is written like the path of an [expression](../pages.md#expression-paths): relative to the page, where the first segment can be the name of a block, or absolute.
 - **The formatted value**: A value is shown in the [formatted form of an expression](../pages.md#expression-formats). A map can replace the text.
-- **A missing value**: A value that is not set and a path that leads nowhere show a dash in place of the value, with the path as tooltip. This is no error box, because a device that is offline or still starting is normal. A misspelled path shows the same dash, so check the spelling when a dash stays. A `Progress` shows the dash for a value that is no number as well.
 - **Live**: A value changes on the page when the property changes.
+
+## Missing Values
+
+A value widget shows a dash in place of a value that is not set and for a path that leads nowhere, with the path as tooltip. This is no error box, because a device that is offline or still starting is normal. A misspelled path shows the same dash, so check the spelling when a dash stays. The pages of [Indicator](indicator.md), [Progress](progress.md), [Gauge](gauge.md) and [SubjectTable](subject-table.md) say what they show in its place. A control shows a missing value as its page describes.
+
+## Ranges
+
+A [Slider](slider.md) and a [Gauge](gauge.md), and a [Control](control.md) that chooses a slider, show a number within a range. Each end of the range comes from the first of these that gives one:
+
+1. The `Minimum` or `Maximum` argument of the block.
+2. The attribute `Minimum` or `Maximum` of the property, when its value is a number. A type declares them for its properties, see [Range Attributes](../../development/building-subjects.md#range-attributes).
+3. For a property with the unit percent, 0 and 1.
+
+Rules for all ranges:
+
+- **No range**: A widget that finds no end of its range shows `Needs a range: set Minimum and Maximum` in its place, see [Value Widget Errors](../page-errors.md#value-widget-errors). A `Gauge` whose path leads nowhere shows the dash of a [missing value](#missing-values) instead, and a `Control` chooses a value row, without a message.
+- **An empty range**: A `Maximum` that is not above `Minimum` shows `Maximum must be above Minimum` with both ends in place of the widget.
+- **The unit of the property**: `Minimum` and `Maximum` are in the unit of the property, so a percent runs from 0 to 1.
+- **Progress**: A [Progress](progress.md) has a range of its own, from its arguments only.
 
 ## Colours
 
@@ -91,6 +121,7 @@ The control widgets ([Switch](switch.md) and the others of the group Controls in
 
 - **Who can operate**: Every viewer of a page can operate its controls. Every viewer of this documentation can operate the two sample motors through the control samples.
 - **Disabled**: A control is disabled when its path leads nowhere, when the property cannot be written because it has no public setter, and while the page is edited.
+- **Live**: A control follows its property, so a change by another viewer or by the device moves it.
 - **Writes**: A value is converted to the type of the property. A value that the type cannot hold, or that the property refuses, shows an error message, and nothing is rolled back.
 - **Runtime values**: A property that is no configuration property, such as `IsPowered`, `Mode` and `Load` of the sample motors, changes in memory only and keeps its value until the subject restarts. The control samples of these pages write only such properties, so they change no file.
 - **Saving**: A write to a configuration property saves the subject that owns the configuration, one second after the last write to it, so a series of arrow keys gives one save. A subject defined on a page saves its block of that page and leaves the rest of the page as it is. A subject of a `*.json` file saves that file.
@@ -101,7 +132,7 @@ The control widgets ([Switch](switch.md) and the others of the group Controls in
 
 ## Spacing
 
-Only containers create space: the page, a card, a tab, an expansion panel and the cells of a layout. A widget has no outer margin of its own, so the same widget looks the same wherever it stands, and the space around it comes from where it stands.
+Only containers create space: the page, a card, a tab, an expansion panel and the cells of a layout. A widget has no outer margin of its own, so the same widget looks the same wherever it stands, and the space around it comes from where it stands. The one exception is the [Indicator](indicator.md), which keeps 4 pixels to what stands next to it, so that several indicators in a row do not touch.
 
 - **Between blocks of a page**: 16 pixels between two blocks and between a block and the text before or after it. Paragraphs of text keep 12 pixels between each other, and headings their own space.
 - **Inside a container**: The blocks and paragraphs of the content are 16 pixels apart, and a heading is 8 pixels above what follows it. The first and the last of them add nothing at the edge of the container, also when a [Responsive](responsive.md) block that the screen hides stands first or last. A widget that shows nothing, such as a `ValueMap`, takes no space.
@@ -115,6 +146,6 @@ Only containers create space: the page, a card, a tab, an expansion panel and th
 
 ## Related
 
-- [Overview](overview.md): every widget with one line
-- [Markdown Pages](../pages.md): the syntax of pages and blocks
-- [Paths](../paths.md): the path syntax
+- [Overview](overview.md) - All widgets by group
+- [Markdown Pages](../pages.md) - The syntax of pages and blocks
+- [Paths](../paths.md) - The path syntax

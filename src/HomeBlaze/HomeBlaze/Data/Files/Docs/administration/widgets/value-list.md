@@ -16,14 +16,14 @@ A `ValueList` has no arguments.
 
 | Slot | Blocks | Holds |
 |------|--------|-------|
-| `Value` | Any number | One row per block. A `Value` block creates a subject, so it takes arguments, an optional `#name` and any page content |
+| `Value` | Any number | One row per block: optional page content, which stands between the label and the value |
 
 The arguments of a `Value` block:
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value) | None | The [path](basics.md#value-widgets) of the property whose value the row shows. A row with content needs none |
-| `Label` | Text | The title of the property | The label of the row. Without it the row shows the title that the property declares, and the name of the property when it declares none |
+| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the row shows. A row with content needs none |
+| `Label` | Text | From the property, see [Labels](basics.md#labels) | The label of the row |
 | `Icon` | Text | None | The [icon](basics.md#icons) at the start of the row |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, colour and icon, see [ValueMap](value-map.md) |
 
@@ -46,7 +46,7 @@ Rows with a label and an icon. The first two rows have an icon, so the third row
 ::: Value Path=../Pump/IsAtTargetSpeed Label="At target speed"
 ::
 
-Rows without a label, the last one with the map of [ValueMap](value-map.md). A label is the title that the property declares, or its name when it declares none: "Speed" and "Target" are titles that the motor declares, and "Status" is the name of its property. The status is shown with the text, the colour and the icon of its case:
+Rows without a label, the last one with the map of [ValueMap](value-map.md). Each row takes its label from the property, see [Labels](basics.md#labels): "Speed" and "Target" are titles that the motor declares, and "Status" is the name of its property. The status is shown with the text, the colour and the icon of its case:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -87,12 +87,11 @@ A row with content and without a path, and a row with a `Progress` as content. T
 - **Aligned labels**: When at least one row has an icon, the rows without one keep the room of an icon, so that all labels line up. An icon that comes from a case of a map counts as well. In a card with an icon, a list in which at least one row has an icon lines up the icons of its rows with the icon of the header and its labels with the title.
 - **Colour and icon of a case**: A matching case gives the value text its colour and the row its icon, see [ValueMap](value-map.md).
 - **Content and value**: Content and a value can stand in the same row. The content takes the room between the label and the value: a `Progress` fills it, and a text stands at the right end of it, right before the value.
-- **Rows only**: A `ValueList` has no default slot. Content outside of a `Value` block is an error.
 
 ## Related
 
 - [Basics](basics.md) - Type names, paths, value widgets, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [ValueMap](value-map.md) - The text, colour and icon of a value
 - [Progress](progress.md) - A bar for a number, also as the content of a row
 - [ValueTile](value-tile.md) - A small box with a label and one large value

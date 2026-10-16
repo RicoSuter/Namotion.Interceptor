@@ -16,7 +16,7 @@ A `ValueMap` has no arguments.
 
 | Slot | Blocks | Holds |
 |------|--------|-------|
-| `Case` | Any number | One case per block. A `Case` block creates a subject, so it takes arguments and an optional `#name`. It holds no content |
+| `Case` | Any number | One case per block. It holds no content |
 
 The arguments of a `Case` block:
 
@@ -56,13 +56,12 @@ A map for the status of a motor. The cases are the values of `MotorStatus`. The 
 - **Which case is used**: A case matches when its `Value` equals the raw text of the value, without regard to upper and lower case. The raw text is what the format `raw` of an expression shows: `True` and `False` for a boolean, the name for an enum value, a number with a dot as the decimal separator. The first case that matches is used.
 - **No case**: A value without a case keeps the formatted text, the default colour and the icon of the widget. A case without `Text` keeps the formatted text of the value.
 - **Colour and icon**: The colour of the case is the colour of the value in a row and in a tile, and the colour of an indicator. The icon of the case replaces the icon of the row, the tile or the indicator. A `Progress` has no map.
-- **A map that cannot be resolved**: A `Map` that leads nowhere, or to a subject that is no `ValueMap`, shows `Cannot resolve map: motorstat` in a small red alert in place of the value, with the name as written. This is a mistake on the page, see [Page Errors](../page-errors.md#value-widget-errors). The rest of the page renders.
-- **Cases only**: A `ValueMap` has no default slot. Content outside of a `Case` block is an error.
+- **A map that cannot be resolved**: A `Map` that leads nowhere, or to a subject that is no `ValueMap`, shows `Cannot resolve map: motorstat` in a small red alert in place of the value, with the name as written. This is a mistake on the page, see [Value Widget Errors](../page-errors.md#value-widget-errors). The rest of the page renders.
 
 ## Related
 
 - [Basics](basics.md) - Type names, paths, value widgets, colours and icons
-- [Overview](overview.md) - Every widget by group
+- [Overview](overview.md) - All widgets by group
 - [ValueList](value-list.md) - Rows with a label and a value
 - [ValueTile](value-tile.md) - A small box with a label and one large value
 - [Indicator](indicator.md) - A state as a coloured chip or as an icon

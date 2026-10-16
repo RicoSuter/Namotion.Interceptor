@@ -6,7 +6,7 @@ position: 1
 
 # Widgets for Markdown Pages
 
-These widgets ship with HomeBlaze and are made for [markdown pages](../pages.md). Each one has a page of its own with its arguments, its slots, live samples and its limits. [Basics](basics.md) has the rules that all of them share: type names, paths, the sample motors, value widgets, picker filters, control writes, colours, icons and spacing. [Markdown Pages](../pages.md#blocks) describes the syntax of the blocks that they are written in.
+These widgets ship with HomeBlaze and are made for [markdown pages](../pages.md). Each one has a page of its own with its arguments, its slots, live samples and its limits. [Basics](basics.md) has the rules that all of them share: type names, paths, the sample motors, picker filters, slot blocks, labels, values, ranges, control writes, colours, icons and spacing. [Markdown Pages](../pages.md#blocks) describes the syntax of the blocks that they are written in.
 
 Every other type that can be configured works as a block as well, see [Widgets](../pages.md#widgets) on that page.
 
@@ -57,7 +57,7 @@ Every other type that can be configured works as a block as well, see [Widgets](
 |--------|-----------|--------------|
 | [HistoryChart](history-chart.md) | `HomeBlaze.History.Blazor.HistoryChart` | The recorded history of numbers as lines and of states as bands |
 
-## Related Documentation
+## Related
 
 - [Markdown Pages](../pages.md) - The syntax of pages: expressions, blocks, slots and the `json` block
 - [Page Errors](../page-errors.md) - Every error message with its cause and its fix
