@@ -185,4 +185,48 @@ public class CardLayoutTests
         Assert.Equal(measures[2], measures[0], 2.0);
         Assert.Equal(measures[3], measures[1], 2.0);
     }
+
+    [Theory]
+    [InlineData("Grid Card After Hidden Block", ".grid-cell-content")]
+    [InlineData("Grid Card Before Hidden Block", ".grid-cell-content")]
+    [InlineData("Canvas Card After Hidden Block", ".canvas-node-content")]
+    public async Task WhenALoneCardSharesItsContentWithABlockThatShowsNothing_ThenItStillFillsTheCellOrTheNode(string title, string container)
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var card = page.GetCard(title);
+        await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act: the distance of each edge of the card from the content box of its container, and the empty wrappers.
+        var measures = await card.EvaluateAsync<double[]>(
+            """
+            (card, container) => {
+                const frame = card.closest(container);
+                const style = getComputedStyle(frame);
+                const frameBox = frame.getBoundingClientRect();
+                const cardBox = card.getBoundingClientRect();
+                const left = frameBox.left + frame.clientLeft + parseFloat(style.paddingLeft);
+                const top = frameBox.top + frame.clientTop + parseFloat(style.paddingTop);
+                const right = frameBox.left + frame.clientLeft + frame.clientWidth - parseFloat(style.paddingRight);
+                const bottom = frameBox.top + frame.clientTop + frame.clientHeight - parseFloat(style.paddingBottom);
+                return [
+                    cardBox.left - left,
+                    cardBox.top - top,
+                    right - cardBox.right,
+                    bottom - cardBox.bottom,
+                    bottom - top,
+                    frame.querySelectorAll('.subject-component-wrapper:empty').length
+                ];
+            }
+            """,
+            container);
+
+        // Assert
+        Assert.Equal(1, measures[5]);
+        Assert.True(measures[4] > 100, $"The container is {measures[4]} pixels high.");
+        Assert.Equal(0, measures[0], 2.0);
+        Assert.Equal(0, measures[1], 2.0);
+        Assert.Equal(0, measures[2], 2.0);
+        Assert.Equal(0, measures[3], 2.0);
+    }
 }
