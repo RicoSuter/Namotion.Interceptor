@@ -106,11 +106,13 @@ else
     private string _currentContent = string.Empty;
     private bool _previousDarkMode = true;
     private List<DecorationRegion> _decorationRegions = new();
-    private string[] _currentDecorationIds = Array.Empty<string>();
-    private const string FoldingModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownFileEditComponent.razor.js";
-    private int[] _foldingLines = [];
-    private IJSObjectReference? _foldingModule;
+    private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownFileEditComponent.razor.js";
+    private Task<IJSObjectReference>? _moduleImport;
     private bool _isDisposed;
+
+    // The version of the editor model that _currentContent was read with, or 0 when the text came another way.
+    // The editor drops decorations of a version that is no longer current.
+    private int _currentVersion;
     private DecorationRegion? _activeRegion;
     private Task? _decorationRefresh;
     private bool _isDecorationRefreshRequested;
@@ -203,7 +205,7 @@ else
             return;
 
         // _currentContent follows the editor with a delay, and the comparison below must see what was typed last.
-        _currentContent = await _editor.GetValue();
+        SetCurrentContent(await _editor.GetValue());
 
         // The subject belongs to the block of the saved page. Opening the dialog on editor text that
         // differs would show the saved values and then replace what was typed, or write into another block.
@@ -237,8 +239,8 @@ else
 
         // Writes the head line and the json block only. When the graph has drifted from the text, the write-back
         // can also have inserted or removed blocks, and writing the editor text below overwrites that.
-        _currentContent = MarkdownBlockWriter.WriteConfiguration(
-            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject));
+        SetCurrentContent(MarkdownBlockWriter.WriteConfiguration(
+            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject)));
 
         // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
@@ -317,7 +319,7 @@ else
             }
         }
 
-        _currentContent = string.Join('\n', lines);
+        SetCurrentContent(string.Join('\n', lines));
 
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
@@ -339,7 +341,7 @@ else
             return;
 
         // _currentContent follows the editor with a delay, and the names must be those of what was typed last.
-        _currentContent = await _editor.GetValue();
+        SetCurrentContent(await _editor.GetValue());
 
         // The name becomes the #id of the block. It is checked while the dialog is open, because the
         // subject that was configured in it is gone once the dialog has closed.
@@ -395,7 +397,7 @@ else
             newLines.Insert(lineAfterBlock, "");
         }
 
-        _currentContent = string.Join(lineEnding, newLines);
+        SetCurrentContent(string.Join(lineEnding, newLines));
 
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
@@ -411,10 +413,8 @@ else
         IsDirtyChanged?.Invoke(false);
     }
 
-    // Called only on the synchronization context of the circuit: the editor keeps its decoration ids in a list that is
-    // not thread-safe, and calls from two threads break it for every later call. A refresh that is requested while one
-    // runs is one more run after it, never a second one at the same time, because both would remove the same old
-    // decorations and the one whose ids are overwritten in _currentDecorationIds would stay in the editor for good.
+    // Called only on the synchronization context of the circuit. A refresh that is requested while one runs is one more
+    // run after it, never a second one at the same time, so that the last text is decorated last.
     // The returned task completes after a run that started after the call, unless a run fails before.
     private Task RefreshDecorationsAsync()
     {
@@ -440,62 +440,37 @@ else
 
     private async Task ApplyDecorationsAsync()
     {
-        if (_editor == null || _isDisposed)
+        if (_editor == null)
             return;
 
+        var version = _currentVersion;
         Func<int, IInterceptorSubject?>? getBlockSubject = File is null ? null : File.GetBlockSubject;
         var parsed = MarkdownDecorationParser.ParseDecorations(_currentContent, getBlockSubject);
         _decorationRegions = parsed.Regions;
 
-        // The head lines of blocks are tinted by their outlines. subject-block-decoration has no style and marks the
-        // blocks that can be edited.
-        var decorations = new List<ModelDeltaDecoration>();
-        foreach (var region in _decorationRegions)
+        var decorations = BlockOutlineDecorations.Create(parsed.Regions, parsed.Outlines);
+        if (await GetModuleAsync() is { } module)
         {
-            decorations.Add(new ModelDeltaDecoration
-            {
-                Range = new BlazorMonaco.Range(region.StartLine, region.StartColumn, region.EndLine, region.EndColumn),
-                Options = new ModelDecorationOptions
-                {
-                    ClassName = region.Type == DecorationRegionType.SubjectBlock
-                        ? "subject-block-decoration"
-                        : "expression-decoration"
-                }
-            });
-        }
-
-        BlockOutlineDecorations.Add(parsed.Outlines, decorations);
-
-        // Apply decorations (delta update - removes old, adds new)
-        _currentDecorationIds = await _editor.DeltaDecorations(_currentDecorationIds, decorations.ToArray());
-
-        if (!BlockOutlineDecorations.HasSameFoldingLines(parsed.Outlines, _foldingLines))
-        {
-            await SetFoldingLinesAsync(_editor, BlockOutlineDecorations.GetFoldingLines(parsed.Outlines));
+            await module.InvokeVoidAsync("update", _editor.Id, version, decorations.Values, decorations.Labels);
         }
     }
 
-    // A disposed component sends no more ranges: the editor id is reused by the next page editor, whose model
-    // would get the ranges of this page.
-    private async Task SetFoldingLinesAsync(StandaloneCodeEditor editor, int[] foldingLines)
+    // Null once the component is disposed: the next page editor gets the same editor id, and a late call would
+    // decorate its model with this page.
+    private async ValueTask<IJSObjectReference?> GetModuleAsync()
     {
         if (_isDisposed)
-            return;
+            return null;
 
-        if (_foldingModule is null)
-        {
-            var module = await JsRuntime.InvokeAsync<IJSObjectReference>("import", FoldingModulePath);
-            if (_isDisposed)
-            {
-                await module.DisposeAsync();
-                return;
-            }
+        _moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
+        var module = await _moduleImport;
+        return _isDisposed ? null : module;
+    }
 
-            _foldingModule = module;
-        }
-
-        await _foldingModule.InvokeVoidAsync("setRanges", editor.Id, foldingLines);
-        _foldingLines = foldingLines;
+    private void SetCurrentContent(string content, int version = 0)
+    {
+        _currentContent = content;
+        _currentVersion = version;
     }
 
     protected override async Task OnInitializedAsync()
@@ -505,7 +480,7 @@ else
             await using var stream = await File.ReadAsync(CancellationToken.None);
             using var reader = new StreamReader(stream);
             _originalContent = await reader.ReadToEndAsync();
-            _currentContent = _originalContent;
+            SetCurrentContent(_originalContent);
         }
     }
 
@@ -514,9 +489,10 @@ else
         // TODO: Add try-catch for ObjectDisposedException/JSDisconnectedException - component may be disposed during async operation
         // Awaited here and not run on the thread pool, because the decorations are refreshed on the synchronization
         // context of the circuit only, see RefreshDecorationsAsync.
-        if (_editor != null)
+        if (_editor != null && await GetModuleAsync() is { } module &&
+            await module.InvokeAsync<EditorContent?>("getContent", _editor.Id) is { } content)
         {
-            _currentContent = await _editor.GetValue();
+            SetCurrentContent(content.Text, content.Version);
             await RefreshDecorationsAsync();
 
             IsDirtyChanged?.Invoke(IsDirty);
@@ -532,7 +508,7 @@ else
         await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content), cancellationToken);
 
         _originalContent = content;
-        _currentContent = content;
+        SetCurrentContent(content);
 
         // The storage reloads the file as part of the write, so the regions get the subjects of the saved page.
         await RefreshDecorationsAsync();
@@ -540,22 +516,28 @@ else
         IsDirtyChanged?.Invoke(false);
     }
 
-    // The module forgets the ranges of a model when Monaco disposes the model together with the editor.
+    // The module forgets the folds of a model when Monaco disposes the model together with the editor.
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
-        if (_foldingModule is null)
+        if (_moduleImport is null)
         {
             return;
         }
 
         try
         {
-            await _foldingModule.DisposeAsync();
+            await (await _moduleImport).DisposeAsync();
+        }
+        catch (JSException)
+        {
+            // The import failed, and there is no module to dispose.
         }
         catch (JSDisconnectedException)
         {
             // The circuit is gone and the browser with it.
         }
     }
+
+    private sealed record EditorContent(int Version, string Text);
 }

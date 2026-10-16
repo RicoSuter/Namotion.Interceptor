@@ -1,94 +1,89 @@
-using BlazorMonaco.Editor;
-
 namespace HomeBlaze.Storage.Blazor.Models;
 
 /// <summary>
-/// Creates the editor decorations that show the nesting of blocks: the fences in the color of the depth, a tint
-/// behind the head line and a label after the closing line. The classes are styled by the page editor.
+/// Writes the decorations and folding ranges of the page editor as records of six numbers: kind, color, start line,
+/// start column, end line and end column. The editor module (<c>Files/MarkdownFileEditComponent.razor.js</c>) turns
+/// them into Monaco decorations, so a refresh sends numbers and not decoration objects.
 /// </summary>
 public static class BlockOutlineDecorations
 {
+    /// <summary>A block region that can be edited.</summary>
+    public const int SubjectBlockKind = 0;
+
+    /// <summary>An expression region.</summary>
+    public const int ExpressionKind = 1;
+
+    /// <summary>The head line of a block with its json block, tinted in the color of the depth.</summary>
+    public const int HeadKind = 2;
+
+    /// <summary>The fence of a head line, in the color of the depth.</summary>
+    public const int FenceKind = 3;
+
+    /// <summary>The fence of a closing line, in the color of the depth and followed by the next label.</summary>
+    public const int ClosingFenceKind = 4;
+
+    /// <summary>A folding range from the start line to the end line. The columns are 1.</summary>
+    public const int FoldKind = 5;
+
+    /// <summary>Number of values per record.</summary>
+    public const int RecordLength = 6;
+
     /// <summary>Number of colors, which repeat for deeper blocks.</summary>
     public const int ColorCount = 5;
 
-    private static readonly string[] HeadClassNames = CreateClassNames("block-head");
-    private static readonly string[] FenceClassNames = CreateClassNames("block-fence");
-    private static readonly string[] ClosingLabelClassNames = CreateClassNames("block-closing-label");
-
-    /// <summary>Adds the decorations of the outlines to <paramref name="decorations"/>.</summary>
-    public static void Add(IReadOnlyList<BlockOutline> outlines, List<ModelDeltaDecoration> decorations)
+    /// <summary>
+    /// Gets the records of the regions and the outlines, and the labels of the closing fences in their order. A
+    /// block gets a fold when it has more than its head line, and a json block when it has more than one line.
+    /// </summary>
+    public static EditorDecorations Create(IReadOnlyList<DecorationRegion> regions, IReadOnlyList<BlockOutline> outlines)
     {
+        var recordCount = regions.Count;
+        var labelCount = 0;
+        for (var i = 0; i < outlines.Count; i++)
+        {
+            var outline = outlines[i];
+            var hasClosingFence = outline.ClosingFence is not null;
+            recordCount += 2 + (hasClosingFence ? 1 : 0) + (HasBlockFold(outline) ? 1 : 0) + (HasConfigurationFold(outline) ? 1 : 0);
+            labelCount += hasClosingFence ? 1 : 0;
+        }
+
+        var values = new int[recordCount * RecordLength];
+        var labels = new string[labelCount];
+        var index = 0;
+        var labelIndex = 0;
+
+        for (var i = 0; i < regions.Count; i++)
+        {
+            var region = regions[i];
+            var kind = region.Type == DecorationRegionType.SubjectBlock ? SubjectBlockKind : ExpressionKind;
+            Write(values, ref index, kind, 0, region.StartLine, region.StartColumn, region.EndLine, region.EndColumn);
+        }
+
         for (var i = 0; i < outlines.Count; i++)
         {
             var outline = outlines[i];
             var color = outline.Depth % ColorCount;
 
-            decorations.Add(new ModelDeltaDecoration
-            {
-                Range = new BlazorMonaco.Range(outline.StartLine, outline.HeadFence.Column, outline.HeadEndLine, outline.HeadEndColumn),
-                Options = new ModelDecorationOptions { ClassName = HeadClassNames[color] }
-            });
-
-            decorations.Add(CreateFence(outline.HeadFence, color, label: null));
+            Write(values, ref index, HeadKind, color, outline.StartLine, outline.HeadFence.Column, outline.HeadEndLine, outline.HeadEndColumn);
+            WriteFence(values, ref index, FenceKind, color, outline.HeadFence);
             if (outline.ClosingFence is { } closingFence)
             {
-                decorations.Add(CreateFence(closingFence, color, outline.Name));
+                WriteFence(values, ref index, ClosingFenceKind, color, closingFence);
+                labels[labelIndex++] = outline.Name;
             }
-        }
-    }
 
-    /// <summary>
-    /// Gets the folding ranges of the outlines as pairs of start and end lines: one per block that has more
-    /// than its head line, and one per json block of more than one line.
-    /// </summary>
-    public static int[] GetFoldingLines(IReadOnlyList<BlockOutline> outlines)
-    {
-        var count = 0;
-        for (var i = 0; i < outlines.Count; i++)
-        {
-            count += (HasBlockFold(outlines[i]) ? 2 : 0) + (HasConfigurationFold(outlines[i]) ? 2 : 0);
-        }
-
-        var lines = new int[count];
-        var index = 0;
-        for (var i = 0; i < outlines.Count; i++)
-        {
-            var outline = outlines[i];
             if (HasBlockFold(outline))
             {
-                lines[index++] = outline.StartLine;
-                lines[index++] = outline.EndLine;
+                Write(values, ref index, FoldKind, 0, outline.StartLine, 1, outline.EndLine, 1);
             }
 
             if (HasConfigurationFold(outline))
             {
-                lines[index++] = outline.ConfigurationStartLine!.Value;
-                lines[index++] = outline.HeadEndLine;
+                Write(values, ref index, FoldKind, 0, outline.ConfigurationStartLine!.Value, 1, outline.HeadEndLine, 1);
             }
         }
 
-        return lines;
-    }
-
-    /// <summary>Gets whether <see cref="GetFoldingLines"/> would return <paramref name="lines"/>, without creating the array.</summary>
-    public static bool HasSameFoldingLines(IReadOnlyList<BlockOutline> outlines, ReadOnlySpan<int> lines)
-    {
-        var index = 0;
-        for (var i = 0; i < outlines.Count; i++)
-        {
-            var outline = outlines[i];
-            if (HasBlockFold(outline) && !Matches(lines, ref index, outline.StartLine, outline.EndLine))
-            {
-                return false;
-            }
-
-            if (HasConfigurationFold(outline) && !Matches(lines, ref index, outline.ConfigurationStartLine!.Value, outline.HeadEndLine))
-            {
-                return false;
-            }
-        }
-
-        return index == lines.Length;
+        return new EditorDecorations(values, labels);
     }
 
     private static bool HasBlockFold(BlockOutline outline) => outline.EndLine > outline.StartLine;
@@ -96,40 +91,24 @@ public static class BlockOutlineDecorations
     private static bool HasConfigurationFold(BlockOutline outline) =>
         outline.ConfigurationStartLine is { } startLine && outline.HeadEndLine > startLine;
 
-    private static bool Matches(ReadOnlySpan<int> lines, ref int index, int startLine, int endLine)
+    private static void WriteFence(int[] values, ref int index, int kind, int color, FencePosition fence) =>
+        Write(values, ref index, kind, color, fence.Line, fence.Column, fence.Line, fence.Column + fence.Length);
+
+    private static void Write(
+        int[] values, ref int index, int kind, int color, int startLine, int startColumn, int endLine, int endColumn)
     {
-        if (index + 1 >= lines.Length || lines[index] != startLine || lines[index + 1] != endLine)
-        {
-            return false;
-        }
-
-        index += 2;
-        return true;
-    }
-
-    // The label is injected after the fence and so needs the fence range: Monaco does not show injected text on an empty range.
-    private static ModelDeltaDecoration CreateFence(FencePosition fence, int color, string? label) => new()
-    {
-        Range = new BlazorMonaco.Range(fence.Line, fence.Column, fence.Line, fence.Column + fence.Length),
-        Options = new ModelDecorationOptions
-        {
-            InlineClassName = FenceClassNames[color],
-            After = label is null ? null : new InjectedTextOptions
-            {
-                Content = "  " + label,
-                InlineClassName = ClosingLabelClassNames[color]
-            }
-        }
-    };
-
-    private static string[] CreateClassNames(string className)
-    {
-        var classNames = new string[ColorCount];
-        for (var color = 0; color < ColorCount; color++)
-        {
-            classNames[color] = $"{className} block-color-{color}";
-        }
-
-        return classNames;
+        values[index++] = kind;
+        values[index++] = color;
+        values[index++] = startLine;
+        values[index++] = startColumn;
+        values[index++] = endLine;
+        values[index++] = endColumn;
     }
 }
+
+/// <summary>
+/// The records of <see cref="BlockOutlineDecorations.Create"/> and the labels of the closing fences.
+/// </summary>
+/// <param name="Values">Records of <see cref="BlockOutlineDecorations.RecordLength"/> values.</param>
+/// <param name="Labels">The label of every closing fence record, in their order.</param>
+public sealed record EditorDecorations(int[] Values, string[] Labels);

@@ -78,7 +78,7 @@ public class BlockOutlineTests
 
         // Assert
         Assert.Equal((4, 4), (outline.HeadEndLine, outline.HeadEndColumn));
-        Assert.Equal([1, 5, 2, 4], BlockOutlineDecorations.GetFoldingLines([outline]));
+        Assert.Equal([(1, 5), (2, 4)], GetFolds([], [outline]));
     }
 
     [Fact]
@@ -176,23 +176,42 @@ public class BlockOutlineTests
 
         // Act
         var outlines = MarkdownDecorationParser.ParseDecorations(content).Outlines;
-        var lines = BlockOutlineDecorations.GetFoldingLines(outlines);
+        var folds = GetFolds([], outlines);
 
         // Assert
-        Assert.Equal([1, 6, 3, 5], lines);
+        Assert.Equal([(1, 6), (3, 5)], folds);
     }
 
     [Fact]
-    public void WhenFoldingLinesAreCompared_ThenOnlyTheSameRangesMatch()
+    public void WhenPageHasBlocksAndExpressions_ThenRecordsAndLabelsDescribeEveryDecoration()
     {
         // Arrange
-        var outlines = MarkdownDecorationParser.ParseDecorations(":: Test.Alert\nHello\n::").Outlines;
+        var content = string.Join("\n",
+            ":: Test.Card#motors",
+            "::: Test.ValueList",
+            "Speed {{ motor/Speed }}",
+            ":::",
+            "::");
+        var parsed = MarkdownDecorationParser.ParseDecorations(content);
 
-        // Act & Assert
-        Assert.True(BlockOutlineDecorations.HasSameFoldingLines(outlines, [1, 3]));
-        Assert.False(BlockOutlineDecorations.HasSameFoldingLines(outlines, [1, 2]));
-        Assert.False(BlockOutlineDecorations.HasSameFoldingLines(outlines, []));
-        Assert.False(BlockOutlineDecorations.HasSameFoldingLines(outlines, [1, 3, 4, 5]));
-        Assert.True(BlockOutlineDecorations.HasSameFoldingLines([], []));
+        // Act
+        var decorations = BlockOutlineDecorations.Create(parsed.Regions, parsed.Outlines);
+
+        // Assert
+        Assert.Equal(0, decorations.Values.Length % BlockOutlineDecorations.RecordLength);
+        Assert.Equal(["motors", "ValueList"], decorations.Labels);
+        var records = decorations.Values.Chunk(BlockOutlineDecorations.RecordLength).ToList();
+        Assert.Contains([BlockOutlineDecorations.ExpressionKind, 0, 3, 7, 3, 24], records);
+        Assert.Contains([BlockOutlineDecorations.FenceKind, 1, 2, 1, 2, 4], records);
+        Assert.Contains([BlockOutlineDecorations.ClosingFenceKind, 1, 4, 1, 4, 4], records);
+        Assert.Contains([BlockOutlineDecorations.ClosingFenceKind, 0, 5, 1, 5, 3], records);
+        Assert.Equal([(1, 5), (2, 4)], GetFolds(parsed.Regions, parsed.Outlines));
     }
+
+    private static List<(int Start, int End)> GetFolds(IReadOnlyList<DecorationRegion> regions, IReadOnlyList<BlockOutline> outlines) =>
+        BlockOutlineDecorations.Create(regions, outlines).Values
+            .Chunk(BlockOutlineDecorations.RecordLength)
+            .Where(record => record[0] == BlockOutlineDecorations.FoldKind)
+            .Select(record => (record[2], record[4]))
+            .ToList();
 }

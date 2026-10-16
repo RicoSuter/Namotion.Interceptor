@@ -101,7 +101,7 @@ public static class MarkdownDecorationParser
 
             var name = block.Head is { } head
                 ? GetName(head)
-                : content.Substring(block.HeadSpan.Start + block.FenceLength, block.HeadSpan.Length - block.FenceLength).Trim();
+                : content.AsSpan(block.HeadSpan.Start + block.FenceLength, block.HeadSpan.Length - block.FenceLength).Trim().ToString();
 
             outlines.Add(new BlockOutline(
                 startLine,
