@@ -453,7 +453,7 @@ public class GetPropertyHistoryToolTests
     }
 
     [Fact]
-    public async Task WhenCalendarBucketsAreQueried_ThenPointsCarryTheZoneOffsetAndTheZoneIsNamed()
+    public async Task WhenCalendarBucketsAreQueried_ThenPointsCarryPeriodLabelsAndTheZoneIsNamed()
     {
         // Arrange - the store answers with points at the UTC instants of Zurich month starts.
         void Configure(TestHistoryStore store) => store.Points =
@@ -470,8 +470,9 @@ public class GetPropertyHistoryToolTests
         // Assert
         Assert.Equal("Europe/Zurich", json.GetProperty("time_zone").GetString());
         var points = json.GetProperty("series").GetProperty("/Energy").GetProperty("points").EnumerateArray().ToArray();
-        Assert.Equal("2026-01-01T00:00:00+01:00", points[0][0].GetString());
-        Assert.Equal("2026-02-01T00:00:00+01:00", points[1][0].GetString());
+        Assert.Equal("2026-01", points[0][0].GetString());
+        Assert.Equal("2026-02", points[1][0].GetString());
+        Assert.Equal("2026-01-01T00:00:00+01:00", json.GetProperty("from").GetString());
     }
 
     [Fact]

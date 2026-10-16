@@ -109,6 +109,8 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                           "from the response's carries its own ranges when ranges are requested. A path that cannot be " +
                           "served carries its own error and the others still return data. " +
                           "Timestamps carry the offset of time_zone (named in the response); compare instants, not strings. " +
+                          "Points of day, week, month and year buckets carry their period in time_zone instead of a " +
+                          "timestamp: 2026-03-29, 2026-W13 (ISO week), 2026-03, 2026. " +
                           "Bucketed values are rounded to 12 significant digits. For energy per month, use bucket=month " +
                           "with aggregation=Delta on the energy counter; Delta returns the counter's unit, so a WattHour " +
                           "counter yields Wh per bucket. " +
@@ -309,7 +311,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         foreach (var result in results)
         {
             series[result.Path] = result.Series is { } served
-                ? BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, bucket is not null, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
+                ? BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, bucket, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
                 : result.ErrorPayload;
         }
 
@@ -355,7 +357,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     }
 
     private static Dictionary<string, object?> BuildSeriesPayload(
-        string? valueType, string? unit, HistorySeries series, TimeZoneInfo timeZone, bool isBucketed, bool includeOwnRanges)
+        string? valueType, string? unit, HistorySeries series, TimeZoneInfo timeZone, HistoryBucket? bucket, bool includeOwnRanges)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal) { ["value_type"] = valueType };
         if (unit is not null)
@@ -376,19 +378,22 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         var points = new object?[series.Points.Length][];
         for (var i = 0; i < points.Length; i++)
         {
-            points[i] = ToPair(series.Points[i], timeZone, isBucketed);
+            points[i] = ToPair(series.Points[i], timeZone, bucket);
         }
 
         payload["points"] = points;
         return payload;
     }
 
-    // Bucketed values are computed, so their floating point noise is rounded away; raw samples are returned as recorded.
-    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo timeZone, bool isBucketed) =>
+    // A calendar point is labeled with its period. Bucketed values are computed, so their floating point noise is
+    // rounded away; raw samples are returned as recorded.
+    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo timeZone, HistoryBucket? bucket) =>
     [
-        HistoryToolFormatting.FormatTimestamp(point.Timestamp, timeZone),
+        bucket is { CalendarUnit: not null } calendar
+            ? HistoryToolFormatting.FormatPeriodLabel(point.Timestamp, calendar)
+            : HistoryToolFormatting.FormatTimestamp(point.Timestamp, timeZone),
         point.Number is { } number
-            ? isBucketed ? HistoryToolFormatting.RoundToSignificantDigits(number) : number
+            ? bucket is not null ? HistoryToolFormatting.RoundToSignificantDigits(number) : number
             : point.Json is { } json ? json : null
     ];
 

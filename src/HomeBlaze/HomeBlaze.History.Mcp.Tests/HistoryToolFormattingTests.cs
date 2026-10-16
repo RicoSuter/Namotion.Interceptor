@@ -148,4 +148,25 @@ public class HistoryToolFormattingTests
         // Assert
         Assert.Equal("2026-01-15T08:00:00Z", formatted);
     }
+
+    [Theory]
+    [InlineData("2026-03-28T23:00:00Z", HistoryCalendarUnit.Day, "2026-03-29")]
+    [InlineData("2026-03-22T23:00:00Z", HistoryCalendarUnit.Week, "2026-W13")]
+    // ISO weeks belong to the year of their Thursday.
+    [InlineData("2024-12-29T23:00:00Z", HistoryCalendarUnit.Week, "2025-W01")]
+    [InlineData("2026-12-27T23:00:00Z", HistoryCalendarUnit.Week, "2026-W53")]
+    [InlineData("2026-02-28T23:00:00Z", HistoryCalendarUnit.Month, "2026-03")]
+    [InlineData("2025-12-31T23:00:00Z", HistoryCalendarUnit.Year, "2026")]
+    public void WhenLabelingACalendarBucket_ThenThePeriodIsNamedInTheZone(string bucketStart, HistoryCalendarUnit unit, string expected)
+    {
+        // Arrange
+        var bucket = HistoryBucket.Calendar(unit, TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich"));
+        var start = DateTimeOffset.Parse(bucketStart, System.Globalization.CultureInfo.InvariantCulture);
+
+        // Act
+        var label = HistoryToolFormatting.FormatPeriodLabel(start, bucket);
+
+        // Assert
+        Assert.Equal(expected, label);
+    }
 }

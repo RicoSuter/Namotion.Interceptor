@@ -25,6 +25,29 @@ public static class HistoryToolFormatting
     }
 
     /// <summary>
+    /// Labels the calendar bucket starting at <paramref name="bucketStart"/> with its period in the bucket's time zone:
+    /// <c>2026-03-29</c> for a day, the ISO 8601 week <c>2026-W13</c> (in its ISO week-numbering year), <c>2026-03</c>
+    /// for a month and <c>2026</c> for a year.
+    /// </summary>
+    internal static string FormatPeriodLabel(DateTimeOffset bucketStart, HistoryBucket bucket)
+    {
+        if (bucket is not { CalendarUnit: { } unit, TimeZone: { } timeZone })
+        {
+            throw new ArgumentException("The bucket is not a calendar bucket.", nameof(bucket));
+        }
+
+        var date = TimeZoneInfo.ConvertTime(bucketStart, timeZone).DateTime;
+        return unit switch
+        {
+            HistoryCalendarUnit.Day => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            HistoryCalendarUnit.Week => string.Create(CultureInfo.InvariantCulture,
+                $"{ISOWeek.GetYear(date):D4}-W{ISOWeek.GetWeekOfYear(date):D2}"),
+            HistoryCalendarUnit.Month => date.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+            _ => date.ToString("yyyy", CultureInfo.InvariantCulture)
+        };
+    }
+
+    /// <summary>
     /// Rounds <paramref name="value"/> to 12 significant digits, so the noise of a computed aggregate
     /// (<c>500.18000000000757</c>) serializes as the value it stands for (<c>500.18</c>). Zero and non-finite values
     /// are returned unchanged.
