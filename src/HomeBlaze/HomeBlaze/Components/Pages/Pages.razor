@@ -292,7 +292,7 @@
             if (_pageHeadFit is { } previous)
             {
                 _pageHeadFit = null;
-                await previous.DisposeAsync();
+                await DisposePageHeadFitAsync(previous);
             }
 
             if (editorBar is { } bar)
@@ -474,7 +474,7 @@
 
             if (_pageHeadFit is not null)
             {
-                await _pageHeadFit.DisposeAsync();
+                await DisposePageHeadFitAsync(_pageHeadFit);
             }
 
             if (_module is not null)
@@ -482,9 +482,16 @@
                 await _module.DisposeAsync();
             }
         }
-        catch (Exception exception) when (exception is JSDisconnectedException or TaskCanceledException)
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
         {
             // The circuit is gone, and the browser released the objects with it.
         }
+    }
+
+    // Releasing the reference alone leaves the observer of the handle running in the browser.
+    private static async Task DisposePageHeadFitAsync(IJSObjectReference pageHeadFit)
+    {
+        await pageHeadFit.InvokeVoidAsync("dispose");
+        await pageHeadFit.DisposeAsync();
     }
 }
