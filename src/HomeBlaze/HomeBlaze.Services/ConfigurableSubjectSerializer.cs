@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -35,6 +36,7 @@ public class ConfigurableSubjectSerializer
     private readonly IServiceProvider _serviceProvider;
     private readonly JsonSerializerOptions _jsonPropertyOptions;
     private readonly JsonSerializerOptions _cSharpPropertyOptions;
+    private readonly ConcurrentDictionary<(Type Type, ConfigurationNaming Naming), JsonElement?> _defaultConfigurations = new();
 
     public ConfigurableSubjectSerializer(TypeProvider typeProvider, IServiceProvider serviceProvider)
     {
@@ -126,6 +128,50 @@ public class ConfigurableSubjectSerializer
         }
 
         return result.ToJsonString(options);
+    }
+
+    /// <summary>
+    /// Gets the configuration of a new subject of <paramref name="type"/> as
+    /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/> writes it: the values that
+    /// <see cref="Deserialize(string, ConfigurationNaming)"/> gives a property that the JSON does not have.
+    /// Null when <see cref="Deserialize(string, ConfigurationNaming)"/> does not create the type.
+    /// </summary>
+    /// <remarks>
+    /// The first call for a type and naming creates a subject of the type and releases it before a hosted service
+    /// of it starts. The result is cached.
+    /// </remarks>
+    public JsonElement? GetDefaultConfiguration(Type type, ConfigurationNaming naming = ConfigurationNaming.JsonProperty) =>
+        _defaultConfigurations.GetOrAdd(
+            (type, naming), static (key, serializer) => serializer.CreateDefaultConfiguration(key.Type, key.Naming), this);
+
+    private JsonElement? CreateDefaultConfiguration(Type type, ConfigurationNaming naming)
+    {
+        // Work that a lifecycle handler starts for the subject does not carry the flow of the caller, and
+        // the subject is released before the deferral ends, so its hosted services never start.
+        using var suppressedFlow = ExecutionContext.IsFlowSuppressed() ? (AsyncFlowControl?)null : ExecutionContext.SuppressFlow();
+        using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStarts();
+
+        var json = new JsonObject { [TypeDiscriminatorPropertyName] = type.FullName }.ToJsonString();
+        if (Deserialize(json, naming) is not IInterceptorSubject subject)
+        {
+            return null;
+        }
+
+        try
+        {
+            // Another type of the same name would give the wrong values.
+            if (subject.GetType() != type)
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(Serialize(subject, naming));
+            return document.RootElement.Clone();
+        }
+        finally
+        {
+            Release(subject);
+        }
     }
 
     /// <summary>

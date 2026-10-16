@@ -64,7 +64,7 @@ public class LayoutBlockSaveTests
                 "The page was not written with a block for the new cell");
 
             Assert.Contains(
-                $"{GridHeadLine}\n::: Cell Row=0 Column=2 RowSpan=1 ColumnSpan=1\n:::: HomeBlaze.Samples.Motor Name={motorName}",
+                $"{GridHeadLine}\n::: Cell Row=0 Column=2\n:::: HomeBlaze.Samples.Motor Name={motorName}",
                 text);
             Assert.DoesNotContain("json", text);
             await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
@@ -266,7 +266,7 @@ public class LayoutBlockSaveTests
                 written => written.Contains("ColumnSpan=2"),
                 "The page was not written with the new column span of the cell");
 
-            Assert.Equal(CreateGridPage("::: Cell Row=0 Column=0 RowSpan=1 ColumnSpan=2", "the cell"), text);
+            Assert.Equal(CreateGridPage("::: Cell Row=0 Column=0 ColumnSpan=2", "the cell"), text);
             await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator(".grid-cell.editing").GetByText("the cell")).ToBeVisibleAsync(new() { Timeout = Timeout });
         });

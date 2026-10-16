@@ -251,7 +251,7 @@ else
         // Writes the head line and the json block only. When the graph has drifted from the text, the write-back
         // can also have inserted or removed blocks, and writing the editor text below overwrites that.
         _currentContent = MarkdownBlockWriter.WriteConfiguration(
-            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject));
+            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject, block));
 
         // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
@@ -367,7 +367,7 @@ else
         string json;
         try
         {
-            json = MarkdownBlockConfiguration.Serialize(Serializer, result.Subject);
+            json = MarkdownBlockConfiguration.Serialize(Serializer, result.Subject, block: null);
         }
         finally
         {

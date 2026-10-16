@@ -16,8 +16,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 [Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownSlotWriteBackTests
 {
-    private const string LeafDefaults = "Count=0 Enabled=false Interval=00:00:00";
-
     private const string ReloadRefusal = "Blocks cannot be inserted or removed until the page has been read again.";
 
     private const string ChangedPageRefusal = "The page changed while the configuration was written; save again.";
@@ -43,7 +41,7 @@ public class MarkdownSlotWriteBackTests
         Assert.True(handled);
         Assert.Equal(
             $"intro\n\n:: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n" +
-            $"::: Tile Position=2\n:::: {LeafType} Name=n {LeafDefaults}\n::::\n:::\n::\n\noutro\n",
+            $"::: Tile Position=2\n:::: {LeafType} Name=n\n::::\n:::\n::\n\noutro\n",
             written);
         Assert.Same(board, page.Children["board"]);
         Assert.Equal([first, added], board.Tiles);
@@ -138,7 +136,7 @@ public class MarkdownSlotWriteBackTests
         // Assert
         Assert.True(handled);
         Assert.Equal(
-            $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::: {LeafType} Count=3 Enabled=false Interval=00:00:00\n::::\n:::\n::\n",
+            $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::: {LeafType} Count=3\n::::\n:::\n::\n",
             await fixture.ReadAsync("page.md"));
     }
 
@@ -370,8 +368,8 @@ public class MarkdownSlotWriteBackTests
         var serializer = fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>();
 
         // Act
-        var boardJson = MarkdownBlockConfiguration.Serialize(serializer, board);
-        var tileJson = MarkdownBlockConfiguration.Serialize(serializer, board.Tiles[0]);
+        var boardJson = MarkdownBlockConfiguration.Serialize(serializer, board, block: null);
+        var tileJson = MarkdownBlockConfiguration.Serialize(serializer, board.Tiles[0], block: null);
 
         // Assert
         Assert.Contains("\"Columns\": 2", boardJson);
@@ -389,7 +387,7 @@ public class MarkdownSlotWriteBackTests
         var tile = new TestTile { Position = 1 };
 
         // Act
-        var json = MarkdownBlockConfiguration.Serialize(serializer, tile);
+        var json = MarkdownBlockConfiguration.Serialize(serializer, tile, block: null);
 
         // Assert
         Assert.Contains("\"Position\": 1", json);
@@ -405,7 +403,7 @@ public class MarkdownSlotWriteBackTests
         var board = new TestCaseBoard(fixture.Services.GetRequiredService<IInterceptorSubjectContext>()) { Tilelist = 3 };
 
         // Act
-        var json = MarkdownBlockConfiguration.Serialize(serializer, board);
+        var json = MarkdownBlockConfiguration.Serialize(serializer, board, block: null);
 
         // Assert
         Assert.Contains("\"Tilelist\": 3", json);
@@ -550,7 +548,7 @@ public class MarkdownSlotWriteBackTests
         // Assert
         var expected =
             $":: {BoardType}#board Columns=2\n::: Tile Position=1\none\n:::\n" +
-            $"::: Tile Position=2\n:::: {LeafType} Count=3 Enabled=false Interval=00:00:00\n" +
+            $"::: Tile Position=2\n:::: {LeafType} Count=3\n" +
             "```json\n{\n  \"Tags\": [\n    \"a\",\n    \"b\"\n  ]\n}\n```\n::::\n:::\n::\n";
         Assert.True(handled);
         Assert.Equal(content, contentOfThePage);

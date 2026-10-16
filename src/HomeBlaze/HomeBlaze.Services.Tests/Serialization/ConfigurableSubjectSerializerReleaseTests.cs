@@ -21,6 +21,7 @@ public class ConfigurableSubjectSerializerReleaseTests
 
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly List<IInterceptorSubject> _attached = [];
+    private int _attachCount;
 
     public ConfigurableSubjectSerializerReleaseTests()
     {
@@ -38,7 +39,11 @@ public class ConfigurableSubjectSerializerReleaseTests
             .WithDataAnnotationValidation();
 
         var lifecycle = context.TryGetLifecycleInterceptor()!;
-        lifecycle.SubjectAttached += change => _attached.Add(change.Subject);
+        lifecycle.SubjectAttached += change =>
+        {
+            _attached.Add(change.Subject);
+            _attachCount++;
+        };
         lifecycle.SubjectDetaching += change => _attached.Remove(change.Subject);
 
         var services = new ServiceCollection();
@@ -154,5 +159,44 @@ public class ConfigurableSubjectSerializerReleaseTests
         // Assert
         Assert.Null(result);
         Assert.False(isCalled);
+    }
+    [Fact]
+    public void WhenDefaultConfigurationIsRequested_ThenItHasTheConstructorValuesAndTheSubjectLeavesTheContext()
+    {
+        // Act
+        var defaults = _serializer.GetDefaultConfiguration(typeof(ParentWithChildSubject), ConfigurationNaming.CSharpProperty);
+
+        // Assert
+        Assert.NotNull(defaults);
+        Assert.Equal(typeof(ParentWithChildSubject).FullName, defaults.Value.GetProperty("$type").GetString());
+        Assert.Equal(string.Empty, defaults.Value.GetProperty("Name").GetString());
+        Assert.False(defaults.Value.TryGetProperty("Child", out _));
+        Assert.Equal(1, _attachCount);
+        Assert.Empty(_attached);
+    }
+
+    [Fact]
+    public void WhenDefaultConfigurationIsRequestedTwice_ThenOnlyOneSubjectIsCreated()
+    {
+        // Arrange
+        var first = _serializer.GetDefaultConfiguration(typeof(ChildSubject));
+
+        // Act
+        var second = _serializer.GetDefaultConfiguration(typeof(ChildSubject));
+
+        // Assert
+        Assert.Equal(first!.Value.GetRawText(), second!.Value.GetRawText());
+        Assert.Equal(1, _attachCount);
+    }
+
+    [Fact]
+    public void WhenTypeIsNotKnown_ThenDefaultConfigurationIsNull()
+    {
+        // Act
+        var defaults = _serializer.GetDefaultConfiguration(typeof(PlainSubject));
+
+        // Assert
+        Assert.Null(defaults);
+        Assert.Equal(0, _attachCount);
     }
 }
