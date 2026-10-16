@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Reflection.Emit;
 using Namotion.Interceptor.Registry.Tests.Models;
 
 namespace Namotion.Interceptor.Registry.Tests;
@@ -26,6 +28,26 @@ public class RegisteredSubjectPropertySetterTests
 
         // Assert
         Assert.Equal((expectedHasSetter, expectedHasPublicSetter), (hasSetter, hasPublicSetter));
+    }
+
+    [Fact]
+    public void WhenInitSetterIsMarkedWithAPolyfillOfIsExternalInit_ThenItIsNotPublic()
+    {
+        // Arrange
+        var subject = new SetterAccessSubject();
+        string? value = null;
+        ((IInterceptorSubject)subject).AddProperties(new SubjectPropertyMetadata(
+            CreateInitOnlyPropertyWithPolyfill(), _ => value, (_, newValue) => value = (string?)newValue, isIntercepted: false, isDynamic: true));
+        ((IInterceptorSubject)subject).Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry());
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
+
+        // Act
+        var hasSetter = property.HasSetter;
+        var hasPublicSetter = property.HasPublicSetter;
+
+        // Assert
+        Assert.True(hasSetter);
+        Assert.False(hasPublicSetter);
     }
 
     [Fact]
@@ -91,5 +113,36 @@ public class RegisteredSubjectPropertySetterTests
         // Assert
         Assert.True(withSetterIsPublic);
         Assert.False(withoutSetterIsPublic);
+    }
+
+    /// <summary>
+    /// Emits a property whose public setter carries the init-only modifier of an own IsExternalInit type, as the
+    /// compiler emits it for an assembly that targets a framework without that type.
+    /// </summary>
+    private static PropertyInfo CreateInitOnlyPropertyWithPolyfill()
+    {
+        var assemblyName = new AssemblyName("PolyfillInitAssembly");
+        var module = AssemblyBuilder
+            .DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run)
+            .DefineDynamicModule(assemblyName.Name!);
+
+        var polyfill = module
+            .DefineType("System.Runtime.CompilerServices.IsExternalInit", TypeAttributes.NotPublic | TypeAttributes.Sealed | TypeAttributes.Abstract)
+            .CreateType();
+
+        var holder = module.DefineType("PolyfillInitHolder", TypeAttributes.Public | TypeAttributes.Abstract);
+        var setter = holder.DefineMethod(
+            "set_Name",
+            MethodAttributes.Public | MethodAttributes.Abstract | MethodAttributes.Virtual | MethodAttributes.HideBySig | MethodAttributes.SpecialName,
+            CallingConventions.HasThis,
+            typeof(void),
+            [polyfill],
+            null,
+            [typeof(string)],
+            null,
+            null);
+        holder.DefineProperty("Name", PropertyAttributes.None, typeof(string), null).SetSetMethod(setter);
+
+        return holder.CreateType().GetProperty("Name")!;
     }
 }

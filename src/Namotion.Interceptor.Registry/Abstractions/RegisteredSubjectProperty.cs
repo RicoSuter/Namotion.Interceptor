@@ -452,8 +452,21 @@ public class RegisteredSubjectProperty
                 .SetMethod;
         }
 
-        return setter is { IsPublic: true } &&
-            Array.IndexOf(setter.ReturnParameter.GetRequiredCustomModifiers(), typeof(IsExternalInit)) < 0;
+        return setter is { IsPublic: true } && !IsInitOnly(setter);
+    }
+
+    private static bool IsInitOnly(MethodInfo setter)
+    {
+        // Matched by name: an assembly built for an older framework declares its own IsExternalInit.
+        foreach (var modifier in setter.ReturnParameter.GetRequiredCustomModifiers())
+        {
+            if (modifier.FullName == "System.Runtime.CompilerServices.IsExternalInit")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
