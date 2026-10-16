@@ -42,12 +42,14 @@ internal static class FragmentOwnership
     private static bool IsTracked(Type componentType) =>
         _isTracked.GetOrAdd(componentType, static type => typeof(ComponentBase).IsAssignableFrom(type));
 
-    private sealed class OwnedFragment(ComponentReadTracker owner, RenderFragment fragment)
+    private sealed class OwnedFragment(ComponentReadTracker owner, RenderFragment fragment) : IReadPropertyRecorderTarget
     {
+        public void OnRead(PropertyReference property) => owner.OnContentRead(property);
+
         public void Render(RenderTreeBuilder builder)
         {
             var start = builder.GetFrames().Count;
-            using (ReadPropertyRecorder.RecordOnCurrentThread(owner))
+            using (ReadPropertyRecorder.RecordOnCurrentThread(this))
             {
                 fragment(builder);
             }

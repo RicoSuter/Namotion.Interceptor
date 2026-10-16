@@ -47,6 +47,7 @@ No base class, wrapper or subscription is needed. A change renders only the comp
 
 - **Reads outside a render**: A value read in `OnInitialized`, `OnParametersSet`, after an `await` or in an event handler is not tracked, because a change renders the component again without running these methods. Read the values that the markup shows in the render.
 - **Reads on another thread** during a render.
+- **A template (`RenderFragment<T>`) passed to a component that does not derive from `ComponentBase`**: its reads are recorded only by an open `TrackingScope`. The components of the framework take no such template apart from `Router`.
 
 ### Options
 
