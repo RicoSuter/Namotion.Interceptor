@@ -24,7 +24,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         property => property.IsConfigurationProperty() ? "It is a configuration property; agents cannot change configuration." : null;
 
     /// <summary>
-    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the
+    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the content search tool, the
     /// Markdown page hints of browse and search and every registered <see cref="McpToolProviderRegistration"/>.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
@@ -70,7 +70,8 @@ internal static class HomeBlazeMcpConfigurationFactory
             ToolProviders =
             {
                 new HomeBlazeMcpToolProvider(invoker, isReadOnly),
-                new HomeBlazeMarkdownToolProvider(invoker, isReadOnly)
+                new HomeBlazeMarkdownToolProvider(invoker, isReadOnly),
+                new HomeBlazeContentSearchToolProvider(rootSubjectProvider, pathProvider)
             },
             ToolDescriptionAdditions =
             {
