@@ -113,12 +113,9 @@
     }
 }
 
-/* Code in the text wraps where it would leave the page. Code in a table cell, such as a long type name, may wrap at any
-   point, so that the other columns keep a readable width; that rule comes second and wins at the same specificity. */
+/* Code that is wider than its line breaks inside a word only where nothing else fits, so that a long path in the text
+   does not widen the page. Code in a table cell may also break after each dot (see MarkdownSegmentBuilder), and a table
+   that is still too wide scrolls in its box. */
 .markdown-content :not(pre) > code {
     overflow-wrap: break-word;
-}
-
-.markdown-content td code {
-    overflow-wrap: anywhere;
 }

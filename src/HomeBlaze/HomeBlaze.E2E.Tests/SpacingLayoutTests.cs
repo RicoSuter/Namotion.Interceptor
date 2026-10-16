@@ -400,24 +400,39 @@ public class SpacingLayoutTests
         await Assertions.Expect(GetCard(page, "Table Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
-        var widths = await page.EvaluateAsync<double[]>(
+        var result = await page.EvaluateAsync<Overflow>(
             """
             () => {
                 const box = text => [...document.querySelectorAll('.markdown-table')].find(b => b.textContent.includes(text));
-                const codeTable = box('HomeBlaze.Components.ExpansionPanels');
                 const wideTable = box('Unbreakable');
-                return [
-                    document.documentElement.scrollWidth - document.documentElement.clientWidth,
-                    codeTable.scrollWidth - codeTable.clientWidth,
-                    wideTable.scrollWidth - wideTable.clientWidth
-                ];
+                const codes = [...document.querySelectorAll('.markdown-table td code')];
+                const lines = code => code.getClientRects().length;
+                const segments = code => code.textContent.split('.').length;
+                return {
+                    pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                    wideTableOverflow: wideTable.scrollWidth - wideTable.clientWidth,
+                    brokenCodes: codes.filter(code => lines(code) > segments(code)).map(code => code.textContent),
+                    wrappedTypeNames: codes.filter(code => segments(code) > 1 && lines(code) > 1).length
+                };
             }
             """);
 
-        // Assert: code in the text and in a cell wraps, so a table of type names fits, and only a word that cannot wrap makes
-        // its box scroll.
-        Assert.Equal(0, widths[0], Tolerance);
-        Assert.Equal(0, widths[1], Tolerance);
-        Assert.True(widths[2] > 0, $"The box of the table with the long word does not scroll: {widths[2]}");
+        // Assert: code in a cell breaks only after a dot, and a table that is still too wide scrolls in its box.
+        Assert.Equal(0, result.PageOverflow, Tolerance);
+        Assert.True(result.WideTableOverflow > 0, $"The box of the table with the long word does not scroll: {result.WideTableOverflow}");
+        Assert.Empty(result.BrokenCodes);
+        Assert.True(result.WrappedTypeNames > 0, "No type name in a cell wraps at a dot, so the test page does not show the case.");
+    }
+
+    // Filled by Playwright, which needs a parameterless constructor and settable properties.
+    private sealed class Overflow
+    {
+        public double PageOverflow { get; set; }
+
+        public double WideTableOverflow { get; set; }
+
+        public string[] BrokenCodes { get; set; } = [];
+
+        public int WrappedTypeNames { get; set; }
     }
 }

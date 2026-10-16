@@ -128,9 +128,12 @@ public static partial class MarkdownSegmentBuilder
             renderer.ObjectRenderers.Replace<CodeInlineRenderer>(literalRenderer);
         }
 
-        if (renderer.ObjectRenderers.FindExact<HtmlTableRenderer>() is not null)
+        var tableRenderer = renderer.ObjectRenderers.FindExact<HtmlTableRenderer>();
+        if (tableRenderer is not null)
         {
-            renderer.ObjectRenderers.Replace<HtmlTableRenderer>(new ScrollableTableRenderer());
+            var scrollableRenderer = new ScrollableTableRenderer();
+            scrollableRenderer.TryWriters.AddRange(tableRenderer.TryWriters);
+            renderer.ObjectRenderers.Replace<HtmlTableRenderer>(scrollableRenderer);
         }
 
         renderer.Render(page.Document);
@@ -258,12 +261,26 @@ public static partial class MarkdownSegmentBuilder
             return output;
         }
 
-        public void End(HtmlRenderer renderer, TextWriter output)
+        // With breakAfterDots the content may break after each dot, so that a type name in a narrow table column breaks
+        // between its segments and not inside one.
+        public void End(HtmlRenderer renderer, TextWriter output, bool breakAfterDots = false)
         {
             renderer.Writer = output;
 
             var code = _code.GetStringBuilder();
             code.Replace("{", "&#123;").Replace("}", "&#125;");
+            if (breakAfterDots)
+            {
+                // Between the end of the opening tag and the closing tag, so that no attribute changes.
+                var text = code.ToString();
+                var contentStart = text.IndexOf('>') + 1;
+                var contentEnd = text.LastIndexOf('<');
+                if (contentStart > 0 && contentEnd > contentStart)
+                {
+                    code.Replace(".", ".<wbr>", contentStart, contentEnd - contentStart);
+                }
+            }
+
             foreach (var chunk in code.GetChunks())
             {
                 output.Write(chunk.Span);
@@ -311,7 +328,18 @@ public static partial class MarkdownSegmentBuilder
         {
             var output = literalCode.Begin(renderer);
             base.Write(renderer, code);
-            literalCode.End(renderer, output);
+            literalCode.End(renderer, output, breakAfterDots: IsInTableCell(code));
+        }
+
+        private static bool IsInTableCell(Inline inline)
+        {
+            var container = inline.Parent;
+            while (container?.Parent is not null)
+            {
+                container = container.Parent;
+            }
+
+            return container?.ParentBlock?.Parent is TableCell;
         }
     }
 }

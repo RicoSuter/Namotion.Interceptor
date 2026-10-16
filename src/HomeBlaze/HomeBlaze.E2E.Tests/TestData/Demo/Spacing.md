@@ -135,6 +135,12 @@ Text before the code table.
 
 Text after the code table, with code that is wider than a phone: `Href="../Docs/administration/widgets/expansion-panels.md#behaviour-and-limits"`.
 
+| Argument | Kind of value | Default | Meaning |
+|----------|---------------|---------|---------|
+| `Subtitle` | Text | None | A smaller line below the title |
+| `IconColor` | Colour | `Default` | The colour of the icon |
+| `AspectRatio` | Text | None | The width and the height of the card in the form `W:H` |
+
 | Name | Word |
 |------|------|
 | Unbreakable | Averyveryverylongwordwithoutanyplacetobreakthatisfarwiderthanthescreenofaphone |
