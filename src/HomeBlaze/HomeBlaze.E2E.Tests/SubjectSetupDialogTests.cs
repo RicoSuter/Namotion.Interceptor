@@ -777,6 +777,23 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(Dialog(page).GetByText("Not a valid number")).ToBeVisibleAsync();
     }
 
+    [Theory]
+    [InlineData("Demo/HistoryChartValues.md/constant", "Range", "Series")]
+    [InlineData("Demo/Displays.md/disptable", "Source", "Columns")]
+    public async Task WhenAWidgetWithAListSlotIsEdited_ThenTheDialogHasNoFieldForTheSlot(string subjectPath, string argument, string slot)
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+
+        // Act
+        var editDialog = await OpenEditDialogAsync(page, subjectPath);
+
+        // Assert
+        await Assertions.Expect(editDialog.GetByLabel(argument, new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(editDialog.GetByText(slot)).ToHaveCountAsync(0);
+    }
+
     [Fact]
     public async Task WhenAValueCannotBeAppliedInTheEditDialog_ThenNothingIsAppliedAndTheDialogStaysOpen()
     {

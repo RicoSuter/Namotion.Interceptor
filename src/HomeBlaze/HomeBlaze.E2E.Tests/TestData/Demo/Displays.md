@@ -17,7 +17,7 @@ title: Displays Demo
 :: HomeBlaze.Components.Gauge Path=dispmotor/CurrentSpeed Label="Gauge No Range"
 ::
 
-:: HomeBlaze.Components.SubjectTable Source="../Displays.md" Type=HomeBlaze.Samples.Motor
+:: HomeBlaze.Components.SubjectTable#disptable Source="../Displays.md" Type=HomeBlaze.Samples.Motor
 ::: Column Property=Name Label="Motor"
 ::: Column Property=TargetSpeed Label="Target"
 ::
