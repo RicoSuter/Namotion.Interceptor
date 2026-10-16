@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -222,6 +221,20 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAPageIsEmpty_ThenItIsCountedAsSearchedButNotReturned()
+    {
+        // Arrange
+        var tool = await CreateToolAsync(("Empty.md", ""));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        Assert.Equal(4, result.GetProperty("pages_searched").GetInt32());
+        Assert.Equal("/Storage/Notes.md", Assert.Single(result.GetProperty("pages").EnumerateArray()).GetProperty("path").GetString());
+    }
+
+    [Fact]
     public async Task WhenTheSnippetWindowStartsInsideASurrogatePair_ThenNoHalfPairIsReturned()
     {
         // Arrange: the match is at index 160, so the window starts at index 100, the second half of the emoji at 99.
@@ -234,7 +247,6 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var snippet = GetSingleSnippet(result);
         Assert.Contains("needle", snippet);
         Assert.DoesNotContain('\uFFFD', snippet);
-        Assert.Equal(snippet, Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(snippet)));
     }
 
     [Fact]
@@ -250,7 +262,6 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var snippet = GetSingleSnippet(result);
         Assert.Contains("needle", snippet);
         Assert.DoesNotContain('\uFFFD', snippet);
-        Assert.Equal(snippet, Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(snippet)));
     }
 
     [Fact]
