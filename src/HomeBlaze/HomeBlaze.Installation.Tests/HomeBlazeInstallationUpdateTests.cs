@@ -71,7 +71,6 @@ public class HomeBlazeInstallationUpdateTests
 
     [Theory]
     [InlineData("1.0.0", null, RepositoryUrl, "Not available for development builds")]
-    [InlineData("edge", null, RepositoryUrl, "Not available for edge builds")]
     [InlineData("0.5.0", "v0.5.0", "https://gitlab.com/owner/repo", "Not supported for gitlab.com")]
     [InlineData("0.5.0", "v0.5.0", "https://github.com/owner", "Not available for this repository URL")]
     [InlineData("0.5.0", "v0.5.0", null, "Not available without a repository URL")]
@@ -84,6 +83,189 @@ public class HomeBlazeInstallationUpdateTests
         Assert.Equal(expectedReason, installation.UpdateCheckStatus);
         var exception = Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
         Assert.Equal(expectedReason, exception.Message);
+    }
+
+    [Theory]
+    [InlineData(null, "master")]
+    [InlineData(Commit, null)]
+    public void WhenAnEdgeBuildHasNoCommitOrBranch_ThenTheStatusAndCheckForUpdatesSayWhy(string? commit, string? branch)
+    {
+        // Act
+        var installation = CreateInstallation(CreateBuild("edge", tag: null, commit: commit, branch: branch));
+        var exception = Record.Exception(installation.CheckForUpdates);
+
+        // Assert
+        Assert.Equal("Not available for edge builds without a commit or branch", installation.UpdateCheckStatus);
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal("Not available for edge builds without a commit or branch", exception.Message);
+    }
+
+    [Fact]
+    public void WhenAnEdgeBuildHasACommitAndBranch_ThenItCanCheck()
+    {
+        // Arrange
+        var installation = CreateInstallation(CreateBuild("edge", tag: null));
+        installation.Status = ServiceStatus.Running;
+
+        // Act
+        var exception = Record.Exception(installation.CheckForUpdates);
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Null(installation.UpdateCheckStatus);
+    }
+
+    [Fact]
+    public async Task WhenAnEdgeBuildIsBehindItsBranch_ThenTheUpdateIsReported()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ComparisonJson(aheadBy: 3, behindBy: 0)));
+        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(handler));
+
+        // Act
+        var retryDelay = await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(retryDelay);
+        Assert.Equal($"https://api.github.com/repos/owner/repo/compare/{Commit}...master?per_page=1&page=2", Assert.Single(handler.Requests).RequestUri!.AbsoluteUri);
+        Assert.True(installation.UpdateAvailable);
+        Assert.Equal(3, installation.CommitsBehind);
+        Assert.Equal(new Uri(CompareUrl), installation.CompareUrl);
+        Assert.Null(installation.LatestVersion);
+        Assert.NotNull(installation.LastUpdateCheck);
+        Assert.Null(installation.UpdateCheckStatus);
+        Assert.Equal("Warning", installation.IconColor);
+    }
+
+    [Fact]
+    public async Task WhenAnEdgeBuildIsTheHeadOfItsBranch_ThenNoUpdateIsReported()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ComparisonJson(aheadBy: 0, behindBy: 0)));
+        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(handler));
+
+        // Act
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(installation.UpdateAvailable);
+        Assert.Equal(0, installation.CommitsBehind);
+        Assert.Null(installation.UpdateCheckStatus);
+        Assert.Null(installation.IconColor);
+    }
+
+    [Theory]
+    [InlineData(2, 1, true)]
+    [InlineData(0, 1, false)]
+    public async Task WhenTheCommitOfAnEdgeBuildIsNotOnItsBranch_ThenOnlyTheUpdateCheckStatusReportsIt(int aheadBy, int behindBy, bool expectedUpdateAvailable)
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ComparisonJson(aheadBy, behindBy)));
+        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(handler));
+        installation.Status = ServiceStatus.Running;
+
+        // Act
+        var retryDelay = await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(retryDelay);
+        Assert.Equal(expectedUpdateAvailable, installation.UpdateAvailable);
+        Assert.Equal(aheadBy, installation.CommitsBehind);
+        Assert.Equal("Commit b1b7c2f is not on master.", installation.UpdateCheckStatus);
+        Assert.Equal(ServiceStatus.Running, installation.Status);
+        Assert.Null(installation.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheCommitOfAnEdgeBuildIsOnItsBranchAgain_ThenTheUpdateCheckStatusIsCleared()
+    {
+        // Arrange
+        var responses = new Queue<HttpResponseMessage>([
+            FakeHttpMessageHandler.Json(ComparisonJson(aheadBy: 2, behindBy: 1)),
+            FakeHttpMessageHandler.Json(ComparisonJson(aheadBy: 1, behindBy: 0)),
+        ]);
+        var handler = new FakeHttpMessageHandler(_ => responses.Dequeue());
+        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(handler));
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Act
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(installation.UpdateCheckStatus);
+        Assert.Equal(1, installation.CommitsBehind);
+    }
+
+    [Fact]
+    public async Task WhenAnEdgeCheckFails_ThenTheLastComparisonIsKept()
+    {
+        // Arrange
+        var responses = new Queue<HttpResponseMessage>([
+            FakeHttpMessageHandler.Json(ComparisonJson(aheadBy: 3, behindBy: 0)),
+            new HttpResponseMessage(HttpStatusCode.InternalServerError),
+        ]);
+        var handler = new FakeHttpMessageHandler(_ => responses.Dequeue());
+        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(handler));
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Act
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.StartsWith("GitHub answered 500", installation.UpdateCheckStatus);
+        Assert.True(installation.UpdateAvailable);
+        Assert.Equal(3, installation.CommitsBehind);
+        Assert.Equal(new Uri(CompareUrl), installation.CompareUrl);
+    }
+
+    [Fact]
+    public async Task WhenGitHubDoesNotKnowTheCommitOfAnEdgeBuild_ThenOnlyTheUpdateCheckStatusReportsIt()
+    {
+        // Arrange
+        var responses = new Queue<HttpResponseMessage>([
+            FakeHttpMessageHandler.Json(ComparisonJson(aheadBy: 3, behindBy: 0)),
+            new HttpResponseMessage(HttpStatusCode.NotFound),
+        ]);
+        var handler = new FakeHttpMessageHandler(_ => responses.Dequeue());
+        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(handler));
+        installation.Status = ServiceStatus.Running;
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Act
+        var retryDelay = await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(retryDelay);
+        Assert.Null(installation.UpdateAvailable);
+        Assert.Null(installation.CommitsBehind);
+        Assert.Null(installation.CompareUrl);
+        Assert.Equal("GitHub could not compare commit b1b7c2f with master.", installation.UpdateCheckStatus);
+        Assert.Equal(ServiceStatus.Running, installation.Status);
+    }
+
+    [Fact]
+    public async Task WhenTheComparisonOfAnEdgeBuildIsRateLimited_ThenTheLastResultIsKeptAndGitHubsWaitApplies()
+    {
+        // Arrange
+        var responses = new Queue<HttpResponseMessage>([
+            FakeHttpMessageHandler.Json(ComparisonJson(aheadBy: 3, behindBy: 0)),
+            CreateTooManyRequests(TimeSpan.FromMinutes(30)),
+        ]);
+        var handler = new FakeHttpMessageHandler(_ => responses.Dequeue());
+        var installation = CreateInstallation(CreateBuild("edge", tag: null), () => new HttpClient(handler), new TestTimeProvider(DateTimeOffset.UtcNow));
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+        installation.Status = ServiceStatus.Running;
+
+        // Act
+        var retryDelay = await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(UpdateSchedule.InitialBackoff, retryDelay);
+        Assert.Equal("GitHub rate limit reached.", installation.UpdateCheckStatus);
+        Assert.True(installation.UpdateAvailable);
+        Assert.Equal(3, installation.CommitsBehind);
+        var exception = Assert.Throws<InvalidOperationException>(installation.CheckForUpdates);
+        Assert.Equal("GitHub asked to wait 30 more minutes.", exception.Message);
     }
 
     [Fact]
