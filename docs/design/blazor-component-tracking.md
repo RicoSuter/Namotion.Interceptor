@@ -4,7 +4,7 @@ This document describes how component tracking in `Namotion.Interceptor.Blazor` 
 
 ## Problem
 
-`TrackingScope` records reads from the start of its render fragment until its `OnAfterRender`, which runs after the whole render batch. That window over-tracks: it also records the reads of every component that renders after the scope in the same batch, so a scope around a page renders the whole page for every change it tracks. It also under-tracks: a component that renders later in a batch of its own (after an await, in a virtualized grid, in a lazily rendered panel) renders outside the window.
+`TrackingScope` records the reads of the async flow that renders it, for as long as its recording is open, and that spans the rest of the render batch. That window over-tracks: it also records the reads of every component that renders after the scope in the same batch, so a scope around a page renders the whole page for every change it tracks. It also under-tracks: a component that renders later in a batch of its own (after an await, in a virtualized grid, in a lazily rendered panel) renders outside the window.
 
 Both come from the same cause: a scope around a fragment has no boundary of the components it renders. The render of each component is that boundary: the renderer invokes the component's render fragment synchronously, on one thread, for one component.
 

@@ -3,9 +3,9 @@ using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Blazor.ComponentTracking;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 using Xunit;
 using Xunit.Abstractions;
-using static Namotion.Interceptor.Blazor.Tests.TrackingScopeTests;
 
 namespace Namotion.Interceptor.Blazor.Tests;
 
@@ -446,6 +446,24 @@ public class ComponentTrackingTests
         _output.WriteLine($"{mode}: subscriptions before removal: {subscribed}, after: {dispatcher.SubscriptionCount}");
         Assert.Equal(1, subscribed);
         Assert.Equal(0, dispatcher.SubscriptionCount);
+    }
+
+    private static IInterceptorSubjectContext CreateContext()
+    {
+        return InterceptorSubjectContext
+            .Create()
+            .WithReadPropertyRecorder()
+            .WithFullPropertyTracking();
+    }
+
+    private static Task<Host> RenderAsync(TestRenderer renderer, RenderFragment content)
+    {
+        return renderer.RenderAsync<Host>(new Dictionary<string, object?> { [nameof(Host.Content)] = content });
+    }
+
+    private static Task WaitAsync(Func<bool> condition)
+    {
+        return AsyncTestHelpers.WaitUntilAsync(condition, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(5));
     }
 
     private static TestRenderer CreateRenderer(TestRenderMode mode, int throttleMilliseconds = 0, int maximumUnacknowledgedBatches = 10)
