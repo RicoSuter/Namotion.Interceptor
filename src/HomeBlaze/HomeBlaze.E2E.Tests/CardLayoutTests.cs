@@ -134,7 +134,7 @@ public class CardLayoutTests
         {
             await page.GetByTestId("edit-mode-menu").ClickAsync();
             await page.Locator(".mud-popover-open").GetByText("Inline", new() { Exact = true }).ClickAsync();
-            await Assertions.Expect(page.Locator($"{container} .subject-component-wrapper.selectable"))
+            await Assertions.Expect(page.Locator(container).Filter(new() { Has = card }).Locator(".subject-component-wrapper.selectable"))
                 .ToHaveCountAsync(1, new() { Timeout = Timeout });
         }
 
@@ -156,5 +156,37 @@ public class CardLayoutTests
         Assert.Equal(measures[1], measures[0], 1.0);
         Assert.Equal(0, measures[2]);
         Assert.Equal(0, measures[3]);
+    }
+
+    [Theory]
+    [InlineData("Grid Ratio Card", ".grid-cell-content")]
+    [InlineData("Canvas Ratio Card", ".canvas-node-content")]
+    public async Task WhenACardWithAnAspectRatioIsInAGridCellOrACanvasNode_ThenItFillsItsWidthAndHeight(string title, string container)
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var card = GetCard(page, title);
+        await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act: the size of the card and the content box of its container from one call.
+        var measures = await card.EvaluateAsync<double[]>(
+            """
+            (card, container) => {
+                const frame = card.closest(container);
+                const style = getComputedStyle(frame);
+                const cardBox = card.getBoundingClientRect();
+                return [
+                    cardBox.width,
+                    cardBox.height,
+                    frame.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+                    frame.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+                ];
+            }
+            """,
+            container);
+
+        // Assert
+        Assert.Equal(measures[2], measures[0], 2.0);
+        Assert.Equal(measures[3], measures[1], 2.0);
     }
 }

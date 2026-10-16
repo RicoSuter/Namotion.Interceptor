@@ -34,9 +34,13 @@ Body of the invalid ratio card.
 :: HomeBlaze.Components.GridLayout#cardgrid Rows=1 Columns=2
 ::: Cell Row=0 Column=0
 :::: HomeBlaze.Components.Card Title="Grid Card"
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.Card Title="Grid Ratio Card" AspectRatio="1:2"
 ::
 
 :: HomeBlaze.Components.CanvasLayout#cardcanvas
 ::: Node X=20 Y=20 Width=300 Height=200
 :::: HomeBlaze.Components.Card Title="Canvas Card"
+::: Node X=340 Y=20 Width=300 Height=200
+:::: HomeBlaze.Components.Card Title="Canvas Ratio Card" AspectRatio="1:2"
 ::
