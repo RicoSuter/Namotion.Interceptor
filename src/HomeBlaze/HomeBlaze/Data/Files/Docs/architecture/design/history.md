@@ -337,13 +337,17 @@ Filling the start of a window needs the value held entering it, which a raw quer
 | `to` | no | now | ISO 8601 |
 | `bucket` | no | null (raw) | for example `5m`, `30s`, `1h`, `7d` |
 | `aggregation` | no | `Last` | case-insensitive match against `HistoryAggregations` |
+| `max_points` | no | 10000 raw, 1000 bucketed | maximum points per path; can only lower the default |
+| `coverage` | no | `summary` | `summary` or `ranges`; `ranges` also lists the covered ranges |
 
-The response is a per-path map, each entry carrying:
+The response carries the resolved `from` and `to`, one coverage summary and a per-path `series` map:
 
-- a value type hint (number / string / boolean / enum);
-- points, including explicit null gaps;
-- truncation state;
-- effective coverage ranges.
+- `coverage`: the covered fraction of the range (`ratio`, rounded toward zero so a range with a gap never reads as 1), the number of `gaps` and the `largest_gap` as a compact duration such as `2h14m`. With `coverage: "ranges"` it also lists the covered `ranges` as `[from, to]` pairs. It is the coverage of the first served series; a series whose coverage differs, for example because the point limit truncated it, carries its own `ranges` when ranges are requested.
+- per path: a value type hint (number / string / boolean / enum), points as `[timestamp, value]` pairs including explicit null gaps, and `truncated: true` when the point limit cut the series.
+
+When no path could be served, `coverage` is omitted.
+
+Timestamps are UTC (`2026-06-24T00:05:00Z`), with fractional seconds only when they are not zero. Raw samples show no gaps, so an agent reading a raw state timeline with a `ratio` below 1 should request the ranges.
 
 Unknown or non-servable aggregations return a structured error with the `available` set; empty results and unknown paths are not errors. Aggregation input is normalized case-insensitively at the MCP boundary. Internal identifiers use ordinal comparison.
 
