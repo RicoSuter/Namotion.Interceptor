@@ -102,6 +102,77 @@ public class DeltaParityTests
 
     [Theory]
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenABucketIsFullyUncovered_ThenItIsNullAndTheReadingSurvivesIt(ParityStoreFactory factory)
+    {
+        // Arrange - coverage starts at 25, so [0,10) and [10,20) are uncovered; 100 lies before the query.
+        using var store = factory.CreateCoveredFrom(Base.AddSeconds(25));
+        store.Record("/a/Energy", Base.AddSeconds(-5), 100d, typeof(double));
+        store.Record("/a/Energy", Base.AddSeconds(26), 110d, typeof(double));
+        await store.FlushAsync();
+
+        // Act
+        var series = store.Query(Delta(Base, Base.AddSeconds(30)));
+
+        // Assert - the uncovered buckets are honest gaps, and the partly covered one still starts from 100.
+        ParityAssert.NumbersEqual([null, null, 10d], series);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenDeltaOnAJsonProperty_ThenThrows(ParityStoreFactory factory)
+    {
+        // Arrange - a string property lives in value_json, which has no counter reading.
+        using var store = factory.Create();
+        store.Record("/a/Note", Base.AddSeconds(1), "hello", typeof(string));
+        await store.FlushAsync();
+
+        // Act & Assert
+        Assert.Throws<HistoryAggregationNotSupportedException>(() =>
+            store.Query(new HistoryQuery("/a/Note", Base, Base.AddSeconds(10), Bucket,
+                HistoryAggregations.Delta, MaxPoints: 1000)));
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenUlongCounterOverflowsIntoJson_ThenDeltaReadsItNumerically(ParityStoreFactory factory)
+    {
+        // Arrange - both readings are above long.MaxValue and exactly representable as double (2^63 + 2048, 2^63 + 4096).
+        using var store = factory.Create();
+        var first = (1UL << 63) + 2048UL;
+        var second = (1UL << 63) + 4096UL;
+        store.Record("/a/Energy", Base.AddSeconds(1), first, typeof(ulong));
+        store.Record("/a/Energy", Base.AddSeconds(3), second, typeof(ulong));
+        await store.FlushAsync();
+
+        // Act
+        var series = store.Query(Delta(Base, Base.AddSeconds(10)));
+
+        // Assert
+        ParityAssert.NumbersEqual([2048d], series);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenQueriedThroughTheMerger_ThenDeltaMatchesTheStoreResult(ParityStoreFactory factory)
+    {
+        // Arrange
+        using var store = factory.Create();
+        store.Record("/a/Energy", Base.AddSeconds(-5), 100d, typeof(double));
+        store.Record("/a/Energy", Base.AddSeconds(2), 110d, typeof(double));
+        store.Record("/a/Energy", Base.AddSeconds(25), 130d, typeof(double));
+        await store.FlushAsync();
+
+        // Act
+        var direct = store.Query(Delta(Base, Base.AddSeconds(30)));
+        var merged = await new[] { store.AsHistoryStore() }
+            .QueryHistoryAsync(Delta(Base, Base.AddSeconds(30)), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(direct.Points.Select(point => point.Number), merged.Points.Select(point => point.Number));
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
     public async Task WhenThePathMoved_ThenDeltaFollowsTheMoveChain(ParityStoreFactory factory)
     {
         // Arrange

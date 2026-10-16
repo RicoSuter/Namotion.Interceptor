@@ -482,8 +482,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // through the engine's OpenPartition/OpenMoves delegates, which re-enter this lock).
         lock (_connectionLock)
         {
-            // The bucket reader's TWA carry-seed look-back reads directly through the same context; it runs
-            // while this lock is already held, matching the original inline GetSampleAtOrBefore look-back.
+            // The bucket reader's look-backs (the TWA carry seed and the Delta reading) read directly through the
+            // same context; they run while this lock is already held, matching the original inline look-back.
             var result = query.Bucket is null
                 ? SqliteHistoryReader.QueryRaw(_readContext, query, cancellationToken)
                 : SqliteBucketReader.QueryBucketed(

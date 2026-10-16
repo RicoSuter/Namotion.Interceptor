@@ -668,6 +668,56 @@ public class HistoryStoreMergerTests
         Assert.Equal("active", live.ReceivedQueries[0].CarrySeed?.Json?.GetString());
     }
 
+    // Delta reading ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenDeltaSpansTwoStores_ThenEachSegmentStartsFromTheNewestReadingBeforeIt()
+    {
+        // Arrange: the durable store covers [0,20) and holds 100 at 5; the live store covers [20,40) and holds 130 at 25.
+        var durable = new FakeHistoryStore
+        {
+            Priority = 10,
+            CurrentCoverage = new HistoryCoverage(At(0), At(20))
+        }.AddSample(At(5), 100);
+        var live = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(20), At(40))
+        }.AddSample(At(25), 130);
+        var query = new HistoryQuery("/a/Energy", At(0), At(40), TimeSpan.FromMinutes(20), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { durable, live }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: the live store's segment was seeded with the durable store's reading.
+        var liveQuery = Assert.Single(live.ReceivedQueries);
+        Assert.Equal(100d, liveQuery.CarrySeed?.Number);
+    }
+
+    [Fact]
+    public async Task WhenDeltaSegmentFollowsAGap_ThenTheSeedStillBridgesIt()
+    {
+        // Arrange: nothing covers [20,30); the live store covers [30,40).
+        var durable = new FakeHistoryStore
+        {
+            Priority = 10,
+            CurrentCoverage = new HistoryCoverage(At(0), At(20))
+        }.AddSample(At(5), 100);
+        var live = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(30), At(40))
+        }.AddSample(At(35), 130);
+        var query = new HistoryQuery("/a/Energy", At(0), At(40), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { durable, live }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        var liveQuery = Assert.Single(live.ReceivedQueries);
+        Assert.Equal(100d, liveQuery.CarrySeed?.Number);
+    }
+
     // Eligibility -----------------------------------------------------------------------------
 
     [Fact]

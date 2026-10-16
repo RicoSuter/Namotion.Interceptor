@@ -130,6 +130,9 @@ public static class HistoryStoreMerger
     /// segment and thread the carry oldest-to-newest, with at most one at-or-before lookup per segment
     /// for its ending raw event. Only raw queries can actually exhaust the budget, and those run newest-first
     /// in a single pass, shrinking it by each returned count.
+    ///
+    /// Bucketed <c>Delta</c> also serves every segment oldest-to-newest, but seeds each one with the newest
+    /// numeric reading before it instead of threading a held value, because that reading bridges coverage gaps.
     /// </summary>
     internal static Task<HistorySeries> ExecuteWithBudget(
         IReadOnlyList<IHistoryStore> ordered,
@@ -137,6 +140,11 @@ public static class HistoryStoreMerger
         HistoryQuery query,
         CancellationToken cancellationToken)
     {
+        if (query.Bucket is not null && query.Aggregation == HistoryAggregations.Delta)
+        {
+            return ExecuteDeltaThreaded(ordered, segments, query, cancellationToken);
+        }
+
         var carryDependent = query.Bucket is not null &&
             query.Aggregation is HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
 
@@ -225,6 +233,52 @@ public static class HistoryStoreMerger
         }
 
         return MergeResults(segments, query, budgetExhaustedBeforeAllPlanned: false);
+    }
+
+    /// <summary>
+    /// Bucketed <c>Delta</c>: serves every planned segment oldest to newest, each seeded with the newest numeric
+    /// reading any store holds before it. Unlike the held value of <c>Last</c>, the reading survives coverage gaps,
+    /// because a counter keeps counting while nothing records it. The bucketed grid is clipped to the budget before
+    /// planning, so serving every segment cannot exceed it.
+    /// </summary>
+    private static async Task<HistorySeries> ExecuteDeltaThreaded(
+        IReadOnlyList<IHistoryStore> ordered,
+        IReadOnlyList<PlannedSegment> segments,
+        HistoryQuery query,
+        CancellationToken cancellationToken)
+    {
+        foreach (var segment in segments)
+        {
+            var seed = await ResolveLastNumericBeforeAsync(ordered, query.PropertyPath, segment.From, cancellationToken)
+                .ConfigureAwait(false);
+            segment.Result = await QuerySegment(segment, query, query.MaxPoints, seed, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return MergeResults(segments, query, budgetExhaustedBeforeAllPlanned: false);
+    }
+
+    // The newest numeric reading strictly before the instant across all stores: the stores cover different times, so
+    // the first hit in priority order can be older than another store's.
+    private static async Task<HistoryPoint?> ResolveLastNumericBeforeAsync(
+        IReadOnlyList<IHistoryStore> ordered,
+        string propertyPath,
+        DateTimeOffset before,
+        CancellationToken cancellationToken)
+    {
+        HistoryPoint? newest = null;
+        foreach (var store in ordered)
+        {
+            var sample = await store
+                .GetLastNumericSampleBeforeAsync(propertyPath, before, cancellationToken)
+                .ConfigureAwait(false);
+            if (sample is not null && (newest is null || sample.Timestamp > newest.Timestamp))
+            {
+                newest = sample;
+            }
+        }
+
+        return newest;
     }
 
     // The newest sample at or before asOf across the ordered stores, taking the first hit. Serves both

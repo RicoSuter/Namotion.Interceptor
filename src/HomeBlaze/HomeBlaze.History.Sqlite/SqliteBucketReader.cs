@@ -109,7 +109,7 @@ internal static class SqliteBucketReader
             var pathIds = new Dictionary<(string PartitionKey, string Path), long?>();
             var segments = new List<ChainSegment>();
             var deltaCursor = new BucketCursor(bucket);
-            var timeWeightedAverageSql = isUlong ? UlongTimeWeightedAverageSql : TimeWeightedAverageSql;
+            var orderedValueSql = isUlong ? UlongTimeWeightedAverageSql : TimeWeightedAverageSql;
             var firstPartition = 0;
             for (var windowIndex = 0; windowIndex < windows.Length; windowIndex++)
             {
@@ -120,7 +120,7 @@ internal static class SqliteBucketReader
                     // The held value only enters the scan when this store covers the first bucket's start.
                     var seed = windowIndex == 0 && window.From == alignedFrom ? carrySeed?.Number : null;
                     ReadTimeWeightedAverageWindow(
-                        context, pathIds, segments, window, timeWeightedAverageSql, bucket, seed, partials,
+                        context, pathIds, segments, window, orderedValueSql, bucket, seed, partials,
                         cancellationToken);
                     continue;
                 }
@@ -129,7 +129,7 @@ internal static class SqliteBucketReader
                 {
                     // The held value threads through every window: gaps between them are bridged.
                     ReadDeltaWindow(
-                        context, pathIds, segments, timeWeightedAverageSql, ref deltaCarry, partials, ref deltaCursor,
+                        context, pathIds, segments, orderedValueSql, ref deltaCarry, partials, ref deltaCursor,
                         cancellationToken);
                     continue;
                 }

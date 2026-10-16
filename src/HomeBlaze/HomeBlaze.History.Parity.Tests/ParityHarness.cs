@@ -18,6 +18,7 @@ public interface IParityStore : IDisposable
     HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf);
     HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before);
     ImmutableArray<HistoryCoverage> CoverageRanges { get; }
+    IHistoryStore AsHistoryStore();
 }
 
 /// <summary>The wall-clock bounds all parity stores share.</summary>
@@ -64,6 +65,8 @@ internal sealed class InMemoryParityStore : IParityStore
 
     public ImmutableArray<HistoryCoverage> CoverageRanges => _engine.CoverageRanges;
 
+    public IHistoryStore AsHistoryStore() => _engine;
+
     public void Dispose() { }
 }
 
@@ -102,6 +105,8 @@ internal sealed class SqliteParityStore : IParityStore
         => _engine.GetLastNumericSampleBefore(propertyPath, before);
 
     public ImmutableArray<HistoryCoverage> CoverageRanges => _engine.CoverageRanges;
+
+    public IHistoryStore AsHistoryStore() => _engine;
 
     public void Dispose()
     {
