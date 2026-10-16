@@ -100,10 +100,40 @@ public class AgentPromptBuilderTests
         };
 
         // Act
-        var message = AgentPromptBuilder.BuildBackgroundMessage("change", recent, Now.AddMinutes(-15), state, Now);
+        var message = AgentPromptBuilder.BuildBackgroundMessage(
+            "change", recent, Now.AddMinutes(-15), state, Now, TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich"));
 
         // Assert
         return Verifier.Verify(message);
+    }
+
+    [Fact]
+    public void WhenServerTimeZoneIsBehindUtc_ThenTriggerLineNamesItsIdAndNegativeOffset()
+    {
+        // Act
+        var message = AgentPromptBuilder.BuildBackgroundMessage(
+            "schedule", [], null, [], Now, TimeZoneInfo.FindSystemTimeZoneById("America/New_York"));
+
+        // Assert
+        Assert.StartsWith(
+            "Trigger: schedule at 2026-10-10 14:30 UTC (server time zone America/New_York, UTC-04:00)" + Environment.NewLine,
+            message);
+    }
+
+    [Fact]
+    public void WhenNoTimeZoneIsGiven_ThenTriggerLineNamesTheLocalZone()
+    {
+        // Arrange
+        var local = TimeZoneInfo.Local;
+        var expectedId = local.HasIanaId || !TimeZoneInfo.TryConvertWindowsIdToIanaId(local.Id, out var ianaId)
+            ? local.Id
+            : ianaId;
+
+        // Act
+        var message = AgentPromptBuilder.BuildBackgroundMessage("schedule", [], null, [], Now);
+
+        // Assert
+        Assert.Contains($"(server time zone {expectedId}, UTC", message.Split(Environment.NewLine)[0]);
     }
 
     [Fact]

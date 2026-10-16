@@ -128,17 +128,25 @@ internal static class AgentPromptBuilder
     }
 
     /// <summary>
-    /// Builds the user message of a background run: trigger, digest of recent results, then the watched state.
+    /// Builds the user message of a background run: trigger with the server's time zone, digest of recent results,
+    /// then the watched state. Times are UTC; <paramref name="serverTimeZone"/> (default: the local zone) is named
+    /// once, with its offset at <paramref name="now"/>, so the agent can relate times to local days.
     /// </summary>
     public static string BuildBackgroundMessage(
         string trigger,
         IReadOnlyList<AgentTimelineEntry> recentResults,
         DateTimeOffset? lastQuietRun,
         IReadOnlyList<AgentWatchedState> watchedState,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        TimeZoneInfo? serverTimeZone = null)
     {
+        serverTimeZone ??= TimeZoneInfo.Local;
+        var offset = serverTimeZone.GetUtcOffset(now);
         var builder = new StringBuilder();
-        builder.Append("Trigger: ").Append(trigger).Append(" at ").AppendLine(FormatTime(now));
+        builder.Append("Trigger: ").Append(trigger).Append(" at ").Append(FormatTime(now))
+            .Append(" (server time zone ").Append(GetIanaId(serverTimeZone))
+            .Append(", UTC").Append(offset < TimeSpan.Zero ? '-' : '+')
+            .Append(offset.ToString(@"hh\:mm", CultureInfo.InvariantCulture)).AppendLine(")");
         builder.AppendLine();
         builder.AppendLine("# Recent results");
         if (recentResults.Count == 0)
@@ -252,6 +260,12 @@ internal static class AgentPromptBuilder
 
     private static void AppendResultLine(StringBuilder builder, AgentTimelineEntry run) =>
         builder.Append("- ").Append(FormatTime(run.Timestamp)).Append(": ").AppendLine(run.ResultText.Trim());
+
+    // The history tools report zones by IANA id, so the agent sees the same id in both places.
+    private static string GetIanaId(TimeZoneInfo timeZone) =>
+        timeZone.HasIanaId || !TimeZoneInfo.TryConvertWindowsIdToIanaId(timeZone.Id, out var ianaId)
+            ? timeZone.Id
+            : ianaId;
 
     private static string FormatTime(DateTimeOffset time) => time.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
 }
