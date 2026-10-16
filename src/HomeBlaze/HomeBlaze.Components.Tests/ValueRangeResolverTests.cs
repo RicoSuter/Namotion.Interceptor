@@ -134,19 +134,40 @@ public class ValueRangeResolverTests
     public void WhenRangeIsEmptyOrNotFinite_ThenItIsAnError(double minimum, double maximum, string expected)
     {
         // Act
-        var error = ValueRangeResolver.Validate(new ValueRange(minimum, maximum));
+        var isResolved = ValueRangeResolver.TryResolve(null, minimum, maximum, out var range, out var error);
+        var hasEnds = ValueRangeResolver.TryFindEnds(null, minimum, maximum, out var ends);
 
         // Assert
+        Assert.False(isResolved);
         Assert.Equal(expected, error);
+        Assert.Equal(default, range);
+        Assert.True(hasEnds);
+        Assert.Equal(new ValueRange(minimum, maximum), ends);
     }
 
     [Fact]
     public void WhenMaximumIsAboveMinimum_ThenTheRangeHasNoError()
     {
         // Act
-        var error = ValueRangeResolver.Validate(new ValueRange(-10, 0.5));
+        var isResolved = ValueRangeResolver.TryResolve(null, -10, 0.5, out var range, out var error);
 
         // Assert
+        Assert.True(isResolved);
+        Assert.Equal(new ValueRange(-10, 0.5), range);
         Assert.Null(error);
+    }
+
+    [Fact]
+    public void WhenAnAttributeOfTheRangeIsEmpty_ThenItIsAnError()
+    {
+        // Arrange
+        var property = GetProperty(nameof(RangedSubject.Speed));
+
+        // Act
+        var isResolved = ValueRangeResolver.TryResolve(property, 3000, null, out _, out var error);
+
+        // Assert
+        Assert.False(isResolved);
+        Assert.Equal("Maximum must be above Minimum: 3000 to 3000", error);
     }
 }

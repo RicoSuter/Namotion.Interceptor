@@ -108,7 +108,7 @@ else
             return false;
         }
 
-        error = ValueRangeResolver.Validate(range) ?? SliderMath.ValidateStep(property?.Type, Step);
+        error = SliderMath.ValidateStep(property?.Type, Step);
         if (error is not null)
         {
             return false;

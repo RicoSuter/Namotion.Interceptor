@@ -16,29 +16,23 @@ internal static class GaugeDisplay
     /// <summary>
     /// Gets the state of a gauge: its range by <see cref="ValueRangeResolver"/> and where the value stands in it.
     /// A path that leads nowhere gives an empty ring without an error, as every value widget shows a dash for it.
-    /// A range whose maximum is not above its minimum gives the error of <see cref="ValueRangeResolver.Validate"/>.
     /// </summary>
     public static GaugeState GetState(ValueReading reading, double? minimum, double? maximum)
     {
         if (!ValueRangeResolver.TryResolve(reading.Property, minimum, maximum, out var range, out var error))
         {
-            return reading.Property is null ? default : new GaugeState(null, null, null, null, error);
-        }
-
-        var rangeError = ValueRangeResolver.Validate(range);
-        if (rangeError is not null)
-        {
-            return new GaugeState(null, null, null, null, rangeError);
+            return reading.Property is null && error == ValueRangeResolver.MissingRangeError
+                ? default
+                : new GaugeState(null, null, null, error);
         }
 
         var percent = ValueReader.GetProgressPercent(reading.Value, range.Minimum, range.Maximum);
-        if (percent is null)
+        if (percent is null || !NumberValues.TryGetNumber(reading.Value, out var value))
         {
-            return new GaugeState(null, null, null, range, null);
+            return new GaugeState(null, null, range, null);
         }
 
-        var value = Convert.ToDouble(reading.Value, CultureInfo.InvariantCulture);
-        return new GaugeState(value, Math.Clamp(value, range.Minimum, range.Maximum), percent, range, null);
+        return new GaugeState(Math.Clamp(value, range.Minimum, range.Maximum), percent, range, null);
     }
 
     /// <summary>

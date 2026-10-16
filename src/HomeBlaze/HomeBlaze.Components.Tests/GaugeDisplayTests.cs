@@ -42,7 +42,7 @@ public class GaugeDisplayTests
 
         // Assert
         Assert.Equal(25d, state.Percent);
-        Assert.Equal(500d, state.Value);
+        Assert.Equal(500d, state.AriaValue);
         Assert.Equal(new ValueRange(0, 2000), state.Range);
         Assert.Null(state.Error);
     }
@@ -127,7 +127,6 @@ public class GaugeDisplayTests
         var state = GaugeDisplay.GetState(reading, null, null);
 
         // Assert
-        Assert.Equal(load, state.Value);
         Assert.Equal(expected, state.AriaValue);
     }
 
@@ -143,7 +142,6 @@ public class GaugeDisplayTests
         // Assert
         Assert.Null(state.Error);
         Assert.Null(state.Percent);
-        Assert.Null(state.Value);
         Assert.Null(state.AriaValue);
         Assert.Null(state.Range);
     }
@@ -160,7 +158,6 @@ public class GaugeDisplayTests
 
         // Assert
         Assert.Null(state.Percent);
-        Assert.Null(state.Value);
         Assert.Null(state.AriaValue);
         Assert.Equal(new ValueRange(0, 10), state.Range);
         Assert.Null(state.Error);

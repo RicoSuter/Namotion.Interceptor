@@ -1,4 +1,3 @@
-using System.Globalization;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -41,12 +40,12 @@ internal static class SliderMath
 
         if (!(value > 0) || double.IsInfinity(value))
         {
-            return $"Step must be above 0: {Format(value)}";
+            return $"Step must be above 0: {NumberValues.Format(value)}";
         }
 
         if (IsWholeNumber(propertyType) && Math.Abs(value - Math.Round(value)) > WholeTolerance)
         {
-            return $"Step must be a whole number for a whole number property: {Format(value)}";
+            return $"Step must be a whole number for a whole number property: {NumberValues.Format(value)}";
         }
 
         return null;
@@ -58,16 +57,7 @@ internal static class SliderMath
     /// </summary>
     public static double ToSliderValue(object? value, ValueRange range, double scale)
     {
-        if (value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal)
-        {
-            var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
-            if (!double.IsNaN(number))
-            {
-                return ToSliderScale(number, scale);
-            }
-        }
-
-        return ToSliderScale(range.Minimum, scale);
+        return ToSliderScale(NumberValues.TryGetNumber(value, out var number) ? number : range.Minimum, scale);
     }
 
     /// <summary>
@@ -140,6 +130,4 @@ internal static class SliderMath
 
         return MaximumDecimals;
     }
-
-    internal static string Format(double value) => value.ToString("0.##########", CultureInfo.InvariantCulture);
 }

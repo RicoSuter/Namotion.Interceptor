@@ -15,8 +15,13 @@ internal static class ControlKindResolver
     /// <param name="property">The target, or null when the path leads nowhere.</param>
     /// <param name="minimum">The <c>Minimum</c> argument of the control, which can give a number its range.</param>
     /// <param name="maximum">The <c>Maximum</c> argument of the control, which can give a number its range.</param>
-    public static ControlKind Resolve(RegisteredSubjectProperty? property, double? minimum, double? maximum)
+    /// <param name="sliderRange">
+    /// For <see cref="ControlKind.Slider"/> the ends of its range, also of an empty range, which the slider reports;
+    /// otherwise default.
+    /// </param>
+    public static ControlKind Resolve(RegisteredSubjectProperty? property, double? minimum, double? maximum, out ValueRange sliderRange)
     {
+        sliderRange = default;
         if (property is null)
         {
             return ControlKind.Value;
@@ -46,7 +51,7 @@ internal static class ControlKindResolver
         }
 
         if (SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number) &&
-            ValueRangeResolver.TryResolve(property, minimum, maximum, out _, out _))
+            ValueRangeResolver.TryFindEnds(property, minimum, maximum, out sliderRange))
         {
             return ControlKind.Slider;
         }

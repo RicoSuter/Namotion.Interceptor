@@ -29,30 +29,45 @@ public class ControlKindResolverTests
         var property = ControlTestContext.GetProperty(_subject, propertyName);
 
         // Act
-        var kind = ControlKindResolver.Resolve(property, null, null);
+        var kind = ControlKindResolver.Resolve(property, null, null, out _);
 
         // Assert
         Assert.Equal(expected, (object)kind);
     }
 
     [Fact]
-    public void WhenANumberWithoutRangeGetsARangeFromTheArguments_ThenItIsASlider()
+    public void WhenANumberWithoutRangeGetsARangeFromTheArguments_ThenItIsASliderWithThatRange()
     {
         // Arrange
         var property = ControlTestContext.GetProperty(_subject, nameof(ControlTargetSubject.Temperature));
 
         // Act
-        var kind = ControlKindResolver.Resolve(property, 0, 50);
+        var kind = ControlKindResolver.Resolve(property, 0, 50, out var sliderRange);
 
         // Assert
         Assert.Equal(ControlKind.Slider, kind);
+        Assert.Equal(new ValueRange(0, 50), sliderRange);
+    }
+
+    [Fact]
+    public void WhenTheRangeOfANumberIsEmpty_ThenItIsStillASliderThatReportsTheRange()
+    {
+        // Arrange
+        var property = ControlTestContext.GetProperty(_subject, nameof(ControlTargetSubject.Temperature));
+
+        // Act
+        var kind = ControlKindResolver.Resolve(property, 50, 0, out var sliderRange);
+
+        // Assert
+        Assert.Equal(ControlKind.Slider, kind);
+        Assert.Equal(new ValueRange(50, 0), sliderRange);
     }
 
     [Fact]
     public void WhenThePathLeadsNowhere_ThenItIsAValueRow()
     {
         // Act
-        var kind = ControlKindResolver.Resolve(null, 0, 50);
+        var kind = ControlKindResolver.Resolve(null, 0, 50, out _);
 
         // Assert
         Assert.Equal(ControlKind.Value, kind);

@@ -17,7 +17,7 @@
     var maximum = control.Maximum;
     var map = control.Map;
     var property = ValueReader.ResolveProperty(PathResolver, control, path);
-    var kind = ControlKindResolver.Resolve(property, minimum, maximum);
+    var kind = ControlKindResolver.Resolve(property, minimum, maximum, out var sliderRange);
 
     if (kind == ControlKind.OperationButton)
     {
@@ -29,7 +29,8 @@
     }
     else if (kind == ControlKind.Slider)
     {
-        <SliderView Property="@property" Path="@path" Label="@label" Minimum="@minimum" Maximum="@maximum" Step="@control.Step" />
+        @* The ends of the range that the kind was chosen by, so that the slider does not look them up again. *@
+        <SliderView Property="@property" Path="@path" Label="@label" Minimum="@sliderRange.Minimum" Maximum="@sliderRange.Maximum" Step="@control.Step" />
     }
     else if (kind == ControlKind.Select)
     {

@@ -1,4 +1,3 @@
-using System.Globalization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
@@ -173,22 +172,13 @@ public static class ValueReader
     /// </summary>
     public static double? GetProgressPercent(object? value, double minimum, double maximum)
     {
-        if (double.IsNaN(minimum) || double.IsNaN(maximum) || maximum <= minimum || !IsNumber(value))
-        {
-            return null;
-        }
-
-        var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
-        if (double.IsNaN(number))
+        if (double.IsNaN(minimum) || double.IsNaN(maximum) || maximum <= minimum || !NumberValues.TryGetNumber(value, out var number))
         {
             return null;
         }
 
         return Math.Clamp((number - minimum) / (maximum - minimum) * FullPercent, 0, FullPercent);
     }
-
-    private static bool IsNumber(object? value) =>
-        value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal;
 
     /// <summary>
     /// Resolves the name or path of a <see cref="ValueMap"/>. Null or empty gives no map and no error.
