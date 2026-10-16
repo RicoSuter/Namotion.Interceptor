@@ -675,7 +675,7 @@ public class MarkdownBlockWriterTests
     {
         // Act
         var block = MarkdownBlockWriter.CreateBlock(
-            "Tile", null, """{ "Position": 3 }""", fenceLength: 3, hasClosingLine: false, content: ":::: Demo.Leaf Count=1");
+            "Tile", null, """{ "Position": 3 }""", fenceLength: 3, lineEnding: "\n", hasClosingLine: false, content: ":::: Demo.Leaf Count=1");
 
         // Assert
         Assert.Equal("::: Tile Position=3\n:::: Demo.Leaf Count=1", block);
@@ -686,7 +686,7 @@ public class MarkdownBlockWriterTests
     {
         // Act
         var block = MarkdownBlockWriter.CreateBlock(
-            "Tile", null, """{ "Position": 3, "Tags": [1] }""", fenceLength: 3, content: "text");
+            "Tile", null, """{ "Position": 3, "Tags": [1] }""", fenceLength: 3, lineEnding: "\n", hasClosingLine: true, content: "text");
 
         // Assert
         Assert.Equal("::: Tile Position=3\n```json\n{\n  \"Tags\": [\n    1\n  ]\n}\n```\ntext\n:::", block);
