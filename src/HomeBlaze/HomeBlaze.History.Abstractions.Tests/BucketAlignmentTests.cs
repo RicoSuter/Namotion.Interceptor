@@ -165,6 +165,32 @@ public class BucketAlignmentTests
     }
 
     [Fact]
+    public void WhenLocalMidnightOccursTwice_ThenDayStartsAtTheEarlierInstant()
+    {
+        // Arrange - a zone at +01:00 (+02:00 in summer) whose clocks go back from 01:00 to 00:00 on 2026-10-25,
+        // so local midnight occurs at 22:00 UTC (+02:00) and again at 23:00 UTC (+01:00) on 2026-10-24.
+        var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
+            new DateTime(2026, 1, 1), new DateTime(2026, 12, 31), TimeSpan.FromHours(1),
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 2, 0, 0), 3, 29),
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 1, 0, 0), 10, 25));
+        var zone = TimeZoneInfo.CreateCustomTimeZone("Test/MidnightTwice", TimeSpan.FromHours(1), "Midnight twice", "Standard", "Daylight", [rule]);
+        var bucket = HistoryBucket.Calendar(HistoryCalendarUnit.Day, zone);
+
+        // Act
+        var start = BucketAlignment.Start(Parse("2026-10-25T12:00:00Z"), bucket);
+        var startFromSecondMidnight = BucketAlignment.Start(Parse("2026-10-24T23:30:00Z"), bucket);
+        var next = BucketAlignment.Next(start, bucket);
+        var previousNext = BucketAlignment.Next(BucketAlignment.Start(start.AddTicks(-1), bucket), bucket);
+
+        // Assert - the day runs 25 hours, from the first midnight to the next one at +01:00.
+        Assert.Equal(Parse("2026-10-24T22:00:00Z"), start);
+        Assert.Equal(start, startFromSecondMidnight);
+        Assert.Equal(start, BucketAlignment.Start(start, bucket));
+        Assert.Equal(Parse("2026-10-25T23:00:00Z"), next);
+        Assert.Equal(start, previousNext);
+    }
+
+    [Fact]
     public void WhenMaxBucketsClipsCalendarRange_ThenFirstBucketStartKeepsTheNewest()
     {
         // Arrange - January to June is six months; keep the newest three.
