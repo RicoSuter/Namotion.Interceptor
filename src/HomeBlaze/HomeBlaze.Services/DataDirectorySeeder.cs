@@ -13,8 +13,10 @@ public static class DataDirectorySeeder
     /// </summary>
     public const string SeedRootFileName = "Root.json";
 
-    // Relative to both the seed directory and the data directory.
-    /// <summary>The documentation directory, relative to the data directory, which <see cref="ReplaceDocumentation"/> replaces.</summary>
+    /// <summary>
+    /// The documentation directory, relative to both the seed directory and the data directory, which
+    /// <see cref="ReplaceDocumentation"/> replaces.
+    /// </summary>
     public const string DocumentationDirectory = "Files/Docs";
 
     /// <summary>

@@ -546,7 +546,7 @@ A canvas with two nodes that show the sample motors by name. A canvas does not a
 
 - **The path**: `Path` is the path of a property. It is written like the path of an [expression](pages.md#expression-paths): relative to the page, where the first segment can be the name of a block, or absolute.
 - **The formatted value**: A value is shown in the [formatted form of an expression](pages.md#expression-formats). A map can replace the text.
-- **Shown properties**: A widget shows the same properties as an expression. For a secret, the raw source of a page or a plain property it shows the dash of a missing value, see [Properties Shown on Pages](../development/building-subjects.md#properties-shown-on-pages).
+- **Shown properties**: A widget shows the same properties as an expression. For a secret, the raw source of a page or a plain property without `[State]` it shows the dash of a missing value, see [Properties Shown on Pages](../development/building-subjects.md#properties-shown-on-pages).
 - **A missing value**: A value that is not set and a path that leads nowhere show a dash in place of the value, with the path as tooltip. This is no error box, because a device that is offline or still starting is normal. A misspelled path shows the same dash, so check the spelling when a dash stays. A `Progress` shows the dash for a value that is no number as well.
 - **Live**: A value changes on the page when the property changes.
 

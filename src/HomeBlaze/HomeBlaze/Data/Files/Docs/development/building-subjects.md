@@ -465,7 +465,7 @@ public partial class Motor
 - Async methods are supported and show a progress indicator
 - Methods returning values display the result in a dialog
 - Errors are caught and shown in an error dialog
-- Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code. An implementation of an interface operation that requires confirmation keeps the requirement, also when it declares its own `[Operation]`
+- Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code. An implementation of an interface operation that requires confirmation, or an override of a base class operation that requires it, requires confirmation as well, also when it declares its own `[Operation]`; a `[Query]` that implements or overrides such an operation becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
 
 **Supported parameter types:**
@@ -1059,12 +1059,14 @@ Mark only types whose configuration is plain values and that do nothing but show
 
 ### Properties Shown on Pages
 
-A `{{ path }}` expression on a page and a [value widget](../administration/page-widgets.md#value-widgets) show the value of a property they reach only when the property is displayable: a partial (intercepted) property or a `[Derived]` property. An expression shows nothing and a value widget shows a dash for:
+A `{{ path }}` expression on a page and a [value widget](../administration/page-widgets.md#value-widgets) show the value of a property they reach only when the property is displayable: a partial (intercepted) property, a `[Derived]` property or a property with `[State]`, on the class or through an interface. An expression shows nothing and a value widget shows a dash for:
 
-- A plain public property, which is registered too but is no tracked value of the subject and can hold internal data, such as the text an agent is still writing. Mark a computed value that pages should show with `[Derived]`.
-- A default property of an interface, such as `bool? IsClosed => State switch { ... }`, unless it is marked with `[Derived]`, as every default `[State]` property of the HomeBlaze abstractions is. It is no partial property of the class, so it counts as a plain property otherwise.
+- A plain property, a public property without `[State]` that is no partial or `[Derived]` property. It is registered too but is no tracked value of the subject and can hold internal data, such as the text an agent is still writing. Mark a computed value that pages should show with `[Derived]`.
+- A default property of an interface without `[State]`, such as `bool? IsClosed => State switch { ... }`, unless it is marked with `[Derived]`. It is no partial property of the class, so it counts as a plain property otherwise.
 - A secret configuration property (`[Configuration(IsSecret = true)]`).
 - A property marked with `[ExcludeFromExpressions]`, for a value that can hold secrets in another form, such as the raw source of a file.
+
+A displayable property whose value type holds a secret configuration member, such as a record with a property marked `[Configuration(IsSecret = true)]`, renders as empty text, since the text of a record shows its members.
 
 Every other configuration value of any subject is shown by design, also to an AI agent that reads a page with `ReadEvaluatedContent`, while the MCP tools themselves expose only state. Mark a value that must not appear on a page as secret.
 

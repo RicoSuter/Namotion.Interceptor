@@ -176,7 +176,6 @@ if (!app.Environment.IsDevelopment())
 
 app.UseAntiforgery();
 
-// The agent route is always mapped; it only accepts same-host requests carrying a running turn's token.
 app.MapHomeBlazeAgentMcp();
 
 // Map the external MCP server endpoint if enabled
