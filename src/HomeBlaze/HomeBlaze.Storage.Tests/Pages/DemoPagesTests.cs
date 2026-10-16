@@ -79,12 +79,12 @@ public class DemoPagesTests
         // Act
         var page = await AddDemoPageAsync(fixture, "Dashboard.md");
 
-        // Assert: the tabs of the widget groups come first, the tabs of the views at the end of the page.
-        var layouts = page.Children.Values.OfType<TabLayout>().ToList();
-        Assert.Equal(2, layouts.Count);
-        Assert.Same(layouts[0], ((IPathScope)page).TryGetNamedSubject("widgets"));
-        Assert.Equal(["Values", "Controls", "History", "Table"], layouts[0].Tabs.Select(tab => tab.Title));
-        var dashboard = layouts[1];
+        // Assert: one tab layout holds the page, with the tabs of the widget groups first and the tabs of the views last.
+        var widgets = Assert.Single(page.Children.Values.OfType<TabLayout>());
+        Assert.Same(widgets, ((IPathScope)page).TryGetNamedSubject("widgets"));
+        Assert.Equal(["Values", "Controls", "History", "Table", "Motors", "More Views"], widgets.Tabs.Select(tab => tab.Title));
+        Assert.Single(FindInTab<ExpansionPanels>(widgets.Tabs[4]));
+        var dashboard = Assert.Single(FindInTab<TabLayout>(widgets.Tabs[5]));
         Assert.Equal(["Devices", "Grid and Canvas", "On This Page"], dashboard.Tabs.Select(tab => tab.Title));
         Assert.Equal(5, PageErrorBoxes.Flatten(page.Children.Values).OfType<TabLayout>().Count());
 
