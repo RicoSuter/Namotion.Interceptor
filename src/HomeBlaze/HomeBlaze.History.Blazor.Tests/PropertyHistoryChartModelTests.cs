@@ -694,7 +694,7 @@ public class PropertyHistoryChartModelTests
         var selection = PropertyHistoryChartModel.GetInitialSelection(null, NumberAggregations, isDiscrete: false);
 
         // Assert
-        Assert.Equal(new PropertyHistoryChartModel.DialogSelection(0, null, 0, HistoryAggregations.TimeWeightedAverage), selection);
+        Assert.Equal(new PropertyHistoryChartModel.DialogSelection(0, 0, HistoryAggregations.TimeWeightedAverage), selection);
     }
 
     [Fact]
@@ -723,7 +723,6 @@ public class PropertyHistoryChartModelTests
 
         // Assert
         Assert.Equal("Last 6 hours", PropertyHistoryChartModel.RangePresets[selection.RangeIndex].Label);
-        Assert.Null(selection.CustomRange);
         Assert.Equal("10m", PropertyHistoryChartModel.Periods[selection.PeriodIndex].ShortName);
         Assert.Equal(HistoryAggregations.Maximum, selection.Aggregation);
     }
@@ -744,18 +743,21 @@ public class PropertyHistoryChartModelTests
         Assert.Equal(period, PropertyHistoryChartModel.Periods[selection.PeriodIndex]);
     }
 
-    [Fact]
-    public void WhenTheDialogOpensWithARangeThatIsNoPreset_ThenItSelectsACustomRangeOfThatLength()
+    [Theory]
+    [InlineData(30, "Last hour")]
+    [InlineData(3 * 60, "Last 6 hours")]
+    [InlineData(60 * 24 * 60, "Last 30 days")]
+    public void WhenTheDialogOpensWithARangeThatIsNoPreset_ThenItSelectsTheShortestPresetAtLeastAsLongOrTheLongest(
+        int rangeMinutes, string expectedLabel)
     {
         // Arrange
-        var settings = new PropertyHistoryDialogSettings(TimeSpan.FromHours(3));
+        var settings = new PropertyHistoryDialogSettings(TimeSpan.FromMinutes(rangeMinutes));
 
         // Act
         var selection = PropertyHistoryChartModel.GetInitialSelection(settings, NumberAggregations, isDiscrete: false);
 
         // Assert
-        Assert.Equal(PropertyHistoryChartModel.RangePresets.Count, selection.RangeIndex);
-        Assert.Equal(TimeSpan.FromHours(3), selection.CustomRange);
+        Assert.Equal(expectedLabel, PropertyHistoryChartModel.RangePresets[selection.RangeIndex].Label);
     }
 
     [Fact]

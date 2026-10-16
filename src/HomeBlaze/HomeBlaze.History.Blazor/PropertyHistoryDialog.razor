@@ -157,14 +157,6 @@
         _rangeIndex = selection.RangeIndex;
         _periodIndex = selection.PeriodIndex;
         _aggregation = selection.Aggregation;
-        // Only a caller of ShowAsync with a range that is no preset opens a custom range: the chart widget passes presets.
-        if (selection.CustomRange is { } customRange)
-        {
-            // An empty To ends the custom range now, see ResolveCustomRange.
-            _useCustom = true;
-            _customFrom = TimeZone.ToZoned(TimeProvider.GetUtcNow() - customRange);
-        }
-
         await LoadAsync();
     }
 

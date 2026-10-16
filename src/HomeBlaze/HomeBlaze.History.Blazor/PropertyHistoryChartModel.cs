@@ -148,15 +148,15 @@ public static class PropertyHistoryChartModel
     /// <summary>
     /// The selections of the history dialog.
     /// </summary>
-    /// <param name="RangeIndex">The index in <see cref="RangePresets"/>, or their count for a custom range.</param>
-    /// <param name="CustomRange">The span of a custom range that ends now, or null.</param>
+    /// <param name="RangeIndex">The index in <see cref="RangePresets"/>.</param>
     /// <param name="PeriodIndex">The index in <see cref="Periods"/>.</param>
     /// <param name="Aggregation">The aggregation.</param>
-    public readonly record struct DialogSelection(int RangeIndex, TimeSpan? CustomRange, int PeriodIndex, string Aggregation);
+    public readonly record struct DialogSelection(int RangeIndex, int PeriodIndex, string Aggregation);
 
     /// <summary>
     /// Gets the selections the history dialog opens with: those of <paramref name="settings"/> that it can show, otherwise
-    /// the last hour, the first offered aggregation, and the Auto period, or raw samples for a discrete property.
+    /// the last hour, the first offered aggregation, and the Auto period, or raw samples for a discrete property. A range
+    /// that is no preset selects the shortest preset at least as long, or the longest preset for a longer range.
     /// </summary>
     /// <param name="settings">The selections asked for, or null.</param>
     /// <param name="offeredAggregations">The aggregations the dialog offers for the property, see <see cref="GateAggregations"/>.</param>
@@ -165,20 +165,17 @@ public static class PropertyHistoryChartModel
         PropertyHistoryDialogSettings? settings, IReadOnlyList<string> offeredAggregations, bool isDiscrete)
     {
         var rangeIndex = 0;
-        TimeSpan? customRange = null;
         if (settings?.Range is { } range && range > TimeSpan.Zero)
         {
-            rangeIndex = RangePresets.Count;
+            rangeIndex = RangePresets.Count - 1;
             for (var index = 0; index < RangePresets.Count; index++)
             {
-                if (RangePresets[index].Range == range)
+                if (RangePresets[index].Range >= range)
                 {
                     rangeIndex = index;
                     break;
                 }
             }
-
-            customRange = rangeIndex == RangePresets.Count ? range : null;
         }
 
         // A discrete property defaults to raw samples: its transitions are the data, and bucketing would only round
@@ -197,7 +194,7 @@ public static class PropertyHistoryChartModel
         }
 
         var aggregation = SelectAggregation(offeredAggregations, settings?.Aggregation);
-        return new DialogSelection(rangeIndex, customRange, periodIndex, aggregation);
+        return new DialogSelection(rangeIndex, periodIndex, aggregation);
     }
 
     /// <summary>

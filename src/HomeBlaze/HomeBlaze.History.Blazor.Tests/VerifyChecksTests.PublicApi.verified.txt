@@ -181,9 +181,8 @@ namespace HomeBlaze.History.Blazor
         }
         public readonly struct DialogSelection : System.IEquatable<HomeBlaze.History.Blazor.PropertyHistoryChartModel.DialogSelection>
         {
-            public DialogSelection(int RangeIndex, System.TimeSpan? CustomRange, int PeriodIndex, string Aggregation) { }
+            public DialogSelection(int RangeIndex, int PeriodIndex, string Aggregation) { }
             public string Aggregation { get; init; }
-            public System.TimeSpan? CustomRange { get; init; }
             public int PeriodIndex { get; init; }
             public int RangeIndex { get; init; }
         }
