@@ -21,7 +21,7 @@
     }
 }
 
-<MudList T="string" Dense="true" ReadOnly="true" Padding="false" data-testid="value-list">
+<MudList T="string" Dense="true" ReadOnly="true" Padding="false" Class="value-list" data-testid="value-list">
     @for (var index = 0; index < rows.Length; index++)
     {
         var row = rows[index];
@@ -63,13 +63,6 @@
         </MudListItem>
     }
 </MudList>
-
-<style>
-    /* A page gives every paragraph a distance above and below. A utility class cannot reach the paragraph that MudListItem wraps its content in or the paragraphs of the content of a row, and this rule removes the distance of both. Content with several paragraphs loses the distance between them. */
-    .mud-list-item.value-list-item p {
-        margin: 0;
-    }
-</style>
 
 @code {
     [Parameter]

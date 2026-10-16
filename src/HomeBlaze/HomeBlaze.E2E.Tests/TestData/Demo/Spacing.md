@@ -54,6 +54,14 @@ A paragraph first.
 A paragraph last.
 ::
 
+:: HomeBlaze.Components.Card Title="List Card"
+::: HomeBlaze.Components.ValueList
+:::: Value Path=spacingmotor/Temperature Label="Temperature"
+::::: HomeBlaze.Components.Progress Path=spacingmotor/Temperature Minimum=20 Maximum=100
+:::: Value Path=spacingmotor/TargetSpeed Label="At target"
+::::: HomeBlaze.Components.Indicator Path=spacingmotor/IsAtTargetSpeed Kind=Icon Icon=Speed
+::
+
 :: HomeBlaze.Components.Card Title="Footer Card"
 Body of the footer card.
 ::: Footer

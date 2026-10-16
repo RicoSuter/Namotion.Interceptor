@@ -25,7 +25,7 @@ else
 
     @* The input events of the range input bubble here, so the text follows the thumb while the slider writes only on release.
        A drag that ends where it started writes nothing, so the pointer up clears the drag text as well. *@
-    <div data-testid="slider" @oninput="_dragCallback" @onpointerup="_clearDragCallback" @onfocusout="_clearDragCallback">
+    <div class="slider-widget" data-testid="slider" @oninput="_dragCallback" @onpointerup="_clearDragCallback" @onfocusout="_clearDragCallback">
         <div class="d-flex align-center gap-2">
             <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="slider-label">@label</MudText>
             <MudText Typo="Typo.subtitle2" Class="ma-0" data-testid="slider-value">@GetValueText(property, value, range, step, scale)</MudText>

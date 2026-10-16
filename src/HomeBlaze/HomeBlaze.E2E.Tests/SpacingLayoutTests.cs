@@ -169,6 +169,33 @@ public class SpacingLayoutTests
         Assert.All(gaps, gap => Assert.Equal(BlockSpacing, gap, Tolerance));
     }
 
+    [Theory]
+    [InlineData(400)]
+    [InlineData(1400)]
+    public async Task WhenAValueListIsTheBodyOfACard_ThenItsRowsAddNoSpaceAtTheEdgesOfTheCard(int width)
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await page.SetViewportSizeAsync(width, 900);
+        var card = GetCard(page, "List Card");
+        await Assertions.Expect(card.GetByTestId("value-row")).ToHaveCountAsync(2, new() { Timeout = Timeout });
+
+        // Act
+        var gaps = await card.EvaluateAsync<double[]>(
+            """
+            card => {
+                const rows = [...card.querySelectorAll('[data-testid=value-row]')].map(row => row.getBoundingClientRect());
+                const title = card.querySelector('[data-testid=card-title]').getBoundingClientRect();
+                const frame = card.getBoundingClientRect();
+                return [rows[0].top - title.bottom, frame.bottom - rows[rows.length - 1].bottom];
+            }
+            """);
+
+        // Assert
+        Assert.Equal(TitleGap, gaps[0], Tolerance);
+        Assert.Equal(CardPadding, gaps[1], Tolerance);
+    }
+
     [Fact]
     public async Task WhenAFooterHasTwoButtons_ThenTheyStandInARow()
     {

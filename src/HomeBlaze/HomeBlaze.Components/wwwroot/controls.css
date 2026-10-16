@@ -1,4 +1,6 @@
-/* The visible edges of a control are where the text around it starts and ends, see "Spacing" in the widget basics. */
+/* The edges of the control widgets: their visible parts start and end where the text around them does, and the room
+   that MudBlazor keeps around them for a ripple or a label does not add to the space between blocks. See "Spacing" in
+   the widget basics. */
 
 /* MudSwitch keeps 12 pixels around its track for the ripple of the thumb. At the start they would move the track in
    from the edge where the box of a Select and the label of a Slider start, and above and below its label they would add
@@ -14,7 +16,12 @@
     display: flow-root;
 }
 
-.select-widget > .mud-input-control {
+.select-widget .mud-select > .mud-input-control {
     margin-top: 6px;
     margin-bottom: 0;
+}
+
+/* MudSlider is an inline block, which adds the room below a baseline to the height of the widget. */
+.slider-widget .mud-slider {
+    display: block;
 }
