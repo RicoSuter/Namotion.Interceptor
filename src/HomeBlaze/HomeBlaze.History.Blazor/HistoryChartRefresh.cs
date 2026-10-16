@@ -26,10 +26,13 @@ internal sealed class HistoryChartRefresh : IDisposable
         HistoryChartSeriesResolver.UpdateValues(series, _values);
     }
 
-    /// <summary>Starts a window after a first query of the series, so they are queried once more.</summary>
+    /// <summary>
+    /// Starts a window after a first query of the series, so they are queried once more one full window later. It
+    /// replaces a running window, which can be shorter or end too soon after that query.
+    /// </summary>
     /// <param name="window">The window of the chart, see <see cref="HistoryRefreshThrottle.GetWindow"/>.</param>
-    /// <returns>Whether this call started a window.</returns>
-    public bool OnFirstQueryCompleted(TimeSpan window) => _throttle.Arm(window);
+    /// <returns>Whether this call started a window, false only after <see cref="Dispose"/>.</returns>
+    public bool OnFirstQueryCompleted(TimeSpan window) => _throttle.Restart(window);
 
     /// <summary>
     /// Starts a window when a value of the series changed since the last call that ran while no window was running,

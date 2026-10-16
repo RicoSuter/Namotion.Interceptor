@@ -76,6 +76,66 @@ public class HistoryRefreshThrottleTests
     }
 
     [Fact]
+    public void WhenRestartedWhileAWindowRuns_ThenTheCallbackRunsOnceAFullNewWindowLater()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var calls = 0;
+        using var throttle = new HistoryRefreshThrottle(timeProvider, () => calls++);
+        throttle.Arm(Window);
+        timeProvider.Advance(Window / 2);
+
+        // Act
+        var restarted = throttle.Restart(Window * 2);
+        timeProvider.Advance(Window * 2 - TimeSpan.FromTicks(1));
+        var callsBeforeTheEnd = calls;
+        timeProvider.Advance(TimeSpan.FromTicks(1));
+        var callsAtTheEnd = calls;
+        timeProvider.Advance(Window * 10);
+
+        // Assert
+        Assert.True(restarted);
+        Assert.Equal(0, callsBeforeTheEnd);
+        Assert.Equal(1, callsAtTheEnd);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void WhenRestartedWithoutAWindow_ThenItStartsOne()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var calls = 0;
+        using var throttle = new HistoryRefreshThrottle(timeProvider, () => calls++);
+
+        // Act
+        var restarted = throttle.Restart(Window);
+        timeProvider.Advance(Window);
+
+        // Assert
+        Assert.True(restarted);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void WhenRestartedAfterDispose_ThenNoWindowStarts()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var calls = 0;
+        var throttle = new HistoryRefreshThrottle(timeProvider, () => calls++);
+        throttle.Dispose();
+
+        // Act
+        var restarted = throttle.Restart(Window);
+        timeProvider.Advance(Window);
+
+        // Assert
+        Assert.False(restarted);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
     public void WhenArmed_ThenItIsArmedUntilTheWindowEnds()
     {
         // Arrange

@@ -2,7 +2,8 @@ namespace HomeBlaze.History.Blazor;
 
 /// <summary>
 /// Runs a callback at most once per window: the first <see cref="Arm"/> after the callback ran starts a
-/// window that ends with the callback, and further calls before it ends do nothing. Thread-safe.
+/// window that ends with the callback, and further calls before it ends do nothing. <see cref="Restart"/> replaces a
+/// running window. Thread-safe.
 /// </summary>
 /// <remarks>
 /// The callback runs on a timer thread while the throttle holds its lock, so it never starts after
@@ -21,7 +22,7 @@ internal sealed class HistoryRefreshThrottle : IDisposable
     private readonly TimeProvider _timeProvider;
     private readonly Action _callback;
     private readonly Lock _lock = new();
-    private ITimer? _timer;
+    private RunningWindow? _window;
     private bool _isDisposed;
 
     /// <param name="timeProvider">The clock of the windows.</param>
@@ -49,7 +50,7 @@ internal sealed class HistoryRefreshThrottle : IDisposable
         {
             lock (_lock)
             {
-                return _timer is not null;
+                return _window is not null;
             }
         }
     }
@@ -58,17 +59,28 @@ internal sealed class HistoryRefreshThrottle : IDisposable
     /// <param name="window">The length of the window. Must be positive.</param>
     /// <returns>Whether this call started a window.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="window"/> is zero or negative.</exception>
-    public bool Arm(TimeSpan window)
+    public bool Arm(TimeSpan window) => Start(window, restart: false);
+
+    /// <summary>Starts a window that ends after <paramref name="window"/>, in place of a running one, unless the throttle is disposed.</summary>
+    /// <param name="window">The length of the window. Must be positive.</param>
+    /// <returns>Whether this call started a window.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="window"/> is zero or negative.</exception>
+    public bool Restart(TimeSpan window) => Start(window, restart: true);
+
+    private bool Start(TimeSpan window, bool restart)
     {
-        // A zero due time fires inside CreateTimer, before _timer is assigned, which would leave the throttle armed forever.
+        // A zero due time fires inside CreateTimer, before _window is assigned, which would leave the throttle armed forever.
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(window, TimeSpan.Zero);
 
         lock (_lock)
         {
-            if (_isDisposed || _timer is not null)
+            if (_isDisposed || (_window is not null && !restart))
             {
                 return false;
             }
+
+            // A tick of the replaced timer that is already queued finds another window in OnElapsed and does nothing.
+            _window?.Timer?.Dispose();
 
             // The caller's execution context, for example one of a render that holds the read recorder of a tracking
             // scope, must not flow into the callback.
@@ -77,8 +89,10 @@ internal sealed class HistoryRefreshThrottle : IDisposable
             try
             {
                 // Assigned under the lock that OnElapsed takes first, so an early tick cannot see it unset.
-                _timer = _timeProvider.CreateTimer(
-                    static state => ((HistoryRefreshThrottle)state!).OnElapsed(), this, window, Timeout.InfiniteTimeSpan);
+                var runningWindow = new RunningWindow(this);
+                runningWindow.Timer = _timeProvider.CreateTimer(
+                    static state => ((RunningWindow)state!).Owner.OnElapsed((RunningWindow)state), runningWindow, window, Timeout.InfiniteTimeSpan);
+                _window = runningWindow;
             }
             finally
             {
@@ -102,26 +116,34 @@ internal sealed class HistoryRefreshThrottle : IDisposable
             }
 
             _isDisposed = true;
-            _timer?.Dispose();
-            _timer = null;
+            _window?.Timer?.Dispose();
+            _window = null;
         }
     }
 
-    private void OnElapsed()
+    private void OnElapsed(RunningWindow window)
     {
         lock (_lock)
         {
-            // A tick that was already queued when the throttle was disposed must not run the callback.
-            if (_isDisposed)
+            // A tick that was already queued when the throttle was disposed or the window restarted must not run the callback.
+            if (_isDisposed || window != _window)
             {
                 return;
             }
 
-            _timer?.Dispose();
-            _timer = null;
+            window.Timer?.Dispose();
+            _window = null;
 
             // Inside the lock so a concurrent Dispose either wins above or waits for the callback to finish.
             _callback();
         }
+    }
+
+    // The state of a timer, so a tick of a replaced timer can be told apart from one of the running window.
+    private sealed class RunningWindow(HistoryRefreshThrottle owner)
+    {
+        public HistoryRefreshThrottle Owner { get; } = owner;
+
+        public ITimer? Timer { get; set; }
     }
 }

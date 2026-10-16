@@ -52,6 +52,33 @@ public class HistoryChartRefreshTests
     }
 
     [Fact]
+    public void WhenAQueryCompletesWhileAWindowRuns_ThenTheNextQueryFollowsOneFullWindowOfTheNewLengthLater()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var queries = 0;
+        var (subject, series) = CreateSeries();
+        using var refresh = new HistoryChartRefresh(timeProvider, () => queries++);
+        refresh.SetSeries(series);
+        subject.Temperature = 21.5;
+        refresh.OnRendered(Window);
+        timeProvider.Advance(Window / 2);
+        var longerWindow = TimeSpan.FromHours(1);
+
+        // Act
+        refresh.SetSeries(series);
+        var armed = refresh.OnFirstQueryCompleted(longerWindow);
+        timeProvider.Advance(longerWindow - TimeSpan.FromTicks(1));
+        var queriesBeforeTheEnd = queries;
+        timeProvider.Advance(TimeSpan.FromTicks(1));
+
+        // Assert
+        Assert.True(armed);
+        Assert.Equal(0, queriesBeforeTheEnd);
+        Assert.Equal(1, queries);
+    }
+
+    [Fact]
     public void WhenAValueOfAnotherPropertyChanges_ThenNoQueryFollows()
     {
         // Arrange
