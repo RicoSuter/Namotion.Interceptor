@@ -1482,7 +1482,7 @@ namespace HomeBlaze.Components.Operations
     public static class OperationInvoker
     {
         public static string GetIconName(HomeBlaze.Abstractions.Metadata.MethodMetadata method) { }
-        public static System.Threading.Tasks.Task<HomeBlaze.Components.Operations.OperationOutcome> InvokeAsync(MudBlazor.IDialogService dialogService, System.IServiceProvider serviceProvider, HomeBlaze.Abstractions.Metadata.MethodMetadata method, System.Threading.CancellationToken lifetime) { }
+        public static System.Threading.Tasks.Task<HomeBlaze.Components.Operations.OperationOutcome> InvokeAsync(MudBlazor.IDialogService dialogService, System.IServiceProvider serviceProvider, HomeBlaze.Abstractions.Metadata.MethodMetadata method, System.Threading.CancellationToken lifetime, System.Action<bool>? isRunningChanged = null) { }
     }
     public enum OperationOutcome
     {

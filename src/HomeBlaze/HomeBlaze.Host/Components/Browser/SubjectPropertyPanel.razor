@@ -304,6 +304,10 @@
     private readonly Dictionary<RegisteredSubjectProperty, Type?> _linkedSubjectTypes = [];
 
     private RegisteredSubject? _registeredSubject;
+    // The method whose prompt, run or result is under way, so that a second click starts nothing.
+    private MethodMetadata? _invokingMethod;
+
+    // The method that runs, which shows the spinner. Not set while its prompt or result dialog is open.
     private MethodMetadata? _executingMethod;
     private readonly CancellationTokenSource _lifetime = new();
 
@@ -859,18 +863,23 @@
 
     private async Task ExecuteMethodAsync(MethodMetadata method)
     {
-        if (Subject == null || _executingMethod != null)
+        if (Subject == null || _invokingMethod != null)
         {
             return;
         }
 
-        _executingMethod = method;
+        _invokingMethod = method;
         try
         {
-            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, method, _lifetime.Token);
+            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, method, _lifetime.Token, isRunning =>
+            {
+                _executingMethod = isRunning ? method : null;
+                StateHasChanged();
+            });
         }
         finally
         {
+            _invokingMethod = null;
             _executingMethod = null;
         }
     }

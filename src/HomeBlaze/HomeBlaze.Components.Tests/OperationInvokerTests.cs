@@ -150,6 +150,59 @@ public class OperationInvokerTests
     }
 
     [Fact]
+    public async Task WhenConfirmedMethodReturnsAResult_ThenItIsReportedRunningOnlyWhileItRuns()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        var isRunning = false;
+        var states = new List<string>();
+        SetupDialog<MethodConfirmationDialog>(dialogService, () => { states.Add($"confirmation:{isRunning}"); return DialogResult.Ok(true); });
+        SetupDialog<MethodResultDialog>(dialogService, () => { states.Add($"result:{isRunning}"); return DialogResult.Ok(true); });
+        var method = new MethodMetadata(_ => { states.Add($"method:{isRunning}"); return 42; }) { RequiresConfirmation = true };
+
+        // Act
+        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None,
+            running => isRunning = running);
+
+        // Assert
+        Assert.Equal(["confirmation:False", "method:True", "result:False"], states);
+    }
+
+    [Fact]
+    public async Task WhenMethodThrows_ThenItIsNoLongerReportedRunningWhenItsErrorShows()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        var reports = new List<bool>();
+        bool? isRunningAtError = null;
+        SetupDialog<MethodErrorDialog>(dialogService, () => { isRunningAtError = reports[^1]; return DialogResult.Ok(true); });
+        var method = new MethodMetadata(_ => throw new InvalidOperationException("Failed"));
+
+        // Act
+        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None, reports.Add);
+
+        // Assert
+        Assert.Equal([true, false], reports);
+        Assert.False(isRunningAtError);
+    }
+
+    [Fact]
+    public async Task WhenConfirmationIsCancelled_ThenNoRunningIsReported()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        SetupDialog<MethodConfirmationDialog>(dialogService, DialogResult.Cancel);
+        var reports = new List<bool>();
+        var method = new MethodMetadata(_ => null) { RequiresConfirmation = true };
+
+        // Act
+        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None, reports.Add);
+
+        // Assert
+        Assert.Empty(reports);
+    }
+
+    [Fact]
     public async Task WhenParameterDialogIsCancelled_ThenMethodIsNotInvoked()
     {
         // Arrange

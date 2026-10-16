@@ -49,11 +49,16 @@ public static class OperationInvoker
     /// Cancelled when the caller goes away. From then on no dialog is shown and a method that has not started is
     /// not started. A started method is not cancelled.
     /// </param>
+    /// <param name="isRunningChanged">
+    /// Called with true right before the method starts and with false once it has returned or thrown, before a result
+    /// or error dialog shows. Not called when the method does not start.
+    /// </param>
     public static async Task<OperationOutcome> InvokeAsync(
         IDialogService dialogService,
         IServiceProvider serviceProvider,
         MethodMetadata method,
-        CancellationToken lifetime)
+        CancellationToken lifetime,
+        Action<bool>? isRunningChanged = null)
     {
         if (lifetime.IsCancellationRequested)
         {
@@ -94,6 +99,7 @@ public static class OperationInvoker
         }
 
         object? result;
+        isRunningChanged?.Invoke(true);
         try
         {
             // Navigating away must not abort an operation that a device has already started. The method is not cancelled
@@ -102,6 +108,7 @@ public static class OperationInvoker
         }
         catch (Exception exception)
         {
+            isRunningChanged?.Invoke(false);
             if (!lifetime.IsCancellationRequested)
             {
                 await MethodErrorDialog.ShowAsync(dialogService, method.Title, exception);
@@ -110,6 +117,7 @@ public static class OperationInvoker
             return OperationOutcome.Failed;
         }
 
+        isRunningChanged?.Invoke(false);
         if (result is not null && !lifetime.IsCancellationRequested)
         {
             await MethodResultDialog.ShowAsync(dialogService, method.Title, result);
