@@ -34,7 +34,7 @@ public class DocumentationFolderFixtureTests
 
         // Assert
         Assert.Same(fixture.FindSubject("/administration/widgets/Pump"), pump);
-        Assert.Contains(fixture.Pages, loaded => loaded.FullPath == "/administration/page-widgets.md");
+        Assert.Contains(fixture.Pages, loaded => loaded.FullPath == "/administration/widgets/overview.md");
         Assert.All(fixture.Pages, loaded => Assert.NotEmpty(loaded.Children));
     }
 }

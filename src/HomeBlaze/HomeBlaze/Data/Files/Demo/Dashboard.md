@@ -140,7 +140,7 @@ The speed of the compressor in the three sizes of a gauge.
 ::::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/CurrentSpeed Label="Large" Minimum=0 Maximum=3000 Size=Large
 ::::
 
-Widgets of this tab: [Responsive](../Docs/administration/widgets/responsive.md), [Gauge](../Docs/administration/widgets/gauge.md) and [HistoryChart](../Docs/administration/widgets/history-chart.md).
+Widgets of this tab: [ValueList](../Docs/administration/widgets/value-list.md), [ValueTile](../Docs/administration/widgets/value-tile.md), [Gauge](../Docs/administration/widgets/gauge.md), [HistoryChart](../Docs/administration/widgets/history-chart.md), [Indicator](../Docs/administration/widgets/indicator.md), [Progress](../Docs/administration/widgets/progress.md), [Card](../Docs/administration/widgets/card.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md) and [Responsive](../Docs/administration/widgets/responsive.md). The texts, colours and icons of the status and the mode come from the two [ValueMap](../Docs/administration/widgets/value-map.md) blocks at the top of this page.
 ::: Tab#controls Title="Controls" Icon=Tune
 :::: HomeBlaze.Components.Responsive Show=NotPhone
 ::::: HomeBlaze.Components.Card Title="Load" Icon=DonutLarge
@@ -208,7 +208,7 @@ Widgets of this tab: [Responsive](../Docs/administration/widgets/responsive.md),
 :::::::: HomeBlaze.Components.Control Path=/Demo/ExhaustFan/GetDiagnostics
 ::::
 
-A wider screen shows the load of each motor as a gauge, which its slider sets. Power, mode and load are runtime values of a motor: they last until the next restart, see [Basics](../Docs/administration/widgets/basics.md#control-writes). The emergency stop asks for confirmation, and **Power** brings the motor back. **Get Diagnostics** shows what the motor reports. Widgets of this tab: [Gauge](../Docs/administration/widgets/gauge.md), [Switch](../Docs/administration/widgets/switch.md), [Select](../Docs/administration/widgets/select.md), [Slider](../Docs/administration/widgets/slider.md), [OperationButton](../Docs/administration/widgets/operation-button.md) and [Control](../Docs/administration/widgets/control.md).
+A wider screen shows the load of each motor as a gauge, which its slider sets. Power, mode and load are runtime values of a motor: they last until the next restart, see [Basics](../Docs/administration/widgets/basics.md#control-writes). The emergency stop asks for confirmation, and **Power** brings the motor back. **Get Diagnostics** shows what the motor reports. Widgets of this tab: [Gauge](../Docs/administration/widgets/gauge.md), [Switch](../Docs/administration/widgets/switch.md), [Select](../Docs/administration/widgets/select.md), [Slider](../Docs/administration/widgets/slider.md), [OperationButton](../Docs/administration/widgets/operation-button.md), [Control](../Docs/administration/widgets/control.md), [Indicator](../Docs/administration/widgets/indicator.md), [Card](../Docs/administration/widgets/card.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md) and [Responsive](../Docs/administration/widgets/responsive.md).
 ::: Tab#history Title="History" Icon=Timeline
 :::: HomeBlaze.Components.Card Title="Speeds, Last Hour" Icon=Timeline
 ::::: HomeBlaze.History.Blazor.HistoryChart#trends Range=1h Height=320
@@ -228,7 +228,7 @@ The speeds of the last hour as lines, and the status of the compressor as a band
 :::::: Series Path=/Servers/HostSystem/MemoryUsage Label="Memory"
 ::::
 
-Widget of this tab: [HistoryChart](../Docs/administration/widgets/history-chart.md).
+Widgets of this tab: [HistoryChart](../Docs/administration/widgets/history-chart.md) and [Card](../Docs/administration/widgets/card.md).
 ::: Tab#subjecttable Title="Table" Icon=TableChart
 :::: HomeBlaze.Components.Card Title="Motors" Icon=TableChart
 ::::: HomeBlaze.Components.SubjectTable#motortable Source=".." Type=HomeBlaze.Samples.Motor
@@ -239,7 +239,7 @@ Widget of this tab: [HistoryChart](../Docs/administration/widgets/history-chart.
 :::::: Column Property=Mode Map=motormode
 ::::
 
-One row for each motor of this folder. Widget of this tab: [SubjectTable](../Docs/administration/widgets/subject-table.md).
+One row for each motor of this folder. Widgets of this tab: [SubjectTable](../Docs/administration/widgets/subject-table.md) and [Card](../Docs/administration/widgets/card.md).
 ::: Tab#motors Title="Motors" Icon=Settings
 :::: HomeBlaze.Components.ExpansionPanels
 ::::: Panel#drives Title="Drives" Icon=Settings Expanded=true
@@ -305,7 +305,7 @@ One row for each motor of this folder. Widget of this tab: [SubjectTable](../Doc
 | **Cooling Fan** | {{ /Demo/CoolingFan/Status }} | {{ /Demo/CoolingFan/CurrentSpeed }} | {{ /Demo/CoolingFan/TargetSpeed }} | {{ /Demo/CoolingFan/SpeedDelta }} | {{ /Demo/CoolingFan/IsAtTargetSpeed }} |
 | **Exhaust Fan** | {{ /Demo/ExhaustFan/Status }} | {{ /Demo/ExhaustFan/CurrentSpeed }} | {{ /Demo/ExhaustFan/TargetSpeed }} | {{ /Demo/ExhaustFan/SpeedDelta }} | {{ /Demo/ExhaustFan/IsAtTargetSpeed }} |
 
-Speeds in RPM. The cards above and this table read the same motors.
+Speeds in RPM. The cards above and this table read the same motors. Widgets of this tab: [ExpansionPanels](../Docs/administration/widgets/expansion-panels.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md), [Card](../Docs/administration/widgets/card.md), [ValueList](../Docs/administration/widgets/value-list.md), [Progress](../Docs/administration/widgets/progress.md) and [Indicator](../Docs/administration/widgets/indicator.md).
 ::: Tab#views Title="More Views" Icon=Dashboard
 :::: HomeBlaze.Components.TabLayout
 ::::: Tab#devices Title="Devices" Icon=Devices
@@ -403,4 +403,4 @@ The same motor again as a widget: see the next card.
 ::::::::: HomeBlaze.Components.Widget Path=dashboardmotor
 ::
 
-The tabs of this page are written without closing lines, except where text follows a block. The page source is the best place to see how the colons count the depth.
+The tabs of this page are written without closing lines, except where text follows a block. The page source is the best place to see how the colons count the depth. Widgets of the tab More Views: [TabLayout](../Docs/administration/widgets/tab-layout.md) inside tabs, [Widget](../Docs/administration/widgets/widget.md), [GridLayout](../Docs/administration/widgets/grid-layout.md), [CanvasLayout](../Docs/administration/widgets/canvas-layout.md), [Alert](../Docs/administration/widgets/alert.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md), [Card](../Docs/administration/widgets/card.md) and [ValueList](../Docs/administration/widgets/value-list.md).

@@ -19,15 +19,14 @@ public class WidgetDocumentationPathTests
 {
     private const string Folder = "administration";
     private const string WidgetsFolder = Folder + "/widgets";
-    private const string PageWidgetsPage = "/" + Folder + "/page-widgets.md";
 
-    // The sample of the Widget section that shows the message for a path that leads nowhere.
+    // The sample of widget.md that shows the message for a path that leads nowhere.
     private const string PathToNothing = "/Missing/Motor";
 
     public static TheoryData<string> Pages()
     {
         var folder = Path.Combine(RepositoryPagesTests.FindRepositoryRoot(), DocumentationFolderFixture.DocumentationFolder, WidgetsFolder);
-        var data = new TheoryData<string> { PageWidgetsPage };
+        var data = new TheoryData<string>();
         foreach (var file in Directory.EnumerateFiles(folder, "*.md").Order(StringComparer.Ordinal))
         {
             data.Add($"/{WidgetsFolder}/{Path.GetFileName(file)}");

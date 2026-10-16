@@ -95,7 +95,7 @@ public sealed class DocumentationFolderFixture : IDisposable
         _services.GetRequiredService<SubjectPathResolver>().ResolveSubject(absolutePath, PathStyle.Canonical)
         ?? throw new InvalidOperationException($"Nothing exists at '{absolutePath}'.");
 
-    /// <summary>Gets the page whose path in the storage is <paramref name="fullPath"/>, for example <c>/administration/page-widgets.md</c>.</summary>
+    /// <summary>Gets the page whose path in the storage is <paramref name="fullPath"/>, for example <c>/administration/widgets/gauge.md</c>.</summary>
     public MarkdownFile FindPage(string fullPath) => Pages.Single(page => page.FullPath == fullPath);
 
     /// <summary>Gets the subjects of the page at every depth in the order of the page.</summary>

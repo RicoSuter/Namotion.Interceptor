@@ -1153,7 +1153,7 @@ In the Inline and Split modes of a page, a click on a widget selects it, and the
 
 A widget type can take content from the markdown page it is used on: text, expressions and other widgets. The type declares where the content goes with `[Slot]` on properties, and the page fills these properties from the content of the block. The attribute is in `HomeBlaze.Abstractions.Attributes`.
 
-[Markdown Pages](../administration/pages.md) is the guide for the page side: the colon lines that open and end a block, the arguments and what a page author sees when something is wrong. [Page Widgets](../administration/page-widgets.md) is the reference of the widgets that ship, and [Page Errors](../administration/page-errors.md) lists the messages. This section is the side of the widget author. Its samples of page source use the names of that guide: a block starts with a head line of colons and a name, a block whose name has no dot is a slot block, and a closing line is written only where the next head line does not end the block.
+[Markdown Pages](../administration/pages.md) is the guide for the page side: the colon lines that open and end a block, the arguments and what a page author sees when something is wrong. [Widgets](../administration/widgets/overview.md) is the reference of the widgets that ship, and [Page Errors](../administration/page-errors.md) lists the messages. This section is the side of the widget author. Its samples of page source use the names of that guide: a block starts with a head line of colons and a name, a block whose name has no dot is a slot block, and a closing line is written only where the next head line does not end the block.
 
 #### Declaring Slots
 

@@ -34,8 +34,8 @@ public partial class DocumentationSamplesTests
     private const string ErrorMarker = "<!-- sample: error -->";
     private const string LiveMarker = "<!-- sample: live -->";
 
-    // Every sample of this page is shown at work or shows an error, so each one needs one of the two markers.
-    private const string PageWidgetsPage = DocumentationFolder + "/administration/page-widgets.md";
+    // Every sample of these pages is shown at work or shows an error, so each one needs one of the two markers.
+    private const string WidgetsFolder = DocumentationFolder + "/administration/widgets/";
 
     // The types of this file are in the test assembly, which every fixture knows.
     private const string SampleWidgetSource = "src/HomeBlaze/HomeBlaze.Storage.Tests/Pages/DocumentationSampleWidget.cs";
@@ -186,10 +186,10 @@ public partial class DocumentationSamplesTests
     }
 
     [Fact]
-    public void WhenPageWidgetsPageHasASample_ThenTheSampleIsMarkedAsLiveOrAsAnError()
+    public void WhenWidgetPageHasASample_ThenTheSampleIsMarkedAsLiveOrAsAnError()
     {
         // Arrange
-        var samples = AllSamples.Value.Where(sample => sample.RelativePath == PageWidgetsPage).ToList();
+        var samples = AllSamples.Value.Where(sample => sample.RelativePath.StartsWith(WidgetsFolder, StringComparison.Ordinal)).ToList();
 
         // Act
         var samplesWithoutMarker = samples
