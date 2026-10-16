@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -253,6 +254,40 @@ public class SubjectFilterToolTests
         Assert.False(json.TryGetProperty("warnings", out _));
     }
 
+    [Fact]
+    public async Task WhenPathProviderHasNoSegmentForASelectedProperty_ThenSearchSelectsItByBrowseNameWithoutWarning()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "search", new NoSegmentPathProvider(nameof(TestDevice.IsOn)));
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", types = new[] { typeof(TestDevice).FullName }, properties = new[] { "IsOn" } });
+
+        // Assert
+        Assert.Equal(3, json.GetProperty("subjectCount").GetInt32());
+        foreach (var result in json.GetProperty("results").EnumerateObject())
+        {
+            Assert.True(result.Value.GetProperty("properties").TryGetProperty("IsOn", out _));
+        }
+
+        Assert.False(json.TryGetProperty("warnings", out _));
+    }
+
+    [Fact]
+    public async Task WhenPathProviderHasNoSegmentForAWhereProperty_ThenSearchWarnsLikeTheFilterResolvesIt()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "search", new NoSegmentPathProvider(nameof(TestDevice.IsOn)));
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", where = "IsOn == true" });
+
+        // Assert
+        Assert.Equal(0, json.GetProperty("subjectCount").GetInt32());
+        var warnings = json.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()!).ToArray();
+        Assert.Equal(["No subject in scope has a property named 'IsOn'."], warnings);
+    }
+
     private static TestDeviceGroup CreateGroup()
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -266,9 +301,9 @@ public class SubjectFilterToolTests
         return group;
     }
 
-    private static McpToolInfo CreateTool(IInterceptorSubject root, string name)
+    private static McpToolInfo CreateTool(IInterceptorSubject root, string name, PathProviderBase? pathProvider = null)
     {
-        var configuration = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var configuration = new McpServerConfiguration { PathProvider = pathProvider ?? DefaultPathProvider.Instance };
         return new McpToolFactory(root, configuration).CreateTools().First(tool => tool.Name == name);
     }
 
@@ -276,5 +311,12 @@ public class SubjectFilterToolTests
     {
         var result = await tool.Handler(JsonSerializer.SerializeToElement(input), CancellationToken.None);
         return JsonSerializer.SerializeToElement(result);
+    }
+
+    // Includes every property but gives the named one no path segment, so it is listed by its browse name only.
+    private sealed class NoSegmentPathProvider(string propertyName) : PathProviderBase
+    {
+        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
+            property.BrowseName == propertyName ? null : property.BrowseName;
     }
 }
