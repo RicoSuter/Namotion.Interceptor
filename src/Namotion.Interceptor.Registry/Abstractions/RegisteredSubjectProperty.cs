@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Immutable;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
@@ -152,11 +153,13 @@ public class RegisteredSubjectProperty
     public bool HasSetter => Reference.Metadata.SetValue is not null;
 
     /// <summary>
-    /// Gets a value indicating whether the property has a setter that is public. A dynamic property without
-    /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> counts as public when it has a setter.
+    /// Gets a value indicating whether the property has a setter that is public. An init-only setter counts as no setter.
+    /// A setter that an override inherits has the accessibility of the property it overrides. An explicit or default
+    /// interface implementation counts as public, and so does a dynamic property without
+    /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> when it has a setter.
     /// </summary>
     // TODO: Read the accessibility from the generated metadata instead of the PropertyInfo (see #102)
-    public bool HasPublicSetter => HasSetter && Reference.Metadata.PropertyInfo?.SetMethod?.IsPublic != false;
+    public bool HasPublicSetter => HasSetter && IsSetterPublic(Reference.Metadata.PropertyInfo);
 
     /// <summary>
     /// Gets the current value of the property.
@@ -431,6 +434,25 @@ public class RegisteredSubjectProperty
             // Release references so subjects can be GC'd on idle threads
             collectionPositions.Clear();
         }
+    }
+
+    private static bool IsSetterPublic(PropertyInfo? propertyInfo)
+    {
+        if (propertyInfo is null)
+        {
+            return true;
+        }
+
+        // An override that declares only the getter has no SetMethod of its own; the root declaration holds the setter.
+        var setter = propertyInfo.SetMethod;
+        if (setter is null && propertyInfo.GetMethod?.GetBaseDefinition().DeclaringType is { } rootType)
+        {
+            setter = rootType
+                .GetProperty(propertyInfo.Name, BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
+                .SetMethod;
+        }
+
+        return setter?.IsPublic == true;
     }
 
     /// <summary>

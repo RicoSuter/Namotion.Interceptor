@@ -12,6 +12,15 @@ public interface IWriteOnlyValve
     int Target { set; }
 }
 
+public class ProtectedSetterDevice : DynamicSubject
+{
+    public virtual int Position { get; protected set; }
+
+    public int Mode { get; protected set; }
+
+    public virtual int Speed { get; set; }
+}
+
 /// <summary>
 /// A dynamic subject must report the accessors its properties actually have, because consumers such as
 /// the OPC UA server decide read-only exposure from HasSetter.
@@ -61,5 +70,40 @@ public class DynamicAccessorMetadataTests
         // Assert
         Assert.False(property.HasSetter);
         Assert.Equal(0, ((IReadOnlyGauge)subject).Level);
+    }
+
+    [Theory]
+    [InlineData(nameof(ProtectedSetterDevice.Position), false)]
+    [InlineData(nameof(ProtectedSetterDevice.Mode), false)]
+    [InlineData(nameof(ProtectedSetterDevice.Speed), true)]
+    public void WhenBaseClassPropertyHasASetter_ThenOnlyAPublicSetterCountsAsPublic(string propertyName, bool expectedHasPublicSetter)
+    {
+        // Arrange
+        IInterceptorSubject subject = DynamicSubjectFactory.CreateSubject<ProtectedSetterDevice>();
+        subject.Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry());
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
+
+        // Act
+        var hasSetter = property.HasSetter;
+        var hasPublicSetter = property.HasPublicSetter;
+
+        // Assert
+        Assert.True(hasSetter);
+        Assert.Equal(expectedHasPublicSetter, hasPublicSetter);
+    }
+
+    [Fact]
+    public void WhenInterfacePropertyHasASetter_ThenItsSetterCountsAsPublic()
+    {
+        // Arrange
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor));
+        subject.Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry());
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(IMotor.Speed))!;
+
+        // Act
+        var hasPublicSetter = property.HasPublicSetter;
+
+        // Assert
+        Assert.True(hasPublicSetter);
     }
 }
