@@ -15,7 +15,7 @@ public partial class HistoryChartSeries : IConfigurable
     /// Path of the property whose history the series shows.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Number | SubjectPathKinds.Boolean | SubjectPathKinds.Enum)]
+    [SubjectPath(Kinds = SubjectPathKinds.Number | SubjectPathKinds.Boolean | SubjectPathKinds.Enum)]
     public partial string? Path { get; set; }
 
     /// <summary>

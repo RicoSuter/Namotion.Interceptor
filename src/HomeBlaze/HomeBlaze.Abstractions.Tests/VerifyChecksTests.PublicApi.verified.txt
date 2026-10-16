@@ -134,9 +134,9 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public SubjectPathAttribute() { }
         public SubjectPathAttribute(System.Type subjectType) { }
-        public HomeBlaze.Abstractions.Attributes.SubjectPathKinds Kind { get; set; }
+        public bool IsWritable { get; set; }
+        public HomeBlaze.Abstractions.Attributes.SubjectPathKinds Kinds { get; set; }
         public System.Type? SubjectType { get; }
-        public bool Writable { get; set; }
     }
     [System.Flags]
     public enum SubjectPathKinds

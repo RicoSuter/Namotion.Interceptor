@@ -25,7 +25,7 @@ public partial class Progress : IConfigurable, ITitleProvider
     /// Path of the property whose value the bar shows.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Number)]
+    [SubjectPath(Kinds = SubjectPathKinds.Number)]
     public partial string? Path { get; set; }
 
     /// <summary>

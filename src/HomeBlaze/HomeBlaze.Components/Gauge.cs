@@ -24,7 +24,7 @@ public partial class Gauge : IConfigurable, ITitleProvider
     /// Path of the property whose value the gauge shows.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Number)]
+    [SubjectPath(Kinds = SubjectPathKinds.Number)]
     public partial string? Path { get; set; }
 
     /// <summary>

@@ -222,8 +222,8 @@ public class GaugeDisplayTests
         // Assert
         Assert.Equal(GaugeSize.Medium, gauge.Size);
         Assert.Null(path.SubjectType);
-        Assert.Equal(SubjectPathKinds.Number, path.Kind);
-        Assert.False(path.Writable);
+        Assert.Equal(SubjectPathKinds.Number, path.Kinds);
+        Assert.False(path.IsWritable);
         Assert.Equal(typeof(ValueMap), map.SubjectType);
     }
 }

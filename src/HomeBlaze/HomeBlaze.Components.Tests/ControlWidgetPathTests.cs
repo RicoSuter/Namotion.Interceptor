@@ -26,7 +26,7 @@ public class ControlWidgetPathTests
         // Assert
         Assert.NotNull(attribute);
         Assert.Null(attribute.SubjectType);
-        Assert.Equal(expectedKind, attribute.Kind);
-        Assert.Equal(expectedWritable, attribute.Writable);
+        Assert.Equal(expectedKind, attribute.Kinds);
+        Assert.Equal(expectedWritable, attribute.IsWritable);
     }
 }

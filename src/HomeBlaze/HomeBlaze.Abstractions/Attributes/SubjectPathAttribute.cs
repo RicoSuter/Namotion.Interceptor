@@ -24,8 +24,8 @@ public sealed class SubjectPathAttribute : Attribute
     public Type? SubjectType { get; }
 
     /// <summary>What a path to a property may lead to. Flags combine with OR. Ignored when <see cref="SubjectType"/> is set.</summary>
-    public SubjectPathKinds Kind { get; set; } = SubjectPathKinds.Value;
+    public SubjectPathKinds Kinds { get; set; } = SubjectPathKinds.Value;
 
-    /// <summary>Whether only properties with a public setter may be selected. Combined with <see cref="Kind"/> with AND. Ignored when <see cref="SubjectType"/> is set.</summary>
-    public bool Writable { get; set; }
+    /// <summary>Whether only properties with a public setter may be selected. Combined with <see cref="Kinds"/> with AND. Ignored when <see cref="SubjectType"/> is set.</summary>
+    public bool IsWritable { get; set; }
 }

@@ -19,7 +19,7 @@ public partial class Select : IConfigurable, ITitleProvider
     /// Path of the enum property that the select shows and writes.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Enum, Writable = true)]
+    [SubjectPath(Kinds = SubjectPathKinds.Enum, IsWritable = true)]
     public partial string? Path { get; set; }
 
     /// <summary>

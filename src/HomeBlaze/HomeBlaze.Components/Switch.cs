@@ -19,7 +19,7 @@ public partial class Switch : IConfigurable, ITitleProvider
     /// Path of the boolean property that the switch shows, and writes when <see cref="On"/> and <see cref="Off"/> are not set.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Boolean)]
+    [SubjectPath(Kinds = SubjectPathKinds.Boolean)]
     public partial string? Path { get; set; }
 
     /// <summary>
@@ -32,14 +32,14 @@ public partial class Switch : IConfigurable, ITitleProvider
     /// Path of the operation that turns the switch on. Set together with <see cref="Off"/>.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Operation)]
+    [SubjectPath(Kinds = SubjectPathKinds.Operation)]
     public partial string? On { get; set; }
 
     /// <summary>
     /// Path of the operation that turns the switch off. Set together with <see cref="On"/>.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Operation)]
+    [SubjectPath(Kinds = SubjectPathKinds.Operation)]
     public partial string? Off { get; set; }
 
     public string? Title => null;

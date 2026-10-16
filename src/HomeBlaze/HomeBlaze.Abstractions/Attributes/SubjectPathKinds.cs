@@ -1,7 +1,7 @@
 namespace HomeBlaze.Abstractions.Attributes;
 
 /// <summary>
-/// What a path to a property may lead to, see <see cref="SubjectPathAttribute.Kind"/>. Flags combine with OR.
+/// What a path to a property may lead to, see <see cref="SubjectPathAttribute.Kinds"/>. Flags combine with OR.
 /// A nullable type counts as its underlying type.
 /// </summary>
 [Flags]

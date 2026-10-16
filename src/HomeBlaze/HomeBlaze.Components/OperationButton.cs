@@ -25,7 +25,7 @@ public partial class OperationButton : IConfigurable, ITitleProvider
     /// Path of the operation or query that the button invokes.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Operation)]
+    [SubjectPath(Kinds = SubjectPathKinds.Operation)]
     public partial string? Path { get; set; }
 
     /// <summary>

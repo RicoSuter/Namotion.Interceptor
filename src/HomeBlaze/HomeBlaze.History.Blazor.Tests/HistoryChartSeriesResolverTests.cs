@@ -51,8 +51,8 @@ public class HistoryChartSeriesResolverTests
             .GetCustomAttribute<SubjectPathAttribute>()!;
 
         // Assert
-        Assert.Equal(SubjectPathKinds.Number | SubjectPathKinds.Boolean | SubjectPathKinds.Enum, attribute.Kind);
-        Assert.False(attribute.Writable);
+        Assert.Equal(SubjectPathKinds.Number | SubjectPathKinds.Boolean | SubjectPathKinds.Enum, attribute.Kinds);
+        Assert.False(attribute.IsWritable);
         Assert.Null(attribute.SubjectType);
     }
 

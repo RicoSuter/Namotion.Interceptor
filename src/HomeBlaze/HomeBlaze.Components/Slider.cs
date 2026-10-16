@@ -19,7 +19,7 @@ public partial class Slider : IConfigurable, ITitleProvider
     /// Path of the number property that the slider shows and writes.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Number, Writable = true)]
+    [SubjectPath(Kinds = SubjectPathKinds.Number, IsWritable = true)]
     public partial string? Path { get; set; }
 
     /// <summary>

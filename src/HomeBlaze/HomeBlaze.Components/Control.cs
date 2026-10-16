@@ -19,7 +19,7 @@ public partial class Control : IConfigurable, ITitleProvider
     /// Path of the property or the operation that the control is for.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kind = SubjectPathKinds.Value | SubjectPathKinds.Operation)]
+    [SubjectPath(Kinds = SubjectPathKinds.Value | SubjectPathKinds.Operation)]
     public partial string? Path { get; set; }
 
     /// <summary>

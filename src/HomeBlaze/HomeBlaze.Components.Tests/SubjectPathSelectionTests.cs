@@ -219,8 +219,8 @@ public class SubjectPathSelectionTests
         // Assert
         Assert.NotNull(attribute);
         Assert.Equal(expectedSubjectType, attribute.SubjectType);
-        Assert.Equal(expectedKind, attribute.Kind);
-        Assert.False(attribute.Writable);
+        Assert.Equal(expectedKind, attribute.Kinds);
+        Assert.False(attribute.IsWritable);
     }
 
     [Fact]
@@ -230,8 +230,8 @@ public class SubjectPathSelectionTests
         var attribute = new SubjectPathAttribute();
 
         // Assert
-        Assert.Equal(SubjectPathKinds.Value, attribute.Kind);
-        Assert.False(attribute.Writable);
+        Assert.Equal(SubjectPathKinds.Value, attribute.Kinds);
+        Assert.False(attribute.IsWritable);
         Assert.Equal(
             SubjectPathKinds.Boolean | SubjectPathKinds.Number | SubjectPathKinds.Enum | SubjectPathKinds.OtherValue,
             SubjectPathKinds.Value);
@@ -428,7 +428,7 @@ public class SubjectPathSelectionTests
 
         // Act
         var combined = subjectPaths
-            .Where(pair => pair.Attribute!.Kind != SubjectPathKinds.Value || pair.Attribute.Writable)
+            .Where(pair => pair.Attribute!.Kinds != SubjectPathKinds.Value || pair.Attribute.IsWritable)
             .Select(pair => $"{pair.Property.DeclaringType!.Name}.{pair.Property.Name}")
             .ToList();
 

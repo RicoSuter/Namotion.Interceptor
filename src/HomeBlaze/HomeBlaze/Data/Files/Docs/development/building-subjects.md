@@ -973,15 +973,15 @@ public partial string? Path { get; set; }
 public partial string? Map { get; set; }
 ```
 
-A path to a property can be narrowed with `Kind` and `Writable`. `Kind` takes the flags of `SubjectPathKinds`, which combine with OR: `Boolean`, `Number` (integral, floating point and decimal types), `Enum`, `OtherValue`, `Operation` (an `[Operation]` or `[Query]` method), and `Value`, the default, for the four value kinds. A nullable type counts as its underlying type. `Writable = true` keeps only properties with a public setter and never matches an operation. Both are ignored for a path to a subject, so do not set them together with a type:
+A path to a property can be narrowed with `Kinds` and `IsWritable`. `Kinds` takes the flags of `SubjectPathKinds`, which combine with OR: `Boolean`, `Number` (integral, floating point and decimal types), `Enum`, `OtherValue`, `Operation` (an `[Operation]` or `[Query]` method), and `Value`, the default, for the four value kinds. A nullable type counts as its underlying type. `IsWritable = true` keeps only properties with a public setter and never matches an operation. Both are ignored for a path to a subject, so do not set them together with a type:
 
 ```csharp
 [Configuration]
-[SubjectPath(Kind = SubjectPathKinds.Number, Writable = true)]
+[SubjectPath(Kinds = SubjectPathKinds.Number, IsWritable = true)]
 public partial string? Path { get; set; }
 
 [Configuration]
-[SubjectPath(Kind = SubjectPathKinds.Operation)]
+[SubjectPath(Kinds = SubjectPathKinds.Operation)]
 public partial string? Operation { get; set; }
 ```
 
