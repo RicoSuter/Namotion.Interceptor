@@ -59,6 +59,29 @@ builder.Services.AddComponentTracking(options => options.ThrottleMilliseconds = 
 |--------|---------|-------------|
 | `ThrottleMilliseconds` | 33 | Minimum time between two rounds of renders that changes cause. |
 
+### Renders of the Parent
+
+A component renders whenever its parent renders and passes a parameter that is not of a primitive type, such as a subject, a record or content. Component tracking cannot prevent that, because only the component itself decides in `SetParametersAsync` whether to render. A component that derives from `TrackedComponentBase` ignores a render of its parent whose parameters are all equal to the ones passed before:
+
+```razor
+@using Namotion.Interceptor.Blazor.ComponentTracking
+@inherits TrackedComponentBase
+
+<span class="@Reading.CssClass">@Reading.Text</span>
+
+@code {
+    // A record, equal when its values are.
+    [Parameter]
+    public Reading Reading { get; set; } = default!;
+}
+```
+
+- **Unchanged** means equal by `Equals` to the value passed before, so the same instance, an equal value or an equal record. Content and other delegates always count as changed, as they do for Blazor.
+- **Still renders** when a property that its render read changes, when a parameter changes and when it calls `StateHasChanged`. `OnParametersSet` does not run for a skipped render.
+- **Only with component tracking**: while prerendering, or without `AddComponentTracking`, it renders with its parent as any component does.
+
+Derive from it only if the render shows nothing else that can change: an object that is changed in place and is not a subject, or an `Equals` that ignores what the render shows, would stay stale. It pays off most for the rows or items of a component that reads all their values in its own render.
+
 ### Prerendering and Disposal
 
 While prerendering, nothing is recorded or subscribed. The interactive render that follows subscribes what it reads. A component that the renderer disposes releases its subscriptions at most a second later, at the next render or change of the circuit, and the circuit releases all of them when it ends.

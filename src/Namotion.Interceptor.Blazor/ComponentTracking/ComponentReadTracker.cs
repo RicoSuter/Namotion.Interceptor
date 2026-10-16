@@ -71,6 +71,9 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
 
     internal bool IsRenderRequested { get; set; }
 
+    /// <summary>Gets a value indicating whether the renders of the component record their reads.</summary>
+    internal bool IsRecording => _isInteractive == true;
+
     /// <summary>Gets a value indicating whether the renderer has not disposed the component yet.</summary>
     public bool IsAlive => _renderer is null || ComponentBaseAccessors.GetComponentState(_renderer, _component) is not null;
 

@@ -95,6 +95,10 @@ Per-property inline subscriptions deliver every write that commits after `Subscr
 
 `TrackingScope` subscribes the context-wide observable per scope, so every change of the whole context costs every scope of every circuit a scheduled callback and buffer lists.
 
+### Renders of the Parent
+
+A parent that renders passes its children their parameters again, and Blazor sets them, and so renders the child, unless every parameter is of a known immutable type and equal. Most parameters are not: a subject, a record, content. Neither the activator nor the wrapped fragment can prevent that render, because the renderer calls the virtual `SetParametersAsync` of the component and an empty fragment would remove its output. `TrackedComponentBase` is the opt-in for a component that can: it compares the parameters with the last ones by `Equals`, counting a delegate as changed because content can read state of its creator that is neither a parameter nor tracked, and returns without setting them when all are equal. It does so only while its tracker records, so that a subject passed as the same instance still renders on a change of a property its render read.
+
 ## Coexistence with TrackingScope
 
 `TrackingScope` is unchanged. With component tracking registered, the scope's own fragment is the render of a `ComponentBase` and its content is owned like any other, so the scope records only reads that happen outside a render. Without the registration nothing changes.
