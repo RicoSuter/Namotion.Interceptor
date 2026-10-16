@@ -15,9 +15,9 @@ public enum TestRenderMode
     WebAssembly,
 
     /// <summary>
-    /// A batch completes when the client acknowledges it, as on a server. While a batch is unacknowledged, a render
-    /// request is only queued, and the queue renders when the acknowledgement arrives, in the async flow of the
-    /// acknowledgement, which shares nothing with the flow that asked for the render.
+    /// A batch completes when the client acknowledges it, as on a server. While the maximum number of batches is
+    /// unacknowledged, a render request is only queued, and the queue renders when an acknowledgement arrives, in the
+    /// async flow of the acknowledgement, which shares nothing with the flow that asked for the render.
     /// </summary>
     Server,
 
@@ -31,6 +31,7 @@ public enum TestRenderMode
 internal sealed class TestRenderer : Renderer
 {
     private readonly TestRenderMode _mode;
+    private readonly int _maximumUnacknowledgedBatches;
 
     // Accessed on the dispatcher only.
     private readonly Queue<TaskCompletionSource> _unacknowledgedBatches = new();
@@ -40,10 +41,16 @@ internal sealed class TestRenderer : Renderer
     private int _unacknowledgedBatchCount;
     private int _deferredRenderRequests;
 
-    public TestRenderer(TestRenderMode mode)
+    /// <param name="mode">How batches render and complete.</param>
+    /// <param name="maximumUnacknowledgedBatches">
+    /// The number of unacknowledged batches from which a render request waits in <see cref="TestRenderMode.Server"/>
+    /// mode. The default is the default of a server circuit.
+    /// </param>
+    public TestRenderer(TestRenderMode mode, int maximumUnacknowledgedBatches = 10)
         : base(CreateServices(), NullLoggerFactory.Instance)
     {
         _mode = mode;
+        _maximumUnacknowledgedBatches = maximumUnacknowledgedBatches;
     }
 
     public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
@@ -96,7 +103,7 @@ internal sealed class TestRenderer : Renderer
 
     protected override void ProcessPendingRender()
     {
-        if (_mode == TestRenderMode.Server && _unacknowledgedBatches.Count > 0)
+        if (_mode == TestRenderMode.Server && _unacknowledgedBatches.Count >= _maximumUnacknowledgedBatches)
         {
             _hasDeferredRender = true;
             Interlocked.Increment(ref _deferredRenderRequests);
@@ -167,7 +174,7 @@ internal sealed class TestRenderer : Renderer
             }
         }
 
-        if (_hasDeferredRender && _unacknowledgedBatches.Count == 0)
+        if (_hasDeferredRender && _unacknowledgedBatches.Count < _maximumUnacknowledgedBatches)
         {
             _hasDeferredRender = false;
             base.ProcessPendingRender();

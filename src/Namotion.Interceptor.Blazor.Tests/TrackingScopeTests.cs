@@ -57,7 +57,7 @@ public class TrackingScopeTests
     }
 
     [Fact]
-    public async Task WhenAPropertyChangesBeforeTheFirstBatchIsAcknowledged_ThenTheScopeRendersTheNewValue()
+    public async Task WhenAPropertyChangesBeforeTheFirstBatchIsAcknowledged_ThenTheScopeRendersTheNewValueAtOnce()
     {
         // Arrange
         var context = CreateContext();
@@ -65,6 +65,34 @@ public class TrackingScopeTests
         var log = new RenderLog();
 
         await using var renderer = new TestRenderer(TestRenderMode.Server);
+        renderer.HoldAcknowledgements();
+        await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
+        await WaitAsync(() => log.Value("reader") == "Initial");
+
+        // Act
+        person.FirstName = "Changed";
+        await WaitAsync(() => log.Value("reader") == "Changed");
+        var unacknowledgedBatchesAfterChange = renderer.UnacknowledgedBatchCount;
+        renderer.ReleaseAcknowledgements();
+        await WaitAsync(() => log.Renders("reader") >= 3 && renderer.UnacknowledgedBatchCount == 0);
+        person.FirstName = "Changed again";
+
+        // Assert
+        await WaitAsync(() => log.Value("reader") == "Changed again");
+        Assert.Equal(2, unacknowledgedBatchesAfterChange);
+        Assert.Equal(0, renderer.DeferredRenderRequests);
+        Assert.Empty(renderer.Exceptions);
+    }
+
+    [Fact]
+    public async Task WhenAPropertyChangesWhileTheClientIsTooFarBehind_ThenTheScopeRendersTheNewValueOnceTheClientAcknowledges()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+        var log = new RenderLog();
+
+        await using var renderer = new TestRenderer(TestRenderMode.Server, maximumUnacknowledgedBatches: 1);
         renderer.HoldAcknowledgements();
         await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
         await WaitAsync(() => log.Value("reader") == "Initial");
@@ -88,7 +116,7 @@ public class TrackingScopeTests
         var person = new Person(context) { FirstName = "Initial" };
         var log = new RenderLog();
 
-        await using var renderer = new TestRenderer(TestRenderMode.Server);
+        await using var renderer = new TestRenderer(TestRenderMode.Server, maximumUnacknowledgedBatches: 1);
         await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
         await WaitAsync(() => log.Renders("reader") == 2 && renderer.UnacknowledgedBatchCount == 0);
 
@@ -119,7 +147,7 @@ public class TrackingScopeTests
         ReadPropertyRecorder.Start().Dispose();
         var scopeCountBefore = ReadPropertyRecorder.ActiveScopeCount;
 
-        var renderer = new TestRenderer(TestRenderMode.Server);
+        await using var renderer = new TestRenderer(TestRenderMode.Server);
         renderer.HoldAcknowledgements();
         await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
         await WaitAsync(() => log.Value("reader") == "Initial");
@@ -127,7 +155,6 @@ public class TrackingScopeTests
 
         // Act
         await renderer.EndAsync();
-        person.FirstName = "Changed";
 
         // Assert
         Assert.Equal(scopeCountBefore + 1, scopeCountWhileRendered);
@@ -146,7 +173,7 @@ public class TrackingScopeTests
         ReadPropertyRecorder.Start().Dispose();
         var scopeCountBefore = ReadPropertyRecorder.ActiveScopeCount;
 
-        var renderer = new TestRenderer(TestRenderMode.Prerender);
+        await using var renderer = new TestRenderer(TestRenderMode.Prerender);
         var host = await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
         await WaitAsync(() => log.Value("reader") == "Initial");
 
