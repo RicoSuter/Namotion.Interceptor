@@ -177,4 +177,4 @@ The tab bar at the left of the content:
 - [Basics](basics.md) - Type names, paths, spacing, colours and icons
 - [Overview](overview.md) - Every widget by group
 - [ExpansionPanels](expansion-panels.md) - Page content in panels that open and close
-- [Card](../page-widgets.md#card) - A titled box around page content, also around tabs
+- [Card](card.md) - A titled box around page content, also around tabs

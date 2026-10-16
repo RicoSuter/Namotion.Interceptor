@@ -23,6 +23,9 @@ public class WidgetPagesTests
     private const string FanPath = "../Fan";
     private const string MapPath = "../value-map.md/motorstate";
 
+    // The only path of the widget pages that leads to nothing, in the sample that shows the message for it.
+    private const string PathToNothing = "/Missing/Motor";
+
     [Fact]
     public async Task WhenValueMapPageIsLoaded_ThenTheMapHasACaseWithTextPerMotorStatus()
     {
@@ -241,6 +244,72 @@ public class WidgetPagesTests
         Assert.All(panels, layout => Assert.Equal([true, false], layout.Panels.Select(panel => panel.Expanded)));
         Assert.Equal(2, subjects.OfType<ValueList>().Count());
         Assert.All(subjects.OfType<ValueRow>().Where(row => row.Map is not null), row => Assert.Equal(MapPath, row.Map));
+    }
+
+    [Fact]
+    public async Task WhenCardPageIsLoaded_ThenItsCardsAreThoseOfTheSamples()
+    {
+        // Arrange
+        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
+
+        // Act
+        var page = fixture.FindPage(GetPagePath("card.md"));
+
+        // Assert
+        var cards = DocumentationFolderFixture.FindSubjects(page).OfType<Card>().ToList();
+        Assert.Equal(7, cards.Count);
+
+        var fullCard = cards[0];
+        var body = Assert.IsType<MarkdownFragment>(fullCard.Content).Children.Values;
+        Assert.Equal(("Pump", "WaterDrop"), (fullCard.Title, fullCard.Icon));
+        Assert.Contains(body, child => child is RenderExpression);
+        Assert.Contains(body, child => child is Widget);
+        Assert.Contains("Target speed", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(fullCard.Footer).Children));
+
+        var plainCard = cards[1];
+        Assert.Equal((null, null, null), (plainCard.Title, plainCard.Icon, plainCard.Footer));
+
+        var optionCard = cards[2];
+        Assert.Equal(("Sample motor", "../pages.md", MudBlazor.Color.Primary, false, 6), (optionCard.Subtitle, optionCard.Href, optionCard.IconColor, optionCard.Outlined, optionCard.Elevation));
+        Assert.Contains(Assert.IsType<MarkdownFragment>(optionCard.HeaderRight).Children.Values, child => child is RenderExpression { Path: $"{PumpPath}/Status" });
+
+        Assert.Equal(["Pump", "Fan", "Notes"], cards.Where(card => card.AspectRatio is not null).Select(card => card.Title));
+        Assert.All(cards.Where(card => card.AspectRatio is not null), card => Assert.Equal("4:3", card.AspectRatio));
+        var sizedCard = Assert.Single(cards, card => card.Height is not null);
+        Assert.Equal(200, sizedCard.Height);
+        Assert.Contains(Assert.IsType<MarkdownFragment>(sizedCard.Content).Children.Values, child => child is Widget);
+        Assert.NotNull(sizedCard.Footer);
+    }
+
+    [Fact]
+    public async Task WhenAlertPageIsLoaded_ThenItsAlertsHaveTheSeveritiesOfTheSamples()
+    {
+        // Arrange
+        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
+
+        // Act
+        var page = fixture.FindPage(GetPagePath("alert.md"));
+
+        // Assert
+        var alerts = DocumentationFolderFixture.FindSubjects(page).OfType<Alert>().ToList();
+        Assert.Equal([MudBlazor.Severity.Info, MudBlazor.Severity.Warning], alerts.Select(alert => alert.Severity));
+        Assert.Equal(MudBlazor.Variant.Outlined, alerts[^1].Variant);
+    }
+
+    [Fact]
+    public async Task WhenWidgetPageIsLoaded_ThenOneWidgetShowsThePumpAndTheOtherLeadsNowhere()
+    {
+        // Arrange
+        using var fixture = await DocumentationFolderFixture.LoadAsync(WidgetsFolder);
+
+        // Act
+        var page = fixture.FindPage(GetPagePath("widget.md"));
+
+        // Assert
+        var widgets = DocumentationFolderFixture.FindSubjects(page).OfType<Widget>().ToList();
+        Assert.Equal([PumpPath, PathToNothing], widgets.Select(widget => widget.Path));
+        Assert.Equal("Pump", Assert.IsType<Motor>(widgets[0].ResolvedSubject).Name);
+        Assert.Null(widgets[1].ResolvedSubject);
     }
 
     // The path of a page of the folder in the storage, for example /administration/widgets/value-map.md.

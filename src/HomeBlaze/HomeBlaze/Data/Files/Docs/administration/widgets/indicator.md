@@ -88,5 +88,5 @@ The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
 - [Basics](basics.md) - Type names, paths, value widgets, colours and icons
 - [Overview](overview.md) - Every widget by group
 - [ValueMap](value-map.md) - The text, colour and icon of a value
-- [Card](../page-widgets.md#card) - A titled box with a header corner for an indicator
+- [Card](card.md) - A titled box with a header corner for an indicator
 - [Gauge](gauge.md) - One value in a ring between a minimum and a maximum

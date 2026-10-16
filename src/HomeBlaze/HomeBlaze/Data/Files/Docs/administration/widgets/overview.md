@@ -27,9 +27,9 @@ The reference of each widget has its arguments, its slots and its samples. Some 
 
 | Widget | Purpose |
 |--------|---------|
-| [Card](../page-widgets.md#card) | A titled box around page content |
-| [Alert](../page-widgets.md#alert) | A highlighted box for a note or a warning |
-| [Widget](../page-widgets.md#widget) | Shows the widget of a subject that exists somewhere else |
+| [Card](card.md) | A titled box around page content |
+| [Alert](alert.md) | A highlighted box for a note or a warning |
+| [Widget](widget.md) | Shows the widget of a subject that exists somewhere else |
 
 ## Values
 

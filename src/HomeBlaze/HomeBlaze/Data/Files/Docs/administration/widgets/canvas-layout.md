@@ -57,7 +57,7 @@ A canvas with two nodes that show the two sample motors. A canvas does not adapt
 - While the page is in edit mode, the nodes can be moved with the mouse, each node has buttons to edit and remove it, a click on a node selects the widget in it, and a click on a free place adds a node there. The canvas itself is selected with the arrow up button of a selected widget in a node, or with the keyboard, see [Editing in the Page Editor](../pages.md#editing-in-the-page-editor).
 - A canvas can be zoomed with the mouse wheel and moved by dragging its background only while the page is edited. While the page is viewed, the canvas itself cannot be zoomed or moved, the wheel scrolls the page, and the widgets in its nodes work as anywhere else on the page. While the page is edited, the widgets in the nodes do not react to the mouse, so that a node can be moved without triggering what it shows. No line can be drawn between nodes in either mode.
 - A node has a fixed size and cuts off content that needs more room. Names and a configuration file work as for the cells of a [GridLayout](grid-layout.md), with the list `nodes`.
-- A [Card](../page-widgets.md#card) in a node fills the node, as in a cell of a `GridLayout`.
+- A [Card](card.md) in a node fills the node, as in a cell of a `GridLayout`.
 
 ## Related
 

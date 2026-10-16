@@ -148,6 +148,6 @@ Limits:
 
 - [Basics](basics.md) - Type names, paths, spacing, colours and icons
 - [Overview](overview.md) - Every widget by group
-- [Card](../page-widgets.md#card) - A titled box, the usual content of a cell
+- [Card](card.md) - A titled box, the usual content of a cell
 - [GridLayout](grid-layout.md) - Fixed rows and columns, with cells that span several
 - [Responsive](responsive.md) - Content that is shown only at some widths of the screen
