@@ -194,6 +194,14 @@ else
         Interlocked.Exchange(ref _rerenderPending, 0);
 
         base.OnAfterRender(firstRender);
+
+        if (firstRender && _disposed == 0)
+        {
+            // Renders once more to record what the first recording missed: content that a descendant renders in a batch
+            // of its own after its first render, and a change that arrived before the recorded properties were active.
+            // Posted from outside the dispatcher, so that it runs after the OnAfterRender calls of the descendants.
+            _ = Task.Run(() => InvokeAsync(StateHasChanged));
+        }
     }
 
     private void StopRecording()

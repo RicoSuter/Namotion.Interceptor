@@ -1,181 +1,131 @@
 using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.Components.Rendering;
-using Microsoft.AspNetCore.Components.RenderTree;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Recorder;
 using Xunit;
-
-// A custom renderer is the only way to control in which async flow a batch renders.
-#pragma warning disable BL0006
 
 namespace Namotion.Interceptor.Blazor.Tests;
 
-public partial class TrackingScopeTests
+public class TrackingScopeTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenPropertyReadByADescendantChanges_ThenTheDescendantRendersTheNewValue(bool renderInOtherFlow)
+    [InlineData(TestRenderMode.WebAssembly)]
+    [InlineData(TestRenderMode.Server)]
+    public async Task WhenPropertyReadByADescendantChanges_ThenTheDescendantRendersTheNewValue(TestRenderMode mode)
     {
         // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithReadPropertyRecorder()
-            .WithFullPropertyTracking();
-
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Initial" };
         var log = new RenderLog();
 
-        await using var renderer = new TestRenderer(renderInOtherFlow);
-        await renderer.RenderAsync<Root>(new Dictionary<string, object?>
-        {
-            [nameof(Root.Person)] = person,
-            [nameof(Root.Log)] = log
-        });
-        await AsyncTestHelpers.WaitUntilAsync(() => log.LastValue == "Initial");
+        await using var renderer = new TestRenderer(mode);
+        await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
+        await WaitAsync(() => log.Value("reader") == "Initial");
 
         // Act
         person.FirstName = "First";
-        await AsyncTestHelpers.WaitUntilAsync(() => log.LastValue == "First");
+        await WaitAsync(() => log.Value("reader") == "First");
         person.FirstName = "Second";
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => log.LastValue == "Second");
+        await WaitAsync(() => log.Value("reader") == "Second");
         Assert.Empty(renderer.Exceptions);
     }
 
-    [InterceptorSubject]
-    public partial class Person
+    [Theory]
+    [InlineData(TestRenderMode.WebAssembly)]
+    [InlineData(TestRenderMode.Server)]
+    public async Task WhenAChildRendersItsContentOnlyFromItsSecondRender_ThenAChangeOfWhatTheContentReadsIsRendered(TestRenderMode mode)
     {
-        public partial string? FirstName { get; set; }
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+        var log = new RenderLog();
+
+        await using var renderer = new TestRenderer(mode);
+        await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read<DeferredReader>("reader", person, log)));
+
+        // The empty first render, the content in a batch of its own and the render of the scope after its first render.
+        await WaitAsync(() => log.Renders("reader") >= 3 && renderer.UnacknowledgedBatchCount == 0);
+
+        // Act
+        person.FirstName = "Changed";
+
+        // Assert
+        await WaitAsync(() => log.Value("reader") == "Changed");
+        Assert.Empty(renderer.Exceptions);
     }
 
-    public sealed class RenderLog
+    [Fact]
+    public async Task WhenTheScopeIsDisposedBeforeItsFirstBatchIsAcknowledged_ThenItStopsRecording()
     {
-        private volatile string? _lastValue;
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+        var log = new RenderLog();
 
-        public string? LastValue
-        {
-            get => _lastValue;
-            set => _lastValue = value;
-        }
+        // Gives this flow the list of recording scopes, which the render started from it shares.
+        ReadPropertyRecorder.Start().Dispose();
+        var scopeCountBefore = ReadPropertyRecorder.ActiveScopeCount;
+
+        var renderer = new TestRenderer(TestRenderMode.Server);
+        renderer.HoldAcknowledgements();
+        await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
+        await WaitAsync(() => log.Value("reader") == "Initial");
+        var scopeCountWhileRendered = ReadPropertyRecorder.ActiveScopeCount;
+
+        // Act
+        await renderer.EndAsync();
+        person.FirstName = "Changed";
+
+        // Assert
+        Assert.Equal(scopeCountBefore + 1, scopeCountWhileRendered);
+        Assert.Equal(scopeCountBefore, ReadPropertyRecorder.ActiveScopeCount);
+        Assert.Empty(renderer.Exceptions);
     }
 
-    public sealed class Root : ComponentBase
+    [Fact]
+    public async Task WhenPrerendered_ThenTheScopeRecordsUntilItIsDisposed()
     {
-        [Parameter]
-        public Person Person { get; set; } = null!;
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+        var log = new RenderLog();
 
-        [Parameter]
-        public RenderLog Log { get; set; } = null!;
+        ReadPropertyRecorder.Start().Dispose();
+        var scopeCountBefore = ReadPropertyRecorder.ActiveScopeCount;
 
-        protected override void BuildRenderTree(RenderTreeBuilder builder)
-        {
-            builder.OpenComponent<TrackingScope>(0);
-            builder.AddComponentParameter(1, nameof(TrackingScope.Context), ((IInterceptorSubject)Person).Context);
-            builder.AddComponentParameter(2, nameof(TrackingScope.ChildContent), (RenderFragment)(content =>
-            {
-                content.OpenComponent<Reader>(0);
-                content.AddComponentParameter(1, nameof(Reader.Person), Person);
-                content.AddComponentParameter(2, nameof(Reader.Log), Log);
-                content.CloseComponent();
-            }));
-            builder.CloseComponent();
-        }
+        var renderer = new TestRenderer(TestRenderMode.Prerender);
+        var host = await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
+        await WaitAsync(() => log.Value("reader") == "Initial");
+
+        // Act
+        await host.RenderAgainAsync();
+        var scopeCountWhileRendered = ReadPropertyRecorder.ActiveScopeCount;
+        await renderer.EndAsync();
+
+        // Assert
+        Assert.Equal(2, log.Renders("reader"));
+        Assert.Equal(scopeCountBefore + 1, scopeCountWhileRendered);
+        Assert.Equal(scopeCountBefore, ReadPropertyRecorder.ActiveScopeCount);
+        Assert.Empty(renderer.Exceptions);
     }
 
-    public sealed class Reader : ComponentBase
+    internal static IInterceptorSubjectContext CreateContext()
     {
-        [Parameter]
-        public Person Person { get; set; } = null!;
-
-        [Parameter]
-        public RenderLog Log { get; set; } = null!;
-
-        protected override void BuildRenderTree(RenderTreeBuilder builder)
-        {
-            var value = Person.FirstName;
-            builder.AddContent(0, value);
-            Log.LastValue = value;
-        }
+        return InterceptorSubjectContext
+            .Create()
+            .WithReadPropertyRecorder()
+            .WithFullPropertyTracking();
     }
 
-    /// <summary>
-    /// With <c>renderInOtherFlow</c>, a render request only queues the render, as on a server whose client has not
-    /// acknowledged enough batches, and the queue is rendered later in an async flow that shares nothing with the request.
-    /// </summary>
-    private sealed class TestRenderer : Renderer
+    internal static Task<Host> RenderAsync(TestRenderer renderer, RenderFragment content)
     {
-        private readonly bool _renderInOtherFlow;
-        private bool _isRenderingQueue;
+        return renderer.RenderAsync<Host>(new Dictionary<string, object?> { [nameof(Host.Content)] = content });
+    }
 
-        public TestRenderer(bool renderInOtherFlow)
-            : base(CreateServices(), NullLoggerFactory.Instance)
-        {
-            _renderInOtherFlow = renderInOtherFlow;
-        }
-
-        public List<Exception> Exceptions { get; } = [];
-
-        public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
-
-        public Task RenderAsync<TComponent>(Dictionary<string, object?> parameters)
-            where TComponent : IComponent, new()
-        {
-            return Dispatcher.InvokeAsync(() =>
-            {
-                var componentId = AssignRootComponentId(new TComponent());
-                _ = RenderRootComponentAsync(componentId, ParameterView.FromDictionary(parameters));
-            });
-        }
-
-        protected override void ProcessPendingRender()
-        {
-            if (!_renderInOtherFlow || _isRenderingQueue)
-            {
-                base.ProcessPendingRender();
-                return;
-            }
-
-            using (ExecutionContext.SuppressFlow())
-            {
-                _ = Task.Run(() => Dispatcher.InvokeAsync(RenderQueue));
-            }
-        }
-
-        // Completes after the batch, as the acknowledgement of a client does, so that OnAfterRender runs in a continuation.
-        protected override Task UpdateDisplayAsync(in RenderBatch renderBatch) => Task.Run(static () => { });
-
-        protected override void HandleException(Exception exception)
-        {
-            lock (Exceptions)
-            {
-                Exceptions.Add(exception);
-            }
-        }
-
-        private void RenderQueue()
-        {
-            _isRenderingQueue = true;
-            try
-            {
-                base.ProcessPendingRender();
-            }
-            finally
-            {
-                _isRenderingQueue = false;
-            }
-        }
-
-        private static ServiceProvider CreateServices()
-        {
-            return new ServiceCollection()
-                .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
-                .BuildServiceProvider();
-        }
+    internal static Task WaitAsync(Func<bool> condition)
+    {
+        return AsyncTestHelpers.WaitUntilAsync(condition, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(5));
     }
 }
