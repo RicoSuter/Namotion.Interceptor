@@ -45,15 +45,18 @@ public sealed class MarkdownBlock
     /// 1-based last line of the block: its closing line, or without one the last line of its content
     /// that is not empty, which is its head line when it has no content.
     /// </summary>
-    /// <remarks><see cref="MarkdownBlockContainer.EndLine"/> says where the value is exact without a closing line.</remarks>
-    internal int EndLine { get; init; }
+    /// <remarks>
+    /// Without a closing line, a block inside a quote, a list item or a table cell can report an earlier line
+    /// of its content.
+    /// </remarks>
+    public int EndLine { get; init; }
 
     /// <summary>
     /// Whether the block ends with a closing line of its own. Without one, a head line with as many
     /// fence characters or fewer, the closing line of a block around it or the end of the page ended it.
     /// A closing line that closes no block is its own closing line.
     /// </summary>
-    internal bool HasClosingLine { get; init; }
+    public bool HasClosingLine { get; init; }
 
     public MarkdownSpan HeadSpan { get; init; }
 
