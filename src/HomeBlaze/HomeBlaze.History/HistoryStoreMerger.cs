@@ -83,7 +83,7 @@ public static class HistoryStoreMerger
         IReadOnlyList<string> propertyPaths,
         DateTimeOffset from,
         DateTimeOffset to,
-        TimeSpan? bucket,
+        HistoryBucket? bucket,
         string aggregation,
         int maxPoints,
         CancellationToken cancellationToken)
@@ -108,7 +108,7 @@ public static class HistoryStoreMerger
         IReadOnlyList<string> propertyPaths,
         DateTimeOffset from,
         DateTimeOffset to,
-        TimeSpan? bucket,
+        HistoryBucket? bucket,
         string aggregation,
         int maxPoints,
         CancellationToken cancellationToken) =>
@@ -307,19 +307,20 @@ public static class HistoryStoreMerger
         {
             // The same clipped grid the planners walked: the newest MaxPoints buckets of the range.
             var bucketStart = BucketAlignment.FirstBucketStart(query.From, query.To, bucket, query.MaxPoints);
-            truncated |= bucketStart > BucketAlignment.BucketStart(query.From, bucket);
+            truncated |= bucketStart > BucketAlignment.Start(query.From, bucket);
 
-            var builder = ImmutableArray.CreateBuilder<HistoryPoint>(
-                checked((int)(1L + ((query.To - bucketStart).Ticks - 1L) / bucket.Ticks)));
+            var builder = bucket.FixedSize is { } size
+                ? ImmutableArray.CreateBuilder<HistoryPoint>(checked((int)(1L + ((query.To - bucketStart).Ticks - 1L) / size.Ticks)))
+                : ImmutableArray.CreateBuilder<HistoryPoint>();
             while (bucketStart < query.To)
             {
                 builder.Add(byTimestamp.TryGetValue(bucketStart, out var point)
                     ? point
                     : new HistoryPoint(bucketStart, null, null));
-                bucketStart += bucket;
+                bucketStart = BucketAlignment.Next(bucketStart, bucket);
             }
 
-            points = builder.MoveToImmutable();
+            points = builder.DrainToImmutable();
         }
         else
         {

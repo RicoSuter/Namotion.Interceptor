@@ -155,7 +155,7 @@ public record HistoryQuery(
     string PropertyPath,
     DateTimeOffset From,
     DateTimeOffset To,
-    TimeSpan? Bucket = null,
+    HistoryBucket? Bucket = null,
     string Aggregation = HistoryAggregations.Last,
     int MaxPoints = 10_000,
     HistoryPoint? CarrySeed = null)
@@ -175,7 +175,8 @@ public record HistoryQuery(
             throw new ArgumentException("The query start must be earlier than its end.", nameof(From));
         }
 
-        if (Bucket is { } bucket && bucket <= TimeSpan.Zero)
+        if (Bucket is { } bucket &&
+            (bucket.FixedSize is { } size ? size <= TimeSpan.Zero : bucket.CalendarUnit is null))
         {
             throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket size must be positive.");
         }

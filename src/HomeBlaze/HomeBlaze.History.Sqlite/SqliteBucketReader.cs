@@ -39,7 +39,8 @@ internal static class SqliteBucketReader
 
         var bucket = query.Bucket!.Value;
         var aggregation = query.Aggregation;
-        var bucketTicks = bucket.Ticks;
+        var bucketTicks = bucket.FixedSize?.Ticks
+            ?? throw new NotSupportedException("Calendar buckets are not supported by the SQLite reader yet.");
 
         // Resolve the move chain once: each leg owns its [ValidFrom, ValidTo) slice of time and stores its
         // samples under its own path. With no moves this is a single unbounded leg under query.PropertyPath.
@@ -70,7 +71,7 @@ internal static class SqliteBucketReader
         var isCarryDependent = aggregation is
             HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
         var carrySeed = isCarryDependent ? query.CarrySeed : null;
-        var originalAlignedFrom = BucketAlignment.BucketStart(query.From, bucket);
+        var originalAlignedFrom = BucketAlignment.Start(query.From, bucket);
 
         // When MaxPoints clipped older buckets, the look-back at the clipped boundary replaces the seed even
         // when nothing is held there, since the seed may not survive a coverage gap in between. Otherwise

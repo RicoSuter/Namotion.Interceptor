@@ -172,7 +172,7 @@ public sealed class FakeHistoryStore : IHistoryStore
         // across a gap this store does not vouch for.
         if (carryDependent && query.CarrySeed is null)
         {
-            var prior = SampleAtOrBefore(BucketAlignment.BucketStart(query.From, bucket));
+            var prior = SampleAtOrBefore(BucketAlignment.Start(query.From, bucket));
             if (prior is not null)
             {
                 carriedNumber = prior.Number;
@@ -181,10 +181,10 @@ public sealed class FakeHistoryStore : IHistoryStore
         }
 
         var points = new List<HistoryPoint>();
-        var bucketStart = BucketAlignment.BucketStart(query.From, bucket);
+        var bucketStart = BucketAlignment.Start(query.From, bucket);
         while (bucketStart < query.To)
         {
-            var bucketEnd = bucketStart + bucket;
+            var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
 
             // Clipped to the query window, matching the real engines: a trailing bucket that runs past
             // To must not aggregate samples from after To into its point.

@@ -82,7 +82,7 @@ internal static class HistoryDispatchPlanner
         var bucketStart = BucketAlignment.FirstBucketStart(query.From, query.To, bucket, query.MaxPoints);
         while (bucketStart < query.To)
         {
-            var bucketEnd = bucketStart + bucket;
+            var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
 
             // Clipped at To for ownership and the segment end alike: unclipped, the live edge would look
             // partly uncovered and the sub-query could aggregate samples from after To.

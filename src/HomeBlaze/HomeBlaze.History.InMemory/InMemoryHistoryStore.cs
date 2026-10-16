@@ -469,7 +469,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         var carriedJson = InMemoryHistoryAggregation.IsCarryDependent(aggregation)
             ? query.CarrySeed?.Json
             : null;
-        var alignedFrom = BucketAlignment.BucketStart(query.From, bucket);
+        var alignedFrom = BucketAlignment.Start(query.From, bucket);
         var firstBucketStart = BucketAlignment.FirstBucketStart(
             query.From, query.To, bucket, query.MaxPoints);
         var bucketStart = firstBucketStart;
@@ -500,7 +500,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         var allPoints = new List<HistoryPoint>();
         while (bucketStart < query.To)
         {
-            var bucketEnd = bucketStart + bucket;
+            var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
 
             // Samples are ascending, so the bucket's slice starts at the cursor and runs to the first
             // sample at or after bucketEnd.

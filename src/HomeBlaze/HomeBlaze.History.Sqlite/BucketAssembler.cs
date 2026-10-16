@@ -104,14 +104,14 @@ internal static class BucketAssembler
         var carriedNumber = lastSeed?.Number;
         var carriedJson = lastSeed?.Json;
 
-        var alignedFrom = BucketAlignment.BucketStart(query.From, bucket);
+        var alignedFrom = BucketAlignment.Start(query.From, bucket);
         var firstBucketStart = BucketAlignment.FirstBucketStart(
             query.From, query.To, bucket, query.MaxPoints);
         var bucketStartTimestamp = firstBucketStart;
         var allPoints = new List<HistoryPoint>();
         while (bucketStartTimestamp < query.To)
         {
-            var bucketEndTimestamp = bucketStartTimestamp + bucket;
+            var bucketEndTimestamp = BucketAlignment.Next(bucketStartTimestamp, bucket);
 
             // Measured over [bucket start, min(bucket end, To)) within coverage (partial buckets: history.md).
             var clippedEnd = bucketEndTimestamp < query.To ? bucketEndTimestamp : query.To;
