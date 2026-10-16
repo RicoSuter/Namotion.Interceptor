@@ -56,7 +56,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 :::::: Item
 ::::::: HomeBlaze.Components.ValueTile Path=/Demo/ExhaustFan/CurrentSpeed Label="Exhaust fan RPM" Icon=Air
 ::::: HomeBlaze.Components.Card Title="Current temperatures" Icon=Thermostat
-:::::: HomeBlaze.Components.FlowLayout MinWidth=180
+:::::: HomeBlaze.Components.FlowLayout MinWidth=120
 ::::::: Item
 :::::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/Temperature Label="Compressor" Minimum=20 Maximum=100
 ::::::: Item
@@ -133,7 +133,7 @@ A phone shows the status list above, a wider screen the speed tiles and the temp
 :::: HomeBlaze.Components.Card Title="Gauge sizes" Icon=Speed
 The speed of the compressor in the three sizes of a gauge.
 
-::::: HomeBlaze.Components.FlowLayout MinWidth=180
+::::: HomeBlaze.Components.FlowLayout MinWidth=168
 :::::: Item
 ::::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/CurrentSpeed Label="Small" Minimum=0 Maximum=3000 Size=Small
 :::::: Item
@@ -145,7 +145,7 @@ The speed of the compressor in the three sizes of a gauge.
 Widgets of this tab: [Responsive](../Docs/administration/widgets/responsive.md), [Gauge](../Docs/administration/widgets/gauge.md) and [HistoryChart](../Docs/administration/widgets/history-chart.md).
 ::: Tab#controls Title="Controls" Icon=Tune
 :::: HomeBlaze.Components.Card Title="Load" Icon=DonutLarge
-::::: HomeBlaze.Components.FlowLayout MinWidth=180
+::::: HomeBlaze.Components.FlowLayout MinWidth=120
 :::::: Item
 ::::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/Load Label="Compressor"
 :::::: Item

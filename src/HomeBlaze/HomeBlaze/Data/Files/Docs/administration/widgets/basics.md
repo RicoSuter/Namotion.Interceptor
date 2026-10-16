@@ -79,6 +79,18 @@ The control widgets ([Switch](switch.md) and the others of the group Controls in
 - **Devices**: A write to a property that a connector sends to a device can fail later on the device side, without a message on the page.
 - **The text editor**: A page that is open in the Split mode text editor does not take what a control saved, and saving the editor afterwards overwrites it.
 
+## Spacing
+
+Only containers create space: the page, a card, a tab, an expansion panel and the cells of a layout. A widget has no outer margin of its own, so the same widget looks the same wherever it stands, and the space around it comes from where it stands.
+
+- **Between blocks of a page**: 16 pixels between two blocks and between a block and the text before or after it. Paragraphs of text keep 12 pixels between each other, and headings their own space.
+- **Inside a container**: The blocks and paragraphs of the content are 16 pixels apart, and the first and the last of them add nothing at the edge of the container, also when a [Responsive](responsive.md) block that the screen hides stands first or last.
+- **Containers**: A [card](../page-widgets.md#card) has 12 pixels of room at every edge of its header, body and footer, and 4 pixels between its title and a body right below it. A tab has 16 pixels between its tab bar and its content and nothing at the other edges. An expansion panel keeps the room that its header and its frame have. A cell of a [FlowLayout](../page-widgets.md#flowlayout) or a [GridLayout](../page-widgets.md#gridlayout) and a node of a [CanvasLayout](../page-widgets.md#canvaslayout) add no room: a card in them brings its own.
+- **Layouts**: The cells of a `FlowLayout` and of a `GridLayout` are 16 pixels apart in both directions.
+- **Fluid and fixed widgets**: A card, a tile, a list, a table and a chart are as wide as their place. A card that is the only content of a `FlowLayout` cell is as high as the highest cell of its row, so the cards of a row end on one line, and its footer stays at the bottom. A widget of a fixed size, such as a [Gauge](gauge.md) or a button, stands at the start of its place; [Gauge Rows](gauge.md#gauge-rows) shows how to choose the column width for it.
+- **Card footers**: The blocks of a footer, such as two buttons, stand in a row with 8 pixels between them and wrap when the card is too narrow.
+- **Controls**: A control is aligned by its visible edges: the track of a [Switch](switch.md), the box of a [Select](select.md) and the label of a [Slider](slider.md) start at the edge where text starts. Inside a widget, its own parts keep their room, such as the height of a row of a value list or the small margin around a chip.
+
 ---
 
 ## Related
