@@ -202,7 +202,7 @@ public static class BucketAlignment
         // it started.
         var target = new DateTimeOffset(DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified), TimeSpan.Zero);
 
-        // UTC offsets stay within 14 hours, so the local time is still before localStart here.
+        // UTC offsets stay within 14 hours, so the instant is still after segmentStart here.
         var segmentStart = target - SearchMargin;
         var offset = timeZone.GetUtcOffset(segmentStart);
         while (true)

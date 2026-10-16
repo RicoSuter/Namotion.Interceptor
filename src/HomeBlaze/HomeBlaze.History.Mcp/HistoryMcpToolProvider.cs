@@ -111,7 +111,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                           "Timestamps carry the offset of time_zone (named in the response); compare instants, not strings. " +
                           "Points of day, week, month and year buckets carry their period in time_zone instead of a " +
                           "timestamp: 2026-03-29, 2026-W13 (ISO week), 2026-03, 2026. " +
-                          "Bucketed values are rounded to 12 significant digits. For energy per month, use bucket=month " +
+                          "Computed bucket values (averages, Sum, StandardDeviation, Delta) are rounded to 12 significant digits; recorded values are not. For energy per month, use bucket=month " +
                           "with aggregation=Delta on the energy counter; Delta returns the counter's unit, so a WattHour " +
                           "counter yields Wh per bucket. " +
                           "Use browse or search to discover paths first.",
@@ -124,10 +124,10 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     private const int MaxHistoryPaths = 10;
 
     /// <summary>
-    /// Returns a structured error when an optional parameter is present but is neither a string nor
-    /// null, so a wrong-typed value is reported rather than silently falling back to its default.
+    /// Reads an optional string parameter: absent or null yields a null <paramref name="value"/>. Returns a structured
+    /// error when the parameter is any other non-string kind, so a wrong-typed value is reported rather than silently
+    /// falling back to its default.
     /// </summary>
-    // An optional string parameter: absent or null reads as null, any other non-string kind is an error.
     private static object? TryReadOptionalString(JsonElement input, string name, out string? value)
     {
         value = null;
@@ -310,7 +310,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         foreach (var result in results)
         {
             series[result.Path] = result.Series is { } served
-                ? BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, bucket, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
+                ? BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, bucket, aggregation, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
                 : result.ErrorPayload;
         }
 
@@ -356,7 +356,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     }
 
     private static Dictionary<string, object?> BuildSeriesPayload(
-        string? valueType, string? unit, HistorySeries series, TimeZoneInfo timeZone, HistoryBucket? bucket, bool includeOwnRanges)
+        string? valueType, string? unit, HistorySeries series, TimeZoneInfo timeZone, HistoryBucket? bucket, string aggregation, bool includeOwnRanges)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal) { ["value_type"] = valueType };
         if (unit is not null)
@@ -374,25 +374,30 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             payload["ranges"] = FormatRanges(series.CoverageRanges, timeZone);
         }
 
+        var roundNumbers = bucket is not null && ComputesNewValue(aggregation);
         var points = new object?[series.Points.Length][];
         for (var i = 0; i < points.Length; i++)
         {
-            points[i] = ToPair(series.Points[i], timeZone, bucket);
+            points[i] = ToPair(series.Points[i], timeZone, bucket, roundNumbers);
         }
 
         payload["points"] = points;
         return payload;
     }
 
-    // A calendar point is labeled with its period. Bucketed values are computed, so their floating point noise is
-    // rounded away; raw samples are returned as recorded.
-    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo timeZone, HistoryBucket? bucket) =>
+    // A calendar point is labeled with its period. Values an aggregation computes carry floating point noise that is
+    // rounded away; raw samples and the aggregations that pick a recorded sample are returned as recorded.
+    private static bool ComputesNewValue(string aggregation) =>
+        aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
+            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation or HistoryAggregations.Delta;
+
+    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo timeZone, HistoryBucket? bucket, bool roundNumbers) =>
     [
         bucket is { CalendarUnit: not null } calendar
             ? HistoryToolFormatting.FormatPeriodLabel(point.Timestamp, calendar)
             : HistoryToolFormatting.FormatTimestamp(point.Timestamp, timeZone),
         point.Number is { } number
-            ? bucket is not null ? HistoryToolFormatting.RoundToSignificantDigits(number) : number
+            ? roundNumbers ? HistoryToolFormatting.RoundToSignificantDigits(number) : number
             : point.Json
     ];
 

@@ -368,7 +368,7 @@ Filling the start of a window needs the value held entering it, which a raw quer
 The response carries the resolved `from` and `to`, the `time_zone`, one coverage summary and a per-path `series` map:
 
 - `coverage`: the covered fraction of the range (`ratio`, rounded toward zero so a range with a gap never reads as 1), the number of `gaps` and the `largest_gap` as a compact duration such as `2h14m`. With `coverage: "ranges"` it also lists the covered `ranges` as `[from, to]` pairs. It is the coverage of the first served series; a series whose coverage differs, for example because the point limit truncated it, carries its own `ranges` when ranges are requested.
-- per path: a value type hint (number / string / boolean / enum), the `unit` when the property's State attribute has one other than `Default` (the `StateUnit` name, for example `WattHour`), points as `[timestamp, value]` pairs including explicit null gaps, and `truncated: true` when the point limit cut the series. `Delta` returns the counter's own unit, so a `WattHour` counter yields Wh per bucket. Bucketed values are computed, so they are rounded to 12 significant digits (`500.18000000000757` becomes `500.18`); raw samples are returned as recorded.
+- per path: a value type hint (number / string / boolean / enum), the `unit` when the property's State attribute has one other than `Default` (the `StateUnit` name, for example `WattHour`), points as `[timestamp, value]` pairs including explicit null gaps, and `truncated: true` when the point limit cut the series. `Delta` returns the counter's own unit, so a `WattHour` counter yields Wh per bucket. Values an aggregation computes (`SampleAverage`, `TimeWeightedAverage`, `Sum`, `StandardDeviation` and `Delta`) are rounded to 12 significant digits (`500.18000000000757` becomes `500.18`); raw samples and the aggregations that return a recorded sample (`Last`, `First`, `Minimum`, `Maximum`) and `Count` are returned as recorded.
 
 When no path could be served, `coverage` is omitted.
 
@@ -376,7 +376,7 @@ One zone governs the whole call: it reads `from` and `to` when they carry no off
 
 Calendar bucket points carry their period in the zone instead of a timestamp: `2026-03-29` for a day, the ISO 8601 week `2026-W13` (numbered in its ISO week-numbering year), `2026-03` for a month and `2026` for a year. Days are 23 or 25 hours long across daylight saving changes; a skipped local midnight starts the day at the transition.
 
-Unknown or non-servable aggregations return a structured error with the `available` set; empty results and unknown paths are not errors. Aggregation input is normalized case-insensitively at the MCP boundary. Internal identifiers use ordinal comparison.
+Unknown or non-servable aggregations return a structured error with the `available` set; empty results and unknown paths are not errors, except that `Delta` on a path that does not resolve returns a per-path error, because it needs the property to check that it is cumulative. Aggregation input is normalized case-insensitively at the MCP boundary. Internal identifiers use ordinal comparison.
 
 ## Planned TimescaleDB tier
 

@@ -638,4 +638,22 @@ public class GetPropertyHistoryToolTests
         Assert.Equal("500.18", bucketed.GetProperty("series").GetProperty("/Power").GetProperty("points")[0][1].GetRawText());
         Assert.Equal("500.18000000000757", raw.GetProperty("series").GetProperty("/Power").GetProperty("points")[0][1].GetRawText());
     }
+
+    [Theory]
+    [InlineData("Maximum")]
+    [InlineData("Last")]
+    public async Task WhenAggregationReturnsARecordedSample_ThenBucketedValueIsNotRounded(string aggregation)
+    {
+        // Arrange
+        void Configure(TestHistoryStore store) => store.Points =
+            [new HistoryPoint(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), 1760000000123, null)];
+
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-01-01T00:00:00Z", to = "2026-01-01T01:00:00Z", bucket = "1h", aggregation },
+            Configure);
+
+        // Assert
+        Assert.Equal("1760000000123", json.GetProperty("series").GetProperty("/Power").GetProperty("points")[0][1].GetRawText());
+    }
 }
