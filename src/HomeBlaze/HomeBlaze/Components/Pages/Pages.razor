@@ -172,6 +172,10 @@
     // The mode whose editor bar the head follows, null while it follows none.
     private PageEditMode? _fittedMode;
 
+    // The last fit of the head. Renders do not wait for each other's OnAfterRenderAsync, so each fit waits for the one
+    // before it, otherwise an older fit that finishes last would replace the observer of the current bar.
+    private Task _pageHeadFitTask = Task.CompletedTask;
+
     // The selection is the receiver, so that a click on empty page space renders only the widget that it deselects.
     private EventCallback<MouseEventArgs> _clearSelectionCallback;
 
@@ -268,13 +272,21 @@
         if (mode != _fittedMode)
         {
             _fittedMode = mode;
-            await FitPageHeadAsync(mode is null ? null : _editorBar);
+            _pageHeadFitTask = FitPageHeadAsync(_pageHeadFitTask, mode, mode is null ? null : _editorBar);
+            await _pageHeadFitTask;
         }
     }
 
     // Each mode with an editor renders a bar of its own, so the head follows the bar of the current mode.
-    private async Task FitPageHeadAsync(ElementReference? editorBar)
+    private async Task FitPageHeadAsync(Task previousFit, PageEditMode? mode, ElementReference? editorBar)
     {
+        await previousFit;
+        if (mode != _fittedMode || _isDisposed)
+        {
+            // A later mode has its own fit queued behind this one, or the page is gone.
+            return;
+        }
+
         try
         {
             if (_pageHeadFit is { } previous)
@@ -458,6 +470,8 @@
 
         try
         {
+            await _pageHeadFitTask;
+
             if (_pageHeadFit is not null)
             {
                 await _pageHeadFit.DisposeAsync();
@@ -468,7 +482,7 @@
                 await _module.DisposeAsync();
             }
         }
-        catch (JSDisconnectedException)
+        catch (Exception exception) when (exception is JSDisconnectedException or TaskCanceledException)
         {
             // The circuit is gone, and the browser released the objects with it.
         }
