@@ -135,7 +135,7 @@ public class CardLayoutTests
         {
             await page.GetByTestId("edit-mode-menu").ClickAsync();
             await page.Locator(".mud-popover-open").GetByText("Inline", new() { Exact = true }).ClickAsync();
-            await Assertions.Expect(page.Locator($"{container} > .subject-component-wrapper.selectable"))
+            await Assertions.Expect(page.Locator($"{container} .subject-component-wrapper.selectable"))
                 .ToHaveCountAsync(1, new() { Timeout = Timeout });
         }
 

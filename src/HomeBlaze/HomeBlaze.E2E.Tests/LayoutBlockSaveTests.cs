@@ -45,6 +45,9 @@ public class LayoutBlockSaveTests
             var emptyCell = page.Locator(".grid-cell.empty[style*='grid-column: 3']");
             await Assertions.Expect(emptyCell).ToBeVisibleAsync(new() { Timeout = Timeout });
 
+            // The empty cells of a grid add a widget once the grid is selected.
+            await emptyCell.SelectWidgetAsync();
+
             // Act
             await emptyCell.ClickAsync();
             await Assertions.Expect(SubjectSetupDialogTests.TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -66,14 +69,14 @@ public class LayoutBlockSaveTests
             Assert.DoesNotContain("json", text);
             await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
 
-            // The buttons of the cell are below the edit button of the widget in it, and not over it.
+            // The buttons of the cell are below the edit button of the selected widget in it, and not over it.
             var cell = page.Locator(".grid-cell.editing[style*='grid-column: 3 / span 1']");
             await Assertions.Expect(cell).ToContainTextAsync(motorName, new() { Timeout = Timeout });
             await Assertions.Expect(cell.GetByTitle("Edit Cell")).ToBeVisibleAsync();
-            await Assertions.Expect(cell.GetByTestId("edit-subject-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            var actionBar = await cell.GetByText(motorName).First.SelectWidgetAsync();
 
             var cellButtons = await GetBoxAsync(cell.Locator(".layout-item-actions"));
-            var widgetButton = await GetBoxAsync(cell.GetByTestId("edit-subject-button"));
+            var widgetButton = await GetBoxAsync(actionBar.GetByTestId("edit-subject-button"));
             Assert.True(
                 widgetButton.Bottom <= cellButtons.Top,
                 $"The buttons of the cell start at {cellButtons.Top} and cover the edit button of the widget, which ends at {widgetButton.Bottom}.");

@@ -32,21 +32,11 @@ Body of the invalid ratio card.
 ::
 
 :: HomeBlaze.Components.GridLayout#cardgrid Rows=1 Columns=2
-```json
-{
-  "Cells": [
-    { "Row": 0, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Card", "Title": "Grid Card" } }
-  ]
-}
-```
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Card Title="Grid Card"
 ::
 
 :: HomeBlaze.Components.CanvasLayout#cardcanvas
-```json
-{
-  "Nodes": [
-    { "X": 20, "Y": 20, "Width": 300, "Height": 200, "Child": { "$type": "HomeBlaze.Components.Card", "Title": "Canvas Card" } }
-  ]
-}
-```
+::: Node X=20 Y=20 Width=300 Height=200
+:::: HomeBlaze.Components.Card Title="Canvas Card"
 ::
