@@ -5,7 +5,7 @@ using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.History.Mcp.Tests;
 
-/// <summary>Root subject for the tool tests: one recordable [State] property and one that is not.</summary>
+/// <summary>Root subject for the tool tests: recordable [State] properties, one of them cumulative, and one that is not.</summary>
 [InterceptorSubject]
 public partial class HistoryToolTestSubject
 {
@@ -14,6 +14,12 @@ public partial class HistoryToolTestSubject
 
     [State]
     public partial HistoryToolTestSubject? Child { get; set; }
+
+    [State(IsCumulative = true)]
+    public partial double Energy { get; set; }
+
+    [State]
+    public partial double Power { get; set; }
 }
 
 /// <summary>

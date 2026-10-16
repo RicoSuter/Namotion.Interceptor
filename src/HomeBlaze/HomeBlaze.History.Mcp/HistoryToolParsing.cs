@@ -108,6 +108,35 @@ public static class HistoryToolParsing
             $"Could not parse bucket '{raw}'. Use a unit suffix like 5m, 30s, 1h, 7d, or a TimeSpan literal like 00:05:00.");
     }
 
+    /// <summary>
+    /// Parses a calendar bucket word (<c>day</c>, <c>week</c>, <c>month</c>, <c>year</c>, case-insensitive).
+    /// Returns null for anything else, including fixed sizes such as <c>5m</c>.
+    /// </summary>
+    public static HistoryCalendarUnit? ParseCalendarUnit(string? raw) =>
+        raw?.Trim().ToLowerInvariant() switch
+        {
+            "day" => HistoryCalendarUnit.Day,
+            "week" => HistoryCalendarUnit.Week,
+            "month" => HistoryCalendarUnit.Month,
+            "year" => HistoryCalendarUnit.Year,
+            _ => null
+        };
+
+    /// <summary>
+    /// Resolves an IANA time zone id. Throws <see cref="FormatException"/> for an unknown id.
+    /// </summary>
+    public static TimeZoneInfo ParseTimeZone(string id)
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(id.Trim());
+        }
+        catch (Exception exception) when (exception is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            throw new FormatException($"Unknown time zone '{id}'.", exception);
+        }
+    }
+
     /// <summary>Parses an ISO 8601 timestamp; a bare (offset-less) timestamp is treated as UTC.</summary>
     public static DateTimeOffset ParseTimestamp(string raw) =>
         DateTimeOffset.Parse(raw, CultureInfo.InvariantCulture,

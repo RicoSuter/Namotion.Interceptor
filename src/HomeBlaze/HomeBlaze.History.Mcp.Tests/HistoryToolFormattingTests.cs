@@ -89,4 +89,20 @@ public class HistoryToolFormattingTests
         Assert.Equal(0.999, summary.Ratio);
         Assert.Equal(1, summary.Gaps);
     }
+
+    [Theory]
+    [InlineData("2025-12-31T23:00:00Z", "2026-01-01T00:00:00+01:00")]
+    [InlineData("2026-06-30T22:00:00Z", "2026-07-01T00:00:00+02:00")]
+    public void WhenFormattingInAZone_ThenLocalTimeWithOffset(string input, string expected)
+    {
+        // Arrange
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
+        var value = DateTimeOffset.Parse(input, System.Globalization.CultureInfo.InvariantCulture);
+
+        // Act
+        var formatted = HistoryToolFormatting.FormatTimestamp(value, zone);
+
+        // Assert
+        Assert.Equal(expected, formatted);
+    }
 }

@@ -12,11 +12,14 @@ namespace HomeBlaze.History.Mcp;
 public static class HistoryToolFormatting
 {
     /// <summary>
-    /// Formats <paramref name="value"/> in UTC as <c>yyyy-MM-ddTHH:mm:ss</c>, with fractional seconds only when
-    /// they are not zero, followed by <c>Z</c>.
+    /// Formats <paramref name="value"/> as <c>yyyy-MM-ddTHH:mm:ss</c> with fractional seconds only when they are
+    /// not zero: in UTC with <c>Z</c> when <paramref name="timeZone"/> is null, otherwise as local time in the zone
+    /// with its offset, for example <c>+01:00</c>.
     /// </summary>
-    public static string FormatTimestamp(DateTimeOffset value) =>
-        value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", CultureInfo.InvariantCulture);
+    public static string FormatTimestamp(DateTimeOffset value, TimeZoneInfo? timeZone = null) =>
+        timeZone is null
+            ? value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", CultureInfo.InvariantCulture)
+            : TimeZoneInfo.ConvertTime(value, timeZone).ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Formats <paramref name="duration"/> as its non-zero day, hour, minute and second parts, for example

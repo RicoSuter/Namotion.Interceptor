@@ -98,4 +98,39 @@ public class HistoryToolParsingTests
         Assert.Equal(TimeSpan.Zero, result.Offset);
         Assert.Equal(new DateTimeOffset(2026, 6, 24, 10, 0, 0, TimeSpan.Zero), result);
     }
+
+    [Theory]
+    [InlineData("day", HistoryCalendarUnit.Day)]
+    [InlineData("Week", HistoryCalendarUnit.Week)]
+    [InlineData("MONTH", HistoryCalendarUnit.Month)]
+    [InlineData(" year ", HistoryCalendarUnit.Year)]
+    public void WhenBucketIsACalendarWord_ThenParsesTheUnit(string raw, HistoryCalendarUnit expected)
+    {
+        // Act
+        var unit = HistoryToolParsing.ParseCalendarUnit(raw);
+
+        // Assert
+        Assert.Equal(expected, unit);
+    }
+
+    [Theory]
+    [InlineData("5m")]
+    [InlineData(null)]
+    [InlineData("days")]
+    public void WhenBucketIsNotACalendarWord_ThenReturnsNull(string? raw)
+    {
+        // Act
+        var unit = HistoryToolParsing.ParseCalendarUnit(raw);
+
+        // Assert
+        Assert.Null(unit);
+    }
+
+    [Fact]
+    public void WhenTimeZoneIsUnknown_ThenThrowsFormatException()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<FormatException>(() => HistoryToolParsing.ParseTimeZone("Mars/Olympus"));
+        Assert.Equal("Unknown time zone 'Mars/Olympus'.", exception.Message);
+    }
 }

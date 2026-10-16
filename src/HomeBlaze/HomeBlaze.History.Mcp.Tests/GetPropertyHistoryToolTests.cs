@@ -437,4 +437,60 @@ public class GetPropertyHistoryToolTests
         Assert.False(json.TryGetProperty("error", out _));
         Assert.True(json.GetProperty("series").TryGetProperty("/a/Value", out _));
     }
+
+    [Fact]
+    public async Task WhenDeltaIsAskedOfANonCumulativeProperty_ThenThatPathCarriesAnError()
+    {
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Power", "/Energy" }, from = "2026-01-01T00:00:00Z", to = "2026-03-01T00:00:00Z", bucket = "month", time_zone = "Europe/Zurich", aggregation = "delta" },
+            store => { });
+
+        // Assert
+        var series = json.GetProperty("series");
+        Assert.Equal("Delta requires a cumulative property (a State attribute with IsCumulative).", series.GetProperty("/Power").GetProperty("error").GetString());
+        Assert.False(series.GetProperty("/Energy").TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task WhenCalendarBucketsAreQueried_ThenPointsCarryTheZoneOffsetAndTheZoneIsNamed()
+    {
+        // Arrange - the store answers with points at the UTC instants of Zurich month starts.
+        void Configure(TestHistoryStore store) => store.Points =
+        [
+            new HistoryPoint(new DateTimeOffset(2025, 12, 31, 23, 0, 0, TimeSpan.Zero), 312.4, null),
+            new HistoryPoint(new DateTimeOffset(2026, 1, 31, 23, 0, 0, TimeSpan.Zero), 355.1, null)
+        ];
+
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Energy" }, from = "2025-12-31T23:00:00Z", to = "2026-02-28T23:00:00Z", bucket = "month", time_zone = "Europe/Zurich", aggregation = "Delta" },
+            Configure);
+
+        // Assert
+        Assert.Equal("Europe/Zurich", json.GetProperty("time_zone").GetString());
+        var points = json.GetProperty("series").GetProperty("/Energy").GetProperty("points").EnumerateArray().ToArray();
+        Assert.Equal("2026-01-01T00:00:00+01:00", points[0][0].GetString());
+        Assert.Equal("2026-02-01T00:00:00+01:00", points[1][0].GetString());
+    }
+
+    [Fact]
+    public async Task WhenTimeZoneIsGivenWithAFixedBucket_ThenStructuredError()
+    {
+        // Act
+        var json = await InvokeAsync(new { paths = new[] { "/Energy" }, from = "2026-01-01T00:00:00Z", bucket = "1h", time_zone = "Europe/Zurich" });
+
+        // Assert
+        Assert.Equal("Parameter 'time_zone' only applies to day, week, month and year buckets.", json.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task WhenTimeZoneIsUnknown_ThenStructuredError()
+    {
+        // Act
+        var json = await InvokeAsync(new { paths = new[] { "/Energy" }, from = "2026-01-01T00:00:00Z", bucket = "day", time_zone = "Mars/Olympus" });
+
+        // Assert
+        Assert.Equal("Unknown time zone 'Mars/Olympus'.", json.GetProperty("error").GetString());
+    }
 }

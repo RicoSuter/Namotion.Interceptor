@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.History.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -33,12 +35,25 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             },
             from = new { type = "string", description = "Range start, ISO 8601. A bare timestamp is treated as UTC." },
             to = new { type = "string", description = "Range end, ISO 8601. Defaults to now." },
-            bucket = new { type = "string", description = "Bucket size for downsampling, e.g. 5m, 30s, 1h, 7d. Omit for raw samples." },
+            bucket = new
+            {
+                type = "string",
+                description = "Bucket for downsampling: a fixed size such as 5m, 30s, 1h, 7d (aligned to the Unix epoch), " +
+                              "or day, week, month or year (aligned to local midnight in time_zone; weeks start Monday). " +
+                              "Omit for raw samples."
+            },
+            time_zone = new
+            {
+                type = "string",
+                description = "IANA time zone for day, week, month and year buckets, e.g. Europe/Zurich. Defaults to the server's local zone."
+            },
             aggregation = new
             {
                 type = "string",
                 description = "Last, First, SampleAverage, TimeWeightedAverage, Minimum, Maximum, Sum, Count, " +
-                              "or StandardDeviation. Case-insensitive. Defaults to Last."
+                              "StandardDeviation, or Delta (increase of a cumulative counter per bucket; a drop counts as " +
+                              "a restart from zero, recording gaps are bridged; only for properties marked cumulative). " +
+                              "Case-insensitive. Defaults to Last."
             },
             max_points = new
             {
@@ -84,7 +99,9 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                           "truncated appears when the point limit cut the series, and a series whose coverage differs " +
                           "from the response's carries its own ranges when ranges are requested. A path that cannot be " +
                           "served carries its own error and the others still return data. " +
-                          "All input and output timestamps are UTC. " +
+                          "Timestamps are UTC, except the points of day, week, month and year buckets, which carry the " +
+                          "offset of time_zone (named in the response). For kWh per month, use bucket=month with " +
+                          "aggregation=Delta on the energy counter. " +
                           "Use browse or search to discover paths first.",
             InputSchema = GetPropertyHistorySchema,
             Handler = HandleGetPropertyHistoryAsync,
@@ -173,22 +190,55 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             return aggregationTypeError;
         }
 
+        if (HasWrongType(input, "time_zone") is { } timeZoneTypeError)
+        {
+            return timeZoneTypeError;
+        }
+
+        var bucketText = input.TryGetProperty("bucket", out var bucketElement) && bucketElement.ValueKind == JsonValueKind.String
+            ? bucketElement.GetString()
+            : null;
+        var timeZoneText = input.TryGetProperty("time_zone", out var timeZoneElement) && timeZoneElement.ValueKind == JsonValueKind.String
+            ? timeZoneElement.GetString()
+            : null;
+        var calendarUnit = HistoryToolParsing.ParseCalendarUnit(bucketText);
+
         DateTimeOffset from;
         DateTimeOffset to;
-        TimeSpan? bucket;
+        HistoryBucket? bucket = null;
         try
         {
             from = HistoryToolParsing.ParseTimestamp(fromElement.GetString()!);
             to = input.TryGetProperty("to", out var toElement) && toElement.ValueKind == JsonValueKind.String
                 ? HistoryToolParsing.ParseTimestamp(toElement.GetString()!)
                 : DateTimeOffset.UtcNow;
-            bucket = input.TryGetProperty("bucket", out var bucketElement) && bucketElement.ValueKind == JsonValueKind.String
-                ? HistoryToolParsing.ParseBucket(bucketElement.GetString())
-                : null;
+            if (calendarUnit is null)
+            {
+                bucket = HistoryToolParsing.ParseBucket(bucketText);
+            }
         }
         catch (FormatException exception)
         {
             return new { error = $"Could not parse a time parameter: {exception.Message}" };
+        }
+
+        TimeZoneInfo? timeZone = null;
+        if (calendarUnit is { } unit)
+        {
+            try
+            {
+                timeZone = timeZoneText is null ? TimeZoneInfo.Local : HistoryToolParsing.ParseTimeZone(timeZoneText);
+            }
+            catch (FormatException exception)
+            {
+                return new { error = exception.Message };
+            }
+
+            bucket = HistoryBucket.Calendar(unit, timeZone);
+        }
+        else if (timeZoneText is not null)
+        {
+            return new { error = "Parameter 'time_zone' only applies to day, week, month and year buckets." };
         }
 
         // The stores validate this too, but there it throws from inside the fan-out and surfaces as an
@@ -250,7 +300,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         foreach (var result in results)
         {
             series[result.Path] = result.Series is { } served
-                ? BuildSeriesPayload(result.ValueType, served, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
+                ? BuildSeriesPayload(result.ValueType, served, timeZone, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
                 : result.ErrorPayload;
         }
 
@@ -261,6 +311,11 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             ["from"] = HistoryToolFormatting.FormatTimestamp(from),
             ["to"] = HistoryToolFormatting.FormatTimestamp(to)
         };
+
+        if (timeZone is not null)
+        {
+            response["time_zone"] = timeZone.Id;
+        }
 
         if (responseCoverage is { } coverage)
         {
@@ -294,7 +349,8 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         return payload;
     }
 
-    private static Dictionary<string, object?> BuildSeriesPayload(string? valueType, HistorySeries series, bool includeOwnRanges)
+    private static Dictionary<string, object?> BuildSeriesPayload(
+        string? valueType, HistorySeries series, TimeZoneInfo? timeZone, bool includeOwnRanges)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal) { ["value_type"] = valueType };
         if (series.IsTruncated)
@@ -310,16 +366,16 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         var points = new object?[series.Points.Length][];
         for (var i = 0; i < points.Length; i++)
         {
-            points[i] = ToPair(series.Points[i]);
+            points[i] = ToPair(series.Points[i], timeZone);
         }
 
         payload["points"] = points;
         return payload;
     }
 
-    private static object?[] ToPair(HistoryPoint point) =>
+    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo? timeZone) =>
     [
-        HistoryToolFormatting.FormatTimestamp(point.Timestamp),
+        HistoryToolFormatting.FormatTimestamp(point.Timestamp, timeZone),
         point.Number is { } number ? number : point.Json is { } json ? json : null
     ];
 
@@ -338,7 +394,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         string path,
         DateTimeOffset from,
         DateTimeOffset to,
-        TimeSpan? bucket,
+        HistoryBucket? bucket,
         string aggregation,
         int maxPoints,
         CancellationToken cancellationToken)
@@ -359,6 +415,15 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             if (resolved is { } match && HistoryColumns.IsRecordable(match.Property.Type))
             {
                 valueType = HistoryToolParsing.ValueType(match.Property.Type);
+            }
+
+            if (aggregation == HistoryAggregations.Delta && !IsCumulative(resolved?.Property))
+            {
+                return new PathResult(path, valueType, null, new
+                {
+                    value_type = valueType,
+                    error = "Delta requires a cumulative property (a State attribute with IsCumulative)."
+                });
             }
 
             result = await stores
@@ -396,6 +461,9 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
         return new PathResult(path, valueType, result, null);
     }
+
+    private static bool IsCumulative(RegisteredSubjectProperty? property) =>
+        property?.TryGetAttribute(KnownAttributes.State)?.GetValue() is StateMetadata { IsCumulative: true };
 
     /// <summary>
     /// Reads the optional max_points override. It can only lower the default: the defaults bound the

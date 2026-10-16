@@ -196,7 +196,7 @@ Move detection uses runtime object identity. Moves performed while HomeBlaze is 
 
 ## Query semantics
 
-A null bucket requests raw samples. A non-null bucket requests one point per epoch-aligned bucket. Alignment uses floor division anchored at the Unix epoch and is correct for timestamps before and after the epoch.
+A null bucket requests raw samples. A non-null bucket requests one point per bucket. A fixed bucket is epoch-aligned: alignment uses floor division anchored at the Unix epoch and is correct for timestamps before and after the epoch. A calendar bucket (`Day`, `Week`, `Month` or `Year`) starts at the local period starts in a time zone, with weeks starting Monday, so its length varies with the calendar and daylight saving time. SQLite has no constant width to group a calendar bucket by, so it queries calendar buckets one bucket at a time.
 
 Empty bucket behavior is:
 
@@ -205,6 +205,7 @@ Empty bucket behavior is:
 | `Count` | `0`, or null when the bucket is only partly covered |
 | `Last` | carried value, or null when unknown |
 | `TimeWeightedAverage` | carried value integrated over known duration, or null when unknown |
+| `Delta` | `0` when a counter reading is held, else null |
 | Other aggregations | null |
 
 Bucketed merger results include the complete newest bucket grid, subject to `MaxPoints`. Planning and store aggregation start at the first bucket that can appear in that output, so a multi-year request with a small point budget does not enumerate every older bucket. Buckets that no store covers at all are explicit null points. This lets the chart render gaps without guessing whether an omitted point means no data or truncation.
@@ -224,6 +225,7 @@ Numeric aggregations on JSON properties throw `HistoryAggregationNotSupportedExc
 | `Minimum`, `Maximum`, `Sum` | numeric reductions over the bucket's samples |
 | `Count` | number of samples in the bucket |
 | `StandardDeviation` | sample standard deviation, null for fewer than two values |
+| `Delta` | Increase of a cumulative counter per bucket: every step between consecutive numeric samples, starting from the newest reading before the bucket, where a drop counts as a restart from zero. The reading survives coverage gaps, in a store and across stores, because a counter keeps counting while nothing records it; a partly covered bucket is therefore not nulled. A bucket with no samples is 0 when a reading is held and null otherwise; a fully uncovered bucket is null, and the increase during it is attributed to the next bucket with samples. The MCP tool only accepts it for properties whose State attribute has `IsCumulative`; the chart does not offer it. |
 
 `HistoryAggregations.AlwaysAvailable` is `{ Last, Count }`; the capability check skips those.
 
@@ -335,8 +337,9 @@ Filling the start of a window needs the value held entering it, which a raw quer
 | `paths` | yes | | one or more canonical property paths |
 | `from` | yes | | ISO 8601; bare timestamps treated as UTC |
 | `to` | no | now | ISO 8601 |
-| `bucket` | no | null (raw) | for example `5m`, `30s`, `1h`, `7d` |
-| `aggregation` | no | `Last` | case-insensitive match against `HistoryAggregations` |
+| `bucket` | no | null (raw) | a fixed size such as `5m`, `30s`, `1h`, `7d` (epoch-aligned), or `day`, `week`, `month`, `year` (local periods in `time_zone`; weeks start Monday) |
+| `time_zone` | no | server local zone | IANA id such as `Europe/Zurich`; only with a calendar bucket |
+| `aggregation` | no | `Last` | case-insensitive match against `HistoryAggregations`; `Delta` only for properties whose State attribute has `IsCumulative`, otherwise that path carries an error |
 | `max_points` | no | 10000 raw, 1000 bucketed | maximum points per path; can only lower the default |
 | `coverage` | no | `summary` | `summary` or `ranges`; `ranges` also lists the covered ranges |
 
@@ -348,6 +351,8 @@ The response carries the resolved `from` and `to`, one coverage summary and a pe
 When no path could be served, `coverage` is omitted.
 
 Timestamps are UTC (`2026-06-24T00:05:00Z`), with fractional seconds only when they are not zero. Raw samples show no gaps, so an agent reading a raw state timeline with a `ratio` below 1 should request the ranges.
+
+Calendar bucket points carry the offset of the zone, for example `2026-01-01T00:00:00+01:00`, and the response names the zone in `time_zone`. Days are 23 or 25 hours long across daylight saving changes; a skipped local midnight starts the day at the transition.
 
 Unknown or non-servable aggregations return a structured error with the `available` set; empty results and unknown paths are not errors. Aggregation input is normalized case-insensitively at the MCP boundary. Internal identifiers use ordinal comparison.
 
@@ -376,7 +381,7 @@ Queries should send the relevant range predicate to PostgreSQL rather than loadi
 - When the requested bucket size exceeds `InMemory.MaxAge`, no store covers the whole newest bucket, so it is served partially, usually by the persistent store, whose coverage covers the bucket start but ends at its last flush. It omits the samples outside that store's coverage and its `Count` and `Sum` are null. Raise `MaxAgeSeconds` for a complete live edge.
 - For a value that has not changed within `InMemory.MaxAge`, `Last` and `TimeWeightedAverage` can be briefly null at the live edge: right after a bucket boundary, until the persistent store flushes past it. The held value is not looked up across stores.
 - No sample is recorded when recording resumes, so after a restart a property shows no value until it next changes.
-- Subject-bearing state, full graph snapshots, `Rate`, `Delta`, `StateDuration`, interpolation, compression, and continuous aggregates are future work.
+- Subject-bearing state, full graph snapshots, `Rate`, `StateDuration`, interpolation, compression, and continuous aggregates are future work.
 
 The planned snapshot layer stores periodic compressed whole-graph snapshots and reconstructs a requested time by finding the nearest prior snapshot and replaying scalar, structural, and move events. Planned MCP tools are `get_snapshot` and capped `get_snapshots`.
 
