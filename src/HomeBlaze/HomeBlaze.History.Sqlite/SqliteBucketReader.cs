@@ -277,6 +277,7 @@ internal static class SqliteBucketReader
     {
         var previousTicks = EpochTicks.ToEpochTicks(window.From);
         var previousValue = seed;
+        var cursor = new BucketCursor(bucket);
 
         segments.Sort(CompareByTime);
         foreach (var segment in segments)
@@ -299,13 +300,13 @@ internal static class SqliteBucketReader
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var ticks = reader.GetInt64(0);
-                Integrate(result, previousTicks, ticks, previousValue, bucket);
+                Integrate(result, previousTicks, ticks, previousValue, ref cursor);
                 previousTicks = ticks;
                 previousValue = reader.IsDBNull(1) ? null : reader.GetDouble(1);
             }
         }
 
-        Integrate(result, previousTicks, EpochTicks.ToEpochTicks(window.To), previousValue, bucket);
+        Integrate(result, previousTicks, EpochTicks.ToEpochTicks(window.To), previousValue, ref cursor);
     }
 
     private static int CompareByTime(ChainSegment left, ChainSegment right)
@@ -317,7 +318,7 @@ internal static class SqliteBucketReader
     // Spreads value * duration over every bucket [fromTicks, toTicks) touches; a null value is unknown
     // and adds nothing.
     private static void Integrate(
-        Dictionary<long, BucketPartial> result, long fromTicks, long toTicks, double? value, HistoryBucket bucket)
+        Dictionary<long, BucketPartial> result, long fromTicks, long toTicks, double? value, ref BucketCursor cursor)
     {
         if (value is not { } number)
         {
@@ -327,7 +328,7 @@ internal static class SqliteBucketReader
         var start = fromTicks;
         while (start < toTicks)
         {
-            var (bucketStart, bucketEnd) = LocateBucket(start, bucket);
+            var (bucketStart, bucketEnd) = cursor.Locate(start);
             var end = Math.Min(bucketEnd, toTicks);
             var duration = (double)(end - start);
             ref var partial = ref CollectionsMarshal.GetValueRefOrAddDefault(result, bucketStart, out _);
@@ -338,6 +339,34 @@ internal static class SqliteBucketReader
                 TotalDuration = partial.TotalDuration + duration
             };
             start = end;
+        }
+    }
+
+    /// <summary>
+    /// Locates the bucket containing a timestamp, caching the last located bounds. Ascending lookups relocate
+    /// once per bucket; lookups in any order stay correct. Pass it by reference so the cache is kept.
+    /// </summary>
+    private struct BucketCursor
+    {
+        private readonly HistoryBucket _bucket;
+        private long _start;
+        private long _end;
+
+        public BucketCursor(HistoryBucket bucket)
+        {
+            _bucket = bucket;
+            _start = 0;
+            _end = 0; // empty bounds, so the first lookup locates
+        }
+
+        public (long Start, long End) Locate(long ticks)
+        {
+            if (ticks < _start || ticks >= _end)
+            {
+                (_start, _end) = LocateBucket(ticks, _bucket);
+            }
+
+            return (_start, _end);
         }
     }
 

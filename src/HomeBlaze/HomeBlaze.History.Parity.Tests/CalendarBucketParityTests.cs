@@ -11,6 +11,9 @@ public class CalendarBucketParityTests
     private static readonly DateTimeOffset DayOne = new(2026, 3, 27, 23, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset End = new(2026, 3, 30, 22, 0, 0, TimeSpan.Zero);
 
+    // Local midnight of 2026-10-24 in Zurich; the next day (DST end) is 25 hours long.
+    private static readonly DateTimeOffset DstEndDayOne = new(2026, 10, 23, 22, 0, 0, TimeSpan.Zero);
+
     // One sample per UTC hour with value = hour index: day one holds 0..23, the DST day 24..46, day three 47..70.
     private static async Task<IParityStore> WithHourlySamplesAsync(ParityStoreFactory factory)
     {
@@ -87,5 +90,121 @@ public class CalendarBucketParityTests
 
         // Assert
         ParityAssert.NumbersEqual([31d, 28d, 31d], series);
+    }
+
+    public static TheoryData<ParityStoreFactory, string, double[]> DstEndDayCases()
+    {
+        // One sample per UTC hour with value = hour index, each held for one hour: day one holds 0..23,
+        // the 25-hour day 24..48, day three 49..72.
+        // Sum: 0+..+23 = 276, 24+..+48 = 25 * 36 = 900, 49+..+72 = 24 * 60.5 = 1452.
+        // TimeWeightedAverage: equal one-hour weights, so 276 / 24 = 11.5, 900 / 25 = 36, 1452 / 24 = 60.5.
+        var cases = new TheoryData<ParityStoreFactory, string, double[]>();
+        foreach (var factory in ParityStores.Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]))
+        {
+            cases.Add(factory, HistoryAggregations.Count, [24, 25, 24]);
+            cases.Add(factory, HistoryAggregations.First, [0, 24, 49]);
+            cases.Add(factory, HistoryAggregations.Last, [23, 48, 72]);
+            cases.Add(factory, HistoryAggregations.Sum, [276, 900, 1452]);
+            cases.Add(factory, HistoryAggregations.TimeWeightedAverage, [11.5, 36, 60.5]);
+        }
+
+        return cases;
+    }
+
+    [Theory]
+    [MemberData(nameof(DstEndDayCases))]
+    public async Task WhenDayBucketsSpanTheDstEnd_ThenTheLongDayHoldsTwentyFiveHours(
+        ParityStoreFactory factory, string aggregation, double[] expected)
+    {
+        // Arrange
+        using var store = factory.Create();
+        for (var index = 0; index <= 72; index++)
+        {
+            store.Record("/a/Value", DstEndDayOne.AddHours(index), (double)index, typeof(double));
+        }
+
+        await store.FlushAsync();
+        var query = new HistoryQuery(
+            "/a/Value",
+            DstEndDayOne,
+            DstEndDayOne.AddHours(73),
+            HistoryBucket.Calendar(HistoryCalendarUnit.Day, Zurich),
+            aggregation,
+            MaxPoints: 1000);
+
+        // Act
+        var series = store.Query(query);
+
+        // Assert
+        Assert.Equal(
+            [DstEndDayOne, new DateTimeOffset(2026, 10, 24, 22, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 10, 25, 23, 0, 0, TimeSpan.Zero)],
+            series.Points.Select(point => point.Timestamp).ToArray());
+        ParityAssert.NumbersEqual(expected.Select(value => (double?)value).ToArray(), series);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenWeekBucketsAreQueried_ThenEachIsoWeekStartsOnMonday(ParityStoreFactory factory)
+    {
+        // Arrange - one sample per day at UTC noon from Thursday 2026-01-08 to Wednesday 2026-01-21.
+        // ISO weeks start Monday 2026-01-05, 01-12 and 01-19: Thu..Sun = 4, Mon..Sun = 7, Mon..Wed = 3.
+        using var store = factory.Create();
+        for (var day = new DateTimeOffset(2026, 1, 8, 12, 0, 0, TimeSpan.Zero); day.Day <= 21; day = day.AddDays(1))
+        {
+            store.Record("/a/Value", day, 1d, typeof(double));
+        }
+
+        await store.FlushAsync();
+        var query = new HistoryQuery(
+            "/a/Value",
+            new DateTimeOffset(2026, 1, 4, 23, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 25, 23, 0, 0, TimeSpan.Zero),
+            HistoryBucket.Calendar(HistoryCalendarUnit.Week, Zurich),
+            HistoryAggregations.Count,
+            MaxPoints: 1000);
+
+        // Act
+        var series = store.Query(query);
+
+        // Assert
+        Assert.Equal(
+            [
+                new DateTimeOffset(2026, 1, 4, 23, 0, 0, TimeSpan.Zero),
+                new DateTimeOffset(2026, 1, 11, 23, 0, 0, TimeSpan.Zero),
+                new DateTimeOffset(2026, 1, 18, 23, 0, 0, TimeSpan.Zero)
+            ],
+            series.Points.Select(point => point.Timestamp).ToArray());
+        ParityAssert.NumbersEqual([4d, 7d, 3d], series);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenYearBucketsAreQueried_ThenEachYearCountsItsOwnMonths(ParityStoreFactory factory)
+    {
+        // Arrange - one sample on the first of each month at UTC noon from 2025-03 to 2026-08:
+        // March..December 2025 = 10, January..August 2026 = 8.
+        using var store = factory.Create();
+        for (var month = new DateTimeOffset(2025, 3, 1, 12, 0, 0, TimeSpan.Zero); month.Year < 2026 || month.Month <= 8; month = month.AddMonths(1))
+        {
+            store.Record("/a/Value", month, 1d, typeof(double));
+        }
+
+        await store.FlushAsync();
+        var query = new HistoryQuery(
+            "/a/Value",
+            new DateTimeOffset(2024, 12, 31, 23, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 12, 31, 23, 0, 0, TimeSpan.Zero),
+            HistoryBucket.Calendar(HistoryCalendarUnit.Year, Zurich),
+            HistoryAggregations.Count,
+            MaxPoints: 1000);
+
+        // Act
+        var series = store.Query(query);
+
+        // Assert
+        Assert.Equal(
+            [new DateTimeOffset(2024, 12, 31, 23, 0, 0, TimeSpan.Zero), new DateTimeOffset(2025, 12, 31, 23, 0, 0, TimeSpan.Zero)],
+            series.Points.Select(point => point.Timestamp).ToArray());
+        ParityAssert.NumbersEqual([10d, 8d], series);
     }
 }

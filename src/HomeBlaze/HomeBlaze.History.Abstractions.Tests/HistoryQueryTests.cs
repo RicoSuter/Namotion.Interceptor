@@ -34,7 +34,8 @@ public class HistoryQueryTests
         var query = new HistoryQuery("/a/Value", From, From.AddMinutes(1), TimeSpan.Zero);
 
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(query.Validate);
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(query.Validate);
+        Assert.StartsWith("The bucket size must be positive.", exception.Message);
     }
 
     [Fact]
