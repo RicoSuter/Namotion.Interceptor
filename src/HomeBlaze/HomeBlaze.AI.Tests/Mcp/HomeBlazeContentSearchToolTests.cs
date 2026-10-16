@@ -116,6 +116,20 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenThePathIsNull_ThenAllPagesAreSearched()
+    {
+        // Arrange
+        var tool = await CreateToolAsync();
+
+        // Act
+        var result = await CallAsync(tool, new { query = "heat pump", path = (string?)null });
+
+        // Assert
+        Assert.Equal(2, result.GetProperty("pages").GetArrayLength());
+        Assert.Equal(3, result.GetProperty("pages_searched").GetInt32());
+    }
+
+    [Fact]
     public async Task WhenThePathIsNotAString_ThenAnErrorIsReturned()
     {
         // Arrange

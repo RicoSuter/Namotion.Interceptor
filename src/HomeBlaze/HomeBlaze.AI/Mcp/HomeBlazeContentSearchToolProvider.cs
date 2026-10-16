@@ -61,7 +61,7 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
     /// <param name="rootSubjectProvider">Resolves the root subject when the tool runs.</param>
     /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
     /// <param name="pathPrefix">The prefix of every path, <see cref="McpServerConfiguration.PathPrefix"/> of the configuration.</param>
-    public HomeBlazeContentSearchToolProvider(Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix)
+    internal HomeBlazeContentSearchToolProvider(Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
@@ -303,7 +303,7 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
     }
 
     // A missing or null path searches all pages; any other value that is not a string is refused, as by the other tools.
-    private static bool TryGetPathPrefix(JsonElement input, out string? pathPrefix)
+    private bool TryGetPathPrefix(JsonElement input, out string? pathPrefix)
     {
         pathPrefix = null;
         if (!input.TryGetProperty("path", out var pathElement) || pathElement.ValueKind == JsonValueKind.Null)
@@ -320,15 +320,11 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
         return true;
     }
 
-    private static string? NormalizePathPrefix(string? pathPrefix)
+    // Spelled as the page paths are, after the path prefix, so a path with or without a leading or trailing slash matches.
+    private string? NormalizePathPrefix(string? pathPrefix)
     {
-        var trimmed = pathPrefix?.TrimEnd('/');
-        if (string.IsNullOrEmpty(trimmed))
-        {
-            return null;
-        }
-
-        return trimmed[0] == '/' ? trimmed : "/" + trimmed;
+        var trimmed = pathPrefix?.Trim('/');
+        return string.IsNullOrEmpty(trimmed) ? null : _pathPrefix + trimmed;
     }
 
     // Whole segments only, so /Docs does not match /DocsArchive/Page.md.
