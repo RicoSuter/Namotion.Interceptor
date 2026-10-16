@@ -284,6 +284,41 @@
         }
     }
 
+    // The widget below tracks its own reads, so a parent that renders again with the same parameters, as a page does for
+    // a change of an expression, renders neither this wrapper nor the widget.
+    private bool _skipRender;
+
+    public override Task SetParametersAsync(ParameterView parameters)
+    {
+        var subject = Subject;
+        var type = Type;
+        var additionalParameters = AdditionalParameters;
+        var isEditing = IsEditing;
+        var selection = Selection;
+        var componentInstance = ComponentInstance;
+        var componentInstanceChanged = ComponentInstanceChanged;
+        var hasRendered = _cachedParameters is not null;
+
+        parameters.SetParameterProperties(this);
+        _skipRender = hasRendered &&
+            Subject == subject && Type == type && AdditionalParameters == additionalParameters &&
+            IsEditing == isEditing && Selection == selection && ComponentInstance == componentInstance &&
+            ComponentInstanceChanged.Equals(componentInstanceChanged);
+
+        return base.SetParametersAsync(ParameterView.Empty);
+    }
+
+    protected override bool ShouldRender()
+    {
+        if (_skipRender)
+        {
+            _skipRender = false;
+            return false;
+        }
+
+        return true;
+    }
+
     protected override void OnParametersSet()
     {
         if (Subject != _previousSubject || AdditionalParameters != _previousAdditionalParameters)
