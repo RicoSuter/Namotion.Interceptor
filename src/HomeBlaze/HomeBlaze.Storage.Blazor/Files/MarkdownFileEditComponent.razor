@@ -263,6 +263,9 @@ else
         if (File == null || _editor == null)
             return;
 
+        // _currentContent follows the editor with a delay, and the expression is replaced in what was typed last.
+        SetCurrentContent(await _editor.GetValue());
+
         // Filter to only include actual subject blocks (not HtmlSegment, RenderExpression, etc.)
         var subjectBlocks = File.Children
             .Where(kvp => kvp.Value is not HtmlSegment && kvp.Value is not RenderExpression)
@@ -440,7 +443,7 @@ else
 
     private async Task ApplyDecorationsAsync()
     {
-        if (_editor == null)
+        if (_editor == null || _isDisposed)
             return;
 
         var version = _currentVersion;
@@ -462,9 +465,31 @@ else
         if (_isDisposed)
             return null;
 
-        _moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
-        var module = await _moduleImport;
-        return _isDisposed ? null : module;
+        var moduleImport = _moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
+        try
+        {
+            var module = await moduleImport;
+            return _isDisposed ? null : module;
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException)
+        {
+            // The next call imports again. Until then the editor has no decorations and reads its text without the module.
+            if (_moduleImport == moduleImport)
+            {
+                _moduleImport = null;
+            }
+
+            return null;
+        }
+    }
+
+    // The text with the version of the editor model, or with version 0 when the module is not available.
+    private async Task<EditorContent?> ReadContentAsync(StandaloneCodeEditor editor)
+    {
+        if (await GetModuleAsync() is { } module)
+            return await module.InvokeAsync<EditorContent?>("getContent", editor.Id);
+
+        return new EditorContent(0, await editor.GetValue());
     }
 
     private void SetCurrentContent(string content, int version = 0)
@@ -489,8 +514,7 @@ else
         // TODO: Add try-catch for ObjectDisposedException/JSDisconnectedException - component may be disposed during async operation
         // Awaited here and not run on the thread pool, because the decorations are refreshed on the synchronization
         // context of the circuit only, see RefreshDecorationsAsync.
-        if (_editor != null && await GetModuleAsync() is { } module &&
-            await module.InvokeAsync<EditorContent?>("getContent", _editor.Id) is { } content)
+        if (_editor != null && await ReadContentAsync(_editor) is { } content)
         {
             SetCurrentContent(content.Text, content.Version);
             await RefreshDecorationsAsync();
@@ -501,19 +525,22 @@ else
 
     public async Task SaveAsync(CancellationToken cancellationToken)
     {
-        if (File == null || _editor == null) return;
+        if (File == null || _editor == null || await ReadContentAsync(_editor) is not { } content) return;
 
-        var content = await _editor.GetValue();
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content.Text), cancellationToken);
 
-        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content), cancellationToken);
+        _originalContent = content.Text;
 
-        _originalContent = content;
-        SetCurrentContent(content);
+        // Text typed during the write was read by its content change and stays the current text, which is not saved.
+        if (content.Version == 0 || _currentVersion <= content.Version)
+        {
+            SetCurrentContent(content.Text, content.Version);
+        }
 
         // The storage reloads the file as part of the write, so the regions get the subjects of the saved page.
         await RefreshDecorationsAsync();
 
-        IsDirtyChanged?.Invoke(false);
+        IsDirtyChanged?.Invoke(IsDirty);
     }
 
     // The module forgets the folds of a model when Monaco disposes the model together with the editor.
@@ -529,7 +556,7 @@ else
         {
             await (await _moduleImport).DisposeAsync();
         }
-        catch (JSException)
+        catch (Exception exception) when (exception is JSException or OperationCanceledException)
         {
             // The import failed, and there is no module to dispose.
         }

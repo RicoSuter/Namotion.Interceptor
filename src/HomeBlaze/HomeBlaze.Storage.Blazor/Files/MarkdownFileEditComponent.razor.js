@@ -129,7 +129,8 @@ function hasSameFolds(model, ids, ranges) {
 }
 
 // Registered once for every markdown editor. A model without folds gets undefined and not an empty list, because
-// only undefined lets Monaco fall back to folding by indentation.
+// only undefined lets Monaco fall back to folding by indentation. Folds that an edit collapsed to one line give an
+// empty list until the next update, so that indentation folds do not show up in between.
 function ensureProvider() {
     if (changeEmitter !== null) {
         return;
@@ -152,7 +153,7 @@ function ensureProvider() {
                 }
             }
 
-            return ranges.length > 0 ? ranges : undefined;
+            return ranges;
         }
     });
 }

@@ -201,6 +201,10 @@ public class BlockOutlineTests
         Assert.Equal(0, decorations.Values.Length % BlockOutlineDecorations.RecordLength);
         Assert.Equal(["motors", "ValueList"], decorations.Labels);
         var records = decorations.Values.Chunk(BlockOutlineDecorations.RecordLength).ToList();
+        Assert.Equal(11, records.Count);
+        Assert.Equal(2, records.Count(record => record[0] == BlockOutlineDecorations.SubjectBlockKind));
+        Assert.Contains([BlockOutlineDecorations.HeadKind, 0, 1, 1, 1, 20], records);
+        Assert.Contains([BlockOutlineDecorations.HeadKind, 1, 2, 1, 2, 19], records);
         Assert.Contains([BlockOutlineDecorations.ExpressionKind, 0, 3, 7, 3, 24], records);
         Assert.Contains([BlockOutlineDecorations.FenceKind, 1, 2, 1, 2, 4], records);
         Assert.Contains([BlockOutlineDecorations.ClosingFenceKind, 1, 4, 1, 4, 4], records);

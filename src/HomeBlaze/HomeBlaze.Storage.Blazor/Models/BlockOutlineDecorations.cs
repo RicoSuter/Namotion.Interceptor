@@ -111,4 +111,4 @@ public static class BlockOutlineDecorations
 /// </summary>
 /// <param name="Values">Records of <see cref="BlockOutlineDecorations.RecordLength"/> values.</param>
 /// <param name="Labels">The label of every closing fence record, in their order.</param>
-public sealed record EditorDecorations(int[] Values, string[] Labels);
+public readonly record struct EditorDecorations(int[] Values, string[] Labels);
