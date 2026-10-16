@@ -185,6 +185,85 @@ public class LiveUpdateTests
         await Assertions.Expect(button).ToBeEnabledAsync(new() { Timeout = Timeout });
     }
 
+    [Fact]
+    public async Task WhenAValueInACellOfAVirtualizedDataGridChanges_ThenTheCellShowsIt()
+    {
+        // Arrange
+        var (rows, page) = await OpenGridPageAsync();
+        var grid = page.GetByTestId("live-grid");
+        await Assertions.Expect(grid.GetByTestId("grid-cell").GetByText("Row 0", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        rows[0].Text = "Row 0 changed";
+
+        // Assert
+        await Assertions.Expect(grid.GetByText("Row 0 changed", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenARowThatScrollingRenderedChanges_ThenTheVirtualizedDataGridShowsIt()
+    {
+        // Arrange
+        var (rows, page) = await OpenGridPageAsync();
+        var grid = page.GetByTestId("live-grid");
+        await Assertions.Expect(grid.GetByText("Row 0", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(grid.GetByText("Row 199", new() { Exact = true })).ToHaveCountAsync(0);
+        await grid.Locator(".mud-table-container").EvaluateAsync("element => element.scrollTop = element.scrollHeight");
+        await Assertions.Expect(grid.GetByText("Row 199", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        rows[199].Text = "Row 199 changed";
+
+        // Assert
+        await Assertions.Expect(grid.GetByText("Row 199 changed", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAValueInARowTemplateOfATableChanges_ThenTheRowShowsIt()
+    {
+        // Arrange
+        var (rows, page) = await OpenGridPageAsync();
+        var table = page.GetByTestId("live-table");
+        await Assertions.Expect(table.GetByText("Row 1", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        rows[1].Text = "Row 1 changed";
+
+        // Assert
+        await Assertions.Expect(table.GetByText("Row 1 changed", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAValueInAnOpenMenuChanges_ThenThePopoverShowsIt()
+    {
+        // Arrange
+        var (rows, page) = await OpenGridPageAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Live menu" }).ClickAsync();
+        var item = page.GetByRole(AriaRole.Menuitem).Filter(new() { HasText = "Row 0" });
+        await Assertions.Expect(item).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        rows[0].Text = "Row 0 in the menu";
+
+        // Assert
+        await Assertions.Expect(page.GetByRole(AriaRole.Menuitem).Filter(new() { HasText = "Row 0 in the menu" })).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    private async Task<(LiveValuesSubject[] Rows, IPage Page)> OpenGridPageAsync()
+    {
+        var (name, grid) = await _fixture.AddSubjectToRootAsync<LiveGridSubject>();
+        var rows = Enumerable.Range(0, 200).Select(index => new LiveValuesSubject { Text = $"Row {index}" }).ToArray();
+        grid.Rows = rows;
+        await _fixture.WriteDemoPageAsync(ScratchPage,
+            $"---\ntitle: Live Updates\n---\n\n# Live Updates\n\n:: HomeBlaze.Components.Widget Path=/{name}\n::\n");
+
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
+        return (rows, page);
+    }
+
     private async Task<(LiveValuesSubject Subject, IPage Page)> OpenPageAsync(string content, Action<LiveValuesSubject> initialize)
     {
         var (name, subject) = await _fixture.AddSubjectToRootAsync<LiveValuesSubject>();
