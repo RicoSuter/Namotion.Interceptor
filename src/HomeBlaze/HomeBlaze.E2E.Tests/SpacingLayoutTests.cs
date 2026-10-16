@@ -204,14 +204,15 @@ public class SpacingLayoutTests
     }
 
     [Fact]
-    public async Task WhenTextStandsInAGridCellOrACanvasNode_ThenItHasTheRoomOfACardBodyAndALoneCardFillsTheCell()
+    public async Task WhenContentStandsInAGridCellOrACanvasNode_ThenItHasTheRoomOfACardBodyUnlessItIsALoneCard()
     {
         // Arrange
         var page = await OpenPageAsync();
         await Assertions.Expect(page.GetByText("Text in a node.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(GetCard(page, "Cell Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("value-tile").Filter(new() { HasText = "Cell Speed" })).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        // Act: the room between the content box of the cell or the node and the text or the card in it.
+        // Act: the room between the content box of the cell or the node and the text, the card or the tile in it.
         var edges = await page.EvaluateAsync<double[][]>(
             """
             () => {
@@ -222,9 +223,11 @@ public class SpacingLayoutTests
                 };
                 const paragraph = text => [...document.querySelectorAll('p')].find(p => p.textContent === text);
                 const card = [...document.querySelectorAll('[data-testid=card]')].find(c => c.textContent.includes('Cell Card'));
+                const tile = [...document.querySelectorAll('[data-testid=value-tile]')].find(t => t.textContent.includes('Cell Speed'));
                 return [
                     room(paragraph('Text in a cell.'), '.grid-cell-content'),
                     room(paragraph('Text in a node.'), '.canvas-node-content'),
+                    room(tile, '.grid-cell-content'),
                     room(card, '.grid-cell-content')
                 ];
             }
@@ -233,7 +236,8 @@ public class SpacingLayoutTests
         // Assert
         Assert.All(edges[0], edge => Assert.Equal(CardPadding, edge, Tolerance));
         Assert.All(edges[1], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[2], edge => Assert.Equal(0, edge, Tolerance));
+        Assert.All(edges[2], edge => Assert.Equal(CardPadding, edge, Tolerance));
+        Assert.All(edges[3], edge => Assert.Equal(0, edge, Tolerance));
     }
 
     [Fact]

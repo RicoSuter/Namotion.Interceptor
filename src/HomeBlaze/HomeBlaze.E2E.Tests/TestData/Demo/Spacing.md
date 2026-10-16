@@ -111,12 +111,14 @@ In a panel.
 
 Text after the panels.
 
-:: HomeBlaze.Components.GridLayout#spacinggrid Rows=1 Columns=2
+:: HomeBlaze.Components.GridLayout#spacinggrid Rows=1 Columns=3
 ::: Cell Row=0 Column=0
 Text in a cell.
 ::: Cell Row=0 Column=1
 :::: HomeBlaze.Components.Card Title="Cell Card"
 In a cell.
+::: Cell Row=0 Column=2
+:::: HomeBlaze.Components.ValueTile Path=spacingmotor/CurrentSpeed Label="Cell Speed"
 ::
 
 :: HomeBlaze.Components.CanvasLayout#spacingcanvas MinHeight=200
