@@ -330,11 +330,27 @@ public class PropertyHistoryChartModelTests
 
         // Act
         var shown = PropertyHistoryChartModel.HidePartialTotals(
-            points, aggregation, TimeSpan.FromSeconds(10), start.AddSeconds(35), coverage);
+            points, aggregation, TimeSpan.FromSeconds(10), start, start.AddSeconds(35), coverage);
 
         // Assert
         Assert.Equal(new double?[] { null, null, 3d, 4d }, shown.Select(point => point.Number));
         Assert.Equal(points.Select(point => point.Timestamp), shown.Select(point => point.Timestamp));
+    }
+
+    [Fact]
+    public void WhenTheWindowStartsInsideTheOldestBucket_ThenItIsMeasuredFromTheWindowStart()
+    {
+        // Arrange - the window starts at 4 s, and the series coverage is clipped to it, which is not a gap.
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new(start, 1d, null), new(start.AddSeconds(10), 2d, null)];
+        HistoryCoverage[] coverage = [new(start.AddSeconds(4), start.AddSeconds(20))];
+
+        // Act
+        var shown = PropertyHistoryChartModel.HidePartialTotals(
+            points, HistoryAggregations.Count, TimeSpan.FromSeconds(10), start.AddSeconds(4), start.AddSeconds(20), coverage);
+
+        // Assert
+        Assert.Equal(new double?[] { 1d, 2d }, shown.Select(point => point.Number));
     }
 
     [Fact]
@@ -347,7 +363,7 @@ public class PropertyHistoryChartModelTests
 
         // Act
         var shown = PropertyHistoryChartModel.HidePartialTotals(
-            points, HistoryAggregations.Maximum, TimeSpan.FromSeconds(10), start.AddSeconds(20), coverage);
+            points, HistoryAggregations.Maximum, TimeSpan.FromSeconds(10), start, start.AddSeconds(20), coverage);
 
         // Assert
         Assert.Same(points, shown);

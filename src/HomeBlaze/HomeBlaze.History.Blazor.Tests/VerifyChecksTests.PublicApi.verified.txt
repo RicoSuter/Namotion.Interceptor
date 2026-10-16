@@ -13,7 +13,7 @@ namespace HomeBlaze.History.Blazor
         public static string FormatBucket(System.TimeSpan bucket) { }
         public static string? FormatDiscreteValue(HomeBlaze.History.Abstractions.HistoryPoint point, System.Type propertyType) { }
         public static System.Collections.Generic.IReadOnlyList<string> GateAggregations(HomeBlaze.History.Abstractions.ValueColumn column, bool isCumulative, System.Collections.Generic.IReadOnlySet<string> storeUnion, bool isDiscrete = false) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> HidePartialTotals(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, string aggregation, System.TimeSpan? bucket, System.DateTimeOffset to, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryCoverage> coverage) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> HidePartialTotals(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, string aggregation, System.TimeSpan? bucket, System.DateTimeOffset from, System.DateTimeOffset to, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryCoverage> coverage) { }
         public static bool IsDiscrete(System.Type propertyType, bool isDiscreteState) { }
         public static System.TimeSpan? ResolveBucket(HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod period, System.TimeSpan range, System.TimeSpan? availableCoverage = default) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {

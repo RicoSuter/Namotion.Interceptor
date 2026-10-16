@@ -433,7 +433,7 @@
         }
 
         _segments = null;
-        var points = PropertyHistoryChartModel.HidePartialTotals(series.Points, aggregation, bucket, _windowTo, series.CoverageRanges);
+        var points = PropertyHistoryChartModel.HidePartialTotals(series.Points, aggregation, bucket, _windowFrom, _windowTo, series.CoverageRanges);
         if (points.Any(point => point.Number is not null))
         {
             var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket, _windowTo);

@@ -356,13 +356,15 @@ public static class PropertyHistoryChartModel
     /// <summary>
     /// Returns <paramref name="points"/> with the <c>Count</c> or <c>Sum</c> of every bucket that <paramref name="coverage"/>
     /// covers only partly replaced by a gap, so a total over part of a bucket does not draw as a too-low value. A bucket is
-    /// measured up to <paramref name="to"/>, so the newest bucket ending there is not partial. Returns
+    /// measured within [<paramref name="from"/>, <paramref name="to"/>), the window the coverage speaks for, so the
+    /// oldest and newest buckets reaching past it are not partial for that alone. Returns
     /// <paramref name="points"/> itself for any other aggregation or a raw query. Both lists must be ascending.
     /// </summary>
     public static IReadOnlyList<HistoryPoint> HidePartialTotals(
         IReadOnlyList<HistoryPoint> points,
         string aggregation,
         TimeSpan? bucket,
+        DateTimeOffset from,
         DateTimeOffset to,
         IReadOnlyList<HistoryCoverage> coverage)
     {
@@ -378,7 +380,7 @@ public static class PropertyHistoryChartModel
             var point = points[index];
             var bucketStart = point.Timestamp;
             var bucketEnd = BucketAlignment.Next(bucketStart, size);
-            var window = new HistoryCoverage(bucketStart, bucketEnd < to ? bucketEnd : to);
+            var window = new HistoryCoverage(bucketStart > from ? bucketStart : from, bucketEnd < to ? bucketEnd : to);
 
             while (coverageIndex < coverage.Count && coverage[coverageIndex].To <= bucketStart)
             {
