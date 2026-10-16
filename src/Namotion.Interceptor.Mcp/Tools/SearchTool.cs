@@ -112,6 +112,7 @@ internal class SearchTool
             }
         }
 
+        var unseenPropertyNames = UnseenPropertyNames.TryCreate(filter?.PropertyNames, propertyNames);
         var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
         var rootSubject = _rootSubjectProvider();
@@ -146,6 +147,8 @@ internal class SearchTool
                 continue;
             }
 
+            unseenPropertyNames?.Observe(registered, pathProvider);
+
             if (filter is not null && !filter.Matches(registered, pathProvider))
             {
                 continue;
@@ -169,7 +172,9 @@ internal class SearchTool
         {
             Results = subjects,
             SubjectCount = subjects.Count,
-            Truncated = truncated
+            Truncated = truncated,
+            // A truncated scan stopped before seeing every subject in scope.
+            Warnings = truncated ? null : unseenPropertyNames?.CreateWarnings()
         };
 
         if (format == "json")

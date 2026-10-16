@@ -151,6 +151,17 @@ public class SubjectFilterExpressionTests
     }
 
     [Fact]
+    public void WhenExpressionIsParsed_ThenExposesEachReferencedPropertyNameOnce()
+    {
+        // Act
+        Assert.True(SubjectFilterExpression.TryParse(
+            "IsOn == true && (Temperature > 1 || IsOn == false) || Name != null", out var expression, out _));
+
+        // Assert
+        Assert.Equal(["IsOn", "Temperature", "Name"], expression.PropertyNames);
+    }
+
+    [Fact]
     public void WhenExpressionIsLongerThanLimit_ThenReturnsLengthError()
     {
         // Arrange

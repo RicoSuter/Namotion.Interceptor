@@ -12,4 +12,9 @@ public class BrowseResult
 
     [JsonPropertyName("truncated")]
     public bool Truncated { get; init; }
+
+    /// <inheritdoc cref="SearchResult.Warnings"/>
+    [JsonPropertyName("warnings")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Warnings { get; init; }
 }

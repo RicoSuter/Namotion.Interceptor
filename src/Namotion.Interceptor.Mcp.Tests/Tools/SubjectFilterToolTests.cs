@@ -120,6 +120,139 @@ public class SubjectFilterToolTests
         Assert.EndsWith("[1 subject]", text);
     }
 
+    [Fact]
+    public async Task WhenSearchWhereNamesPropertyNoSubjectHas_ThenWarns()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "search");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", where = "IsOnline == false || IsOn == false" });
+
+        // Assert
+        Assert.Equal(2, json.GetProperty("subjectCount").GetInt32());
+        var warnings = json.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()!).ToArray();
+        Assert.Equal(["No subject in scope has a property named 'IsOnline'."], warnings);
+    }
+
+    [Fact]
+    public async Task WhenSearchPropertiesNamesPropertyNoSubjectHas_ThenWarns()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "search");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", properties = new[] { "IsOn", "BatteryLevel" } });
+
+        // Assert
+        var warnings = json.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()!).ToArray();
+        Assert.Equal(["No subject in scope has a property named 'BatteryLevel'."], warnings);
+    }
+
+    [Fact]
+    public async Task WhenPropertyExistsOnlyOutsideTheTypeFilter_ThenSearchWarns()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "search");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", types = new[] { nameof(TestDeviceGroup) }, where = "IsOn == true" });
+
+        // Assert
+        Assert.Equal(0, json.GetProperty("subjectCount").GetInt32());
+        var warnings = json.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()!).ToArray();
+        Assert.Equal(["No subject in scope has a property named 'IsOn'."], warnings);
+    }
+
+    [Fact]
+    public async Task WhenEveryNameResolvesOnSomeSubject_ThenSearchHasNoWarnings()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "search");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", where = "DeviceName == Light", properties = new[] { "IsOn" } });
+
+        // Assert
+        Assert.Equal(1, json.GetProperty("subjectCount").GetInt32());
+        Assert.False(json.TryGetProperty("warnings", out _));
+    }
+
+    [Fact]
+    public async Task WhenSearchIsTruncated_ThenHasNoWarnings()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "search");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", maxSubjects = 1, properties = new[] { "BatteryLevel" } });
+
+        // Assert
+        Assert.True(json.GetProperty("truncated").GetBoolean());
+        Assert.False(json.TryGetProperty("warnings", out _));
+    }
+
+    [Fact]
+    public async Task WhenSearchFindsNothingInTextFormat_ThenAppendsWarningLines()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "search");
+
+        // Act
+        var result = await tool.Handler(
+            JsonSerializer.SerializeToElement(new { where = "IsOnline == false" }),
+            CancellationToken.None);
+
+        // Assert
+        var text = Assert.IsType<string>(result);
+        Assert.Equal(
+            "No subjects found matching the search criteria." + Environment.NewLine +
+            "# warning: No subject in scope has a property named 'IsOnline'.",
+            text);
+    }
+
+    [Fact]
+    public async Task WhenBrowsePropertiesNamesPropertyNoSubjectHas_ThenWarns()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "browse");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", depth = 1, properties = new[] { "IsOn", "BatteryLevel" } });
+
+        // Assert
+        var warnings = json.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()!).ToArray();
+        Assert.Equal(["No subject in scope has a property named 'BatteryLevel'."], warnings);
+    }
+
+    [Fact]
+    public async Task WhenBrowseDoesNotReachSubjectsWithTheProperty_ThenWarns()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "browse");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", depth = 0, properties = new[] { "IsOn" } });
+
+        // Assert
+        var warnings = json.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()!).ToArray();
+        Assert.Equal(["No subject in scope has a property named 'IsOn'."], warnings);
+    }
+
+    [Fact]
+    public async Task WhenBrowseIsTruncated_ThenHasNoWarnings()
+    {
+        // Arrange
+        var tool = CreateTool(CreateGroup(), "browse");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", depth = 1, maxSubjects = 1, properties = new[] { "BatteryLevel" } });
+
+        // Assert
+        Assert.True(json.GetProperty("truncated").GetBoolean());
+        Assert.False(json.TryGetProperty("warnings", out _));
+    }
+
     private static TestDeviceGroup CreateGroup()
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();

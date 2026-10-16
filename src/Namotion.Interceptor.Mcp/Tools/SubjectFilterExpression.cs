@@ -19,10 +19,16 @@ internal sealed class SubjectFilterExpression
 
     private readonly Node _root;
 
-    private SubjectFilterExpression(Node root)
+    private SubjectFilterExpression(Node root, IReadOnlyCollection<string> propertyNames)
     {
         _root = root;
+        PropertyNames = propertyNames;
     }
+
+    /// <summary>
+    /// The distinct property names the expression compares, in order of first appearance.
+    /// </summary>
+    public IReadOnlyCollection<string> PropertyNames { get; }
 
     /// <summary>
     /// Parses <paramref name="text"/>. On failure <paramref name="error"/> reads
@@ -35,8 +41,9 @@ internal sealed class SubjectFilterExpression
     {
         try
         {
-            var root = new Parser(text).Parse();
-            expression = new SubjectFilterExpression(root);
+            var parser = new Parser(text);
+            var root = parser.Parse();
+            expression = new SubjectFilterExpression(root, parser.PropertyNames);
             error = null;
             return true;
         }
@@ -91,16 +98,8 @@ internal sealed class SubjectFilterExpression
 
         public override bool Matches(RegisteredSubject subject, PathProviderBase pathProvider)
         {
-            var property = pathProvider.TryGetPropertyFromSegment(subject, propertyName);
-            if (property is null ||
-                property.IsAttribute ||
-                property.CanContainSubjects ||
-                !pathProvider.IsPropertyIncluded(property))
-            {
-                return false;
-            }
-
-            return Compare(property.GetValue());
+            var property = McpToolHelper.TryGetScalarProperty(subject, pathProvider, propertyName);
+            return property is not null && Compare(property.GetValue());
         }
 
         private bool Compare(object? value)
@@ -181,6 +180,8 @@ internal sealed class SubjectFilterExpression
         private int _position;
         private int _nestingDepth;
 
+        public List<string> PropertyNames { get; } = [];
+
         public Node Parse()
         {
             if (text.Length > MaximumExpressionLength)
@@ -247,6 +248,11 @@ internal sealed class SubjectFilterExpression
             var (comparisonOperator, operatorText) = ReadOperator()
                 ?? throw CreateError($"expected a comparison operator after '{propertyName}'");
             var literal = ReadLiteral(operatorText);
+            if (!PropertyNames.Contains(propertyName))
+            {
+                PropertyNames.Add(propertyName);
+            }
+
             return new ComparisonNode(propertyName, comparisonOperator, literal);
         }
 

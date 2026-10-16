@@ -110,10 +110,19 @@ internal class BrowseTool
         var subjectCount = 0;
         var truncated = false;
         var visited = new HashSet<IInterceptorSubject>();
+        var unseenPropertyNames = UnseenPropertyNames.TryCreate(propertyNames, null);
         var result = BuildSubjectNode(startSubject, rootSubject, pathProvider, depth, includeProperties,
-            includeAttributes, includeMethods, includeInterfaces, propertyNames, excludeTypes, visited, maxSubjects, ref subjectCount, ref truncated);
+            includeAttributes, includeMethods, includeInterfaces, propertyNames, excludeTypes, visited, maxSubjects,
+            unseenPropertyNames, ref subjectCount, ref truncated);
 
-        var browseResult = new BrowseResult { Result = result, SubjectCount = subjectCount, Truncated = truncated };
+        var browseResult = new BrowseResult
+        {
+            Result = result,
+            SubjectCount = subjectCount,
+            Truncated = truncated,
+            // A truncated tree skipped subjects that may have the property.
+            Warnings = truncated ? null : unseenPropertyNames?.CreateWarnings()
+        };
 
         if (format == "json")
         {
@@ -136,9 +145,11 @@ internal class BrowseTool
         string[]? excludeTypes,
         HashSet<IInterceptorSubject> visited,
         int maxSubjects,
+        UnseenPropertyNames? unseenPropertyNames,
         ref int subjectCount,
         ref bool truncated)
     {
+        unseenPropertyNames?.Observe(subject, pathProvider);
         var node = McpToolHelper.BuildSubjectNodeDto(
             subject, pathProvider, rootSubject, _configuration,
             includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames);
@@ -146,7 +157,7 @@ internal class BrowseTool
         // Add subject-containing properties via tree traversal
         BuildSubjectTree(node, subject, rootSubject, pathProvider, remainingDepth,
             includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames, excludeTypes,
-            visited, maxSubjects, ref subjectCount, ref truncated);
+            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
 
         return node;
     }
@@ -165,6 +176,7 @@ internal class BrowseTool
         string[]? excludeTypes,
         HashSet<IInterceptorSubject> visited,
         int maxSubjects,
+        UnseenPropertyNames? unseenPropertyNames,
         ref int subjectCount,
         ref bool truncated)
     {
@@ -205,7 +217,7 @@ internal class BrowseTool
                         var childNode = BuildSubjectNode(childSubject, rootSubject, pathProvider,
                             remainingDepth - 1, includeProperties, includeAttributes,
                             includeMethods, includeInterfaces, propertyNames, excludeTypes,
-                            visited, maxSubjects, ref subjectCount, ref truncated);
+                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
                         node.Properties[segment] = new SubjectObjectProperty(childNode);
                     }
                 }
@@ -235,7 +247,7 @@ internal class BrowseTool
                         children[key] = BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, includeProperties, includeAttributes,
                             includeMethods, includeInterfaces, propertyNames, excludeTypes,
-                            visited, maxSubjects, ref subjectCount, ref truncated);
+                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
                     }
 
                     if (children.Count > 0)
@@ -267,7 +279,7 @@ internal class BrowseTool
                         children.Add(BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, includeProperties, includeAttributes,
                             includeMethods, includeInterfaces, propertyNames, excludeTypes,
-                            visited, maxSubjects, ref subjectCount, ref truncated));
+                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated));
                     }
 
                     if (children.Count > 0)

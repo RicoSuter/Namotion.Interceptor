@@ -253,6 +253,49 @@ public class McpTextFormatterTests
         return Verifier.Verify(McpTextFormatter.FormatSearchResult(result));
     }
     [Fact]
+    public void WhenSearchResultHasWarnings_ThenWarningLinesPrecedeFooter()
+    {
+        // Arrange
+        var result = new SearchResult
+        {
+            Results = new Dictionary<string, SubjectNode>
+            {
+                ["/Demo/Motor1"] = new() { Path = "/Demo/Motor1", Type = "MyApp.Motor" }
+            },
+            SubjectCount = 1,
+            Warnings = ["first", "second"]
+        };
+
+        // Act
+        var text = McpTextFormatter.FormatSearchResult(result);
+
+        // Assert
+        Assert.EndsWith(
+            "# warning: first" + Environment.NewLine +
+            "# warning: second" + Environment.NewLine +
+            "[1 subject]",
+            text);
+    }
+
+    [Fact]
+    public void WhenBrowseResultHasWarnings_ThenWarningLinesPrecedeFooter()
+    {
+        // Arrange
+        var result = new BrowseResult
+        {
+            Result = new SubjectNode { Path = "/", Type = "MyApp.Root" },
+            SubjectCount = 0,
+            Warnings = ["missing"]
+        };
+
+        // Act
+        var text = McpTextFormatter.FormatBrowseResult(result);
+
+        // Assert
+        Assert.EndsWith("# warning: missing" + Environment.NewLine + "[0 subjects]", text);
+    }
+
+    [Fact]
     public void WhenPropertyIsRecordArray_ThenRendersCompactJson()
     {
         // Arrange

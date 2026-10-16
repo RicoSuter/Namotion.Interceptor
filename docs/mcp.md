@@ -61,6 +61,7 @@ Key conventions:
 - **Collapsed collection:** `Name/ (Nx ItemType)` or `Name/ (N children)`
 - **Collapsed child subject:** `Name/ (ItemType)` for a single subject property beyond the depth limit (omitted when the property is null)
 - **Footer:** `[N subjects]` or `[N subjects, truncated]`
+- **Warning:** `# warning: <text>` before the footer, see [Unknown property names](#unknown-property-names)
 - Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
 - Collection values (arrays, lists, dictionaries of plain values) render as compact JSON, such as `[{"Title":"Radio","IsContainer":false}]`. Whole items are shown up to about 500 characters and the rest as `... +N more`; `get_property` returns the full value. Byte arrays render as their length, such as `<16 bytes>`.
 
@@ -217,6 +218,23 @@ IsConnected == false || BatteryLevel < 0.2 && Status != "Running"
 - An invalid expression returns an error naming the zero-based position, for example `where: use '==' for equality at position 12`.
 
 `browse` has no `where`; to filter a subtree, use `search` with `path` and `where`. Combine `where` with `properties` to return only the values the question needs.
+
+#### Unknown property names
+
+A name in `where` or `properties` that no subject has is not an error, because subjects of different types have different properties. So that an empty answer is not mistaken for a negative one, `search` and `browse` add a warning for each name that no subject in scope has as a property the path provider exposes and that holds no subjects. For `search` the scope is every subject that passes `types`, `excludeTypes`, `path` and `query`, before `where` is applied; for `browse` it is every subject in the returned tree. A truncated result has no warnings, because it did not look at every subject.
+
+In JSON, the warnings are a `warnings` array of strings, omitted when there are none:
+
+```json
+{
+  "results": {},
+  "subjectCount": 0,
+  "truncated": false,
+  "warnings": ["No subject in scope has a property named 'IsOnline'."]
+}
+```
+
+In text, each warning is a `# warning: ` line before the footer, or after the "no subjects found" message of an empty search.
 
 ### `get_property`
 

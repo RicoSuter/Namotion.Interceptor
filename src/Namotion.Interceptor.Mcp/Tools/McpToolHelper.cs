@@ -157,6 +157,24 @@ internal static class McpToolHelper
         return null;
     }
 
+    /// <summary>
+    /// Resolves <paramref name="segment"/> to a scalar property of <paramref name="subject"/> that the path provider
+    /// exposes, or null when there is none.
+    /// </summary>
+    internal static RegisteredSubjectProperty? TryGetScalarProperty(
+        RegisteredSubject subject,
+        PathProviderBase pathProvider,
+        string segment)
+    {
+        var property = pathProvider.TryGetPropertyFromSegment(subject, segment);
+        return property is null ||
+               property.IsAttribute ||
+               property.CanContainSubjects ||
+               !pathProvider.IsPropertyIncluded(property)
+            ? null
+            : property;
+    }
+
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
