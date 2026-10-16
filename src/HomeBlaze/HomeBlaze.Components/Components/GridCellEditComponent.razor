@@ -43,7 +43,7 @@
     @if (Cell?.Child != null)
     {
         <MudAlert Severity="Severity.Info" Dense="true">
-            @Cell.Child.GetType().Name
+            @(Cell.Child is IConfigurable ? Cell.Child.GetType().Name : "Page content")
         </MudAlert>
     }
     else

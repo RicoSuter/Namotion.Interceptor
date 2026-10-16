@@ -1,0 +1,995 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Abstractions.Attributes
+{
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public class ConfigurationAttribute : System.Attribute
+    {
+        public ConfigurationAttribute() { }
+        public bool IsSecret { get; set; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=true)]
+    public sealed class ExcludeFromBrowsingAttribute : System.Attribute
+    {
+        public ExcludeFromBrowsingAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class ExcludeFromCreationAttribute : System.Attribute
+    {
+        public ExcludeFromCreationAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property, Inherited=true)]
+    public sealed class ExcludeFromExpressionsAttribute : System.Attribute
+    {
+        public ExcludeFromExpressionsAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Parameter)]
+    public sealed class FromServicesAttribute : System.Attribute
+    {
+        public FromServicesAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class LinkAddressAttribute : System.Attribute
+    {
+        public LinkAddressAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class MediaAddressAttribute : System.Attribute
+    {
+        public MediaAddressAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Method)]
+    public class OperationAttribute : HomeBlaze.Abstractions.Attributes.SubjectMethodAttribute
+    {
+        public OperationAttribute() { }
+        public bool RequiresConfirmation { get; set; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Parameter, Inherited=true)]
+    public class OperationParameterAttribute : System.Attribute
+    {
+        public OperationParameterAttribute() { }
+        public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; set; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class PageLayoutAttribute : System.Attribute
+    {
+        public PageLayoutAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Method)]
+    public class QueryAttribute : HomeBlaze.Abstractions.Attributes.SubjectMethodAttribute
+    {
+        public QueryAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class SingleInstanceAttribute : System.Attribute
+    {
+        public SingleInstanceAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class SlotAttribute : System.Attribute
+    {
+        public SlotAttribute() { }
+        public SlotAttribute(string name) { }
+        public bool IsDefault { get; set; }
+        public string? Name { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=true)]
+    public class StateAttribute : System.Attribute
+    {
+        public StateAttribute() { }
+        public StateAttribute(string? title) { }
+        public bool IsCumulative { get; set; }
+        public bool IsCumulativeSet { get; }
+        public bool IsDiscrete { get; set; }
+        public bool IsDiscreteSet { get; }
+        public bool IsEstimated { get; set; }
+        public bool IsEstimatedSet { get; }
+        public bool IsPositionSet { get; }
+        public bool IsUnitSet { get; }
+        public int Position { get; set; }
+        public string? Title { get; set; }
+        public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; set; }
+    }
+    public enum StateUnit
+    {
+        Default = 0,
+        Percent = 1,
+        DegreeCelsius = 2,
+        Watt = 3,
+        Kilowatt = 4,
+        WattHour = 5,
+        Volt = 6,
+        Ampere = 7,
+        Hertz = 8,
+        Lumen = 9,
+        Lux = 10,
+        Meter = 11,
+        Kilometer = 12,
+        Millimeter = 13,
+        MillimeterPerHour = 14,
+        Kilobyte = 15,
+        KilobytePerSecond = 16,
+        MegabitPerSecond = 17,
+        LiterPerHour = 18,
+        KilowattHour = 19,
+        Milliampere = 20,
+        Currency = 21,
+        HexColor = 22,
+        MeterPerSecond = 23,
+        Hectopascal = 24,
+        Degree = 25,
+        UvIndex = 26,
+        Byte = 27,
+        Kelvin = 28,
+        Minute = 29,
+        Hour = 30,
+        VoltAmpere = 31,
+        VoltAmpereReactive = 32,
+        VoltAmpereHour = 33,
+        VoltAmpereReactiveHour = 34,
+        AmpereHour = 35,
+        WattPerSquareMeter = 36,
+    }
+    [System.AttributeUsage(System.AttributeTargets.Interface)]
+    public class SubjectAbstractionAttribute : System.Attribute
+    {
+        public SubjectAbstractionAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class SubjectIconAttribute : System.Attribute
+    {
+        public SubjectIconAttribute(string iconName) { }
+        public string IconName { get; }
+    }
+    public abstract class SubjectMethodAttribute : System.Attribute
+    {
+        protected SubjectMethodAttribute() { }
+        public string? Description { get; set; }
+        public string? Icon { get; set; }
+        public int Position { get; set; }
+        public string? Title { get; set; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class SubjectPathAttribute : System.Attribute
+    {
+        public SubjectPathAttribute() { }
+        public SubjectPathAttribute(System.Type subjectType) { }
+        public System.Type? SubjectType { get; }
+    }
+}
+namespace HomeBlaze.Abstractions.Common
+{
+    public readonly struct GeoCoordinate : System.IEquatable<HomeBlaze.Abstractions.Common.GeoCoordinate>
+    {
+        public GeoCoordinate(double Latitude, double Longitude, double? Altitude = default) { }
+        public double? Altitude { get; init; }
+        public double Latitude { get; init; }
+        public double Longitude { get; init; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Subject that tracks when it was last updated.")]
+    public interface ILastUpdatedProvider
+    {
+        System.DateTimeOffset? LastUpdated { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports software version and available updates.")]
+    public interface ISoftwareState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=851)]
+        [System.ComponentModel.Category("Device")]
+        string? AvailableSoftwareUpdate { get; }
+        bool HasSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=850)]
+        [System.ComponentModel.Category("Device")]
+        string? SoftwareVersion { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports how long a device or process has been running.")]
+    public interface IUptimeState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        System.TimeSpan? Uptime { get; }
+    }
+    public sealed class Image : System.IEquatable<HomeBlaze.Abstractions.Common.Image>
+    {
+        public Image() { }
+        public required string ContentType { get; init; }
+        public required System.ReadOnlyMemory<byte> Data { get; init; }
+    }
+}
+namespace HomeBlaze.Abstractions.Devices.Covers
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls position of a cover device.")]
+    public interface IPositionController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task SetPositionAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal position, System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports position of a cover device (0=open, 1=closed).")]
+    public interface IPositionState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=120, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        decimal? Position { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Combined roller shutter with state and control operations.")]
+    public interface IRollerShutter : HomeBlaze.Abstractions.Devices.Covers.IPositionController, HomeBlaze.Abstractions.Devices.Covers.IPositionState, HomeBlaze.Abstractions.Devices.Covers.IRollerShutterController, HomeBlaze.Abstractions.Devices.Covers.IRollerShutterState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls a roller shutter with open, close, stop, and position operations.")]
+    public interface IRollerShutterController : HomeBlaze.Abstractions.Devices.Covers.IPositionController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task CloseAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task OpenAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports roller shutter state including position, movement, and calibration.")]
+    public interface IRollerShutterState : HomeBlaze.Abstractions.Devices.Covers.IPositionState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=123)]
+        bool? IsCalibrating { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=125)]
+        [Namotion.Interceptor.Attributes.Derived]
+        bool? IsFullyClosed { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=124)]
+        [Namotion.Interceptor.Attributes.Derived]
+        bool? IsFullyOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=122)]
+        bool? IsMoving { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=121)]
+        HomeBlaze.Abstractions.Devices.Covers.RollerShutterState? ShutterState { get; }
+    }
+    public enum RollerShutterState
+    {
+        Unknown = 0,
+        Open = 1,
+        Opening = 2,
+        PartiallyOpen = 3,
+        Closing = 4,
+        Closed = 5,
+        Calibrating = 6,
+    }
+}
+namespace HomeBlaze.Abstractions.Devices
+{
+    public abstract class DeviceEvent : HomeBlaze.Abstractions.Messaging.IEvent, HomeBlaze.Abstractions.Messaging.IMessage, System.IEquatable<HomeBlaze.Abstractions.Devices.DeviceEvent>
+    {
+        protected DeviceEvent() { }
+        public required string DeviceId { get; init; }
+        public required System.DateTimeOffset Timestamp { get; init; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports hardware identity information.")]
+    public interface IDeviceInfo
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=804)]
+        [System.ComponentModel.Category("Device")]
+        string? HardwareRevision { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=800)]
+        [System.ComponentModel.Category("Device")]
+        string? Manufacturer { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=801)]
+        [System.ComponentModel.Category("Device")]
+        string? Model { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=802)]
+        [System.ComponentModel.Category("Device")]
+        string? ProductCode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=803)]
+        [System.ComponentModel.Category("Device")]
+        string? SerialNumber { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Hub device that manages child devices (bridges, controllers).")]
+    public interface IHubDevice { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Power relay that controls electrical power via switching.")]
+    public interface IPowerRelay : HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls a switch with turn on, turn off, and toggle operations.")]
+    public interface ISwitchController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task ToggleAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Combined switch with on/off state and control operations.")]
+    public interface ISwitchDevice : HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether a switch is on, off, or unknown.")]
+    public interface ISwitchState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=100)]
+        bool? IsOn { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Device without a recognized specific type.")]
+    public interface IUnknownDevice { }
+    public class SwitchEvent : HomeBlaze.Abstractions.Devices.DeviceEvent, System.IEquatable<HomeBlaze.Abstractions.Devices.SwitchEvent>
+    {
+        public SwitchEvent() { }
+        public required bool IsOn { get; init; }
+        public required HomeBlaze.Abstractions.Devices.ISwitchState Switch { get; init; }
+    }
+}
+namespace HomeBlaze.Abstractions.Devices.Energy
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports battery level as a percentage.")]
+    public interface IBatteryState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=340, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        decimal? BatteryLevel { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Energy charger device with plug-in and charging state.")]
+    public interface IEnergyCharger : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether a charger is plugged in and actively charging.")]
+    public interface IEnergyChargerState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=102)]
+        bool? IsCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=101)]
+        bool? IsPluggedIn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=330, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        decimal? MaximumChargingPower { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Electric vehicle charger with state and control.")]
+    public interface IVehicleCharger : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerController, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerState { }
+    public interface IVehicleChargerController
+    {
+        System.Threading.Tasks.Task PauseChargingAsync(System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task ResumeChargingAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Electric vehicle charger state with charge level and power.")]
+    public interface IVehicleChargerState : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        decimal? ChargeLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        decimal? ChargingPower { get; }
+    }
+}
+namespace HomeBlaze.Abstractions.Devices.Light
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls brightness level of a light device.")]
+    public interface IBrightnessController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Light")]
+        System.Threading.Tasks.Task SetBrightnessAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal brightness, System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports brightness level as a percentage (0=off, 1=full brightness).")]
+    public interface IBrightnessState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=110, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [System.ComponentModel.Category("Light")]
+        decimal? Brightness { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls RGB color of a light device.")]
+    public interface IColorController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Light")]
+        System.Threading.Tasks.Task SetColorAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.HexColor)] string color, System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports current RGB color as a hex string.")]
+    public interface IColorState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=111, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.HexColor)]
+        [System.ComponentModel.Category("Light")]
+        string? Color { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls color temperature of a light device.")]
+    public interface IColorTemperatureController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Light")]
+        System.Threading.Tasks.Task SetColorTemperatureAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal colorTemperature, System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports color temperature (0=warm white, 1=cool white).")]
+    public interface IColorTemperatureState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=112, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [System.ComponentModel.Category("Light")]
+        decimal? ColorTemperature { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Lightbulb device with on/off control and lumen output.")]
+    public interface ILightbulb : HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Lumen)]
+        [System.ComponentModel.Category("Light")]
+        decimal? Lumen { get; }
+    }
+}
+namespace HomeBlaze.Abstractions.Devices.Locks
+{
+    public enum DoorLockState
+    {
+        Unlocking = 0,
+        Unlocked = 1,
+        Locking = 2,
+        Locked = 3,
+        Unlatching = 4,
+        Unlatched = 5,
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Combined door lock with state and control operations.")]
+    public interface IDoorLock : HomeBlaze.Abstractions.Devices.Locks.IDoorLockController, HomeBlaze.Abstractions.Devices.Locks.IDoorLockState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls a door lock with lock, unlock, and toggle operations.")]
+    public interface IDoorLockController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task LockAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        System.Threading.Tasks.Task ToggleLockAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        System.Threading.Tasks.Task UnlockAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports door lock state (locked, unlocked).")]
+    public interface IDoorLockState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=131)]
+        [Namotion.Interceptor.Attributes.Derived]
+        bool? IsLocked { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=130)]
+        HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
+    }
+}
+namespace HomeBlaze.Abstractions
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Subject with persistable configuration properties.")]
+    public interface IConfigurable
+    {
+        System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IDataDirectoryProvider
+    {
+        string DataDirectory { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Subject that provides an icon name and color for UI display.")]
+    public interface IIconProvider
+    {
+        string? IconColor { get; }
+        string? IconName { get; }
+    }
+    public interface ILinkScope
+    {
+        string ResolveLink(string link);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Subject with lifecycle status tracking (running, stopped, error).")]
+    public interface IMonitoredService
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=910)]
+        HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=911)]
+        string? StatusMessage { get; }
+    }
+    public interface IPathScope
+    {
+        Namotion.Interceptor.IInterceptorSubject? TryGetNamedSubject(string name);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Subject that acts as a server with URL and port.")]
+    public interface IServerSubject : HomeBlaze.Abstractions.IMonitoredService
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=920)]
+        [Namotion.Interceptor.Attributes.Derived]
+        bool IsServerRunning { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=922)]
+        [Namotion.Interceptor.Attributes.Derived]
+        int? Port { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=921)]
+        [Namotion.Interceptor.Attributes.Derived]
+        string? ServerUrl { get; }
+    }
+    public interface ISubjectPathResolver
+    {
+        string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style);
+        System.Collections.Generic.IReadOnlyList<string> GetPaths(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style);
+        Namotion.Interceptor.IInterceptorSubject? ResolveSubject(string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Subject that provides a display title.")]
+    public interface ITitleProvider
+    {
+        string? Title { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Non-physical virtual subject (e.g., room, zone, or group).")]
+    public interface IVirtualSubject { }
+    public static class KnownAttributes
+    {
+        public const string Configuration = "HB:Configuration";
+        public const string IsEnabled = "HB:IsEnabled";
+        public const string State = "HB:State";
+    }
+    public enum PathStyle
+    {
+        Canonical = 0,
+        Route = 1,
+    }
+    public enum ServiceStatus
+    {
+        Stopped = 0,
+        Starting = 1,
+        Running = 2,
+        Stopping = 3,
+        Unavailable = 4,
+        Error = 5,
+    }
+}
+namespace HomeBlaze.Abstractions.Inputs
+{
+    public class ButtonEvent : HomeBlaze.Abstractions.Devices.DeviceEvent, System.IEquatable<HomeBlaze.Abstractions.Inputs.ButtonEvent>
+    {
+        public ButtonEvent() { }
+        public required HomeBlaze.Abstractions.Inputs.IButtonDevice Button { get; init; }
+        public required HomeBlaze.Abstractions.Inputs.ButtonState ButtonState { get; init; }
+    }
+    public enum ButtonState
+    {
+        None = 0,
+        Down = 1,
+        Repeat = 2,
+        Release = 3,
+        LongRelease = 4,
+    }
+    public readonly struct DeviceAction : System.IEquatable<HomeBlaze.Abstractions.Inputs.DeviceAction>
+    {
+        public DeviceAction(string Id, string Title) { }
+        public string Id { get; init; }
+        public string Title { get; init; }
+    }
+    public readonly struct DeviceActivity : System.IEquatable<HomeBlaze.Abstractions.Inputs.DeviceActivity>
+    {
+        public DeviceActivity(string Id, string Title) { }
+        public string Id { get; init; }
+        public string Title { get; init; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Device with a list of executable actions.")]
+    public interface IActionDevice
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=170)]
+        HomeBlaze.Abstractions.Inputs.DeviceAction[] Actions { get; }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task ExecuteActionAsync(string actionId, System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Device with selectable activities (e.g., TV input, scene).")]
+    public interface IActivityDevice
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=161)]
+        HomeBlaze.Abstractions.Inputs.DeviceActivity[] Activities { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=160)]
+        HomeBlaze.Abstractions.Inputs.DeviceActivity? CurrentActivity { get; }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task SetActivityAsync(string activityId, System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports button press state.")]
+    public interface IButtonDevice
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=150)]
+        HomeBlaze.Abstractions.Inputs.ButtonState? ButtonState { get; }
+    }
+}
+namespace HomeBlaze.Abstractions.Media
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Audio player with playback and volume state and controls, and the currently playi" +
+        "ng track.")]
+    public interface IAudioPlayer : HomeBlaze.Abstractions.Media.IMediaPlaybackController, HomeBlaze.Abstractions.Media.IMediaPlaybackState, HomeBlaze.Abstractions.Media.IMediaTrackState, HomeBlaze.Abstractions.Media.IVolumeController, HomeBlaze.Abstractions.Media.IVolumeState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls media playback with play, pause, stop, skip and seek.")]
+    public interface IMediaPlaybackController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Playback")]
+        System.Threading.Tasks.Task NextAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Playback")]
+        System.Threading.Tasks.Task PauseAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Playback")]
+        System.Threading.Tasks.Task PlayAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Playback")]
+        System.Threading.Tasks.Task PreviousAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Playback")]
+        System.Threading.Tasks.Task SeekAsync(System.TimeSpan position, System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Playback")]
+        System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the media playback state (playing, paused, stopped, buffering) and whethe" +
+        "r media is playing.")]
+    public interface IMediaPlaybackState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=140)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Playback")]
+        bool? IsPlaying { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=139)]
+        [System.ComponentModel.Category("Playback")]
+        HomeBlaze.Abstractions.Media.MediaPlaybackState? PlaybackState { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the currently playing media track.")]
+    public interface IMediaTrackState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=148)]
+        [System.ComponentModel.Category("Track")]
+        string? CurrentTrackAlbum { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=147)]
+        [System.ComponentModel.Category("Track")]
+        string? CurrentTrackArtist { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=152)]
+        [System.ComponentModel.Category("Track")]
+        System.TimeSpan? CurrentTrackDuration { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=149)]
+        [System.ComponentModel.Category("Track")]
+        string? CurrentTrackImageUri { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=151)]
+        [System.ComponentModel.Category("Track")]
+        System.TimeSpan? CurrentTrackPosition { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=146)]
+        [System.ComponentModel.Category("Track")]
+        string? CurrentTrackTitle { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=150)]
+        [System.ComponentModel.Category("Track")]
+        string? CurrentTrackUri { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls volume level and mute.")]
+    public interface IVolumeController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Volume")]
+        System.Threading.Tasks.Task MuteAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Volume")]
+        System.Threading.Tasks.Task SetVolumeAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal volume, System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Volume")]
+        System.Threading.Tasks.Task UnmuteAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports volume level as a fraction (0=minimum, 1=maximum) and whether the audio i" +
+        "s muted.")]
+    public interface IVolumeState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=141)]
+        [System.ComponentModel.Category("Volume")]
+        bool? IsMuted { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=145, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [System.ComponentModel.Category("Volume")]
+        decimal? Volume { get; }
+    }
+    public enum MediaPlaybackState
+    {
+        Stopped = 0,
+        Playing = 1,
+        Paused = 2,
+        Buffering = 3,
+    }
+}
+namespace HomeBlaze.Abstractions.Messaging
+{
+    public interface ICommand : HomeBlaze.Abstractions.Messaging.IMessage { }
+    public interface IEvent : HomeBlaze.Abstractions.Messaging.IMessage
+    {
+        System.DateTimeOffset Timestamp { get; }
+    }
+    public interface IMessage { }
+    public interface IMessageBus : System.IObservable<HomeBlaze.Abstractions.Messaging.IMessage>
+    {
+        void Publish(HomeBlaze.Abstractions.Messaging.IMessage message);
+    }
+    public interface IMessagePublisher<in TMessage>
+        where in TMessage : HomeBlaze.Abstractions.Messaging.IMessage
+    {
+        void Publish(TMessage message);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Sends notification messages.")]
+    public interface INotificationPublisher
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task SendNotificationAsync(string message, System.Threading.CancellationToken cancellationToken);
+    }
+}
+namespace HomeBlaze.Abstractions.Metadata
+{
+    public class ConfigurationMetadata
+    {
+        public ConfigurationMetadata() { }
+        public bool IsSecret { get; init; }
+    }
+    public enum MethodKind
+    {
+        Operation = 0,
+        Query = 1,
+    }
+    public class MethodMetadata
+    {
+        public MethodMetadata(System.Func<object?[]?, object?> invoke) { }
+        public MethodMetadata(Namotion.Interceptor.IInterceptorSubject subject, System.Reflection.MethodInfo method) { }
+        public string? Category { get; init; }
+        public string? Description { get; init; }
+        public string? Icon { get; init; }
+        public HomeBlaze.Abstractions.Metadata.MethodKind Kind { get; init; }
+        public HomeBlaze.Abstractions.Metadata.MethodParameter[] Parameters { get; init; }
+        public int Position { get; init; }
+        public string PropertyName { get; init; }
+        public bool RequiresConfirmation { get; init; }
+        public System.Type? ResultType { get; init; }
+        public string Title { get; init; }
+        public System.Threading.Tasks.Task<object?> InvokeAsync(object?[]? parameters, System.IServiceProvider? serviceProvider, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public class MethodParameter
+    {
+        public MethodParameter() { }
+        public bool IsFromServices { get; init; }
+        public bool IsNullable { get; init; }
+        public bool IsRuntimeProvided { get; init; }
+        public required string Name { get; init; }
+        public bool RequiresInput { get; }
+        public required System.Type Type { get; init; }
+        public HomeBlaze.Abstractions.Attributes.StateUnit? Unit { get; init; }
+    }
+    public class StateMetadata
+    {
+        public StateMetadata() { }
+        public string? Category { get; init; }
+        public bool IsCumulative { get; init; }
+        public bool IsDiscrete { get; init; }
+        public bool IsEstimated { get; init; }
+        public int Position { get; init; }
+        public string? Title { get; init; }
+        public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; init; }
+    }
+}
+namespace HomeBlaze.Abstractions.Networking
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether a device is connected.")]
+    public interface IConnectionState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=900)]
+        bool IsConnected { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Network adapter with IP, MAC, subnet, gateway, and signal strength.")]
+    public interface INetworkAdapter
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=863)]
+        [System.ComponentModel.Category("Network")]
+        string? Gateway { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=860)]
+        [System.ComponentModel.Category("Network")]
+        string? IpAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=864)]
+        [System.ComponentModel.Category("Network")]
+        bool? IsWireless { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=861)]
+        [System.ComponentModel.Category("Network")]
+        string? MacAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=865)]
+        [System.ComponentModel.Category("Network")]
+        int? SignalStrength { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=862)]
+        [System.ComponentModel.Category("Network")]
+        string? SubnetMask { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Device reached at a configured host name or IP address.")]
+    public interface INetworkHost
+    {
+        string? HostAddress { get; }
+    }
+}
+namespace HomeBlaze.Abstractions.Security
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Tracks authentication status, user identity, and authentication time.")]
+    public interface IAuthenticatedSubject
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=872)]
+        System.DateTimeOffset? AuthenticatedAt { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=871)]
+        string? AuthenticatedUser { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=870)]
+        bool IsAuthenticated { get; }
+    }
+}
+namespace HomeBlaze.Abstractions.Sensors
+{
+    public enum DoorState
+    {
+        Open = 0,
+        Opening = 1,
+        PartiallyOpen = 2,
+        Closing = 3,
+        Closed = 4,
+        Unknown = 5,
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports barometric pressure in hectopascals.")]
+    public interface IBarometricPressureSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hectopascal)]
+        decimal? AbsolutePressure { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hectopascal)]
+        decimal? RelativePressure { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Combined camera with state and capture operations.")]
+    public interface ICamera : HomeBlaze.Abstractions.Sensors.ICameraController, HomeBlaze.Abstractions.Sensors.ICameraState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Controls a camera with image capture operations.")]
+    public interface ICameraController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        System.Threading.Tasks.Task<HomeBlaze.Abstractions.Common.Image?> CaptureImageAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the current captured image from a camera.")]
+    public interface ICameraState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=270)]
+        HomeBlaze.Abstractions.Common.Image? CurrentImage { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports door state (open, closed, partially open).")]
+    public interface IDoorSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=231)]
+        [Namotion.Interceptor.Attributes.Derived]
+        bool? IsClosed { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=230)]
+        HomeBlaze.Abstractions.Sensors.DoorState? State { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports electrical current in amperes.")]
+    public interface IElectricalCurrentSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=321, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        decimal? ElectricalCurrent { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports electrical frequency in hertz.")]
+    public interface IElectricalFrequencySensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=322, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
+        decimal? ElectricalFrequency { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports electrical voltage in volts.")]
+    public interface IElectricalVoltageSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=320, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Volt)]
+        decimal? ElectricalVoltage { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports relative humidity as a percentage.")]
+    public interface IHumiditySensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=210, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        decimal? Humidity { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports illuminance level in lux.")]
+    public interface ILightSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=240, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Lux)]
+        decimal? Illuminance { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Measures power and energy flowing through an external circuit in both directions.")]
+    public interface IPowerMeter
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=310, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        decimal? MeasuredPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=312, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        decimal? TotalExportedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=311, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        decimal? TotalImportedEnergy { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports power consumption in watts and total energy in watt-hours.")]
+    public interface IPowerSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=300, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        decimal? Power { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=301, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        decimal? TotalConsumedEnergy { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether presence or motion is detected.")]
+    public interface IPresenceSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=220)]
+        bool? IsPresent { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports rain status, rate in mm/h, and total accumulation.")]
+    public interface IRainSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=250)]
+        bool? IsRaining { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=251, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MillimeterPerHour)]
+        decimal? RainRate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=252, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
+        decimal? TotalRain { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports soil moisture level as a percentage.")]
+    public interface ISoilSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=260, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        decimal? SoilMoisture { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports temperature in degrees Celsius.")]
+    public interface ITemperatureSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=200, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        decimal? Temperature { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports thermal power output in watts and total thermal energy produced in watt-h" +
+        "ours.")]
+    public interface IThermalPowerSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=350, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        decimal? ThermalPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=351, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        decimal? TotalProducedThermalEnergy { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports UV index on the WHO standard scale (0-11+).")]
+    public interface IUvIndexSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.UvIndex)]
+        decimal? UvIndex { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports wind speed, gust, and direction.")]
+    public interface IWindSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Degree)]
+        decimal? WindDirection { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MeterPerSecond)]
+        decimal? WindGust { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MeterPerSecond)]
+        decimal? WindSpeed { get; }
+    }
+}

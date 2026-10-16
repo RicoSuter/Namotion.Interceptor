@@ -281,3 +281,7 @@ public partial class SubjectWithValidatedProperty : IConfigurable
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
+
+/// <summary>A subject that is not configurable, so the serializer cannot write it.</summary>
+[InterceptorSubject]
+public partial class PlainSubject;

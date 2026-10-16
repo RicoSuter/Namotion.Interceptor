@@ -200,12 +200,31 @@ public sealed partial class MarkdownContentParser
             return null;
         }
 
-        foreach (var (key, _) in configuration)
+        List<string>? emptySlotLists = null;
+        foreach (var (key, value) in configuration)
         {
-            if (key != TypeDiscriminator && !properties.ContainsKey(key))
+            if (key == TypeDiscriminator || properties.ContainsKey(key))
             {
-                error = FormatUnknownProperty(type, key, properties);
-                return null;
+                continue;
+            }
+
+            // Earlier versions wrote an empty list for the slot of a layout into every page they saved. It holds
+            // nothing, and the next save of the block leaves it out.
+            if (value is JsonArray { Count: 0 } && SlotMap.For(type).FindByPropertyName(key) is { IsList: true })
+            {
+                (emptySlotLists ??= []).Add(key);
+                continue;
+            }
+
+            error = FormatUnknownProperty(type, key, properties);
+            return null;
+        }
+
+        if (emptySlotLists is not null)
+        {
+            foreach (var key in emptySlotLists)
+            {
+                configuration.Remove(key);
             }
         }
 
@@ -214,6 +233,18 @@ public sealed partial class MarkdownContentParser
 
     private static string FormatUnknownProperty(Type type, string key, IReadOnlyDictionary<string, Type> properties)
     {
+        if (SlotMap.For(type).FindByPropertyNameIgnoringCase(key) is { } slot)
+        {
+            if (slot.IsDefault)
+            {
+                return $"'{slot.PropertyName}' is the content of the block on a page, so it cannot be set as configuration.";
+            }
+
+            return slot.IsList
+                ? $"'{slot.PropertyName}' is written as blocks on a page: one '{slot.Name}' block per value inside this block."
+                : $"'{slot.PropertyName}' is written as a block on a page: a '{slot.Name}' block inside this block.";
+        }
+
         if (properties.Count == 0)
         {
             return $"{type.Name} has no configuration properties, so '{key}' cannot be set.";
@@ -284,11 +315,17 @@ public sealed partial class MarkdownContentParser
         return $"The value of '{property.PropertyName}' in the json block cannot be read{place}: {reason}";
     }
 
+    // A slot is filled by the content of the block, also when the same property is configuration in a file.
     private static IReadOnlyDictionary<string, Type> GetConfigurationProperties(Type type) =>
-        ConfigurationPropertyCache.GetOrAdd(type, static key => key
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is not null)
-            .ToDictionary(property => property.Name, property => property.PropertyType));
+        ConfigurationPropertyCache.GetOrAdd(type, static key =>
+        {
+            var slots = SlotMap.For(key);
+            return key
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is not null &&
+                                   slots.FindByPropertyName(property.Name) is null)
+                .ToDictionary(property => property.Name, property => property.PropertyType);
+        });
 
     // The literal an argument stands for: a bare literal for a bool or numeric property, a JSON string for every
     // other type. Null when the text is no such literal.

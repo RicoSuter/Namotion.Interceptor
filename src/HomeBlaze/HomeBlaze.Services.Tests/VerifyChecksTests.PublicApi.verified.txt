@@ -1,0 +1,353 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Components.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Services.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Services.Components
+{
+    public class SubjectComponentRegistration : System.IEquatable<HomeBlaze.Services.Components.SubjectComponentRegistration>
+    {
+        public SubjectComponentRegistration(System.Type ComponentType, System.Type SubjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type, string? Name) { }
+        public System.Type ComponentType { get; init; }
+        public string? Name { get; init; }
+        public System.Type SubjectType { get; init; }
+        public HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type { get; init; }
+    }
+    public class SubjectComponentRegistry
+    {
+        public SubjectComponentRegistry(HomeBlaze.Services.TypeProvider typeProvider) { }
+        public System.Collections.Generic.IReadOnlyCollection<HomeBlaze.Services.Components.SubjectComponentRegistration> GetAllComponents() { }
+        public HomeBlaze.Services.Components.SubjectComponentRegistration? GetComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
+        public System.Collections.Generic.IEnumerable<HomeBlaze.Services.Components.SubjectComponentRegistration> GetComponents(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type) { }
+        public bool HasComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
+    }
+}
+namespace HomeBlaze.Services
+{
+    public class ConfigurableSubjectSerializer
+    {
+        public const string TypeDiscriminatorPropertyName = "$type";
+        public ConfigurableSubjectSerializer(HomeBlaze.Services.TypeProvider typeProvider, System.IServiceProvider serviceProvider) { }
+        public bool CanDeserialize(string json, System.Type propertyType, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public void Release(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool> isExcluded, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+    }
+    public enum ConfigurationNaming
+    {
+        JsonProperty = 0,
+        CSharpProperty = 1,
+    }
+    public static class DataDirectorySeeder
+    {
+        public const string DocumentationDirectory = "Files/Docs";
+        public const string SeedRootFileName = "Root.json";
+        public static int ReplaceDocumentation(string rootConfigurationPath, string? seedDirectory) { }
+        public static int SeedIfMissing(string rootConfigurationPath, string? seedDirectory) { }
+    }
+    public class DeveloperModeService
+    {
+        public DeveloperModeService() { }
+        public bool IsEnabled { get; }
+        public event System.Action? OnChange;
+        public void SetEnabled(bool enabled) { }
+        public void Toggle() { }
+    }
+    public static class HomeBlazePaths
+    {
+        public const string PluginConfigurationPathKey = "PluginConfigurationPath";
+        public const string RootConfigurationFileKey = "HomeBlaze:RootConfigFile";
+        public const string SeedDirectoryKey = "HomeBlaze:SeedDirectory";
+        public static readonly string DefaultPluginConfigurationFile;
+        public static readonly string DefaultRootConfigurationFile;
+        public static string GetPluginConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
+        public static string GetRootConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
+    }
+    public static class ParameterConverter
+    {
+        public static bool IsSupported(System.Type type) { }
+        public static bool TryConvert(string? input, System.Type targetType, out object? value) { }
+        public static bool TryConvert(string? input, System.Type targetType, HomeBlaze.Abstractions.Attributes.StateUnit? unit, out object? value) { }
+    }
+    public static class RegisteredSubjectMethodExtensions
+    {
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetOperationMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetQueryMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+    }
+    public class RootManager : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IDataDirectoryProvider, HomeBlaze.Storage.Abstractions.IConfigurationWriter
+    {
+        public RootManager(HomeBlaze.Services.SubjectTypeRegistry typeRegistry, HomeBlaze.Services.ConfigurableSubjectSerializer serializer, Namotion.Interceptor.IInterceptorSubjectContext context, HomeBlaze.Services.SubjectPathResolver pathResolver, Microsoft.Extensions.Configuration.IConfiguration? configuration = null, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.RootManager>? logger = null, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory = null) { }
+        public string ConfigurationPath { get; }
+        public string DataDirectory { get; }
+        public bool IsLoaded { get; }
+        public Namotion.Interceptor.IInterceptorSubject? Root { get; }
+        public System.Threading.Tasks.Task<Namotion.Interceptor.IInterceptorSubject> RootLoaded { get; }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public static class RootManagerExtensions
+    {
+        public static HomeBlaze.Storage.Abstractions.IConfigurationWriter GetConfigurationWriter(this HomeBlaze.Services.RootManager rootManager, Namotion.Interceptor.IInterceptorSubject subject) { }
+    }
+    public static class ServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeServices(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
+    public sealed class SkippedConfigurationProperty : System.IEquatable<HomeBlaze.Services.SkippedConfigurationProperty>
+    {
+        public SkippedConfigurationProperty(string PropertyName, System.Type PropertyType, string Json, System.Exception Exception) { }
+        public System.Exception Exception { get; init; }
+        public string Json { get; init; }
+        public string PropertyName { get; init; }
+        public System.Type PropertyType { get; init; }
+    }
+    public static class SubjectContextFactory
+    {
+        public static Namotion.Interceptor.IInterceptorSubjectContext Create(Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
+    public class SubjectFactory
+    {
+        public SubjectFactory(System.IServiceProvider serviceProvider) { }
+        public Namotion.Interceptor.IInterceptorSubject CreateSubject(System.Type type) { }
+        public T CreateSubject<T>()
+            where T : Namotion.Interceptor.IInterceptorSubject { }
+        public void DiscardSubject(Namotion.Interceptor.IInterceptorSubject subject) { }
+    }
+    public static class SubjectLinkScopeExtensions
+    {
+        public static string? ResolveScopedLink(this Namotion.Interceptor.IInterceptorSubject subject, string? link) { }
+    }
+    public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    {
+        public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
+        public event System.Action? PathsChanged;
+        public string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
+        public System.Collections.Generic.IReadOnlyList<string> GetPaths(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
+        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
+        public Namotion.Interceptor.IInterceptorSubject? ResolveSubject(string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
+    }
+    public static class SubjectPathResolverExtensions
+    {
+        public static Namotion.Interceptor.IInterceptorSubject? FindChildByIndex(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string indexStr) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveDisplayableProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
+        public static object? ResolveValue(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
+    }
+    public static class SubjectPathResolverScopeExtensions
+    {
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveScopedDisplayableProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveScopedProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
+        public static Namotion.Interceptor.IInterceptorSubject? ResolveScopedSubject(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
+        public static object? ResolveScopedValue(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
+    }
+    public static class SubjectRegistryExtensions
+    {
+        public static HomeBlaze.Abstractions.Metadata.ConfigurationMetadata? GetConfigurationMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetConfigurationProperties(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static string GetDisplayName(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static int GetDisplayPosition(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static HomeBlaze.Abstractions.Metadata.StateMetadata? GetStateMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetStateProperties(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool HasConfigurationProperties(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool IsConfigurationProperty(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static bool IsDisplayable(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static Namotion.Interceptor.IInterceptorSubject? TryGetConfigurationOwner(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static Namotion.Interceptor.IInterceptorSubject? TryGetConfigurationOwner(this Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.IInterceptorSubject, bool> isOwner) { }
+    }
+    public class SubjectTypeCatalog
+    {
+        public const string OtherGroup = "Other";
+        public SubjectTypeCatalog(HomeBlaze.Services.SubjectTypeRegistry typeRegistry) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> GetCreatableTypes(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> existingSubjects) { }
+        public static HomeBlaze.Services.SubjectTypeDescriptor Describe(System.Type type) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeGroup> GetGroups(System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> descriptors, string? searchText) { }
+    }
+    public sealed class SubjectTypeDescriptor : System.IEquatable<HomeBlaze.Services.SubjectTypeDescriptor>
+    {
+        public SubjectTypeDescriptor(System.Type Type, string DisplayName, string? Description, string Group, string IconName) { }
+        public string? Description { get; init; }
+        public string DisplayName { get; init; }
+        public string Group { get; init; }
+        public string IconName { get; init; }
+        public System.Type Type { get; init; }
+        public bool Matches(System.ReadOnlySpan<string> searchTerms) { }
+    }
+    public sealed class SubjectTypeGroup : System.IEquatable<HomeBlaze.Services.SubjectTypeGroup>
+    {
+        public SubjectTypeGroup(string Name, System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> Matches) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> Matches { get; init; }
+        public string Name { get; init; }
+    }
+    public class SubjectTypeRegistry
+    {
+        public SubjectTypeRegistry(HomeBlaze.Services.TypeProvider typeProvider) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, System.Type> ExtensionMappings { get; }
+        public System.Collections.Generic.IReadOnlyCollection<System.Type> RegisteredTypes { get; }
+        public bool HasExtensionMapping(string extension) { }
+        public bool IsRegistered(System.Type type) { }
+        public System.Type? ResolveType(string typeName) { }
+        public System.Type? ResolveTypeForExtension(string extension) { }
+    }
+    public class TypeProvider
+    {
+        public TypeProvider() { }
+        public System.Collections.Generic.IReadOnlyCollection<System.Type> Types { get; }
+        public HomeBlaze.Services.TypeProvider AddAssembly(System.Reflection.Assembly assembly) { }
+        public void AddTypes(System.Collections.Generic.IEnumerable<System.Type> types) { }
+    }
+}
+namespace HomeBlaze.Services.Diagnostics
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Memory")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Description("Reports CPU, memory and garbage collection values of the current process")]
+    [System.ComponentModel.DisplayName("Process")]
+    public class HostProcess : HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=413, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.KilobytePerSecond)]
+        public decimal? AllocationRate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=410, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? CpuUsage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=412, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? GcHeapSize { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=414, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? GcPauseTime { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        public string RuntimeVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=415)]
+        public int? ThreadCount { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=416)]
+        public System.TimeSpan? Uptime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=411, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? WorkingSet { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Runs a full, compacting garbage collection and refreshes the values.", Icon="DeleteSweep", RequiresConfirmation=true, Title="Collect garbage")]
+        public void CollectGarbage() { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.SingleInstance]
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Computer")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("System")]
+    [System.ComponentModel.Description("Reports CPU, memory and uptime of the machine and the process HomeBlaze runs in")]
+    [System.ComponentModel.DisplayName("Host system")]
+    public class HostSystem : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public HostSystem(Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Diagnostics.HostSystem> logger) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        [System.ComponentModel.Category("System")]
+        public string Architecture { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=412, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? AvailableMemory { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=421)]
+        [System.ComponentModel.Category("System")]
+        public decimal? ContainerCpuLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=420, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        [System.ComponentModel.Category("System")]
+        public long? ContainerMemoryLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=410, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? CpuUsage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=404)]
+        [System.ComponentModel.Category("System")]
+        public bool IsContainer { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        [System.ComponentModel.Category("System")]
+        public string MachineName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=413, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? MemoryUsage { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        [System.ComponentModel.Category("System")]
+        public string OperatingSystemName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=430)]
+        public HomeBlaze.Services.Diagnostics.HostProcess Process { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=403)]
+        [System.ComponentModel.Category("System")]
+        public int ProcessorCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=411, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? TotalMemory { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=414)]
+        [System.ComponentModel.Category("System")]
+        public System.TimeSpan? Uptime { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+}
+namespace HomeBlaze.Services.Display
+{
+    public static class RawValueFormatter
+    {
+        public static string Format(object? value) { }
+    }
+    public static class StateUnitExtensions
+    {
+        public static string FormatPercent(decimal fraction) { }
+        public static string FormatWithUnit(decimal value, HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
+        public static string GetPropertyDisplayValue(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? value, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Suffix",
+                "NeedsSpace"})]
+        public static System.ValueTuple<string, bool>? GetUnitInfo(HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
+        public static string? GetUnitSuffix(HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
+    }
+}
+namespace HomeBlaze.Services.Lifecycle
+{
+    public class MethodPropertyInitializer : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    {
+        public MethodPropertyInitializer() { }
+        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
+    }
+    public class PropertyAttributeInitializer : Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
+    {
+        public PropertyAttributeInitializer() { }
+        public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value) { }
+    }
+}
+namespace HomeBlaze.Services.Serialization
+{
+    public class ConfigurationJsonTypeInfoResolver : System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver
+    {
+        public ConfigurationJsonTypeInfoResolver(HomeBlaze.Services.TypeProvider typeProvider, System.IServiceProvider serviceProvider, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public override System.Text.Json.Serialization.Metadata.JsonTypeInfo GetTypeInfo(System.Type type, System.Text.Json.JsonSerializerOptions options) { }
+    }
+}

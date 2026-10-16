@@ -36,7 +36,7 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
             return CloseBlock(processor, fenceStart, fenceLength);
         }
 
-        if (!IsHead(head))
+        if (!MarkdownBlockFence.StartsHeadLine(head.CurrentChar))
         {
             return BlockState.None;
         }
@@ -85,7 +85,7 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
         var container = (MarkdownBlockContainer)block;
         if (processor.CurrentBlock is HtmlBlock htmlBlock &&
             TryReadFence(processor, out _, out var fenceLength, out var head) &&
-            (head.IsEmpty ? fenceLength == container.FenceLength : EndsAtEmptyLine(htmlBlock) && IsHead(head)) &&
+            (head.IsEmpty ? fenceLength == container.FenceLength : EndsAtEmptyLine(htmlBlock) && MarkdownBlockFence.StartsHeadLine(head.CurrentChar)) &&
             IsInsideBlocksOnly(htmlBlock, block))
         {
             processor.Close(htmlBlock);
@@ -176,14 +176,6 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
         return container;
     }
 
-    /// <summary>Gets whether the text after a fence makes the line a head line.</summary>
-    private static bool IsHead(StringSlice head)
-    {
-        // Other text after a fence, such as a time or a smiley, is no attempt at a head line.
-        var first = head.CurrentChar;
-        return char.IsLetter(first) || first == '_' || first == '{';
-    }
-
     /// <summary>Gets whether the HTML block ends at the next empty line and not at an end of its own.</summary>
     private static bool EndsAtEmptyLine(HtmlBlock htmlBlock) =>
         htmlBlock.Type is HtmlBlockType.InterruptingBlock or HtmlBlockType.NonInterruptingBlock;
@@ -218,10 +210,9 @@ internal sealed class MarkdownBlockContainerParser : BlockParser
             fenceStart--;
         }
 
-        // Four columns of indentation make the line code. The characters that were taken off count as
-        // indentation for the processor, so they are subtracted.
+        // The characters that were taken off count as indentation for the processor, so they are subtracted.
         fenceLength = processor.Start - fenceStart;
-        if (processor.Indent - fenceLength >= 4)
+        if (MarkdownBlockFence.IsIndentedAsCode(processor.Indent - fenceLength))
         {
             return false;
         }

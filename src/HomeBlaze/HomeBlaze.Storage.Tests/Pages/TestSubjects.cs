@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
@@ -8,6 +10,14 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests.Pages;
+
+/// <summary>The names of the test subject types as a head line of a page names them.</summary>
+public static class TestTypeNames
+{
+    public const string Namespace = "HomeBlaze.Storage.Tests.Pages";
+    public const string BoardType = Namespace + ".TestBoard";
+    public const string LeafType = Namespace + ".TestLeaf";
+}
 
 [InterceptorSubject]
 public partial class TestLeaf : IConfigurable
@@ -129,6 +139,21 @@ public partial class TestRow : IConfigurable
 /// <summary>A subject that is not configurable, so a slot of this type cannot create its value.</summary>
 [InterceptorSubject]
 public partial class TestPlain;
+
+/// <summary>Has a list slot of a type that is not configurable, so a new value of it cannot be written as a block.</summary>
+[InterceptorSubject]
+public partial class TestPlainHost : IConfigurable
+{
+    public TestPlainHost()
+    {
+        PlainValues = [];
+    }
+
+    [Slot("Plain")]
+    public partial TestPlain[] PlainValues { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
 
 /// <summary>Has slots whose values fail when they are created or configured.</summary>
 [InterceptorSubject]
@@ -547,4 +572,172 @@ public partial class TestMeter : IConfigurable
     public partial decimal Flow { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>A layout whose values are configuration in a file and slot blocks on a page.</summary>
+[InterceptorSubject]
+public partial class TestBoard : IConfigurable
+{
+    public TestBoard()
+    {
+        Tiles = [];
+    }
+
+    [Configuration]
+    public partial int Columns { get; set; }
+
+    [Configuration, Slot("Tile")]
+    public partial TestTile[] Tiles { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>A board with a configuration property whose name differs from the property of its slot only by case.</summary>
+[InterceptorSubject]
+public partial class TestCaseBoard : IConfigurable
+{
+    public TestCaseBoard()
+    {
+        TileList = [];
+    }
+
+    [Configuration, Slot("Tile")]
+    public partial TestTile[] TileList { get; set; }
+
+    // Differs only in the case of a letter that the camel case of a configuration file keeps.
+    [Configuration]
+    public partial int Tilelist { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>One value of a <see cref="TestBoard"/>. Its child is a subject in a file and content on a page.</summary>
+[InterceptorSubject]
+public partial class TestTile : IConfigurable
+{
+    [Configuration]
+    public partial int Position { get; set; }
+
+    [Configuration, Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Child { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>Runs code of the test while its configuration is applied, which is inside the reload of its page.</summary>
+[InterceptorSubject]
+public partial class TestCallback : IConfigurable
+{
+    [Configuration]
+    public partial string? Label { get; set; }
+
+    /// <summary>Awaited while the configuration is applied. Null does nothing.</summary>
+    public Func<Task>? OnApply { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) =>
+        OnApply?.Invoke() ?? Task.CompletedTask;
+}
+
+/// <summary>Runs code of the test while its configuration is serialized, which is inside the synchronous part of a save.</summary>
+[InterceptorSubject]
+public partial class TestSerializerCallback : IConfigurable
+{
+    [Configuration]
+    public partial TestSerializerCallbackValue? Value { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>The value of a <see cref="TestSerializerCallback"/>, written as its text.</summary>
+[JsonConverter(typeof(TestSerializerCallbackValueConverter))]
+public sealed class TestSerializerCallbackValue(string text)
+{
+    public string Text { get; } = text;
+
+    /// <summary>Runs once, the next time the value is serialized. Null does nothing.</summary>
+    public Action? OnNextWrite { get; set; }
+}
+
+public sealed class TestSerializerCallbackValueConverter : JsonConverter<TestSerializerCallbackValue>
+{
+    public override TestSerializerCallbackValue Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        new(reader.GetString() ?? string.Empty);
+
+    public override void Write(Utf8JsonWriter writer, TestSerializerCallbackValue value, JsonSerializerOptions options)
+    {
+        var onNextWrite = value.OnNextWrite;
+        value.OnNextWrite = null;
+        onNextWrite?.Invoke();
+        writer.WriteStringValue(value.Text);
+    }
+}
+
+/// <summary>A subject with a list of subjects in its configuration, which a page writes in the json block.</summary>
+[InterceptorSubject]
+public partial class TestShelf : IConfigurable
+{
+    public TestShelf()
+    {
+        Rows = 2;
+        Items = [];
+    }
+
+    [Configuration]
+    public partial int Rows { get; set; }
+
+    [Configuration]
+    public partial int Columns { get; set; }
+
+    [Configuration]
+    public partial List<TestShelfItem> Items { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>One entry of a <see cref="TestShelf"/> with a subject of any type.</summary>
+[InterceptorSubject]
+public partial class TestShelfItem : IConfigurable
+{
+    public TestShelfItem()
+    {
+        RowSpan = 1;
+    }
+
+    [Configuration]
+    public partial int? Row { get; set; }
+
+    [Configuration]
+    public partial int? Column { get; set; }
+
+    [Configuration]
+    public partial int RowSpan { get; set; }
+
+    [Configuration]
+    public partial int ColumnSpan { get; set; }
+
+    [Configuration]
+    public partial IInterceptorSubject? Child { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>A tile of a type that the slot of a <see cref="TestBoard"/> does not create.</summary>
+[InterceptorSubject]
+public partial class TestWideTile : TestTile
+{
+    [Configuration]
+    public partial int Span { get; set; }
+}
+
+/// <summary>Holds a subject class whose full name has a '+', which the head line of a block cannot carry.</summary>
+public static partial class TestNesting
+{
+    [InterceptorSubject]
+    public partial class TestNestedLeaf : IConfigurable
+    {
+        [Configuration]
+        public partial int Count { get; set; }
+
+        public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
@@ -8,6 +9,7 @@ namespace HomeBlaze.Storage.Pages;
 /// <summary>One slot of a type. The accessors are those of the intercepted property, so a write is tracked.</summary>
 internal sealed record SlotDefinition(
     string Name,
+    string PropertyName,
     Type PropertyType,
     Type ValueType,
     bool IsList,
@@ -27,20 +29,41 @@ internal sealed class SlotMap
 
     private static readonly ConcurrentDictionary<Type, SlotMap> Cache = new();
 
-    private SlotMap(SlotDefinition? defaultSlot, IReadOnlyDictionary<string, SlotDefinition> named, string? error)
+    private readonly FrozenDictionary<string, SlotDefinition> _byPropertyName;
+
+    private SlotMap(SlotDefinition? defaultSlot, Dictionary<string, SlotDefinition> named, string? error)
     {
         Default = defaultSlot;
-        Named = named;
+        Named = named.ToFrozenDictionary();
+        _byPropertyName = named.Values.ToFrozenDictionary(slot => slot.PropertyName, StringComparer.Ordinal);
         Error = error;
     }
 
     public SlotDefinition? Default { get; }
 
     /// <summary>All slots by block name, including the default slot.</summary>
-    public IReadOnlyDictionary<string, SlotDefinition> Named { get; }
+    public FrozenDictionary<string, SlotDefinition> Named { get; }
 
     /// <summary>Set when the type declares its slots in a way that cannot be used.</summary>
     public string? Error { get; }
+
+    /// <summary>Gets the slot that the property with exactly this name declares, or null.</summary>
+    public SlotDefinition? FindByPropertyName(string propertyName) =>
+        _byPropertyName.GetValueOrDefault(propertyName);
+
+    /// <summary>Gets the slot that the property with this name in any casing declares, or null.</summary>
+    public SlotDefinition? FindByPropertyNameIgnoringCase(string propertyName)
+    {
+        foreach (var slot in Named.Values)
+        {
+            if (string.Equals(slot.PropertyName, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                return slot;
+            }
+        }
+
+        return null;
+    }
 
     public static SlotMap For(Type type) => Cache.GetOrAdd(type, Create);
 
@@ -124,7 +147,8 @@ internal sealed class SlotMap
                 return Invalid($"the slot '{name}' needs a setter.");
             }
 
-            var slot = new SlotDefinition(name, property.PropertyType, valueType, isList, attribute.IsDefault, getValue, setValue);
+            var slot = new SlotDefinition(
+                name, property.Name, property.PropertyType, valueType, isList, attribute.IsDefault, getValue, setValue);
             named.Add(name, slot);
             if (attribute.IsDefault)
             {

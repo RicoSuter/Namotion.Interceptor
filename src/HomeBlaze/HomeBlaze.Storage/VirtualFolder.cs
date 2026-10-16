@@ -77,6 +77,12 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
         => Storage.WriteBlobAsync(path, content, cancellationToken);
 
     /// <summary>
+    /// Writes a blob to storage. Path is relative to the storage root.
+    /// </summary>
+    public Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
+        => Storage.WriteBlobAsync(path, content, cancellationToken);
+
+    /// <summary>
     /// Deletes a blob from storage. Path is relative to the storage root.
     /// The parent storage handles removal from the hierarchy.
     /// </summary>

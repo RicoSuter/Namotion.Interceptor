@@ -811,8 +811,8 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.ExpansionPanels\n::: Panel Title=More\nDetails\n:::\n::")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Alert\nCareful.\n::")]
     [InlineData("Title=Info", "Title=Info Href=\"https://example.com/plant\"")]
-    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout Rows=1 Columns=2\n```json\n{ \"Cells\": [ { \"Row\": 0, \"Column\": 1, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"motor\" } } ] }\n```\n::")]
-    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.CanvasLayout MinHeight=300\n```json\n{ \"Nodes\": [ { \"X\": 20, \"Y\": 20, \"Child\": { \"$type\": \"HomeBlaze.Components.Card\", \"Title\": \"Note\" } } ] }\n```\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout Rows=1 Columns=2\n::: Cell Row=0 Column=1\n:::: HomeBlaze.Components.Widget Path=motor\n::::\n:::\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.CanvasLayout MinHeight=300\n::: Node X=20 Y=20\n:::: HomeBlaze.Components.Card Title=Note\n::::\n:::\n::")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesLayoutBlocks_ThenThePageIsWritten(string oldText, string newText)
     {
         // Arrange
@@ -872,10 +872,10 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card Title=Info Password=x\n::", "With the permission to edit page layout")]
     [InlineData("Title=Info", "Title=Info Image=\"https://tracker.example.com/pixel.png\"", "With the permission to edit page layout")]
     [InlineData("Title=Info", "Title=Info Href=\"javascript:alert(1)\"", "With the permission to edit page layout")]
-    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n```json\n{ \"Cells\": [ { \"Child\": { \"$type\": \"HomeBlaze.Samples.Motor\", \"Name\": \"Other\" } } ] }\n```\n::", "With the permission to edit page layout")]
-    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n```json\n{ \"Cells\": [ { \"Child\": { \"Path\": \"motor\" } } ] }\n```\n::", "With the permission to edit page layout")]
-    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n```json\n{ \"Cells\": [ { \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"missing\" } } ] }\n```\n::", "leads to no existing subject")]
-    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.CanvasLayout\n```json\n{ \"Nodes\": [ { \"Child\": { \"$type\": \"HomeBlaze.Components.Card\", \"Image\": \"https://tracker.example.com/pixel.png\" } } ] }\n```\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n::: Cell\n:::: HomeBlaze.Samples.Motor#other Name=Other\n::::\n:::\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n::: Cell\n```json\n{ \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"motor\" } }\n```\n:::\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n::: Cell\n:::: HomeBlaze.Components.Widget Path=missing\n::::\n:::\n::", "leads to no existing subject")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.CanvasLayout\n::: Node\n:::: HomeBlaze.Components.Card Title=Pixel Image=\"https://tracker.example.com/pixel.png\"\n::::\n:::\n::", "With the permission to edit page layout")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesAnythingElse_ThenItIsRejected(string oldText, string newText, string expectedMessage)
     {
         // Arrange
@@ -1089,17 +1089,20 @@ public class MarkdownFileWriteTests : IDisposable
         ::
 
         :: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
-        ```json
-        { "Cells": [ { "Row": 0, "Column": 1, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "gone" } } ] }
-        ```
+        ::: Cell Row=0 Column=1
+        :::: HomeBlaze.Components.Widget Path=lost
+        ::::
+        :::
         ::
 
         :: HomeBlaze.Components.Card#info Title=Info
         ::
         """;
 
-    [Fact]
-    public async Task WhenThePageAlreadyHasDanglingReferences_ThenALayoutEditThatKeepsThemIsWritten()
+    [Theory]
+    [InlineData("Title=Info", "Title=Details")]
+    [InlineData("Rows=1 Columns=2", "Rows=1 Columns=3")]
+    public async Task WhenThePageAlreadyHasDanglingReferences_ThenALayoutEditThatKeepsThemIsWritten(string oldText, string newText)
     {
         // Arrange
         WriteFile("Plant.md", PageWithDanglingReferences);
@@ -1108,15 +1111,15 @@ public class MarkdownFileWriteTests : IDisposable
         using var permission = MarkdownPageLayoutPermission.Enter(true);
 
         // Act
-        await markdown.ReplaceTextAsync("Title=Info", "Title=Details", CancellationToken.None);
+        await markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None);
 
         // Assert
-        Assert.Equal(PageWithDanglingReferences.Replace("Title=Info", "Title=Details"), ReadFile("Plant.md"));
+        Assert.Equal(PageWithDanglingReferences.Replace(oldText, newText), ReadFile("Plant.md"));
     }
 
     [Theory]
     [InlineData("Path=gone\n", "Path=missing\n")]
-    [InlineData("Rows=1 Columns=2", "Rows=1 Columns=3")]
+    [InlineData("Path=lost\n", "Path=missing\n")]
     [InlineData("# Plant\n", "# Plant\n\n:: HomeBlaze.Components.Widget Path=gone\n::\n")]
     public async Task WhenALayoutEditAddsOrChangesADanglingReference_ThenItIsRejected(string oldText, string newText)
     {

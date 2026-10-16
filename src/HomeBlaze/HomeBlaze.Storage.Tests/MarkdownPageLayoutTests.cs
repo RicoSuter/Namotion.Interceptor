@@ -27,7 +27,7 @@ public class MarkdownPageLayoutTests
         var block = Assert.Single(MarkdownPageLayout.FindLayoutBlocks(page, FindType));
 
         // Act
-        var paths = MarkdownPageLayout.GetReferencePaths(block, typeof(TwoReferenceLayout), FindType);
+        var paths = MarkdownPageLayout.GetReferencePaths(block, typeof(TwoReferenceLayout));
 
         // Assert
         Assert.Equal(["first", "second"], paths.Order());

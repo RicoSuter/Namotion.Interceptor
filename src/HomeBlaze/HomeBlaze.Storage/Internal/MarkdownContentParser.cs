@@ -179,6 +179,14 @@ public sealed partial class MarkdownContentParser
         _logger = logger;
     }
 
+    /// <summary>Logs why a change of a subject was not written to the text of its page.</summary>
+    internal void LogRefusedWrite(string path, string reason) =>
+        _logger?.LogWarning("A change was not written to the page {Path}: {Reason}", path, reason);
+
+    /// <summary>Logs that the page could not be read again after a refused write.</summary>
+    internal void LogFailedReload(string path, Exception exception) =>
+        _logger?.LogWarning(exception, "Failed to reload the page {Path} after a refused write", path);
+
     /// <summary>
     /// Renders markdown content by replacing each {{ path }} expression that
     /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value in the format it asks for: also

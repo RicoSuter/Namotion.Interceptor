@@ -37,6 +37,7 @@ Setup, deployment, and runtime configuration for operators and administrators.
 - [Paths](administration/paths.md): Path syntax for referencing subjects
 - [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
 - [AI Agents](administration/ai-agents.md): Built-in agents on a Claude subscription or the Anthropic API: triggers, chat, memory and permissions
+- [Version and Updates](administration/updates.md): Running version, build and update check
 
 ### Development
 

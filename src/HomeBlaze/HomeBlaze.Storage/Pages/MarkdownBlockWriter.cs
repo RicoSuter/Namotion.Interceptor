@@ -1,10 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Services;
+using Markdig.Helpers;
 
 namespace HomeBlaze.Storage.Pages;
 
-/// <summary>Writes the configuration of one block back into the page text. Block content is never touched.</summary>
+/// <summary>
+/// Pure text functions for the head line and the json block of a block, and for inserting and removing whole
+/// blocks. They know nothing about subjects.
+/// </summary>
 public static class MarkdownBlockWriter
 {
     private const string UnixLineEnding = "\n";
@@ -74,21 +78,226 @@ public static class MarkdownBlockWriter
     }
 
     /// <summary>
-    /// Creates the text of a new, empty widget block with a fence of <paramref name="fenceLength"/> characters
-    /// from a configuration like the one <see cref="WriteConfiguration"/> takes.
+    /// Creates the text of a new block with a fence of <paramref name="fenceLength"/> characters from a
+    /// configuration like the one <see cref="WriteConfiguration"/> takes.
     /// Its lines end with <paramref name="lineEnding"/>, except the last one, which has no line ending.
     /// </summary>
+    /// <param name="name">The full type name of a widget block, or the name of a slot block.</param>
+    /// <param name="id">The name of the block after <c>#</c>, or null.</param>
+    /// <param name="configurationJson">The configuration as a JSON object.</param>
+    /// <param name="fenceLength">The number of fence characters.</param>
+    /// <param name="lineEnding">The line ending between the lines.</param>
+    /// <param name="hasClosingLine">Whether the block ends with a closing line. Without one, what follows it must end it.</param>
+    /// <param name="content">Lines that stand inside the block after its json block, or null.</param>
     public static string CreateBlock(
-        string typeName, string? id, string configurationJson, int fenceLength, string lineEnding = UnixLineEnding)
+        string name,
+        string? id,
+        string configurationJson,
+        int fenceLength,
+        string lineEnding = UnixLineEnding,
+        bool hasClosingLine = true,
+        string? content = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(fenceLength, MarkdownBlockFence.MinimumLength);
 
         var (arguments, remainder) = SplitConfiguration(configurationJson);
-        var head = new MarkdownBlockHead(fenceLength, typeName, id, arguments).Format();
-        var closingLine = MarkdownBlockFence.Create(fenceLength);
-        return remainder is null
-            ? $"{head}{lineEnding}{closingLine}"
-            : $"{head}{lineEnding}{FormatFence(remainder, lineEnding)}{lineEnding}{closingLine}";
+        var lines = new List<string> { new MarkdownBlockHead(fenceLength, name, id, arguments).Format() };
+        if (remainder is not null)
+        {
+            lines.Add(FormatFence(remainder, lineEnding));
+        }
+
+        if (!string.IsNullOrEmpty(content))
+        {
+            lines.Add(content);
+        }
+
+        if (hasClosingLine)
+        {
+            lines.Add(MarkdownBlockFence.Create(fenceLength));
+        }
+
+        return string.Join(lineEnding, lines);
+    }
+
+    /// <summary>
+    /// Gets where a new block of the slot <paramref name="slotName"/> of <paramref name="owner"/> goes: after
+    /// the last block of that slot, written like that block, or without one at the end of the content of the
+    /// owner, in the style of the page.
+    /// </summary>
+    /// <remarks>
+    /// The style of the page is without closing lines when any widget or slot block of it has none. After a
+    /// block of the slot, the new block has as many fence characters as that block, so that what ended that
+    /// block ends the new one as well. The text of the page must have no lone carriage return, see
+    /// <see cref="HasLoneCarriageReturn"/>.
+    /// </remarks>
+    internal static MarkdownBlockPlacement GetSlotBlockPlacement(MarkdownPage page, MarkdownBlock owner, string slotName)
+    {
+        var source = page.Source;
+        if (GetSlotBlocks(owner, slotName).LastOrDefault() is { } lastSibling)
+        {
+            return new MarkdownBlockPlacement(
+                lastSibling.EndLine + 1,
+                lastSibling.FenceLength,
+                lastSibling.HasClosingLine,
+                GetIndentation(source, lastSibling),
+                GetLineEnding(source, lastSibling.HeadSpan.End));
+        }
+
+        var hasClosingLine = !page.AllBlocks.Any(
+            block => block.Kind is (MarkdownBlockKind.Widget or MarkdownBlockKind.Slot) && !block.HasClosingLine);
+
+        // Before the closing line of the owner, or after its last line of content.
+        var line = owner.HasClosingLine ? owner.EndLine : owner.EndLine + 1;
+        return new MarkdownBlockPlacement(
+            line, owner.FenceLength + 1, hasClosingLine, GetIndentation(source, owner), GetLineEnding(source, owner.HeadSpan.End));
+    }
+
+    /// <summary>
+    /// Gets the slot blocks of <paramref name="owner"/> with the name <paramref name="slotName"/>, in the order of
+    /// their lines.
+    /// </summary>
+    internal static IEnumerable<MarkdownBlock> GetSlotBlocks(MarkdownBlock owner, string slotName) =>
+        // The parser lists the children of a block in the order of the text, and a block is a slot block only
+        // directly inside a widget or slot block.
+        owner.Children.Where(child => child.Kind == MarkdownBlockKind.Slot && child.Head!.Name == slotName);
+
+    // The white space before the head line of the block on its line.
+    private static string GetIndentation(string source, MarkdownBlock block) =>
+        source[(source.AsSpan(0, block.HeadSpan.Start).LastIndexOf('\n') + 1)..block.HeadSpan.Start];
+
+    /// <summary>
+    /// Inserts <paramref name="text"/> as lines of their own before the 1-based <paramref name="line"/>. A line
+    /// after the last line of the text appends them. The text has no line ending after its last line.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="source"/> must have no lone carriage return when the line comes from a parsed page, see
+    /// <see cref="HasLoneCarriageReturn"/>.
+    /// </remarks>
+    internal static string InsertLines(string source, int line, string text, string lineEnding, out MarkdownLineEdit edit)
+    {
+        var offset = GetLineStart(source, line);
+        var insertedLineCount = text.AsSpan().Count('\n') + 1;
+
+        // The last line has no line ending, so the new lines get one before them instead of after them.
+        if (offset == source.Length && source.Length > 0 && source[^1] != '\n')
+        {
+            edit = new MarkdownLineEdit(source.AsSpan().Count('\n') + 2, 0, insertedLineCount);
+            return source + lineEnding + text;
+        }
+
+        edit = new MarkdownLineEdit(source.AsSpan(0, offset).Count('\n') + 1, 0, insertedLineCount);
+        return source.Insert(offset, text + lineEnding);
+    }
+
+    /// <summary>
+    /// Removes the block with everything in it: the lines from its head line to its last line, which is its
+    /// closing line or, without one, the last line of its content that is not empty.
+    /// </summary>
+    /// <remarks>
+    /// One empty line stays in place of the block when the line before it and the line after it are both text.
+    /// As neighbours they would be joined: the text after the block would continue the paragraph, the list item
+    /// or the quote before it. <paramref name="source"/> must have no lone carriage return, see
+    /// <see cref="HasLoneCarriageReturn"/>.
+    /// </remarks>
+    internal static string RemoveBlock(string source, MarkdownBlock block, out MarkdownLineEdit edit)
+    {
+        var start = GetLineStart(source, block.Line);
+        var end = GetLineStart(source, block.EndLine + 1);
+        var removedLineCount = block.EndLine - block.Line + 1;
+
+        if (IsTextLine(source, GetLineStart(source, block.Line - 1), start) && IsTextLine(source, end, GetLineStart(source, block.EndLine + 2)))
+        {
+            edit = new MarkdownLineEdit(block.Line, removedLineCount, 1);
+            return source.Remove(start, end - start).Insert(start, GetLineEnding(source, block.HeadSpan.End));
+        }
+
+        edit = new MarkdownLineEdit(block.Line, removedLineCount, 0);
+        return source.Remove(start, end - start);
+    }
+
+    // Whether the line between the two offsets has text that is no head line and no closing line of a block.
+    // Next to such a fence line, and next to an empty line, nothing is joined. Mirrors TryReadFence of
+    // MarkdownBlockContainerParser through the rules of MarkdownBlockFence: a fence indented as code and a
+    // fence before text that starts no head line, such as a time, are text. Both continue a paragraph before them.
+    private static bool IsTextLine(string source, int lineStart, int nextLineStart)
+    {
+        // Only spaces and tabs are indentation, and only a line of nothing else is empty.
+        var line = source.AsSpan(lineStart, nextLineStart - lineStart).TrimEnd("\r\n");
+        var text = line.TrimStart(" \t");
+        if (text.IsEmpty)
+        {
+            return false;
+        }
+
+        var indentation = line[..^text.Length];
+        var fenceLength = text.IndexOfAnyExcept(MarkdownBlockFence.Character);
+        if (fenceLength < 0)
+        {
+            fenceLength = text.Length;
+        }
+
+        // A tab reaches the fourth column, so only spaces need counting.
+        if (fenceLength < MarkdownBlockFence.MinimumLength ||
+            indentation.Contains('\t') ||
+            MarkdownBlockFence.IsIndentedAsCode(indentation.Length))
+        {
+            return true;
+        }
+
+        // The white space that StringSlice.Trim takes off in TryReadFence, which is not that of char.IsWhiteSpace.
+        foreach (var character in text[fenceLength..])
+        {
+            if (!CharHelper.IsWhitespace(character))
+            {
+                return !MarkdownBlockFence.StartsHeadLine(character);
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/>.</summary>
+    internal static string Indent(string text, string indentation, string lineEnding) =>
+        indentation.Length == 0 ? text : indentation + text.Replace(lineEnding, lineEnding + indentation);
+
+    // The offset of the first character of the 1-based line, or the length of the text for a line after the last one.
+    private static int GetLineStart(string source, int line)
+    {
+        var offset = 0;
+        for (var current = 1; current < line; current++)
+        {
+            var lineFeed = source.IndexOf('\n', offset);
+            if (lineFeed < 0)
+            {
+                return source.Length;
+            }
+
+            offset = lineFeed + 1;
+        }
+
+        return offset;
+    }
+
+    /// <summary>
+    /// Gets whether <paramref name="source"/> has a carriage return that no line feed follows. Markdig ends a line
+    /// there as well, so the line numbers of a page parsed from such a text are not the ones that
+    /// <see cref="GetSlotBlockPlacement"/>, <see cref="InsertLines"/> and <see cref="RemoveBlock"/> count.
+    /// </summary>
+    internal static bool HasLoneCarriageReturn(string source)
+    {
+        var text = source.AsSpan();
+        for (var index = text.IndexOf('\r'); index >= 0; index = text.IndexOf('\r'))
+        {
+            if (index + 1 == text.Length || text[index + 1] != '\n')
+            {
+                return true;
+            }
+
+            text = text[(index + 2)..];
+        }
+
+        return false;
     }
 
     /// <summary>

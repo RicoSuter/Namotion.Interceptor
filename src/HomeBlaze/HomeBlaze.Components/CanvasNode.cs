@@ -38,9 +38,9 @@ public partial class CanvasNode : IConfigurable
     public partial int Height { get; set; }
 
     /// <summary>
-    /// The child subject to render in this node.
+    /// What the node shows. On a page the content of the <c>Node</c> block, in a configuration file one subject.
     /// </summary>
-    [Configuration]
+    [Configuration, Slot(IsDefault = true)]
     public partial IInterceptorSubject? Child { get; set; }
 
     public CanvasNode()

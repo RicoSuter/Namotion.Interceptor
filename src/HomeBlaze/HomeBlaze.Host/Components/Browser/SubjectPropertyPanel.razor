@@ -593,6 +593,19 @@
                                    data-testid="subject-pane-value-link" />
                 </MudTooltip>
             }
+            else if (value is Uri { IsAbsoluteUri: true } uri && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            {
+                <MudTooltip Text="Open in new tab">
+                    <MudIconButton Href="@uri.AbsoluteUri"
+                                   Target="_blank"
+                                   Rel="noopener noreferrer"
+                                   Icon="@Icons.Material.Filled.OpenInNew"
+                                   Size="Size.Small"
+                                   Class="pa-0 ml-2"
+                                   aria-label="@($"Open {displayName} in new tab")"
+                                   data-testid="subject-pane-value-link" />
+                </MudTooltip>
+            }
             else if (value is not null)
             {
                 @* Copied by the script of the pane in the click itself, see SubjectPropertyPanel.razor.js. *@

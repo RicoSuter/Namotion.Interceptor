@@ -17,7 +17,7 @@ public class ValueWidgetBlockTests
     [Fact]
     public async Task WhenValueListHasRows_ThenEachRowHasItsOptionsAndContent()
     {
-        // Arrange & Act
+        // Act
         var page = await AddPageAsync("""
             :: HomeBlaze.Components.ValueList#list
             ::: Value Path=/a/Speed Label="Speed" Icon=Speed Map=states
@@ -42,7 +42,7 @@ public class ValueWidgetBlockTests
     [Fact]
     public async Task WhenPageHasValueTile_ThenItHasItsOptions()
     {
-        // Arrange & Act
+        // Act
         var page = await AddPageAsync("""
             :: HomeBlaze.Components.ValueTile#tile Path=/a/Speed Label="Speed" Icon=Speed Map=states
             ::
@@ -59,7 +59,7 @@ public class ValueWidgetBlockTests
     [Fact]
     public async Task WhenPageHasIndicatorAndProgress_ThenTheyHaveTheirOptionsAndDefaults()
     {
-        // Arrange & Act
+        // Act
         var page = await AddPageAsync("""
             :: HomeBlaze.Components.Indicator#plain Path=/a/IsOn
             ::
@@ -99,7 +99,7 @@ public class ValueWidgetBlockTests
     [Fact]
     public async Task WhenPageHasExpansionPanelsAndAlert_ThenTheyHaveTheirOptionsAndDefaults()
     {
-        // Arrange & Act
+        // Act
         var page = await AddPageAsync("""
             :: HomeBlaze.Components.ExpansionPanels#panels Single=true
             ::: Panel Title="One" Icon=Bed Expanded=true

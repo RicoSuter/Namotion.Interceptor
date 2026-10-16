@@ -21,7 +21,6 @@ On this page:
 - [What an Edit of the Page Keeps](#what-an-edit-of-the-page-keeps): which subjects keep running when the text changes
 - [Editing in the Page Editor](#editing-in-the-page-editor): creating and editing blocks with dialogs
 - [Not Supported](#not-supported): what the syntax does not do
-- [The Old `subject(name)` Form](#the-old-subjectname-form): converting the pages of earlier versions
 - [Example: A Dashboard Page](#example-a-dashboard-page): a complete page
 - [Tips](#tips)
 - [Related Documentation](#related-documentation)
@@ -248,7 +247,7 @@ Every form a line of the syntax can take:
 | Head line of a slot block | `::: Footer` or `::: Tab#name Title="Some text"` | Opens a block that fills a slot of the widget block directly around it. Only some slots take a name and arguments |
 | Head line of a style block | `:: {.some-class}` | Opens a block that becomes a plain `<div>` with these attributes |
 | Closing line | `::` | Closes the block that was opened with the same number of colons. Colons only. It is optional where the next head line or the end of the page ends the block |
-| `json` block | A fenced code block with the language `json`, as the first thing inside a block | Configuration of the block that is not a single value. It is not shown |
+| `json` block | A fenced code block with the language `json`, as the first thing inside a block | Configuration of the block that does not fit on the head line. It is not shown |
 | Expression | `{{ path/Property }}` | A live value in the text |
 | Text that starts with colons | `\:: some text` | A backslash before the first colon makes the line ordinary text |
 
@@ -260,12 +259,12 @@ The rest of this section is the reference:
 - [Names](#names): type names, property names, block names and slot names
 - [Closing and Nesting](#closing-and-nesting): how many colons a line has, when a closing line is needed, and what a wrong number does
 - [Content and Slots](#content-and-slots): text, expressions and blocks inside a widget
-- [The `json` Block](#the-json-block): configuration that is not a single value
+- [The `json` Block](#the-json-block): configuration that does not fit on the head line
 - [Style Blocks](#style-blocks): a plain `<div>` around content
 - [Names and the Page](#names-and-the-page): what a name and a relative path refer to
 - [Where a Block Is Allowed](#where-a-block-is-allowed)
 
-[Page Widgets](page-widgets.md) shows every widget for pages live, with the source of each sample above its result. The sample data of a development checkout also has demo pages to try each area: `Demo/Blocks.md` for an overview, `Demo/Dashboard.md` as the full example of a dashboard, `Demo/References.md` for names and paths, `Demo/Configuration.md` for arguments, the `json` block, style blocks and the page editor, and `Demo/Errors.md` for the common error boxes. An installed HomeBlaze does not ship the demo pages.
+[Page Widgets](page-widgets.md) shows every widget for pages live, with the source of each sample above its result. The sample data of a development checkout also has demo pages to try each area: `Demo/Blocks.md` for an overview, `Demo/Dashboard.md` as the full example of a dashboard, `Demo/References.md` for names and paths, `Demo/Configuration.md` for arguments, the `json` block, a grid with `Cell` blocks, style blocks and the page editor, and `Demo/Errors.md` for the common error boxes. An installed HomeBlaze does not ship the demo pages.
 
 ### The Head Line
 
@@ -483,9 +482,9 @@ This sentence was meant for the page and is shown in the card.
 
 What to write:
 
-- **Layouts in the short form**: Write a `FlowLayout`, a `TabLayout` and the cards and widgets in them without closing lines.
+- **Layouts in the short form**: Write a `FlowLayout`, a `TabLayout`, a `GridLayout`, a `CanvasLayout` and the cards and widgets in them without closing lines.
 - **A closing line after text**: Write the closing line whenever a block contains text and something follows that belongs further out, like the text of the page after a card.
-- **Every closing line stays valid**: A page with all its closing lines means the same as the page in the short form. The page editor writes a closing line for every block that it creates.
+- **Every closing line stays valid**: A page with all its closing lines means the same as the page in the short form. The "Create" button of the page editor writes a closing line for every block that it creates. A cell or a node that is added in edit mode is written like those beside it, see [Editing in the Page Editor](#editing-in-the-page-editor).
 
 #### What a Wrong Number of Colons Does
 
@@ -632,7 +631,7 @@ The footer of the card, with a value: {{ ../Conveyor/TargetSpeed }} RPM.
 ::
 ~~~~
 
-**A slot whose blocks create a subject.** Some slots do not hold content directly. Each of their blocks creates a subject of a type that the widget chose, and the block takes the arguments of that type, an optional `#name` and a `json` block, like a widget block. The content of the block goes to the default slot of that subject. The `Tab` of a `TabLayout` is such a slot: each `Tab` block creates a tab with a `Title` and an `Icon`. The `Panel` of `ExpansionPanels` and the `Value` of a `ValueList` work the same way, and so does the `Case` of a `ValueMap`, which takes arguments but no content.
+**A slot whose blocks create a subject.** Some slots do not hold content directly. Each of their blocks creates a subject of a type that the widget chose, and the block takes the arguments of that type, an optional `#name` and a `json` block, like a widget block. The content of the block goes to the default slot of that subject. The `Tab` of a `TabLayout` is such a slot: each `Tab` block creates a tab with a `Title` and an `Icon`. The `Cell` of a `GridLayout`, the `Node` of a `CanvasLayout`, the `Panel` of `ExpansionPanels` and the `Value` of a `ValueList` work the same way, and so does the `Case` of a `ValueMap`, which takes arguments but no content.
 
 ~~~~markdown
 :: HomeBlaze.Components.TabLayout
@@ -685,7 +684,7 @@ Rules for all slots:
 
 A mistake in how the slots of a widget are filled replaces the whole widget with one box. The box names the line that has to be fixed.
 
-**Content in a widget without a default slot.** A motor declares no slot, so its block must stay empty. `FlowLayout` and `TabLayout` have no default slot either: all their content stands in `Item` or `Tab` blocks. When the block has no closing line and no slot block follows the content, the box also names the closing line that ends it, see [When a Closing Line Is Needed](#when-a-closing-line-is-needed).
+**Content in a widget without a default slot.** A motor declares no slot, so its block must stay empty. The layouts have no default slot either: all the content of a `FlowLayout`, a `TabLayout`, a `GridLayout` and a `CanvasLayout` stands in `Item`, `Tab`, `Cell` or `Node` blocks. When the block has no closing line and no slot block follows the content, the box also names the closing line that ends it, see [When a Closing Line Is Needed](#when-a-closing-line-is-needed).
 
 <!-- sample: error -->
 ~~~~markdown
@@ -755,37 +754,34 @@ Line 4: The slot 'Footer' holds content only and takes no arguments, name or jso
 
 ### The `json` Block
 
-A list or an object does not fit on the head line. Write such configuration as a JSON object in a fenced code block with the language `json` that is the first thing inside the block. This page calls it the `json` block.
+A list, an object, a subject or a text with a line break does not fit on the head line. Write such configuration as a JSON object in a fenced code block with the language `json` that is the first thing inside the block. This page calls it the `json` block.
 
-The cells of a `GridLayout` are a list. Each cell here holds a subject of its own, a `Widget` that shows a motor:
+On a page, no widget that ships with HomeBlaze takes a list, an object or a subject as configuration, so the only configuration of these widgets that needs a `json` block is a text with a line break. The `json` block is there for every other type with such values, for example a device whose configuration has a list.
+
+The `Subtitle` of a `Card` is text. Here it has a line break, which an argument cannot hold:
 
 ~~~~markdown
-:: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
+:: HomeBlaze.Components.Card#note Title="Note"
 ```json
-{
-  "Cells": [
-    { "Row": 0, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" } },
-    { "Row": 0, "Column": 1, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../WaterPump" } }
-  ]
-}
+{ "Subtitle": "First line\nSecond line" }
 ```
 ::
 ~~~~
 
-The reader sees a grid of one row with the two motors next to each other. The `json` block itself is not shown.
+The `json` block itself is not shown, and a card shows its subtitle as running text, so the line break is a space there.
 
 - **Where**: The `json` block is the first thing inside its block. Empty lines before it do not count. It is written with three or more backticks or tildes and the language `json` in lower case. A fenced code block with `json` anywhere else is ordinary content and is shown as code.
 - **Which blocks**: A widget block can have a `json` block, and so can a slot block that creates a subject, like a `Tab`.
-- **Names**: The names in the object are property names like the keys of the arguments. This holds at every depth: here for `Cells` of the grid, for `Row`, `Column` and `Child` of a cell, and for `Path` of the widget in the cell.
+- **Names**: The names in the object are property names like the keys of the arguments, here `Subtitle` of the card. This holds at every depth of the object, also for the properties of a subject that is nested in a value.
 - **`$type`**: A subject inside the object names its type with `$type`, which is spelled the same as in a JSON file. It must be the first name in the braces of that subject. At the top level of the object, a `$type` is ignored, because the type of the block is on its head line.
 - **Argument and `json` block**: Both can be used together. When both set the same property, the argument wins.
 
 What the page checks in a `json` block, and what it does not:
 
-- **Checked**: The text must be one valid JSON object without a name that stands twice. A name at the top level of the object that the type does not have is an error like an unknown argument, with the same hint when only the case differs.
-- **Values are checked**: A value at the top level of the object that does not fit its property is an error, and the block is not created. The exception is `null`, see the next point. For a single value the message is the one of an argument and names the expected type. For a list or an object the message names the property and the place inside the value where the reader of the JSON stopped. If the `$type` of a nested subject names no type, the whole top level value that contains it is such an error. The same holds for a value deeper in the object that cannot be converted, like text for the `Row` of a cell. A nested subject without a `$type` is an error as well, and so is one whose `$type` is not the first name in its braces: the message names the place of the subject and says that it needs its `$type` there. When several values do not fit, the box shows the first of them only: with `{ "Rows": "three", "Columns": "four" }` it names `Rows`, and `Columns` follows once `Rows` is right.
-- **`null` is a value**: At the top level, `null` is applied without a message to every property that can be empty. That is every property that holds text, a list or an object, and a number, a yes or no or a duration that its type declares as optional, like `MinHeight` of a `CanvasLayout`. The property is then empty, also where the type starts with a value, like the empty list of `Cells`. For a number, a yes or no or a duration that must have a value, like `Rows` of a `GridLayout`, `null` is an error like any value that does not fit. To leave a property at its default, leave its name out.
-- **Names are not checked below the top level**: A name deeper in the object that is no property of its type is skipped without a message, and the property keeps its default. This is the trap when you paste from a `*.json` configuration file, which spells the names in camelCase: `"path"` in the widget of a cell is skipped, the widget has no path and shows "Cannot resolve path". When a nested value is missing on the page, check the spelling and the case of its name.
+- **Checked**: The text must be one valid JSON object without a name that stands twice. A name at the top level of the object that the type does not have is an error like an unknown argument, with the same hint when only the case differs. The property of a slot, like `Cells` of a `GridLayout`, cannot be set there either: the box then says how the slot is filled, see [Content and Slots](#content-and-slots). An empty list for a slot that takes several blocks, like `"Cells": []`, is no error: the page ignores it, and the next save of the block leaves it out.
+- **Values are checked**: A value at the top level of the object that does not fit its property is an error, and the block is not created. The exception is `null`, see the next point. For a single value the message is the one of an argument and names the expected type. For a list or an object the message names the property and the place inside the value where the reader of the JSON stopped. If the `$type` of a nested subject names no type, the whole top level value that contains it is such an error. The same holds for a value deeper in the object that cannot be converted, like text for a number of a nested subject. A nested subject without a `$type` is an error as well, and so is one whose `$type` is not the first name in its braces: the message names the place of the subject and says that it needs its `$type` there. When several values do not fit, the box shows the first of them only: for a `GridLayout` with `{ "Rows": "three", "Columns": "four" }` it names `Rows`, and `Columns` follows once `Rows` is right.
+- **`null` is a value**: At the top level, `null` is applied without a message to every property that can be empty. That is every property that holds text, a list or an object, and a number, a yes or no or a duration that its type declares as optional, like `MinHeight` of a `CanvasLayout`. The property is then empty, also where the type gives it a value to start with. For a number, a yes or no or a duration that must have a value, like `Rows` of a `GridLayout`, `null` is an error like any value that does not fit. To leave a property at its default, leave its name out.
+- **Names are not checked below the top level**: A name deeper in the object that is no property of its type is skipped without a message, and the property keeps its default. This is the trap when you paste from a `*.json` configuration file, which spells the names in camelCase: `"path"` in a nested subject whose property is `Path` is skipped, and the subject has no path. When a nested value is missing on the page, check the spelling and the case of its name.
 
 A value that does not fit, here text for the number of rows. The grid is not shown:
 
@@ -884,8 +880,8 @@ These widgets ship with HomeBlaze and are made for pages. [Page Widgets](page-wi
 | `FlowLayout` | Cells next to each other that wrap to the width of the screen, for example cards side by side | [FlowLayout](page-widgets.md#flowlayout) |
 | `TabLayout` | Several tabs with page content, one of them shown at a time | [TabLayout](page-widgets.md#tablayout) |
 | `Widget` | The widget of a subject that exists somewhere else: in a file of its own, or in another block of the page | [Widget](page-widgets.md#widget) |
-| `GridLayout` | A grid with a fixed number of rows and columns and one subject per cell | [GridLayout](page-widgets.md#gridlayout) |
-| `CanvasLayout` | An area on which subjects are placed at any position | [CanvasLayout](page-widgets.md#canvaslayout) |
+| `GridLayout` | A grid with a fixed number of rows and columns and page content in each cell | [GridLayout](page-widgets.md#gridlayout) |
+| `CanvasLayout` | An area on which page content is placed at any position | [CanvasLayout](page-widgets.md#canvaslayout) |
 | `ValueMap` | Text, colour and icon per value, read by the value widgets. It shows nothing itself | [ValueMap](page-widgets.md#valuemap) |
 | `ValueList` | Rows that each show a label and a value, for example the values of a device | [ValueList](page-widgets.md#valuelist) |
 | `ValueTile` | A small box with a label and one large value | [ValueTile](page-widgets.md#valuetile) |
@@ -906,7 +902,7 @@ A block that cannot be shown is replaced by a red box with the line number of th
 
 - **One box per block**: The box replaces the block with everything in it. The blocks inside it are not created, and they are created again once the error is fixed.
 - **A block without a closing line**: For such a block, "everything in it" is everything up to the line that ends it: the next head line with as many colons or fewer, the closing line of a block around it, or the end of the page.
-- **Errors in slots**: An error in a slot block, such as a `Tab`, a `Footer` or an `Item`, is shown in a box that names the line of the slot block. The box replaces the whole widget around it. One case differs: when the colon lines or the head line of the slot block are wrong and the widget has a default slot that takes loose content, like a `Card`, the widget is still shown and the box stands in its content where the block was. A widget without a place for loose content has no place for the box, so it is replaced, with one box for each such block in it. That is a `FlowLayout`, a `TabLayout`, and also a `Card` whose body stands in a `Content` block.
+- **Errors in slots**: An error in a slot block, such as a `Tab`, a `Footer` or an `Item`, is shown in a box that names the line of the slot block. The box replaces the whole widget around it. One case differs: when the colon lines or the head line of the slot block are wrong and the widget has a default slot that takes loose content, like a `Card`, the widget is still shown and the box stands in its content where the block was. A widget without a place for loose content has no place for the box, so it is replaced, with one box for each such block in it. That is every widget without a default slot, like the layouts, and also a `Card` whose body stands in a `Content` block.
 - **Failures of a subject**: When the subject of a block fails while it is created or configured, the box shows the message of that failure, and the log of HomeBlaze has the details.
 
 [Page Errors](page-errors.md) lists every message with its cause and its fix.
@@ -933,12 +929,12 @@ The page knows a block by its key. The key is the `#name` of the block. A block 
 - **Without a name**: The position counts the pieces of content before the block at the same level, which is the page or the block around it: every block, every expression and every stretch of text between them is one piece. Adding or removing a block or an expression before the block creates its subject again. So does a first line of text before a block that had none.
 - **Removed arguments**: When an argument, or a name at the top level of the `json` block, is removed, the subject is created again, so that the property gets its default value like after a restart.
 - **Nested blocks**: A subject inside another block is kept only when the block around it is kept. A named motor inside a card without a name is created again when the card is.
-- **Subjects in the `json` block**: A subject that is nested in the `json` block, for example a widget in a cell of a `GridLayout`, is created again on every reload of the page. The block itself is kept, but its configuration is applied again, and that creates the subjects in it anew.
-- **Tabs**: A `Tab` with a name keeps itself and everything inside it when tabs are added, removed or moved. Tabs without a name are matched by their position among the tabs without a name. Adding, renaming or removing the name of a tab creates the tab again once.
+- **Subjects in the `json` block**: A subject nested in a value of the `json` block is created again on every reload of the page. The block itself is kept, but its configuration is applied again, and that creates the subjects in it anew.
+- **Tabs, cells and nodes**: A `Tab`, a `Cell` of a `GridLayout` or a `Node` of a `CanvasLayout` with a name keeps itself and everything inside it when others are added, removed or moved. Those without a name are matched by their position among those without a name. Adding, renaming or removing the name creates it again once.
 - **Flow items**: An `Item` cannot have a name, so items are matched by their position. A subject inside an item is created again when an item is added or removed before it, also when the subject has a name.
 - **Errors**: Everything inside a block that was shown as an error is created again once the error is fixed.
 
-Give every subject that has state a name, and name the blocks around it too: the card, the tab and the layout. A subject that must keep its state under all changes belongs in a file of its own, shown on the page through a `Widget` block.
+Give every subject that has state a name, and name the blocks around it too: the card, the tab, the cell and the layout. A subject that must keep its state under all changes belongs in a file of its own, shown on the page through a `Widget` block.
 
 The Markdown tools of [AI agents](ai-agents.md#changing-pages) refuse a change that would create the subject of a block without a name directly on the page again.
 
@@ -971,6 +967,15 @@ What the editor writes:
 
 Editing a subject elsewhere in the UI, for example through the edit button of its widget, writes its block in the same way.
 
+While the page is in edit mode, which is with "Split" or "Inline" in the menu at the top right of the page, a `GridLayout` shows a plus in every free place, and a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas. Each cell and each node has buttons to edit and remove it, and a node can be moved with the mouse. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
+
+- **Add**: The click opens the dialog "Create subject". The new cell or node is a `Cell` or `Node` block after the last one of its layout, with the widget that you chose as a block inside it. It is written like the block before it: with as many colons, and with a closing line only when that block has one. In a layout without a cell or a node, the new block has one colon more than the layout. It then gets a closing line when every widget block and slot block of the page has one, and none otherwise.
+- **Edit and move**: Editing a cell or a node, or moving a node, writes the head line of its block again, with all its arguments. A node that had only `X` and `Y` has `Width` and `Height` on its head line afterwards. The content of the block stays as it is.
+- **Remove**: Removing a cell or a node removes its block with everything in it. Where the text before the block and the text after it would then stand directly below each other, one empty line stays between them.
+- **A change that the page cannot keep**: When the page cannot keep a change, nothing is written, and the notification "Configuration applied but not saved. It will be lost on restart." appears. When adding or removing the block would change another block or other text of the page, or the cells or nodes were put into another order outside of the page, for example by a method or another tool, the page is read again at once, and the layout shows what the page holds. When the page is being read again at that moment, or another change was saved while this one was written, the layout shows the change until the page is read again, which every save of its text and a restart do, so save it again. The order of cells and nodes is the order of their blocks, so change it in the text of the page.
+
+Use these buttons with "Inline". In "Split", the editor next to the page does not show what the buttons wrote until the page is opened again, so do not save the text of the editor after using them, because it would write its older text over theirs.
+
 ---
 
 ## Not Supported
@@ -978,47 +983,10 @@ Editing a subject elsewhere in the UI, for example through the edit button of it
 - More formats for expressions than `display` and `raw`, like another unit, another number of decimals or conditions.
 - Expressions in arguments. The value of an argument is fixed text.
 - Short names for types. A block always has the full type name.
-- The cells of a `GridLayout` and the nodes of a `CanvasLayout` as blocks. They are part of the configuration and stand in the `json` block.
 - A name for an `Item` of a `FlowLayout`, and with it a subject inside an item that survives a change of the items before it.
 - A check of the names below the top level of a `json` block.
 - A widget block inside a list item, a quote, a style block or an HTML element.
 - Blocks of one page that are shared with another page. Keep a shared subject in a file of its own and show it with a `Widget` block.
-
----
-
-## The Old `subject(name)` Form
-
-Earlier versions embedded a subject with a fenced code block that had `subject(name)` as its language and held JSON. This form is no longer supported. A page that still has one shows an error box in its place. Convert each one into a block by hand.
-
-Before:
-
-<!-- sample: error -->
-~~~~markdown
-```subject(mymotor)
-{
-  "$type": "HomeBlaze.Samples.Motor",
-  "name": "My Motor",
-  "targetSpeed": 2000,
-  "simulationInterval": "00:00:01"
-}
-```
-~~~~
-
-~~~~text
-Line 1: The subject(name) fence is no longer supported. Write the subject as a block: a line with :: Full.Type.Name#name key=value, then a closing :: line.
-~~~~
-
-After:
-
-~~~~markdown
-:: HomeBlaze.Samples.Motor#mymotor Name="My Motor" TargetSpeed=2000 SimulationInterval=00:00:01
-::
-~~~~
-
-- The name in parentheses becomes the `#name`.
-- The value of `$type` becomes the type name.
-- Every single value becomes an argument. Lists and objects go into a `json` block inside the block.
-- The old form spelled its names in camelCase like a JSON file. A block uses the property names, so `targetSpeed` becomes `TargetSpeed`, on the head line and in the `json` block.
 
 ---
 

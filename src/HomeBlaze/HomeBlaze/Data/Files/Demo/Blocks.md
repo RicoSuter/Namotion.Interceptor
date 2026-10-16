@@ -13,7 +13,7 @@ Each area has a page of its own to try things out:
 - [Page Widgets](../Docs/administration/page-widgets.md): the reference of the widgets, which shows flows, tabs, cards, a grid and a canvas live, alone and inside each other
 - [Dashboard](Dashboard.md): a complete dashboard built from these widgets
 - [References](References.md): names, relative and absolute paths, and what a reference cannot show
-- [Configuration](Configuration.md): values on the head line, the `json` block, style blocks and the page editor
+- [Configuration](Configuration.md): values on the head line, the `json` block, the cells of a grid, style blocks and the page editor
 - [Errors](Errors.md): the common error boxes, each with the block that causes it and how to fix it
 
 :: HomeBlaze.Components.Card Title="Motor Card" Icon=Settings

@@ -11,8 +11,8 @@ namespace HomeBlaze.Storage.Internal;
 /// <summary>
 /// Tells the layout blocks of a page from the blocks that create or configure subjects. A layout block is a style block
 /// or a block of a type marked with <see cref="PageLayoutAttribute"/>, inside the page, a style block or another layout
-/// block, whose head line and json block hold only non-secret configuration values of its type: single values, and
-/// subjects or lists of subjects of such types that hold the same, such as the cells of a grid.
+/// block, whose head line and json block hold only single, non-secret configuration values of its type. The cells of a
+/// grid and the nodes of a canvas are slot blocks, so the same rules apply to them and to what stands inside them.
 /// Such a block holds nothing secret, so it is shown unredacted, and with the permission to edit page layout it may change.
 /// </summary>
 internal static class MarkdownPageLayout
@@ -33,7 +33,7 @@ internal static class MarkdownPageLayout
             .ToList();
 
         return new LayoutType(
-            properties.ToDictionary(property => property.Name, property => property.PropertyType, StringComparer.Ordinal),
+            GetNames(properties, _ => true),
             GetNames(properties, property => property.GetCustomAttribute<SubjectPathAttribute>(true) is { SubjectType: not null }),
             GetNames(properties, property => property.IsDefined(typeof(LinkAddressAttribute), true)),
             GetNames(properties, property => property.IsDefined(typeof(MediaAddressAttribute), true)));
@@ -70,7 +70,7 @@ internal static class MarkdownPageLayout
 
                 case MarkdownBlockKind.Widget:
                     type = findType(block.Head!.Name);
-                    isLayout = type is not null && HasLayoutConfiguration(block, type, findType);
+                    isLayout = type is not null && HasLayoutConfiguration(block, type);
                     break;
 
                 // A slot block belongs to the widget around it, which must be a layout block for it to get here.
@@ -79,7 +79,7 @@ internal static class MarkdownPageLayout
                     type = slot.IsOpen ? null : slot.ValueType;
                     isLayout = slot.IsOpen
                         ? block.Head.Arguments.Count == 0 && block.Head.Id is null && block.ConfigurationJson is null
-                        : HasLayoutConfiguration(block, slot.ValueType, findType);
+                        : HasLayoutConfiguration(block, slot.ValueType);
                     break;
             }
 
@@ -91,7 +91,7 @@ internal static class MarkdownPageLayout
         }
     }
 
-    private static bool HasLayoutConfiguration(MarkdownBlock block, Type type, Func<string, Type?> findType)
+    private static bool HasLayoutConfiguration(MarkdownBlock block, Type type)
     {
         if (GetLayoutType(type) is not { } layoutType)
         {
@@ -106,8 +106,11 @@ internal static class MarkdownPageLayout
             }
         }
 
-        return block.ConfigurationJson is null || ParseConfiguration(block) is { } configuration &&
-               IsLayoutObject(configuration, layoutType, findType, references: null);
+        // Only single values: an object or a list could hold a subject definition.
+        return block.ConfigurationJson is null ||
+               ParseConfiguration(block) is { } configuration &&
+               configuration.All(pair => pair.Value is null or JsonValue &&
+                                         IsLayoutValue(layoutType, pair.Key, (pair.Value as JsonValue)?.ToString()));
     }
 
     // Read with the rules of a parse; anything that cannot be read makes the block no layout block, so that it is kept
@@ -124,109 +127,40 @@ internal static class MarkdownPageLayout
         }
     }
 
-    // An object or a list could hold a subject definition, so each one must be a subject of a layout type, named by its
-    // $type, or a list of a layout type, and hold layout values itself. Collects the reference paths of nested subjects.
-    private static bool IsLayoutObject(
-        JsonObject configuration, LayoutType layoutType, Func<string, Type?> findType, List<string?>? references, bool isSubject = false)
-    {
-        foreach (var (key, value) in configuration)
-        {
-            if (isSubject && key == ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName)
-            {
-                continue;
-            }
-
-            var isLayout = value switch
-            {
-                null or JsonValue => IsLayoutValue(layoutType, key, (value as JsonValue)?.ToString()),
-                JsonArray items => GetItemLayoutType(layoutType, key) is { } itemType &&
-                                   items.All(item => item is JsonObject itemObject &&
-                                                     IsLayoutObject(itemObject, itemType, findType, references)),
-                JsonObject subject => IsLayoutSubject(subject, layoutType, key, findType, references),
-                _ => false
-            };
-
-            if (!isLayout)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool IsLayoutSubject(
-        JsonObject subject, LayoutType ownerType, string key, Func<string, Type?> findType, List<string?>? references)
-    {
-        if (!ownerType.ConfigurationProperties.TryGetValue(key, out var propertyType) ||
-            subject[ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName] is not JsonValue typeName ||
-            !typeName.TryGetValue<string>(out var name) ||
-            findType(name) is not { } type ||
-            !propertyType.IsAssignableFrom(type) ||
-            GetLayoutType(type) is not { } layoutType)
-        {
-            return false;
-        }
-
-        foreach (var property in layoutType.ReferenceProperties)
-        {
-            references?.Add(subject[property] is JsonValue path && path.TryGetValue<string>(out var text) ? text : null);
-        }
-
-        return IsLayoutObject(subject, layoutType, findType, references, isSubject: true);
-    }
-
-    private static LayoutType? GetItemLayoutType(LayoutType ownerType, string key)
-    {
-        if (!ownerType.ConfigurationProperties.TryGetValue(key, out var propertyType))
-        {
-            return null;
-        }
-
-        var itemType = propertyType.IsArray
-            ? propertyType.GetElementType()
-            : propertyType is { IsGenericType: true } && propertyType.GetGenericArguments() is [var argument] ? argument : null;
-        return itemType is null ? null : GetLayoutType(itemType);
-    }
-
     // A value of a non-secret configuration property, which neither loads content nor links to an address that runs
     // something when it is opened.
     private static bool IsLayoutValue(LayoutType layoutType, string key, string? value) =>
-        layoutType.ConfigurationProperties.ContainsKey(key) &&
+        layoutType.ConfigurationProperties.Contains(key) &&
         !layoutType.MediaProperties.Contains(key) &&
         (!layoutType.LinkProperties.Contains(key) || value is null || MarkdownWriteRules.IsSafeUrl(value));
 
-    /// <summary>
-    /// Gets the subject paths that a layout block sets, its own and those of the subjects nested in its configuration.
-    /// A path that is not set is left out.
-    /// </summary>
-    public static List<string> GetReferencePaths(MarkdownBlock block, Type type, Func<string, Type?> findType)
+    /// <summary>Gets the subject paths that a layout block sets; a path that is not set is left out.</summary>
+    public static List<string> GetReferencePaths(MarkdownBlock block, Type type)
     {
-        var references = new List<string?>();
+        var references = new List<string>();
         if (GetLayoutType(type) is not { } layoutType)
         {
-            return [];
+            return references;
         }
 
         var configuration = block.ConfigurationJson is null ? null : ParseConfiguration(block);
         foreach (var property in layoutType.ReferenceProperties)
         {
-            references.Add(
-                block.Head?.Arguments.FirstOrDefault(argument => argument.Key == property) is { } argument ? argument.Value :
-                configuration?[property] is JsonValue value && value.TryGetValue<string>(out var path) ? path : null);
+            var path = block.Head?.Arguments.FirstOrDefault(argument => argument.Key == property) is { } argument
+                ? argument.Value
+                : configuration?[property] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                references.Add(path);
+            }
         }
 
-        if (configuration is not null)
-        {
-            IsLayoutObject(configuration, layoutType, findType, references);
-        }
-
-        return references.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).ToList();
+        return references;
     }
 
     /// <summary>The non-secret configuration properties of a layout type and the names of its reference, link and media properties.</summary>
     internal sealed record LayoutType(
-        IReadOnlyDictionary<string, Type> ConfigurationProperties,
+        IReadOnlySet<string> ConfigurationProperties,
         IReadOnlySet<string> ReferenceProperties,
         IReadOnlySet<string> LinkProperties,
         IReadOnlySet<string> MediaProperties);

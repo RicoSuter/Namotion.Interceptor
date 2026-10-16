@@ -290,8 +290,19 @@ public class PageWidgetsPageTests
         var grid = Assert.IsType<GridLayout>(page.TryGetNamedSubject("motorgrid"));
         Assert.Equal((2, 2), (grid.Rows, grid.Columns));
         Assert.Equal(
-            [(0, 0, 1, PumpName), (0, 1, 1, FanName), (1, 0, 2, PumpName)],
-            grid.Cells.Select(cell => (cell.Row, cell.Column, cell.ColumnSpan, Assert.IsType<Widget>(cell.Child).Path)));
+            new (int?, int?, int)[] { (0, 0, 1), (0, 1, 1), (1, 0, 2) },
+            grid.Cells.Select(cell => (cell.Row, cell.Column, cell.ColumnSpan)));
+        Assert.Equal(
+            [PumpName, FanName],
+            grid.Cells.Take(2).Select(cell => Assert.IsType<MarkdownFragment>(cell.Child).Children.Values.OfType<Widget>().Single().Path));
+
+        // The last cell holds text with an expression per motor and no widget.
+        var lastCell = Assert.IsType<MarkdownFragment>(grid.Cells[2].Child).Children.Values;
+        Assert.Empty(lastCell.OfType<Widget>());
+        Assert.Equal(
+            [$"{PumpName}/TargetSpeed", $"{FanName}/TargetSpeed"],
+            lastCell.OfType<RenderExpression>().Select(expression => expression.Path));
+        Assert.Contains("The pump is set to", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(grid.Cells[2].Child).Children));
     }
 
     [Fact]
@@ -305,7 +316,9 @@ public class PageWidgetsPageTests
 
         // Assert
         var canvas = Assert.IsType<CanvasLayout>(page.TryGetNamedSubject("plan"));
-        Assert.Equal([PumpName, FanName], canvas.Nodes.Select(node => Assert.IsType<Widget>(node.Child).Path));
+        Assert.Equal(
+            [PumpName, FanName],
+            canvas.Nodes.Select(node => Assert.IsType<MarkdownFragment>(node.Child).Children.Values.OfType<Widget>().Single().Path));
 
         // The content of a page is this wide in a window of 390 pixels.
         const int contentWidthOnAPhone = 358;
@@ -319,22 +332,9 @@ public class PageWidgetsPageTests
     private static Motor FindMotor(IPathScope page, string name) => Assert.IsType<Motor>(page.TryGetNamedSubject(name));
 
     /// <summary>
-    /// Gets the subjects of the page at every depth in the order of the page, followed by the subjects
-    /// that its grids and canvases hold in their configuration.
+    /// Gets the subjects of the page at every depth in the order of the page. What the cells of its grids
+    /// and the nodes of its canvases hold is among them, because cells and nodes are slots.
     /// </summary>
-    private static List<IInterceptorSubject> FindSubjects(MarkdownFile page)
-    {
-        var subjects = PageErrorBoxes.Flatten(page.Children.Values).ToList();
-        var configured = subjects
-            .SelectMany(subject => subject switch
-            {
-                GridLayout grid => grid.Cells.Select(cell => cell.Child),
-                CanvasLayout canvas => canvas.Nodes.Select(node => node.Child),
-                _ => []
-            })
-            .OfType<IInterceptorSubject>()
-            .ToList();
-
-        return [.. subjects, .. configured];
-    }
+    private static List<IInterceptorSubject> FindSubjects(MarkdownFile page) =>
+        PageErrorBoxes.Flatten(page.Children.Values).ToList();
 }

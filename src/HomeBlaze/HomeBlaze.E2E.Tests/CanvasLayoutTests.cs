@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
-using Namotion.Interceptor.Testing;
+using static HomeBlaze.E2E.Tests.Infrastructure.PageGeometry;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -27,7 +27,7 @@ public class CanvasLayoutTests
     // The page that tests overwrite. Each of them writes its own content before it opens the page.
     private const string ScratchPage = "Scratch.md";
 
-    private static readonly Regex FirstNodePositionPattern = new("\"X\": (-?\\d+),\\s*\"Y\": (-?\\d+),");
+    private static readonly Regex FirstNodePositionPattern = new("^::: Node X=(-?\\d+) Y=(-?\\d+) ", RegexOptions.Multiline);
 
     private readonly PlaywrightFixture _fixture;
 
@@ -619,51 +619,21 @@ public class CanvasLayoutTests
     // one that the write has when it is done. It is the final one only after the events of the drag have arrived.
     private async Task WaitForPositionToBeWrittenAsync(double[] position)
     {
-        var path = _fixture.GetDemoPagePath(ScratchPage);
-
-        await AsyncTestHelpers.WaitUntilAsync(
-            () =>
+        await _fixture.WaitForDemoPageTextAsync(
+            ScratchPage,
+            text =>
             {
-                var match = FirstNodePositionPattern.Match(_fixture.ReadFileAsync(path).GetAwaiter().GetResult());
+                var match = FirstNodePositionPattern.Match(text);
                 return match.Success
                     && double.Parse(match.Groups[1].Value) == position[0]
                     && double.Parse(match.Groups[2].Value) == position[1];
             },
-            message: $"The page was not written with the new position {position[0]}, {position[1]} of the node");
+            $"The page was not written with the new position {position[0]}, {position[1]} of the node");
     }
 
     private static ILocator GetCanvas(IPage page) => page.Locator(".canvas-layout-container");
 
     private static ILocator GetNodes(IPage page) => GetCanvas(page).Locator(".canvas-node");
-
-    private static async Task DragAsync(IPage page, double fromX, double fromY, double toX, double toY)
-    {
-        await page.Mouse.MoveAsync((float)fromX, (float)fromY);
-        await page.Mouse.DownAsync();
-        await page.Mouse.MoveAsync((float)toX, (float)toY, new() { Steps = 10 });
-        await page.Mouse.UpAsync();
-    }
-
-    private sealed record Box(double Left, double Top, double Width, double Height)
-    {
-        public double Right => Left + Width;
-
-        public double Bottom => Top + Height;
-    }
-
-    // Left, top, width and height come from one call, so that a layout that is still moving cannot give values of different moments.
-    private static async Task<Box> GetBoxAsync(ILocator locator)
-    {
-        var values = await locator.EvaluateAsync<double[]>(
-            """
-            element => {
-                const rectangle = element.getBoundingClientRect();
-                return [rectangle.left, rectangle.top, rectangle.width, rectangle.height];
-            }
-            """);
-
-        return new Box(values[0], values[1], values[2], values[3]);
-    }
 
     // Relative to the canvas, so that a page that scrolls does not count as a move.
     private static async Task<Box> GetBoxInCanvasAsync(ILocator locator)
@@ -705,27 +675,29 @@ public class CanvasLayoutTests
         var builder = new StringBuilder();
         builder.Append("---\ntitle: Scratch\n---\n\n# Scratch\n\n");
         builder.Append($":: HomeBlaze.Components.CanvasLayout#canvas MinHeight={CanvasHeight}\n");
-        builder.Append("```json\n");
-        builder.Append("{\n  \"Nodes\": [\n");
         if (withControlsWidget)
         {
             // One node with a widget that has a slider, a text field, a button and an area that scrolls.
-            builder.Append("    { \"X\": 40, \"Y\": 10, \"Width\": 420, \"Height\": 380, \"Child\": { \"$type\": \"HomeBlaze.E2E.Tests.Models.ControlsTestSubject\" } }\n");
+            builder.Append("::: Node X=40 Y=10 Width=420 Height=380\n");
+            builder.Append(":::: HomeBlaze.E2E.Tests.Models.ControlsTestSubject\n");
         }
         else if (withOperableWidgets)
         {
             // A card whose title is a link, and an icon indicator whose path does not exist, so that its tooltip is the path.
-            builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Card\", \"Title\": \"Linked Card\", \"Href\": \"/pages/Demo/Blocks.md\" } },\n");
-            builder.Append("    { \"X\": 420, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Indicator\", \"Path\": \"../Motor/Missing\", \"Kind\": \"Icon\" } }\n");
+            builder.Append("::: Node X=40 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Card Title=\"Linked Card\" Href=/pages/Demo/Blocks.md\n");
+            builder.Append("::: Node X=420 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Indicator Path=../Motor/Missing Kind=Icon\n");
         }
         else
         {
-            builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } },\n");
-            builder.Append("    { \"X\": 420, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } }\n");
+            builder.Append("::: Node X=40 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Widget Path=../Motor\n");
+            builder.Append("::: Node X=420 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Widget Path=../Motor\n");
         }
 
-        builder.Append("  ]\n}\n");
-        builder.Append("```\n::\n\n");
+        builder.Append("::\n\n");
 
         if (withTextBelow)
         {

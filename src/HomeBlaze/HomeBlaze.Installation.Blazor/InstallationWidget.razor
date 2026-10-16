@@ -1,0 +1,86 @@
+@using System.Globalization
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Components
+@using HomeBlaze.Services.Display
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HomeBlazeInstallation))]
+@implements ISubjectComponent
+
+@if (Subject is HomeBlazeInstallation installation)
+{
+    <MudPaper Class="pa-4" data-testid="installation-widget">
+        <MudStack Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icons.Material.Filled.Info" Class="mr-2" />
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.h6">@installation.Title</MudText>
+                    <MudText Typo="Typo.caption">@FormatBuild(installation)</MudText>
+                </MudStack>
+                @if (installation.VersionUrl is { } versionUrl)
+                {
+                    <MudTooltip Text="Open in new tab">
+                        <MudIconButton Href="@versionUrl.AbsoluteUri"
+                                       Target="_blank"
+                                       Rel="noopener noreferrer"
+                                       Icon="@Icons.Material.Filled.OpenInNew"
+                                       Size="Size.Small"
+                                       aria-label="@($"Open version {installation.Version} in new tab")"
+                                       data-testid="installation-widget-version-link" />
+                    </MudTooltip>
+                }
+                <MudSpacer />
+                <MudChip T="string" Size="Size.Small" data-testid="installation-widget-channel">@installation.Channel</MudChip>
+            </MudStack>
+
+            <MudDivider />
+
+            @if (installation.UpdateAvailable == true)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudIcon Icon="@Icons.Material.Filled.Update" Color="Color.Warning" Size="Size.Small" />
+                    <MudText Typo="Typo.caption">Update available: @installation.LatestVersion @FormatDate(installation.LatestReleaseDate)</MudText>
+                    @if (installation.LatestReleaseUrl is { } releaseUrl)
+                    {
+                        <MudLink Href="@releaseUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Release notes</MudLink>
+                    }
+                </MudStack>
+            }
+            @if (installation.UpdateCheckStatus is { } updateCheckStatus)
+            {
+                <MudText Typo="Typo.caption">Update check: @updateCheckStatus</MudText>
+            }
+
+            <MudText Typo="Typo.caption">Data @FormatDataVolume(installation)</MudText>
+            @if (installation.DataVolumeUsage is { } dataVolumeUsage)
+            {
+                <MudProgressLinear Value="@(ValueReader.GetProgressPercent(dataVolumeUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
+            }
+
+            <MudText Typo="Typo.caption">
+                @installation.EnvironmentName · developer mode @(installation.IsDeveloperMode ? "on" : "off")
+            </MudText>
+        </MudStack>
+    </MudPaper>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private static string FormatBuild(HomeBlazeInstallation installation)
+    {
+        var commit = installation.Commit is { Length: >= 7 } value ? $" · {value[..7]}" : string.Empty;
+        var built = installation.BuildTime is { } buildTime
+            ? $" · built {buildTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}"
+            : string.Empty;
+        return installation.Version + commit + built;
+    }
+
+    private static string FormatDate(DateTimeOffset? date) =>
+        date is { } value ? $"({value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)})" : string.Empty;
+
+    private static string FormatDataVolume(HomeBlazeInstallation installation) =>
+        installation.DataVolumeFreeSpace is { } free && installation.DataVolumeTotalSize is { } total
+            ? $"{StateUnitExtensions.FormatWithUnit(free, StateUnit.Byte)} free of {StateUnitExtensions.FormatWithUnit(total, StateUnit.Byte)} ({StateUnitExtensions.FormatPercent(installation.DataVolumeUsage ?? 0)})"
+            : ValueReader.MissingText;
+}

@@ -124,8 +124,9 @@ internal static partial class MarkdownWriteRules
         "With the permission to edit page layout, only layout blocks can be added, changed, removed or moved: cards, tabs, " +
         "tab, flow, grid and canvas layouts, expansion panels, alerts, style blocks, value widgets such as ValueTile, " +
         "Indicator, Progress and ValueList, and Widget references to existing subjects, with single values of their " +
-        "configuration on the head line or in the json block, where the cells of a grid and the nodes of a canvas may " +
-        "hold such layout subjects with their $type, links only to http, https, mailto or relative addresses and no picture. Every other block, and each old subject(name) code block, " +
+        "configuration on the head line or in the json block (the Cell and Node blocks of a grid and a canvas follow the " +
+        "same rules), links only to http, https, mailto or relative addresses and no picture. Every other block, and each " +
+        "old subject(name) code block, " +
         "must stay exactly as ReadRawContent shows it, with *** where it hides a secret value, inside the same blocks and " +
         $"at the same position among the content around it, and {MarkdownFile.ActiveContent} cannot be added or changed.";
 
@@ -296,7 +297,7 @@ internal static partial class MarkdownWriteRules
                 continue;
             }
 
-            foreach (var path in MarkdownPageLayout.GetReferencePaths(block, type, layout.FindType))
+            foreach (var path in MarkdownPageLayout.GetReferencePaths(block, type))
             {
                 if (!layout.ResolvesToSubject(path))
                 {

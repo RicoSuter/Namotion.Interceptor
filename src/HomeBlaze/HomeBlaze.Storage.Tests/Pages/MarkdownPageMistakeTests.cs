@@ -806,12 +806,12 @@ public class MarkdownPageMistakeTests
         var page = await fixture.AddPageAsync("page.md", """
             Text before.
 
-            :: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
+            :: HomeBlaze.Storage.Tests.Pages.TestShelf#shelf Rows=1 Columns=2
             ```json
             {
-              "Cells": [
-                { "Row": 0, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" } },
-                { "Row": 0, "Column": 1, "Child": { "$type": "HomeBlaze.Components.Widgt", "Path": "../WaterPump" } }
+              "Items": [
+                { "Row": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" } },
+                { "Row": 0, "Child": { "$type": "HomeBlaze.Components.Widgt", "Path": "../WaterPump" } }
               ]
             }
             ```
@@ -822,25 +822,25 @@ public class MarkdownPageMistakeTests
 
         // Assert
         var box = Assert.Single(PageErrorBoxes.FindSortedByLine(page));
-        Assert.StartsWith("Line 3: The value of 'Cells' in the json block cannot be read at Cells[1].Child: ", box);
+        Assert.StartsWith("Line 3: The value of 'Items' in the json block cannot be read at Items[1].Child: ", box);
         Assert.Contains("HomeBlaze.Components.Widgt", box);
         Assert.DoesNotContain("LineNumber", box);
-        Assert.False(page.Children.ContainsKey("grid"));
+        Assert.False(page.Children.ContainsKey("shelf"));
         Assert.Contains("Text after.", MarkdownPageFixture.Html(page.Children));
     }
 
     [Theory]
-    [InlineData("\"none\"", "Line 1: The value of 'Cells' in the json block cannot be read: ")]
-    [InlineData("[ { \"Row\": \"zero\" } ]", "Line 1: The value of 'Cells' in the json block cannot be read at Cells[0].Row: ")]
+    [InlineData("\"none\"", "Line 1: The value of 'Items' in the json block cannot be read: ")]
+    [InlineData("[ { \"Row\": \"zero\" } ]", "Line 1: The value of 'Items' in the json block cannot be read at Items[0].Row: ")]
     public async Task WhenListInTheJsonBlockCannotBeRead_ThenTheBoxNamesThePropertyAndThePlaceInsideIt(
-        string cells, string expectedStart)
+        string items, string expectedStart)
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
 
         // Act
         var page = await fixture.AddPageAsync(
-            "page.md", $":: HomeBlaze.Components.GridLayout\n```json\n{{ \"Cells\": {cells} }}\n```\n::");
+            "page.md", $":: HomeBlaze.Storage.Tests.Pages.TestShelf\n```json\n{{ \"Items\": {items} }}\n```\n::");
 
         // Assert
         var box = Assert.Single(PageErrorBoxes.FindSortedByLine(page));
@@ -850,14 +850,14 @@ public class MarkdownPageMistakeTests
 
     [Theory]
     [InlineData(
-        """{ "Cells": [ { "Child": { "Path": "../a" } } ] }""",
-        "Cells[0].Child")]
+        """{ "Items": [ { "Child": { "Path": "../a" } } ] }""",
+        "Items[0].Child")]
     [InlineData(
-        """{ "Cells": [ { "Child": { "Path": "../a", "$type": "HomeBlaze.Components.Widget" } } ] }""",
-        "Cells[0].Child")]
+        """{ "Items": [ { "Child": { "Path": "../a", "$type": "HomeBlaze.Components.Widget" } } ] }""",
+        "Items[0].Child")]
     [InlineData(
-        """{ "Cells": [ { "Row": 0 }, { "Child": { "$type": "HomeBlaze.Components.GridLayout", "Cells": [ { "Child": { "Path": "../a" } } ] } } ] }""",
-        "Cells[1].Child.Cells[0].Child")]
+        """{ "Items": [ { "Row": 0 }, { "Child": { "$type": "HomeBlaze.Storage.Tests.Pages.TestShelf", "Items": [ { "Child": { "Path": "../a" } } ] } } ] }""",
+        "Items[1].Child.Items[0].Child")]
     public async Task WhenSubjectInsideAValueOfTheJsonBlockHasNoTypeAsItsFirstName_ThenTheBoxNamesThePropertyThePlaceAndTheMissingType(
         string json, string expectedPlace)
     {
@@ -866,13 +866,13 @@ public class MarkdownPageMistakeTests
 
         // Act
         var page = await fixture.AddPageAsync(
-            "page.md", $"Text before.\n\n:: HomeBlaze.Components.GridLayout#grid\n```json\n{json}\n```\n::\n\nText after.");
+            "page.md", $"Text before.\n\n:: HomeBlaze.Storage.Tests.Pages.TestShelf#shelf\n```json\n{json}\n```\n::\n\nText after.");
 
         // Assert
         Assert.Equal(
-            [$"Line 3: The value of 'Cells' in the json block cannot be read at {expectedPlace}: {MissingTypeError}"],
+            [$"Line 3: The value of 'Items' in the json block cannot be read at {expectedPlace}: {MissingTypeError}"],
             PageErrorBoxes.FindSortedByLine(page));
-        Assert.False(page.Children.ContainsKey("grid"));
+        Assert.False(page.Children.ContainsKey("shelf"));
         Assert.Contains("Text after.", MarkdownPageFixture.Html(page.Children));
     }
 

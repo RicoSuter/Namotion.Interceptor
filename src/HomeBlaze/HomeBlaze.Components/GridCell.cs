@@ -38,9 +38,9 @@ public partial class GridCell : IConfigurable
     public partial int ColumnSpan { get; set; }
 
     /// <summary>
-    /// The child subject to render in this cell.
+    /// What the cell shows. On a page the content of the <c>Cell</c> block, in a configuration file one subject.
     /// </summary>
-    [Configuration]
+    [Configuration, Slot(IsDefault = true)]
     public partial IInterceptorSubject? Child { get; set; }
 
     public GridCell()

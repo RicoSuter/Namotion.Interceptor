@@ -98,6 +98,8 @@ else
     private List<DecorationRegion> _decorationRegions = new();
     private string[] _currentDecorationIds = Array.Empty<string>();
     private DecorationRegion? _activeRegion;
+    private Task? _decorationRefresh;
+    private bool _isDecorationRefreshRequested;
 
     private string MonacoTheme => IsDarkMode ? "vs-dark" : "vs";
 
@@ -211,8 +213,10 @@ else
             return;
         }
 
+        // Writes the head line and the json block only. When the graph has drifted from the text, the write-back
+        // can also have inserted or removed blocks, and writing the editor text below overwrites that.
         _currentContent = MarkdownBlockWriter.WriteConfiguration(
-            _currentContent, block, Serializer.Serialize(subject, ConfigurationNaming.CSharpProperty));
+            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject));
 
         // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
@@ -220,8 +224,7 @@ else
 
         // Save the file, which also reloads it on the worker of its storage. The reload keeps the edited
         // subject and applies its configuration.
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
-        await File.WriteAsync(stream, CancellationToken.None);
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(_currentContent), CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
@@ -298,8 +301,7 @@ else
         await _editor.SetValue(_currentContent);
 
         // Save the file, which also reloads it on the worker of its storage
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
-        await File.WriteAsync(stream, CancellationToken.None);
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(_currentContent), CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
@@ -330,7 +332,7 @@ else
         string json;
         try
         {
-            json = Serializer.Serialize(result.Subject, ConfigurationNaming.CSharpProperty);
+            json = MarkdownBlockConfiguration.Serialize(Serializer, result.Subject);
         }
         finally
         {
@@ -377,8 +379,7 @@ else
         await _editor.SetValue(_currentContent);
 
         // Save the file, which also reloads it on the worker of its storage
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
-        await File.WriteAsync(stream, CancellationToken.None);
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(_currentContent), CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
@@ -388,7 +389,34 @@ else
         IsDirtyChanged?.Invoke(false);
     }
 
-    private async Task RefreshDecorationsAsync()
+    // Called only on the synchronization context of the circuit: the editor keeps its decoration ids in a list that is
+    // not thread-safe, and calls from two threads break it for every later call. A refresh that is requested while one
+    // runs is one more run after it, never a second one at the same time, because both would remove the same old
+    // decorations and the one whose ids are overwritten in _currentDecorationIds would stay in the editor for good.
+    // The returned task completes after a run that started after the call, unless a run fails before.
+    private Task RefreshDecorationsAsync()
+    {
+        if (_decorationRefresh is { IsCompleted: false } runningRefresh)
+        {
+            _isDecorationRefreshRequested = true;
+            return runningRefresh;
+        }
+
+        _decorationRefresh = RunDecorationRefreshesAsync();
+        return _decorationRefresh;
+    }
+
+    private async Task RunDecorationRefreshesAsync()
+    {
+        do
+        {
+            _isDecorationRefreshRequested = false;
+            await ApplyDecorationsAsync();
+        }
+        while (_isDecorationRefreshRequested);
+    }
+
+    private async Task ApplyDecorationsAsync()
     {
         if (_editor == null)
             return;
@@ -429,27 +457,18 @@ else
         }
     }
 
-    private void OnContentChanged(ModelContentChangedEvent e)
+    private async Task OnContentChanged(ModelContentChangedEvent e)
     {
-        // Content changed, we'll get the actual value on save
-        // For now, mark as potentially dirty
         // TODO: Add try-catch for ObjectDisposedException/JSDisconnectedException - component may be disposed during async operation
-        Task.Run(async () =>
+        // Awaited here and not run on the thread pool, because the decorations are refreshed on the synchronization
+        // context of the circuit only, see RefreshDecorationsAsync.
+        if (_editor != null)
         {
-            if (_editor != null)
-            {
-                _currentContent = await _editor.GetValue();
+            _currentContent = await _editor.GetValue();
+            await RefreshDecorationsAsync();
 
-                // Refresh decorations after content change
-                await RefreshDecorationsAsync();
-
-                await InvokeAsync(() =>
-                {
-                    IsDirtyChanged?.Invoke(IsDirty);
-                    StateHasChanged();
-                });
-            }
-        });
+            IsDirtyChanged?.Invoke(IsDirty);
+        }
     }
 
     public async Task SaveAsync(CancellationToken cancellationToken)
@@ -458,8 +477,7 @@ else
 
         var content = await _editor.GetValue();
 
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
-        await File.WriteAsync(stream, cancellationToken);
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content), cancellationToken);
 
         _originalContent = content;
         _currentContent = content;

@@ -51,14 +51,20 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // A parse changes the subjects it reuses in place, so two reloads at once would leave the nested subjects
     // from one parse and the snapshot from another. Only OnFileChangedAsync takes this. A write-back must not:
-    // the storage reloads the file as part of the write, and that reload would wait for the write-back that
-    // waits for the write.
+    // it would write what a running reload applied in place of the change it was called for, and the storage
+    // reloads the file as part of the write, which would wait for the write-back that waits for the write.
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
 
-    // Serializes every write of this file, so the read-modify-write of ReplaceText and of a configuration write-back
-    // cannot interleave with another write. It is held while the storage reloads the file after a write, so nothing
+    // Serializes every write of this file, so the read-modify-write of ReplaceText and the publish and write of a
+    // configuration write-back cannot interleave with another write. It is held while the storage reloads the file after a write, so nothing
     // in that reload may write this file.
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    // A reload changes the subjects it reuses before it publishes its snapshot, and it reuses the values of a
+    // slot by their position. Between the two, and after a reload that failed once it had begun, the slot
+    // values of the graph do not belong to the blocks of the snapshot, so a write-back must not insert or
+    // remove a block then. A reload that publishes while a write-back works makes its exchange fail instead.
+    private volatile bool _isGraphAheadOfSnapshot;
 
     // Each access reads the current snapshot. Code that needs two of these together must take
     // _parseResult into a local once and read both from that local.
@@ -158,6 +164,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             await reading.WithStorageTimeoutAsync("reading", FullPath, timeProvider, cancellationToken);
             var content = await reading;
             var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
+
+            // A full fence, because a volatile write lets later writes pass it. With the fence before the read of
+            // the flag in WriteConfigurationAsync, a write-back that sees a slot value this parse changed also sees
+            // the flag.
+            _isGraphAheadOfSnapshot = true;
+            Thread.MemoryBarrier();
             var result = await _parser.ParseAsync(content, this, Children, cancellationToken);
 
             // The page itself is assigned only after the parse succeeded, so a failed reload leaves its content,
@@ -168,11 +180,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             // the derived values again that looked a name up (see TryGetNamedSubject), and they must find
             // the new names then.
             _parseResult = result;
+            _isGraphAheadOfSnapshot = false;
             Content = content;
             Frontmatter = frontmatter;
 
-            // The load runs on the worker of the storage. Without the flow of that work, as for every assignment
-            // to the tree: lifecycle handlers run here for a page that is in the tree.
+            // Without the flow of the caller, which is the worker of the storage or a refused write-back, as for
+            // every assignment to the tree: lifecycle handlers run here for a page that is in the tree.
             using (ExecutionContext.SuppressFlow())
             {
                 Children = result.Children;
@@ -395,51 +408,106 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Writes the configuration of the block that contains the subject. For every slot of that block subject that
+    /// is a list of subjects of a type, a value without a block gets a new block and a block whose value is gone
+    /// is removed with its content. Returns false, and writes nothing, when the page has no block for the subject,
+    /// when the page cannot keep the change or the change cannot be made without touching other content, when
+    /// blocks would be inserted or removed while a reload runs or after one that failed, until the page has been
+    /// read again, or when another write-back or a reload changed the page while this one ran. When the page cannot
+    /// keep the change, it is read again from its file before this returns, so the graph matches the text again unless that read fails.
+    /// </remarks>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
         MarkdownWriteRules.EnsureNotWithinStorageWork(Storage);
+
+        // Waits for a write that is under way, such as a save of the page editor, so this write-back builds on the
+        // text that it writes instead of being refused by the reload that follows it.
+        await _writeLock.WaitAsync(cancellationToken);
+        _writeLock.Release();
+
+        var snapshot = _parseResult;
+        var blockIndex = FindBlock(snapshot.BlockSubjects, subject);
+        if (snapshot.Page is not { } page || blockIndex < 0)
+        {
+            return false;
+        }
+
+        // The block spans index into the text the page was parsed from, which is the source of the
+        // page and not necessarily Content.
+        var write = MarkdownBlockReconciler.TryWrite(page, snapshot.BlockSubjects, blockIndex, _serializer, out var refusal);
+        if (write is null)
+        {
+            _parser.LogRefusedWrite(FullPath, refusal!);
+
+            // The graph keeps the refused values of a slot, and a later reload would give the blocks to them by
+            // their position, so a value would take the block of another one.
+            try
+            {
+                await OnFileChangedAsync(cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                _parser.LogFailedReload(FullPath, exception);
+            }
+
+            return false;
+        }
+
+        // Only the publish and the write: another write-back may run while this one serializes, and the exchange
+        // below decides between them. A write of ReplaceText or ReplaceContent reloads the page under the lock, so it
+        // fails the exchange of a write-back that was computed before it.
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            // Taken under the lock, so a write-back starts from the page that the previous one wrote.
-            var snapshot = _parseResult;
-            if (snapshot.Page is not { } page ||
-                FindBlock(snapshot.BlockSubjects, subject) is not (var blockIndex, var blockSubject))
+            // After the graph was read and before anything is published: the blocks were compared with slot values
+            // that a reload may have changed since the snapshot was parsed. A reload that published since then fails
+            // the exchange below. A full fence, because a volatile read lets the earlier reads of the graph pass it
+            // (see OnFileChangedAsync).
+            Thread.MemoryBarrier();
+            if (write.HasInsertedOrRemovedBlocks && _isGraphAheadOfSnapshot)
             {
+                _parser.LogRefusedWrite(FullPath, "Blocks cannot be inserted or removed until the page has been read again.");
                 return false;
             }
 
-            // The block spans index into the text the page was parsed from, which is the source of the
-            // page and not necessarily Content.
-            var json = _serializer.Serialize(blockSubject, ConfigurationNaming.CSharpProperty);
-            var content = MarkdownBlockWriter.WriteConfiguration(page.Source, page.AllBlocks[blockIndex], json);
+            // The text was computed from the snapshot, so it would undo what another write or a reload published
+            // since then.
+            var published = snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects };
+            if (!ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, published, snapshot), snapshot))
+            {
+                _parser.LogRefusedWrite(FullPath, "The page changed while the configuration was written; save again.");
+                return false;
+            }
 
             // Before the write, because the storage reloads this file from inside the write. The reload
             // must find the keys that are now in the file, or a value that became null would recreate the subject.
-            _parser.RememberConfiguration(blockSubject, json);
+            foreach (var (writtenSubject, configurationJson) in write.Configurations)
+            {
+                _parser.RememberConfiguration(writtenSubject, configurationJson);
+            }
 
-            // The spans moved, the block order did not, so the block subjects stay valid.
-            _parseResult = snapshot with { Page = MarkdownPageParser.Parse(content) };
+            var content = write.Page.Source;
             Content = content;
 
             await WriteUnlockedAsync(content);
+            return true;
         }
         finally
         {
             _writeLock.Release();
         }
-
-        return true;
     }
 
-    private static (int BlockIndex, IInterceptorSubject Subject)? FindBlock(
-        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
+    // The index of the block whose subject is the subject or holds it in its configuration, for example a new grid
+    // cell that has no block of its own yet, or -1.
+    private static int FindBlock(IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
     {
-        // The edited subject can be nested in the configuration of a block subject, for example a grid cell.
         var blockIndex = -1;
-        var blockSubject = subject.TryGetConfigurationOwner(candidate =>
+        subject.TryGetConfigurationOwner(candidate =>
         {
             foreach (var (index, candidateBlockSubject) in blockSubjects)
             {
@@ -453,7 +521,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return false;
         });
 
-        return blockSubject is null ? null : (blockIndex, blockSubject);
+        return blockIndex;
     }
 
     private static string FormatFilename(string name)
