@@ -31,6 +31,9 @@ public sealed partial class MarkdownContentParser
     // The top-level keys of the configuration last applied to a subject. See CanUpdateInPlace.
     private readonly ConditionalWeakTable<IInterceptorSubject, string[]> _appliedConfigurationKeys = new();
 
+    // The configuration text last applied to a subject. See CreateOrUpdateAsync.
+    private readonly ConditionalWeakTable<IInterceptorSubject, string> _appliedConfigurationJson = new();
+
     /// <summary>
     /// Creates the subject of a block from its configuration, or updates <paramref name="existing"/> in place.
     /// The error is set when a value of the configuration does not fit its property. The block is an error
@@ -51,6 +54,13 @@ public sealed partial class MarkdownContentParser
         IInterceptorSubject? subject;
         if (CanUpdateInPlace(existing, type, configuration.Keys))
         {
+            // A block whose configuration did not change keeps the values of its subject. They can hold a change
+            // that is about to be saved, which the reload inside the save of another block must not reset.
+            if (_appliedConfigurationJson.TryGetValue(existing, out var appliedJson) && appliedJson == configuration.Json)
+            {
+                return (existing, null);
+            }
+
             // Without the execution flow, as for the creation below: it can attach nested subjects.
             using (ExecutionContext.SuppressFlow())
             {
@@ -87,6 +97,7 @@ public sealed partial class MarkdownContentParser
         if (subject is not null)
         {
             _appliedConfigurationKeys.AddOrUpdate(subject, configuration.Keys);
+            _appliedConfigurationJson.AddOrUpdate(subject, configuration.Json);
         }
 
         return (subject, null);
@@ -112,6 +123,11 @@ public sealed partial class MarkdownContentParser
 
         _appliedConfigurationKeys.AddOrUpdate(subject, keys.ToArray());
     }
+
+    /// <summary>
+    /// Makes the next parse apply the configuration of the block of the subject also when its text did not change.
+    /// </summary>
+    internal void ForgetAppliedConfiguration(IInterceptorSubject subject) => _appliedConfigurationJson.Remove(subject);
 
     // Updating in place only sets the keys that are present. A key that was removed from the page
     // would keep its old value on the instance, unlike after a restart, so the subject is recreated then.

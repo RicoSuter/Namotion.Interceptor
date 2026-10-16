@@ -78,6 +78,7 @@ The control widgets ([Switch](switch.md) and the others of the group Controls in
 - **Not saved**: When nothing can save the value, for example for a subject that a device discovered at runtime and that belongs to no file, a warning says that the value is not saved, and the value stays in memory. Such a subject warns at each save.
 - **Devices**: A write to a property that a connector sends to a device can fail later on the device side, without a message on the page.
 - **The text editor**: A page that is open in the Split mode text editor does not take what a control saved, and saving the editor afterwards overwrites it.
+- **Several viewers**: Two viewers who change two subjects of one page at the same time both keep their change: the saves of one page run one after the other. A value that was not saved stays in memory when the page is reloaded, as long as the block of its subject is not edited.
 
 ## Spacing
 

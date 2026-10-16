@@ -294,14 +294,12 @@ public class MarkdownSlotWriteBackTests
     }
 
     [Fact]
-    public async Task WhenAnotherSaveIsWrittenWhileASaveSerializes_ThenTheSlowerSaveIsRefusedAndTheFileKeepsTheOtherChange()
+    public async Task WhenAnotherSaveIsAskedForWhileASaveSerializes_ThenItWaitsForItAndBothAreWritten()
     {
         // Arrange: the save of the callback block stops while its configuration is serialized.
         var (fixture, log) = await CreateFixtureWithLogAsync();
-        var blocks =
-            $":: {Namespace}.TestSerializerCallback#callback\n```json\n{{ \"Value\": \"a\" }}\n```\n::\n\n" +
-            $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::\n";
-        var (page, board) = await AddBoardPageAsync(fixture, blocks + "::\n");
+        var callbackBlock = $":: {Namespace}.TestSerializerCallback#callback\n```json\n{{ \"Value\": \"a\" }}\n```\n::\n\n";
+        var (page, board) = await AddBoardPageAsync(fixture, callbackBlock + $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::\n::\n");
         var callback = (TestSerializerCallback)page.Children["callback"];
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var release = new ManualResetEventSlim();
@@ -315,16 +313,20 @@ public class MarkdownSlotWriteBackTests
         await entered.Task.WaitAsync(DeadlockTimeout);
 
         // Act
-        board.Tiles = [.. board.Tiles, new TestTile { Position = 2 }];
-        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+        board.Columns = 3;
+        var boardSave = page.WriteConfigurationAsync(board, CancellationToken.None);
+        var isBoardSaveWaiting = !boardSave.IsCompleted;
         release.Set();
-        var handledSlowSave = await slowSave.WaitAsync(DeadlockTimeout);
+        var results = await Task.WhenAll(slowSave, boardSave).WaitAsync(DeadlockTimeout);
 
         // Assert
-        Assert.True(handled);
-        Assert.False(handledSlowSave);
-        Assert.Equal(blocks + "::: Tile Position=2\n:::\n::\n", await fixture.ReadAsync("page.md"));
-        AssertRefusal(ChangedPageRefusal, log);
+        Assert.True(isBoardSaveWaiting);
+        Assert.Equal([true, true], results);
+        Assert.Equal(
+            $":: {Namespace}.TestSerializerCallback#callback Value=a\n::\n\n:: {BoardType}#board Columns=3\n::: Tile Position=1\n:::\n::\n",
+            await fixture.ReadAsync("page.md"));
+        Assert.Equal(3, board.Columns);
+        Assert.Empty(log.Entries);
     }
 
     [Fact]
@@ -599,6 +601,30 @@ public class MarkdownSlotWriteBackTests
         Assert.Equal(
             new[] { "\n<p>one</p>\n", "\n<p>two</p>\n", "\n<p>three</p>\n" },
             board.Tiles.Select(tile => MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(tile.Child).Children)).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenWriteIsRefused_ThenTheConfigurationOfTheBlockAndOfTheBlocksInsideItIsReadAgain()
+    {
+        // Arrange: the lone carriage return refuses the removal.
+        var (fixture, _) = await CreateFixtureWithLogAsync();
+        var content =
+            $"intro\ra\n\n:: {BoardType}#board Columns=2\n" +
+            "::: Tile Position=1\none\n:::\n::: Tile Position=2\ntwo\n:::\n::\n";
+        var (page, board) = await AddBoardPageAsync(fixture, content);
+        var first = board.Tiles[0];
+        board.Columns = 5;
+        first.Position = 7;
+        board.Tiles = [first];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(2, board.Columns);
+        Assert.Same(first, board.Tiles[0]);
+        Assert.Equal(new[] { 1, 2 }, board.Tiles.Select(tile => tile.Position).ToArray());
     }
 
     [Fact]
