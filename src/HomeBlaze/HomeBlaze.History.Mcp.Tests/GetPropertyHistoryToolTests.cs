@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.AI.Mcp;
+using HomeBlaze.History.Abstractions;
 using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
@@ -13,9 +14,12 @@ namespace HomeBlaze.History.Mcp.Tests;
 public class GetPropertyHistoryToolTests
 {
     private static Task<JsonElement> InvokeAsync(object inputObject) =>
-        InvokeAsync(inputObject, unsupportedPath: null, withStore: false);
+        InvokeAsync(inputObject, configureStore: null);
 
-    private static async Task<JsonElement> InvokeAsync(object inputObject, string? unsupportedPath, bool withStore)
+    private static Task<JsonElement> InvokeAsync(object inputObject, string? unsupportedPath, bool withStore) =>
+        InvokeAsync(inputObject, withStore ? store => store.UnsupportedPath = unsupportedPath : null);
+
+    private static async Task<JsonElement> InvokeAsync(object inputObject, Action<TestHistoryStore>? configureStore)
     {
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
@@ -26,10 +30,11 @@ public class GetPropertyHistoryToolTests
                 handler => handler is PropertyAttributeInitializer);
 
         var root = new HistoryToolTestSubject(context) { Name = "Test Room" };
-        if (withStore)
+        if (configureStore is not null)
         {
             // Registered in the same context, so the merger picks it up from the registry's subjects.
-            _ = new TestHistoryStore(context) { UnsupportedPath = unsupportedPath };
+            var store = new TestHistoryStore(context);
+            configureStore(store);
         }
 
         var provider = new HistoryMcpToolProvider(
@@ -39,6 +44,103 @@ public class GetPropertyHistoryToolTests
         var input = JsonSerializer.SerializeToElement(inputObject);
         var result = await tool.Handler(input, CancellationToken.None);
         return JsonSerializer.SerializeToElement(result);
+    }
+
+    private static readonly DateTimeOffset Start = new(2026, 6, 24, 0, 0, 0, TimeSpan.Zero);
+
+    private static void ConfigureGappedStore(TestHistoryStore store)
+    {
+        store.Coverage = [new HistoryCoverage(Start, Start.AddMinutes(20)), new HistoryCoverage(Start.AddMinutes(30), Start.AddHours(1))];
+        store.Points = [new HistoryPoint(Start.AddMinutes(5), 1.5, null), new HistoryPoint(Start.AddMinutes(40).AddMilliseconds(250), 2, null)];
+    }
+
+    [Fact]
+    public async Task WhenQueried_ThenCoverageSummaryIsReturnedOnceAtTopLevel()
+    {
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/a/Value", "/b/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z" },
+            ConfigureGappedStore);
+
+        // Assert
+        Assert.Equal("2026-06-24T00:00:00Z", json.GetProperty("from").GetString());
+        Assert.Equal("2026-06-24T01:00:00Z", json.GetProperty("to").GetString());
+        var coverage = json.GetProperty("coverage");
+        Assert.Equal(0.833, coverage.GetProperty("ratio").GetDouble());
+        Assert.Equal(1, coverage.GetProperty("gaps").GetInt32());
+        Assert.Equal("10m", coverage.GetProperty("largest_gap").GetString());
+        Assert.False(coverage.TryGetProperty("ranges", out _));
+        foreach (var entry in json.GetProperty("series").EnumerateObject())
+        {
+            Assert.False(entry.Value.TryGetProperty("coverage", out _));
+            Assert.False(entry.Value.TryGetProperty("ranges", out _));
+            Assert.False(entry.Value.TryGetProperty("truncated", out _));
+        }
+    }
+
+    [Fact]
+    public async Task WhenPointsAreReturned_ThenTheyArePairsWithCompactTimestamps()
+    {
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/a/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z" },
+            ConfigureGappedStore);
+
+        // Assert
+        var points = json.GetProperty("series").GetProperty("/a/Value").GetProperty("points").EnumerateArray().ToArray();
+        Assert.Equal(2, points.Length);
+        Assert.Equal("2026-06-24T00:05:00Z", points[0][0].GetString());
+        Assert.Equal(1.5, points[0][1].GetDouble());
+        Assert.Equal("2026-06-24T00:40:00.25Z", points[1][0].GetString());
+        Assert.Equal(2, points[1][1].GetDouble());
+    }
+
+    [Fact]
+    public async Task WhenCoverageRangesRequested_ThenRangesAreListedOnceAtTopLevel()
+    {
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/a/Value", "/b/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", coverage = "Ranges" },
+            ConfigureGappedStore);
+
+        // Assert
+        var ranges = json.GetProperty("coverage").GetProperty("ranges").EnumerateArray()
+            .Select(range => $"{range[0].GetString()}/{range[1].GetString()}")
+            .ToArray();
+        Assert.Equal(["2026-06-24T00:00:00Z/2026-06-24T00:20:00Z", "2026-06-24T00:30:00Z/2026-06-24T01:00:00Z"], ranges);
+        foreach (var entry in json.GetProperty("series").EnumerateObject())
+        {
+            Assert.False(entry.Value.TryGetProperty("ranges", out _));
+        }
+    }
+
+    [Fact]
+    public async Task WhenOneSeriesCoverageDiffers_ThenOnlyThatSeriesCarriesItsOwnRanges()
+    {
+        // Act - a truncated result narrows what the merger vouches for, so that series' coverage differs.
+        var json = await InvokeAsync(
+            new { paths = new[] { "/a/Value", "/b/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", coverage = "ranges" },
+            store =>
+            {
+                ConfigureGappedStore(store);
+                store.TruncatedPath = "/b/Value";
+            });
+
+        // Assert
+        var series = json.GetProperty("series");
+        Assert.False(series.GetProperty("/a/Value").TryGetProperty("ranges", out _));
+        Assert.True(series.GetProperty("/b/Value").GetProperty("truncated").GetBoolean());
+        Assert.NotEmpty(series.GetProperty("/b/Value").GetProperty("ranges").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task WhenCoverageModeIsUnknown_ThenStructuredError()
+    {
+        // Act
+        var json = await InvokeAsync(new { paths = new[] { "/a/Value" }, from = "2026-06-24T00:00:00Z", coverage = "all" });
+
+        // Assert
+        Assert.Equal("Parameter 'coverage' must be 'summary' or 'ranges'.", json.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -307,10 +409,15 @@ public class GetPropertyHistoryToolTests
         {
             Assert.True(series.TryGetProperty(path, out var entry));
             Assert.True(entry.TryGetProperty("value_type", out _));     // present (null when unresolved)
-            Assert.Empty(entry.GetProperty("coverage").EnumerateArray());
             Assert.Empty(entry.GetProperty("points").EnumerateArray());
-            Assert.False(entry.GetProperty("truncated").GetBoolean());
+            Assert.False(entry.TryGetProperty("truncated", out _));
+            Assert.False(entry.TryGetProperty("ranges", out _));
         }
+
+        var coverage = json.GetProperty("coverage");
+        Assert.Equal(0, coverage.GetProperty("ratio").GetDouble());
+        Assert.Equal(1, coverage.GetProperty("gaps").GetInt32());
+        Assert.Equal("1h", coverage.GetProperty("largest_gap").GetString());
     }
 
     [Fact]

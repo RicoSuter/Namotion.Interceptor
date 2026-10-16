@@ -17,19 +17,26 @@ public partial class HistoryToolTestSubject
 }
 
 /// <summary>
-/// History store subject for the tool tests: covers the whole timeline and answers every path with an
-/// empty series, except <see cref="UnsupportedPath"/>, which throws the way a real store does when a
-/// numeric aggregation is asked of a value_json column.
+/// History store subject for the tool tests: covers <see cref="Coverage"/> (the whole timeline by default) and
+/// answers every path with <see cref="Points"/> inside the queried window, except <see cref="UnsupportedPath"/>,
+/// which throws the way a real store does when a numeric aggregation is asked of a value_json column, and
+/// <see cref="TruncatedPath"/>, which reports its result as truncated.
 /// </summary>
 [InterceptorSubject]
 public partial class TestHistoryStore : IHistoryStore
 {
     public string? UnsupportedPath { get; set; }
 
+    public string? TruncatedPath { get; set; }
+
+    public ImmutableArray<HistoryCoverage> Coverage { get; set; } =
+        [new HistoryCoverage(DateTimeOffset.MinValue, DateTimeOffset.MaxValue)];
+
+    public ImmutableArray<HistoryPoint> Points { get; set; } = [];
+
     public int Priority => 10;
 
-    public ImmutableArray<HistoryCoverage> CoverageRanges =>
-        [new HistoryCoverage(DateTimeOffset.MinValue, DateTimeOffset.MaxValue)];
+    public ImmutableArray<HistoryCoverage> CoverageRanges => Coverage;
 
     public IReadOnlySet<string> SupportedAggregations =>
         new HashSet<string>(HistoryAggregations.All, StringComparer.Ordinal);
@@ -43,7 +50,15 @@ public partial class TestHistoryStore : IHistoryStore
                 new HashSet<string>(StringComparer.Ordinal) { HistoryAggregations.Last });
         }
 
-        return Task.FromResult(new HistorySeries(query.PropertyPath, [], false, CoverageRanges));
+        var points = Points
+            .Where(point => point.Timestamp >= query.From && point.Timestamp < query.To)
+            .ToImmutableArray();
+        var isTruncated = string.Equals(query.PropertyPath, TruncatedPath, StringComparison.Ordinal);
+        return Task.FromResult(new HistorySeries(
+            query.PropertyPath,
+            points,
+            isTruncated,
+            HistoryCoverage.Clip(CoverageRanges, new HistoryCoverage(query.From, query.To))));
     }
 
     public ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(

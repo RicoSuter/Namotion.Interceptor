@@ -1,4 +1,4 @@
-using System.Globalization;
+using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.History.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -45,6 +45,13 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 type = "integer",
                 description = "Maximum points per path. Defaults to (and is capped at) 10000 for raw samples " +
                               "and 1000 for bucketed ones. Lower it to keep the response small."
+            },
+            coverage = new
+            {
+                type = "string",
+                description = "summary (default) or ranges. The response always carries a coverage summary (ratio, gaps, " +
+                              "largest_gap); ranges also lists the covered ranges, which raw state timelines need when ratio < 1, " +
+                              "because raw samples do not show gaps."
             }
         },
         required = new[] { "paths", "from" }
@@ -70,11 +77,13 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         {
             Name = "get_property_history",
             Description = "Query recorded history for one or more [State] property paths over a time range. " +
-                          "Supports raw samples or bucketed downsampling with an aggregation. Returns a 'series' " +
-                          "map keyed by path, each with a value_type hint, effective coverage ranges, the points " +
-                          "(a null value means a gap, an unknown value, or the Count or Sum of a partly covered bucket), " +
-                          "and a truncated flag; a path that cannot be served carries its " +
-                          "own error and the others still return data. " +
+                          "Supports raw samples or bucketed downsampling with an aggregation. Returns the resolved from and to, " +
+                          "a coverage summary for the whole response (covered ratio, gap count, largest gap; ranges on request), " +
+                          "and a 'series' map keyed by path, each with a value_type hint and points as [timestamp, value] pairs " +
+                          "(a null value means a gap, an unknown value, or the Count or Sum of a partly covered bucket); " +
+                          "truncated appears when the point limit cut the series, and a series whose coverage differs " +
+                          "from the response's carries its own ranges when ranges are requested. A path that cannot be " +
+                          "served carries its own error and the others still return data. " +
                           "All input and output timestamps are UTC. " +
                           "Use browse or search to discover paths first.",
             InputSchema = GetPropertyHistorySchema,
@@ -84,12 +93,6 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     }
 
     private const int MaxHistoryPaths = 10;
-
-    // Recorded timestamps keep whatever offset their source supplied, so formatting them verbatim can
-    // emit mixed offsets and break a caller that compares or sorts the strings, as the documented
-    // all-UTC contract invites.
-    private static string FormatUtc(DateTimeOffset value) =>
-        value.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Returns a structured error when an optional parameter is present but is neither a string nor
@@ -207,6 +210,20 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             };
         }
 
+        if (HasWrongType(input, "coverage") is { } coverageTypeError)
+        {
+            return coverageTypeError;
+        }
+
+        var coverageMode = input.TryGetProperty("coverage", out var coverageElement) && coverageElement.ValueKind == JsonValueKind.String
+            ? coverageElement.GetString()
+            : null;
+        var includeRanges = string.Equals(coverageMode, "ranges", StringComparison.OrdinalIgnoreCase);
+        if (!includeRanges && coverageMode is not null && !string.Equals(coverageMode, "summary", StringComparison.OrdinalIgnoreCase))
+        {
+            return new { error = "Parameter 'coverage' must be 'summary' or 'ranges'." };
+        }
+
         var defaultMaxPoints = bucket is null ? 10_000 : 1_000;
         if (TryReadMaxPoints(input, defaultMaxPoints, out var maxPoints) is { } maxPointsError)
         {
@@ -225,18 +242,97 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 stores, rootRegistered, path, from, to, bucket, aggregation, maxPoints, cancellationToken)))
             .ConfigureAwait(false);
 
+        // The response coverage is the first served series'. In the normal case every series shares it, and
+        // repeating it per series dominated the response size.
+        var responseCoverage = results.FirstOrDefault(result => result.Series is not null)?.Series!.CoverageRanges;
+
         var series = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var (path, payload) in results)
+        foreach (var result in results)
         {
-            series[path] = payload;
+            series[result.Path] = result.Series is { } served
+                ? BuildSeriesPayload(result.ValueType, served, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
+                : result.ErrorPayload;
         }
 
         // Nested rather than returned as the top-level map: a path is caller-supplied, so a bare map
         // keyed by path cannot be told apart from the tool's own { error = ... } shape.
-        return new { series };
+        var response = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["from"] = HistoryToolFormatting.FormatTimestamp(from),
+            ["to"] = HistoryToolFormatting.FormatTimestamp(to)
+        };
+
+        if (responseCoverage is { } coverage)
+        {
+            response["coverage"] = BuildCoveragePayload(coverage, from, to, includeRanges);
+        }
+
+        response["series"] = series;
+        return response;
     }
 
-    private async Task<(string Path, object? Payload)> QueryOnePathAsync(
+    private static Dictionary<string, object?> BuildCoveragePayload(
+        ImmutableArray<HistoryCoverage> ranges, DateTimeOffset from, DateTimeOffset to, bool includeRanges)
+    {
+        var summary = HistoryToolFormatting.Summarize(ranges, from, to);
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["ratio"] = summary.Ratio,
+            ["gaps"] = summary.Gaps
+        };
+
+        if (summary.Gaps > 0)
+        {
+            payload["largest_gap"] = HistoryToolFormatting.FormatDuration(summary.LargestGap);
+        }
+
+        if (includeRanges)
+        {
+            payload["ranges"] = FormatRanges(ranges);
+        }
+
+        return payload;
+    }
+
+    private static Dictionary<string, object?> BuildSeriesPayload(string? valueType, HistorySeries series, bool includeOwnRanges)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal) { ["value_type"] = valueType };
+        if (series.IsTruncated)
+        {
+            payload["truncated"] = true;
+        }
+
+        if (includeOwnRanges)
+        {
+            payload["ranges"] = FormatRanges(series.CoverageRanges);
+        }
+
+        var points = new object?[series.Points.Length][];
+        for (var i = 0; i < points.Length; i++)
+        {
+            points[i] = ToPair(series.Points[i]);
+        }
+
+        payload["points"] = points;
+        return payload;
+    }
+
+    private static object?[] ToPair(HistoryPoint point) =>
+    [
+        HistoryToolFormatting.FormatTimestamp(point.Timestamp),
+        point.Number is { } number ? number : point.Json is { } json ? json : null
+    ];
+
+    private static string[][] FormatRanges(ImmutableArray<HistoryCoverage> ranges) =>
+        ranges.Select(range => new[]
+        {
+            HistoryToolFormatting.FormatTimestamp(range.From),
+            HistoryToolFormatting.FormatTimestamp(range.To)
+        }).ToArray();
+
+    private sealed record PathResult(string Path, string? ValueType, HistorySeries? Series, object? ErrorPayload);
+
+    private async Task<PathResult> QueryOnePathAsync(
         IReadOnlyList<IHistoryStore> stores,
         RegisteredSubject? rootRegistered,
         string path,
@@ -272,7 +368,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         }
         catch (HistoryAggregationNotSupportedException exception)
         {
-            return (path, new
+            return new PathResult(path, valueType, null, new
             {
                 value_type = valueType,
                 error = exception.Message,
@@ -291,30 +387,14 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             // whole fan-out and discarded the results for every sibling path that had already
             // succeeded, which is exactly what this tool promises not to do.
             _logger.LogError(exception, "Reading history for '{PropertyPath}' failed.", path);
-            return (path, new
+            return new PathResult(path, valueType, null, new
             {
                 value_type = valueType,
                 error = "Could not read history for this path. Check server logs for details."
             });
         }
 
-        return (path, new
-        {
-            value_type = valueType,
-            truncated = result.IsTruncated,
-            coverage = result.CoverageRanges.Select(range => new
-            {
-                from = FormatUtc(range.From),
-                to = FormatUtc(range.To)
-            }).ToArray(),
-            points = result.Points.Select(point => new
-            {
-                t = FormatUtc(point.Timestamp),
-                value = point.Number is { } number ? (object?)number
-                      : point.Json is { } json ? json
-                      : null
-            }).ToArray()
-        });
+        return new PathResult(path, valueType, result, null);
     }
 
     /// <summary>
