@@ -41,8 +41,8 @@ These properties are updated in real-time during simulation:
 
 ### Derived Properties
 These properties auto-calculate when dependencies change:
-- **SpeedDelta** - Difference between target and current speed
-- **IsAtTargetSpeed** - True when within 50 RPM of target
+- **SpeedDelta** - Difference between the speed the motor aims at (the target scaled by the mode, 0 while not powered) and the current speed
+- **IsAtTargetSpeed** - True when within 50 RPM of the speed the motor aims at
 
 ## File Structure
 

@@ -38,7 +38,7 @@ public class MotorTests
         Assert.False(motor.IsPowered);
         Assert.Equal(1150, motor.CurrentSpeed);
         Assert.Equal(1200, motor.TargetSpeed);
-        Assert.Equal(50, motor.SpeedDelta);
+        Assert.Equal(-1150, motor.SpeedDelta);
         Assert.Equal(MotorStatus.Stopping, motor.Status);
     }
 
@@ -99,6 +99,38 @@ public class MotorTests
         // Assert
         Assert.Equal(expectedTarget, simulationTarget);
         Assert.Equal(targetSpeed, motor.TargetSpeed);
+    }
+
+    [Fact]
+    public void WhenSpeedReachedTheTargetScaledByTheMode_ThenItIsAtTargetSpeed()
+    {
+        // Arrange
+        var motor = CreateMotor();
+        motor.TargetSpeed = 1000;
+
+        // Act
+        motor.Mode = MotorMode.Eco;
+        motor.CurrentSpeed = 600;
+
+        // Assert
+        Assert.Equal(0, motor.SpeedDelta);
+        Assert.True(motor.IsAtTargetSpeed);
+    }
+
+    [Fact]
+    public void WhenNotPowered_ThenTheSpeedIsMeasuredAgainstZero()
+    {
+        // Arrange
+        var motor = CreateMotor();
+        motor.TargetSpeed = 1000;
+        motor.CurrentSpeed = 1000;
+
+        // Act
+        motor.PowerOff();
+
+        // Assert
+        Assert.Equal(-1000, motor.SpeedDelta);
+        Assert.False(motor.IsAtTargetSpeed);
     }
 
     [Fact]

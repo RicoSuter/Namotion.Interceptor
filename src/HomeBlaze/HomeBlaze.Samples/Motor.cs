@@ -86,15 +86,15 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     // Derived properties
 
     /// <summary>
-    /// Difference between target and current speed.
+    /// Difference between the speed the simulation aims at (see <see cref="GetSimulationTarget"/>) and the current speed.
     /// </summary>
     [Derived]
     [State("Delta", Position = 5)]
     [Category("Speed")]
-    public int SpeedDelta => TargetSpeed - CurrentSpeed;
+    public int SpeedDelta => GetSimulationTarget() - CurrentSpeed;
 
     /// <summary>
-    /// Whether the motor is at target speed (within 50 RPM).
+    /// Whether the motor is within 50 RPM of the speed the simulation aims at.
     /// </summary>
     [Derived]
     [State("At Target", Position = 6)]
