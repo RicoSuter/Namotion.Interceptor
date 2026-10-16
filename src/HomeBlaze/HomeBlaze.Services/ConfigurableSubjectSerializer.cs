@@ -37,7 +37,7 @@ public class ConfigurableSubjectSerializer
     private readonly IServiceProvider _serviceProvider;
     private readonly JsonSerializerOptions _jsonPropertyOptions;
     private readonly JsonSerializerOptions _cSharpPropertyOptions;
-    // Holds Type keys for the lifetime of the serializer, so unloading a plugin must clear its entries first.
+    // Never cleared: holds its Type keys, and with them their assemblies, as long as the serializer lives, like TypeProvider.
     private readonly ConcurrentDictionary<(Type Type, ConfigurationNaming Naming), JsonElement?> _defaultConfigurations = new();
 
     public ConfigurableSubjectSerializer(TypeProvider typeProvider, IServiceProvider serviceProvider)
