@@ -12,7 +12,10 @@ internal sealed class StorageWorker : IDisposable
     internal const string CallFromWithinItemMessage =
         "An operation of a storage was called from work that runs on the worker of that storage, such as the load " +
         "of a file or the ApplyConfigurationAsync of a subject. The operation would wait for the work that waits " +
-        "for it. Call it from a task that is started inside using (ExecutionContext.SuppressFlow()), for example " +
+        "for it. " + CallFromWithinWorkRemedy;
+
+    internal const string CallFromWithinWorkRemedy =
+        "Call it from a task that is started inside using (ExecutionContext.SuppressFlow()), for example " +
         "with Task.Run, and do not wait for that task: the call then runs once the work has returned. A call that " +
         "is made directly inside that scope is refused like this one.";
 

@@ -686,7 +686,7 @@ public class MarkdownSlotWriteBackTests
 
         // Assert
         Assert.False(handled);
-        Assert.Equal(StorageWorker.CallFromWithinItemMessage, Assert.IsType<InvalidOperationException>(refusal).Message);
+        Assert.Equal(MarkdownFile.CallFromWithinWriteMessage, Assert.IsType<InvalidOperationException>(refusal).Message);
         Assert.Equal(content, await fixture.ReadAsync("page.md"));
         Assert.Equal([1, 2], board.Tiles.Select(tile => tile.Position));
     }

@@ -47,6 +47,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // reload lock, which the reload inside the write takes while this one is held.
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
+    internal const string CallFromWithinWriteMessage =
+        "A write of the configuration of a page was called from within a write of the same page, such as from the " +
+        "ApplyConfigurationAsync of a subject that the reload inside that write applies. The call would wait for " +
+        "the write that waits for it. " + StorageWorker.CallFromWithinWorkRemedy;
+
     // The write-back of this page that the flow runs in, so that a save from inside it is refused instead of waiting
     // for _writeLock. Off the worker, the reload after a refused write applies configuration within the write.
     private readonly AsyncLocal<WriteOfFlow?> _writeOfFlow = new();
@@ -224,10 +229,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         // From work on the worker or within a write of this page, such as the configuration that the reload inside a
         // save applies, the call would wait for the lock that the save holds while it waits for that work. The worker
         // would refuse it later.
-        if (Storage is FluentStorageContainer { IsCallFromWithinWorkerItem: true } ||
-            _writeOfFlow.Value is { IsFinished: false })
+        if (Storage is FluentStorageContainer { IsCallFromWithinWorkerItem: true })
         {
             throw new InvalidOperationException(StorageWorker.CallFromWithinItemMessage);
+        }
+
+        if (_writeOfFlow.Value is { IsFinished: false })
+        {
+            throw new InvalidOperationException(CallFromWithinWriteMessage);
         }
 
         await _writeLock.WaitAsync(cancellationToken);
