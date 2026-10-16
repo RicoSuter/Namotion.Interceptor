@@ -62,13 +62,13 @@ using System.Text.Json.Serialization;
                         (o) => ((WeatherStation)o).Temperature,
                         (o, v) => ((WeatherStation)o).Temperature = (double)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<double>(static (o) => ((WeatherStation)o)._Temperature),
                     ["Humidity"] = new SubjectPropertyMetadata(
                         typeof(WeatherStation).GetProperty(nameof(Humidity), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly)!,
                         (o) => ((WeatherStation)o).Humidity,
                         (o, v) => ((WeatherStation)o).Humidity = (double)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<double>(static (o) => ((WeatherStation)o)._Humidity),
                     ["IsHot"] = new SubjectPropertyMetadata(
                         typeof(global::IHasTemperature).GetProperty(nameof(global::IHasTemperature.IsHot), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((global::IHasTemperature)o).IsHot,

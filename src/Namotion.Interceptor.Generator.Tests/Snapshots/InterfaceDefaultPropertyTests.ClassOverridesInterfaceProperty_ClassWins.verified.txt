@@ -62,7 +62,7 @@ using System.Text.Json.Serialization;
                         (o) => ((Sensor)o).Name,
                         (o, v) => ((Sensor)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<string>(static (o) => ((Sensor)o)._Name),
             }
             .ToFrozenDictionary();
 

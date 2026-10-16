@@ -62,13 +62,13 @@ using System.Text.Json.Serialization;
                         (o) => ((SampleSubject)o).Value,
                         (o, v) => ((SampleSubject)o).Value = (int)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<int>(static (o) => ((SampleSubject)o)._Value),
                     ["Name"] = new SubjectPropertyMetadata(
                         typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly)!,
                         (o) => ((SampleSubject)o).Name,
                         (o, v) => ((SampleSubject)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<string>(static (o) => ((SampleSubject)o)._Name),
                     ["Hidden"] = new SubjectPropertyMetadata(
                         typeof(SampleSubject).GetProperty(nameof(Hidden), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly)!,
                         (o) => ((SampleSubject)o).Hidden,

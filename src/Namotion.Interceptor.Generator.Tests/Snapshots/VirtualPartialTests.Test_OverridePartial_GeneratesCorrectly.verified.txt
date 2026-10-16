@@ -62,7 +62,7 @@ using System.Text.Json.Serialization;
                         (o) => ((DerivedClass)o).VirtualProp,
                         (o, v) => ((DerivedClass)o).VirtualProp = (string)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<string>(static (o) => ((DerivedClass)o)._VirtualProp),
             }
             .ToFrozenDictionary();
 

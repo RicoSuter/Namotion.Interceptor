@@ -14,6 +14,34 @@ namespace Namotion.Interceptor.Registry.Tests;
 public class DynamicPropertyLifecycleTests
 {
     [Fact]
+    public void WhenAddingAPropertyWithAnInitialValue_ThenTheAddPublishesNullAsOldValue()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "John" };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+
+        using var subscription = context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "Initial")
+            .Subscribe(changes.Add);
+
+        // Act
+        registeredRoot.AddProperty("Initial", typeof(string), _ => "value", null);
+
+        // Assert: the add publishes the null-to-value transition the caller supplies; the getter,
+        // which already returns the value, does not replace the old side.
+        var change = Assert.Single(changes);
+        Assert.Null(change.GetOldValue<string?>());
+        Assert.Equal("value", change.GetNewValue<string?>());
+    }
+
+    [Fact]
     public void WhenWritingToDynamicDerivedPropertyWithSetter_ThenPropertyIsRecalculated()
     {
         // Arrange: Dynamic derived property with a setter.
