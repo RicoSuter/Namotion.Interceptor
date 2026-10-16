@@ -41,17 +41,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return next(ref context);
         }
 
-        if (transaction.IsCommitting)
+        if (transaction.IsCommitting && TryReadWhileCommitting(transaction, ref context, next, out var committingValue))
         {
-            if (transaction.IsCommitModelAccessAuthorized)
-            {
-                return next(ref context);
-            }
-
-            if (transaction.IsInactiveUnderLockOrThrowIfCommitting())
-            {
-                return next(ref context);
-            }
+            return committingValue;
         }
 
         // Recorder-active reads are the landed-model view. This access linearizes at the non-committing
@@ -67,6 +59,41 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         return next(ref context);
+    }
+
+    /// <summary>
+    /// Reads a property while <paramref name="transaction"/> commits. Returns false when the transaction stopped
+    /// committing and the caller continues the capturing read path; throws when the read is not authorized.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryReadWhileCommitting<TProperty>(
+        SubjectTransaction transaction,
+        ref PropertyReadContext<TProperty> context,
+        ReadInterceptionDelegate<TProperty> next,
+        out TProperty value)
+    {
+        if (transaction.IsCommitModelAccessAuthorized)
+        {
+            value = next(ref context);
+            return true;
+        }
+
+        if (transaction.IsCommitValidationAuthorized)
+        {
+            value = transaction.TryGetCommitValidationValue<TProperty>(context.Property, out var validationValue)
+                ? validationValue
+                : next(ref context);
+            return true;
+        }
+
+        if (transaction.IsInactiveUnderLockOrThrowIfCommitting())
+        {
+            value = next(ref context);
+            return true;
+        }
+
+        value = default!;
+        return false;
     }
 
     /// <inheritdoc />
@@ -86,19 +113,10 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        if (transaction.IsCommitting)
+        if (transaction.IsCommitting && ShouldWriteThroughWhileCommitting(transaction))
         {
-            if (transaction.IsCommitModelAccessAuthorized)
-            {
-                next(ref context);
-                return;
-            }
-
-            if (transaction.IsInactiveUnderLockOrThrowIfCommitting())
-            {
-                next(ref context);
-                return;
-            }
+            next(ref context);
+            return;
         }
 
         // Settable-derived writes are immediate and outside the transaction. This access linearizes at the
@@ -109,7 +127,11 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        ValidateTransactionContext(context.Property, transaction);
+        var subjectContext = context.Property.Subject.Context;
+        ValidateTransactionContext(subjectContext, context.Property, transaction);
+
+        transaction.IncludeHandlersOf(subjectContext);
+        InvokeCapturingHandlers(transaction, context.Property, context.NewValue, context.Origin);
 
         // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
         var resolvedOrigin = context.GetFinalOrigin();
@@ -134,11 +156,34 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         next(ref context);
     }
 
+    /// <summary>
+    /// Returns true when a write while <paramref name="transaction"/> commits goes straight to the model, and false
+    /// when the transaction stopped committing and the caller continues the capturing write path. Throws when the
+    /// write is not authorized.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ValidateTransactionContext(PropertyReference property, SubjectTransaction transaction)
+    private static bool ShouldWriteThroughWhileCommitting(SubjectTransaction transaction)
     {
-        var subjectInterceptors = property.Subject.Context
-            .GetServices<SubjectTransactionInterceptor>();
+        if (transaction.IsCommitModelAccessAuthorized)
+        {
+            return true;
+        }
+
+        if (transaction.IsCommitValidationAuthorized)
+        {
+            SubjectTransaction.ThrowCaptureDuringCommitValidation();
+        }
+
+        return transaction.IsInactiveUnderLockOrThrowIfCommitting();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ValidateTransactionContext(
+        IInterceptorSubjectContext subjectContext,
+        PropertyReference property,
+        SubjectTransaction transaction)
+    {
+        var subjectInterceptors = subjectContext.GetServices<SubjectTransactionInterceptor>();
         var isBoundToThisContext = subjectInterceptors.Length == 1
             ? ReferenceEquals(subjectInterceptors[0], transaction.Interceptor)
             : ContainsByReference(subjectInterceptors, transaction.Interceptor);
@@ -146,6 +191,39 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         if (!isBoundToThisContext)
         {
             ThrowTransactionContextMismatch(property);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void InvokeCapturingHandlers<TProperty>(
+        SubjectTransaction transaction,
+        PropertyReference property,
+        TProperty newValue,
+        ChangeOrigin origin)
+    {
+        var handlers = transaction.Handlers;
+        if (!handlers.IsDefaultOrEmpty)
+        {
+            InvokeCapturingHandlersCore(handlers, transaction, property, newValue, origin);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void InvokeCapturingHandlersCore<TProperty>(
+        ImmutableArray<ITransactionHandler> handlers,
+        SubjectTransaction transaction,
+        PropertyReference property,
+        TProperty newValue,
+        ChangeOrigin origin)
+    {
+        if (transaction.IsValidating)
+        {
+            SubjectTransaction.ThrowCaptureDuringCommitValidation();
+        }
+
+        foreach (var handler in handlers)
+        {
+            handler.OnCapturing(transaction, property, newValue, origin);
         }
     }
 

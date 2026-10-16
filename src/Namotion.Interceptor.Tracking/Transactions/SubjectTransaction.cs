@@ -1,4 +1,7 @@
 using System.Buffers;
+using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Performance;
 
@@ -17,6 +20,9 @@ public sealed class SubjectTransaction : IDisposable
     [ThreadStatic]
     private static SubjectTransaction? _commitModelAccessTransaction;
 
+    [ThreadStatic]
+    private static SubjectTransaction? _commitValidationTransaction;
+
     /// <summary>
     /// Gets a value indicating whether any transaction is currently active across all contexts.
     /// This is a fast-path check using a volatile read; it may briefly return true after
@@ -29,6 +35,15 @@ public sealed class SubjectTransaction : IDisposable
     private readonly TransactionRequirement _requirement;
     private readonly TimeSpan _commitTimeout;
     private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
+
+    // Replaced under _pendingChangesLock only while no commit runs, so the handlers that checked a commit are exactly
+    // the ones its applies are marked for. Never mutated in place: it starts as the context's cached service array.
+    private ITransactionHandler[] _handlers;
+
+    // Caches only (a stale read just takes the slow path): the last subject context and handler array included.
+    // Written after _handlers with release semantics, so a reader that skips on a hit also sees the included handlers.
+    private IInterceptorSubjectContext? _lastIncludedContext;
+    private ITransactionHandler[] _lastIncludedHandlers;
 
     /// <summary>
     /// Last write wins if the same property is written multiple times.
@@ -50,6 +65,14 @@ public sealed class SubjectTransaction : IDisposable
     // once the commit finishes. Accessed only under _pendingChangesLock (no volatile needed; never read lock-free).
     private bool _disposeRequestedDuringCommit;
 
+    // Set while commit handlers check the snapshot, before _isCommitting: captures throw so the checked snapshot is
+    // the one that commits. Written only under _pendingChangesLock.
+    private bool _isValidating;
+
+    // The changes whose source write failed, set only while the handlers check the set right before the local apply.
+    // Read only by the committing thread inside its commit validation scope, so it needs no lock.
+    private IReadOnlyList<SubjectPropertyChange>? _commitValidationExcludedChanges;
+
     /// <summary>
     /// Gets the current transaction in this execution context, or null if none is active.
     /// </summary>
@@ -64,6 +87,22 @@ public sealed class SubjectTransaction : IDisposable
     public static bool ValidateWriterContract { get; set; }
 
     /// <summary>
+    /// Returns true when the current write is a commit applying the value of <paramref name="property"/> that
+    /// <paramref name="handler"/> checked in <see cref="ITransactionHandler.OnCommitting"/>, or a rollback restoring
+    /// it. Reference-type values match by identity, value-type values by equality. A call by one of the transaction's
+    /// handlers consumes the mark, so it returns true at most once per applied value.
+    /// </summary>
+    /// <typeparam name="TProperty">The type of the written value.</typeparam>
+    /// <param name="handler">The handler asking whether it already checked the write.</param>
+    /// <param name="property">The property being written.</param>
+    /// <param name="value">The value being written.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool TryConsumeCommitWrite<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
+    {
+        return CommitWriteMarker.TryConsume(handler, property, value);
+    }
+
+    /// <summary>
     /// Sets the current transaction in this execution context.
     /// This is needed for async patterns where AsyncLocal must be set in the caller's context.
     /// </summary>
@@ -76,6 +115,12 @@ public sealed class SubjectTransaction : IDisposable
     /// Gets a value indicating whether the transaction is currently committing changes.
     /// </summary>
     internal bool IsCommitting => _isCommitting;
+
+    /// <summary>
+    /// Gets a value indicating whether commit handlers are checking the snapshot.
+    /// </summary>
+    // Lock-free early check; the authoritative check stays in TryCaptureChange under the lock.
+    internal bool IsValidating => Volatile.Read(ref _isValidating);
 
     /// <summary>
     /// Gets a value indicating whether the transaction has reached a terminal committed state.
@@ -93,9 +138,143 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsCommitModelAccessAuthorized => ReferenceEquals(_commitModelAccessTransaction, this);
 
     /// <summary>
+    /// Gets a value indicating whether this thread runs this transaction's handlers right before the local apply.
+    /// </summary>
+    internal bool IsCommitValidationAuthorized => ReferenceEquals(_commitValidationTransaction, this);
+
+    /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
     /// </summary>
     internal SubjectTransactionInterceptor Interceptor { get; }
+
+    /// <summary>
+    /// Gets the transaction handlers resolved from the context when the transaction began, followed by those added from
+    /// the contexts of subjects when they are written.
+    /// </summary>
+    internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(Volatile.Read(ref _handlers));
+
+    // Applies carry the commit write mark only when handlers checked the final set.
+    private SubjectTransaction? MarkingTransaction => _handlers.Length == 0 ? null : this;
+
+    /// <summary>
+    /// Adds the transaction handlers of <paramref name="subjectContext"/> that are not registered on the transaction's
+    /// context, when a subject of it is written and the transaction is about to capture the write.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown while a commit is in progress or commit handlers are checking the snapshot, like the capture would.
+    /// </exception>
+    internal void IncludeHandlersOf(IInterceptorSubjectContext subjectContext)
+    {
+        if (ReferenceEquals(subjectContext, Context) || ReferenceEquals(subjectContext, Volatile.Read(ref _lastIncludedContext)))
+        {
+            return;
+        }
+
+        var subjectHandlers = ImmutableCollectionsMarshal.AsArray(subjectContext.GetServices<ITransactionHandler>()) ?? [];
+        if (!ReferenceEquals(subjectHandlers, Volatile.Read(ref _lastIncludedHandlers)))
+        {
+            if (!ContainsAll(Volatile.Read(ref _handlers), subjectHandlers) &&
+                !TryInclude(subjectHandlers, Context.GetServices<ITransactionHandler>().AsSpan()))
+            {
+                return;
+            }
+
+            Volatile.Write(ref _lastIncludedHandlers, subjectHandlers);
+        }
+
+        Volatile.Write(ref _lastIncludedContext, subjectContext);
+    }
+
+    /// <summary>
+    /// Adds the handlers of <paramref name="subjectHandlers"/> that are in neither the transaction's handlers nor
+    /// <paramref name="transactionContextHandlers"/>, so a handler registered on the transaction's context after it
+    /// began stays out. Returns false when the transaction is disposed or committed.
+    /// </summary>
+    private bool TryInclude(
+        ReadOnlySpan<ITransactionHandler> subjectHandlers,
+        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
+    {
+        lock (_pendingChangesLock)
+        {
+            // Same checks and order as TryCaptureChange, which this write reaches next.
+            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
+            {
+                return false;
+            }
+
+            ThrowIfCommittingConcurrently();
+            if (_isValidating)
+            {
+                ThrowCaptureDuringCommitValidation();
+            }
+
+            var handlers = _handlers;
+            var additionCount = 0;
+            for (var index = 0; index < subjectHandlers.Length; index++)
+            {
+                if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+                {
+                    additionCount++;
+                }
+            }
+
+            if (additionCount > 0)
+            {
+                var union = new ITransactionHandler[handlers.Length + additionCount];
+                handlers.CopyTo(union, 0);
+                var count = handlers.Length;
+                for (var index = 0; index < subjectHandlers.Length; index++)
+                {
+                    if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+                    {
+                        union[count++] = subjectHandlers[index];
+                    }
+                }
+
+                Volatile.Write(ref _handlers, union);
+            }
+
+            return true;
+        }
+    }
+
+    private static bool IsAddition(
+        ReadOnlySpan<ITransactionHandler> subjectHandlers,
+        int index,
+        ReadOnlySpan<ITransactionHandler> handlers,
+        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
+    {
+        var handler = subjectHandlers[index];
+        return !ContainsByReference(handlers, handler) &&
+            !ContainsByReference(transactionContextHandlers, handler) &&
+            !ContainsByReference(subjectHandlers[..index], handler);
+    }
+
+    private static bool ContainsAll(ReadOnlySpan<ITransactionHandler> handlers, ReadOnlySpan<ITransactionHandler> candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (!ContainsByReference(handlers, candidate))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ContainsByReference(ReadOnlySpan<ITransactionHandler> handlers, ITransactionHandler handler)
+    {
+        foreach (var candidate in handlers)
+        {
+            if (ReferenceEquals(candidate, handler))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Gets a snapshot of the pending changes as a read-only list, in insertion order.
@@ -136,6 +315,47 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
+    /// Reads a pending value for the handlers that run right before the local apply, while the transaction is
+    /// committing. Returns false when the property is not part of the transaction or its source write failed.
+    /// </summary>
+    internal bool TryGetCommitValidationValue<TProperty>(PropertyReference property, out TProperty value)
+    {
+        if (!IsExcludedFromCommitValidation(property))
+        {
+            lock (_pendingChangesLock)
+            {
+                if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out var change))
+                {
+                    value = change.GetNewValue<TProperty>();
+                    return true;
+                }
+            }
+        }
+
+        value = default!;
+        return false;
+    }
+
+    private bool IsExcludedFromCommitValidation(PropertyReference property)
+    {
+        var excludedChanges = _commitValidationExcludedChanges;
+        if (excludedChanges is null)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < excludedChanges.Count; index++)
+        {
+            if (PropertyReference.Comparer.Equals(excludedChanges[index].Property, property))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Atomically captures a property change into the pending dictionary.
     /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
     /// subsequent writes preserve the original old value (last write wins). Returns false when
@@ -151,7 +371,9 @@ public sealed class SubjectTransaction : IDisposable
     /// True when the new value equals the landed value; an existing pending change for the property is
     /// then cancelled instead of updated.
     /// </param>
-    /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown if a concurrent commit is in progress (TOCTOU race) or commit handlers are checking the snapshot.
+    /// </exception>
     internal bool TryCaptureChange<TProperty>(
         PropertyReference property,
         ChangeOrigin origin,
@@ -169,6 +391,10 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             ThrowIfCommittingConcurrently();
+            if (_isValidating)
+            {
+                ThrowCaptureDuringCommitValidation();
+            }
 
             var pendingChanges = _pendingChanges;
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
@@ -241,6 +467,14 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
+    internal static void ThrowCaptureDuringCommitValidation()
+    {
+        throw new InvalidOperationException(
+            "Cannot write a transactional property while transaction handlers check the commit. " +
+            "Transaction handlers must not write properties. " +
+            "This is also reported when the transaction is used from another thread.");
+    }
+
     /// <summary>
     /// Gets the context this transaction is bound to.
     /// </summary>
@@ -256,6 +490,11 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public TransactionLocking Locking { get; }
 
+    /// <summary>
+    /// Gets the validation mode for this transaction.
+    /// </summary>
+    public TransactionValidationMode ValidationMode { get; }
+
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the transaction context, policies and acquired lock ownership as one coherent state.")]
     private SubjectTransaction(
         IInterceptorSubjectContext context,
@@ -264,6 +503,7 @@ public sealed class SubjectTransaction : IDisposable
         TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
+        TransactionValidationMode validationMode,
         TimeSpan commitTimeout,
         IDisposable? lockReleaser)
     {
@@ -273,8 +513,11 @@ public sealed class SubjectTransaction : IDisposable
         Locking = locking;
         _requirement = requirement;
         ConflictBehavior = conflictBehavior;
+        ValidationMode = validationMode;
         _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
+        _handlers = ImmutableCollectionsMarshal.AsArray(context.GetServices<ITransactionHandler>()) ?? [];
+        _lastIncludedHandlers = _handlers;
 
         Interlocked.Increment(ref _activeTransactionCount);
     }
@@ -289,16 +532,19 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="locking">The locking mode controlling transaction synchronization.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="conflictBehavior">The conflict detection behavior.</param>
+    /// <param name="validationMode">The validation mode.</param>
     /// <param name="commitTimeout">Timeout for commit operations. User cancellation is ignored during commit and only timeout-based cancellation is used. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.</param>
     /// <param name="cancellationToken">The cancellation token (used before commit starts, ignored during commit).</param>
     /// <returns>A new SubjectTransaction instance.</returns>
     /// <exception cref="InvalidOperationException">Thrown when transactions are not enabled or when nested transaction is attempted.</exception>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The factory forwards the complete set of transaction policies to the private constructor as one coherent state.")]
     internal static async ValueTask<SubjectTransaction> BeginTransactionAsync(
         IInterceptorSubjectContext context,
         TransactionFailureHandling failureHandling,
         TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
+        TransactionValidationMode validationMode,
         TimeSpan commitTimeout,
         CancellationToken cancellationToken)
     {
@@ -327,6 +573,7 @@ public sealed class SubjectTransaction : IDisposable
             locking,
             requirement,
             conflictBehavior,
+            validationMode,
             commitTimeout,
             transactionLock);
     }
@@ -429,13 +676,13 @@ public sealed class SubjectTransaction : IDisposable
             {
                 ThrowIfConflictsDetected(changes.Span);
 
-                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null);
+                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null, MarkingTransaction);
 
                 if (applyFailed.Count > 0)
                 {
                     if (_failureHandling == TransactionFailureHandling.Rollback)
                     {
-                        var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
+                        var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied, MarkingTransaction);
                         failure = CreateFailureException([], SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed), SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
                     }
                     else
@@ -544,8 +791,45 @@ public sealed class SubjectTransaction : IDisposable
                 SubjectPropertyChangeOperations.Concat(sourceErrors, revert.Errors));
         }
 
-        // Apply the whole snapshot except the source-write failures in a single pass. With no source
-        // failure, this is the entire snapshot, and ApplyAllChanges returns an empty Successful set.
+        return await ApplyAfterSourceWritesAsync(writer, changes, writeResult, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Checks the final set again and applies it locally after the source writes, reverting sources where the
+    /// failure handling requires it. Returns null on full success.
+    /// </summary>
+    private async ValueTask<SubjectTransactionException?> ApplyAfterSourceWritesAsync(
+        ITransactionWriter writer,
+        Memory<SubjectPropertyChange> changes,
+        SourceWriteResult writeResult,
+        CancellationToken cancellationToken)
+    {
+        var (written, failedSource, sourceErrors, revertState) = writeResult;
+
+        // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
+        // final set is checked again right before it lands.
+        var (invalid, invalidErrors) = CheckBeforeLocalApply(changes.Span, failedSource);
+        IReadOnlyList<SubjectPropertyChange> invalidWritten = [];
+        if (invalid.Count > 0)
+        {
+            if (_failureHandling == TransactionFailureHandling.Rollback)
+            {
+                var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
+                var notApplied = SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, invalid, written);
+                return CreateFailureException(
+                    [],
+                    SubjectPropertyChangeOperations.Concat(invalid, notApplied, revert.Failed),
+                    SubjectPropertyChangeOperations.Concat(invalidErrors, revert.Errors));
+            }
+
+            // BestEffort: skip the invalid changes like failed source writes, and revert the sources that accepted them.
+            invalidWritten = SubjectPropertyChangeOperations.IntersectByProperty(invalid, written);
+            failedSource = SubjectPropertyChangeOperations.Concat(failedSource, invalid);
+            sourceErrors = SubjectPropertyChangeOperations.Concat(sourceErrors, invalidErrors);
+        }
+
+        // Apply the whole snapshot except the source-write failures and the changes the handlers rejected in a single
+        // pass. With neither, this is the entire snapshot, and ApplyLocalChanges returns an empty Successful set.
         var exclude = failedSource.Count == 0 ? null : failedSource;
         IReadOnlyList<SubjectPropertyChange> applied;
         IReadOnlyList<SubjectPropertyChange> applyFailed;
@@ -554,10 +838,10 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<Exception> revertErrors = [];
         using (EnterCommitModelAccess())
         {
-            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude);
+            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude, MarkingTransaction);
             if (applyFailed.Count > 0 && _failureHandling == TransactionFailureHandling.Rollback)
             {
-                (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
+                (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied, MarkingTransaction);
             }
         }
 
@@ -579,14 +863,23 @@ public sealed class SubjectTransaction : IDisposable
                     SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
             }
 
-            // BestEffort: keep source == model for failed-apply properties by reverting only the
-            // source writes whose property failed to apply (matched by Property equality).
-            var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
+            // BestEffort: keep source == model for failed-apply and rejected properties by reverting only the
+            // source writes whose property failed to apply (matched by Property equality) or was rejected.
+            var toRevert = SubjectPropertyChangeOperations.Concat(SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written), invalidWritten);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
                 SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, bestEffortRevert.Failed),
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
+        }
+
+        if (invalidWritten.Count > 0)
+        {
+            var invalidRevert = await RevertSourceWritesSafelyAsync(writer, invalidWritten, revertState, cancellationToken).ConfigureAwait(false);
+            return CreateFailureException(
+                applied,
+                SubjectPropertyChangeOperations.Concat(failedSource, invalidRevert.Failed),
+                SubjectPropertyChangeOperations.Concat(sourceErrors, invalidRevert.Errors));
         }
 
         return CreateFailureAfterSuccessfulLocalApply(changes, exclude, applied, failedSource, sourceErrors);
@@ -767,15 +1060,62 @@ public sealed class SubjectTransaction : IDisposable
 
     private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) StartCommitAndSnapshotChanges()
     {
+        var (rentedArray, changes, handlers) = SnapshotChanges();
+        if (handlers.Length == 0)
+        {
+            return (rentedArray, changes);
+        }
+
+        try
+        {
+            InvokeCommitHandlers(handlers, changes.Span);
+
+            lock (_pendingChangesLock)
+            {
+                _isValidating = false;
+                if (Volatile.Read(ref _isDisposed) != 0)
+                {
+                    throw new ObjectDisposedException(nameof(SubjectTransaction));
+                }
+
+                _isCommitting = true;
+            }
+
+            return (rentedArray, changes);
+        }
+        catch
+        {
+            lock (_pendingChangesLock)
+            {
+                _isValidating = false;
+            }
+
+            // The caller has not received the array yet, so EndCommit cannot return it.
+            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
+            throw;
+        }
+    }
+
+    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes, ITransactionHandler[] Handlers) SnapshotChanges()
+    {
         lock (_pendingChangesLock)
         {
-            // Rent before setting _isCommitting so an allocation failure leaves the transaction reusable.
+            // Rent before changing state so an allocation failure leaves the transaction reusable.
             var pendingChanges = _pendingChanges;
             var changeCount = pendingChanges?.Count ?? 0;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
-            // Set this while holding the lock so no write can be captured between snapshot and commit.
-            _isCommitting = true;
+            // Read the handlers and set the state while holding the lock so no write can be captured, and no
+            // handler included, between the snapshot and the commit.
+            var handlers = _handlers;
+            if (handlers.Length == 0)
+            {
+                _isCommitting = true;
+            }
+            else
+            {
+                _isValidating = true;
+            }
 
             var index = 0;
             if (pendingChanges is not null)
@@ -786,8 +1126,164 @@ public sealed class SubjectTransaction : IDisposable
                 }
             }
 
-            return (rentedArray, rentedArray.AsMemory(0, changeCount));
+            return (rentedArray, rentedArray.AsMemory(0, changeCount), handlers);
         }
+    }
+
+    private void InvokeCommitHandlers(ITransactionHandler[] handlers, ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        foreach (var handler in handlers)
+        {
+            handler.OnCommitting(this, changes);
+        }
+    }
+
+    /// <summary>
+    /// Calls the handlers again right before the local apply with the changes that will be applied, with reads
+    /// returning the transaction's values for them. Returns the snapshot slots of the changes they rejected: the
+    /// failed changes of a <see cref="SubjectTransactionException"/> that match checked changes, or every checked
+    /// change otherwise.
+    /// </summary>
+    private (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) CheckBeforeLocalApply(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> failedSource)
+    {
+        // A transaction disposed from another flow mid-commit has dropped the pending values the reads need.
+        if (_handlers.Length == 0 || Volatile.Read(ref _isDisposed) != 0)
+        {
+            return ([], []);
+        }
+
+        // The writer marks accepted snapshot slots as Confirmed, but handlers must see the captured origin, which the
+        // pending changes still hold. Changes whose source write failed do not land, so the handlers neither receive
+        // them nor read their values.
+        var (rentedArray, checkedCount) = RentLandingPendingChanges(failedSource);
+        try
+        {
+            if (checkedCount == 0)
+            {
+                return ([], []);
+            }
+
+            _commitValidationExcludedChanges = failedSource.Count == 0 ? null : failedSource;
+            try
+            {
+                using (EnterCommitValidationAccess())
+                {
+                    InvokeCommitHandlers(_handlers, new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount));
+                }
+
+                return ([], []);
+            }
+            catch (Exception exception)
+            {
+                return GetRejectedChanges(exception, SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []));
+            }
+            finally
+            {
+                _commitValidationExcludedChanges = null;
+            }
+        }
+        finally
+        {
+            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
+        }
+    }
+
+    /// <summary>
+    /// Copies the pending changes whose property is not in <paramref name="failedSource"/> into a rented array, in
+    /// insertion order. The caller returns the array to <see cref="ArrayPool{T}.Shared"/>.
+    /// </summary>
+    private (SubjectPropertyChange[] RentedArray, int Count) RentLandingPendingChanges(
+        IReadOnlyList<SubjectPropertyChange> failedSource)
+    {
+        HashSet<PropertyReference>? failedProperties = null;
+        if (failedSource.Count > 0)
+        {
+            failedProperties = new HashSet<PropertyReference>(failedSource.Count, PropertyReference.Comparer);
+            foreach (var change in failedSource)
+            {
+                failedProperties.Add(change.Property);
+            }
+        }
+
+        lock (_pendingChangesLock)
+        {
+            var pendingChanges = _pendingChanges;
+            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(pendingChanges?.Count ?? 0);
+            var count = 0;
+            if (pendingChanges is not null)
+            {
+                foreach (var change in pendingChanges.Values)
+                {
+                    if (failedProperties is null || !failedProperties.Contains(change.Property))
+                    {
+                        rentedArray[count++] = change;
+                    }
+                }
+            }
+
+            return (rentedArray, count);
+        }
+    }
+
+    /// <summary>
+    /// Returns the snapshot slots in <paramref name="checkedChanges"/> that a handler exception rejects, matched by
+    /// property. A <see cref="SubjectTransactionException"/> rejects its failed changes; when none of them was
+    /// checked, the rejection fails closed like any other exception and rejects every checked change.
+    /// </summary>
+    private static (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) GetRejectedChanges(
+        Exception exception,
+        IReadOnlyList<SubjectPropertyChange> checkedChanges)
+    {
+        if (exception is SubjectTransactionException { FailedChanges.Count: > 0 } transactionException)
+        {
+            var rejected = SubjectPropertyChangeOperations.IntersectByProperty(transactionException.FailedChanges, checkedChanges);
+            if (rejected.Count > 0)
+            {
+                return (rejected, GetRejectionErrors(transactionException, checkedChanges));
+            }
+        }
+
+        return (checkedChanges, [exception]);
+    }
+
+    /// <summary>
+    /// Returns the errors of a rejection. When the failed changes and errors align one to one, only the errors of
+    /// the failed changes that were checked are kept; otherwise all errors, or the exception itself when it has none.
+    /// </summary>
+    private static IReadOnlyList<Exception> GetRejectionErrors(
+        SubjectTransactionException exception,
+        IReadOnlyList<SubjectPropertyChange> checkedChanges)
+    {
+        var failedChanges = exception.FailedChanges;
+        var errors = exception.Errors;
+        if (errors.Count == 0)
+        {
+            return [exception];
+        }
+
+        if (errors.Count != failedChanges.Count)
+        {
+            return errors;
+        }
+
+        var checkedProperties = new HashSet<PropertyReference>(checkedChanges.Count, PropertyReference.Comparer);
+        foreach (var change in checkedChanges)
+        {
+            checkedProperties.Add(change.Property);
+        }
+
+        var alignedErrors = new List<Exception>(errors.Count);
+        for (var index = 0; index < failedChanges.Count; index++)
+        {
+            if (checkedProperties.Contains(failedChanges[index].Property))
+            {
+                alignedErrors.Add(errors[index]);
+            }
+        }
+
+        return alignedErrors;
     }
 
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
@@ -832,6 +1328,29 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
+    private CommitValidationAccessScope EnterCommitValidationAccess() => new(this);
+
+    /// <summary>
+    /// Lets this thread read the transaction's pending values while it runs the handlers right before the local
+    /// apply. The previous identity is restored on disposal. Callers must dispose the scope before awaiting.
+    /// </summary>
+    private readonly struct CommitValidationAccessScope : IDisposable
+    {
+        private readonly SubjectTransaction? _previousTransaction;
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit validation identity and restores the previous identity on disposal, including nested scopes.")]
+        public CommitValidationAccessScope(SubjectTransaction transaction)
+        {
+            _previousTransaction = _commitValidationTransaction;
+            _commitValidationTransaction = transaction;
+        }
+
+        public void Dispose()
+        {
+            _commitValidationTransaction = _previousTransaction;
+        }
+    }
+
     private SubjectTransactionException CreateFailureException(
         IReadOnlyList<SubjectPropertyChange> successful,
         IReadOnlyList<SubjectPropertyChange> failed,
@@ -862,7 +1381,9 @@ public sealed class SubjectTransaction : IDisposable
             lock (_pendingChangesLock)
             {
                 _pendingChanges?.Clear();
-                committing = _isCommitting;
+                // A disposal during the handler phase also defers to EndCommit, so the exclusive lock is not released
+                // while handlers of this commit still run.
+                committing = _isCommitting || _isValidating;
                 if (committing)
                 {
                     _disposeRequestedDuringCommit = true;

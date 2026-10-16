@@ -12,10 +12,11 @@ internal static class SubjectPropertyChangeOperations
     /// matches a change in <paramref name="exclude"/> (matched via a <see cref="HashSet{T}"/> of excluded
     /// properties). Inspect Failed.Count == 0 to detect full success. The Successful list is returned empty
     /// only on the no-exclude full-success path, where the caller already holds the input span and does not
-    /// need the applied set; with exclusions, or on any failure, Successful is populated.
+    /// need the applied set; with exclusions, or on any failure, Successful is populated. When
+    /// <paramref name="markingTransaction"/> is set, each applied write carries the commit write mark of that transaction.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, SubjectTransaction? markingTransaction = null)
     {
         HashSet<PropertyReference>? excluded = null;
         if (exclude is { Count: > 0 })
@@ -27,12 +28,12 @@ internal static class SubjectPropertyChangeOperations
             }
         }
 
-        return ApplyLocalChanges(changes, excluded);
+        return ApplyLocalChanges(changes, excluded, markingTransaction);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Extracting this failure bookkeeping reproduced slower single-source commits despite unchanged allocations; keep it inline unless an alternative passes the same benchmark comparison.")]
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded, SubjectTransaction? markingTransaction)
     {
         // When excluded is null the applied set equals the input on success, so Successful stays null
         // (returned empty) until the first failure. When excluded is set the applied set differs from the
@@ -49,7 +50,7 @@ internal static class SubjectPropertyChangeOperations
                 continue;
             }
 
-            if (change.TryApplyLocalChange(out var error))
+            if (change.TryApplyLocalChange(markingTransaction, out var error))
             {
                 successful?.Add(change);
             }
@@ -91,10 +92,11 @@ internal static class SubjectPropertyChangeOperations
     /// On failure the reported change is the original forward change (not the inverted rollback record),
     /// so <see cref="SubjectTransactionException.FailedChanges"/> always holds the change that was submitted,
     /// consistent with the source-revert path. Returns any revert failures and errors so the caller can fold
-    /// them into the exception.
+    /// them into the exception. When <paramref name="markingTransaction"/> is set, each restoring write carries the
+    /// commit write mark of that transaction.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertLocalChanges(
-        IReadOnlyList<SubjectPropertyChange> applied)
+        IReadOnlyList<SubjectPropertyChange> applied, SubjectTransaction? markingTransaction = null)
     {
         List<SubjectPropertyChange>? failed = null;
         List<Exception>? errors = null;
@@ -105,7 +107,7 @@ internal static class SubjectPropertyChangeOperations
             var original = applied[i];
             var rollback = original.ToRollbackChange();
 
-            if (!rollback.TryApplyLocalChange(out var error))
+            if (!rollback.TryApplyLocalChange(markingTransaction, out var error))
             {
                 (failed ??= []).Add(original);
                 if (error != null)
@@ -118,27 +120,22 @@ internal static class SubjectPropertyChangeOperations
         return (failed ?? (IReadOnlyList<SubjectPropertyChange>)[], errors ?? (IReadOnlyList<Exception>)[]);
     }
 
-    private static bool TryApplyLocalChange(this SubjectPropertyChange change, out Exception? error)
+    private static bool TryApplyLocalChange(this SubjectPropertyChange change, SubjectTransaction? markingTransaction, out Exception? error)
     {
         try
         {
-            var metadata = change.Property.Metadata;
             var newValue = change.GetNewValue<object?>();
-            // Local origins arm no stamp: an absent stamp and a Local stamp both finalize to Local
-            // (FinalizeOrigin short-circuits on Local before reading the sent value), so skip
-            // PendingOrigin.Set on the Local replay/revert hot path. Non-Local origins (FromSource,
-            // Confirmed) still arm so echo suppression sees the source.
             using (SubjectChangeContext.WithTimestamps(change.ChangedTimestamp, change.ReceivedTimestamp))
             {
-                if (change.Origin.Kind == ChangeOriginKind.Local)
+                if (markingTransaction is null)
                 {
-                    metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                    SetLocalValue(change, newValue);
                 }
                 else
                 {
-                    using (PendingOrigin.Set(change.Property, change.Origin, newValue))
+                    using (CommitWriteMarker.Set(markingTransaction, change.Property, newValue))
                     {
-                        metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                        SetLocalValue(change, newValue);
                     }
                 }
             }
@@ -149,6 +146,26 @@ internal static class SubjectPropertyChangeOperations
         {
             error = ex;
             return false;
+        }
+    }
+
+    private static void SetLocalValue(SubjectPropertyChange change, object? newValue)
+    {
+        var metadata = change.Property.Metadata;
+        // Local origins arm no stamp: an absent stamp and a Local stamp both finalize to Local
+        // (FinalizeOrigin short-circuits on Local before reading the sent value), so skip
+        // PendingOrigin.Set on the Local replay/revert hot path. Non-Local origins (FromSource,
+        // Confirmed) still arm so echo suppression sees the source.
+        if (change.Origin.Kind == ChangeOriginKind.Local)
+        {
+            metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+        }
+        else
+        {
+            using (PendingOrigin.Set(change.Property, change.Origin, newValue))
+            {
+                metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+            }
         }
     }
 
