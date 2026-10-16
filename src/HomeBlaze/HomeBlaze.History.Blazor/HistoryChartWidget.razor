@@ -72,7 +72,8 @@
 
     // The legend of the lines ends where the plot does, see HistoryChartView.LineLegend.
     private const string LegendStyle =
-        "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; justify-content:flex-end; margin-right:var(--history-chart-plot-end, 0px);";
+        "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; justify-content:flex-end; " +
+        "margin-right:var(--history-chart-plot-right, var(--history-chart-plot-end, 0px));";
 
     // The legend of every series below the widget, while there is no chart view to hold it.
     private const string OwnLegendStyle = "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;";
