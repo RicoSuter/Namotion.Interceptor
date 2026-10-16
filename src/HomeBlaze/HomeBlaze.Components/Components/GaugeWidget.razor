@@ -15,14 +15,9 @@
     var state = GaugeDisplay.GetState(reading, gauge.Minimum, gauge.Maximum);
     var size = gauge.Size;
 
-    if (reading.MapError is not null)
+    if ((reading.MapError ?? state.Error) is { } error)
     {
-        @* The value text is the one place that shows the error of a map. *@
-        <ValueText Reading="@reading" />
-    }
-    else if (state.Error is not null)
-    {
-        <WidgetArgumentError Message="@state.Error" />
+        <WidgetArgumentError Message="@error" />
     }
     else
     {

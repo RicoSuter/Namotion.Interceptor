@@ -18,70 +18,79 @@
     {
         var columns = table.Columns;
 
-        // Resolved once per render instead of once per cell.
-        var maps = columns.Length == 0 ? [] : new (ValueMap? Map, string? Error)[columns.Length];
+        // Resolved once per render instead of once per cell. A map that cannot be resolved replaces the table with
+        // one error per column, not one per cell.
+        var maps = columns.Length == 0 ? [] : new ValueMap?[columns.Length];
+        var hasMapError = false;
         for (var index = 0; index < columns.Length; index++)
         {
-            var map = ValueReader.ResolveMap(PathResolver, columns[index], columns[index].Map, out var mapError);
-            maps[index] = (map, mapError);
+            maps[index] = ValueReader.ResolveMap(PathResolver, columns[index], columns[index].Map, out var mapError);
+            if (mapError is not null)
+            {
+                hasMapError = true;
+                <WidgetArgumentError @key="columns[index]" Message="@mapError" />
+            }
         }
 
-        <MudSimpleTable Dense="true" Hover="true" Elevation="0" data-testid="subject-table">
-            <thead>
-                <tr>
-                    @if (columns.Length == 0)
-                    {
-                        <th>Name</th>
-                    }
-
-                    @foreach (var column in columns)
-                    {
-                        <th @key="column">@SubjectTableRows.GetHeader(column, rows)</th>
-                    }
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var row in rows)
-                {
-                    var link = SubjectTableRows.GetLink(PathResolver, row.Subject);
-
-                    <tr @key="row.Subject" data-testid="subject-table-row">
+        if (!hasMapError)
+        {
+            <MudSimpleTable Dense="true" Hover="true" Elevation="0" data-testid="subject-table">
+                <thead>
+                    <tr>
                         @if (columns.Length == 0)
                         {
-                            <td>
-                                <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">@SubjectTableRows.GetTitle(row)</MudLink>
-                            </td>
+                            <th>Name</th>
                         }
 
-                        @for (var index = 0; index < columns.Length; index++)
+                        @foreach (var column in columns)
                         {
-                            var column = columns[index];
-                            var reading = ValueReader.ReadProperty(row.Subject, column.Property, maps[index].Map, maps[index].Error, TimeZone);
-
-                            <td data-testid="subject-table-cell">
-                                @if (index == 0 && reading.MapError is null)
-                                {
-                                    <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">
-                                        @if (reading.IsMissing)
-                                        {
-                                            @SubjectTableRows.GetTitle(row)
-                                        }
-                                        else
-                                        {
-                                            <ValueText Reading="@reading" Path="@column.Property" />
-                                        }
-                                    </MudLink>
-                                }
-                                else
-                                {
-                                    <ValueText Reading="@reading" Path="@column.Property" />
-                                }
-                            </td>
+                            <th @key="column">@SubjectTableRows.GetHeader(column, rows)</th>
                         }
                     </tr>
-                }
-            </tbody>
-        </MudSimpleTable>
+                </thead>
+                <tbody>
+                    @foreach (var row in rows)
+                    {
+                        var link = SubjectTableRows.GetLink(PathResolver, row.Subject);
+
+                        <tr @key="row.Subject" data-testid="subject-table-row">
+                            @if (columns.Length == 0)
+                            {
+                                <td>
+                                    <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">@SubjectTableRows.GetTitle(row)</MudLink>
+                                </td>
+                            }
+
+                            @for (var index = 0; index < columns.Length; index++)
+                            {
+                                var column = columns[index];
+                                var reading = ValueReader.ReadProperty(row.Subject, column.Property, maps[index], TimeZone);
+
+                                <td data-testid="subject-table-cell">
+                                    @if (index == 0)
+                                    {
+                                        <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">
+                                            @if (reading.IsMissing)
+                                            {
+                                                @SubjectTableRows.GetTitle(row)
+                                            }
+                                            else
+                                            {
+                                                <ValueText Reading="@reading" Path="@column.Property" />
+                                            }
+                                        </MudLink>
+                                    }
+                                    else
+                                    {
+                                        <ValueText Reading="@reading" Path="@column.Property" />
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
     }
 }
 

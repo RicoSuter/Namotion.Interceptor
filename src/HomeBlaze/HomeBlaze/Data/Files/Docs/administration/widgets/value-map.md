@@ -56,7 +56,7 @@ A map for the status of a motor. The cases are the values of `MotorStatus`. The 
 - **Which case is used**: A case matches when its `Value` equals the raw text of the value, without regard to upper and lower case. The raw text is what the format `raw` of an expression shows: `True` and `False` for a boolean, the name for an enum value, a number with a dot as the decimal separator. The first case that matches is used.
 - **No case**: A value without a case keeps the formatted text, the default colour and the icon of the widget. A case without `Text` keeps the formatted text of the value.
 - **Colour and icon**: The colour of the case is the colour of the value in a row and in a tile, and the colour of an indicator. The icon of the case replaces the icon of the row, the tile or the indicator. A `Progress` has no map.
-- **A map that cannot be resolved**: A `Map` that leads nowhere, or to a subject that is no `ValueMap`, shows `Cannot resolve map: motorstat` in a small red alert in place of the value, with the name as written. This is a mistake on the page, see [Value Widget Errors](../page-errors.md#value-widget-errors). The rest of the page renders.
+- **A map that cannot be resolved**: A `Map` that leads nowhere, or to a subject that is no `ValueMap`, shows `Cannot resolve map: motorstat` in a small red alert in place of the widget, with the name as written. A row of a `ValueList` shows it in place of its value, and a `SubjectTable` shows it once per such column in place of the table. This is a mistake on the page, see [Value Widget Errors](../page-errors.md#value-widget-errors). The rest of the page renders.
 
 ## Related
 

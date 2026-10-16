@@ -32,32 +32,33 @@
         @* The ends of the range that the kind was chosen by, so that the slider does not look them up again. *@
         <SliderView Property="@property" Path="@path" Label="@label" Minimum="@sliderRange.Minimum" Maximum="@sliderRange.Maximum" Step="@control.Step" />
     }
-    else if (kind == ControlKind.Select)
+    else
     {
+        // A select and a value row show the map; one that cannot be resolved replaces the control, as it does every widget.
         var valueMap = ValueReader.ResolveMap(PathResolver, control, map, out var mapError);
         if (mapError is not null)
         {
             <WidgetArgumentError Message="@mapError" />
         }
-        else
+        else if (kind == ControlKind.Select)
         {
             <SelectView Property="@property" Path="@path" Label="@label" Map="@valueMap" />
         }
-    }
-    else
-    {
-        var reading = ValueReader.ReadResolved(PathResolver, control, property, map, TimeZone);
-        <div class="d-flex align-center gap-2" data-testid="control-value">
-            <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="value-label">@ValueReader.GetControlLabel(reading.Property, label, path)</MudText>
-            @if (kind == ControlKind.Indicator)
-            {
-                <IndicatorView Reading="@reading" Map="@map" Path="@path" />
-            }
-            else
-            {
-                <ValueText Reading="@reading" Path="@path" Typo="Typo.subtitle2" />
-            }
-        </div>
+        else
+        {
+            var reading = ValueReader.ReadResolved(property, valueMap, TimeZone);
+            <div class="d-flex align-center gap-2" data-testid="control-value">
+                <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="value-label">@ValueReader.GetControlLabel(reading.Property, label, path)</MudText>
+                @if (kind == ControlKind.Indicator)
+                {
+                    <IndicatorView Reading="@reading" Map="@map" Path="@path" />
+                }
+                else
+                {
+                    <ValueText Reading="@reading" Path="@path" Typo="Typo.subtitle2" />
+                }
+            </div>
+        }
     }
 }
 

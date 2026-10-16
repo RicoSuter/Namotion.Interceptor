@@ -37,6 +37,14 @@ title: Displays Demo
 ::: Column Property=Missing Label="Gap"
 ::
 
+:: HomeBlaze.Components.Gauge Path=dispmotor/TargetSpeed Minimum=0 Maximum=2000 Label="Gauge Broken Map" Map=nogaugemap
+::
+
+:: HomeBlaze.Components.SubjectTable Source="../Displays.md" Type=HomeBlaze.Samples.Motor
+::: Column Property=Name Label="Broken Name"
+::: Column Property=Status Label="Broken State" Map=nocolumnmap
+::
+
 :: HomeBlaze.Components.Responsive Show=NotPhone
 Wide screen text
 ::

@@ -96,8 +96,23 @@ public class DisplayWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveTextAsync("Needs a range: set Minimum and Maximum", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("widget-argument-error").Filter(new() { HasText = "Needs a range" }))
+            .ToHaveTextAsync("Needs a range: set Minimum and Maximum", new() { Timeout = Timeout });
         await Assertions.Expect(GetGauge(page, "Gauge No Range")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenMapOfAGaugeOrOfATableColumnCannotBeResolved_ThenEachShowsOneArgumentErrorInItsPlace()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert: the table has two rows, and its broken column still shows one error and not one per cell.
+        var errors = page.GetByTestId("widget-argument-error");
+        await Assertions.Expect(errors.Filter(new() { HasText = "nogaugemap" })).ToHaveTextAsync(["Cannot resolve map: nogaugemap"], new() { Timeout = Timeout });
+        await Assertions.Expect(errors.Filter(new() { HasText = "nocolumnmap" })).ToHaveTextAsync(["Cannot resolve map: nocolumnmap"]);
+        await Assertions.Expect(GetGauge(page, "Gauge Broken Map")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetTable(page, "Broken Name")).ToHaveCountAsync(0);
     }
 
     [Fact]

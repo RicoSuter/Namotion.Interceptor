@@ -39,65 +39,36 @@ public static class ValueReader
     }
 
     /// <summary>
-    /// Reads a property that <see cref="ResolveProperty"/> already resolved and applies the map, with the same
-    /// text, colour and missing value as <see cref="Read"/> gives for its path.
+    /// Reads a property that <see cref="ResolveProperty"/> already resolved and applies a map that
+    /// <see cref="ResolveMap"/> already resolved, with the same text, colour and missing value as <see cref="Read"/>.
     /// </summary>
-    /// <param name="resolver">The resolver of the map.</param>
-    /// <param name="widget">The subject the map is relative to, usually the widget itself.</param>
     /// <param name="property">The property, or null for a missing reading.</param>
-    /// <param name="map">The name or path of a <see cref="ValueMap"/>, or null or empty for none.</param>
+    /// <param name="valueMap">The resolved map, or null for none.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
     public static ValueReading ReadResolved(
-        SubjectPathResolver resolver,
-        IInterceptorSubject widget,
         RegisteredSubjectProperty? property,
-        string? map,
+        ValueMap? valueMap,
         ITimeZoneDisplay? timeZone)
     {
-        var valueMap = ResolveMap(resolver, widget, map, out var mapError);
-        return ReadCore(property, valueMap, mapError, timeZone);
-    }
-
-    /// <summary>
-    /// Reads the property with the name on a subject and applies the map, with the same text, colour and
-    /// missing value as <see cref="Read"/> gives for a path.
-    /// </summary>
-    /// <param name="resolver">The resolver of the map.</param>
-    /// <param name="widget">The subject the map is relative to, usually the widget or its slot block.</param>
-    /// <param name="subject">The subject that has the property, for example a row of a table.</param>
-    /// <param name="propertyName">The name of the property. Null, empty or unknown gives a missing reading.</param>
-    /// <param name="map">The name or path of a <see cref="ValueMap"/>, or null or empty for none.</param>
-    /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
-    public static ValueReading ReadProperty(
-        SubjectPathResolver resolver,
-        IInterceptorSubject widget,
-        IInterceptorSubject subject,
-        string? propertyName,
-        string? map,
-        ITimeZoneDisplay? timeZone)
-    {
-        var valueMap = ResolveMap(resolver, widget, map, out var mapError);
-        return ReadProperty(subject, propertyName, valueMap, mapError, timeZone);
+        return ReadCore(property, valueMap, mapError: null, timeZone);
     }
 
     /// <summary>
     /// Reads the property with the name on a subject and applies a map that <see cref="ResolveMap"/> already
-    /// resolved, with the same reading as the overload that takes the name or path of the map.
+    /// resolved, with the same text, colour and missing value as <see cref="Read"/> gives for a path.
     /// </summary>
     /// <param name="subject">The subject that has the property, for example a row of a table.</param>
     /// <param name="propertyName">The name of the property. Null, empty or unknown gives a missing reading.</param>
     /// <param name="valueMap">The resolved map, or null for none.</param>
-    /// <param name="mapError">The error that <see cref="ResolveMap"/> gave for the map, or null.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
     public static ValueReading ReadProperty(
         IInterceptorSubject subject,
         string? propertyName,
         ValueMap? valueMap,
-        string? mapError,
         ITimeZoneDisplay? timeZone)
     {
         var property = string.IsNullOrEmpty(propertyName) ? null : subject.TryGetRegisteredProperty(propertyName);
-        return ReadCore(property, valueMap, mapError, timeZone);
+        return ReadCore(property, valueMap, mapError: null, timeZone);
     }
 
     private static ValueReading ReadCore(

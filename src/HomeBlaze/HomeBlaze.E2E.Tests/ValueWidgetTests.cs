@@ -811,7 +811,7 @@ public class ValueWidgetTests
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
 
         // The map error that the page shows is that of the indicator with a map that does not exist.
-        await Assertions.Expect(page.GetByTestId("value-map-error")).ToHaveCountAsync(1);
+        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(1);
 
         await chip.HoverAsync();
         await Assertions.Expect(page.Locator(".mud-tooltip").GetByText("valuemotor/Missing")).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -824,7 +824,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        await Assertions.Expect(page.GetByTestId("value-map-error")).ToHaveTextAsync("Cannot resolve map: nomap", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveTextAsync("Cannot resolve map: nomap", new() { Timeout = Timeout });
         // Outside the cards are the three indicators of the first blocks and the two chips that follow them.
         await Assertions.Expect(page.Locator("[data-testid=indicator]:not([data-testid=card] *)")).ToHaveCountAsync(5);
     }

@@ -1,4 +1,4 @@
-@* The indicator of a value: a chip with icon and text, an icon alone, or the error of its map. *@
+@* The indicator of a value: a chip with icon and text, an icon alone, or the error of its map in its place. *@
 
 @{
     var color = ValueReader.GetIndicatorColor(Reading, Map);
@@ -7,8 +7,7 @@
 
 @if (Reading.MapError is not null)
 {
-    @* The value text is the one place that shows the error of a map. *@
-    <ValueText Reading="@Reading" />
+    <WidgetArgumentError Message="@Reading.MapError" />
 }
 else if (Kind == IndicatorKind.Icon)
 {

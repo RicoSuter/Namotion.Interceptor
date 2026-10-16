@@ -185,11 +185,11 @@ public class ValueReaderTests
     public async Task WhenPropertyOfASubjectIsRead_ThenTextIsTheDisplayValue()
     {
         // Arrange
-        var (resolver, page) = await AddPageAsync();
+        var (_, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
 
         // Act
-        var reading = ValueReader.ReadProperty(resolver, page, meter, nameof(TestMeter.Power), null, null);
+        var reading = ValueReader.ReadProperty(meter, nameof(TestMeter.Power), null, null);
 
         // Assert
         Assert.False(reading.IsMissing);
@@ -204,9 +204,10 @@ public class ValueReaderTests
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
 
         // Act
-        var reading = ValueReader.ReadProperty(resolver, page, meter, nameof(TestMeter.IsOn), "onoff", null);
+        var reading = ValueReader.ReadProperty(meter, nameof(TestMeter.IsOn), valueMap, null);
 
         // Assert
         Assert.Equal("an", reading.Text);
@@ -222,11 +223,11 @@ public class ValueReaderTests
     public async Task WhenPropertyOfASubjectIsNotSetOrUnknown_ThenReadingIsMissing(string? propertyName)
     {
         // Arrange
-        var (resolver, page) = await AddPageAsync();
+        var (_, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
 
         // Act
-        var reading = ValueReader.ReadProperty(resolver, page, meter, propertyName, null, null);
+        var reading = ValueReader.ReadProperty(meter, propertyName, null, null);
 
         // Assert
         Assert.True(reading.IsMissing);
@@ -235,37 +236,34 @@ public class ValueReaderTests
     }
 
     [Fact]
-    public async Task WhenMapOfAPropertyReadIsNoValueMap_ThenReadingHasAMapError()
+    public async Task WhenMapIsNoValueMap_ThenResolvingItGivesTheMapError()
     {
         // Arrange
         var (resolver, page) = await AddPageAsync();
-        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
 
         // Act
-        var reading = ValueReader.ReadProperty(resolver, page, meter, nameof(TestMeter.Power), "nomap", null);
+        var map = ValueReader.ResolveMap(resolver, page, "nomap", out var error);
 
         // Assert
-        Assert.Equal("Cannot resolve map: nomap", reading.MapError);
+        Assert.Null(map);
+        Assert.Equal("Cannot resolve map: nomap", error);
     }
 
     [Fact]
-    public async Task WhenPropertyOfASubjectIsReadWithAResolvedMap_ThenReadingEqualsThatOfTheMapPath()
+    public async Task WhenPropertyOfASubjectIsReadWithAResolvedMap_ThenReadingEqualsThatOfThePath()
     {
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
-        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out var mapError);
-        var noMap = ValueReader.ResolveMap(resolver, page, "nomap", out var noMapError);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
 
         // Act
-        var fromResolvedMap = ValueReader.ReadProperty(meter, nameof(TestMeter.IsOn), valueMap, mapError, null);
-        var fromMapPath = ValueReader.ReadProperty(resolver, page, meter, nameof(TestMeter.IsOn), "onoff", null);
-        var withMapError = ValueReader.ReadProperty(meter, nameof(TestMeter.Power), noMap, noMapError, null);
+        var fromSubject = ValueReader.ReadProperty(meter, nameof(TestMeter.IsOn), valueMap, null);
+        var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
 
         // Assert
-        Assert.Equal(fromMapPath, fromResolvedMap);
-        Assert.Equal("an", fromResolvedMap.Text);
-        Assert.Equal("Cannot resolve map: nomap", withMapError.MapError);
+        Assert.Equal(fromPath, fromSubject);
+        Assert.Equal("an", fromSubject.Text);
     }
 
     [Fact]
@@ -274,16 +272,17 @@ public class ValueReaderTests
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var property = ValueReader.ResolveProperty(resolver, page, "meter/IsOn");
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
 
         // Act
-        var fromProperty = ValueReader.ReadResolved(resolver, page, property, "onoff", null);
+        var fromProperty = ValueReader.ReadResolved(property, valueMap, null);
         var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
-        var withoutProperty = ValueReader.ReadResolved(resolver, page, null, "nomap", null);
+        var withoutProperty = ValueReader.ReadResolved(null, valueMap, null);
 
         // Assert
         Assert.Equal(fromPath, fromProperty);
         Assert.True(withoutProperty.IsMissing);
-        Assert.Equal("Cannot resolve map: nomap", withoutProperty.MapError);
+        Assert.Null(withoutProperty.MapError);
     }
 
     [Fact]

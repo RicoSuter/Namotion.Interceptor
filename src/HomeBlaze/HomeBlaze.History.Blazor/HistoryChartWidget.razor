@@ -2,6 +2,7 @@
 @implements ISubjectComponent
 @implements IDisposable
 @using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Components
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.History.Abstractions
@@ -27,8 +28,7 @@
     <div data-testid="history-chart">
         @if (_error is not null)
         {
-            @* The markup of WidgetArgumentError, which this project cannot reference. *@
-            <MudAlert Severity="Severity.Error" Dense="true" data-testid="widget-argument-error">@_error</MudAlert>
+            <WidgetArgumentError Message="@_error" />
         }
         else
         {

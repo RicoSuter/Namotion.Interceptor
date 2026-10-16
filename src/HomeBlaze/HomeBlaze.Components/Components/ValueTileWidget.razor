@@ -9,21 +9,29 @@
 
 @if (tile is not null)
 {
-    // Read once per render and never kept: the read is what the tracking scope records.
-    var reading = ValueReader.Read(PathResolver, tile, tile.Path, tile.Map, TimeZone);
-    var icon = MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? tile.Icon);
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var path = tile.Path;
+    var reading = ValueReader.Read(PathResolver, tile, path, tile.Map, TimeZone);
+    if (reading.MapError is not null)
+    {
+        <WidgetArgumentError Message="@reading.MapError" />
+    }
+    else
+    {
+        var icon = MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? tile.Icon);
 
-    <MudPaper Class="pa-3" Elevation="1" data-testid="value-tile">
-        <div class="d-flex align-center gap-1">
-            @if (icon is not null)
-            {
-                <MudIcon Icon="@icon" Size="Size.Small" />
-            }
+        <MudPaper Class="pa-3" Elevation="1" data-testid="value-tile">
+            <div class="d-flex align-center gap-1">
+                @if (icon is not null)
+                {
+                    <MudIcon Icon="@icon" Size="Size.Small" />
+                }
 
-            <MudText Typo="Typo.caption" data-testid="value-label">@ValueReader.GetLabel(reading, tile.Label)</MudText>
-        </div>
-        <ValueText Reading="@reading" Path="@tile.Path" Typo="Typo.h5" />
-    </MudPaper>
+                <MudText Typo="Typo.caption" data-testid="value-label">@ValueReader.GetLabel(reading, tile.Label)</MudText>
+            </div>
+            <ValueText Reading="@reading" Path="@path" Typo="Typo.h5" />
+        </MudPaper>
+    }
 }
 
 @code {
