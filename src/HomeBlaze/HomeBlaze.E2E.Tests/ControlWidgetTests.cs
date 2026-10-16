@@ -132,11 +132,13 @@ public class ControlWidgetTests
     }
 
     [Fact]
-    public async Task WhenSwitchOfARuntimePropertyIsToggled_ThenThePropertyIsWritten()
+    public async Task WhenSwitchOfARuntimePropertyIsToggled_ThenThePropertyIsWrittenAndThePageIsNotChanged()
     {
+        // Arrange
+        var originalContent = await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName));
+
         try
         {
-            // Arrange
             ResetMotor();
             var page = await OpenPageAsync();
             var powerSwitch = GetSwitch(page, "Power");
@@ -148,9 +150,23 @@ public class ControlWidgetTests
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(() => !GetMotor().IsPowered, WaitTimeout, message: "The switch did not power the motor off");
             await Assertions.Expect(powerSwitch).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
+
+            // A save of the page writes every block of it, so the save that a configuration write of the same page causes
+            // shows whether the runtime value got into the text. It also takes in a save that the runtime write would
+            // have started, because the writes of one page are saved together after the last of them.
+            var outlineSwitch = GetSwitch(page, "Card outline");
+            await outlineSwitch.ClickAsync();
+            var savedContent = await _fixture.WaitForDemoPageTextAsync(
+                PageName,
+                content => SplitLines(content).Any(line =>
+                    line.StartsWith(CardHeadLine, StringComparison.Ordinal) &&
+                    line.Contains("Outlined=false", StringComparison.Ordinal)),
+                "The page was not saved with the outline of the card switched off");
+            AssertOnlyTheHeadLineChanged(originalContent, savedContent, "ctlcard", "Outlined=false");
         }
         finally
         {
+            await _fixture.WriteDemoPageAsync(PageName, originalContent);
             ResetMotor();
         }
     }
@@ -440,6 +456,29 @@ public class ControlWidgetTests
         await Assertions.Expect(GetSlider(page, "Target speed")).ToBeDisabledAsync(new() { Timeout = Timeout });
         await Assertions.Expect(GetSelect(page, "Motor mode").Locator("input").First).ToBeDisabledAsync(new() { Timeout = Timeout });
         await Assertions.Expect(GetButton(page, "Emergency Stop")).ToBeDisabledAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAValueIsSelectedInTheSelectOfAControl_ThenTheEnumPropertyIsWritten()
+    {
+        try
+        {
+            // Arrange
+            ResetMotor();
+            var page = await OpenPageAsync();
+            var select = GetSelect(page, "Control mode");
+
+            // Act
+            await select.Locator(".mud-input-control").ClickAsync();
+            await page.Locator(".mud-popover-open").GetByText("Eco", new() { Exact = true }).ClickAsync();
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => GetMotor().Mode == MotorMode.Eco, WaitTimeout, message: "The control did not write Eco");
+        }
+        finally
+        {
+            ResetMotor();
+        }
     }
 
     [Fact]

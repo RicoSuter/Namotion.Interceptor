@@ -83,6 +83,10 @@ public class ValueWidgetTests
         await Assertions.Expect(text).Not.ToHaveTextAsync(second, new() { Timeout = Timeout });
     }
 
+    // An indicator of the icon kind is the svg of a MudIcon, which tells it from a chip wherever it is on the page.
+    private static ILocator GetFirstIconIndicator(IPage page) =>
+        page.Locator("svg[data-testid=indicator]").First;
+
     private static ILocator GetRow(IPage page, string label) =>
         page.GetByTestId("value-row").Filter(new() { Has = page.GetByTestId("value-label").GetByText(label, new() { Exact = true }) });
 
@@ -788,7 +792,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var icon = page.GetByTestId("indicator").Nth(1);
+        var icon = GetFirstIconIndicator(page);
         await Assertions.Expect(icon).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(icon).ToHaveTextAsync(string.Empty);
     }
@@ -798,7 +802,7 @@ public class ValueWidgetTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var icon = page.GetByTestId("indicator").Nth(1);
+        var icon = GetFirstIconIndicator(page);
         await Assertions.Expect(icon).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -815,7 +819,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var icon = page.GetByTestId("indicator").Nth(1);
+        var icon = GetFirstIconIndicator(page);
         var caseText = new Regex("^(steht|startet|läuft|stoppt)$");
         await Assertions.Expect(icon).ToHaveAttributeAsync("role", "img", new() { Timeout = Timeout });
         await Assertions.Expect(icon).ToHaveAttributeAsync("aria-label", caseText);
