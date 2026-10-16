@@ -113,6 +113,9 @@ else
     // The version of the editor model that _currentContent was read with, or 0 when the text came another way.
     // The editor drops decorations of a version that is no longer current.
     private int _currentVersion;
+
+    // Counts the changes of _currentContent, so that a save can tell whether newer text arrived during its write.
+    private int _contentChangeCount;
     private DecorationRegion? _activeRegion;
     private Task? _decorationRefresh;
     private bool _isDecorationRefreshRequested;
@@ -262,9 +265,6 @@ else
     {
         if (File == null || _editor == null)
             return;
-
-        // _currentContent follows the editor with a delay, and the expression is replaced in what was typed last.
-        SetCurrentContent(await _editor.GetValue());
 
         // Filter to only include actual subject blocks (not HtmlSegment, RenderExpression, etc.)
         var subjectBlocks = File.Children
@@ -486,8 +486,15 @@ else
     // The text with the version of the editor model, or with version 0 when the module is not available.
     private async Task<EditorContent?> ReadContentAsync(StandaloneCodeEditor editor)
     {
+        if (_isDisposed)
+            return null;
+
         if (await GetModuleAsync() is { } module)
             return await module.InvokeAsync<EditorContent?>("getContent", editor.Id);
+
+        // Checked again, because the component can have been disposed while the module was imported.
+        if (_isDisposed)
+            return null;
 
         return new EditorContent(0, await editor.GetValue());
     }
@@ -496,6 +503,7 @@ else
     {
         _currentContent = content;
         _currentVersion = version;
+        _contentChangeCount++;
     }
 
     protected override async Task OnInitializedAsync()
@@ -525,16 +533,20 @@ else
 
     public async Task SaveAsync(CancellationToken cancellationToken)
     {
-        if (File == null || _editor == null || await ReadContentAsync(_editor) is not { } content) return;
+        if (File == null || _editor == null) return;
 
-        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content.Text), cancellationToken);
+        var content = await _editor.GetValue();
+        var contentChangeCount = _contentChangeCount;
 
-        _originalContent = content.Text;
+        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content), cancellationToken);
 
-        // Text typed during the write was read by its content change and stays the current text, which is not saved.
-        if (content.Version == 0 || _currentVersion <= content.Version)
+        _originalContent = content;
+
+        // Text typed during the write was read by its content change after the read above, and stays the current
+        // text, which is not saved.
+        if (_contentChangeCount == contentChangeCount)
         {
-            SetCurrentContent(content.Text, content.Version);
+            SetCurrentContent(content);
         }
 
         // The storage reloads the file as part of the write, so the regions get the subjects of the saved page.
