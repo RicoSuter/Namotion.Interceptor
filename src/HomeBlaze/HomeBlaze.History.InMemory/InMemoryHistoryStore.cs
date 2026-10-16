@@ -411,10 +411,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         return new ValueTask<HistoryPoint?>(GetLastNumericSampleBefore(propertyPath, before));
     }
 
-    /// <summary>
-    /// Gets the most recent sample with a finite numeric value strictly before <paramref name="before"/>, following move
-    /// chains and regardless of coverage, or null if none. See <see cref="IHistoryStore.GetLastNumericSampleBeforeAsync"/>.
-    /// </summary>
+    /// <inheritdoc cref="IHistoryStore.GetLastNumericSampleBeforeAsync"/>
     public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
     {
         foreach (var leg in ResolveChain(propertyPath))
@@ -499,13 +496,10 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
                 });
         }
 
+        var isCarryDependent = InMemoryHistoryAggregation.IsCarryDependent(aggregation);
         var isDelta = aggregation == HistoryAggregations.Delta;
-        var carriedNumber = InMemoryHistoryAggregation.IsCarryDependent(aggregation) || isDelta
-            ? query.CarrySeed?.Number
-            : null;
-        var carriedJson = InMemoryHistoryAggregation.IsCarryDependent(aggregation)
-            ? query.CarrySeed?.Json
-            : null;
+        var carriedNumber = isCarryDependent || isDelta ? query.CarrySeed?.Number : null;
+        var carriedJson = isCarryDependent ? query.CarrySeed?.Json : null;
         var alignedFrom = BucketAlignment.Start(query.From, bucket);
         var firstBucketStart = BucketAlignment.FirstBucketStart(
             query.From, query.To, bucket, query.MaxPoints);
@@ -513,19 +507,20 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
 
         // When MaxPoints clipped older buckets, the look-back at the clipped boundary replaces the seed even
         // when nothing is held there, since the seed may not survive a coverage gap in between. Otherwise
-        // this store's own held value stands in when the merger supplied no seed.
-        if (InMemoryHistoryAggregation.IsCarryDependent(aggregation) &&
-            (bucketStart > alignedFrom || query.CarrySeed is null))
+        // this store's own held value stands in when the merger supplied no seed. Delta looks back to the
+        // last counter reading wherever it lies (see HistoryAggregations.Delta).
+        if (bucketStart > alignedFrom || query.CarrySeed is null)
         {
-            var prior = GetSampleAtOrBefore(query.PropertyPath, bucketStart);
-            carriedNumber = prior?.Number;
-            carriedJson = prior?.Json;
-        }
-
-        // Delta bridges coverage gaps, so its seed is the last counter reading before the first bucket, wherever it lies.
-        if (isDelta && (bucketStart > alignedFrom || query.CarrySeed is null))
-        {
-            carriedNumber = GetLastNumericSampleBefore(query.PropertyPath, bucketStart)?.Number;
+            if (isCarryDependent)
+            {
+                var prior = GetSampleAtOrBefore(query.PropertyPath, bucketStart);
+                carriedNumber = prior?.Number;
+                carriedJson = prior?.Json;
+            }
+            else if (isDelta)
+            {
+                carriedNumber = GetLastNumericSampleBefore(query.PropertyPath, bucketStart)?.Number;
+            }
         }
 
         // The covered window is read once, then walked with a cursor. Querying per bucket took the

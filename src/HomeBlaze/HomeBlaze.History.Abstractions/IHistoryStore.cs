@@ -51,7 +51,7 @@ public interface IHistoryStore
     /// <summary>
     /// Gets the most recent sample with a finite numeric value strictly before <paramref name="before"/> for the property
     /// path (following move chains), regardless of coverage, or null if none. The result's <see cref="HistoryPoint.Json"/>
-    /// is null. Used by <see cref="HistoryAggregations.Delta"/>, which bridges coverage gaps.
+    /// is null.
     /// </summary>
     ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
         string propertyPath, DateTimeOffset before, CancellationToken cancellationToken);
@@ -183,19 +183,14 @@ public record HistoryQuery(
             throw new ArgumentException("The query start must be earlier than its end.", nameof(From));
         }
 
-        if (Bucket is { } bucket)
+        if (Bucket is { FixedSize: { } size } && size <= TimeSpan.Zero)
         {
-            if (bucket.FixedSize is { } size)
-            {
-                if (size <= TimeSpan.Zero)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket size must be positive.");
-                }
-            }
-            else if (bucket.CalendarUnit is not { } unit || !Enum.IsDefined(unit))
-            {
-                throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket needs a positive size or a calendar unit.");
-            }
+            throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket size must be positive.");
+        }
+
+        if (Bucket is { FixedSize: null, CalendarUnit: var unit } && (unit is null || !Enum.IsDefined(unit.Value)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket needs a positive size or a calendar unit.");
         }
 
         if (string.IsNullOrWhiteSpace(Aggregation))

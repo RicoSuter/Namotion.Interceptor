@@ -489,7 +489,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                 : SqliteBucketReader.QueryBucketed(
                     _readContext, query,
                     (path, asOf) => GetSampleAtOrBeforeCore(path, asOf, coverageRanges),
-                    (path, before) => SqliteHistoryReader.GetLastNumericSampleBefore(_readContext, path, before),
                     coverageRanges,
                     cancellationToken);
             return result with
@@ -518,10 +517,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         return new ValueTask<HistoryPoint?>(GetLastNumericSampleBefore(propertyPath, before));
     }
 
-    /// <summary>
-    /// Gets the most recent sample with a finite numeric value strictly before <paramref name="before"/>, following move
-    /// chains and regardless of coverage, or null if none. See <see cref="IHistoryStore.GetLastNumericSampleBeforeAsync"/>.
-    /// </summary>
+    /// <inheritdoc cref="IHistoryStore.GetLastNumericSampleBeforeAsync"/>
     public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
     {
         // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).

@@ -291,12 +291,20 @@ internal static class SqliteHistoryReader
     // The largest finite double: comparing ABS(v) against it rejects NULL, NaN and the infinities in one predicate.
     private const string MaximumFiniteSql = "1.7976931348623157e308";
 
+    private const string LastNumericBeforeSql =
+        "SELECT ts, " + SqliteValueRouting.NumericValueSql + " AS v FROM history " +
+        "WHERE path_id = @path_id AND ts < @before AND ABS(" + SqliteValueRouting.NumericValueSql + ") <= " + MaximumFiniteSql +
+        " ORDER BY ts DESC LIMIT 1;";
+
+    private const string UlongLastNumericBeforeSql =
+        "SELECT ts, " + SqliteValueRouting.UlongNumericValueSql + " AS v FROM history " +
+        "WHERE path_id = @path_id AND ts < @before AND ABS(" + SqliteValueRouting.UlongNumericValueSql + ") <= " + MaximumFiniteSql +
+        " ORDER BY ts DESC LIMIT 1;";
+
     // Newest row with a finite numeric value strictly before the given instant for a single path across its partitions.
     private static HistoryPoint? GetLegNumericSampleBefore(SqliteReadContext context, string path, DateTimeOffset before, bool isUlong)
     {
-        var numeric = isUlong
-            ? "CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL)"
-            : "CAST(COALESCE(value_double, value_long) AS REAL)";
+        var sql = isUlong ? UlongLastNumericBeforeSql : LastNumericBeforeSql;
         var beforeTicks = EpochTicks.ToEpochTicks(before);
         foreach (var key in context.PartitionKeysAtOrBefore(before))
         {
@@ -312,9 +320,7 @@ internal static class SqliteHistoryReader
             }
 
             using var command = connection.CreateCommand();
-            command.CommandText =
-                "SELECT ts, " + numeric + " AS v FROM history " +
-                "WHERE path_id = @path_id AND ts < @before AND ABS(" + numeric + ") <= " + MaximumFiniteSql + " ORDER BY ts DESC LIMIT 1;";
+            command.CommandText = sql;
             command.Parameters.AddWithValue("@path_id", pathId);
             command.Parameters.AddWithValue("@before", beforeTicks);
 

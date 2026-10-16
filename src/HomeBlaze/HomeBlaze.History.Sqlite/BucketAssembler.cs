@@ -12,6 +12,7 @@ namespace HomeBlaze.History.Sqlite;
 /// partitions (Count sum, Sum sum, Min/Max min/max, SampleAverage=Sum/Count, StandardDeviation from Count+Sum+SumOfSquares);
 /// First picks the smallest <c>FirstTicks</c>, Last the largest <c>LastTicks</c>; TWA carries the covered
 /// integral (<c>WeightedSum</c> over <c>TotalDuration</c>), which the reader computes and the assembler divides.
+/// For Delta, <c>Sum</c> holds the bucket's increase, written by the ordered Delta scan.
 /// </summary>
 internal readonly record struct BucketPartial(
     long BucketStartTicks,
@@ -21,9 +22,6 @@ internal readonly record struct BucketPartial(
     long? LastTicks, double? LastNumber, string? LastJson,          // latest sample in bucket
     double WeightedSum, double TotalDuration)                       // TWA partials
 {
-    /// <summary>The Delta increase of the bucket's samples, written by the ordered Delta scan only.</summary>
-    public double? Delta { get; init; }
-
     /// <summary>
     /// Combines two partials for the same bucket (the per-partition reductions) into one.
     /// </summary>
@@ -107,7 +105,7 @@ internal static class BucketAssembler
         var carriedNumber = lastSeed?.Number;
         var carriedJson = lastSeed?.Json;
         var isDelta = aggregation == HistoryAggregations.Delta;
-        var hasDeltaCarry = isDelta && lastSeed?.Number is not null;
+        var hasDeltaCarry = lastSeed?.Number is not null;
 
         var alignedFrom = BucketAlignment.Start(query.From, bucket);
         var firstBucketStart = BucketAlignment.FirstBucketStart(
@@ -147,7 +145,7 @@ internal static class BucketAssembler
             if (isDelta)
             {
                 // A bucket with samples has its increase; one without has 0 when a reading is held, else nothing.
-                if (hasPartial && partial.Delta is { } increase)
+                if (hasPartial && partial.Sum is { } increase)
                 {
                     point = new HistoryPoint(bucketStartTimestamp, increase, null);
                     hasDeltaCarry = true;

@@ -131,8 +131,7 @@ public static class HistoryStoreMerger
     /// for its ending raw event. Only raw queries can actually exhaust the budget, and those run newest-first
     /// in a single pass, shrinking it by each returned count.
     ///
-    /// Bucketed <c>Delta</c> also serves every segment oldest-to-newest, but threads the last counter reading the
-    /// previous segment consumed instead of a held value, because that reading bridges coverage gaps.
+    /// Bucketed <c>Delta</c> also serves every segment oldest-to-newest (see <see cref="ExecuteDeltaThreaded"/>).
     /// </summary>
     internal static Task<HistorySeries> ExecuteWithBudget(
         IReadOnlyList<IHistoryStore> ordered,
@@ -240,9 +239,8 @@ public static class HistoryStoreMerger
     /// numeric reading any store holds before it; each later segment with the last reading the previous segment
     /// consumed: its store's newest reading inside the previous segment, else the previous segment's seed. A reading
     /// another store holds inside the previous segment was never consumed, so seeding from it would lose the increase
-    /// up to it. Unlike the held value of <c>Last</c>, the reading survives coverage gaps, because a counter keeps
-    /// counting while nothing records it. The bucketed grid is clipped to the budget before planning, so serving every
-    /// segment cannot exceed it.
+    /// up to it. The reading survives coverage gaps (see <see cref="HistoryAggregations.Delta"/>). The bucketed grid is
+    /// clipped to the budget before planning, so serving every segment cannot exceed it.
     /// </summary>
     private static async Task<HistorySeries> ExecuteDeltaThreaded(
         IReadOnlyList<IHistoryStore> ordered,
