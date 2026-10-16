@@ -63,7 +63,7 @@ A slider with a range and a step of its own. They are in the unit of the propert
 - **The step**: A `Step` of 0 or less shows `Step must be above 0`, and a `Step` with a fraction for a property that holds whole numbers shows `Step must be a whole number for a whole number property`, in place of the slider, see [Value Widget Errors](../page-errors.md#value-widget-errors).
 - **A missing value**: A value that is not set shows the thumb at `Minimum` and a dash as text. Releasing the thumb there writes nothing; to write `Minimum`, move the thumb away and back.
 - **Disabled**: Besides the cases of [Control Writes](basics.md#control-writes), the slider is disabled when the path leads nowhere or the property holds no number. Such a slider needs no range, and for a path that leads nowhere it shows a dash as text, see [Ranges](basics.md#ranges).
-- **Saving**: For example `Path=motor/TargetSpeed` on a page of your own takes the range 0 to 3000 from the attributes of the motor and saves the motor one second after the last move, so a series of arrow keys gives one save, see [Control Writes](basics.md#control-writes). `Load` of the sample motors is no configuration property, so these samples save nothing.
+- **Saving**: For example `Path=motor/TargetSpeed` on a page of your own takes the range 0 to 3000 from the attributes of the motor and saves the motor as [Control Writes](basics.md#control-writes) describes. `Load` of the sample motors is no configuration property, so these samples save nothing.
 
 ## Related
 

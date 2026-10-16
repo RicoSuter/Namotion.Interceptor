@@ -42,7 +42,7 @@ Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so
 
 ## Behaviour and Limits
 
-- **The range**: [Ranges](basics.md#ranges) has where the ends of the range come from and the messages for a missing or an empty range, the same as for a [Gauge](gauge.md) and a [Slider](slider.md). A property with the unit percent runs from 0 to 1 without `Minimum` and `Maximum`.
+- **The range**: [Ranges](basics.md#ranges) has where the ends of the range come from and the messages for a missing or an empty range, the same as for a [Gauge](gauge.md) and a [Slider](slider.md).
 - **Outside the range**: A value below the minimum gives an empty bar and a value above the maximum a full one.
 - **No bar**: A [missing value](basics.md#missing-values), a path that leads nowhere and a value that is no number show the dash in place of the bar.
 - **No text**: The bar has no text. Show the number with an expression, or put the bar into a row of a [ValueList](value-list.md), where the value stands next to it.

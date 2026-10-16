@@ -1801,4 +1801,4 @@ Page components provide full-page views:
 | Compact/card format | Yes | No | No |
 | Full configuration | No | Yes | No |
 | Uses IsEditing | Yes (optional) | No | Yes (provides) |
-| Auto edit button | Yes (if Edit exists) | N/A | No |
+| Auto edit button | Yes (if Edit component or configuration properties) | N/A | No |

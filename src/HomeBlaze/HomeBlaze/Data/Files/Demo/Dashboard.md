@@ -21,7 +21,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 ::
 
 :: HomeBlaze.Components.ValueMap#motormode
-::: Case Value=Eco Text="Eco" Color=Success Icon=Eco
+::: Case Value=Eco Text="Eco" Color=Success Icon=EnergySavingsLeaf
 ::: Case Value=Normal Text="Normal" Color=Info Icon=Speed
 ::: Case Value=Boost Text="Boost" Color=Warning Icon=RocketLaunch
 ::
