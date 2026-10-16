@@ -101,20 +101,15 @@ internal static class McpToolHelper
             enrichments.Remove("$interfaces");
         }
 
-        // Build scalar properties; a property selection implies including properties.
+        // A property selection implies including properties.
         Dictionary<string, SubjectNodeProperty>? properties = null;
         if (includeProperties || propertyNames is not null)
         {
             properties = new Dictionary<string, SubjectNodeProperty>();
             foreach (var property in subject.Properties)
             {
-                if (property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects)
-                {
-                    continue;
-                }
-
-                var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-                if (propertyNames is not null && !propertyNames.Contains(segment))
+                if (TryGetSelectableSegment(property, pathProvider) is not { } segment ||
+                    (propertyNames is not null && !propertyNames.Contains(segment)))
                 {
                     continue;
                 }
@@ -146,16 +141,36 @@ internal static class McpToolHelper
             return null;
         }
 
-        if (element.ValueKind != JsonValueKind.Array ||
-            element.EnumerateArray().Any(item => item.ValueKind != JsonValueKind.String))
+        if (element.ValueKind != JsonValueKind.Array)
         {
-            return new { error = "Parameter 'properties' must be an array of property names." };
+            return InvalidPropertiesError();
         }
 
-        propertyNames = new HashSet<string>(
-            element.EnumerateArray().Select(item => item.GetString()!), StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                return InvalidPropertiesError();
+            }
+
+            names.Add(item.GetString()!);
+        }
+
+        propertyNames = names;
         return null;
+
+        static object InvalidPropertiesError() => new { error = "Parameter 'properties' must be an array of property names." };
     }
+
+    /// <summary>
+    /// The name a scalar property is listed and selected under: its path segment, else its browse name. Null for an
+    /// attribute, a property holding subjects or one the path provider excludes.
+    /// </summary>
+    internal static string? TryGetSelectableSegment(RegisteredSubjectProperty property, PathProviderBase pathProvider) =>
+        property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects
+            ? null
+            : pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
 
     /// <summary>
     /// Resolves <paramref name="segment"/> to a scalar property of <paramref name="subject"/> that the path provider

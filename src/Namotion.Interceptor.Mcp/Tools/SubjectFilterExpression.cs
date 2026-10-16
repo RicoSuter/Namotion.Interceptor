@@ -93,8 +93,8 @@ internal sealed class SubjectFilterExpression
     /// </summary>
     private sealed class ComparisonNode(string propertyName, ComparisonOperator comparisonOperator, object? literal) : Node
     {
-        // Parsed once here instead of on every evaluation.
         private readonly DateTimeOffset? _literalInstant = literal is string literalText ? TryParseInstant(literalText) : null;
+        private readonly bool _isEquality = comparisonOperator is ComparisonOperator.Equal or ComparisonOperator.NotEqual;
 
         public override bool Matches(RegisteredSubject subject, PathProviderBase pathProvider)
         {
@@ -119,13 +119,12 @@ internal sealed class SubjectFilterExpression
                 return false;
             }
 
-            var isEquality = comparisonOperator is ComparisonOperator.Equal or ComparisonOperator.NotEqual;
             int? order = (value, literal) switch
             {
-                (bool boolean, bool literalBoolean) when isEquality => boolean == literalBoolean ? 0 : 1,
-                (Enum enumValue, string name) when isEquality =>
+                (bool boolean, bool literalBoolean) when _isEquality => boolean == literalBoolean ? 0 : 1,
+                (Enum enumValue, string name) when _isEquality =>
                     string.Equals(GetEnumName(enumValue), name, StringComparison.OrdinalIgnoreCase) ? 0 : 1,
-                (string text, string literalText) => isEquality
+                (string text, string literalText) => _isEquality
                     ? string.Equals(text, literalText, StringComparison.OrdinalIgnoreCase) ? 0 : 1
                     : string.CompareOrdinal(text, literalText),
                 (DateTimeOffset instant, string) => _literalInstant is { } literalInstant

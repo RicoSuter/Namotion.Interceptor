@@ -103,12 +103,10 @@ internal class SearchTool
             }
 
             var whereText = whereElement.GetString()!;
-            if (!string.IsNullOrWhiteSpace(whereText))
+            if (!string.IsNullOrWhiteSpace(whereText) &&
+                !SubjectFilterExpression.TryParse(whereText, out filter, out var whereError))
             {
-                if (!SubjectFilterExpression.TryParse(whereText, out filter, out var whereError))
-                {
-                    return Task.FromResult<object?>(new { error = whereError });
-                }
+                return Task.FromResult<object?>(new { error = whereError });
             }
         }
 
