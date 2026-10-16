@@ -119,6 +119,30 @@ public class DeltaParityTests
 
     [Theory]
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenMaxPointsClipsOlderBuckets_ThenTheSeedIsTheLastReadingBeforeTheFirstKeptBucket(ParityStoreFactory factory)
+    {
+        // Arrange - 100 before the query, then 110 at 5, 120 at 15, 125 at 25 and 140 at 35.
+        using var store = factory.Create();
+        store.Record("/a/Energy", Base.AddSeconds(-5), 100d, typeof(double));
+        store.Record("/a/Energy", Base.AddSeconds(5), 110d, typeof(double));
+        store.Record("/a/Energy", Base.AddSeconds(15), 120d, typeof(double));
+        store.Record("/a/Energy", Base.AddSeconds(25), 125d, typeof(double));
+        store.Record("/a/Energy", Base.AddSeconds(35), 140d, typeof(double));
+        await store.FlushAsync();
+        var query = new HistoryQuery("/a/Energy", Base, Base.AddSeconds(40), Bucket, HistoryAggregations.Delta, MaxPoints: 2);
+
+        // Act
+        var direct = store.Query(query);
+        var merged = await new[] { store.AsHistoryStore() }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert - only [20,30) and [30,40) are kept: 125 - 120 = 5 and 140 - 125 = 15. Seeding from 100 would give 25.
+        Assert.Equal([Base.AddSeconds(20), Base.AddSeconds(30)], direct.Points.Select(point => point.Timestamp).ToArray());
+        ParityAssert.NumbersEqual([5d, 15d], direct);
+        ParityAssert.NumbersEqual([5d, 15d], merged);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
     public async Task WhenDeltaOnAJsonProperty_ThenThrows(ParityStoreFactory factory)
     {
         // Arrange - a string property lives in value_json, which has no counter reading.

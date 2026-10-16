@@ -207,4 +207,123 @@ public class CalendarBucketParityTests
             series.Points.Select(point => point.Timestamp).ToArray());
         ParityAssert.NumbersEqual([10d, 8d], series);
     }
+
+    // Local month starts in Zurich: February and March begin at 23:00 UTC (CET), April and May at 22:00 UTC (CEST).
+    // February holds 672 hours, March 743 (the DST start on 2026-03-29 drops one), April 720.
+    private static readonly DateTimeOffset FebruaryStart = new(2026, 1, 31, 23, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset MarchStart = new(2026, 2, 28, 23, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset AprilStart = new(2026, 3, 31, 22, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset MayStart = new(2026, 4, 30, 22, 0, 0, TimeSpan.Zero);
+
+    private static HistoryQuery MonthQuery(string propertyPath, string aggregation) =>
+        new(propertyPath, FebruaryStart, MayStart, HistoryBucket.Calendar(HistoryCalendarUnit.Month, Zurich), aggregation, MaxPoints: 1000);
+
+    public static TheoryData<ParityStoreFactory, string, double[]> MonthCases()
+    {
+        // 4 before the query; February 8 from mid-month (+336 h); March 10 from its local start (still February in UTC)
+        // and 20 from +371.5 h; April 30 from its local start (still March in UTC) and 40 from +180 h.
+        // Sum: 8, 10 + 20 = 30, 30 + 40 = 70. First and Last exclude the 4 from before the query.
+        // TimeWeightedAverage: February (4 * 336 + 8 * 336) / 672 = 6, March (10 * 371.5 + 20 * 371.5) / 743 = 15,
+        // April (30 * 180 + 40 * 540) / 720 = 37.5.
+        var cases = new TheoryData<ParityStoreFactory, string, double[]>();
+        foreach (var factory in ParityStores.Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]))
+        {
+            cases.Add(factory, HistoryAggregations.Sum, [8, 30, 70]);
+            cases.Add(factory, HistoryAggregations.First, [8, 10, 30]);
+            cases.Add(factory, HistoryAggregations.Last, [8, 20, 40]);
+            cases.Add(factory, HistoryAggregations.TimeWeightedAverage, [6, 15, 37.5]);
+        }
+
+        return cases;
+    }
+
+    [Theory]
+    [MemberData(nameof(MonthCases))]
+    public async Task WhenMonthBucketsSpanTheDstStart_ThenEveryAggregationUsesLocalMonths(
+        ParityStoreFactory factory, string aggregation, double[] expected)
+    {
+        // Arrange
+        using var store = factory.Create();
+        store.Record("/a/Value", new DateTimeOffset(2026, 1, 15, 12, 0, 0, TimeSpan.Zero), 4d, typeof(double));
+        store.Record("/a/Value", FebruaryStart.AddHours(336), 8d, typeof(double));
+        store.Record("/a/Value", MarchStart, 10d, typeof(double));
+        store.Record("/a/Value", MarchStart.AddHours(371.5), 20d, typeof(double));
+        store.Record("/a/Value", AprilStart, 30d, typeof(double));
+        store.Record("/a/Value", AprilStart.AddHours(180), 40d, typeof(double));
+        await store.FlushAsync();
+
+        // Act
+        var series = store.Query(MonthQuery("/a/Value", aggregation));
+
+        // Assert
+        Assert.Equal([FebruaryStart, MarchStart, AprilStart], series.Points.Select(point => point.Timestamp).ToArray());
+        ParityAssert.NumbersEqual(expected.Select(value => (double?)value).ToArray(), series);
+    }
+
+    // Counter readings: 100 before the query seeds February; 130 and 140 (local 23:30 on 28 February) in February;
+    // 150 (local 00:30 on 1 March), 170 after the DST start and a reset to 5 (local 23:30 on 31 March) in March;
+    // 12 (local 00:30 on 1 April) and 20 in April.
+    // Delta: February (130 - 100) + (140 - 130) = 40, March (150 - 140) + (170 - 150) + 5 (reset) = 35,
+    // April (12 - 5) + (20 - 12) = 15.
+    private static readonly (DateTimeOffset Timestamp, double Value)[] CounterReadings =
+    [
+        (new DateTimeOffset(2026, 1, 20, 12, 0, 0, TimeSpan.Zero), 100),
+        (new DateTimeOffset(2026, 2, 10, 12, 0, 0, TimeSpan.Zero), 130),
+        (new DateTimeOffset(2026, 2, 28, 22, 30, 0, TimeSpan.Zero), 140),
+        (new DateTimeOffset(2026, 2, 28, 23, 30, 0, TimeSpan.Zero), 150),
+        (new DateTimeOffset(2026, 3, 29, 12, 0, 0, TimeSpan.Zero), 170),
+        (new DateTimeOffset(2026, 3, 31, 21, 30, 0, TimeSpan.Zero), 5),
+        (new DateTimeOffset(2026, 3, 31, 22, 30, 0, TimeSpan.Zero), 12),
+        (new DateTimeOffset(2026, 4, 15, 12, 0, 0, TimeSpan.Zero), 20)
+    ];
+
+    private static readonly double?[] MonthlyDeltas = [40d, 35d, 15d];
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenDeltaUsesMonthBucketsAcrossTheDstStart_ThenEachLocalMonthSumsItsIncrease(ParityStoreFactory factory)
+    {
+        // Arrange
+        using var store = factory.Create();
+        foreach (var (timestamp, value) in CounterReadings)
+        {
+            store.Record("/a/Energy", timestamp, value, typeof(double));
+        }
+
+        await store.FlushAsync();
+
+        // Act
+        var series = store.Query(MonthQuery("/a/Energy", HistoryAggregations.Delta));
+
+        // Assert
+        Assert.Equal([FebruaryStart, MarchStart, AprilStart], series.Points.Select(point => point.Timestamp).ToArray());
+        ParityAssert.NumbersEqual(MonthlyDeltas, series);
+    }
+
+    [Fact]
+    public async Task WhenDeltaMonthsAreMergedAcrossTwoStores_ThenTheMergedSeriesMatchesTheGoldenDeltas()
+    {
+        // Arrange - the durable store holds every reading; the live store covers April only, so its segment
+        // needs the durable store's reset reading 5 as its seed (without it, April would count 12 as the baseline).
+        using var durable = new SqliteParityStore(ParityClock.Start);
+        using var live = new InMemoryParityStore(AprilStart);
+        foreach (var (timestamp, value) in CounterReadings)
+        {
+            durable.Record("/a/Energy", timestamp, value, typeof(double));
+            if (timestamp >= AprilStart)
+            {
+                live.Record("/a/Energy", timestamp, value, typeof(double));
+            }
+        }
+
+        await durable.FlushAsync();
+
+        // Act
+        var series = await new[] { durable.AsHistoryStore(), live.AsHistoryStore() }
+            .QueryHistoryAsync(MonthQuery("/a/Energy", HistoryAggregations.Delta), CancellationToken.None);
+
+        // Assert
+        Assert.Equal([FebruaryStart, MarchStart, AprilStart], series.Points.Select(point => point.Timestamp).ToArray());
+        ParityAssert.NumbersEqual(MonthlyDeltas, series);
+    }
 }
