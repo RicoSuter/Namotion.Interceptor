@@ -297,18 +297,26 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     }
 
     /// <summary>
-    /// Simulates running for a specified duration.
+    /// Runs the motor at the specified speed for a duration and then restores the previous target speed, also when
+    /// the run is canceled or fails.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="durationSeconds"/> is negative.</exception>
     [Operation(Title = "Run Test", Description = "Runs the motor at specified speed for a duration", Icon = "PlayArrow", Position = 6)]
     [Category("Speed")]
-    public async Task RunTestAsync(int speed, int durationSeconds)
+    public async Task RunTestAsync(int speed, int durationSeconds, CancellationToken cancellationToken = default)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(durationSeconds);
+
         var previousSpeed = TargetSpeed;
         TargetSpeed = Math.Clamp(speed, TargetSpeed_Minimum, TargetSpeed_Maximum);
-
-        await Task.Delay(TimeSpan.FromSeconds(durationSeconds));
-
-        TargetSpeed = previousSpeed;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(durationSeconds), cancellationToken);
+        }
+        finally
+        {
+            TargetSpeed = previousSpeed;
+        }
     }
 }
 

@@ -222,4 +222,50 @@ public class MotorTests
         Assert.InRange(temperatureWithoutLoad, 24m, 26m);
         Assert.InRange(motor.Temperature!.Value, 34m, 36m);
     }
+
+    [Fact]
+    public async Task WhenTestRunCompletes_ThenTheTargetSpeedIsRestored()
+    {
+        // Arrange
+        var motor = CreateMotor();
+        motor.TargetSpeed = 1200;
+
+        // Act
+        await motor.RunTestAsync(2000, 0);
+
+        // Assert
+        Assert.Equal(1200, motor.TargetSpeed);
+    }
+
+    [Fact]
+    public async Task WhenTestRunIsCanceled_ThenTheTargetSpeedIsRestored()
+    {
+        // Arrange
+        var motor = CreateMotor();
+        motor.TargetSpeed = 1200;
+        using var cancellationTokenSource = new CancellationTokenSource();
+        var run = motor.RunTestAsync(2000, 60, cancellationTokenSource.Token);
+        var targetSpeedDuringRun = motor.TargetSpeed;
+
+        // Act
+        await cancellationTokenSource.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        // Assert
+        Assert.Equal(2000, targetSpeedDuringRun);
+        Assert.Equal(1200, motor.TargetSpeed);
+    }
+
+    [Fact]
+    public async Task WhenTestRunDurationIsNegative_ThenItThrowsAndKeepsTheTargetSpeed()
+    {
+        // Arrange
+        var motor = CreateMotor();
+        motor.TargetSpeed = 1200;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => motor.RunTestAsync(2000, -1));
+        Assert.Equal("durationSeconds", exception.ParamName);
+        Assert.Equal(1200, motor.TargetSpeed);
+    }
 }

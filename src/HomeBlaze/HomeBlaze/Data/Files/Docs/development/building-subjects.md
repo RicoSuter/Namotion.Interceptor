@@ -439,12 +439,20 @@ public partial class Motor
     }
 
     [Operation(Title = "Run Test", Position = 4)]
-    public async Task RunTestAsync(int speed, int durationSeconds)
+    public async Task RunTestAsync(int speed, int durationSeconds, CancellationToken cancellationToken)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(durationSeconds);
+
         var previousSpeed = TargetSpeed;
         TargetSpeed = speed;
-        await Task.Delay(TimeSpan.FromSeconds(durationSeconds));
-        TargetSpeed = previousSpeed;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(durationSeconds), cancellationToken);
+        }
+        finally
+        {
+            TargetSpeed = previousSpeed; // also when the run is canceled
+        }
     }
 }
 ```
