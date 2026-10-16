@@ -309,6 +309,50 @@ public class PropertyHistoryChartModelTests
         Assert.Equal(3d, runs[1][0].Number);
     }
 
+    [Theory]
+    [InlineData(HistoryAggregations.Count)]
+    [InlineData(HistoryAggregations.Sum)]
+    public void WhenATotalBucketIsPartlyCovered_ThenItIsHiddenAsAGap(string aggregation)
+    {
+        // Arrange - 10 s buckets up to 35 s; coverage [5,12) and [15,40): [0,10) and [10,20) are partial, [20,30) is
+        // full, and [30,35) ends at the query end, which is not a gap.
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points =
+        [
+            new(start, 1d, null), new(start.AddSeconds(10), 2d, null),
+            new(start.AddSeconds(20), 3d, null), new(start.AddSeconds(30), 4d, null)
+        ];
+        HistoryCoverage[] coverage =
+        [
+            new(start.AddSeconds(5), start.AddSeconds(12)),
+            new(start.AddSeconds(15), start.AddSeconds(40))
+        ];
+
+        // Act
+        var shown = PropertyHistoryChartModel.HidePartialTotals(
+            points, aggregation, TimeSpan.FromSeconds(10), start.AddSeconds(35), coverage);
+
+        // Assert
+        Assert.Equal(new double?[] { null, null, 3d, 4d }, shown.Select(point => point.Number));
+        Assert.Equal(points.Select(point => point.Timestamp), shown.Select(point => point.Timestamp));
+    }
+
+    [Fact]
+    public void WhenTheAggregationIsNotATotal_ThenPartlyCoveredBucketsAreShown()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new(start, 1d, null), new(start.AddSeconds(10), 2d, null)];
+        HistoryCoverage[] coverage = [new(start.AddSeconds(5), start.AddSeconds(20))];
+
+        // Act
+        var shown = PropertyHistoryChartModel.HidePartialTotals(
+            points, HistoryAggregations.Maximum, TimeSpan.FromSeconds(10), start.AddSeconds(20), coverage);
+
+        // Assert
+        Assert.Same(points, shown);
+    }
+
     [Fact]
     public void WhenARawSinglePointIsLastInTheSeries_ThenItHoldsToTheWindowEnd()
     {

@@ -354,6 +354,57 @@ public static class PropertyHistoryChartModel
     }
 
     /// <summary>
+    /// Returns <paramref name="points"/> with the <c>Count</c> or <c>Sum</c> of every bucket that <paramref name="coverage"/>
+    /// covers only partly replaced by a gap, so a total over part of a bucket does not draw as a too-low value. A bucket is
+    /// measured up to <paramref name="to"/>, so the newest bucket ending there is not partial. Returns
+    /// <paramref name="points"/> itself for any other aggregation or a raw query. Both lists must be ascending.
+    /// </summary>
+    public static IReadOnlyList<HistoryPoint> HidePartialTotals(
+        IReadOnlyList<HistoryPoint> points,
+        string aggregation,
+        TimeSpan? bucket,
+        DateTimeOffset to,
+        IReadOnlyList<HistoryCoverage> coverage)
+    {
+        if (bucket is not { } size || aggregation is not (HistoryAggregations.Count or HistoryAggregations.Sum))
+        {
+            return points;
+        }
+
+        HistoryPoint[]? shown = null;
+        var coverageIndex = 0;
+        for (var index = 0; index < points.Count; index++)
+        {
+            var point = points[index];
+            var bucketStart = point.Timestamp;
+            var bucketEnd = BucketAlignment.Next(bucketStart, size);
+            var window = new HistoryCoverage(bucketStart, bucketEnd < to ? bucketEnd : to);
+
+            while (coverageIndex < coverage.Count && coverage[coverageIndex].To <= bucketStart)
+            {
+                coverageIndex++;
+            }
+
+            var covered = TimeSpan.Zero;
+            for (var rangeIndex = coverageIndex; rangeIndex < coverage.Count && coverage[rangeIndex].From < window.To; rangeIndex++)
+            {
+                if (coverage[rangeIndex].Intersect(window) is { } overlap)
+                {
+                    covered += overlap.To - overlap.From;
+                }
+            }
+
+            if (point.Number is not null && covered > TimeSpan.Zero && covered < window.To - window.From)
+            {
+                shown ??= points.ToArray();
+                shown[index] = point with { Number = null };
+            }
+        }
+
+        return shown ?? points;
+    }
+
+    /// <summary>
     /// Splits a point sequence into contiguous runs of numeric points, breaking at every null
     /// (empty-bucket) entry. Each run renders as one chart line so gaps appear as visual breaks.
     /// A single-point run is widened into a flat two-point run so a line chart draws it, ending at the
