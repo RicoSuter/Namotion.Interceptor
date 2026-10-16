@@ -37,6 +37,9 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     /// and does its work on another thread. Blazor's <c>InvokeAsync</c> does not qualify, because it runs the callback
     /// inline when the dispatcher is idle.
     /// </remarks>
+    private SubjectPathsVersion? _pathsVersion;
+    private long _pathsVersionValue;
+
     public event Action? PathsChanged;
 
     /// <param name="getRoot">
@@ -65,6 +68,7 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
         IInterceptorSubject? relativeTo = null)
     {
         var root = _getRoot();
+        ReadPathsVersion(root);
 
         if (string.IsNullOrEmpty(path))
             return relativeTo ?? root;
@@ -145,6 +149,7 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
         IInterceptorSubject subject,
         PathStyle style)
     {
+        ReadPathsVersion(_getRoot());
         var canonicalPaths = _canonicalPathsCache.GetOrAdd(subject, ComputeCanonicalPaths);
 
         if (style == PathStyle.Canonical)
@@ -179,7 +184,25 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         ClearCaches();
+        if (Volatile.Read(ref _pathsVersion) is { } pathsVersion)
+        {
+            pathsVersion.Value = Interlocked.Increment(ref _pathsVersionValue);
+        }
+
         PathsChanged?.Invoke();
+    }
+
+    // A cache hit reads no property of the graph, so this read is what a caller that tracks its reads depends on.
+    private void ReadPathsVersion(IInterceptorSubject? root)
+    {
+        var pathsVersion = Volatile.Read(ref _pathsVersion);
+        if (pathsVersion is null && root is not null)
+        {
+            Interlocked.CompareExchange(ref _pathsVersion, new SubjectPathsVersion(root.Context), null);
+            pathsVersion = _pathsVersion;
+        }
+
+        _ = pathsVersion?.Value;
     }
 
     private void ClearCaches()
