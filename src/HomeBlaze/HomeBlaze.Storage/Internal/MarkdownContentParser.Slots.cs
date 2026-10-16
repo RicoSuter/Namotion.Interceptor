@@ -249,7 +249,7 @@ public sealed partial class MarkdownContentParser
             filled.Add(slots.Default);
         }
 
-        foreach (var slot in slots.Named.Values)
+        foreach (var slot in slots.Slots)
         {
             if (!filled.Contains(slot))
             {
