@@ -106,7 +106,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                           "and a 'series' map keyed by path, each with a value_type hint, a unit when the property declares one " +
                           "(a StateUnit name such as WattHour), and points as [timestamp, value] pairs " +
                           "(a null value means no coverage or no known value). For bucketed queries, coverage.partial lists " +
-                          "the buckets the coverage covers only partly, in the form of the points' first element; their Count " +
+                          "the buckets the coverage covers only partly (measured within the requested range), in the form of the points' first element; their Count " +
                           "and Sum are lower bounds over the covered part. The point limit keeps the newest points and drops " +
                           "the oldest: a cut series carries truncated and complete_from, the timestamp from which it is complete; " +
                           "narrow from and to, or use a coarser bucket, to see older data. A series whose coverage differs " +

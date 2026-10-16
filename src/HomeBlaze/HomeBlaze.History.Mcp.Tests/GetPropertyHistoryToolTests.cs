@@ -205,6 +205,35 @@ public class GetPropertyHistoryToolTests
     }
 
     [Fact]
+    public async Task WhenCoverageEndsInsideTheNewestBucketBeforeTo_ThenThatBucketIsListedAsPartial()
+    {
+        // Arrange - Zurich days 06-22, 06-23 and 06-24, the query ends at the end of 06-24; coverage ends at 06-24 12:00
+        // local, before the query end, so the newest bucket is partly covered although it ends at the query end.
+        void Configure(TestHistoryStore store)
+        {
+            store.Coverage =
+            [
+                new HistoryCoverage(new DateTimeOffset(2026, 6, 21, 22, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 24, 10, 0, 0, TimeSpan.Zero))
+            ];
+            store.Points =
+            [
+                new HistoryPoint(new DateTimeOffset(2026, 6, 21, 22, 0, 0, TimeSpan.Zero), 10, null),
+                new HistoryPoint(new DateTimeOffset(2026, 6, 22, 22, 0, 0, TimeSpan.Zero), 10, null),
+                new HistoryPoint(new DateTimeOffset(2026, 6, 23, 22, 0, 0, TimeSpan.Zero), 5, null)
+            ];
+        }
+
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-06-22", to = "2026-06-25", bucket = "day", time_zone = "Europe/Zurich", aggregation = "Count" },
+            Configure);
+
+        // Assert
+        var partial = json.GetProperty("coverage").GetProperty("partial").EnumerateArray().Select(entry => entry.GetString());
+        Assert.Equal(["2026-06-24"], partial);
+    }
+
+    [Fact]
     public async Task WhenFixedBucketsArePartlyCovered_ThenCoverageListsThemAsTimestamps()
     {
         // Act - coverage [00:00, 00:20) and [00:30, 01:00): the 15 minute bucket [00:15, 00:30) is partial, and the
