@@ -51,7 +51,8 @@
     .markdown-content img { max-width: 100%; height: auto; }
     .markdown-content img:not([width]) { max-height: 80vh; }
     .markdown-content a { color: var(--mud-palette-primary); text-decoration: none; }
-    /* The dark primary is too dark for text on the page and on cards. */
+    /* The dark primary is too dark for text on the page and on cards. The host sets homeblaze-dark-mode in the dark mode
+       (see MainLayout of HomeBlaze.Host, which this project does not reference). */
     .homeblaze-dark-mode .markdown-content a { color: var(--mud-palette-primary-lighten); }
     .markdown-content a:hover { text-decoration: underline; }
     .markdown-content .markdown-block-error { border: 1px solid var(--mud-palette-error); color: var(--mud-palette-error); border-radius: 4px; padding: 0.5rem 0.75rem; margin: 0.75rem 0; font-family: monospace; font-size: 0.85rem; }

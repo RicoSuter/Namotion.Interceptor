@@ -13,8 +13,8 @@
 
 <MudThemeProvider Theme="@_theme" IsDarkMode="_isDarkMode"/>
 
-@* MudBlazor marks no element with the mode, so styles that differ by mode beyond the palette scope to this class. It wraps
-   the providers too, because dialogs, popovers and snackbars render there and not inside the layout. *@
+@* MudBlazor marks no element with the mode, so styles that differ by mode beyond the palette (wwwroot/theme.css) scope to
+   this class. It wraps the providers too, because dialogs, popovers and snackbars render there and not inside the layout. *@
 <div class="@(_isDarkMode ? DarkModeClass : null)" style="display: contents">
     <MudPopoverProvider/>
     <MudDialogProvider/>
@@ -175,7 +175,7 @@
     // Links on pages use the lightened primary colour, which is lighter than the computed default so that it
     // reaches 4.5:1 on the surface of cards, as does the secondary text. The outline of inputs reaches 3:1 on
     // cards. The darker status tones keep their defaults for the hover of filled buttons, so text in a status
-    // colour, such as that of alerts, gets the lightened tone in app.css, which reaches 4.5:1 on cards. Filled
+    // colour, such as that of alerts, gets the lightened tone in theme.css, which reaches 4.5:1 on cards. Filled
     // buttons and chips in a status colour have dark text, as in the dark theme of Material, because white text
     // is below 4.5:1 on all four status colours.
     private readonly PaletteDark _darkPalette = new()
