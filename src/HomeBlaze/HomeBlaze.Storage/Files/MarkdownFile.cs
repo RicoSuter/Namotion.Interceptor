@@ -397,8 +397,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Writes the Markdown source to the file as it is, once no other write of the file is under way; the storage
-    /// refreshes the page after the write. It is not cancelled once that write has begun.
+    /// Writes the Markdown source to the file as it is, once no other write of the file is under way. The storage then
+    /// refreshes the page as best effort: a failed refresh is logged, and the next pass reloads the file. The write is
+    /// not cancelled once it has begun.
     /// </summary>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
     /// load of a file.</exception>

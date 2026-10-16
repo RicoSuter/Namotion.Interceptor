@@ -105,7 +105,7 @@ internal static class ClaudeCliProcess
             standardErrorTask = ReadLimitedAsync(process.StandardError, cancellationToken);
             standardInputTask = WriteStandardInputAsync(process.StandardInput, invocation.StandardInput, cancellationToken);
 
-            var output = new OutputCollector(backendToolCalls, logger);
+            var output = new OutputCollector(backendToolCalls, logger, invocation.WorkingDirectory);
             while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
             {
                 output.Apply(ClaudeStreamJsonParser.Parse(line), progress);
@@ -218,18 +218,28 @@ internal static class ClaudeCliProcess
     {
         // Recreated for every run, so nothing left in it, such as a profile, applies.
         var path = Path.Combine(workingDirectory, ConfigDirectoryName);
-        if (Directory.Exists(path))
+        try
         {
-            Directory.Delete(path, recursive: true);
-        }
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
 
-        if (OperatingSystem.IsWindows())
-        {
-            Directory.CreateDirectory(path);
+            if (OperatingSystem.IsWindows())
+            {
+                Directory.CreateDirectory(path);
+            }
+            else
+            {
+                Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
         }
-        else
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            throw new AgentTurnException(
+                AgentFailureKind.Configuration,
+                $"The Anthropic config folder '{path}' of the Claude CLI could not be emptied ({exception.Message}). Make the working directory writable for the HomeBlaze user, or remove the folder.",
+                innerException: exception);
         }
 
         return path;
@@ -351,7 +361,7 @@ internal static class ClaudeCliProcess
         return builder.ToString();
     }
 
-    private sealed class OutputCollector(AgentToolSet? backendToolCalls, ILogger logger)
+    private sealed class OutputCollector(AgentToolSet? backendToolCalls, ILogger logger, string workingDirectory)
     {
         private const string McpToolPrefix = "mcp__";
 
@@ -377,7 +387,8 @@ internal static class ClaudeCliProcess
                     if (init.ApiKeySource is null)
                     {
                         logger.LogWarning(
-                            "The init line of the Claude CLI names no API key source, so HomeBlaze cannot check that the CLI uses the subscription login instead of billing the API.");
+                            "The init line of the Claude CLI in {WorkingDirectory} names no API key source, so HomeBlaze cannot check that the CLI uses the subscription login instead of billing the API.",
+                            workingDirectory);
                     }
 
                     _sessionId = init.SessionId;

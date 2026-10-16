@@ -8,6 +8,8 @@ namespace Namotion.Interceptor.Testing;
 /// </summary>
 public static class ExecutableScripts
 {
+    private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(30);
+
     /// <summary>
     /// Writes <paramref name="content"/> to <paramref name="path"/> as a file only its owner can read, write and execute.
     /// </summary>
@@ -21,17 +23,30 @@ public static class ExecutableScripts
         // template.
         var templatePath = path + ".template";
         File.WriteAllText(templatePath, content);
-        var startInfo = new ProcessStartInfo("/bin/sh") { UseShellExecute = false };
-        foreach (var argument in new[] { "-c", "cp \"$1\" \"$2\" && chmod 700 \"$2\"", "sh", templatePath, path })
+        try
         {
-            startInfo.ArgumentList.Add(argument);
-        }
+            var startInfo = new ProcessStartInfo("/bin/sh") { UseShellExecute = false };
+            foreach (var argument in new[] { "-c", "cp \"$1\" \"$2\" && chmod 700 \"$2\"", "sh", templatePath, path })
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
 
-        using var process = Process.Start(startInfo)!;
-        process.WaitForExit();
-        if (process.ExitCode != 0)
+            using var process = Process.Start(startInfo)!;
+            if (!process.WaitForExit(WriteTimeout))
+            {
+                process.Kill(entireProcessTree: true);
+                throw new InvalidOperationException(
+                    $"The script could not be written to {path}: copying it did not finish within {WriteTimeout.TotalSeconds} seconds.");
+            }
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"The script could not be written to {path}.");
+            }
+        }
+        finally
         {
-            throw new InvalidOperationException($"The script could not be written to {path}.");
+            File.Delete(templatePath);
         }
     }
 }
