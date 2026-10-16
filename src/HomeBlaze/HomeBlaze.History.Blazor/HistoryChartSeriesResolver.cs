@@ -305,6 +305,25 @@ internal static class HistoryChartSeriesResolver
     }
 
     /// <summary>
+    /// Gets what the legend says about how the query shows a series: the note of <see cref="GetAggregationNote"/>, and
+    /// that the oldest points are not shown when the query cut the series to <see cref="PropertyHistoryChartModel.MaxPoints"/>.
+    /// Null when there is nothing to say.
+    /// </summary>
+    /// <param name="aggregationNote">The note of <see cref="GetAggregationNote"/>, or null.</param>
+    /// <param name="isTruncated">Whether the query cut the series.</param>
+    /// <param name="isRaw">Whether the series was queried as raw samples, as a band always is.</param>
+    public static string? GetQueryNote(string? aggregationNote, bool isTruncated, bool isRaw)
+    {
+        if (!isTruncated)
+        {
+            return aggregationNote;
+        }
+
+        var truncationNote = isRaw ? "oldest samples not shown" : "oldest intervals not shown";
+        return aggregationNote is null ? truncationNote : $"{aggregationNote}; {truncationNote}";
+    }
+
+    /// <summary>
     /// Gets the selections the history dialog of a series opens with: the range of the chart, and for a line also its
     /// bucket and the aggregation it asks for, which the dialog gates like <see cref="ChooseAggregation"/>. A band keeps
     /// the state timeline of the dialog.

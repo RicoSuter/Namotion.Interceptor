@@ -114,8 +114,8 @@
     private int[] _bandSeries = [];
     private bool[] _hasBand = [];
 
-    // Per series of the shown data, what the legend says about a line that shows another aggregation than it asks for.
-    private string?[] _aggregationNotes = [];
+    // Per series of the shown data, what the legend says about how its query shows it, see GetQueryNote.
+    private string?[] _queryNotes = [];
 
     // One fragment per band of the shown data, built with it, so a render allocates none.
     private RenderFragment[] _bandHeaders = [];
@@ -210,7 +210,7 @@
         var text = property is null || value is null ? MissingText : property.GetPropertyDisplayValue(value, TimeZone);
         var note = entry.Note ??
             (_hasStores == false ? NoStoreNote : null) ??
-            (ReferenceEquals(_dataSeries, _series) ? _aggregationNotes[index] : null);
+            (ReferenceEquals(_dataSeries, _series) ? _queryNotes[index] : null);
 
         if (isBand)
         {
@@ -431,9 +431,10 @@
 
             var series = _series;
             var requests = new List<HistoryChartSeriesRequest>(series.Count);
+            var requestSeries = new List<int>(series.Count);
             var bandSeries = new List<int>();
             var hasBand = new bool[series.Count];
-            var aggregationNotes = new string?[series.Count];
+            var queryNotes = new string?[series.Count];
             for (var index = 0; index < series.Count; index++)
             {
                 var entry = series[index];
@@ -452,7 +453,8 @@
 
                 var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
                     property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations, entry.Aggregation);
-                aggregationNotes[index] = HistoryChartSeriesResolver.GetAggregationNote(entry, period.IsRaw, aggregation);
+                queryNotes[index] = HistoryChartSeriesResolver.GetAggregationNote(entry, period.IsRaw, aggregation);
+                requestSeries.Add(index);
                 requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index], entry.Unit));
             }
 
@@ -465,11 +467,18 @@
                 return;
             }
 
+            for (var request = 0; request < requests.Count; request++)
+            {
+                var index = requestSeries[request];
+                queryNotes[index] = HistoryChartSeriesResolver.GetQueryNote(
+                    queryNotes[index], result.Series[request].IsTruncated, requests[request].IsBand || bucket is null);
+            }
+
             _data = result.Data;
             _dataSeries = series;
             _bandSeries = bandSeries.ToArray();
             _hasBand = hasBand;
-            _aggregationNotes = aggregationNotes;
+            _queryNotes = queryNotes;
             _bandHeaders = new RenderFragment[_bandSeries.Length];
             for (var band = 0; band < _bandHeaders.Length; band++)
             {

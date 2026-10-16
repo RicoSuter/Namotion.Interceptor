@@ -455,6 +455,22 @@ public class HistoryChartSeriesResolverTests
         Assert.Null(note);
     }
 
+    [Theory]
+    [InlineData(null, false, false, null)]
+    [InlineData("Sum not available, shows Last", false, false, "Sum not available, shows Last")]
+    [InlineData(null, true, true, "oldest samples not shown")]
+    [InlineData(null, true, false, "oldest intervals not shown")]
+    [InlineData("Sum not available, shows Last", true, false, "Sum not available, shows Last; oldest intervals not shown")]
+    public void WhenTheQueryNoteIsBuilt_ThenItNamesTheAggregationAndTheTruncation(
+        string? aggregationNote, bool isTruncated, bool isRaw, string? expected)
+    {
+        // Act
+        var note = HistoryChartSeriesResolver.GetQueryNote(aggregationNote, isTruncated, isRaw);
+
+        // Assert
+        Assert.Equal(expected, note);
+    }
+
     [Fact]
     public void WhenTheChartOrASeriesSetsAnAggregation_ThenTheSeriesAsksForItsOwnOrElseTheOneOfTheChart()
     {
