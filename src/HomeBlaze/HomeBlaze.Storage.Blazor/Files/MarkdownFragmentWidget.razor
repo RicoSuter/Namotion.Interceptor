@@ -6,7 +6,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(MarkdownFragment))]
 @implements ISubjectComponent
 
-@* The class is what the page styles use to space the blocks of a slot, see MarkdownFilePageComponent. *@
+@* The class is what the page styles use to space the blocks of a slot, see wwwroot/markdown-page.css. *@
 <div class="markdown-fragment">
     <MarkdownContentView Children="@((Subject as MarkdownFragment)?.Children)" />
 </div>
