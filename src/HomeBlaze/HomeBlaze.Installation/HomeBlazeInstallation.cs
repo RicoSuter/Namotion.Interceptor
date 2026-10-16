@@ -27,7 +27,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
     ILastUpdatedProvider
 {
     private readonly DeveloperModeService _developerModeService;
-    private readonly GitHubReleaseClient? _releaseClient;
+    private readonly GitHubRepositoryClient? _gitHubClient;
     private readonly string? _updateCheckUnavailableReason;
 
     // Null when the running version is not a semantic version, which no release can be compared with.
@@ -133,8 +133,9 @@ public partial class HomeBlazeInstallation : BackgroundService,
     // Update
 
     /// <summary>
-    /// Whether a newer version exists, or null until the first successful check, and when the running version is
-    /// not a semantic version.
+    /// Whether a newer release exists or, for an edge build, whether its branch has newer commits; null until the first
+    /// successful check, when the running version of a release build is not a semantic version, and when GitHub cannot
+    /// compare the commit of an edge build with its branch.
     /// </summary>
     [State(IsDiscrete = true, Position = 460)]
     [Category("Update")]
@@ -152,14 +153,31 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [Category("Update")]
     public partial Uri? LatestReleaseUrl { get; internal set; }
 
+    /// <summary>
+    /// The number of commits of its branch that an edge build lacks; null for other builds, until the first successful
+    /// check, and when GitHub cannot compare the commit with the branch.
+    /// </summary>
     [State(Position = 464)]
+    [Category("Update")]
+    public partial int? CommitsBehind { get; internal set; }
+
+    /// <summary>
+    /// The GitHub page that lists the commits of the branch that an edge build lacks; null whenever
+    /// <see cref="CommitsBehind"/> is null.
+    /// </summary>
+    [State(Position = 465)]
+    [Category("Update")]
+    public partial Uri? CompareUrl { get; internal set; }
+
+    [State(Position = 466)]
     [Category("Update")]
     public partial DateTimeOffset? LastUpdateCheck { get; internal set; }
 
     /// <summary>
-    /// Why no check can run for this build, or the error of the last check until a check succeeds.
+    /// Why no check can run for this build, the error of the last check until a check succeeds, or why the last check
+    /// could not place the commit of an edge build on its branch.
     /// </summary>
-    [State(Position = 465)]
+    [State(Position = 467)]
     [Category("Update")]
     public partial string? UpdateCheckStatus { get; internal set; }
 
@@ -209,7 +227,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         _developerModeService = developerModeService;
         _timeProvider = timeProvider;
         _logger = logger;
-        _releaseClient = GitHubReleaseClient.TryCreate(build.RepositoryUrl, createHttpClient, $"HomeBlaze/{build.Version}", timeProvider, requestTimeout);
+        _gitHubClient = GitHubRepositoryClient.TryCreate(build.RepositoryUrl, createHttpClient, $"HomeBlaze/{build.Version}", timeProvider, requestTimeout);
 
         Name = string.Empty;
         PollingInterval = TimeSpan.FromSeconds(30);
@@ -245,8 +263,10 @@ public partial class HomeBlazeInstallation : BackgroundService,
         LatestVersion = null;
         LatestReleaseDate = null;
         LatestReleaseUrl = null;
+        CommitsBehind = null;
+        CompareUrl = null;
         LastUpdateCheck = null;
-        _updateCheckUnavailableReason = GetUpdateCheckUnavailableReason(Channel, build.RepositoryUrl);
+        _updateCheckUnavailableReason = GetUpdateCheckUnavailableReason(Channel, build);
         UpdateCheckStatus = _updateCheckUnavailableReason;
 
         Status = ServiceStatus.Stopped;

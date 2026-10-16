@@ -10,6 +10,12 @@ namespace HomeBlaze.Installation;
 internal sealed record LatestRelease(string Version, DateTimeOffset? PublishedAt, Uri? Url);
 
 /// <summary>
+/// How a commit relates to the head of a branch: the commits of the branch the commit lacks, the commits of the commit
+/// the branch lacks, and the GitHub page that lists the commits the commit lacks.
+/// </summary>
+internal sealed record BranchComparison(int CommitsBehind, int CommitsAhead, Uri? Url);
+
+/// <summary>
 /// A GitHub answer other than success, with the time GitHub asks to wait before the next request.
 /// </summary>
 public sealed class GitHubRequestException(string message, TimeSpan? retryAfter) : Exception(message)
@@ -21,23 +27,25 @@ public sealed class GitHubRequestException(string message, TimeSpan? retryAfter)
 }
 
 /// <summary>
-/// Reads the latest release of one GitHub repository from the unauthenticated GitHub REST API.
+/// Reads the latest release of one GitHub repository, and compares commits with its branches, from the unauthenticated
+/// GitHub REST API.
 /// </summary>
-internal sealed class GitHubReleaseClient
+internal sealed class GitHubRepositoryClient
 {
     private static readonly Uri ApiBaseAddress = new("https://api.github.com/");
     private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(30);
     private static readonly long MaximumUnixTimeSeconds = DateTimeOffset.MaxValue.ToUnixTimeSeconds();
 
-    private readonly Uri _latestReleaseUri;
+    // Ends with a slash, so request paths resolve below it.
+    private readonly Uri _repositoryApiUri;
     private readonly Func<HttpClient> _createHttpClient;
     private readonly string _userAgent;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _requestTimeout;
 
-    private GitHubReleaseClient(Uri latestReleaseUri, Func<HttpClient> createHttpClient, string userAgent, TimeProvider timeProvider, TimeSpan requestTimeout)
+    private GitHubRepositoryClient(Uri repositoryApiUri, Func<HttpClient> createHttpClient, string userAgent, TimeProvider timeProvider, TimeSpan requestTimeout)
     {
-        _latestReleaseUri = latestReleaseUri;
+        _repositoryApiUri = repositoryApiUri;
         _createHttpClient = createHttpClient;
         _userAgent = userAgent;
         _timeProvider = timeProvider;
@@ -48,14 +56,14 @@ internal sealed class GitHubReleaseClient
     /// Creates a client for a <c>https://github.com/owner/name</c> repository, or returns null for any other URL. A
     /// request is canceled after <paramref name="requestTimeout"/>, 30 seconds by default.
     /// </summary>
-    public static GitHubReleaseClient? TryCreate(
+    public static GitHubRepositoryClient? TryCreate(
         string? repositoryUrl,
         Func<HttpClient> createHttpClient,
         string userAgent,
         TimeProvider timeProvider,
         TimeSpan? requestTimeout = null) =>
-        GetLatestReleaseUri(repositoryUrl, out _) is { } latestReleaseUri
-            ? new GitHubReleaseClient(latestReleaseUri, createHttpClient, userAgent, timeProvider, requestTimeout ?? DefaultRequestTimeout)
+        GetRepositoryApiUri(repositoryUrl, out _) is { } repositoryApiUri
+            ? new GitHubRepositoryClient(repositoryApiUri, createHttpClient, userAgent, timeProvider, requestTimeout ?? DefaultRequestTimeout)
             : null;
 
     /// <summary>
@@ -64,7 +72,7 @@ internal sealed class GitHubReleaseClient
     /// </summary>
     public static string? GetUnsupportedReason(string? repositoryUrl)
     {
-        GetLatestReleaseUri(repositoryUrl, out var unsupportedReason);
+        GetRepositoryApiUri(repositoryUrl, out var unsupportedReason);
         return unsupportedReason;
     }
 
@@ -73,11 +81,54 @@ internal sealed class GitHubReleaseClient
     /// </summary>
     public async Task<LatestRelease?> GetLatestReleaseAsync(CancellationToken cancellationToken)
     {
+        using var document = await GetAsync("releases/latest", cancellationToken);
+        if (document is null)
+        {
+            return null;
+        }
+
+        var root = GetObject(document, "release");
+        return new LatestRelease(
+            NormalizeVersion(GetRequiredString(root, "tag_name")),
+            root.TryGetProperty("published_at", out var publishedAt) &&
+            publishedAt.ValueKind == JsonValueKind.String &&
+            publishedAt.TryGetDateTimeOffset(out var date) ? date : null,
+            GetUri(root, "html_url"));
+    }
+
+    /// <summary>
+    /// Compares <paramref name="commit"/> with the head of <paramref name="branch"/>, or returns null when GitHub cannot
+    /// compare them, such as when it does not know the commit or the branch.
+    /// </summary>
+    public async Task<BranchComparison?> CompareWithBranchAsync(string commit, string branch, CancellationToken cancellationToken)
+    {
+        // Only the first page carries the changed files with their patches; the second one still carries the counts, also
+        // when it holds no commit. The commit is the base, so ahead_by counts the commits of the branch it lacks.
+        var path = $"compare/{Uri.EscapeDataString(commit)}...{EscapePath(branch)}?per_page=1&page=2";
+        using var document = await GetAsync(path, cancellationToken);
+        if (document is null)
+        {
+            return null;
+        }
+
+        var root = GetObject(document, "comparison");
+        return new BranchComparison(
+            GetRequiredCount(root, "ahead_by"),
+            GetRequiredCount(root, "behind_by"),
+            GetUri(root, "html_url"));
+    }
+
+    /// <summary>
+    /// Sends a GET request for <paramref name="path"/> below the repository and returns the parsed answer, or null
+    /// when GitHub answers 404.
+    /// </summary>
+    private async Task<JsonDocument?> GetAsync(string path, CancellationToken cancellationToken)
+    {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(_requestTimeout);
         var requestToken = timeoutCts.Token;
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, _latestReleaseUri);
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_repositoryApiUri, path));
         request.Headers.TryAddWithoutValidation("User-Agent", _userAgent);
         request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
         request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
@@ -93,22 +144,10 @@ internal sealed class GitHubReleaseClient
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(requestToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: requestToken);
-        var root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object)
-        {
-            throw new JsonException("The GitHub release answer is not a JSON object.");
-        }
-
-        return new LatestRelease(
-            NormalizeVersion(GetRequiredString(root, "tag_name")),
-            root.TryGetProperty("published_at", out var publishedAt) &&
-            publishedAt.ValueKind == JsonValueKind.String &&
-            publishedAt.TryGetDateTimeOffset(out var date) ? date : null,
-            GetUri(root, "html_url"));
+        return await JsonDocument.ParseAsync(stream, cancellationToken: requestToken);
     }
 
-    private static Uri? GetLatestReleaseUri(string? repositoryUrl, out string? unsupportedReason)
+    private static Uri? GetRepositoryApiUri(string? repositoryUrl, out string? unsupportedReason)
     {
         if (!Uri.TryCreate(repositoryUrl, UriKind.Absolute, out var uri))
         {
@@ -129,7 +168,7 @@ internal sealed class GitHubReleaseClient
         }
 
         unsupportedReason = null;
-        return new Uri(ApiBaseAddress, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/releases/latest");
+        return new Uri(ApiBaseAddress, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/");
     }
 
     private GitHubRequestException CreateRequestException(HttpResponseMessage response)
@@ -201,6 +240,28 @@ internal sealed class GitHubReleaseClient
         tagName is ['v' or 'V', var second, ..] && char.IsAsciiDigit(second)
             ? tagName[1..]
             : tagName;
+
+    /// <summary>
+    /// Escapes each segment of a branch name such as <c>feature/name</c> and keeps the slashes between them.
+    /// </summary>
+    private static string EscapePath(string value) =>
+        string.Join('/', value.Split('/').Select(Uri.EscapeDataString));
+
+    private static JsonElement GetObject(JsonDocument document, string answerName) =>
+        document.RootElement.ValueKind == JsonValueKind.Object
+            ? document.RootElement
+            : throw new JsonException($"The GitHub {answerName} answer is not a JSON object.");
+
+    private static int GetRequiredCount(JsonElement element, string propertyName)
+    {
+        if (element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Number &&
+            property.TryGetInt32(out var value))
+        {
+            return value >= 0 ? value : throw new JsonException($"The GitHub answer has a negative {propertyName}.");
+        }
+
+        throw new JsonException($"The GitHub answer has no {propertyName}.");
+    }
 
     private static string GetRequiredString(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String &&
