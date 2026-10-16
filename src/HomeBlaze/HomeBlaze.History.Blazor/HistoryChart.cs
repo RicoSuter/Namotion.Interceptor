@@ -32,7 +32,8 @@ public partial class HistoryChart : IConfigurable, ITitleProvider
 
     /// <summary>
     /// The interval one point of a line stands for, a short name of <see cref="PropertyHistoryChartModel.Periods"/>:
-    /// Auto, Raw or a fixed size such as 5m.
+    /// Auto, Raw or a fixed size such as 5m. A fixed size must divide the range into at most
+    /// <see cref="PropertyHistoryChartModel.MaxPoints"/> intervals.
     /// </summary>
     [Configuration]
     public partial string Bucket { get; set; }
@@ -46,13 +47,14 @@ public partial class HistoryChart : IConfigurable, ITitleProvider
     public partial string? Aggregation { get; set; }
 
     /// <summary>
-    /// The height of the lines in pixels. On a narrow screen the lines get lower to keep their proportions.
+    /// The height of the lines in pixels, above 0. On a narrow screen the lines get lower to keep their proportions.
     /// </summary>
     [Configuration]
     public partial int Height { get; set; }
 
     /// <summary>
-    /// How often the chart queries again while its values change. Less than a minute counts as a minute.
+    /// How often the chart queries again at most while its values change. Less than a minute counts as a minute, a bucket
+    /// longer than the interval lengthens it to the bucket, and more than a day is an error.
     /// </summary>
     [Configuration]
     public partial TimeSpan RefreshInterval { get; set; }

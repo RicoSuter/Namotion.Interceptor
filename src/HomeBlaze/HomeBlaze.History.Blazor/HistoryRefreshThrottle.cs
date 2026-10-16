@@ -15,6 +15,9 @@ internal sealed class HistoryRefreshThrottle : IDisposable
     /// <summary>The shortest window. It also covers the flush interval of a buffering history store.</summary>
     public static readonly TimeSpan MinimumInterval = TimeSpan.FromSeconds(60);
 
+    /// <summary>The longest window. A timer cannot wait much longer than 49 days.</summary>
+    public static readonly TimeSpan MaximumInterval = TimeSpan.FromDays(1);
+
     private readonly TimeProvider _timeProvider;
     private readonly Action _callback;
     private readonly Lock _lock = new();
@@ -30,13 +33,13 @@ internal sealed class HistoryRefreshThrottle : IDisposable
     }
 
     /// <summary>
-    /// Gets the window of a chart: the larger of its refresh interval, at least <see cref="MinimumInterval"/>,
-    /// and its bucket. A raw query has no bucket.
+    /// Gets the window of a chart: the larger of its refresh interval and its bucket, from <see cref="MinimumInterval"/>
+    /// to <see cref="MaximumInterval"/>. A raw query has no bucket.
     /// </summary>
     public static TimeSpan GetWindow(TimeSpan refreshInterval, TimeSpan? bucket)
     {
-        var window = refreshInterval > MinimumInterval ? refreshInterval : MinimumInterval;
-        return bucket is { } size && size > window ? size : window;
+        var window = bucket is { } size && size > refreshInterval ? size : refreshInterval;
+        return window < MinimumInterval ? MinimumInterval : window > MaximumInterval ? MaximumInterval : window;
     }
 
     /// <summary>Starts a window unless one is running or the throttle is disposed.</summary>

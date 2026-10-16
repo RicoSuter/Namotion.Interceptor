@@ -1,3 +1,4 @@
+using System.Globalization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
@@ -108,14 +109,21 @@ internal static class HistoryChartSeriesResolver
     }
 
     /// <summary>
-    /// Gets the widget argument error of a chart, or null: an unknown range, bucket or aggregation, or a recorded
-    /// line whose unit differs from that of the first recorded line. A line that counts samples has no unit. An
-    /// aggregation that the property or the stores do not offer is no error, see <see cref="GetAggregationNote"/>.
+    /// Gets the widget argument error of a chart, or null: an unknown range, bucket or aggregation, a fixed bucket that
+    /// divides the range into more than <see cref="PropertyHistoryChartModel.MaxPoints"/> intervals, a height that is
+    /// not positive, a refresh interval above <see cref="HistoryRefreshThrottle.MaximumInterval"/>, or a recorded line
+    /// whose unit differs from that of the first recorded line. A line that counts samples has no unit. An aggregation
+    /// that the property or the stores do not offer is no error, see <see cref="GetAggregationNote"/>.
     /// </summary>
     public static string? FindArgumentError(
-        string? range, string? bucket, string? aggregation, IReadOnlyList<HistoryChartSeriesInfo> series)
+        string? range,
+        string? bucket,
+        string? aggregation,
+        int height,
+        TimeSpan refreshInterval,
+        IReadOnlyList<HistoryChartSeriesInfo> series)
     {
-        if (!PropertyHistoryChartModel.TryGetRange(range, out _))
+        if (!PropertyHistoryChartModel.TryGetRange(range, out var rangeSpan))
         {
             var choices = string.Join(", ", PropertyHistoryChartModel.RangePresets.Select(preset => preset.ShortName));
             return $"Unknown range '{range}': use one of {choices}";
@@ -125,6 +133,24 @@ internal static class HistoryChartSeriesResolver
         {
             var choices = string.Join(", ", PropertyHistoryChartModel.Periods.Select(period => period.ShortName));
             return $"Unknown bucket '{bucket}': use one of {choices}";
+        }
+
+        if (period.Bucket is { } size && !PropertyHistoryChartModel.FitsMaxPoints(rangeSpan, size))
+        {
+            var smallest = PropertyHistoryChartModel.Periods.First(candidate =>
+                candidate.Bucket is { } candidateSize && PropertyHistoryChartModel.FitsMaxPoints(rangeSpan, candidateSize));
+            return $"Bucket '{bucket}' is too small for range '{range}': use {smallest.ShortName} or more, or Auto";
+        }
+
+        if (height <= 0)
+        {
+            return $"Height must be above 0: {height}";
+        }
+
+        if (refreshInterval > HistoryRefreshThrottle.MaximumInterval)
+        {
+            return $"RefreshInterval '{refreshInterval.ToString("c", CultureInfo.InvariantCulture)}' is too long: " +
+                $"use at most {HistoryRefreshThrottle.MaximumInterval.ToString("c", CultureInfo.InvariantCulture)}";
         }
 
         if (!string.IsNullOrEmpty(aggregation) && !PropertyHistoryChartModel.TryGetAggregation(aggregation, out _))

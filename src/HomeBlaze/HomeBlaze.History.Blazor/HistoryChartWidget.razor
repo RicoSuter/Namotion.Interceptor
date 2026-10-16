@@ -23,7 +23,6 @@
     // reads are what the page tracking scope records, so a change of a charted value renders the legend again,
     // and that render arms the refresh of the chart. The legends in the chart view are read in the same render batch.
     Resolve(chart);
-    var height = chart.Height;
 
     <div data-testid="history-chart">
         @if (_error is not null)
@@ -44,7 +43,7 @@
             {
                 @* The view shows the legend of the lines below them and each band series in the header of its band. *@
                 var linesTarget = CanShowHistory(_firstLine) ? _firstLine : -1;
-                <HistoryChartView Data="_data" MaxHeight="height" ShowAxes="!chart.Compact" LineLegend="_lineLegend" BandHeader="_bandHeader"
+                <HistoryChartView Data="_data" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact" LineLegend="_lineLegend" BandHeader="_bandHeader"
                                   LinesClicked="@(linesTarget >= 0 ? _showHistory[linesTarget] : default)"
                                   LinesTitle="@(linesTarget >= 0 ? _historyTitles[linesTarget] : null)" />
             }
@@ -93,6 +92,8 @@
     private string? _resolvedRange;
     private string? _resolvedBucket;
     private string? _resolvedAggregation;
+    private int _resolvedHeight;
+    private TimeSpan _resolvedRefreshInterval;
     private int _resolvedPathsVersion = -1;
     private IReadOnlyList<HistoryChartSeriesInfo> _series = [];
     private string?[] _colors = [];
@@ -268,9 +269,9 @@
             return;
         }
 
-        if (_error is null && Subject is HistoryChart chart)
+        if (_error is null && Subject is HistoryChart)
         {
-            _throttle?.Arm(HistoryRefreshThrottle.GetWindow(chart.RefreshInterval, _bucket));
+            _throttle?.Arm(HistoryRefreshThrottle.GetWindow(_resolvedRefreshInterval, _bucket));
         }
     }
 
@@ -280,6 +281,8 @@
         var range = chart.Range;
         var bucket = chart.Bucket;
         var aggregation = chart.Aggregation;
+        var height = chart.Height;
+        var refreshInterval = chart.RefreshInterval;
         var pathsVersion = Volatile.Read(ref _pathsVersion);
 
         var isCurrent = ReferenceEquals(entries, _resolvedEntries) &&
@@ -287,6 +290,8 @@
             range == _resolvedRange &&
             bucket == _resolvedBucket &&
             aggregation == _resolvedAggregation &&
+            height == _resolvedHeight &&
+            refreshInterval == _resolvedRefreshInterval &&
             entries.Length == _resolvedConfiguration.Length;
 
         // Every entry is read once, also after one differs, so the tracking scope records all of them. While they are
@@ -313,7 +318,7 @@
         }
 
         var series = HistoryChartSeriesResolver.Resolve(PathResolver, entries, configurations, aggregation);
-        var error = HistoryChartSeriesResolver.FindArgumentError(range, bucket, aggregation, series);
+        var error = HistoryChartSeriesResolver.FindArgumentError(range, bucket, aggregation, height, refreshInterval, series);
 
         // A change of the graph that leaves the series as they were, which is the common case, does not query again.
         var seriesChanged = !series.SequenceEqual(_series);
@@ -327,6 +332,8 @@
         _resolvedRange = range;
         _resolvedBucket = bucket;
         _resolvedAggregation = aggregation;
+        _resolvedHeight = height;
+        _resolvedRefreshInterval = refreshInterval;
         _resolvedPathsVersion = pathsVersion;
         _error = error;
         if (!seriesChanged)

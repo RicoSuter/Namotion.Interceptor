@@ -27,6 +27,11 @@ public class HistoryChartSeriesResolverTests
     private static HistoryChartSeriesInfo Band(string label, StateUnit unit = StateUnit.Default) =>
         new(label, null, null, HistoryChartSeriesKind.Band, unit, HasHistory: true, IsCumulative: false);
 
+    // The default height and refresh interval of a chart, which are no error.
+    private static string? FindArgumentError(
+        string? range, string? bucket, string? aggregation, IReadOnlyList<HistoryChartSeriesInfo> series) =>
+        HistoryChartSeriesResolver.FindArgumentError(range, bucket, aggregation, 300, TimeSpan.FromMinutes(1), series);
+
     private static IReadOnlyList<HistoryChartSeriesInfo> Resolve(SubjectPathResolver resolver, HistoryChart chart) =>
         HistoryChartSeriesResolver.Resolve(
             resolver, chart.Series, chart.Series.Select(HistoryChartSeriesConfiguration.Read).ToArray(), chart.Aggregation);
@@ -82,7 +87,7 @@ public class HistoryChartSeriesResolverTests
         HistoryChartSeriesInfo[] series = [Line("Pump"), Band("Status", StateUnit.DegreeCelsius), Line("Fan")];
 
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", null, series);
+        var error = FindArgumentError("24h", "Auto", null, series);
 
         // Assert
         Assert.Null(error);
@@ -95,7 +100,7 @@ public class HistoryChartSeriesResolverTests
         HistoryChartSeriesInfo[] series = [Band("Status"), Line("Pump"), Line("Temperature", StateUnit.DegreeCelsius)];
 
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", null, series);
+        var error = FindArgumentError("24h", "Auto", null, series);
 
         // Assert
         Assert.NotNull(error);
@@ -111,7 +116,7 @@ public class HistoryChartSeriesResolverTests
         HistoryChartSeriesInfo[] series = [Line("Pump"), Line("Temperature", StateUnit.DegreeCelsius, hasHistory: false)];
 
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", null, series);
+        var error = FindArgumentError("24h", "Auto", null, series);
 
         // Assert
         Assert.Null(error);
@@ -123,18 +128,85 @@ public class HistoryChartSeriesResolverTests
     public void WhenRangeOrBucketIsUnknown_ThenTheErrorNamesTheValueAndTheChoices(string range, string bucket, string expectedStart)
     {
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError(range, bucket, null, []);
+        var error = FindArgumentError(range, bucket, null, []);
 
         // Assert
         Assert.NotNull(error);
         Assert.StartsWith(expectedStart, error);
     }
 
+    [Theory]
+    [InlineData("1h", "1s", "Bucket '1s' is too small for range '1h': use 10s or more, or Auto")]
+    [InlineData("24h", "10s", "Bucket '10s' is too small for range '24h': use 5m or more, or Auto")]
+    [InlineData("7d", "10m", "Bucket '10m' is too small for range '7d': use 15m or more, or Auto")]
+    [InlineData("30D", "15M", "Bucket '15M' is too small for range '30D': use 1h or more, or Auto")]
+    public void WhenAFixedBucketDividesTheRangeIntoMoreThanTheMaximumPoints_ThenTheErrorNamesTheSmallestBucketThatFits(
+        string range, string bucket, string expected)
+    {
+        // Act
+        var error = FindArgumentError(range, bucket, null, []);
+
+        // Assert
+        Assert.Equal(expected, error);
+    }
+
+    [Theory]
+    [InlineData("1h", "10s")]
+    [InlineData("24h", "5m")]
+    [InlineData("7d", "15m")]
+    [InlineData("30d", "1h")]
+    [InlineData("30d", "Raw")]
+    [InlineData("30d", "Auto")]
+    public void WhenTheBucketFitsTheRangeOrIsNotFixed_ThenThereIsNoError(string range, string bucket)
+    {
+        // Act
+        var error = FindArgumentError(range, bucket, null, []);
+
+        // Assert
+        Assert.Null(error);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-100)]
+    public void WhenTheHeightIsNotPositive_ThenTheErrorNamesIt(int height)
+    {
+        // Act
+        var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", null, height, TimeSpan.FromMinutes(1), []);
+
+        // Assert
+        Assert.Equal($"Height must be above 0: {height}", error);
+    }
+
+    [Fact]
+    public void WhenTheRefreshIntervalIsLongerThanADay_ThenTheErrorNamesItAndTheLongestInterval()
+    {
+        // Act
+        var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", null, 300, TimeSpan.FromDays(60), []);
+
+        // Assert
+        Assert.Equal("RefreshInterval '60.00:00:00' is too long: use at most 1.00:00:00", error);
+    }
+
+    [Theory]
+    [InlineData(-60)]
+    [InlineData(0)]
+    [InlineData(86400)]
+    public void WhenTheRefreshIntervalIsAtMostADay_ThenThereIsNoError(int refreshIntervalSeconds)
+    {
+        // Act
+        var error = HistoryChartSeriesResolver.FindArgumentError(
+            "24h", "Auto", null, 1, TimeSpan.FromSeconds(refreshIntervalSeconds), []);
+
+        // Assert
+        Assert.Null(error);
+    }
+
     [Fact]
     public void WhenRangeAndBucketAreKnownInAnotherCase_ThenThereIsNoError()
     {
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError("7D", "raw", null, []);
+        var error = FindArgumentError("7D", "raw", null, []);
 
         // Assert
         Assert.Null(error);
@@ -144,7 +216,7 @@ public class HistoryChartSeriesResolverTests
     public void WhenTheAggregationOfTheChartIsUnknown_ThenTheErrorNamesTheValueAndTheChoices()
     {
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", "Median", [Line("Pump", aggregation: "Median")]);
+        var error = FindArgumentError("24h", "Auto", "Median", [Line("Pump", aggregation: "Median")]);
 
         // Assert
         Assert.Equal(
@@ -157,7 +229,7 @@ public class HistoryChartSeriesResolverTests
     public void WhenTheAggregationOfASeriesIsUnknown_ThenTheErrorNamesTheSeries()
     {
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError(
+        var error = FindArgumentError(
             "24h", "Auto", "Maximum", [Line("Pump", aggregation: "Maximum"), Line("Fan", aggregation: "Mean")]);
 
         // Assert
@@ -174,7 +246,7 @@ public class HistoryChartSeriesResolverTests
     public void WhenTheAggregationIsEmptyOrKnownInAnyCase_ThenThereIsNoError(string? aggregation)
     {
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", aggregation, [Line("Pump", aggregation: aggregation)]);
+        var error = FindArgumentError("24h", "Auto", aggregation, [Line("Pump", aggregation: aggregation)]);
 
         // Assert
         Assert.Null(error);
@@ -191,7 +263,7 @@ public class HistoryChartSeriesResolverTests
         ];
 
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError("24h", "Auto", null, series);
+        var error = FindArgumentError("24h", "Auto", null, series);
 
         // Assert
         Assert.Equal("Series 'Samples' (count) has another unit than 'Temperature' (°C): show it in a second chart", error);
@@ -211,7 +283,7 @@ public class HistoryChartSeriesResolverTests
         ];
 
         // Act
-        var error = HistoryChartSeriesResolver.FindArgumentError("24h", bucket, null, series);
+        var error = FindArgumentError("24h", bucket, null, series);
 
         // Assert
         Assert.Null(error);

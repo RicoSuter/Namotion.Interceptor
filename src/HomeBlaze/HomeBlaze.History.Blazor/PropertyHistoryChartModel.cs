@@ -302,12 +302,7 @@ public static class PropertyHistoryChartModel
             ? coverage
             : range;
 
-        // Rounded up, and against one fewer than the cap: the first bucket starts at or before the query's
-        // start, so a range can span one interval more than dividing it by the bucket suggests. Guarded against
-        // overflow, which would turn the floor negative and silently stop capping anything at all.
-        var capTicks = range.Ticks > long.MaxValue - MaxPoints
-            ? long.MaxValue
-            : (range.Ticks + MaxPoints - 2) / (MaxPoints - 1);
+        var capTicks = GetSmallestBucketTicks(range);
         var targetTicks = TimeSpan.FromTicks(
             Math.Max(Math.Max(target.Ticks / 200, capTicks), TimeSpan.TicksPerSecond));
         foreach (var candidate in Ladder)
@@ -320,6 +315,15 @@ public static class PropertyHistoryChartModel
 
         return Ladder[^1];
     }
+
+    /// <summary>Gets whether a query of <paramref name="range"/> in buckets of <paramref name="bucket"/> returns every bucket, see <see cref="MaxPoints"/>.</summary>
+    internal static bool FitsMaxPoints(TimeSpan range, TimeSpan bucket) => bucket.Ticks >= GetSmallestBucketTicks(range);
+
+    // Rounded up, and against one fewer than the cap: the first bucket starts at or before the query's start, so a
+    // range can span one interval more than dividing it by the bucket suggests. Guarded against overflow, which would
+    // turn the floor negative and silently stop capping anything at all.
+    private static long GetSmallestBucketTicks(TimeSpan range) =>
+        range.Ticks > long.MaxValue - MaxPoints ? long.MaxValue : (range.Ticks + MaxPoints - 2) / (MaxPoints - 1);
 
     /// <summary>
     /// Returns true when a property holds a discrete state rather than a measurement, so its history

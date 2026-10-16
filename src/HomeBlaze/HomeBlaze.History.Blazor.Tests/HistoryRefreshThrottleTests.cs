@@ -76,6 +76,20 @@ public class HistoryRefreshThrottleTests
     }
 
     [Fact]
+    public void WhenArmedForAVeryLongRefreshInterval_ThenTheSystemTimerStarts()
+    {
+        // Arrange - a system timer throws for a due time above about 49 days.
+        using var throttle = new HistoryRefreshThrottle(TimeProvider.System, () => { });
+        var window = HistoryRefreshThrottle.GetWindow(TimeSpan.FromDays(60), null);
+
+        // Act
+        var armed = throttle.Arm(window);
+
+        // Assert
+        Assert.True(armed);
+    }
+
+    [Fact]
     public void WhenNeverArmed_ThenTheCallbackNeverRuns()
     {
         // Arrange
@@ -134,7 +148,9 @@ public class HistoryRefreshThrottleTests
     [InlineData(300, 60, 300)]
     [InlineData(60, 3600, 3600)]
     [InlineData(10, 30, 60)]
-    public void WhenTheWindowIsComputed_ThenItIsTheLargerOfTheIntervalAndTheBucket(
+    [InlineData(60 * 86400, null, 86400)]
+    [InlineData(60 * 86400, 3600, 86400)]
+    public void WhenTheWindowIsComputed_ThenItIsTheLargerOfTheIntervalAndTheBucketFromAMinuteToADay(
         int refreshIntervalSeconds, int? bucketSeconds, int expectedSeconds)
     {
         // Arrange
