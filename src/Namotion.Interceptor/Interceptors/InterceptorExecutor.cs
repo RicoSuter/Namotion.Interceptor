@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Interceptors;
 
@@ -124,10 +125,39 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         return result;
     }
 
+    /// <summary>
+    /// Fallback contexts whose removal is under way on this executor. The detach callbacks run while
+    /// the edge is still registered, because they resolve their handlers through this executor and
+    /// would find nothing once it is gone, so the registration alone cannot tell a fresh removal
+    /// from one already in flight. A removal of the same pair arriving in that window is refused:
+    /// re-entered from a callback it would otherwise recurse until the stack is exhausted, and
+    /// issued from another thread it would run the callbacks twice.
+    /// </summary>
+    private ImmutableArray<IInterceptorSubjectContext> _fallbackContextsBeingRemoved = ImmutableArray<IInterceptorSubjectContext>.Empty;
+
+    // Tells a removal's finally that OnFallbackContextRemoved already released its claim, because
+    // by then another thread may hold a new claim on the same pair that a second release would drop.
+    // Sound only while base runs no user code after the hook, where a nested removal could reset it.
+    [ThreadStatic]
+    private static bool _removalReleasedOnCommit;
+
     public override bool RemoveFallbackContext(IInterceptorSubjectContext context)
     {
-        if (HasFallbackContext(context))
+        if (!HasFallbackContext(context) || !TryClaimFallbackContextRemoval(context))
         {
+            return false;
+        }
+
+        var committing = false;
+        try
+        {
+            // A removal that completed between the check above and the claim has already run the
+            // callbacks and dropped the edge.
+            if (!HasFallbackContext(context))
+            {
+                return false;
+            }
+
             var array = context.GetServices<ILifecycleInterceptor>();
             for (var index = 0; index < array.Length; index++)
             {
@@ -135,9 +165,45 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
                 interceptor.DetachSubjectFromContext(_subject);
             }
 
+            committing = true;
+            _removalReleasedOnCommit = false;
             return base.RemoveFallbackContext(context);
         }
+        finally
+        {
+            if (!committing || !_removalReleasedOnCommit)
+            {
+                ReleaseFallbackContextRemoval(context);
+            }
+        }
+    }
 
-        return false;
+    private protected override void OnFallbackContextRemoved(InterceptorSubjectContext context)
+    {
+        // Released together with the removal: released after it, an add of the same pair could
+        // complete in between, and a removal issued after that add would be refused and leave the
+        // new edge registered.
+        ReleaseFallbackContextRemoval(context);
+        _removalReleasedOnCommit = true;
+    }
+
+    private bool TryClaimFallbackContextRemoval(IInterceptorSubjectContext context)
+    {
+        return ImmutableInterlocked.Update(
+            ref _fallbackContextsBeingRemoved,
+            static (contexts, claimed) => contexts.Contains(claimed) ? contexts : contexts.Add(claimed),
+            context);
+    }
+
+    private void ReleaseFallbackContextRemoval(IInterceptorSubjectContext context)
+    {
+        // A release always follows a claim of the same context, so a single entry is that context
+        // and the shared empty array can stand in for the one Remove would allocate.
+        ImmutableInterlocked.Update(
+            ref _fallbackContextsBeingRemoved,
+            static (contexts, released) => contexts.Length == 1
+                ? ImmutableArray<IInterceptorSubjectContext>.Empty
+                : contexts.Remove(released),
+            context);
     }
 }

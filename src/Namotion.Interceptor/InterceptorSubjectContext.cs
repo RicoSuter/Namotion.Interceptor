@@ -166,6 +166,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             PublishState(new ContextState(state.Services, state.FallbackContexts.RemoveAt(index)));
+            OnFallbackContextRemoved(contextImpl);
 
             // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
             // stays a superset of the true using set for the whole transition (see
@@ -182,6 +183,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         InvalidateUsingContexts();
         return true;
+    }
+
+    /// <summary>
+    /// Runs under the mutation lock right after a fallback context removal is published, so no
+    /// other mutation of this context can come between the two. Must not call into another context.
+    /// </summary>
+    private protected virtual void OnFallbackContextRemoved(InterceptorSubjectContext context)
+    {
     }
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
