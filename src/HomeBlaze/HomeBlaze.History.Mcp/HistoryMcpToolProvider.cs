@@ -67,13 +67,14 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             {
                 type = "integer",
                 description = "Maximum points per path. Defaults to (and is capped at) 10000 for raw samples " +
-                              "and 1000 for bucketed ones. Lower it to keep the response small."
+                              "and 1000 for bucketed ones. A series with more keeps its newest points and drops the oldest " +
+                              "(marked by truncated and complete_from). Lower it to keep the response small."
             },
             coverage = new
             {
                 type = "string",
                 description = "summary (default) or ranges. The response always carries a coverage summary (ratio, gaps, " +
-                              "largest_gap); ranges also lists the covered ranges, which raw state timelines need when ratio < 1, " +
+                              "largest_gap, and partial for bucketed queries); ranges also lists the covered ranges, which raw state timelines need when ratio < 1, " +
                               "because raw samples do not show gaps."
             }
         },
@@ -104,8 +105,11 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                           "a coverage summary for the whole response (covered ratio, gap count, largest gap; ranges on request), " +
                           "and a 'series' map keyed by path, each with a value_type hint, a unit when the property declares one " +
                           "(a StateUnit name such as WattHour), and points as [timestamp, value] pairs " +
-                          "(a null value means a gap, an unknown value, or the Count or Sum of a partly covered bucket); " +
-                          "truncated appears when the point limit cut the series, and a series whose coverage differs " +
+                          "(a null value means no coverage or no known value). For bucketed queries, coverage.partial lists " +
+                          "the buckets the coverage covers only partly, in the form of the points' first element; their Count " +
+                          "and Sum are lower bounds over the covered part. The point limit keeps the newest points and drops " +
+                          "the oldest: a cut series carries truncated and complete_from, the timestamp from which it is complete; " +
+                          "narrow from and to, or use a coarser bucket, to see older data. A series whose coverage differs " +
                           "from the response's carries its own ranges when ranges are requested. A path that cannot be " +
                           "served carries its own error and the others still return data. " +
                           "Timestamps carry the offset of time_zone (named in the response); compare instants, not strings. " +
@@ -325,7 +329,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
         if (responseCoverage is { } coverage)
         {
-            response["coverage"] = BuildCoveragePayload(coverage, from, to, timeZone, includeRanges);
+            response["coverage"] = BuildCoveragePayload(coverage, from, to, timeZone, bucket, maxPoints, includeRanges);
         }
 
         response["series"] = series;
@@ -333,7 +337,13 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     }
 
     private static Dictionary<string, object?> BuildCoveragePayload(
-        ImmutableArray<HistoryCoverage> ranges, DateTimeOffset from, DateTimeOffset to, TimeZoneInfo timeZone, bool includeRanges)
+        ImmutableArray<HistoryCoverage> ranges,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        TimeZoneInfo timeZone,
+        HistoryBucket? bucket,
+        int maxPoints,
+        bool includeRanges)
     {
         var summary = HistoryToolFormatting.Summarize(ranges, from, to);
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -352,7 +362,57 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             payload["ranges"] = FormatRanges(ranges, timeZone);
         }
 
+        if (bucket is { } grid && FindPartialBuckets(ranges, from, to, grid, maxPoints, timeZone) is { } partial)
+        {
+            payload["partial"] = partial;
+        }
+
         return payload;
+    }
+
+    /// <summary>
+    /// Labels the buckets of the returned grid that <paramref name="ranges"/> covers only partly, or returns null when
+    /// there are none. A bucket is measured within [<paramref name="from"/>, <paramref name="to"/>), the window the
+    /// coverage speaks for, so the oldest and newest buckets reaching past it are not partial for that alone.
+    /// </summary>
+    private static List<string>? FindPartialBuckets(
+        ImmutableArray<HistoryCoverage> ranges,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        HistoryBucket bucket,
+        int maxPoints,
+        TimeZoneInfo timeZone)
+    {
+        List<string>? partial = null;
+        var rangeIndex = 0;
+        var bucketStart = BucketAlignment.FirstBucketStart(from, to, bucket, maxPoints);
+        while (bucketStart < to)
+        {
+            var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
+            var window = new HistoryCoverage(bucketStart > from ? bucketStart : from, bucketEnd < to ? bucketEnd : to);
+            while (rangeIndex < ranges.Length && ranges[rangeIndex].To <= window.From)
+            {
+                rangeIndex++;
+            }
+
+            var covered = TimeSpan.Zero;
+            for (var index = rangeIndex; index < ranges.Length && ranges[index].From < window.To; index++)
+            {
+                if (ranges[index].Intersect(window) is { } overlap)
+                {
+                    covered += overlap.To - overlap.From;
+                }
+            }
+
+            if (covered > TimeSpan.Zero && covered < window.To - window.From)
+            {
+                (partial ??= []).Add(FormatPointTime(bucketStart, timeZone, bucket));
+            }
+
+            bucketStart = bucketEnd;
+        }
+
+        return partial;
     }
 
     private static Dictionary<string, object?> BuildSeriesPayload(
@@ -367,6 +427,11 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         if (series.IsTruncated)
         {
             payload["truncated"] = true;
+            if (series.Points.Length > 0)
+            {
+                // The point limit keeps the newest points, so the series is complete from its first returned point.
+                payload["complete_from"] = HistoryToolFormatting.FormatTimestamp(series.Points[0].Timestamp, timeZone);
+            }
         }
 
         if (includeOwnRanges)
@@ -393,13 +458,16 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
     private static object?[] ToPair(HistoryPoint point, TimeZoneInfo timeZone, HistoryBucket? bucket, bool roundNumbers) =>
     [
-        bucket is { CalendarUnit: not null } calendar
-            ? HistoryToolFormatting.FormatPeriodLabel(point.Timestamp, calendar)
-            : HistoryToolFormatting.FormatTimestamp(point.Timestamp, timeZone),
+        FormatPointTime(point.Timestamp, timeZone, bucket),
         point.Number is { } number
             ? roundNumbers ? HistoryToolFormatting.RoundToSignificantDigits(number) : number
             : point.Json
     ];
+
+    private static string FormatPointTime(DateTimeOffset timestamp, TimeZoneInfo timeZone, HistoryBucket? bucket) =>
+        bucket is { CalendarUnit: not null } calendar
+            ? HistoryToolFormatting.FormatPeriodLabel(timestamp, calendar)
+            : HistoryToolFormatting.FormatTimestamp(timestamp, timeZone);
 
     private static string[][] FormatRanges(ImmutableArray<HistoryCoverage> ranges, TimeZoneInfo timeZone) =>
         ranges.Select(range => new[]

@@ -131,6 +131,110 @@ public class GetPropertyHistoryToolTests
     }
 
     [Fact]
+    public async Task WhenARawSeriesIsTruncated_ThenItSaysWhereItIsComplete()
+    {
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/a/Value", "/b/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", time_zone = "UTC" },
+            store =>
+            {
+                ConfigureGappedStore(store);
+                store.TruncatedPath = "/b/Value";
+            });
+
+        // Assert
+        var series = json.GetProperty("series");
+        Assert.False(series.GetProperty("/a/Value").TryGetProperty("complete_from", out _));
+        var truncated = series.GetProperty("/b/Value");
+        Assert.Equal("2026-06-24T00:05:00Z", truncated.GetProperty("complete_from").GetString());
+        Assert.Equal(truncated.GetProperty("points")[0][0].GetString(), truncated.GetProperty("complete_from").GetString());
+    }
+
+    [Fact]
+    public async Task WhenACalendarSeriesIsTruncated_ThenCompleteFromIsAFullTimestamp()
+    {
+        // Arrange
+        void Configure(TestHistoryStore store)
+        {
+            store.Points = [new HistoryPoint(new DateTimeOffset(2026, 6, 22, 22, 0, 0, TimeSpan.Zero), 3, null)];
+            store.TruncatedPath = "/Power";
+        }
+
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-06-23", to = "2026-06-24", bucket = "day", time_zone = "Europe/Zurich", aggregation = "Count" },
+            Configure);
+
+        // Assert
+        var series = json.GetProperty("series").GetProperty("/Power");
+        Assert.Equal("2026-06-23", series.GetProperty("points")[0][0].GetString());
+        Assert.Equal("2026-06-23T00:00:00+02:00", series.GetProperty("complete_from").GetString());
+    }
+
+    [Fact]
+    public async Task WhenDayBucketsArePartlyCovered_ThenCoverageListsThemAndTheirCountIsPresent()
+    {
+        // Arrange - Zurich days 06-22, 06-23 and 06-24 (the query ends at noon); a restart gap from 06-23 12:00 to 06-24
+        // 00:00 leaves 06-23 partly covered. 06-24 ends at the query end, which is not a gap.
+        void Configure(TestHistoryStore store)
+        {
+            store.Coverage =
+            [
+                new HistoryCoverage(new DateTimeOffset(2026, 6, 21, 22, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 23, 10, 0, 0, TimeSpan.Zero)),
+                new HistoryCoverage(new DateTimeOffset(2026, 6, 23, 22, 0, 0, TimeSpan.Zero), DateTimeOffset.MaxValue)
+            ];
+            store.Points =
+            [
+                new HistoryPoint(new DateTimeOffset(2026, 6, 21, 22, 0, 0, TimeSpan.Zero), 10, null),
+                new HistoryPoint(new DateTimeOffset(2026, 6, 22, 22, 0, 0, TimeSpan.Zero), 4, null),
+                new HistoryPoint(new DateTimeOffset(2026, 6, 23, 22, 0, 0, TimeSpan.Zero), 6, null)
+            ];
+        }
+
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-06-22", to = "2026-06-24T12:00", bucket = "day", time_zone = "Europe/Zurich", aggregation = "Count" },
+            Configure);
+
+        // Assert
+        var partial = json.GetProperty("coverage").GetProperty("partial").EnumerateArray().Select(entry => entry.GetString());
+        Assert.Equal(["2026-06-23"], partial);
+        var points = json.GetProperty("series").GetProperty("/Power").GetProperty("points").EnumerateArray()
+            .Select(point => $"{point[0].GetString()}={point[1].GetDouble()}");
+        Assert.Equal(["2026-06-22=10", "2026-06-23=4", "2026-06-24=6"], points);
+    }
+
+    [Fact]
+    public async Task WhenFixedBucketsArePartlyCovered_ThenCoverageListsThemAsTimestamps()
+    {
+        // Act - coverage [00:00, 00:20) and [00:30, 01:00): the 15 minute bucket [00:15, 00:30) is partial, and the
+        // query starts inside [00:00, 00:15), which is not a gap.
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-06-24T00:05:00Z", to = "2026-06-24T01:00:00Z", bucket = "15m", time_zone = "UTC", aggregation = "Count" },
+            ConfigureGappedStore);
+
+        // Assert
+        var partial = json.GetProperty("coverage").GetProperty("partial").EnumerateArray().Select(entry => entry.GetString());
+        Assert.Equal(["2026-06-24T00:15:00Z"], partial);
+    }
+
+    [Fact]
+    public async Task WhenNoBucketIsPartlyCoveredOrTheQueryIsRaw_ThenCoverageHasNoPartialList()
+    {
+        // Act
+        var fullyCovered = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", bucket = "10m", aggregation = "Count" },
+            ConfigureGappedStore);
+        var raw = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z" },
+            ConfigureGappedStore);
+
+        // Assert
+        Assert.False(fullyCovered.GetProperty("coverage").TryGetProperty("partial", out _));
+        Assert.False(raw.GetProperty("coverage").TryGetProperty("partial", out _));
+    }
+
+    [Fact]
     public async Task WhenCoverageModeIsUnknown_ThenStructuredError()
     {
         // Act
