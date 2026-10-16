@@ -222,4 +222,25 @@ public class BucketAlignmentTests
 
     private static DateTimeOffset Parse(string value) =>
         DateTimeOffset.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+
+    [Theory]
+    // An ordinary local time maps to its instant.
+    [InlineData("2026-06-01T12:00:00", "2026-06-01T10:00:00Z")]
+    // 02:30 does not exist on 2026-03-29 in Zurich: the instant after the gap.
+    [InlineData("2026-03-29T02:30:00", "2026-03-29T01:00:00Z")]
+    // 02:30 occurs twice on 2026-10-25 in Zurich: the earlier instant, still at +02:00.
+    [InlineData("2026-10-25T02:30:00", "2026-10-25T00:30:00Z")]
+    public void WhenConvertingALocalTime_ThenSkippedTimesMoveAfterTheGapAndRepeatedOnesTakeTheEarlierInstant(
+        string localTime, string expected)
+    {
+        // Arrange
+        var local = DateTime.Parse(localTime, System.Globalization.CultureInfo.InvariantCulture);
+
+        // Act
+        var instant = BucketAlignment.LocalTimeToInstant(local, Zurich);
+
+        // Assert
+        Assert.Equal(Parse(expected), instant);
+        Assert.Equal(TimeSpan.Zero, instant.Offset);
+    }
 }

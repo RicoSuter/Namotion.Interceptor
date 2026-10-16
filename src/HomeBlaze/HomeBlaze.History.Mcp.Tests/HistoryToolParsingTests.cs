@@ -89,15 +89,33 @@ public class HistoryToolParsingTests
     }
 
     [Fact]
-    public void WhenBareTimestamp_ThenParsedAsUtc()
+    public void WhenBareTimestamp_ThenParsedAsLocalTimeInTheZone()
     {
         // Act
-        var result = HistoryToolParsing.ParseTimestamp("2026-06-24T10:00:00");
+        var result = HistoryToolParsing.ParseTimestamp("2026-06-24T10:00:00", Zurich);
 
         // Assert
-        Assert.Equal(TimeSpan.Zero, result.Offset);
-        Assert.Equal(new DateTimeOffset(2026, 6, 24, 10, 0, 0, TimeSpan.Zero), result);
+        Assert.Equal(new DateTimeOffset(2026, 6, 24, 8, 0, 0, TimeSpan.Zero), result);
     }
+
+    [Theory]
+    [InlineData("2026-06-24T10:00:00Z", "2026-06-24T10:00:00Z")]
+    [InlineData("2026-06-24T10:00:00+05:00", "2026-06-24T05:00:00Z")]
+    // A bare date is local midnight.
+    [InlineData("2026-01-01", "2025-12-31T23:00:00Z")]
+    // A local time in the spring gap moves to the instant after it; a repeated one takes the earlier instant.
+    [InlineData("2026-03-29T02:30:00", "2026-03-29T01:00:00Z")]
+    [InlineData("2026-10-25T02:30:00", "2026-10-25T00:30:00Z")]
+    public void WhenTimestampIsParsedInAZone_ThenAnExplicitOffsetIsHonoredAndABareOneIsLocal(string raw, string expected)
+    {
+        // Act
+        var result = HistoryToolParsing.ParseTimestamp(raw, Zurich);
+
+        // Assert
+        Assert.Equal(DateTimeOffset.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), result);
+    }
+
+    private static readonly TimeZoneInfo Zurich = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
 
     [Theory]
     [InlineData("day", HistoryCalendarUnit.Day)]

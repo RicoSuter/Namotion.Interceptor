@@ -93,6 +93,7 @@ public class HistoryToolFormattingTests
     [Theory]
     [InlineData("2025-12-31T23:00:00Z", "2026-01-01T00:00:00+01:00")]
     [InlineData("2026-06-30T22:00:00Z", "2026-07-01T00:00:00+02:00")]
+    [InlineData("2026-06-30T22:00:00.5Z", "2026-07-01T00:00:00.5+02:00")]
     public void WhenFormattingInAZone_ThenLocalTimeWithOffset(string input, string expected)
     {
         // Arrange
@@ -133,5 +134,18 @@ public class HistoryToolFormattingTests
 
         // Assert
         Assert.True(double.IsNaN(rounded));
+    }
+
+    [Fact]
+    public void WhenTheZoneOffsetIsZero_ThenTheTimestampEndsInZ()
+    {
+        // Arrange - London is at +00:00 in winter.
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+
+        // Act
+        var formatted = HistoryToolFormatting.FormatTimestamp(new DateTimeOffset(2026, 1, 15, 8, 0, 0, TimeSpan.Zero), zone);
+
+        // Assert
+        Assert.Equal("2026-01-15T08:00:00Z", formatted);
     }
 }

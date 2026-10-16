@@ -13,13 +13,16 @@ public static class HistoryToolFormatting
 {
     /// <summary>
     /// Formats <paramref name="value"/> as <c>yyyy-MM-ddTHH:mm:ss</c> with fractional seconds only when they are
-    /// not zero: in UTC with <c>Z</c> when <paramref name="timeZone"/> is null, otherwise as local time in the zone
-    /// with its offset, for example <c>+01:00</c>.
+    /// not zero, as local time in <paramref name="timeZone"/> (UTC when null) with its offset, for example
+    /// <c>+01:00</c>, or <c>Z</c> when the offset is zero.
     /// </summary>
-    public static string FormatTimestamp(DateTimeOffset value, TimeZoneInfo? timeZone = null) =>
-        timeZone is null
-            ? value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", CultureInfo.InvariantCulture)
-            : TimeZoneInfo.ConvertTime(value, timeZone).ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture);
+    public static string FormatTimestamp(DateTimeOffset value, TimeZoneInfo? timeZone = null)
+    {
+        var local = timeZone is null ? value.ToUniversalTime() : TimeZoneInfo.ConvertTime(value, timeZone);
+        return local.Offset == TimeSpan.Zero
+            ? local.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", CultureInfo.InvariantCulture)
+            : local.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// Rounds <paramref name="value"/> to 12 significant digits, so the noise of a computed aggregate

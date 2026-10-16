@@ -34,8 +34,13 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 items = new { type = "string" },
                 description = "One or more canonical property paths, e.g. /Devices/Sensor/Temperature."
             },
-            from = new { type = "string", description = "Range start, ISO 8601. A bare timestamp is treated as UTC." },
-            to = new { type = "string", description = "Range end, ISO 8601. Defaults to now." },
+            from = new
+            {
+                type = "string",
+                description = "Range start, ISO 8601. Without an offset it is local time in time_zone, e.g. 2026-03-01 is " +
+                              "local midnight; an explicit Z or offset is honored."
+            },
+            to = new { type = "string", description = "Range end, ISO 8601, read like from. Defaults to now." },
             bucket = new
             {
                 type = "string",
@@ -46,14 +51,16 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             time_zone = new
             {
                 type = "string",
-                description = "IANA time zone for day, week, month and year buckets, e.g. Europe/Zurich. Defaults to the server's local zone."
+                description = "IANA time zone, e.g. Europe/Zurich: reads from and to without an offset, formats the response " +
+                              "timestamps, and aligns day, week, month and year buckets. Defaults to the server's local zone, " +
+                              "which the response names."
             },
             aggregation = new
             {
                 type = "string",
                 description = "Last, First, SampleAverage, TimeWeightedAverage, Minimum, Maximum, Sum, Count, " +
                               "StandardDeviation, or Delta (increase of a cumulative counter per bucket; a drop counts as " +
-                              "a restart from zero, recording gaps are bridged; only for properties marked cumulative). " +
+                              "a restart from zero, recording gaps are bridged; needs a bucket; only for properties marked cumulative). " +
                               "Case-insensitive. Defaults to Last."
             },
             max_points = new
@@ -93,7 +100,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         {
             Name = "get_property_history",
             Description = "Query recorded history for one or more [State] property paths over a time range. " +
-                          "Supports raw samples or bucketed downsampling with an aggregation. Returns the resolved from and to, " +
+                          "Supports raw samples or bucketed downsampling with an aggregation. Returns the resolved from, to and time_zone, " +
                           "a coverage summary for the whole response (covered ratio, gap count, largest gap; ranges on request), " +
                           "and a 'series' map keyed by path, each with a value_type hint, a unit when the property declares one " +
                           "(a StateUnit name such as WattHour), and points as [timestamp, value] pairs " +
@@ -101,10 +108,10 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                           "truncated appears when the point limit cut the series, and a series whose coverage differs " +
                           "from the response's carries its own ranges when ranges are requested. A path that cannot be " +
                           "served carries its own error and the others still return data. " +
-                          "Timestamps are UTC, except the points of day, week, month and year buckets, which carry the " +
-                          "offset of time_zone (named in the response). For energy per month, use bucket=month with " +
-                          "aggregation=Delta on the energy counter; Delta returns the counter's unit, so a WattHour counter " +
-                          "yields Wh per bucket. " +
+                          "Timestamps carry the offset of time_zone (named in the response); compare instants, not strings. " +
+                          "Bucketed values are rounded to 12 significant digits. For energy per month, use bucket=month " +
+                          "with aggregation=Delta on the energy counter; Delta returns the counter's unit, so a WattHour " +
+                          "counter yields Wh per bucket. " +
                           "Use browse or search to discover paths first.",
             InputSchema = GetPropertyHistorySchema,
             Handler = HandleGetPropertyHistoryAsync,
@@ -208,42 +215,33 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             : null;
         var calendarUnit = HistoryToolParsing.ParseCalendarUnit(bucketText);
 
-        DateTimeOffset from;
-        DateTimeOffset to;
-        HistoryBucket? bucket = null;
+        // The zone reads offset-less timestamps, formats every response timestamp and aligns calendar buckets.
+        TimeZoneInfo timeZone;
         try
         {
-            from = HistoryToolParsing.ParseTimestamp(fromElement.GetString()!);
+            timeZone = timeZoneText is null ? TimeZoneInfo.Local : HistoryToolParsing.ParseTimeZone(timeZoneText);
+        }
+        catch (FormatException exception)
+        {
+            return new { error = exception.Message };
+        }
+
+        DateTimeOffset from;
+        DateTimeOffset to;
+        HistoryBucket? bucket;
+        try
+        {
+            from = HistoryToolParsing.ParseTimestamp(fromElement.GetString()!, timeZone);
             to = input.TryGetProperty("to", out var toElement) && toElement.ValueKind == JsonValueKind.String
-                ? HistoryToolParsing.ParseTimestamp(toElement.GetString()!)
+                ? HistoryToolParsing.ParseTimestamp(toElement.GetString()!, timeZone)
                 : DateTimeOffset.UtcNow;
-            if (calendarUnit is null)
-            {
-                bucket = HistoryToolParsing.ParseBucket(bucketText);
-            }
+            bucket = calendarUnit is { } unit
+                ? HistoryBucket.Calendar(unit, timeZone)
+                : HistoryToolParsing.ParseBucket(bucketText);
         }
         catch (FormatException exception)
         {
             return new { error = $"Could not parse a time parameter: {exception.Message}" };
-        }
-
-        TimeZoneInfo? timeZone = null;
-        if (calendarUnit is { } unit)
-        {
-            try
-            {
-                timeZone = timeZoneText is null ? TimeZoneInfo.Local : HistoryToolParsing.ParseTimeZone(timeZoneText);
-            }
-            catch (FormatException exception)
-            {
-                return new { error = exception.Message };
-            }
-
-            bucket = HistoryBucket.Calendar(unit, timeZone);
-        }
-        else if (timeZoneText is not null)
-        {
-            return new { error = "Parameter 'time_zone' only applies to day, week, month and year buckets." };
         }
 
         // The stores validate this too, but there it throws from inside the fan-out and surfaces as an
@@ -319,18 +317,14 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         // keyed by path cannot be told apart from the tool's own { error = ... } shape.
         var response = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            ["from"] = HistoryToolFormatting.FormatTimestamp(from),
-            ["to"] = HistoryToolFormatting.FormatTimestamp(to)
+            ["from"] = HistoryToolFormatting.FormatTimestamp(from, timeZone),
+            ["to"] = HistoryToolFormatting.FormatTimestamp(to, timeZone),
+            ["time_zone"] = HistoryToolParsing.GetIanaId(timeZone)
         };
-
-        if (timeZone is not null)
-        {
-            response["time_zone"] = HistoryToolParsing.GetIanaId(timeZone);
-        }
 
         if (responseCoverage is { } coverage)
         {
-            response["coverage"] = BuildCoveragePayload(coverage, from, to, includeRanges);
+            response["coverage"] = BuildCoveragePayload(coverage, from, to, timeZone, includeRanges);
         }
 
         response["series"] = series;
@@ -338,7 +332,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     }
 
     private static Dictionary<string, object?> BuildCoveragePayload(
-        ImmutableArray<HistoryCoverage> ranges, DateTimeOffset from, DateTimeOffset to, bool includeRanges)
+        ImmutableArray<HistoryCoverage> ranges, DateTimeOffset from, DateTimeOffset to, TimeZoneInfo timeZone, bool includeRanges)
     {
         var summary = HistoryToolFormatting.Summarize(ranges, from, to);
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -354,14 +348,14 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
         if (includeRanges)
         {
-            payload["ranges"] = FormatRanges(ranges);
+            payload["ranges"] = FormatRanges(ranges, timeZone);
         }
 
         return payload;
     }
 
     private static Dictionary<string, object?> BuildSeriesPayload(
-        string? valueType, string? unit, HistorySeries series, TimeZoneInfo? timeZone, bool isBucketed, bool includeOwnRanges)
+        string? valueType, string? unit, HistorySeries series, TimeZoneInfo timeZone, bool isBucketed, bool includeOwnRanges)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal) { ["value_type"] = valueType };
         if (unit is not null)
@@ -376,7 +370,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
         if (includeOwnRanges)
         {
-            payload["ranges"] = FormatRanges(series.CoverageRanges);
+            payload["ranges"] = FormatRanges(series.CoverageRanges, timeZone);
         }
 
         var points = new object?[series.Points.Length][];
@@ -390,7 +384,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     }
 
     // Bucketed values are computed, so their floating point noise is rounded away; raw samples are returned as recorded.
-    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo? timeZone, bool isBucketed) =>
+    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo timeZone, bool isBucketed) =>
     [
         HistoryToolFormatting.FormatTimestamp(point.Timestamp, timeZone),
         point.Number is { } number
@@ -398,11 +392,11 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             : point.Json is { } json ? json : null
     ];
 
-    private static string[][] FormatRanges(ImmutableArray<HistoryCoverage> ranges) =>
+    private static string[][] FormatRanges(ImmutableArray<HistoryCoverage> ranges, TimeZoneInfo timeZone) =>
         ranges.Select(range => new[]
         {
-            HistoryToolFormatting.FormatTimestamp(range.From),
-            HistoryToolFormatting.FormatTimestamp(range.To)
+            HistoryToolFormatting.FormatTimestamp(range.From, timeZone),
+            HistoryToolFormatting.FormatTimestamp(range.To, timeZone)
         }).ToArray();
 
     private sealed record PathResult(string Path, string? ValueType, string? Unit, HistorySeries? Series, object? ErrorPayload);

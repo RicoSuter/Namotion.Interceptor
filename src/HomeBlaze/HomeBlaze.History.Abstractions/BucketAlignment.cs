@@ -80,13 +80,13 @@ public static class BucketAlignment
 
         var (unit, timeZone) = GetCalendar(bucket);
         var periodStart = PeriodStartDate(TimeZoneInfo.ConvertTime(timestamp, timeZone).DateTime, unit);
-        var start = PeriodStartInstant(periodStart, timeZone);
+        var start = LocalTimeToInstant(periodStart, timeZone);
 
         // The local date can fall back across midnight, so a later period may already have started.
         while (true)
         {
             periodStart = AddPeriod(periodStart, unit);
-            var nextStart = PeriodStartInstant(periodStart, timeZone);
+            var nextStart = LocalTimeToInstant(periodStart, timeZone);
             if (nextStart > timestamp)
             {
                 return start;
@@ -118,7 +118,7 @@ public static class BucketAlignment
         while (true)
         {
             periodStart = AddPeriod(periodStart, unit);
-            var nextStart = PeriodStartInstant(periodStart, timeZone);
+            var nextStart = LocalTimeToInstant(periodStart, timeZone);
             if (nextStart > bucketStart)
             {
                 return nextStart;
@@ -187,12 +187,20 @@ public static class BucketAlignment
         _ => periodStart.AddYears(1)
     };
 
-    // The earliest instant whose local time is at or after localStart. Only UTC to local conversions are used,
-    // because .NET answers the local to UTC questions (IsInvalidTime, GetUtcOffset(DateTime)) inconsistently
-    // with them around some transitions, which made a bucket end where it started.
-    private static DateTimeOffset PeriodStartInstant(DateTime localStart, TimeZoneInfo timeZone)
+    /// <summary>
+    /// Returns the earliest instant, in UTC, whose local time in <paramref name="timeZone"/> is at or after
+    /// <paramref name="localTime"/>: the instant itself for an ordinary local time, the instant after the gap for one
+    /// the clocks skip, and the earlier instant for one that occurs twice. The kind of <paramref name="localTime"/> is
+    /// ignored.
+    /// </summary>
+    public static DateTimeOffset LocalTimeToInstant(DateTime localTime, TimeZoneInfo timeZone)
     {
-        var target = new DateTimeOffset(DateTime.SpecifyKind(localStart, DateTimeKind.Unspecified), TimeSpan.Zero);
+        ArgumentNullException.ThrowIfNull(timeZone);
+
+        // Only UTC to local conversions are used, because .NET answers the local to UTC questions (IsInvalidTime,
+        // GetUtcOffset(DateTime)) inconsistently with them around some transitions, which made a bucket end where
+        // it started.
+        var target = new DateTimeOffset(DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified), TimeSpan.Zero);
 
         // UTC offsets stay within 14 hours, so the local time is still before localStart here.
         var segmentStart = target - SearchMargin;

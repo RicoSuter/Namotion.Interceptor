@@ -176,10 +176,26 @@ public static class HistoryToolParsing
         return true;
     }
 
-    /// <summary>Parses an ISO 8601 timestamp; a bare (offset-less) timestamp is treated as UTC.</summary>
-    public static DateTimeOffset ParseTimestamp(string raw) =>
-        DateTimeOffset.Parse(raw, CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+    /// <summary>
+    /// Parses an ISO 8601 timestamp to a UTC instant. An explicit offset or <c>Z</c> is honored; a timestamp without
+    /// one is local time in <paramref name="timeZone"/>, where a skipped local time resolves to the instant after the
+    /// gap and a repeated one to the earlier instant. Throws <see cref="FormatException"/> for an invalid timestamp.
+    /// </summary>
+    public static DateTimeOffset ParseTimestamp(string raw, TimeZoneInfo timeZone)
+    {
+        try
+        {
+            // RoundtripKind leaves the kind Unspecified exactly when the text carries no offset and no Z.
+            var parsed = DateTime.Parse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+            return parsed.Kind == DateTimeKind.Unspecified
+                ? BucketAlignment.LocalTimeToInstant(parsed, timeZone)
+                : DateTimeOffset.Parse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+        }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            throw new FormatException($"The timestamp '{raw}' is out of range.", exception);
+        }
+    }
 
     /// <summary>
     /// Maps a property's declared type to the response value-type hint (number / string / boolean / enum).
