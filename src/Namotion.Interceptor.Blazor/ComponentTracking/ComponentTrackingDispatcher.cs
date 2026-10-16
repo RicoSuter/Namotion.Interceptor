@@ -21,7 +21,7 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     private readonly Queue<ComponentReadTracker> _renderQueue = new();
     private readonly ConcurrentQueue<Entry> _changedEntries = new();
     private readonly long _throttleTicks;
-    private readonly long _sweepTicks = Stopwatch.Frequency;
+    private const long SweepIntervalMilliseconds = 1000;
     private readonly Action _drain;
     private Timer? _timer;
     private readonly ILogger _logger;
@@ -232,8 +232,9 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     // at most once a second, when something renders or changes anyway.
     private void SweepIfDue()
     {
-        var now = Stopwatch.GetTimestamp();
-        if (now - _lastSweepTimestamp > _sweepTicks)
+        // Checked on every render, so with the cheaper clock.
+        var now = Environment.TickCount64;
+        if (now - _lastSweepTimestamp > SweepIntervalMilliseconds)
         {
             _lastSweepTimestamp = now;
             Sweep();

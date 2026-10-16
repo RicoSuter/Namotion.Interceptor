@@ -22,9 +22,24 @@ internal static class FragmentOwnership
     {
         var frames = builder.GetFrames();
         var array = frames.Array;
+        Type? lastType = null;
+        var isLastTypeTracked = false;
         for (var index = start; index < frames.Count; index++)
         {
-            if (array[index].FrameType != RenderTreeFrameType.Component || IsTracked(array[index].ComponentType))
+            if (array[index].FrameType != RenderTreeFrameType.Component)
+            {
+                continue;
+            }
+
+            // Siblings are often of one type, and the shared lookup is the cost of this walk.
+            var componentType = array[index].ComponentType;
+            if (componentType != lastType)
+            {
+                lastType = componentType;
+                isLastTypeTracked = IsTracked(componentType);
+            }
+
+            if (isLastTypeTracked)
             {
                 continue;
             }

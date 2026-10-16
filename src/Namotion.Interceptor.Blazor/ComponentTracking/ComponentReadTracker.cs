@@ -180,7 +180,10 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
     // Releases what neither this render nor the content rendered after the last one read.
     private void ReleaseUnread()
     {
-        if (_acquired is null)
+        // The reads of the render are acquired, so when they are as many as the acquired properties and no content read
+        // something after the last render, every acquired property was read again.
+        if (_acquired is null ||
+            (_previousContentReads is not { Count: > 0 } && (_renderReads?.Count ?? 0) == _acquired.Count))
         {
             return;
         }
