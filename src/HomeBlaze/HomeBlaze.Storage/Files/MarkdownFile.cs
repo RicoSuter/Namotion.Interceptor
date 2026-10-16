@@ -286,6 +286,19 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return false;
         }
 
+        // The text of the block and of the blocks around it changes in the file, so a later read of the text that
+        // they had before is a change that must be applied, also when the read inside the write is skipped or fails.
+        // The blocks inside it keep their text.
+        var writtenBlock = page.AllBlocks[blockIndex];
+        foreach (var candidate in page.AllBlocks)
+        {
+            if (candidate.Line <= writtenBlock.Line && candidate.EndLine >= writtenBlock.EndLine &&
+                snapshot.BlockSubjects.TryGetValue(candidate.Index, out var candidateSubject))
+            {
+                _parser.ForgetAppliedBlock(candidateSubject);
+            }
+        }
+
         // Before the write, because the storage reloads this file from inside WriteAsync. The reload
         // must find the keys that are now in the file, or a value that became null would recreate the subject.
         foreach (var (writtenSubject, configurationJson) in write.Configurations)

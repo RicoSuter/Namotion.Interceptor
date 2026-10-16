@@ -174,8 +174,8 @@ public sealed class PropertyWriter : IDisposable
                 await previousSave;
             }
 
-            // Runs on the thread pool and is not awaited, so a failing save must end here. Saves of the same file
-            // can overlap (another owner, another circuit) and fail with an IOException, which is shown as an error.
+            // Runs on the thread pool and is not awaited, so a failing save must end here. The writer runs saves of
+            // one file one after the other, but a save can still fail, for example on an IO error of the storage.
             ConfigurationPersistResult result;
             try
             {

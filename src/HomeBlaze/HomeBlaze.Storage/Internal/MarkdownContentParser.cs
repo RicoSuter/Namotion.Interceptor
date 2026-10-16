@@ -248,7 +248,7 @@ public sealed partial class MarkdownContentParser
         var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
         var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName));
 
-        var state = new ParseState(parent, page.AllBlocks);
+        var state = new ParseState(parent, page);
         try
         {
             var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
@@ -292,6 +292,7 @@ public sealed partial class MarkdownContentParser
                     var (key, subject, error) = await CreateWidgetAsync(block, children, existingChildren, index, state, cancellationToken);
                     if (subject is null)
                     {
+                        state.AddErrorBox();
                         AddHtml(children, existingChildren, index, error!.Render());
                     }
                     else
@@ -393,8 +394,14 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var block = segment.Block;
+        if (existing is not null && existing.GetType() == type && TryKeepUnchangedBlock(existing, block, state))
+        {
+            return (existing, null);
+        }
+
         var registrationCount = state.RegistrationCount;
         var createdCount = state.CreatedCount;
+        var errorBoxCount = state.ErrorBoxCount;
 
         BlockError? error;
         try
@@ -433,6 +440,11 @@ public sealed partial class MarkdownContentParser
                 if (error is null)
                 {
                     state.Register(block, block.Head!.Id, subject);
+                    if (state.ErrorBoxCount == errorBoxCount)
+                    {
+                        RememberAppliedBlock(subject, block, state, registrationCount);
+                    }
+
                     return (subject, null);
                 }
             }
@@ -523,17 +535,22 @@ public sealed partial class MarkdownContentParser
 
     private sealed class ParseState
     {
-        private readonly List<(int BlockIndex, string? Id)> _registrations = [];
+        private readonly List<(int BlockIndex, string? Id, IInterceptorSubject Subject)> _registrations = [];
         private readonly List<IInterceptorSubject> _created = [];
         private readonly Dictionary<string, int> _nameOwners = new();
+        private readonly string _source;
+        private bool? _hasLoneCarriageReturn;
+        private List<int>? _lineStarts;
 
-        public ParseState(MarkdownFile page, IReadOnlyList<MarkdownBlock> blocksInDocumentOrder)
+        public ParseState(MarkdownFile page, MarkdownPage parsedPage)
         {
             Page = page;
+            Blocks = parsedPage.AllBlocks;
+            _source = parsedPage.Source;
 
             // Decided before anything is built: slot blocks are built before the loose content around them, and
             // the blocks inside a block that ends as an error box are not built at all.
-            foreach (var block in blocksInDocumentOrder)
+            foreach (var block in parsedPage.AllBlocks)
             {
                 if (block.Head?.Id is { } id)
                 {
@@ -543,6 +560,12 @@ public sealed partial class MarkdownContentParser
         }
 
         public MarkdownFile Page { get; }
+
+        /// <summary>The widget, slot and invalid blocks of the page, by <see cref="MarkdownBlock.Index"/>.</summary>
+        public IReadOnlyList<MarkdownBlock> Blocks { get; }
+
+        /// <summary>How many blocks this parse has shown as an error box so far.</summary>
+        public int ErrorBoxCount { get; private set; }
 
         public Dictionary<int, IInterceptorSubject> BlockSubjects { get; } = new();
 
@@ -558,6 +581,47 @@ public sealed partial class MarkdownContentParser
         /// it is detached only when it is released.
         /// </summary>
         public void AddCreated(IInterceptorSubject subject) => _created.Add(subject);
+
+        public void AddErrorBox() => ErrorBoxCount++;
+
+        /// <summary>
+        /// Gets the lines of the block in the text of the page, from its head line to its last line. False on a
+        /// page with a lone carriage return, whose line numbers are not the ones counted here.
+        /// </summary>
+        public bool TryGetBlockText(MarkdownBlock block, out ReadOnlySpan<char> text)
+        {
+            _hasLoneCarriageReturn ??= MarkdownBlockWriter.HasLoneCarriageReturn(_source);
+            if (_hasLoneCarriageReturn.Value)
+            {
+                text = default;
+                return false;
+            }
+
+            if (_lineStarts is null)
+            {
+                _lineStarts = [0];
+                for (var lineFeed = _source.IndexOf('\n'); lineFeed >= 0; lineFeed = _source.IndexOf('\n', lineFeed + 1))
+                {
+                    _lineStarts.Add(lineFeed + 1);
+                }
+            }
+
+            var start = GetLineStart(block.Line);
+            text = _source.AsSpan(start, GetLineStart(block.EndLine + 1) - start);
+            return true;
+        }
+
+        /// <summary>Gets the subjects registered after <see cref="RegistrationCount"/> had the given value, with their block index.</summary>
+        public IEnumerable<(int BlockIndex, IInterceptorSubject Subject)> GetRegistrationsSince(int registrationCount)
+        {
+            for (var index = registrationCount; index < _registrations.Count; index++)
+            {
+                yield return (_registrations[index].BlockIndex, _registrations[index].Subject);
+            }
+        }
+
+        // The offset of the first character of the 1-based line, or the length of the text for a line after the last one.
+        private int GetLineStart(int line) => line - 1 < _lineStarts!.Count ? _lineStarts[line - 1] : _source.Length;
 
         /// <summary>
         /// Removes and returns the subjects created after <see cref="CreatedCount"/> had the given value,
@@ -590,7 +654,7 @@ public sealed partial class MarkdownContentParser
                 NamedSubjects[id] = subject;
             }
 
-            _registrations.Add((block.Index, id));
+            _registrations.Add((block.Index, id, subject));
         }
 
         /// <summary>
@@ -601,7 +665,7 @@ public sealed partial class MarkdownContentParser
         {
             for (var index = _registrations.Count - 1; index >= registrationCount; index--)
             {
-                var (blockIndex, id) = _registrations[index];
+                var (blockIndex, id, _) = _registrations[index];
                 BlockSubjects.Remove(blockIndex);
                 if (id is not null)
                 {

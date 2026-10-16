@@ -298,8 +298,10 @@ public class MarkdownSlotWriteBackTests
     {
         // Arrange: the save of the callback block stops while its configuration is serialized.
         var (fixture, log) = await CreateFixtureWithLogAsync();
-        var callbackBlock = $":: {Namespace}.TestSerializerCallback#callback\n```json\n{{ \"Value\": \"a\" }}\n```\n::\n\n";
-        var (page, board) = await AddBoardPageAsync(fixture, callbackBlock + $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::\n::\n");
+        var (page, board) = await AddBoardPageAsync(
+            fixture,
+            $":: {Namespace}.TestSerializerCallback#callback\n```json\n{{ \"Value\": \"a\" }}\n```\n::\n\n" +
+            $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::\n::\n");
         var callback = (TestSerializerCallback)page.Children["callback"];
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var release = new ManualResetEventSlim();
@@ -312,8 +314,9 @@ public class MarkdownSlotWriteBackTests
         var slowSave = Task.Run(() => page.WriteConfigurationAsync(callback, CancellationToken.None));
         await entered.Task.WaitAsync(DeadlockTimeout);
 
-        // Act
-        board.Columns = 3;
+        // Act: the reload inside the slow save reads the board block, which did not change, while the added tile has no block yet.
+        var added = new TestTile { Position = 2 };
+        board.Tiles = [.. board.Tiles, added];
         var boardSave = page.WriteConfigurationAsync(board, CancellationToken.None);
         var isBoardSaveWaiting = !boardSave.IsCompleted;
         release.Set();
@@ -323,9 +326,10 @@ public class MarkdownSlotWriteBackTests
         Assert.True(isBoardSaveWaiting);
         Assert.Equal([true, true], results);
         Assert.Equal(
-            $":: {Namespace}.TestSerializerCallback#callback Value=a\n::\n\n:: {BoardType}#board Columns=3\n::: Tile Position=1\n:::\n::\n",
+            $":: {Namespace}.TestSerializerCallback#callback Value=a\n::\n\n" +
+            $":: {BoardType}#board Columns=2\n::: Tile Position=1\n:::\n::: Tile Position=2\n:::\n::\n",
             await fixture.ReadAsync("page.md"));
-        Assert.Equal(3, board.Columns);
+        Assert.Same(added, board.Tiles[1]);
         Assert.Empty(log.Entries);
     }
 

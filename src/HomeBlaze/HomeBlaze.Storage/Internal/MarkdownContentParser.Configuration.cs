@@ -34,6 +34,10 @@ public sealed partial class MarkdownContentParser
     // The configuration text last applied to a subject. See CreateOrUpdateAsync.
     private readonly ConditionalWeakTable<IInterceptorSubject, string> _appliedConfigurationJson = new();
 
+    // The text of the block last applied to a subject in full, with the subjects of the blocks inside it. See
+    // TryKeepUnchangedBlock.
+    private readonly ConditionalWeakTable<IInterceptorSubject, AppliedBlock> _appliedBlocks = new();
+
     /// <summary>
     /// Creates the subject of a block from its configuration, or updates <paramref name="existing"/> in place.
     /// The error is set when a value of the configuration does not fit its property. The block is an error
@@ -127,7 +131,78 @@ public sealed partial class MarkdownContentParser
     /// <summary>
     /// Makes the next parse apply the configuration of the block of the subject also when its text did not change.
     /// </summary>
-    internal void ForgetAppliedConfiguration(IInterceptorSubject subject) => _appliedConfigurationJson.Remove(subject);
+    internal void ForgetAppliedConfiguration(IInterceptorSubject subject)
+    {
+        _appliedConfigurationJson.Remove(subject);
+        _appliedBlocks.Remove(subject);
+    }
+
+    /// <summary>
+    /// Makes the next parse apply the block of the subject in full also when its text is the one last applied, because
+    /// a write-back changed that text in the file.
+    /// </summary>
+    internal void ForgetAppliedBlock(IInterceptorSubject subject) => _appliedBlocks.Remove(subject);
+
+    /// <summary>
+    /// Keeps the subject of a block whose text did not change since it was last applied in full, with its values,
+    /// its slot values and the subjects of the blocks inside it, and registers them for the blocks of this parse.
+    /// </summary>
+    /// <remarks>
+    /// The values in memory can hold a change that is about to be saved, such as a value added to a slot, which
+    /// the reload inside the save of another block must not reset. A slot value without a block stays one, so
+    /// the save of its owner inserts its block.
+    /// </remarks>
+    private bool TryKeepUnchangedBlock(IInterceptorSubject existing, MarkdownBlock block, ParseState state)
+    {
+        if (!_appliedBlocks.TryGetValue(existing, out var applied) ||
+            !state.TryGetBlockText(block, out var text) ||
+            !text.SequenceEqual(applied.Text))
+        {
+            return false;
+        }
+
+        // The text inside the block is the same, so its blocks follow it at the same distance. Their names can
+        // have been taken by a block before them since then, which makes them error boxes.
+        foreach (var (offset, _) in applied.InnerSubjects)
+        {
+            var index = block.Index + offset;
+            if (index >= state.Blocks.Count || !state.OwnsName(state.Blocks[index]))
+            {
+                return false;
+            }
+        }
+
+        foreach (var (offset, subject) in applied.InnerSubjects)
+        {
+            var innerBlock = state.Blocks[block.Index + offset];
+            state.Register(innerBlock, innerBlock.Head!.Id, subject);
+        }
+
+        state.Register(block, block.Head!.Id, existing);
+        return true;
+    }
+
+    // Only a block without an error box inside is remembered: an error can come from outside the block, such as a
+    // name that another block took, and must go away when that changes.
+    private void RememberAppliedBlock(IInterceptorSubject subject, MarkdownBlock block, ParseState state, int registrationCount)
+    {
+        if (!state.TryGetBlockText(block, out var text))
+        {
+            _appliedBlocks.Remove(subject);
+            return;
+        }
+
+        var innerSubjects = new List<(int Offset, IInterceptorSubject Subject)>();
+        foreach (var (blockIndex, innerSubject) in state.GetRegistrationsSince(registrationCount))
+        {
+            if (blockIndex != block.Index)
+            {
+                innerSubjects.Add((blockIndex - block.Index, innerSubject));
+            }
+        }
+
+        _appliedBlocks.AddOrUpdate(subject, new AppliedBlock(text.ToString(), innerSubjects.ToArray()));
+    }
 
     // Updating in place only sets the keys that are present. A key that was removed from the page
     // would keep its old value on the instance, unlike after a restart, so the subject is recreated then.
@@ -370,6 +445,9 @@ public sealed partial class MarkdownContentParser
             return null;
         }
     }
+
+    /// <summary>The text of a block and the subjects of the blocks inside it, by their distance from the block.</summary>
+    private sealed record AppliedBlock(string Text, (int Offset, IInterceptorSubject Subject)[] InnerSubjects);
 
     /// <summary>The merged configuration of one block and its top-level keys without the type discriminator.</summary>
     private readonly record struct BlockConfiguration(string Json, string[] Keys);

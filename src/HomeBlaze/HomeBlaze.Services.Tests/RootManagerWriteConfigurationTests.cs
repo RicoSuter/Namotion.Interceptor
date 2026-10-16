@@ -9,7 +9,7 @@ namespace HomeBlaze.Services.Tests;
 
 public class RootManagerWriteConfigurationTests : IDisposable
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
 
     private readonly string _configurationFilePath =
         Path.Combine(Path.GetTempPath(), $"homeblaze-root-{Guid.NewGuid():N}.json");
@@ -79,11 +79,11 @@ public class RootManagerWriteConfigurationTests : IDisposable
 
         // Act: the first write stops after it has read the old value, and the second starts with the new one then.
         var firstWrite = Task.Run(() => _rootManager.WriteConfigurationAsync(child, CancellationToken.None));
-        await blockingRead.Reached.WaitAsync(Timeout);
+        await blockingRead.Reached.WaitAsync(DeadlockTimeout);
         child.ChildConfig = "second";
         var secondWrite = _rootManager.WriteConfigurationAsync(child, CancellationToken.None);
         blockingRead.Release();
-        var results = await Task.WhenAll(firstWrite, secondWrite).WaitAsync(Timeout);
+        var results = await Task.WhenAll(firstWrite, secondWrite).WaitAsync(DeadlockTimeout);
 
         // Assert
         Assert.Equal([true, true], results);
@@ -111,7 +111,7 @@ public class RootManagerWriteConfigurationTests : IDisposable
                 Interlocked.Exchange(ref _isArmed, 0) == 1)
             {
                 _reached.TrySetResult();
-                _released.Wait(Timeout);
+                _released.Wait(DeadlockTimeout);
             }
 
             return value;
