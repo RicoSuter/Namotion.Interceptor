@@ -134,7 +134,19 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public SubjectPathAttribute() { }
         public SubjectPathAttribute(System.Type subjectType) { }
+        public HomeBlaze.Abstractions.Attributes.SubjectPathKinds Kind { get; set; }
         public System.Type? SubjectType { get; }
+        public bool Writable { get; set; }
+    }
+    [System.Flags]
+    public enum SubjectPathKinds
+    {
+        Boolean = 1,
+        Number = 2,
+        Enum = 4,
+        OtherValue = 8,
+        Operation = 16,
+        Value = 15,
     }
 }
 namespace HomeBlaze.Abstractions.Common
@@ -500,6 +512,8 @@ namespace HomeBlaze.Abstractions
     {
         public const string Configuration = "HB:Configuration";
         public const string IsEnabled = "HB:IsEnabled";
+        public const string Maximum = "Maximum";
+        public const string Minimum = "Minimum";
         public const string State = "HB:State";
     }
     public enum PathStyle
