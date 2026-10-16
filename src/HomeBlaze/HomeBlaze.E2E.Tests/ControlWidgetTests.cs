@@ -75,19 +75,6 @@ public class ControlWidgetTests
             .Filter(new() { Has = picker.Page.GetByText(name, new() { Exact = true }) })
             .Locator("xpath=..");
 
-    // The server reads a page again after it wrote it, and a file that it holds open is read again later.
-    private static string? TryReadContent(string path)
-    {
-        try
-        {
-            return File.ReadAllText(path);
-        }
-        catch (IOException)
-        {
-            return null;
-        }
-    }
-
     // Like File.ReadAllLines: a line break at the end of the file ends the last line and starts no new one.
     private static string[] SplitLines(string content)
     {
@@ -114,8 +101,7 @@ public class ControlWidgetTests
     public async Task WhenSwitchOfAConfigurationPropertyIsToggled_ThenOnlyTheHeadLineOfItsBlockIsSaved()
     {
         // Arrange
-        var pagePath = _fixture.GetDemoPagePath(PageName);
-        var originalContent = await _fixture.ReadFileAsync(pagePath);
+        var originalContent = await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName));
 
         try
         {
@@ -130,14 +116,12 @@ public class ControlWidgetTests
             // Assert: the page is saved a moment after the write, so the file is read until it has the new value.
             await Assertions.Expect(outlineSwitch).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
 
-            var savedContent = string.Empty;
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => TryReadContent(pagePath) is { } content &&
-                    SplitLines(savedContent = content).Any(line =>
-                        line.StartsWith(CardHeadLine, StringComparison.Ordinal) &&
-                        line.Contains("Outlined=false", StringComparison.Ordinal)),
-                WaitTimeout,
-                message: "The page was not saved with the outline of the card switched off");
+            var savedContent = await _fixture.WaitForDemoPageTextAsync(
+                PageName,
+                content => SplitLines(content).Any(line =>
+                    line.StartsWith(CardHeadLine, StringComparison.Ordinal) &&
+                    line.Contains("Outlined=false", StringComparison.Ordinal)),
+                "The page was not saved with the outline of the card switched off");
 
             AssertOnlyTheHeadLineChanged(originalContent, savedContent, "ctlcard", "Outlined=false");
         }
@@ -247,8 +231,7 @@ public class ControlWidgetTests
     public async Task WhenSliderIsDraggedAndReleased_ThenThePropertyIsWrittenOnceAndTheValueSurvivesAReload()
     {
         // Arrange
-        var pagePath = _fixture.GetDemoPagePath(PageName);
-        var originalContent = await _fixture.ReadFileAsync(pagePath);
+        var originalContent = await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName));
         var motor = GetMotor();
         var originalSpeed = motor.TargetSpeed;
         var writes = 0;
@@ -275,14 +258,12 @@ public class ControlWidgetTests
             // Assert: the page is saved a moment after the write, by which time any further write would have happened.
             await AsyncTestHelpers.WaitUntilAsync(() => GetMotor().TargetSpeed != originalSpeed, WaitTimeout, message: "The slider did not write the target speed");
             var writtenSpeed = GetMotor().TargetSpeed;
-            var savedContent = string.Empty;
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => TryReadContent(pagePath) is { } content &&
-                    SplitLines(savedContent = content).Any(line =>
-                        line.StartsWith(MotorHeadLine, StringComparison.Ordinal) &&
-                        line.Contains($"TargetSpeed={writtenSpeed} ", StringComparison.Ordinal)),
-                WaitTimeout,
-                message: "The page was not saved with the new target speed");
+            var savedContent = await _fixture.WaitForDemoPageTextAsync(
+                PageName,
+                content => SplitLines(content).Any(line =>
+                    line.StartsWith(MotorHeadLine, StringComparison.Ordinal) &&
+                    line.Contains($"TargetSpeed={writtenSpeed} ", StringComparison.Ordinal)),
+                "The page was not saved with the new target speed");
             AssertOnlyTheHeadLineChanged(originalContent, savedContent, MotorName, $"TargetSpeed={writtenSpeed}");
             Assert.Equal(1, Volatile.Read(ref writes));
 
