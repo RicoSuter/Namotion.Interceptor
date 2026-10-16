@@ -50,6 +50,18 @@ internal sealed class TestRenderer : Renderer
 
     public List<Exception> Exceptions { get; } = [];
 
+    /// <summary>Gets the number of exceptions the renderer has handled so far.</summary>
+    public int ExceptionCount
+    {
+        get
+        {
+            lock (Exceptions)
+            {
+                return Exceptions.Count;
+            }
+        }
+    }
+
     /// <summary>Gets the number of render requests that waited for an acknowledgement.</summary>
     public int DeferredRenderRequests => Volatile.Read(ref _deferredRenderRequests);
 

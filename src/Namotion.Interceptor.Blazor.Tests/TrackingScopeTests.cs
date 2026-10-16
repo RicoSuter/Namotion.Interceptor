@@ -162,6 +162,32 @@ public class TrackingScopeTests
         Assert.Empty(renderer.Exceptions);
     }
 
+    [Fact]
+    public async Task WhenTheContentThrowsWhileRendering_ThenTheScopeStopsRecording()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Initial" };
+
+        ReadPropertyRecorder.Start().Dispose();
+        var scopeCountBefore = ReadPropertyRecorder.ActiveScopeCount;
+
+        await using var renderer = new TestRenderer(TestRenderMode.WebAssembly);
+        RenderFragment content = builder =>
+        {
+            builder.AddContent(0, person.FirstName);
+            throw new InvalidOperationException("The content failed to render.");
+        };
+
+        // Act
+        await RenderAsync(renderer, Fragments.Scope(context, content));
+        await WaitAsync(() => renderer.ExceptionCount > 0);
+
+        // Assert
+        Assert.Equal(scopeCountBefore, ReadPropertyRecorder.ActiveScopeCount);
+        Assert.IsType<InvalidOperationException>(Assert.Single(renderer.Exceptions));
+    }
+
     internal static IInterceptorSubjectContext CreateContext()
     {
         return InterceptorSubjectContext

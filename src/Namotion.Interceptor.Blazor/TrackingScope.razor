@@ -104,7 +104,16 @@ else
 
                 _currentScope = ReadPropertyRecorder.Start(_collectingProperties);
                 Interlocked.Exchange(ref _isRecording, 1);
-                ChildContent?.Invoke(builder);
+                try
+                {
+                    ChildContent?.Invoke(builder);
+                }
+                catch
+                {
+                    // A failed render never reaches OnAfterRender, which would otherwise close the scope.
+                    StopRecording();
+                    throw;
+                }
             };
         }
     }
