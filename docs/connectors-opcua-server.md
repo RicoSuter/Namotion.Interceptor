@@ -260,16 +260,16 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 `OpcUaServerDiagnostics` derives from `ConnectorDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this server.
 
-**`IsOperational` here means the server has started and is accepting client connections.** This built-in server implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes explicit true or false values. The server restarts itself internally on failure, and the two timestamps split along that line: `OperationalChangeTime` moves on every internal restart, while the inherited `StartTime` marks the current run of the hosted service and does not.
+**`IsOperational` here means the server has started and is accepting client connections.** This built-in server implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes explicit true or false values. [`SubjectServerBase`](connectors.md#subjectserverbase) restarts the server internally on failure, and the two timestamps split along that line: `OperationalChangeTime` moves on every internal restart, while the inherited `StartTime` marks the current run of the hosted service and does not.
 
 This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes to the server) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes) are never `null` here. `OutboundChanges` is the change queue feeding the address space, and its `Capacity` is `null` because that queue is unbounded.
 
 | Member | Meaning |
 |---|---|
 | `ActiveSessionCount` | Currently active client sessions. |
-| `ConsecutiveFailures` | Consecutive startup failures. A gauge that resets on a successful start, which is why it carries no `Total` prefix. See [Resilience](#resilience). |
+| `ConsecutiveFailures` | The number of failed attempts since an attempt last started successfully. A gauge that resets on a successful start, which is why it carries no `Total` prefix. See [Resilience](#resilience). |
 
-`LastError` is cleared by a restart of the hosted service, not by the server's own internal restart, so a non-null value means "a start failed, or something escaped the change queue processor, at some point during this run of the hosted service". A failed write into the address space is not one of them: the change queue processor logs and swallows every exception its write handler raises, so those never reach `LastError` at all.
+`LastError` is cleared by a restart of the hosted service, not by the server's own internal restart, so a non-null value means "an attempt failed, or something escaped the change queue processor, at some point during this run of the hosted service". A failed write into the address space is not one of them: the change queue processor logs and swallows every exception its write handler raises, so those never reach `LastError` at all.
 
 ## Direct Server Access
 
@@ -299,18 +299,7 @@ Returns `false` if the property is not exposed by this server, not yet created, 
 
 ## Resilience
 
-The server automatically restarts on failure using exponential backoff with jitter:
-
-| Failure # | Base Delay | Jitter |
-|-----------|-----------|--------|
-| 1 | 1s | 0-2s |
-| 2 | 2s | 0-2s |
-| 3 | 4s | 0-2s |
-| 4 | 8s | 0-2s |
-| 5 | 16s | 0-2s |
-| 6+ | 30s (cap) | 0-2s |
-
-The consecutive failure counter resets when the server starts successfully. Track failure count via `Diagnostics.ConsecutiveFailures`.
+The server restarts on failure with exponential backoff and jitter, as described in [SubjectServerBase](connectors.md#subjectserverbase). Track the failure count via `Diagnostics.ConsecutiveFailures`, which resets when the server starts successfully.
 
 ## Lifecycle
 

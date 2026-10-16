@@ -15,9 +15,9 @@ using Xunit;
 namespace Namotion.Interceptor.WebSocket.Tests.Server;
 
 /// <summary>
-/// The server owns its own restart loop, so nothing outside it can tell whether the listener is up.
-/// These pin the transitions the loop is responsible for, and that a restart can register its own
-/// outbound change queue: the metrics permit one live registration at a time.
+/// The restart loop belongs to <see cref="SubjectServerBase"/>, so nothing outside it can tell whether
+/// the listener is up. These pin the transitions the loop is responsible for, and that a restart can
+/// register its own outbound change queue: the metrics permit one live registration at a time.
 /// </summary>
 [Trait("Category", "Integration")]
 public class WebSocketServerLivenessTests
@@ -126,8 +126,8 @@ public class WebSocketServerLivenessTests
     [Fact]
     public async Task WhenTheListenerCannotBind_ThenTheFailureIsReported()
     {
-        // Arrange: the port is already taken, so the server fails inside the loop, which swallows the
-        // exception rather than letting the base class see it.
+        // Arrange: the port is already taken, so StartServerAsync throws and SubjectServerBase records
+        // the failure.
         using var occupied = new TcpListener(IPAddress.Loopback, 0);
         occupied.Start();
         var occupiedPort = ((IPEndPoint)occupied.LocalEndpoint).Port;
@@ -155,8 +155,7 @@ public class WebSocketServerLivenessTests
     public async Task WhenTheServerIsStoppedDuringItsRestartBackoff_ThenTheHostedTaskCompletes()
     {
         // Arrange: the same occupied port as above, so the server fails to bind and spends the next
-        // few seconds in its backoff, which is where the stop below lands. That delay sits outside
-        // every catch around the attempt, so cancelling there needs a clause of its own.
+        // few seconds in SubjectServerBase's restart delay, which is where the stop below lands.
         using var occupied = new TcpListener(IPAddress.Loopback, 0);
         occupied.Start();
         var occupiedPort = ((IPEndPoint)occupied.LocalEndpoint).Port;

@@ -181,14 +181,15 @@ namespace Namotion.Interceptor.WebSocket.Server
         public System.Threading.Tasks.Task HandleClientAsync(System.Net.WebSockets.WebSocket webSocket, System.Threading.CancellationToken stoppingToken) { }
         public System.Threading.Tasks.Task RunHeartbeatLoopAsync(System.Threading.CancellationToken cancellationToken) { }
     }
-    public sealed class WebSocketSubjectServer : Namotion.Interceptor.Connectors.SubjectConnectorBase, Namotion.Interceptor.Connectors.IFaultInjectable, System.IAsyncDisposable
+    public sealed class WebSocketSubjectServer : Namotion.Interceptor.Connectors.SubjectServerBase, Namotion.Interceptor.Connectors.IFaultInjectable, System.IAsyncDisposable
     {
         public WebSocketSubjectServer(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.WebSocket.Server.WebSocketServerConfiguration configuration, Microsoft.Extensions.Logging.ILogger<Namotion.Interceptor.WebSocket.Server.WebSocketSubjectServer> logger) { }
         [get: System.Runtime.CompilerServices.PreserveBaseOverrides]
         public virtual Namotion.Interceptor.WebSocket.Server.WebSocketServerDiagnostics Diagnostics { get; }
         public override Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
+        protected override Namotion.Interceptor.Connectors.ChangeQueueProcessor CreateChangeQueueProcessor(System.Action<long> dropHandler) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
-        protected override System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected override System.Threading.Tasks.Task<System.IAsyncDisposable?> StartServerAsync(Namotion.Interceptor.Connectors.ConnectorRunAttempt attempt, System.Threading.CancellationToken stoppingToken) { }
     }
 }
 namespace Namotion.Interceptor.WebSocket
