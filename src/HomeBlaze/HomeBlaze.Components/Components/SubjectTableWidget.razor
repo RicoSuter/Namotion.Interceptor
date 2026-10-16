@@ -12,7 +12,7 @@
     // Read once per render and never kept: the reads are what the tracking scope records.
     if (!SubjectTableRows.TryGetRows(PathResolver, table, table.Source, table.Type, out var rows, out var error))
     {
-        <WidgetArgumentError Message="@(error ?? string.Empty)" />
+        <WidgetArgumentError Message="@error" />
     }
     else
     {
@@ -20,7 +20,7 @@
 
         // Resolved once per render instead of once per cell. A map that cannot be resolved replaces the table with
         // one error per column, not one per cell.
-        var maps = columns.Length == 0 ? [] : new ValueMap?[columns.Length];
+        var maps = GetMapsBuffer(columns.Length);
         var hasMapError = false;
         for (var index = 0; index < columns.Length; index++)
         {
@@ -96,9 +96,22 @@
 }
 
 @code {
+    private ValueMap?[] _maps = [];
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
+
+    // Reused by the renders of this table, which every render fills completely before the rows read it.
+    private ValueMap?[] GetMapsBuffer(int count)
+    {
+        if (_maps.Length != count)
+        {
+            _maps = count == 0 ? [] : new ValueMap?[count];
+        }
+
+        return _maps;
+    }
 }

@@ -118,4 +118,24 @@ public class CardSizeTests
         Assert.Null(style);
         Assert.Equal($"Height must be above 0: {height}", error);
     }
+
+    [Fact]
+    public void WhenHeightAndAspectRatioStayTheSame_ThenTheCacheReturnsTheSameStyle()
+    {
+        // Arrange
+        var cache = new CardStyleCache();
+        var first = cache.GetStyle(240, null, out _);
+
+        // Act
+        var second = cache.GetStyle(240, null, out var error);
+        var changed = cache.GetStyle(null, "4:3", out _);
+        var invalid = cache.GetStyle(null, "wide", out var invalidError);
+
+        // Assert
+        Assert.Same(first, second);
+        Assert.Null(error);
+        Assert.Equal("aspect-ratio: 4 / 3", changed);
+        Assert.Null(invalid);
+        Assert.Equal("AspectRatio must look like 4:3: wide", invalidError);
+    }
 }

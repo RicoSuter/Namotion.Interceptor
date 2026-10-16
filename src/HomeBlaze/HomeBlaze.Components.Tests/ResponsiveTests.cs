@@ -15,11 +15,11 @@ public class ResponsiveTests
         .WithRegistry();
 
     [Theory]
-    [InlineData(ResponsiveShow.Phone, "d-block d-sm-none")]
-    [InlineData(ResponsiveShow.Tablet, "d-none d-sm-block d-lg-none")]
-    [InlineData(ResponsiveShow.Desktop, "d-none d-lg-block")]
-    [InlineData(ResponsiveShow.NotPhone, "d-none d-sm-block")]
-    [InlineData(ResponsiveShow.NotDesktop, "d-block d-lg-none")]
+    [InlineData(ResponsiveShow.Phone, "responsive-widget d-block d-sm-none")]
+    [InlineData(ResponsiveShow.Tablet, "responsive-widget d-none d-sm-block d-lg-none")]
+    [InlineData(ResponsiveShow.Desktop, "responsive-widget d-none d-lg-block")]
+    [InlineData(ResponsiveShow.NotPhone, "responsive-widget d-none d-sm-block")]
+    [InlineData(ResponsiveShow.NotDesktop, "responsive-widget d-block d-lg-none")]
     public void WhenScreensAreChosen_ThenTheDisplayClassesHideTheContentOnTheOthers(ResponsiveShow show, string expected)
     {
         // Act

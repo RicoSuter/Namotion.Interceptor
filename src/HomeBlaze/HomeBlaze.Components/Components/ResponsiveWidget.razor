@@ -8,7 +8,7 @@
 @if (responsive is not null)
 {
     @* Not MudHidden, which renders nothing on other screens: the content is rendered and kept live everywhere, and the classes alone hide it, without JavaScript. *@
-    <div class="responsive-widget @Responsive.GetCssClasses(responsive.Show)" data-testid="responsive">
+    <div class="@Responsive.GetCssClasses(responsive.Show)" data-testid="responsive">
         <SubjectComponent Subject="@responsive.Content" Type="SubjectComponentType.Widget" />
     </div>
 }

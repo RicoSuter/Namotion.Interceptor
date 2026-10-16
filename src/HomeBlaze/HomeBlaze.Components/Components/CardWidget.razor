@@ -7,7 +7,7 @@
 
 @if (card is not null)
 {
-    var sizeStyle = CardSize.GetStyle(card.Height, card.AspectRatio, out var sizeError);
+    var sizeStyle = _styleCache.GetStyle(card.Height, card.AspectRatio, out var sizeError);
     if (sizeError is not null)
     {
         <WidgetArgumentError Message="@sizeError" />
@@ -79,6 +79,8 @@
 }
 
 @code {
+    private readonly CardStyleCache _styleCache = new();
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 

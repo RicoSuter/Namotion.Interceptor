@@ -5,16 +5,17 @@
     // Read once per render and never kept: the reads are what the tracking scope records.
     var property = Property;
     var enumType = property is null ? null : EnumChoices.GetEnumType(property.Type);
+    UpdateEnumType(enumType);
 }
 
-@if (enumType is not null && EnumChoices.IsFlags(enumType))
+@if (enumType is not null && _isFlags)
 {
     <WidgetArgumentError Message="@EnumChoices.GetFlagsError(enumType)" />
 }
 else
 {
     var value = property?.GetValue();
-    var names = GetNames(enumType);
+    var names = _names;
     var isNullable = enumType is not null && Nullable.GetUnderlyingType(property!.Type) is not null;
     var canWrite = enumType is not null && PropertyWriter.IsWritable(property!, value);
     var map = Map;
@@ -57,9 +58,10 @@ else
     private object _resetKey = new();
     private EventCallback<string?> _chooseCallback;
     private Func<string?, string?> _textFunc = null!;
-    // Enum.GetNames copies the names on every call, so they are kept per enum type.
-    private Type? _namesType;
+    // Enum.GetNames copies the names on every call and IsFlags reads the attributes of the type, so both are kept per enum type.
+    private Type? _enumType;
     private string[] _names = [];
+    private bool _isFlags;
 
     /// <summary>
     /// The enum property that the select shows, or null when the path leads nowhere.
@@ -95,20 +97,16 @@ else
         _textFunc = GetText;
     }
 
-    private string[] GetNames(Type? enumType)
+    private void UpdateEnumType(Type? enumType)
     {
-        if (enumType is null)
+        if (enumType == _enumType)
         {
-            return [];
+            return;
         }
 
-        if (enumType != _namesType)
-        {
-            _names = Enum.GetNames(enumType);
-            _namesType = enumType;
-        }
-
-        return _names;
+        _names = enumType is null ? [] : Enum.GetNames(enumType);
+        _isFlags = enumType is not null && EnumChoices.IsFlags(enumType);
+        _enumType = enumType;
     }
 
     private string? GetText(string? name) => GetText(name, name is null ? null : Map?.FindCase(name));

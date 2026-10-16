@@ -36,16 +36,16 @@ public partial class Responsive : IConfigurable, ITitleProvider
     public string? Title => null;
 
     /// <summary>
-    /// Gets the MudBlazor display classes that show an element only on the chosen screens.
-    /// A value outside the enum is treated as <see cref="ResponsiveShow.NotPhone"/>.
+    /// Gets the classes of the element that holds the content: <c>responsive-widget</c> and the MudBlazor display classes
+    /// that show it only on the chosen screens. A value outside the enum is treated as <see cref="ResponsiveShow.NotPhone"/>.
     /// </summary>
     public static string GetCssClasses(ResponsiveShow show) => show switch
     {
-        ResponsiveShow.Phone => "d-block d-sm-none",
-        ResponsiveShow.Tablet => "d-none d-sm-block d-lg-none",
-        ResponsiveShow.Desktop => "d-none d-lg-block",
-        ResponsiveShow.NotDesktop => "d-block d-lg-none",
-        _ => "d-none d-sm-block",
+        ResponsiveShow.Phone => "responsive-widget d-block d-sm-none",
+        ResponsiveShow.Tablet => "responsive-widget d-none d-sm-block d-lg-none",
+        ResponsiveShow.Desktop => "responsive-widget d-none d-lg-block",
+        ResponsiveShow.NotDesktop => "responsive-widget d-block d-lg-none",
+        _ => "responsive-widget d-none d-sm-block",
     };
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

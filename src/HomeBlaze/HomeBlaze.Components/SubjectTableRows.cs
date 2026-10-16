@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
@@ -27,6 +28,10 @@ internal static class SubjectTableRows
     // Keyed weakly, so that a type of a plugin that is unloaded is not kept alive.
     private static readonly ConditionalWeakTable<Type, HashSet<string>> TypeNames = new();
 
+    // Keyed weakly by the subject of a row; an entry is used while the canonical path of the subject is the one it was
+    // built for. The entries are immutable, because the rows of tables of several circuits render in parallel.
+    private static readonly ConditionalWeakTable<IInterceptorSubject, LinkEntry> Links = new();
+
     /// <summary>
     /// Finds the rows of a table. A source that leads to a property that holds subjects gives the subjects of the
     /// property; a source that leads to a subject gives the children of its <see cref="InlinePathsAttribute"/> property.
@@ -44,7 +49,7 @@ internal static class SubjectTableRows
         string? source,
         string? typeName,
         out ImmutableArray<SubjectPropertyChild> rows,
-        out string? error)
+        [NotNullWhen(false)] out string? error)
     {
         rows = ImmutableArray<SubjectPropertyChild>.Empty;
         if (string.IsNullOrEmpty(source))
@@ -120,17 +125,36 @@ internal static class SubjectTableRows
     }
 
     /// <summary>
-    /// Gets the address of the subject in the subject browser, or null when the subject is not in the graph.
+    /// Gets the address of the subject in the subject browser, or null when the subject is not in the graph. The
+    /// address is kept per subject until its path changes, because it is read on every render of every row.
     /// </summary>
     public static string? GetLink(SubjectPathResolver resolver, IInterceptorSubject subject)
     {
-        var path = resolver.GetPath(subject, PathStyle.Route);
+        // The canonical paths are cached by the resolver, the route paths are built on every call.
+        var canonicalPath = resolver.GetPath(subject, PathStyle.Canonical);
+        if (canonicalPath is null)
+        {
+            return null;
+        }
+
+        if (Links.TryGetValue(subject, out var entry) && string.Equals(entry.CanonicalPath, canonicalPath, StringComparison.Ordinal))
+        {
+            return entry.Link;
+        }
+
+        var link = CreateLink(resolver.GetPath(subject, PathStyle.Route));
+        Links.AddOrUpdate(subject, new LinkEntry(canonicalPath, link));
+        return link;
+    }
+
+    private static string? CreateLink(string? path)
+    {
         if (path is null)
         {
             return null;
         }
 
-        // The path is read on every render of every row, so a path without a character to escape is used as it is.
+        // A path without a character to escape is used as it is.
         if (path.Length > 1 && path[0] == '/' && !path.AsSpan(1).ContainsAnyExcept(RouteCharacters))
         {
             return BrowserRoute + path;
@@ -149,6 +173,8 @@ internal static class SubjectTableRows
 
         return BrowserRoute + "/" + string.Join('/', segments);
     }
+
+    private sealed record LinkEntry(string CanonicalPath, string? Link);
 
     private static RegisteredSubjectProperty? FindRowsProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string source)
     {

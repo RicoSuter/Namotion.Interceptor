@@ -216,6 +216,20 @@ public class SubjectTableRowsTests
     }
 
     [Fact]
+    public void WhenLinkIsReadAgain_ThenItIsTheKeptAddress()
+    {
+        // Arrange
+        var graph = CreateGraph();
+        var first = SubjectTableRows.GetLink(graph.Resolver, graph.Fan);
+
+        // Act
+        var second = SubjectTableRows.GetLink(graph.Resolver, graph.Fan);
+
+        // Assert
+        Assert.Same(first, second);
+    }
+
+    [Fact]
     public void WhenSubjectTableIsDescribed_ThenItsSourceOffersSubjectsAndItsColumnsAreSlotBlocks()
     {
         // Act
