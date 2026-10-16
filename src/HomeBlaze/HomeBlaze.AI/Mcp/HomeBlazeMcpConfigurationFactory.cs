@@ -17,6 +17,12 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 internal static class HomeBlazeMcpConfigurationFactory
 {
+    private static readonly Func<RegisteredSubject, MethodMetadata, string?> RefuseAgentOperation =
+        (subject, _) => subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
+
+    private static readonly Func<RegisteredSubjectProperty, string?> RefuseConfigurationWrite =
+        property => property.IsConfigurationProperty() ? "It is a configuration property; agents cannot change configuration." : null;
+
     /// <summary>
     /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the
     /// Markdown page hints of browse and search and every registered <see cref="McpToolProviderRegistration"/>.
@@ -24,44 +30,16 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
+    /// <param name="forAgents">
+    /// Whether the tools serve the built-in agents: set_property then refuses every property marked with
+    /// <see cref="ConfigurationAttribute"/>, and invoke_operation and the Markdown tools refuse every operation of an
+    /// agent (<see cref="LlmAgentBase"/>).
+    /// </param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
         Func<IInterceptorSubject> rootSubjectProvider,
-        bool isReadOnly)
-    {
-        return Create(serviceProvider, rootSubjectProvider, isReadOnly, propertyWriteFilter: null, operationFilter: null);
-    }
-
-    /// <summary>
-    /// Creates the configuration of the built-in agents' tools: the same as <see cref="Create(IServiceProvider, Func{IInterceptorSubject}, bool)"/>,
-    /// except that set_property refuses every property marked with <see cref="ConfigurationAttribute"/> and
-    /// invoke_operation and the Markdown tools refuse every operation of an agent (<see cref="LlmAgentBase"/>).
-    /// </summary>
-    /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
-    /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
-    /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
-    public static McpServerConfiguration CreateForAgents(
-        IServiceProvider serviceProvider,
-        Func<IInterceptorSubject> rootSubjectProvider,
-        bool isReadOnly)
-    {
-        return Create(serviceProvider, rootSubjectProvider, isReadOnly, RefuseConfigurationWrite, RefuseAgentOperation);
-    }
-
-    private static string? RefuseAgentOperation(RegisteredSubject subject, MethodMetadata method) =>
-        subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
-
-    private static string? RefuseConfigurationWrite(RegisteredSubjectProperty property, string path) =>
-        property.TryGetAttribute(KnownAttributes.Configuration) is not null
-            ? $"'{path}' is a configuration property; agents cannot change configuration."
-            : null;
-
-    private static McpServerConfiguration Create(
-        IServiceProvider serviceProvider,
-        Func<IInterceptorSubject> rootSubjectProvider,
         bool isReadOnly,
-        Func<RegisteredSubjectProperty, string, string?>? propertyWriteFilter,
-        Func<RegisteredSubject, MethodMetadata, string?>? operationFilter)
+        bool forAgents)
     {
         var typeRegistry = serviceProvider.GetRequiredService<SubjectTypeRegistry>();
         var pathProvider = new StateAttributePathProvider();
@@ -75,7 +53,13 @@ internal static class HomeBlazeMcpConfigurationFactory
             .Where(type => type.GetCustomAttributes(typeof(ExcludeFromBrowsingAttribute), true).Length > 0)
             .ToArray();
 
-        var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+        var invoker = new McpMethodInvoker(
+            rootSubjectProvider,
+            pathProvider,
+            serviceProvider,
+            serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<McpMethodInvoker>(),
+            isReadOnly,
+            forAgents ? RefuseAgentOperation : null);
         var configuration = new McpServerConfiguration
         {
             PathProvider = pathProvider,
@@ -85,18 +69,8 @@ internal static class HomeBlazeMcpConfigurationFactory
             TypeProviders = typeProviders,
             ToolProviders =
             {
-                new HomeBlazeMcpToolProvider(
-                    rootSubjectProvider,
-                    pathProvider, serviceProvider,
-                    loggerFactory.CreateLogger<HomeBlazeMcpToolProvider>(),
-                    isReadOnly,
-                    operationFilter),
-                new HomeBlazeMarkdownToolProvider(
-                    rootSubjectProvider,
-                    pathProvider, serviceProvider,
-                    loggerFactory.CreateLogger<HomeBlazeMarkdownToolProvider>(),
-                    isReadOnly,
-                    operationFilter)
+                new HomeBlazeMcpToolProvider(invoker, isReadOnly),
+                new HomeBlazeMarkdownToolProvider(invoker, isReadOnly)
             },
             ToolDescriptionAdditions =
             {
@@ -104,7 +78,7 @@ internal static class HomeBlazeMcpConfigurationFactory
                 ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint,
                 ["set_property"] = HomeBlazeMcpInstructions.ChangeCaution
             },
-            PropertyWriteFilter = propertyWriteFilter,
+            PropertyWriteFilter = forAgents ? RefuseConfigurationWrite : null,
             IsReadOnly = isReadOnly
         };
 

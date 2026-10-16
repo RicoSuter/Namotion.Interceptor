@@ -1,13 +1,11 @@
+using System.Buffers;
 using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
-using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
-using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI.Mcp;
 
@@ -101,23 +99,12 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     private readonly bool _isReadOnly;
     private readonly McpMethodInvoker _invoker;
 
-    /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
-    /// <param name="pathProvider">Resolves subject paths.</param>
-    /// <param name="serviceProvider">Services for [FromServices] method parameters.</param>
-    /// <param name="logger">The logger.</param>
+    /// <param name="invoker">Resolves the subjects and invokes their operations, with the operation filter of invoke_operation.</param>
     /// <param name="isReadOnly">Whether the tools are left out.</param>
-    /// <param name="operationFilter">Decides whether a tool may call an operation of a subject, as for invoke_operation:
-    /// returns null to allow it, or the error message for the client. Null allows all.</param>
-    public HomeBlazeMarkdownToolProvider(
-        Func<IInterceptorSubject> rootSubjectProvider,
-        PathProviderBase pathProvider,
-        IServiceProvider serviceProvider,
-        ILogger<HomeBlazeMarkdownToolProvider> logger,
-        bool isReadOnly,
-        Func<RegisteredSubject, MethodMetadata, string?>? operationFilter = null)
+    internal HomeBlazeMarkdownToolProvider(McpMethodInvoker invoker, bool isReadOnly)
     {
         _isReadOnly = isReadOnly;
-        _invoker = new McpMethodInvoker(rootSubjectProvider, pathProvider, serviceProvider, logger, isReadOnly, operationFilter);
+        _invoker = invoker;
     }
 
     public IEnumerable<McpToolInfo> GetTools()
@@ -142,16 +129,10 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
 
     private Task<object?> HandleAsync(JsonElement input, MarkdownTool tool, CancellationToken cancellationToken)
     {
-        if (!input.TryGetProperty(tool.PathArgument, out var pathElement) || pathElement.ValueKind != JsonValueKind.String)
-        {
-            return Task.FromResult<object?>(new { error = $"Missing parameter '{tool.PathArgument}'." });
-        }
-
-        var path = pathElement.GetString()!;
-        var subject = _invoker.TryResolveSubject(path);
+        var subject = _invoker.TryResolveSubject(input, tool.PathArgument, out var path, out var error);
         if (subject is null)
         {
-            return Task.FromResult<object?>(new { error = "Subject not found." });
+            return Task.FromResult(error);
         }
 
         if (tool.GetTargetError(subject.Subject, path) is { } targetError)
@@ -159,18 +140,28 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
             return Task.FromResult<object?>(new { error = targetError });
         }
 
-        var arguments = new Dictionary<string, JsonElement>(tool.Arguments.Length);
-        foreach (var (argumentName, parameterName) in tool.Arguments)
+        // Renames the tool arguments to the parameters of the operation without reflection-based serialization.
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
         {
-            if (!input.TryGetProperty(argumentName, out var argument))
+            writer.WriteStartObject();
+            foreach (var (argumentName, parameterName) in tool.Arguments)
             {
-                return Task.FromResult<object?>(new { error = $"Missing parameter '{argumentName}'." });
+                if (!input.TryGetProperty(argumentName, out var argument))
+                {
+                    return Task.FromResult<object?>(new { error = $"Missing parameter '{argumentName}'." });
+                }
+
+                writer.WritePropertyName(parameterName);
+                argument.WriteTo(writer);
             }
 
-            arguments[parameterName] = argument;
+            writer.WriteEndObject();
         }
 
-        return _invoker.InvokeAsync(subject, tool.MethodName, MethodKind.Operation, JsonSerializer.SerializeToElement(arguments), cancellationToken);
+        var reader = new Utf8JsonReader(buffer.WrittenSpan);
+        var arguments = JsonElement.ParseValue(ref reader);
+        return _invoker.InvokeAsync(subject, tool.MethodName, MethodKind.Operation, arguments, cancellationToken);
     }
 
     // Only the type is checked here; the operations refuse a file or folder outside local storage or in the

@@ -40,26 +40,45 @@ internal sealed class McpMethodInvoker
     }
 
     /// <summary>
-    /// Returns the subject at <paramref name="path"/>, the root for an empty path or "/", or null when the path
-    /// does not resolve or the root is not registered.
+    /// Resolves the subject whose path is the string argument <paramref name="pathArgument"/> of the tool input: the root
+    /// for an empty path or "/".
     /// </summary>
-    public RegisteredSubject? TryResolveSubject(string path)
+    /// <param name="input">The tool input.</param>
+    /// <param name="pathArgument">The name of the argument that holds the path.</param>
+    /// <param name="path">The path, or empty when the argument is missing.</param>
+    /// <param name="error">The result for the client when null is returned: the argument is missing or not a string, or no subject is at the path.</param>
+    public RegisteredSubject? TryResolveSubject(JsonElement input, string pathArgument, out string path, out object? error)
     {
-        var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject();
-        if (rootRegistered is null)
+        if (!input.TryGetProperty(pathArgument, out var pathElement))
         {
+            path = string.Empty;
+            error = new { error = $"Missing parameter '{pathArgument}'." };
             return null;
         }
 
-        return string.IsNullOrEmpty(path) || path == "/"
-            ? rootRegistered
-            : _pathProvider.TryGetSubjectFromPath(rootRegistered, path);
+        if (pathElement.ValueKind != JsonValueKind.String)
+        {
+            path = string.Empty;
+            error = new { error = $"Parameter '{pathArgument}' must be a string." };
+            return null;
+        }
+
+        path = pathElement.GetString()!;
+        var subject = _rootSubjectProvider().TryGetRegisteredSubject();
+        if (subject is not null && !string.IsNullOrEmpty(path) && path != "/")
+        {
+            subject = _pathProvider.TryGetSubjectFromPath(subject, path);
+        }
+
+        error = subject is null ? new { error = "Subject not found." } : null;
+        return subject;
     }
 
     /// <summary>
     /// Invokes the method and returns <c>{ success, result }</c>, or <c>{ error }</c> when the call is refused, an argument
     /// does not fit or the method fails.
     /// </summary>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled during the call.</exception>
     /// <param name="subject">The subject that has the method.</param>
     /// <param name="methodName">The registered method name.</param>
     /// <param name="allowedKind">The kind of method the calling tool may invoke.</param>
@@ -97,6 +116,10 @@ internal sealed class McpMethodInvoker
             // Argument validation messages are written for the caller, for example listing the known values.
             _logger.LogWarning(exception, "Method '{MethodName}' rejected an argument.", methodName);
             return new { error = exception.Message };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {

@@ -237,9 +237,10 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
     {
         // Arrange
         var (root, _, services) = await CreateGraphAsync();
-        var provider = new HomeBlazeMarkdownToolProvider(
-            () => root, new StateAttributePathProvider(), services, NullLogger<HomeBlazeMarkdownToolProvider>.Instance,
+        var invoker = new McpMethodInvoker(
+            () => root, new StateAttributePathProvider(), services, NullLogger.Instance,
             isReadOnly: false, operationFilter: (_, method) => $"{method.PropertyName} is refused.");
+        var provider = new HomeBlazeMarkdownToolProvider(invoker, isReadOnly: false);
         var tools = provider.GetTools().ToDictionary(tool => tool.Name);
 
         // Act
@@ -264,7 +265,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         // Act
         var readOnlyTools = CreateTools(services, root, isReadOnly: true);
         var writableTools = CreateTools(services, root, isReadOnly: false);
-        var externalTools = new McpToolFactory(root, HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false))
+        var externalTools = new McpToolFactory(root, HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, forAgents: false))
             .CreateTools().ToDictionary(tool => tool.Name);
 
         // Assert
@@ -360,7 +361,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
 
     private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isReadOnly = false)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.CreateForAgents(services, () => root, isReadOnly);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly, forAgents: true);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 

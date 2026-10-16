@@ -2,15 +2,10 @@ using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
-using Microsoft.Extensions.Logging;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Mcp.Tools;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI.Mcp;
 
@@ -28,16 +23,19 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private const string ListMethodsToolName = "list_methods";
 
-    private const string ListMethodsDescription =
+    private const string PathArgument = "path";
+
+    private const string ListMethodsDescriptionPrefix =
         "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
-        $"(reads, no side effects; call it with {InvokeQueryToolName}) or an operation (changes devices or sends something; " +
-        $"call it with {InvokeOperationToolName}). The kind field of each method says which. Operations with requiresConfirmation " +
-        "set need a person's confirmation and cannot be called through MCP.";
+        $"(reads, no side effects; call it with {InvokeQueryToolName}) or an operation (changes devices or sends something";
+
+    private const string ListMethodsDescription =
+        ListMethodsDescriptionPrefix + $"; call it with {InvokeOperationToolName}). The kind field of each method says which. " +
+        "Operations with requiresConfirmation set need a person's confirmation and cannot be called through MCP.";
 
     private const string ReadOnlyListMethodsDescription =
-        "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
-        $"(reads, no side effects; call it with {InvokeQueryToolName}) or an operation (changes devices or sends something). " +
-        "The kind field of each method says which; operations are listed for information but cannot be called on this server.";
+        ListMethodsDescriptionPrefix + "). The kind field of each method says which; operations are listed for information " +
+        "but cannot be called on this server.";
 
     private const string InvokeQueryDescription =
         "Call a query method of a subject: it reads and has no side effects, for example ReadEvaluatedContent on a " +
@@ -68,26 +66,18 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         required = new[] { "path", "method" }
     });
 
+    // Operations also reach systems outside the graph, such as notification services and media URLs.
+    private static readonly McpToolAnnotations InvokeOperationAnnotations = McpToolAnnotations.Destructive with { OpenWorldHint = true };
+
     private readonly bool _isReadOnly;
     private readonly McpMethodInvoker _invoker;
 
-    /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
-    /// <param name="pathProvider">Resolves subject paths.</param>
-    /// <param name="serviceProvider">Services for [FromServices] method parameters.</param>
-    /// <param name="logger">The logger.</param>
+    /// <param name="invoker">Resolves the subjects and invokes their methods.</param>
     /// <param name="isReadOnly">Whether invoke_operation is left out.</param>
-    /// <param name="operationFilter">Decides whether invoke_operation may call an operation of a subject: returns
-    /// null to allow it, or the error message for the client, in which case nothing is invoked. Null allows all.</param>
-    public HomeBlazeMcpToolProvider(
-        Func<IInterceptorSubject> rootSubjectProvider,
-        PathProviderBase pathProvider,
-        IServiceProvider serviceProvider,
-        ILogger<HomeBlazeMcpToolProvider> logger,
-        bool isReadOnly,
-        Func<RegisteredSubject, MethodMetadata, string?>? operationFilter = null)
+    internal HomeBlazeMcpToolProvider(McpMethodInvoker invoker, bool isReadOnly)
     {
         _isReadOnly = isReadOnly;
-        _invoker = new McpMethodInvoker(rootSubjectProvider, pathProvider, serviceProvider, logger, isReadOnly, operationFilter);
+        _invoker = invoker;
     }
 
     public IEnumerable<McpToolInfo> GetTools()
@@ -118,17 +108,17 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
                 Description = InvokeOperationDescription,
                 InputSchema = InvokeMethodSchema,
                 Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Operation, cancellationToken),
-                Annotations = McpToolAnnotations.Destructive
+                Annotations = InvokeOperationAnnotations
             };
         }
     }
 
     private Task<object?> HandleListMethodsAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var subject = _invoker.TryResolveSubject(input.GetProperty("path").GetString()!);
+        var subject = _invoker.TryResolveSubject(input, PathArgument, out _, out var error);
         if (subject is null)
         {
-            return Task.FromResult<object?>(new { error = "Subject not found." });
+            return Task.FromResult(error);
         }
 
         var methods = subject.GetAllMethods().Select(method => new
@@ -151,10 +141,10 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private Task<object?> HandleInvokeAsync(JsonElement input, MethodKind allowedKind, CancellationToken cancellationToken)
     {
-        var subject = _invoker.TryResolveSubject(input.GetProperty("path").GetString()!);
+        var subject = _invoker.TryResolveSubject(input, PathArgument, out _, out var error);
         if (subject is null)
         {
-            return Task.FromResult<object?>(new { error = "Subject not found." });
+            return Task.FromResult(error);
         }
 
         var arguments = input.TryGetProperty("parameters", out var argumentsElement) ? argumentsElement : default;

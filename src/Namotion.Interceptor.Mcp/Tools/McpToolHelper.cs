@@ -112,7 +112,7 @@ internal static class McpToolHelper
                 }
 
                 var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-                properties[segment] = BuildScalarPropertyDto(property, path, segment, pathProvider, configuration, includeAttributes);
+                properties[segment] = BuildScalarPropertyDto(property, configuration, includeAttributes);
             }
         }
 
@@ -150,9 +150,6 @@ internal static class McpToolHelper
 
     private static ScalarProperty BuildScalarPropertyDto(
         RegisteredSubjectProperty property,
-        string? subjectPath,
-        string segment,
-        PathProviderBase pathProvider,
         McpServerConfiguration configuration,
         bool includeAttributes)
     {
@@ -174,41 +171,43 @@ internal static class McpToolHelper
         return new ScalarProperty(
             property.GetValue(),
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
-            IsWritable: IsWritable(property, subjectPath, segment, pathProvider, configuration),
+            IsWritable: IsWritable(property, configuration),
             Attributes: attributes);
     }
 
-    // The path, as the subject node shows it, is built only when a filter needs it, since browse reports many properties.
-    private static bool IsWritable(
-        RegisteredSubjectProperty property, string? subjectPath, string segment, PathProviderBase pathProvider, McpServerConfiguration configuration)
-    {
-        if (!CanWrite(property, configuration))
-        {
-            return false;
-        }
-
-        if (configuration.PropertyWriteFilter is not { } filter)
-        {
-            return true;
-        }
-
-        // The root's path is the prefix alone, so its properties follow the prefix without a separator.
-        var path = string.IsNullOrEmpty(subjectPath) ? segment
-            : subjectPath == configuration.PathPrefix ? string.Concat(subjectPath, segment)
-            : $"{subjectPath}{pathProvider.PathSeparator}{segment}";
-        return filter(property, path) is null;
-    }
+    /// <summary>
+    /// Whether set_property may write the property: <see cref="GetWriteError"/> returns null for it.
+    /// </summary>
+    internal static bool IsWritable(RegisteredSubjectProperty property, McpServerConfiguration configuration) =>
+        !configuration.IsReadOnly && HasPublicSetter(property) && configuration.PropertyWriteFilter?.Invoke(property) is null;
 
     /// <summary>
-    /// Whether the configuration lets MCP write the property before its <see cref="McpServerConfiguration.PropertyWriteFilter"/>
-    /// is asked: it is not read-only and the property has a public setter.
+    /// The error set_property returns for the property, or null when it may be written: the server is read-only, the
+    /// property has no public setter, or the <see cref="McpServerConfiguration.PropertyWriteFilter"/> refuses it.
     /// </summary>
-    internal static bool CanWrite(RegisteredSubjectProperty property, McpServerConfiguration configuration) =>
-        !configuration.IsReadOnly && property.HasSetter && HasPublicSetter(property);
+    /// <param name="property">The property.</param>
+    /// <param name="path">The path of the property as the client gave it, for the message.</param>
+    /// <param name="configuration">The configuration.</param>
+    internal static string? GetWriteError(RegisteredSubjectProperty property, string path, McpServerConfiguration configuration)
+    {
+        if (configuration.IsReadOnly)
+        {
+            return "Server is in read-only mode.";
+        }
+
+        if (!HasPublicSetter(property))
+        {
+            return $"Property is not writable: {path}";
+        }
+
+        return configuration.PropertyWriteFilter?.Invoke(property) is { } reason
+            ? $"Property is not writable: {path}. {reason}"
+            : null;
+    }
 
     // TODO: Clean up when HasSetter in registry respects access modifiers (see #102)
-    internal static bool HasPublicSetter(RegisteredSubjectProperty property) =>
-        property.Reference.Metadata.PropertyInfo?.SetMethod?.IsPublic != false;
+    private static bool HasPublicSetter(RegisteredSubjectProperty property) =>
+        property.HasSetter && property.Reference.Metadata.PropertyInfo?.SetMethod?.IsPublic != false;
 
     private static string[]? ToStringArray(object? value)
     {

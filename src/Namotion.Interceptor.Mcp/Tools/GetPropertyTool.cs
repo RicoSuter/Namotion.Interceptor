@@ -72,7 +72,7 @@ internal class GetPropertyTool
             ["type"] = JsonSchemaTypeMapper.ToJsonSchemaType(property.Type)
         };
 
-        if (McpToolHelper.CanWrite(property, _configuration) && _configuration.PropertyWriteFilter?.Invoke(property, path) is null)
+        if (McpToolHelper.IsWritable(property, _configuration))
         {
             response["isWritable"] = true;
         }

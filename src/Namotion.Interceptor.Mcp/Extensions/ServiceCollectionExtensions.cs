@@ -54,11 +54,11 @@ public static class ServiceCollectionExtensions
             }
             catch (Exception exception)
             {
-                logger?.LogWarning(exception, "MCP tool '{ToolName}' failed.", request.Params!.Name);
+                logger?.LogWarning(exception, "MCP tool '{ToolName}' failed.", request.Params.Name);
                 return new ValueTask<CallToolResult>(McpToolDispatcher.CreateErrorResult(exception.Message));
             }
 
-            return McpToolDispatcher.CallToolAsync(tools, request.Params!, logger, cancellationToken);
+            return McpToolDispatcher.CallToolAsync(tools, request.Params, logger, cancellationToken);
         });
 
         return builder;

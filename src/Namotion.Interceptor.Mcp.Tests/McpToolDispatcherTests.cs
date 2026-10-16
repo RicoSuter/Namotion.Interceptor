@@ -72,6 +72,29 @@ public class McpToolDispatcherTests
         Assert.Equal(42, JsonDocument.Parse(text).RootElement.GetProperty("value").GetInt32());
     }
 
+    [Theory]
+    [InlineData(null, "{}")]
+    [InlineData("""{ "path": "/a", "flag": true, "nested": { "list": [1, null] } }""", """{"path":"/a","flag":true,"nested":{"list":[1,null]}}""")]
+    public async Task WhenCallingATool_ThenTheHandlerReceivesTheArgumentsAsOneObject(string? argumentsJson, string expectedInput)
+    {
+        // Arrange
+        string? received = null;
+        var tools = new[] { CreateTool("echo", input => received = input.GetRawText()) };
+        var parameters = new CallToolRequestParams
+        {
+            Name = "echo",
+            Arguments = argumentsJson is null
+                ? null
+                : JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(argumentsJson)
+        };
+
+        // Act
+        await McpToolDispatcher.CallToolAsync(tools, parameters, logger: null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expectedInput, received);
+    }
+
     [Fact]
     public async Task WhenAnObjectResultHasNonAsciiAndHtmlCharacters_ThenTheyAreNotEscaped()
     {

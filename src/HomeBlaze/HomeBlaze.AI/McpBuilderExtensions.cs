@@ -44,6 +44,7 @@ public static class McpBuilderExtensions
             serviceProvider => HomeBlazeMcpConfigurationFactory.Create(
                 serviceProvider,
                 () => HomeBlazeMcpConfigurationFactory.GetLoadedRoot(serviceProvider),
-                isReadOnly));
+                isReadOnly,
+                forAgents: false));
     }
 }

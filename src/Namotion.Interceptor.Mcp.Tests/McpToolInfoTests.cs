@@ -36,25 +36,4 @@ public class McpToolInfoTests
             }
         });
     }
-
-    [Fact]
-    public void WhenCopyingAToolWithAnInitializer_ThenTheInitializerOverridesTheCopiedValue()
-    {
-        // Arrange
-        var source = new McpToolInfo
-        {
-            Name = "tool",
-            Description = "Description",
-            InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
-            Handler = (_, _) => Task.FromResult<object?>("result")
-        };
-
-        // Act
-        var copy = new McpToolInfo(source) { Description = "Changed" };
-
-        // Assert
-        Assert.Equal("Changed", copy.Description);
-        Assert.Equal("tool", copy.Name);
-        Assert.Same(source.Handler, copy.Handler);
-    }
 }

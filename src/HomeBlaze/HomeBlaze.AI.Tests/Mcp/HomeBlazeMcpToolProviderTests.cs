@@ -466,53 +466,28 @@ public class HomeBlazeMcpToolProviderTests
         Assert.Equal("query", query.GetProperty("kind").GetString());
     }
 
-    [Fact]
-    public void WhenNotReadOnly_ThenTheMethodToolDescriptionsNameEachOtherAndTheConfirmationRule()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenListingTools_ThenTheMethodToolDescriptionsNameEachOtherOnlyWhereTheToolIsOffered(bool isReadOnly)
     {
         // Arrange
-        var (_, factory) = CreateTestSetup(isReadOnly: false);
+        var (_, factory) = CreateTestSetup(isReadOnly);
 
         // Act
         var tools = factory.CreateTools().ToDictionary(tool => tool.Name, tool => tool.Description);
 
         // Assert
         Assert.Contains("invoke_query", tools["list_methods"]);
-        Assert.Contains("invoke_operation", tools["list_methods"]);
-        Assert.Contains("kind", tools["list_methods"]);
-        Assert.Contains("requiresConfirmation", tools["list_methods"]);
-        Assert.Contains("Find methods and their kind with list_methods", tools["invoke_query"]);
-        Assert.Contains("Find methods and their kind with list_methods", tools["invoke_operation"]);
-        Assert.Contains("require confirmation", tools["invoke_operation"]);
-        Assert.Contains(HomeBlazeMcpInstructions.ChangeCaution, tools["invoke_operation"]);
-    }
-
-    [Fact]
-    public void WhenListingTools_ThenInvokeQueryDescribesReadingMarkdownPages()
-    {
-        // Arrange
-        var (_, factory) = CreateTestSetup(isReadOnly: true);
-
-        // Act
-        var description = factory.CreateTools().First(tool => tool.Name == "invoke_query").Description;
-
-        // Assert
-        Assert.Contains("ReadEvaluatedContent on a Markdown page or document (*.md)", description);
-        Assert.Contains("includeSourcePaths=true", description);
-    }
-
-    [Fact]
-    public void WhenReadOnly_ThenListMethodsDescriptionSaysOperationsCannotBeCalled()
-    {
-        // Arrange
-        var (_, factory) = CreateTestSetup(isReadOnly: true);
-
-        // Act
-        var description = factory.CreateTools().First(tool => tool.Name == "list_methods").Description;
-
-        // Assert
-        Assert.Contains("invoke_query", description);
-        Assert.Contains("operations are listed for information but cannot be called", description);
-        Assert.DoesNotContain("invoke_operation", description);
+        Assert.Equal(!isReadOnly, tools["list_methods"].Contains("invoke_operation", StringComparison.Ordinal));
+        Assert.All(tools.Where(tool => tool.Key.StartsWith("invoke_", StringComparison.Ordinal)), tool =>
+            Assert.Contains("Find methods and their kind with list_methods", tool.Value));
+        if (!isReadOnly)
+        {
+            Assert.Contains("requiresConfirmation", tools["list_methods"]);
+            Assert.Contains("Operations that require confirmation by a person cannot be called.", tools["invoke_operation"]);
+            Assert.Contains(HomeBlazeMcpInstructions.ChangeCaution, tools["invoke_operation"]);
+        }
     }
 
     [Theory]
@@ -641,6 +616,86 @@ public class HomeBlazeMcpToolProviderTests
         Assert.Contains("failed", error.GetString());
     }
 
+    [Fact]
+    public async Task WhenTheCallIsCancelledDuringTheMethod_ThenTheCancellationPropagates()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        using var cancellationTokenSource = new CancellationTokenSource();
+        AddMethod(room, new MethodMetadata(_ =>
+        {
+            cancellationTokenSource.Cancel();
+            throw new OperationCanceledException(cancellationTokenSource.Token);
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "Wait",
+            Parameters = []
+        });
+
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "Wait" });
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => tool.Handler(input, cancellationTokenSource.Token));
+    }
+
+    [Fact]
+    public async Task WhenAMethodThrowsCancellationWithoutTheCallBeingCancelled_ThenReturnsGenericError()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, new MethodMetadata(_ => throw new OperationCanceledException())
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "Wait",
+            Parameters = []
+        });
+
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "Wait" });
+        var json = JsonSerializer.SerializeToElement(await tool.Handler(input, CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Method invocation failed. Check server logs for details.", json.GetProperty("error").GetString());
+    }
+
+    [Theory]
+    [InlineData("list_methods")]
+    [InlineData("invoke_query")]
+    public async Task WhenThePathArgumentIsMissing_ThenTheToolNamesIt(string toolName)
+    {
+        // Arrange
+        var (_, factory) = CreateTestSetup(isReadOnly: true);
+        var tool = factory.CreateTools().First(t => t.Name == toolName);
+
+        // Act
+        var json = JsonSerializer.SerializeToElement(await tool.Handler(
+            JsonSerializer.SerializeToElement(new { method = "Read" }), CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Missing parameter 'path'.", json.GetProperty("error").GetString());
+    }
+
+    [Theory]
+    [InlineData("list_methods")]
+    [InlineData("invoke_query")]
+    public async Task WhenThePathArgumentIsNotAString_ThenTheToolSaysItMustBeAString(string toolName)
+    {
+        // Arrange
+        var (_, factory) = CreateTestSetup(isReadOnly: true);
+        var tool = factory.CreateTools().First(t => t.Name == toolName);
+
+        // Act
+        var json = JsonSerializer.SerializeToElement(await tool.Handler(
+            JsonSerializer.SerializeToElement(new { path = 42, method = "Read" }), CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Parameter 'path' must be a string.", json.GetProperty("error").GetString());
+    }
+
     internal static (TestThing Room, McpToolFactory Factory) CreateTestSetup(bool isReadOnly)
     {
         var context = InterceptorSubjectContext.Create()
@@ -654,11 +709,9 @@ public class HomeBlazeMcpToolProviderTests
         var room = new TestThing(context) { Name = "Test Room", Temperature = 21.5m };
 
         var pathProvider = new StateAttributePathProvider();
-        var toolProvider = new HomeBlazeMcpToolProvider(
-            () => room, pathProvider,
-            new EmptyServiceProvider(),
-            NullLogger<HomeBlazeMcpToolProvider>.Instance,
-            isReadOnly);
+        var invoker = new McpMethodInvoker(
+            () => room, pathProvider, new EmptyServiceProvider(), NullLogger.Instance, isReadOnly, operationFilter: null);
+        var toolProvider = new HomeBlazeMcpToolProvider(invoker, isReadOnly);
 
         var configuration = new McpServerConfiguration
         {

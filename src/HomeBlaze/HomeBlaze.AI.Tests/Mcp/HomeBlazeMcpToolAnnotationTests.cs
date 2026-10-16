@@ -14,12 +14,12 @@ namespace HomeBlaze.AI.Tests.Mcp;
 public class HomeBlazeMcpToolAnnotationTests
 {
     [Fact]
-    public async Task WhenAClientListsTheToolsOverHttp_ThenReadToolsAreReadOnlyAndWriteToolsDestructive()
+    public async Task WhenAClientListsTheToolsOverHttp_ThenReadToolsAreReadOnlyWriteToolsDestructiveAndOnlyOperationsOpenWorld()
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
         var configuration = HomeBlazeMcpConfigurationFactory.Create(
-            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => room, isReadOnly: false);
+            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => room, isReadOnly: false, forAgents: false);
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -52,7 +52,7 @@ public class HomeBlazeMcpToolAnnotationTests
         {
             Assert.False(tools[name]!.ReadOnlyHint, name);
             Assert.True(tools[name]!.DestructiveHint, name);
-            Assert.False(tools[name]!.OpenWorldHint, name);
+            Assert.Equal(name == "invoke_operation", tools[name]!.OpenWorldHint);
         }
 
         Assert.All(tools.Values, annotations => Assert.Null(annotations!.IdempotentHint));

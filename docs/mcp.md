@@ -205,7 +205,7 @@ Read a property value by path. Returns the value, JSON schema type, and optional
 
 Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. A value that cannot be converted returns an error and leaves the property unchanged.
 
-An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and a path and returns null to allow the write or the error message for the client, for example to keep a client from changing properties that hold settings. Decide on the property; the path only serves the message and can be spelled differently by each tool. A refused property is not reported as writable by `get_property`, `browse` and `search`. The filter may be called concurrently.
+An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and returns null to allow the write or the reason it is refused, for example to keep a client from changing properties that hold settings. `set_property` then returns the error `Property is not writable: <path>. <reason>` and writes nothing. A refused property is not reported as writable by `get_property`, `browse` and `search`. The filter may be called concurrently.
 
 ### `list_types`
 
@@ -238,8 +238,8 @@ var config = new McpServerConfiguration
     // Optional: text appended to a tool's description, keyed by tool name
     ToolDescriptionAdditions = { ["browse"] = "Subjects of type Document hold the manuals." },
 
-    // Optional: refuse writes to some properties; return null to allow, else the error for the client
-    PropertyWriteFilter = (property, path) => property.Name == "Password" ? $"'{path}' cannot be written." : null,
+    // Optional: refuse writes to some properties; return null to allow, else the reason for the client
+    PropertyWriteFilter = property => property.Name == "Password" ? "Passwords cannot be changed." : null,
 
     // Safety limits
     MaxDepth = 10,
@@ -343,10 +343,10 @@ var response = await client.GetResponseAsync(messages, options, cancellationToke
 var handlers = options.Handlers;
 handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
 handlers.CallToolHandler = (request, cancellationToken) =>
-    McpToolDispatcher.CallToolAsync(tools, request.Params!, logger, cancellationToken);
+    McpToolDispatcher.CallToolAsync(tools, request.Params, logger, cancellationToken);
 ```
 
-`ListTools` maps the annotations of each tool. `CallToolAsync` returns a string result as text and any other result as indented JSON that keeps non-ASCII characters and `<>&'` unescaped, and turns an unknown tool or a throwing handler into an error result.
+`ListTools` maps the annotations of each tool. `CallToolAsync` returns a string result as text and any other result as indented JSON that keeps non-ASCII characters and `<>&'` unescaped, and turns an unknown tool or a throwing handler into an error result. A call whose cancellation token is cancelled throws `OperationCanceledException` instead.
 
 To change one member of a tool, for example to wrap its handler with a budget or logging, copy it with the copy constructor, which keeps all other members including the annotations:
 

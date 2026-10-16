@@ -76,7 +76,7 @@ public class GetPropertyToolTests
         {
             PathProvider = DefaultPathProvider.Instance,
             IsReadOnly = false,
-            PropertyWriteFilter = (_, path) => path == "Temperature" ? "Protected." : null
+            PropertyWriteFilter = property => property.Name == "Temperature" ? "Protected." : null
         };
         var tool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "get_property");
 

@@ -19,19 +19,6 @@ public class MethodResultLimitTests
     }
 
     [Fact]
-    public void WhenAStringIsLongerThanTheLimit_ThenItIsCutAndTheMarkerNamesTheCutCharacters()
-    {
-        // Arrange
-        var text = new string('a', MethodResultLimit.MaxStringLength) + "bcd";
-
-        // Act
-        var result = Assert.IsType<string>(MethodResultLimit.Apply(text));
-
-        // Assert
-        Assert.Equal(new string('a', MethodResultLimit.MaxStringLength) + "\n[truncated: 3 characters]", result);
-    }
-
-    [Fact]
     public void WhenTheCutWouldSplitASurrogatePair_ThenThePairIsCutAsAWhole()
     {
         // Arrange

@@ -46,16 +46,11 @@ public class SetPropertyToolTests
             .WithRegistry();
 
         var room = new TestRoom(context) { Name = "Test", Temperature = 21.5m };
-        string? filteredPath = null;
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
             IsReadOnly = false,
-            PropertyWriteFilter = (property, path) =>
-            {
-                filteredPath = path;
-                return property.Name == "Temperature" ? $"'{path}' is protected." : null;
-            }
+            PropertyWriteFilter = property => property.Name == "Temperature" ? "It is protected." : null
         };
         var tool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "set_property");
 
@@ -66,11 +61,10 @@ public class SetPropertyToolTests
             JsonSerializer.SerializeToElement(new { path = "Name", value = "Changed" }), CancellationToken.None));
 
         // Assert
-        Assert.Equal("'Temperature' is protected.", refused.GetProperty("error").GetString());
+        Assert.Equal("Property is not writable: Temperature. It is protected.", refused.GetProperty("error").GetString());
         Assert.Equal(21.5m, room.Temperature);
         Assert.True(allowed.GetProperty("success").GetBoolean());
         Assert.Equal("Changed", room.Name);
-        Assert.Equal("Name", filteredPath);
     }
 
     [Fact]

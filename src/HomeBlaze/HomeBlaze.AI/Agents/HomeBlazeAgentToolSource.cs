@@ -5,7 +5,7 @@ using Namotion.Interceptor.Mcp.Tools;
 namespace HomeBlaze.AI.Agents;
 
 /// <summary>
-/// Creates the HomeBlaze MCP tools for agents with <see cref="HomeBlazeMcpConfigurationFactory.CreateForAgents"/>.
+/// Creates the HomeBlaze MCP tools for agents with <see cref="HomeBlazeMcpConfigurationFactory.Create"/>.
 /// </summary>
 internal sealed class HomeBlazeAgentToolSource : IAgentToolSource
 {
@@ -19,7 +19,7 @@ internal sealed class HomeBlazeAgentToolSource : IAgentToolSource
     public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly)
     {
         var rootSubjectProvider = () => HomeBlazeMcpConfigurationFactory.GetLoadedRoot(_serviceProvider);
-        var configuration = HomeBlazeMcpConfigurationFactory.CreateForAgents(_serviceProvider, rootSubjectProvider, isReadOnly);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(_serviceProvider, rootSubjectProvider, isReadOnly, forAgents: true);
         return new McpToolFactory(rootSubjectProvider, configuration).CreateTools();
     }
 }

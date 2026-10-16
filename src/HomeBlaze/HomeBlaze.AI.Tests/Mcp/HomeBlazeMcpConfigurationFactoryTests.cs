@@ -24,7 +24,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
         var services = CreateServices(services => services.AddHomeBlazeMcpToolProvider(_ => new StubToolProvider()));
 
         // Act
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, forAgents: false);
         var toolNames = new McpToolFactory(room, configuration).CreateTools().Select(tool => tool.Name).ToArray();
 
         // Assert
@@ -34,30 +34,8 @@ public class HomeBlazeMcpConfigurationFactoryTests
         Assert.Contains("stub_tool", toolNames);
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void WhenCreatingAConfiguration_ThenBrowseAndSearchPointToTheMarkdownPages(bool isReadOnly)
-    {
-        // Arrange
-        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: true);
-        var services = CreateServices();
-
-        // Act
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly);
-        var tools = new McpToolFactory(room, configuration).CreateTools().ToDictionary(tool => tool.Name, tool => tool.Description);
-
-        // Assert
-        Assert.All(new[] { tools["browse"], tools["search"] }, description =>
-        {
-            Assert.Contains(".md", description);
-            Assert.Contains("invoke_query", description);
-            Assert.Contains("ReadEvaluatedContent", description);
-        });
-    }
-
     [Fact]
-    public void WhenCreatingAConfiguration_ThenSetPropertyCarriesTheChangeCaution()
+    public void WhenCreatingAConfiguration_ThenBrowseAndSearchPointToTheMarkdownPagesAndSetPropertyCarriesTheChangeCaution()
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
@@ -66,6 +44,12 @@ public class HomeBlazeMcpConfigurationFactoryTests
         var tools = CreateTools(room, forAgents: false);
 
         // Assert
+        Assert.All(new[] { tools["browse"].Description, tools["search"].Description }, description =>
+        {
+            Assert.Contains(".md", description);
+            Assert.Contains("invoke_query", description);
+            Assert.Contains("ReadEvaluatedContent", description);
+        });
         Assert.EndsWith(HomeBlazeMcpInstructions.ChangeCaution, tools["set_property"].Description);
     }
 
@@ -114,7 +98,9 @@ public class HomeBlazeMcpConfigurationFactoryTests
             JsonSerializer.SerializeToElement(new { path = "/TargetTemperature", value = 30 }), CancellationToken.None));
 
         // Assert
-        Assert.Equal("'/TargetTemperature' is a configuration property; agents cannot change configuration.", result.GetProperty("error").GetString());
+        Assert.Equal(
+            "Property is not writable: /TargetTemperature. It is a configuration property; agents cannot change configuration.",
+            result.GetProperty("error").GetString());
         Assert.Equal(20m, room.TargetTemperature);
     }
 
@@ -164,9 +150,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
     private static Dictionary<string, McpToolInfo> CreateTools(TestThing room, bool forAgents)
     {
         var services = CreateServices();
-        var configuration = forAgents
-            ? HomeBlazeMcpConfigurationFactory.CreateForAgents(services, () => room, isReadOnly: false)
-            : HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, forAgents);
         return new McpToolFactory(room, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
