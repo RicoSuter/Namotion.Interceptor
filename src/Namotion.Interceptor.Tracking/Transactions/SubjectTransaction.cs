@@ -141,6 +141,16 @@ public sealed class SubjectTransaction : IDisposable
     /// subsequent writes preserve the original old value (last write wins). Returns false when
     /// disposal wins the race, allowing the caller to continue the normal write chain.
     /// </summary>
+    /// <param name="property">The property being written.</param>
+    /// <param name="origin">The resolved origin of the change.</param>
+    /// <param name="changedTimestamp">The timestamp to publish for this change.</param>
+    /// <param name="receivedTimestamp">The timestamp the change was received, if any.</param>
+    /// <param name="currentValue">The landed model value seen by the write interceptor chain.</param>
+    /// <param name="newValue">The value being written.</param>
+    /// <param name="restoresLandedValue">
+    /// True when the new value equals the landed value; an existing pending change for the property is
+    /// then cancelled instead of updated.
+    /// </param>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
     internal bool TryCaptureChange<TProperty>(
         PropertyReference property,
@@ -148,7 +158,8 @@ public sealed class SubjectTransaction : IDisposable
         DateTimeOffset changedTimestamp,
         DateTimeOffset? receivedTimestamp,
         TProperty currentValue,
-        TProperty newValue)
+        TProperty newValue,
+        bool restoresLandedValue)
     {
         lock (_pendingChangesLock)
         {
@@ -161,6 +172,15 @@ public sealed class SubjectTransaction : IDisposable
 
             var pendingChanges = _pendingChanges;
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
+
+            // A write back to the landed value cancels an existing pending change, so the outcome matches
+            // never having written the property: no no-op change reaches sources, batch limits or conflicts.
+            if (!isFirstWrite && restoresLandedValue)
+            {
+                pendingChanges.Remove(property);
+                return true;
+            }
+
             pendingChanges[property] = SubjectPropertyChange.Create(
                 property,
                 origin: origin,
@@ -169,6 +189,24 @@ public sealed class SubjectTransaction : IDisposable
                 isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
                 newValue);
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Returns true when the current flow's transaction is capturing and already holds a pending change for
+    /// <paramref name="property"/>.
+    /// </summary>
+    internal static bool HasPendingChangeInCurrentTransaction(PropertyReference property)
+    {
+        var transaction = CurrentTransaction.Value;
+        if (transaction is null || transaction.IsDisposed || transaction._isCommitted || transaction._isCommitting)
+        {
+            return false;
+        }
+
+        lock (transaction._pendingChangesLock)
+        {
+            return transaction._pendingChanges?.ContainsKey(property) == true;
         }
     }
 

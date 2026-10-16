@@ -698,4 +698,101 @@ public class SubjectTransactionTests
         Assert.Equal("Modified", person.FirstName);
     }
 
+    [Fact]
+    public async Task WhenPropertyIsWrittenBackToLandedValue_ThenCommitKeepsLandedValue()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        var valueInsideTransaction = person.FirstName;
+        var pendingBeforeCommit = transaction.GetPendingChanges();
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Ann", valueInsideTransaction);
+        Assert.Empty(pendingBeforeCommit);
+        Assert.Equal("Ann", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenLandedValueIsWrittenWithoutPendingChange_ThenNothingIsCaptured()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Ann";
+
+        // Assert
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsWrittenBackToLandedValue_ThenCommitPublishesNoChangeNotification()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var person = new Person(context) { FirstName = "Ann" };
+        changes.Clear();
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "Bob";
+            person.FirstName = "Ann";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(Person.FirstName));
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsWrittenBackToLandedValueThenAgain_ThenPendingChangeIsRecreatedCleanly()
+    {
+        // Arrange: the LastName write in between lands between the cancelled and re-created FirstName entries
+        // only if the first FirstName entry was actually removed rather than merely overwritten in place, so
+        // the resulting [LastName, FirstName] order pins the removal rather than just the old/new values.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        person.LastName = "Smith";
+        person.FirstName = "Carl";
+
+        // Assert
+        var pending = transaction.GetPendingChanges();
+        Assert.Equal([nameof(Person.LastName), nameof(Person.FirstName)], pending.Select(c => c.Property.Name));
+
+        var firstNameChange = pending.Single(c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Equal("Ann", firstNameChange.GetOldValue<string?>());
+        Assert.Equal("Carl", firstNameChange.GetNewValue<string?>());
+
+        await transaction.CommitAsync(CancellationToken.None);
+    }
+
 }
