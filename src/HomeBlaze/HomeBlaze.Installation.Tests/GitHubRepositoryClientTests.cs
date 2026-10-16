@@ -113,7 +113,6 @@ public class GitHubRepositoryClientTests
         Assert.Equal(expectedVersion, release!.Version);
     }
 
-    // The commit is the base, so ahead_by counts the commits the commit lacks and behind_by those the branch lacks.
     [Theory]
     [InlineData(2, 0)]
     [InlineData(0, 0)]

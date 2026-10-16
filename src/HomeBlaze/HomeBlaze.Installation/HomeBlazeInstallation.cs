@@ -134,8 +134,8 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     /// <summary>
     /// Whether a newer release exists or, for an edge build, whether its branch has newer commits; null until the first
-    /// successful check, when the running version is not a semantic version, and when GitHub cannot compare the commit
-    /// of an edge build with its branch.
+    /// successful check, when the running version of a release build is not a semantic version, and when GitHub cannot
+    /// compare the commit of an edge build with its branch.
     /// </summary>
     [State(IsDiscrete = true, Position = 460)]
     [Category("Update")]

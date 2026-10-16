@@ -38,9 +38,9 @@
             {
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                     <MudIcon Icon="@Icons.Material.Filled.Update" Color="Color.Warning" Size="Size.Small" />
-                    @if (installation.CommitsBehind is { } commitsBehind)
+                    @if (installation.Channel == InstallationChannel.Edge)
                     {
-                        <MudText Typo="Typo.caption">Update available: @commitsBehind @(commitsBehind == 1 ? "commit" : "commits") behind @installation.Branch</MudText>
+                        <MudText Typo="Typo.caption">Update available: @FormatCommits(installation.CommitsBehind) behind @installation.Branch</MudText>
                         @if (installation.CompareUrl is { } compareUrl)
                         {
                             <MudLink Href="@compareUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Changes</MudLink>
@@ -86,6 +86,13 @@
             : string.Empty;
         return installation.Version + commit + built;
     }
+
+    private static string FormatCommits(int? count) => count switch
+    {
+        null => "new commits",
+        1 => "1 commit",
+        { } value => $"{value} commits"
+    };
 
     private static string FormatDate(DateTimeOffset? date) =>
         date is { } value ? $"({value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)})" : string.Empty;

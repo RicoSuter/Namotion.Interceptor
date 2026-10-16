@@ -101,6 +101,21 @@ public class HomeBlazeInstallationUpdateTests
     }
 
     [Fact]
+    public void WhenAnEdgeBuildHasACommitAndBranch_ThenItCanCheck()
+    {
+        // Arrange
+        var installation = CreateInstallation(CreateBuild("edge", tag: null));
+        installation.Status = ServiceStatus.Running;
+
+        // Act
+        var exception = Record.Exception(installation.CheckForUpdates);
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Null(installation.UpdateCheckStatus);
+    }
+
+    [Fact]
     public async Task WhenAnEdgeBuildIsBehindItsBranch_ThenTheUpdateIsReported()
     {
         // Arrange
