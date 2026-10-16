@@ -93,7 +93,7 @@ public class NavigationTests
     public async Task WhenPageIsAddedToExpandedFolder_ThenNavMenuShowsIt()
     {
         // Arrange
-        var (services, root, folder) = GetDemoFolder();
+        var (services, root, folder) = await GetDemoFolderAsync();
         var originalChildren = folder.Children;
         var navigation = await OpenWithDemoFolderExpandedAsync();
 
@@ -119,7 +119,7 @@ public class NavigationTests
     public async Task WhenPageIsRemovedFromExpandedFolder_ThenNavMenuDropsIt()
     {
         // Arrange
-        var (services, root, folder) = GetDemoFolder();
+        var (services, root, folder) = await GetDemoFolderAsync();
         var originalChildren = folder.Children;
 
         try
@@ -149,7 +149,7 @@ public class NavigationTests
     public async Task WhenFolderAppearsBeforeExpandedFolder_ThenExpandedStateStaysWithItsFolder()
     {
         // Arrange
-        var (services, root, _) = GetDemoFolder();
+        var (services, root, _) = await GetDemoFolderAsync();
         var originalRootChildren = root.Children;
         var navigation = await OpenWithDemoFolderExpandedAsync();
 
@@ -175,10 +175,14 @@ public class NavigationTests
         }
     }
 
-    private (IServiceProvider Services, FluentStorageContainer Root, VirtualFolder Folder) GetDemoFolder()
+    private async Task<(IServiceProvider Services, FluentStorageContainer Root, VirtualFolder Folder)> GetDemoFolderAsync()
     {
         var services = _fixture.ServerServices;
         var root = (FluentStorageContainer)services.GetRequiredService<RootManager>().Root!;
+
+        // A pass of the storage that finds a change sets the children of a folder anew from its files, which drops what
+        // a test adds. A pass now takes in what earlier tests left changed on disk, so that the pass they asked for finds nothing.
+        await root.ReconcileAsync();
         return (services, root, (VirtualFolder)root.Children["Demo"]);
     }
 
