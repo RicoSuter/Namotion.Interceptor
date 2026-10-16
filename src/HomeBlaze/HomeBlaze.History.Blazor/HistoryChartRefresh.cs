@@ -31,11 +31,16 @@ internal sealed class HistoryChartRefresh : IDisposable
     /// <returns>Whether this call started a window.</returns>
     public bool OnFirstQueryCompleted(TimeSpan window) => _throttle.Arm(window);
 
-    /// <summary>Starts a window when a value of the series changed since the last call or <see cref="SetSeries"/>.</summary>
+    /// <summary>
+    /// Starts a window when a value of the series changed since the last call that ran while no window was running,
+    /// or since <see cref="SetSeries"/>. A change seen while a window runs is kept for the first call after it ended.
+    /// </summary>
     /// <param name="window">The window of the chart, see <see cref="HistoryRefreshThrottle.GetWindow"/>.</param>
     /// <returns>Whether this call started a window.</returns>
     public bool OnRendered(TimeSpan window) =>
-        HistoryChartSeriesResolver.UpdateValues(_series, _values) && _throttle.Arm(window);
+        // The query at the end of a window can miss a change that a store has not flushed yet, so the values are not
+        // taken while it runs: the render after that query sees the change and starts one more window.
+        !_throttle.IsArmed && HistoryChartSeriesResolver.UpdateValues(_series, _values) && _throttle.Arm(window);
 
     public void Dispose() => _throttle.Dispose();
 }

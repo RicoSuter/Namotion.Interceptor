@@ -95,6 +95,35 @@ public class HistoryChartRefreshTests
     }
 
     [Fact]
+    public void WhenAValueChangesWhileAWindowRuns_ThenTheRenderAfterItsQueryStartsExactlyOneMoreWindow()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var queries = 0;
+        var (subject, series) = CreateSeries();
+        using var refresh = new HistoryChartRefresh(timeProvider, () => queries++);
+        refresh.SetSeries(series);
+        refresh.OnFirstQueryCompleted(Window);
+
+        // Act
+        subject.Temperature = 21.5;
+        var armedWhileRunning = refresh.OnRendered(Window);
+        timeProvider.Advance(Window);
+        var queriesAfterFirstWindow = queries;
+        var armedAfterQuery = refresh.OnRendered(Window);
+        timeProvider.Advance(Window);
+        var armedAfterSecondQuery = refresh.OnRendered(Window);
+        timeProvider.Advance(Window * 3);
+
+        // Assert
+        Assert.False(armedWhileRunning);
+        Assert.Equal(1, queriesAfterFirstWindow);
+        Assert.True(armedAfterQuery);
+        Assert.False(armedAfterSecondQuery);
+        Assert.Equal(2, queries);
+    }
+
+    [Fact]
     public void WhenTheSeriesAreSet_ThenTheirCurrentValuesStartNoWindow()
     {
         // Arrange

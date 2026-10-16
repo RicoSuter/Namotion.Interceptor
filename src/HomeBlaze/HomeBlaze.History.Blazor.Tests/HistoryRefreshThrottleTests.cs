@@ -76,6 +76,25 @@ public class HistoryRefreshThrottleTests
     }
 
     [Fact]
+    public void WhenArmed_ThenItIsArmedUntilTheWindowEnds()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        using var throttle = new HistoryRefreshThrottle(timeProvider, () => { });
+        var armedBefore = throttle.IsArmed;
+
+        // Act
+        throttle.Arm(Window);
+        var armedDuringTheWindow = throttle.IsArmed;
+        timeProvider.Advance(Window);
+
+        // Assert
+        Assert.False(armedBefore);
+        Assert.True(armedDuringTheWindow);
+        Assert.False(throttle.IsArmed);
+    }
+
+    [Fact]
     public void WhenArmedForAVeryLongRefreshInterval_ThenTheSystemTimerStarts()
     {
         // Arrange - a system timer throws for a due time above about 49 days.

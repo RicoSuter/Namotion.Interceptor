@@ -42,6 +42,18 @@ internal sealed class HistoryRefreshThrottle : IDisposable
         return window < MinimumInterval ? MinimumInterval : window > MaximumInterval ? MaximumInterval : window;
     }
 
+    /// <summary>Gets whether a window is running.</summary>
+    public bool IsArmed
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _timer is not null;
+            }
+        }
+    }
+
     /// <summary>Starts a window unless one is running or the throttle is disposed.</summary>
     /// <param name="window">The length of the window. Must be positive.</param>
     /// <returns>Whether this call started a window.</returns>
