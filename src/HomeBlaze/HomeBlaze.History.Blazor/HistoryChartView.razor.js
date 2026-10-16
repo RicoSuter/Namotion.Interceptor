@@ -14,17 +14,24 @@ export function alignBands(lines) {
     }
 
     const update = () => {
-        // A horizontal grid line spans the plot area from its left to its right edge.
+        // A view that is not displayed, like one in a hidden tab, has no plot to measure. It keeps its margins, and the
+        // resize observer updates them when it is shown again.
+        const box = view.getBoundingClientRect();
+        if (box.width === 0) {
+            return;
+        }
+
+        // A horizontal grid line spans the plot area from its left to its right edge. A compact chart draws no grid
+        // lines and its plot fills the view, so its bands need no margins.
         const gridLine = [...lines.querySelectorAll('.mud-charts-grid path')]
             .map(path => path.getBoundingClientRect())
-            .find(box => box.height < 1 && box.width > 0);
+            .find(line => line.height < 1 && line.width > 0);
         if (!gridLine) {
             view.style.removeProperty(leftProperty);
             view.style.removeProperty(rightProperty);
             return;
         }
 
-        const box = view.getBoundingClientRect();
         setProperty(view, leftProperty, gridLine.left - box.left);
         setProperty(view, rightProperty, box.right - gridLine.right);
     };
@@ -33,11 +40,14 @@ export function alignBands(lines) {
     const changes = new MutationObserver(update);
     changes.observe(lines, { subtree: true, childList: true, attributes: true, attributeFilter: ['d', 'viewBox'] });
     changes.observe(view, { attributes: true, attributeFilter: ['style'] });
+    const resizes = new ResizeObserver(update);
+    resizes.observe(lines);
     update();
 
     return {
         dispose: () => {
             changes.disconnect();
+            resizes.disconnect();
             view.style.removeProperty(leftProperty);
             view.style.removeProperty(rightProperty);
         }
