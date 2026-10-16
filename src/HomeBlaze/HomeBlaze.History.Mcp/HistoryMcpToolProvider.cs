@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.History.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -94,14 +95,16 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             Description = "Query recorded history for one or more [State] property paths over a time range. " +
                           "Supports raw samples or bucketed downsampling with an aggregation. Returns the resolved from and to, " +
                           "a coverage summary for the whole response (covered ratio, gap count, largest gap; ranges on request), " +
-                          "and a 'series' map keyed by path, each with a value_type hint and points as [timestamp, value] pairs " +
+                          "and a 'series' map keyed by path, each with a value_type hint, a unit when the property declares one " +
+                          "(a StateUnit name such as WattHour), and points as [timestamp, value] pairs " +
                           "(a null value means a gap, an unknown value, or the Count or Sum of a partly covered bucket); " +
                           "truncated appears when the point limit cut the series, and a series whose coverage differs " +
                           "from the response's carries its own ranges when ranges are requested. A path that cannot be " +
                           "served carries its own error and the others still return data. " +
                           "Timestamps are UTC, except the points of day, week, month and year buckets, which carry the " +
-                          "offset of time_zone (named in the response). For kWh per month, use bucket=month with " +
-                          "aggregation=Delta on the energy counter. " +
+                          "offset of time_zone (named in the response). For energy per month, use bucket=month with " +
+                          "aggregation=Delta on the energy counter; Delta returns the counter's unit, so a WattHour counter " +
+                          "yields Wh per bucket. " +
                           "Use browse or search to discover paths first.",
             InputSchema = GetPropertyHistorySchema,
             Handler = HandleGetPropertyHistoryAsync,
@@ -308,7 +311,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         foreach (var result in results)
         {
             series[result.Path] = result.Series is { } served
-                ? BuildSeriesPayload(result.ValueType, served, timeZone, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
+                ? BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
                 : result.ErrorPayload;
         }
 
@@ -358,9 +361,14 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     }
 
     private static Dictionary<string, object?> BuildSeriesPayload(
-        string? valueType, HistorySeries series, TimeZoneInfo? timeZone, bool includeOwnRanges)
+        string? valueType, string? unit, HistorySeries series, TimeZoneInfo? timeZone, bool includeOwnRanges)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal) { ["value_type"] = valueType };
+        if (unit is not null)
+        {
+            payload["unit"] = unit;
+        }
+
         if (series.IsTruncated)
         {
             payload["truncated"] = true;
@@ -394,7 +402,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             HistoryToolFormatting.FormatTimestamp(range.To)
         }).ToArray();
 
-    private sealed record PathResult(string Path, string? ValueType, HistorySeries? Series, object? ErrorPayload);
+    private sealed record PathResult(string Path, string? ValueType, string? Unit, HistorySeries? Series, object? ErrorPayload);
 
     private async Task<PathResult> QueryOnePathAsync(
         IReadOnlyList<IHistoryStore> stores,
@@ -410,6 +418,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         // Resolution runs inside the boundary too: walking a path invokes property getters, so one
         // throwing getter would otherwise fault the whole fan-out before any query started.
         string? valueType = null;
+        string? unit = null;
         HistorySeries result;
         try
         {
@@ -425,18 +434,24 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 valueType = HistoryToolParsing.ValueType(match.Property.Type);
             }
 
+            var state = resolved?.Property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
+            if (state is { Unit: not StateUnit.Default })
+            {
+                unit = state.Unit.ToString();
+            }
+
             if (aggregation == HistoryAggregations.Delta && resolved is null)
             {
-                return new PathResult(path, valueType, null, new
+                return new PathResult(path, valueType, null, null, new
                 {
                     value_type = valueType,
                     error = "Property not found; Delta needs the property to check that it is cumulative."
                 });
             }
 
-            if (aggregation == HistoryAggregations.Delta && !IsCumulative(resolved?.Property))
+            if (aggregation == HistoryAggregations.Delta && state is not { IsCumulative: true })
             {
-                return new PathResult(path, valueType, null, new
+                return new PathResult(path, valueType, null, null, new
                 {
                     value_type = valueType,
                     error = "Delta requires a cumulative property (a State attribute with IsCumulative)."
@@ -450,7 +465,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         }
         catch (HistoryAggregationNotSupportedException exception)
         {
-            return new PathResult(path, valueType, null, new
+            return new PathResult(path, valueType, null, null, new
             {
                 value_type = valueType,
                 error = exception.Message,
@@ -469,18 +484,15 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             // whole fan-out and discarded the results for every sibling path that had already
             // succeeded, which is exactly what this tool promises not to do.
             _logger.LogError(exception, "Reading history for '{PropertyPath}' failed.", path);
-            return new PathResult(path, valueType, null, new
+            return new PathResult(path, valueType, null, null, new
             {
                 value_type = valueType,
                 error = "Could not read history for this path. Check server logs for details."
             });
         }
 
-        return new PathResult(path, valueType, result, null);
+        return new PathResult(path, valueType, unit, result, null);
     }
-
-    private static bool IsCumulative(RegisteredSubjectProperty? property) =>
-        property?.TryGetAttribute(KnownAttributes.State)?.GetValue() is StateMetadata { IsCumulative: true };
 
     /// <summary>
     /// Reads the optional max_points override. It can only lower the default: the defaults bound the

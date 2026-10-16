@@ -542,4 +542,18 @@ public class GetPropertyHistoryToolTests
             series.GetProperty("/Missing").GetProperty("error").GetString());
         Assert.False(series.GetProperty("/Energy").TryGetProperty("error", out _));
     }
+
+    [Fact]
+    public async Task WhenAPropertyHasAUnit_ThenItsSeriesCarriesIt()
+    {
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Energy", "/Power" }, from = "2026-01-01T00:00:00Z", to = "2026-01-02T00:00:00Z" },
+            store => { });
+
+        // Assert
+        var series = json.GetProperty("series");
+        Assert.Equal("WattHour", series.GetProperty("/Energy").GetProperty("unit").GetString());
+        Assert.False(series.GetProperty("/Power").TryGetProperty("unit", out _));
+    }
 }

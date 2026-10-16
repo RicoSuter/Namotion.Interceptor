@@ -15,7 +15,7 @@ public partial class HistoryToolTestSubject
     [State]
     public partial HistoryToolTestSubject? Child { get; set; }
 
-    [State(IsCumulative = true)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true)]
     public partial double Energy { get; set; }
 
     [State]
