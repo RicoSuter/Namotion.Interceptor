@@ -276,14 +276,15 @@
                     .ToList();
             }
         }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            // Superseded by a newer load, which also owns the error; leave its result in place.
+            return;
+        }
         catch (HistoryAggregationNotSupportedException exception)
         {
             _error = exception.Message;
             ClearView();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return; // superseded by a newer load; leave its result in place
         }
         catch (Exception exception)
         {
