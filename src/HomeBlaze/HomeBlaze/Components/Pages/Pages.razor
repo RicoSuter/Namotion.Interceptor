@@ -429,6 +429,7 @@
     private RenderFragment RenderEditMenu() => __builder =>
     {
         <MudMenu Icon="@GetModeIcon()"
+                 AriaLabel="Edit mode"
                  data-testid="edit-mode-menu"
                  Color="@(IsEditing ? Color.Primary : Color.Default)"
                  Variant="Variant.Filled"
