@@ -7,6 +7,7 @@
 @using Namotion.Interceptor.Registry.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
 @inject ITimeZoneDisplay TimeZone
+@inject TimeProvider TimeProvider
 @implements IDisposable
 
 <MudDialog Style="height:100%;" ContentClass="overflow-hidden">
@@ -54,12 +55,15 @@
             </MudText>
         }
 
-        <div style="flex:1 1 auto; min-height:0; margin-top:16px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+        @* A new selection keeps the shown chart until its own is loaded. *@
+        <div style="position:relative; flex:1 1 auto; min-height:0; margin-top:16px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
             @if (_loading)
             {
-                <MudProgressCircular Indeterminate="true" />
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="position:absolute; top:0; left:0; right:0; z-index:1;"
+                                   data-testid="property-history-loading" />
             }
-            else if (_error is not null)
+
+            @if (_error is not null)
             {
                 <MudAlert Severity="Severity.Warning">@_error</MudAlert>
             }
@@ -80,7 +84,7 @@
                     </tbody>
                 </MudSimpleTable>
             }
-            else
+            else if (!_loading)
             {
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">No data in this range.</MudText>
             }
@@ -138,8 +142,8 @@
     private bool UseStateTimeline =>
         PropertyHistoryChartModel.IsDiscrete(PropertyType, IsDiscreteState) &&
         (IsRawPeriodSelected || _aggregation is HistoryAggregations.Last or HistoryAggregations.First);
-    private CancellationTokenSource? _loadCts;
-    private volatile bool _disposed;
+    private CancellationTokenSource? _loadCancellation;
+    private volatile bool _isDisposed;
 
     protected override async Task OnInitializedAsync()
     {
@@ -153,11 +157,12 @@
         _rangeIndex = selection.RangeIndex;
         _periodIndex = selection.PeriodIndex;
         _aggregation = selection.Aggregation;
+        // Only a caller of ShowAsync with a range that is no preset opens a custom range: the chart widget passes presets.
         if (selection.CustomRange is { } customRange)
         {
             // An empty To ends the custom range now, see ResolveCustomRange.
             _useCustom = true;
-            _customFrom = TimeZone.ToZoned(DateTimeOffset.UtcNow - customRange);
+            _customFrom = TimeZone.ToZoned(TimeProvider.GetUtcNow() - customRange);
         }
 
         await LoadAsync();
@@ -185,10 +190,10 @@
     private async Task LoadAsync()
     {
         // Cancel any in-flight load so a slower earlier query cannot overwrite this newer selection.
-        _loadCts?.Cancel();
-        _loadCts?.Dispose();
-        _loadCts = new CancellationTokenSource();
-        var cancellationToken = _loadCts.Token;
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+        _loadCancellation = new CancellationTokenSource();
+        var cancellationToken = _loadCancellation.Token;
 
         _loading = true;
         _error = null;
@@ -204,11 +209,11 @@
             if (_useCustom)
             {
                 (from, to) = PropertyHistoryChartModel.ResolveCustomRange(
-                    _customFrom, _customTo, DateTimeOffset.UtcNow, TimeZone.ToUtc);
+                    _customFrom, _customTo, TimeProvider.GetUtcNow(), TimeZone.ToUtc);
             }
             else
             {
-                to = DateTimeOffset.UtcNow;
+                to = TimeProvider.GetUtcNow();
                 from = to - PropertyHistoryChartModel.RangePresets[_rangeIndex].Range;
             }
 
@@ -306,23 +311,23 @@
 
     private void OnTimeZoneChanged()
     {
-        if (_disposed)
+        if (_isDisposed)
         {
             return;
         }
 
         // Dispose runs on the dispatcher too, so the check inside cannot race it.
-        InvokeAsync(() => _disposed ? Task.CompletedTask : LoadAsync());
+        InvokeAsync(() => _isDisposed ? Task.CompletedTask : LoadAsync());
     }
 
     public void Dispose()
     {
-        _disposed = true;
+        _isDisposed = true;
         TimeZone.Changed -= OnTimeZoneChanged;
         // Cancel before disposing: disposing a CTS does not cancel its token, so an in-flight LoadAsync would
         // otherwise keep running and call StateHasChanged on this disposed component.
-        _loadCts?.Cancel();
-        _loadCts?.Dispose();
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
     }
 
     /// <summary>
