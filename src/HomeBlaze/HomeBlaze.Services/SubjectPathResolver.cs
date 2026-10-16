@@ -15,7 +15,7 @@ namespace HomeBlaze.Services;
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
 /// Implements lifecycle handling to invalidate caches when subjects are attached/detached.
 /// </summary>
-public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
+public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler, ISubjectPathResolver
 {
     private readonly Func<IInterceptorSubject?> _getRoot;
 
@@ -184,16 +184,31 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         ClearCaches();
+        IncrementPathsVersion();
+        PathsChanged?.Invoke();
+    }
+
+    // A property added to or removed from a subject at run time changes what a path to a property resolves to.
+    void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change) => IncrementPathsVersion();
+
+    void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change) => IncrementPathsVersion();
+
+    private void IncrementPathsVersion()
+    {
         if (Volatile.Read(ref _pathsVersion) is { } pathsVersion)
         {
             pathsVersion.Value = Interlocked.Increment(ref _pathsVersionValue);
         }
-
-        PathsChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Gets a number that changes whenever the paths of subjects may have changed. Reading it in a render makes the
+    /// component render again when the paths change, also when it keeps what it resolved instead of resolving again.
+    /// </summary>
+    public long PathsVersion => ReadPathsVersion(_getRoot());
+
     // A cache hit reads no property of the graph, so this read is what a caller that tracks its reads depends on.
-    private void ReadPathsVersion(IInterceptorSubject? root)
+    private long ReadPathsVersion(IInterceptorSubject? root)
     {
         var pathsVersion = Volatile.Read(ref _pathsVersion);
         if (pathsVersion is null && root is not null)
@@ -202,7 +217,7 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
             pathsVersion = _pathsVersion;
         }
 
-        _ = pathsVersion?.Value;
+        return pathsVersion?.Value ?? 0;
     }
 
     private void ClearCaches()

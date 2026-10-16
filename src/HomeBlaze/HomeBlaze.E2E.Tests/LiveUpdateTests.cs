@@ -249,6 +249,35 @@ public class LiveUpdateTests
         await Assertions.Expect(page.GetByRole(AriaRole.Menuitem).Filter(new() { HasText = "Row 0 in the menu" })).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
+    [Fact]
+    public async Task WhenTheTimeZoneOfTheViewerResolvesAfterTheFirstRender_ThenADateInAWidgetIsShownInIt()
+    {
+        // Arrange & Act: dates are shown as a placeholder until the browser has told its time zone.
+        var content = ":: HomeBlaze.Components.ValueTile Path=$P/Since Label=\"Since\"\n::\n";
+        var (_, page) = await OpenPageAsync(content, live => live.Since = new DateTimeOffset(2031, 5, 6, 7, 8, 9, TimeSpan.Zero));
+
+        // Assert
+        await Assertions.Expect(page.Locator(".markdown-content").GetByTestId("value-text")).ToContainTextAsync("2031", new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAChildIsAddedWhileTheBrowserShowsItsParent_ThenThePaneListsIt()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}browser");
+        await page.WaitUntilInteractiveAsync();
+        var pane = page.Locator("[data-testid='subject-pane']").First;
+        await Assertions.Expect(pane.Locator(".subject-pane-child-name").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var (name, _) = await _fixture.AddPlainSubjectToRootAsync(label: "Added while open");
+
+        // Assert
+        await Assertions.Expect(pane.Locator(".subject-pane-child-name").Filter(new() { HasTextRegex = new System.Text.RegularExpressions.Regex($"^({name}|Added while open)$") }))
+            .ToHaveCountAsync(1, new() { Timeout = Timeout });
+    }
+
     private async Task<(LiveValuesSubject[] Rows, IPage Page)> OpenGridPageAsync()
     {
         var (name, grid) = await _fixture.AddSubjectToRootAsync<LiveGridSubject>();

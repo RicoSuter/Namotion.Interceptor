@@ -510,6 +510,9 @@
 
     private static SubjectPropertyChild[] GetVisibleChildren(RegisteredSubjectProperty property)
     {
+        // The children come from the registry, which is not a tracked read. Reading the property is, so the pane renders
+        // again when a child is added, replaced or removed.
+        _ = property.GetValue();
         return property.Children
             .Where(child => !Attribute.IsDefined(child.Subject.GetType(), typeof(ExcludeFromBrowsingAttribute), true))
             .ToArray();
@@ -688,7 +691,12 @@
 
         return registered.Properties
             .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
-            .Sum(p => p.Children.Length);
+            .Sum(p =>
+            {
+                // Read for the same reason as in GetVisibleChildren.
+                _ = p.GetValue();
+                return p.Children.Length;
+            });
     }
 
     public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);

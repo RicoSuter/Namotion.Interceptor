@@ -1,8 +1,10 @@
 @using System.Runtime.CompilerServices
+@using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Components.Dialogs
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject IDialogService DialogService
+@inject ITimeZoneDisplay TimeZone
 
 @implements IDisposable
 @implements IHandleEvent
@@ -198,6 +200,7 @@
 
     protected override void OnInitialized()
     {
+        TimeZone.Changed += OnTimeZoneChanged;
         _pointerDownCallback = EventCallback.Factory.Create<PointerEventArgs>(this, OnPointerDown);
         _clickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, OnClick);
         _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown);
@@ -377,8 +380,13 @@
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, SubjectEditDialog.GetTitle(null, title));
     }
 
+    // A widget formats dates in the time zone of the viewer, which is not a tracked value, and this wrapper skips the
+    // renders of its parent that pass the same parameters, so it renders the widget again itself.
+    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
+
     public void Dispose()
     {
+        TimeZone.Changed -= OnTimeZoneChanged;
         Selection?.Remove(this);
         ParentComponent?._childComponents?.Remove(this);
     }

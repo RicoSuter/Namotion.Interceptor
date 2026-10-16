@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Models;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -122,5 +123,35 @@ public class SubjectPathResolverPathsChangedTests : SubjectPathResolverTestBase
 
         // Assert
         Assert.Equal(0, raisedCount);
+    }
+
+    [Fact]
+    public void WhenSubjectIsAttachedToTheGraph_ThenPathsVersionChanges()
+    {
+        // Arrange
+        var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
+        var before = Resolver.PathsVersion;
+
+        // Act
+        root.Child = new TestContainer(Context) { Name = "Child" };
+
+        // Assert
+        Assert.NotEqual(before, Resolver.PathsVersion);
+    }
+
+    [Fact]
+    public void WhenAPropertyIsAddedToASubjectAtRunTime_ThenPathsVersionChanges()
+    {
+        // Arrange
+        var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
+        var before = Resolver.PathsVersion;
+
+        // Act
+        root.TryGetRegisteredSubject()!.AddProperty("Dynamic", typeof(int), _ => 1, null);
+
+        // Assert
+        Assert.NotEqual(before, Resolver.PathsVersion);
     }
 }

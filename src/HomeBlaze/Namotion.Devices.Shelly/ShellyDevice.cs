@@ -44,7 +44,6 @@ public partial class ShellyDevice : BackgroundService,
     private int? _wifiSignalStrength;
     private string? _stateHostAddress;
     private bool _isVirtualEnergyCounterReadFailing;
-    private string? _availableSoftwareUpdate;
     
     [Configuration]
     public partial string Name { get; set; }
@@ -96,9 +95,8 @@ public partial class ShellyDevice : BackgroundService,
     [State]
     public string? SoftwareVersion => _deviceInfo?.Version;
 
-    [Derived]
     [State]
-    public string? AvailableSoftwareUpdate => _availableSoftwareUpdate;
+    public partial string? AvailableSoftwareUpdate { get; internal set; }
 
     [Derived]
     [State]
@@ -747,7 +745,7 @@ public partial class ShellyDevice : BackgroundService,
 
         // Partial updates omit available_updates; a full status always contains it, possibly empty.
         if (sysStatus.AvailableUpdates != null)
-            _availableSoftwareUpdate = sysStatus.AvailableUpdates.Stable?.Version;
+            AvailableSoftwareUpdate = sysStatus.AvailableUpdates.Stable?.Version;
     }
 
     /// <summary>

@@ -31,8 +31,8 @@ public partial class RenderExpression : ITitleProvider
 
     public string? Title => null;
 
-    // No production code reads this. Its change notification is what renders the page again when the target of an
-    // absolute path appears after the page rendered, a case that the reads of a render miss because the resolver caches such paths.
+    // No production code reads this: a render reads the value through GetText, which also reads the version of the paths,
+    // so it renders again when the target of an absolute path appears. Its change notification tells other observers.
     [Derived]
     public object? Value => ResolveProperty()?.GetValue();
 

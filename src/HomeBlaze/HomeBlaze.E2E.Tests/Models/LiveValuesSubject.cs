@@ -17,6 +17,8 @@ public partial class LiveValuesSubject : IConfigurable
 
     public partial bool IsOn { get; set; }
 
+    public partial DateTimeOffset? Since { get; set; }
+
     [PropertyAttribute(nameof(Run), KnownAttributes.IsEnabled)]
     public bool Run_IsEnabled => IsOn;
 
