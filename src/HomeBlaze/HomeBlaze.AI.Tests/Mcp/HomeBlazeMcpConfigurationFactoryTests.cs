@@ -54,6 +54,23 @@ public class HomeBlazeMcpConfigurationFactoryTests
     }
 
     [Fact]
+    public void WhenCreatingAConfiguration_ThenSearchExplainsThatPercentValuesAreFractions()
+    {
+        // Arrange
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+
+        // Act
+        var tools = CreateTools(room, forAgents: false);
+
+        // Assert
+        Assert.EndsWith(
+            HomeBlazeMcpInstructions.MarkdownSubjectsToolHint + " " + HomeBlazeMcpInstructions.PercentFractionsSearchHint,
+            tools["search"].Description);
+        Assert.Contains("BatteryLevel < 0.2", HomeBlazeMcpInstructions.PercentFractionsSearchHint);
+        Assert.DoesNotContain(HomeBlazeMcpInstructions.PercentFractionsSearchHint, tools["browse"].Description);
+    }
+
+    [Fact]
     public void WhenRegisteringTheHomeBlazeTools_ThenTheServerInstructionsPointToTheMarkdownPages()
     {
         // Arrange

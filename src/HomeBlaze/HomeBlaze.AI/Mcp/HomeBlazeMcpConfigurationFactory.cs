@@ -25,7 +25,7 @@ internal static class HomeBlazeMcpConfigurationFactory
 
     /// <summary>
     /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the
-    /// Markdown page hints of browse and search and every registered <see cref="McpToolProviderRegistration"/>.
+    /// Markdown page hints of browse and search, the Percent hint of search and every registered <see cref="McpToolProviderRegistration"/>.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
@@ -75,7 +75,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             ToolDescriptionAdditions =
             {
                 ["browse"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint,
-                ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint,
+                ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint + " " + HomeBlazeMcpInstructions.PercentFractionsSearchHint,
                 ["set_property"] = HomeBlazeMcpInstructions.ChangeCaution
             },
             PropertyWriteFilter = forAgents ? RefuseConfigurationWrite : null,

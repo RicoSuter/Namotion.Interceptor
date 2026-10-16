@@ -40,4 +40,8 @@ internal static class HomeBlazeMcpInstructions
     internal const string MarkdownSubjectsToolHint =
         "Subjects whose name ends in .md are Markdown pages and documents with the documentation of this " +
         "installation; read their text with invoke_query, method ReadEvaluatedContent.";
+
+    /// <summary>Appended to the search description, after <see cref="MarkdownSubjectsToolHint"/>.</summary>
+    internal const string PercentFractionsSearchHint =
+        "Properties with unit Percent hold fractions where 1 is 100%, so filter a battery at 20% as BatteryLevel < 0.2.";
 }
