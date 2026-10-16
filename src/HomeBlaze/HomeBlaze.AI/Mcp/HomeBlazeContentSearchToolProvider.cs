@@ -156,8 +156,13 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
 
             // The view with secret values hidden; null while the page was not parsed yet.
             var content = file.ReadRawContent();
+            if (content is null)
+            {
+                continue;
+            }
+
             pagesSearched++;
-            if (string.IsNullOrEmpty(content))
+            if (content.Length == 0)
             {
                 continue;
             }
@@ -200,8 +205,10 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
         List<object>? matches = null;
         var matchCount = 0;
         var lineNumber = 0;
-        foreach (var line in content.AsSpan().EnumerateLines())
+        var remaining = content.AsSpan();
+        while (remaining.Length > 0)
         {
+            var line = TakeLine(ref remaining);
             lineNumber++;
             if (Stopwatch.GetTimestamp() > deadline)
             {
@@ -229,6 +236,15 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
         return new PageScan(matchCount, matches, IsTimedOut: false);
     }
 
+    // Only \n separates lines, as in editors and Markdown parsers; EnumerateLines would also split on U+2028 and others.
+    private static ReadOnlySpan<char> TakeLine(ref ReadOnlySpan<char> remaining)
+    {
+        var lineEnd = remaining.IndexOf('\n');
+        var line = lineEnd < 0 ? remaining : remaining[..lineEnd];
+        remaining = lineEnd < 0 ? default : remaining[(lineEnd + 1)..];
+        return line.Length > 0 && line[^1] == '\r' ? line[..^1] : line;
+    }
+
     private static string CreateSnippet(ReadOnlySpan<char> line, int matchIndex)
     {
         if (line.Length <= SnippetLength)
@@ -238,6 +254,18 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
 
         var start = Math.Clamp(matchIndex - SnippetLeadLength, 0, line.Length - SnippetLength);
         var end = start + SnippetLength;
+
+        // Do not emit half of a surrogate pair at either edge of the window.
+        if (start > 0 && char.IsLowSurrogate(line[start]))
+        {
+            start++;
+        }
+
+        if (end < line.Length && char.IsHighSurrogate(line[end - 1]))
+        {
+            end--;
+        }
+
         return string.Concat(start > 0 ? "…" : "", line[start..end].Trim(), end < line.Length ? "…" : "");
     }
 
@@ -262,12 +290,13 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
     // The path as browse and search show it: the path through the first parent, after the leading slash.
     private string? TryGetPath(RegisteredSubject subject, IInterceptorSubject rootSubject)
     {
-        if (subject.Parents.Length == 0)
+        var parents = subject.Parents;
+        if (parents.Length == 0)
         {
             return null;
         }
 
-        var parent = subject.Parents[0];
+        var parent = parents[0];
         var path = parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index);
         return path is not null ? "/" + path : null;
     }

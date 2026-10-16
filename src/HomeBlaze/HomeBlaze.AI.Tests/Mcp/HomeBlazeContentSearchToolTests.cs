@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -149,6 +150,110 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenMaxPagesIsZero_ThenItIsRaisedToOne()
+    {
+        // Arrange
+        var tool = await CreateToolAsync();
+
+        // Act
+        var result = await CallAsync(tool, new { query = "heat pump", max_pages = 0 });
+
+        // Assert
+        Assert.Single(result.GetProperty("pages").EnumerateArray());
+        Assert.True(result.GetProperty("truncated").GetBoolean());
+    }
+
+    [Fact]
+    public async Task WhenSearchingARegularExpressionWithIgnoreCase_ThenTheCaseOfTheQueryDoesNotMatter()
+    {
+        // Arrange
+        var tool = await CreateToolAsync();
+
+        // Act
+        var ignoringCase = await CallAsync(tool, new { query = "FREEZER door", regex = true });
+        var matchingCase = await CallAsync(tool, new { query = "freezer door", regex = true, ignore_case = false });
+
+        // Assert
+        var page = Assert.Single(ignoringCase.GetProperty("pages").EnumerateArray());
+        Assert.Equal("/Storage/Notes.md", page.GetProperty("path").GetString());
+        Assert.Empty(matchingCase.GetProperty("pages").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task WhenTheTokenIsCancelled_ThenTheSearchIsCancelled()
+    {
+        // Arrange
+        var tool = await CreateToolAsync();
+        using var cancellationTokenSource = new CancellationTokenSource();
+        await cancellationTokenSource.CancelAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            tool.Handler(JsonSerializer.SerializeToElement(new { query = "freezer" }), cancellationTokenSource.Token));
+    }
+
+    [Fact]
+    public async Task WhenALineContainsAUnicodeLineSeparator_ThenItDoesNotStartANewLine()
+    {
+        // Arrange
+        var tool = await CreateToolAsync(("Separator.md", "first\u2028still first line\nneedle"));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "needle" });
+
+        // Assert
+        var page = Assert.Single(result.GetProperty("pages").EnumerateArray());
+        Assert.Equal(2, Assert.Single(page.GetProperty("matches").EnumerateArray()).GetProperty("line").GetInt32());
+    }
+
+    [Fact]
+    public async Task WhenTheLinesEndWithCarriageReturnAndLineFeed_ThenTheLineNumbersAndSnippetsAreUnaffected()
+    {
+        // Arrange
+        var tool = await CreateToolAsync(("Windows.md", "first\r\nsecond needle\r\nthird"));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "needle" });
+
+        // Assert
+        var match = Assert.Single(Assert.Single(result.GetProperty("pages").EnumerateArray()).GetProperty("matches").EnumerateArray());
+        Assert.Equal(2, match.GetProperty("line").GetInt32());
+        Assert.Equal("second needle", match.GetProperty("snippet").GetString());
+    }
+
+    [Fact]
+    public async Task WhenTheSnippetWindowStartsInsideASurrogatePair_ThenNoHalfPairIsReturned()
+    {
+        // Arrange: the match is at index 160, so the window starts at index 100, the second half of the emoji at 99.
+        var tool = await CreateToolAsync(("EmojiStart.md", new string('x', 99) + "\U0001F600" + new string('x', 58) + " needle" + new string('y', 300)));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "needle" });
+
+        // Assert
+        var snippet = GetSingleSnippet(result);
+        Assert.Contains("needle", snippet);
+        Assert.DoesNotContain('\uFFFD', snippet);
+        Assert.Equal(snippet, Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(snippet)));
+    }
+
+    [Fact]
+    public async Task WhenTheSnippetWindowEndsInsideASurrogatePair_ThenNoHalfPairIsReturned()
+    {
+        // Arrange: the match is at index 160, so the window ends at index 260, after the first half of the emoji at 259.
+        var tool = await CreateToolAsync(("EmojiEnd.md", new string('x', 159) + " needle" + new string('y', 93) + "\U0001F600" + new string('y', 100)));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "needle" });
+
+        // Assert
+        var snippet = GetSingleSnippet(result);
+        Assert.Contains("needle", snippet);
+        Assert.DoesNotContain('\uFFFD', snippet);
+        Assert.Equal(snippet, Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(snippet)));
+    }
+
+    [Fact]
     public async Task WhenAPageHasMoreMatchingLinesThanTheLimit_ThenTheMatchCountIncludesAllOfThem()
     {
         // Arrange
@@ -265,6 +370,10 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
         var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly, forAgents: true);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
+
+    private static string GetSingleSnippet(JsonElement result) =>
+        Assert.Single(Assert.Single(result.GetProperty("pages").EnumerateArray()).GetProperty("matches").EnumerateArray())
+            .GetProperty("snippet").GetString()!;
 
     private static async Task<JsonElement> CallAsync(McpToolInfo tool, object input) =>
         JsonSerializer.SerializeToElement(await tool.Handler(JsonSerializer.SerializeToElement(input), CancellationToken.None));

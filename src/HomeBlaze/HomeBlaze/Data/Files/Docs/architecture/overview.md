@@ -205,7 +205,7 @@ The knowledge graph is accessed through two layers of MCP tools. The base layer 
 | Consumer | Access Pattern |
 |----------|---------------|
 | Operator UI | TrackingScope for live updates, subject browser for navigation, operations for actions |
-| AI agents | Base MCP tools (`browse`, `search`, `get_property`, `set_property`, `list_types`) + HomeBlaze MCP tools (`list_methods`, `invoke_query`, `invoke_operation`, `get_property_history`, `get_event_history`, `get_command_history`, enriched metadata) |
+| AI agents | Base MCP tools (`browse`, `search`, `get_property`, `set_property`, `list_types`) + HomeBlaze MCP tools (`list_methods`, `invoke_query`, `invoke_operation`, `search_content`, `edit_markdown`, `write_markdown`, `create_markdown`, `get_property_history`, `get_event_history`, `get_command_history`, enriched metadata) |
 | Connectors | Read/write interceptors feed property changes in and out, operations map to protocol methods (e.g. OPC UA methods) |
 | WebSocket sync | SubjectUpdate messages replicate the subject graph and proxy operations between instances |
 
