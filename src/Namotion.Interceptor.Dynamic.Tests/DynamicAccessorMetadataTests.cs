@@ -12,13 +12,17 @@ public interface IWriteOnlyValve
     int Target { set; }
 }
 
-public class ProtectedSetterDevice : DynamicSubject
+public class SetterAccessDevice : DynamicSubject
 {
     public virtual int Position { get; protected set; }
 
     public int Mode { get; protected set; }
 
     public virtual int Speed { get; set; }
+
+    public int SerialNumber { get; init; }
+
+    public virtual int Address { get; init; }
 }
 
 /// <summary>
@@ -73,13 +77,15 @@ public class DynamicAccessorMetadataTests
     }
 
     [Theory]
-    [InlineData(nameof(ProtectedSetterDevice.Position), false)]
-    [InlineData(nameof(ProtectedSetterDevice.Mode), false)]
-    [InlineData(nameof(ProtectedSetterDevice.Speed), true)]
-    public void WhenBaseClassPropertyHasASetter_ThenOnlyAPublicSetterCountsAsPublic(string propertyName, bool expectedHasPublicSetter)
+    [InlineData(nameof(SetterAccessDevice.Position), false)]
+    [InlineData(nameof(SetterAccessDevice.Mode), false)]
+    [InlineData(nameof(SetterAccessDevice.Speed), true)]
+    [InlineData(nameof(SetterAccessDevice.SerialNumber), false)]
+    [InlineData(nameof(SetterAccessDevice.Address), false)]
+    public void WhenBaseClassPropertyHasASetter_ThenOnlyAPublicSetterThatIsNotInitOnlyCountsAsPublic(string propertyName, bool expectedHasPublicSetter)
     {
         // Arrange
-        IInterceptorSubject subject = DynamicSubjectFactory.CreateSubject<ProtectedSetterDevice>();
+        IInterceptorSubject subject = DynamicSubjectFactory.CreateSubject<SetterAccessDevice>();
         subject.Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry());
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
 

@@ -155,8 +155,8 @@ public class RegisteredSubjectProperty
     /// <summary>
     /// Gets a value indicating whether the property has a setter that is public. An init-only setter counts as no setter.
     /// A setter that an override inherits has the accessibility of the property it overrides. An explicit or default
-    /// interface implementation counts as public, and so does a dynamic property without
-    /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> when it has a setter.
+    /// interface implementation has the accessibility of the implemented interface member. A dynamic property without
+    /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> counts as public when it has a setter.
     /// </summary>
     // TODO: Read the accessibility from the generated metadata instead of the PropertyInfo (see #102)
     public bool HasPublicSetter => HasSetter && IsSetterPublic(Reference.Metadata.PropertyInfo);
@@ -452,7 +452,8 @@ public class RegisteredSubjectProperty
                 .SetMethod;
         }
 
-        return setter?.IsPublic == true;
+        return setter is { IsPublic: true } &&
+            Array.IndexOf(setter.ReturnParameter.GetRequiredCustomModifiers(), typeof(IsExternalInit)) < 0;
     }
 
     /// <summary>
