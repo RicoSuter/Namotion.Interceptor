@@ -281,6 +281,35 @@ public partial class NameWithUnderscoreAndDigit
     public partial IInterceptorSubject? Content { get; set; }
 }
 
+// Enough slots with names of the same length that a hashed collection does not keep their order.
+[InterceptorSubject]
+public partial class ManySlots
+{
+    [Slot]
+    public partial IInterceptorSubject? Zulu { get; set; }
+
+    [Slot]
+    public partial IInterceptorSubject? Echo { get; set; }
+
+    [Slot]
+    public partial IInterceptorSubject? Kilo { get; set; }
+
+    [Slot]
+    public partial IInterceptorSubject? Alfa { get; set; }
+
+    [Slot]
+    public partial IInterceptorSubject? Mike { get; set; }
+
+    [Slot]
+    public partial IInterceptorSubject? Golf { get; set; }
+
+    [Slot]
+    public partial IInterceptorSubject? Papa { get; set; }
+
+    [Slot]
+    public partial IInterceptorSubject? Lima { get; set; }
+}
+
 [InterceptorSubject]
 public partial class DuplicateNames
 {
