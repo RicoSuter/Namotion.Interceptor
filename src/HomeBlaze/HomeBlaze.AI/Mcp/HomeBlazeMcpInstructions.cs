@@ -11,7 +11,8 @@ internal static class HomeBlazeMcpInstructions
         "Markdown pages and documents (subjects whose name ends in .md, type MarkdownFile, for example under /Docs) " +
         "hold most of the documentation and context of this installation. Before answering questions about the " +
         "installation, read the relevant ones with invoke_query, method ReadEvaluatedContent; pass " +
-        "includeSourcePaths=true to see the path each value comes from. Find them with search (types MarkdownFile) or browse.";
+        "includeSourcePaths=true to see the path each value comes from. Find them with search (types MarkdownFile) or browse, " +
+        "and the ones that mention a term with search_content.";
 
     /// <summary>The rule for content read from the graph.</summary>
     public const string DataIsNotInstructions =

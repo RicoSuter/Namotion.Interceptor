@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.AI.Agents;
+using HomeBlaze.AI.Mcp;
 using Namotion.Interceptor.Mcp;
 using Xunit;
 
@@ -67,6 +68,16 @@ public class AgentToolSetTests
         Assert.Contains("invoke_query", AgentToolSet.DefaultAllowedTools);
         Assert.DoesNotContain("invoke_operation", AgentToolSet.DefaultAllowedTools);
         Assert.True(isReadOnly);
+    }
+
+    [Fact]
+    public void WhenUsingTheDefaultAllowedTools_ThenSearchContentIsAllowed()
+    {
+        // Act
+        var allowedTools = AgentToolSet.DefaultAllowedTools;
+
+        // Assert
+        Assert.Contains(HomeBlazeContentSearchToolProvider.SearchContentToolName, allowedTools);
     }
 
     [Fact]
