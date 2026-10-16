@@ -314,7 +314,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
         if (timeZone is not null)
         {
-            response["time_zone"] = timeZone.Id;
+            response["time_zone"] = HistoryToolParsing.GetIanaId(timeZone);
         }
 
         if (responseCoverage is { } coverage)

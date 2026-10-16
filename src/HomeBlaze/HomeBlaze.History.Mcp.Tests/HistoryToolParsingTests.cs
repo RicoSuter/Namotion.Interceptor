@@ -133,4 +133,30 @@ public class HistoryToolParsingTests
         var exception = Assert.Throws<FormatException>(() => HistoryToolParsing.ParseTimeZone("Mars/Olympus"));
         Assert.Equal("Unknown time zone 'Mars/Olympus'.", exception.Message);
     }
+
+    [Theory]
+    [InlineData("/Europe/Zurich")]
+    [InlineData("Europe/../Zurich")]
+    [InlineData("Europe/Zurich\\")]
+    [InlineData("")]
+    public void WhenTimeZoneIdIsNotAPlainIanaId_ThenThrowsFormatException(string id)
+    {
+        // Act & Assert
+        var exception = Assert.Throws<FormatException>(() => HistoryToolParsing.ParseTimeZone(id));
+        Assert.Equal($"Unknown time zone '{id}'.", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("Europe/Zurich")]
+    [InlineData("Etc/GMT+1")]
+    [InlineData("America/Port-au-Prince")]
+    [InlineData("UTC")]
+    public void WhenTimeZoneIdIsAnIanaId_ThenItResolves(string id)
+    {
+        // Act
+        var timeZone = HistoryToolParsing.ParseTimeZone(id);
+
+        // Assert
+        Assert.NotNull(timeZone);
+    }
 }

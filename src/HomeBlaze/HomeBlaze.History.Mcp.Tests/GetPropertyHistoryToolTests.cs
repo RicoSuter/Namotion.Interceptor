@@ -485,6 +485,16 @@ public class GetPropertyHistoryToolTests
     }
 
     [Fact]
+    public async Task WhenTimeZoneIsGivenWithoutABucket_ThenStructuredError()
+    {
+        // Act
+        var json = await InvokeAsync(new { paths = new[] { "/Energy" }, from = "2026-01-01T00:00:00Z", time_zone = "Europe/Zurich" });
+
+        // Assert
+        Assert.Equal("Parameter 'time_zone' only applies to day, week, month and year buckets.", json.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task WhenTimeZoneIsUnknown_ThenStructuredError()
     {
         // Act

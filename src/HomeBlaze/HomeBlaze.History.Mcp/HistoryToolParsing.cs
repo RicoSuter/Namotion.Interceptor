@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security;
 using HomeBlaze.History.Abstractions;
 
 namespace HomeBlaze.History.Mcp;
@@ -127,14 +128,52 @@ public static class HistoryToolParsing
     /// </summary>
     public static TimeZoneInfo ParseTimeZone(string id)
     {
+        // On Unix the id becomes a path under the zoneinfo directory, so only plain relative ids reach the lookup.
+        var trimmed = id.Trim();
+        if (!IsPlainTimeZoneId(trimmed))
+        {
+            throw new FormatException($"Unknown time zone '{id}'.");
+        }
+
         try
         {
-            return TimeZoneInfo.FindSystemTimeZoneById(id.Trim());
+            return TimeZoneInfo.FindSystemTimeZoneById(trimmed);
         }
-        catch (Exception exception) when (exception is TimeZoneNotFoundException or InvalidTimeZoneException)
+        catch (Exception exception) when (exception is TimeZoneNotFoundException or InvalidTimeZoneException or SecurityException)
         {
             throw new FormatException($"Unknown time zone '{id}'.", exception);
         }
+    }
+
+    /// <summary>
+    /// Gets the id to report for a time zone: its IANA id where the platform knows one, else its own id.
+    /// </summary>
+    internal static string GetIanaId(TimeZoneInfo timeZone)
+    {
+        if (timeZone.HasIanaId)
+        {
+            return timeZone.Id;
+        }
+
+        return TimeZoneInfo.TryConvertWindowsIdToIanaId(timeZone.Id, out var ianaId) ? ianaId : timeZone.Id;
+    }
+
+    private static bool IsPlainTimeZoneId(string id)
+    {
+        if (id.Length == 0 || id[0] == '/' || id.Contains("..", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var character in id)
+        {
+            if (!char.IsAsciiLetterOrDigit(character) && character is not ('_' or '+' or '-' or '/'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>Parses an ISO 8601 timestamp; a bare (offset-less) timestamp is treated as UTC.</summary>
