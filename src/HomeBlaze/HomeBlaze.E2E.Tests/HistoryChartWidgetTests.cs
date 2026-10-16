@@ -266,6 +266,18 @@ public class HistoryChartWidgetTests
     }
 
     [Fact]
+    public async Task WhenABucketIsTooSmallForTheRange_ThenItShowsAnErrorThatNamesTheSmallestBucketThatFits()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync(DesktopWidth);
+        var error = page.GetByTestId("widget-argument-error").Filter(new() { HasText = "Bucket '1s'" });
+
+        // Assert
+        await Assertions.Expect(error).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(error).ToHaveTextAsync("Bucket '1s' is too small for range '1h': use 10s or more, or Auto");
+    }
+
+    [Fact]
     public async Task WhenScreenIsWide_ThenTheLinesFillTheWidthAtTheirHeightWithAFewValueLabels()
     {
         // Arrange & Act

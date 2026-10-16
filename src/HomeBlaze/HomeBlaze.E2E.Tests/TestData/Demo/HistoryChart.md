@@ -34,6 +34,10 @@ title: History Chart Demo
 ::: Series Path=chartmotor/CurrentSpeed Label="Median speed"
 ::
 
+:: HomeBlaze.History.Blazor.HistoryChart Range=1h Bucket=1s
+::: Series Path=chartmotor/CurrentSpeed Label="Fine speed"
+::
+
 :: HomeBlaze.Components.TabLayout
 ::: Tab Title="First"
 The chart is in the second tab, which is hidden when the page opens.
