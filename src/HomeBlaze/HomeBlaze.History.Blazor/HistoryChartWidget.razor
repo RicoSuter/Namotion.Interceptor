@@ -19,9 +19,9 @@
 
 @if (Subject is HistoryChart chart)
 {
-    // The configuration and the current values are read on every render and the values are never kept: these
-    // reads are what the page tracking scope records, so a change of a charted value renders the legend again,
-    // and that render arms the refresh of the chart. The legends in the chart view are read in the same render batch.
+    // The configuration and the current values are read on every render: these reads are what the page tracking scope
+    // records, so a change of a charted value renders the legend again. The legends in the chart view are read in the
+    // same render batch.
     Resolve(chart);
 
     <div data-testid="history-chart">
@@ -83,7 +83,10 @@
     private bool? _hasStores;
     private string? _queryError;
     private TimeSpan? _bucket;
-    private bool _skipNextArm;
+
+    // The values of the series after the last render. The page renders every widget on a change of any value it shows,
+    // so only a change of one of these arms the refresh.
+    private object?[] _lastValues = [];
 
     // The resolution of the series, kept until the configuration or the paths of the graph change, because the
     // legend renders on every change of a charted value.
@@ -262,14 +265,8 @@
             return;
         }
 
-        // The render that shows a new result is no change of a value.
-        if (_skipNextArm)
-        {
-            _skipNextArm = false;
-            return;
-        }
-
-        if (_error is null && Subject is HistoryChart)
+        var isChanged = HistoryChartSeriesResolver.UpdateValues(_series, _lastValues);
+        if (isChanged && _error is null && Subject is HistoryChart)
         {
             _throttle?.Arm(HistoryRefreshThrottle.GetWindow(_resolvedRefreshInterval, _bucket));
         }
@@ -343,6 +340,8 @@
         }
 
         _series = series;
+        _lastValues = new object?[series.Count];
+        HistoryChartSeriesResolver.UpdateValues(series, _lastValues);
         _firstLine = HistoryChartSeriesResolver.FindFirstRecordedLine(series);
         _showHistory = new EventCallback[series.Count];
         _historyTitles = new string[series.Count];
@@ -420,7 +419,6 @@
             _hasStores = stores.Length > 0;
             if (stores.Length == 0)
             {
-                _skipNextArm = true;
                 StateHasChanged();
                 return;
             }
@@ -496,7 +494,6 @@
             _queryError = "Could not load history: " + exception.Message;
         }
 
-        _skipNextArm = true;
         StateHasChanged();
     }
 

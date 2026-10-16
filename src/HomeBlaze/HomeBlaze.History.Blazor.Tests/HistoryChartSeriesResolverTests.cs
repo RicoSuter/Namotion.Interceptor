@@ -290,6 +290,50 @@ public class HistoryChartSeriesResolverTests
     }
 
     [Fact]
+    public void WhenAValueOfAnotherPropertyChanges_ThenTheValuesOfTheSeriesAreUnchanged()
+    {
+        // Arrange
+        var (resolver, root) = CreateGraph(
+            new HistoryChartSeries { Path = "/Temperature" },
+            new HistoryChartSeries { Path = "/IsOn" },
+            new HistoryChartSeries { Path = "/Unknown" });
+        var series = Resolve(resolver, root.Chart!);
+        var values = new object?[series.Count];
+        HistoryChartSeriesResolver.UpdateValues(series, values);
+
+        // Act
+        root.Energy = 5;
+        root.NotRecorded = 7;
+        var isChanged = HistoryChartSeriesResolver.UpdateValues(series, values);
+
+        // Assert
+        Assert.False(isChanged);
+        Assert.Equal([0d, false, null], values);
+    }
+
+    [Fact]
+    public void WhenAValueOfASeriesChanges_ThenTheValuesChangeOnce()
+    {
+        // Arrange
+        var (resolver, root) = CreateGraph(
+            new HistoryChartSeries { Path = "/Temperature" },
+            new HistoryChartSeries { Path = "/IsOn" });
+        var series = Resolve(resolver, root.Chart!);
+        var values = new object?[series.Count];
+        HistoryChartSeriesResolver.UpdateValues(series, values);
+
+        // Act
+        root.IsOn = true;
+        var isChanged = HistoryChartSeriesResolver.UpdateValues(series, values);
+        var isChangedAgain = HistoryChartSeriesResolver.UpdateValues(series, values);
+
+        // Assert
+        Assert.True(isChanged);
+        Assert.False(isChangedAgain);
+        Assert.Equal([0d, true], values);
+    }
+
+    [Fact]
     public void WhenLineColorsAreAssigned_ThenOnlyChartedLinesTakeTheNextColorOrTheirOwn()
     {
         // Arrange

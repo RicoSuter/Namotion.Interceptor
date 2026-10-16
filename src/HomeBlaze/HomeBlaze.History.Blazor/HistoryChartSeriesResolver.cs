@@ -196,6 +196,27 @@ internal static class HistoryChartSeriesResolver
     }
 
     /// <summary>
+    /// Reads the current value of every series into <paramref name="values"/>, which holds one entry per series, and
+    /// returns whether one differs from the value it held, compared with <see cref="object.Equals(object, object)"/>.
+    /// A series that leads nowhere holds null.
+    /// </summary>
+    public static bool UpdateValues(IReadOnlyList<HistoryChartSeriesInfo> series, object?[] values)
+    {
+        var isChanged = false;
+        for (var index = 0; index < values.Length; index++)
+        {
+            var value = series[index].Property?.GetValue();
+            if (!Equals(value, values[index]))
+            {
+                values[index] = value;
+                isChanged = true;
+            }
+        }
+
+        return isChanged;
+    }
+
+    /// <summary>
     /// Gets the colour of every recorded line, in series order: its own, otherwise the next of
     /// <see cref="HistoryChartPalette.LineColors"/> by its position among the recorded lines. Null for
     /// everything else.
