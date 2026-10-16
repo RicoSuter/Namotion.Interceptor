@@ -23,6 +23,7 @@ namespace HomeBlaze.History.Blazor
         public string Range { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public System.TimeSpan RefreshInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.Slot("Series")]
         public HomeBlaze.History.Blazor.HistoryChartSeries[] Series { get; set; }
         public string? Title { get; }

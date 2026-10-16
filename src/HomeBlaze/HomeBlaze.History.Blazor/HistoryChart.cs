@@ -65,9 +65,9 @@ public partial class HistoryChart : IConfigurable, ITitleProvider
     public partial bool Compact { get; set; }
 
     /// <summary>
-    /// The series, one per <c>Series</c> block.
+    /// The series of the chart. On a page one <c>Series</c> block each, in a configuration file a list.
     /// </summary>
-    [Slot("Series")]
+    [Configuration, Slot("Series")]
     public partial HistoryChartSeries[] Series { get; set; }
 
     public string? Title => null;

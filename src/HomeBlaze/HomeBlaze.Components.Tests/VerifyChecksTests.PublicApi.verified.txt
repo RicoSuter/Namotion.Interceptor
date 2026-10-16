@@ -581,6 +581,7 @@ namespace HomeBlaze.Components
     {
         public SubjectTable() { }
         public SubjectTable(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.Slot("Column")]
         public HomeBlaze.Components.SubjectTableColumn[] Columns { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]

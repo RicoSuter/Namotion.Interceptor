@@ -90,6 +90,7 @@ An interface as type: every subject in the folder that measures a temperature, w
 - **The cells**: A cell shows the value of the property of its row like every value widget does, see [Basics](basics.md): formatted with its unit, with the text and colour of a map, and a dash when the value is not set or the row has no such property.
 - **The link**: The cell of the first column links to the subject in the subject browser. A table without columns has one column `Name` with the title of each subject, as a link.
 - **Live**: The values change on the page when the properties change, and the rows follow when subjects are added to or removed from the source.
+- **Configuration file**: In a configuration file of its own, a `SubjectTable` has its columns as the list `columns`, each with `property`, `label` and `map`. On a page they are always `Column` blocks, and neither a `Columns` argument nor the [`json` block](../pages.md#the-json-block) can set them.
 - **Limits**: There is no sorting, no paging and no editing in the table.
 
 ## Related

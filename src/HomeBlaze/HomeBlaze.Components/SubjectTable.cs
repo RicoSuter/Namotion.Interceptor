@@ -35,9 +35,10 @@ public partial class SubjectTable : IConfigurable, ITitleProvider
     public partial string? Type { get; set; }
 
     /// <summary>
-    /// The columns, one per <c>Column</c> block. The first one links to the row subject.
+    /// The columns of the table, the first one links to the row subject. On a page one <c>Column</c> block each, in a
+    /// configuration file a list.
     /// </summary>
-    [Slot("Column")]
+    [Configuration, Slot("Column")]
     public partial SubjectTableColumn[] Columns { get; set; }
 
     public string? Title => null;
