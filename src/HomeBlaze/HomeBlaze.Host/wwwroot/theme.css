@@ -36,3 +36,12 @@
 .homeblaze-dark-mode .mud-navmenu .mud-nav-link.active:not(.mud-nav-link-disabled) {
     color: var(--mud-palette-primary-lighten);
 }
+
+/* The selection of a widget in edit mode: the dark primary is below 3:1 on cards for its outline and its Edit action. */
+.homeblaze-dark-mode .subject-component-wrapper.selectable.selected {
+    outline-color: var(--mud-palette-primary-lighten);
+}
+
+.homeblaze-dark-mode .subject-action-bar .mud-primary-text {
+    color: var(--mud-palette-primary-lighten) !important;
+}

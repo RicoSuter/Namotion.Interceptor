@@ -73,6 +73,23 @@ public class WidgetSelectionTests
     }
 
     [Fact]
+    public async Task WhenAWidgetIsSelectedInDarkMode_ThenItsOutlineAndEditActionHaveTheLightenedPrimaryColour()
+    {
+        // Arrange: the app starts in the dark theme.
+        var page = await OpenPageInInlineModeAsync();
+        var wrapper = GetWrapperOf(page, "switch");
+
+        // Act
+        var actionBar = await wrapper.SelectWidgetAsync();
+
+        // Assert
+        var expected = await page.ResolveColourAsync("var(--mud-palette-primary-lighten)");
+        Assert.NotEqual(await page.ResolveColourAsync("var(--mud-palette-primary)"), expected);
+        await Assertions.Expect(wrapper).ToHaveCSSAsync("outline-color", expected, new() { Timeout = Timeout });
+        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCSSAsync("color", expected);
+    }
+
+    [Fact]
     public async Task WhenEditIsClickedOnACardWithATitle_ThenTheEditDialogIsTitledWithItAndShowsTheType()
     {
         // Arrange
