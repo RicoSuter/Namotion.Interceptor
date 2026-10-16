@@ -246,12 +246,12 @@
             return;
         }
 
-        // A click on a node selects its widget.
+        // A click on a node selects its widget, on a page the first widget in the content of the node.
         if (_pressedNode is { } node)
         {
-            if (_nodeComponents.TryGetValue(node, out var component))
+            if (_nodeComponents.TryGetValue(node, out var component) && component.FindSelectable() is { } selectable)
             {
-                Selection?.Select(component);
+                Selection?.Select(selectable);
             }
 
             return;

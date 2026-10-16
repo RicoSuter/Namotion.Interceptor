@@ -119,6 +119,9 @@
     private double _pointerDownX;
     private double _pointerDownY;
 
+    // The widgets directly inside this one, in the order they were created. Allocated by the first of them.
+    private List<SubjectComponent>? _childComponents;
+
     // Created once: a method group in the markup would allocate a delegate on every render, and every widget renders here.
     // Only a selectable widget gets the handlers of the wrapper, so that an event on a viewed page stays in the browser.
     private EventCallback<PointerEventArgs> _pointerDownCallback;
@@ -200,6 +203,35 @@
         _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown);
         _selectParentCallback = EventCallback.Factory.Create(this, SelectParent);
         _editCallback = EventCallback.Factory.Create(this, OpenEditDialog);
+        if (ParentComponent != null)
+        {
+            (ParentComponent._childComponents ??= []).Add(this);
+        }
+    }
+
+    /// <summary>
+    /// Gets this widget when it can be selected, otherwise the first widget inside it that can, such as the widget in
+    /// the page content of a canvas node.
+    /// </summary>
+    internal SubjectComponent? FindSelectable()
+    {
+        if (IsSelectable)
+        {
+            return this;
+        }
+
+        if (_childComponents != null)
+        {
+            foreach (var child in _childComponents)
+            {
+                if (child.FindSelectable() is { } selectable)
+                {
+                    return selectable;
+                }
+            }
+        }
+
+        return null;
     }
 
     // An event of the wrapper or the bar does not render the widget: a press, a key or a click that selects nothing changes
@@ -313,5 +345,6 @@
     public void Dispose()
     {
         Selection?.Remove(this);
+        ParentComponent?._childComponents?.Remove(this);
     }
 }
