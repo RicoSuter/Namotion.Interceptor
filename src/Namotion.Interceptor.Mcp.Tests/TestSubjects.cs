@@ -52,6 +52,7 @@ public partial class TestNumbers
     public partial int IntValue { get; set; }
     public partial long LongValue { get; set; }
     public partial float FloatValue { get; set; }
+    public partial double DoubleValue { get; set; }
 }
 
 [InterceptorSubject]

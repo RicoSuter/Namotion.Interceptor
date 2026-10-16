@@ -211,7 +211,7 @@ IsConnected == false || BatteryLevel < 0.2 && Status != "Running"
 - Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=` between a property name and a number, `true`, `false`, `null` or a string in double or single quotes. A bare word on the right, as in `Status != Running`, is read as a string.
 - Combine comparisons with `&&` (or `and`) and `||` (or `or`); `&&` binds tighter, and parentheses group.
 - Numbers compare numerically whatever their CLR type. Enums compare by name and strings case-insensitively for `==` and `!=`; strings order by ordinal. `DateTime` and `DateTimeOffset` values compare against an ISO 8601 string, a string without an offset read as UTC.
-- A subject without the property, with a null value compared to a non-null literal, or with a value of an incompatible type does not match, for every operator including `!=`. `== null` and `!= null` test whether the value is null; the other operators never match `null`. Properties holding subjects and attributes never match.
+- A subject without the property, with a null value compared to a non-null literal, with a NaN value, or with a value of an incompatible type does not match, for every operator including `!=`. `== null` and `!= null` test whether the value is null; the other operators never match `null`. Properties holding subjects and attributes never match.
 - Only properties the path provider exposes can be filtered on.
 - An expression may be at most 1000 characters long and nest parentheses at most 32 levels deep.
 - An invalid expression returns an error naming the zero-based position, for example `where: use '==' for equality at position 12`.

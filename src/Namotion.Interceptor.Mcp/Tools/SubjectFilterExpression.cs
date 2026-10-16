@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// property against a number, <c>true</c>, <c>false</c>, <c>null</c> or a string, combined with
 /// <c>&amp;&amp;</c> (<c>and</c>), <c>||</c> (<c>or</c>) and parentheses, where <c>&amp;&amp;</c> binds tighter.
 /// Properties resolve through the path provider, so a filter only sees properties the provider exposes.
-/// A missing property, a null value against a non-null literal or an incompatible type never matches.
+/// A missing property, a null value against a non-null literal, a NaN value or an incompatible type never matches.
 /// </summary>
 internal sealed class SubjectFilterExpression
 {
@@ -135,6 +135,9 @@ internal sealed class SubjectFilterExpression
                 (DateTime dateTime, string) => _literalInstant is { } literalInstant
                     ? ToInstant(dateTime).CompareTo(literalInstant)
                     : null,
+                // CompareTo orders NaN below every number, so NaN is handled like an incompatible type.
+                (float single, double) when float.IsNaN(single) => null,
+                (double floatingPoint, double) when double.IsNaN(floatingPoint) => null,
                 // Widening a float to double would make 0.1f differ from the literal 0.1.
                 (float single, double number) => single.CompareTo((float)number),
                 (_, double number) when IsNumber(value) =>

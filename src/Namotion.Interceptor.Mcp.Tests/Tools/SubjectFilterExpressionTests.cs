@@ -123,6 +123,33 @@ public class SubjectFilterExpressionTests
         Assert.Equal(expected, matches);
     }
 
+    [Theory]
+    [InlineData("DoubleValue < 0.2")]
+    [InlineData("DoubleValue <= 0.2")]
+    [InlineData("DoubleValue > 0.2")]
+    [InlineData("DoubleValue >= 0.2")]
+    [InlineData("DoubleValue == 0.2")]
+    [InlineData("DoubleValue != 0.2")]
+    [InlineData("FloatValue < 0.2")]
+    [InlineData("FloatValue <= 0.2")]
+    [InlineData("FloatValue > 0.2")]
+    [InlineData("FloatValue >= 0.2")]
+    [InlineData("FloatValue == 0.2")]
+    [InlineData("FloatValue != 0.2")]
+    public void WhenValueIsNaN_ThenNoNumberComparisonMatches(string where)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var numbers = new TestNumbers(context) { FloatValue = float.NaN, DoubleValue = double.NaN };
+        Assert.True(SubjectFilterExpression.TryParse(where, out var expression, out _));
+
+        // Act
+        var matches = expression.Matches(numbers.TryGetRegisteredSubject()!, DefaultPathProvider.Instance);
+
+        // Assert
+        Assert.False(matches);
+    }
+
     [Fact]
     public void WhenExpressionIsLongerThanLimit_ThenReturnsLengthError()
     {
