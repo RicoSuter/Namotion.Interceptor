@@ -141,7 +141,6 @@ public static class ValueReader
 
         try
         {
-            // Only a displayable property: never a secret, the raw source of a page or a plain property.
             return resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, widget);
         }
         catch

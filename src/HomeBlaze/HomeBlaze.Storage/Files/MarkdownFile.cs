@@ -75,17 +75,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public string FullPath { get; }
     public string Name { get; }
 
-    /// <summary>
-    /// Whether the file is in local storage (on disk or in memory), the only storage the write operations change.
-    /// </summary>
-    public bool IsLocal => MarkdownWriteRules.IsLocal(Storage);
-
-    /// <summary>
-    /// Whether the file is in the documentation folder, which is replaced on every start and which the write operations
-    /// do not change.
-    /// </summary>
-    public bool IsInDocumentationFolder => MarkdownWriteRules.IsInDocumentationFolder(Storage, FullPath);
-
     [Derived]
     public string? Title => Frontmatter?.Title ?? FormatFilename(Name);
 
@@ -232,7 +221,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         // Without a parsed page there are no subjects to tell the secret values, so only an empty source is shown.
         var snapshot = _parseResult;
         return snapshot.Page is { } page
-            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, FindLayoutBlocks(page))
+            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, FindLayoutBlocks(page), out _)
             : string.IsNullOrEmpty(Content) ? Content : null;
     }
 
@@ -359,13 +348,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private string RedactSource(string source, out List<EmbeddedSubjectRedaction.Redaction> redactions)
     {
         var snapshot = _parseResult;
-        return snapshot.Page is { } page && page.Source == source
-            ? EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, out redactions, FindLayoutBlocks(page))
-            : RedactWithoutSubjects(MarkdownPageParser.Parse(source), out redactions);
-    }
+        if (snapshot.Page is { } page && page.Source == source)
+        {
+            return EmbeddedSubjectRedaction.Redact(page, snapshot.BlockSubjects, FindLayoutBlocks(page), out redactions);
+        }
 
-    private string RedactWithoutSubjects(MarkdownPage page, out List<EmbeddedSubjectRedaction.Redaction> redactions) =>
-        EmbeddedSubjectRedaction.Redact(page, new Dictionary<int, IInterceptorSubject>(), out redactions, FindLayoutBlocks(page));
+        var unparsedPage = MarkdownPageParser.Parse(source);
+        return EmbeddedSubjectRedaction.Redact(
+            unparsedPage, new Dictionary<int, IInterceptorSubject>(), FindLayoutBlocks(unparsedPage), out redactions);
+    }
 
     private HashSet<MarkdownBlock> FindLayoutBlocks(MarkdownPage page) => MarkdownPageLayout.FindLayoutBlocks(page, _parser.FindType);
 
@@ -384,11 +375,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // Not cancelled once the content is decided: a cancelled reload after the write would leave the parse snapshot of
     // the old content, which a later configuration write-back would write back.
-    private async Task WriteUnlockedAsync(string content)
-    {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content), writable: false);
-        await Storage.WriteBlobAsync(FullPath, stream, CancellationToken.None);
-    }
+    private Task WriteUnlockedAsync(string content) =>
+        Storage.WriteBlobAsync(FullPath, Encoding.UTF8.GetBytes(content), CancellationToken.None);
 
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
@@ -401,6 +389,27 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             // Not cancelled once the lock is held, for the reason given at WriteUnlockedAsync.
             await Storage.WriteBlobAsync(FullPath, content, CancellationToken.None);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Writes the Markdown source to the file as it is, once no other write of the file is under way; the storage
+    /// refreshes the page after the write. It is not cancelled once that write has begun.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
+    /// load of a file.</exception>
+    public async Task WriteAsync(string content, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        MarkdownWriteRules.EnsureNotWithinStorageWork(Storage);
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            await WriteUnlockedAsync(content);
         }
         finally
         {

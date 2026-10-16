@@ -134,8 +134,6 @@ namespace HomeBlaze.Services
     public static class SubjectPathResolverExtensions
     {
         public static Namotion.Interceptor.IInterceptorSubject? FindChildByIndex(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string indexStr) { }
-        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveDisplayableProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
-        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
         public static object? ResolveValue(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
     }
     public static class SubjectPathResolverScopeExtensions

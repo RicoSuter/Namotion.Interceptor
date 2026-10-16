@@ -192,6 +192,30 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenReplaceTextRunsDuringASaveOfTheEditor_ThenItWaitsAndReplacesInTheSavedSource()
+    {
+        // Arrange - the page editor saves its text through WriteAsync, and the storage is still writing it.
+        WriteFile("Notes.md", "# Heading\n\nold");
+        PausableBlobStorage? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+        var save = markdown.WriteAsync("# Heading\n\nsaved by the editor", CancellationToken.None);
+        await writeReached;
+
+        // Act
+        var replace = markdown.ReplaceTextAsync("saved by the editor", "changed by an agent", CancellationToken.None);
+        client.Release();
+        await Task.WhenAll(save, replace);
+
+        // Assert
+        Assert.Equal("# Heading\n\nchanged by an agent", ReadFile("Notes.md"));
+        Assert.Equal("# Heading\n\nchanged by an agent", markdown.Content);
+    }
+
+    [Fact]
     public async Task WhenAConfigurationWriteBackRunsDuringAnotherWrite_ThenItWaitsAndWritesIntoTheWrittenSource()
     {
         // Arrange - an editor save whose content is still being written.
@@ -596,8 +620,9 @@ public class MarkdownFileWriteTests : IDisposable
             () => markdown.ReplaceTextAsync("# Old", "# New", CancellationToken.None));
         Assert.Contains("local", replaceContent.Message);
         Assert.Contains("local", replaceText.Message);
-        Assert.False(markdown.IsLocal);
+        Assert.False(MarkdownWriteRules.IsLocal(markdown.Storage));
         storage.Verify(container => container.WriteBlobAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
+        storage.Verify(container => container.WriteBlobAsync(It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
         storage.Verify(container => container.ReadBlobAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -615,7 +640,6 @@ public class MarkdownFileWriteTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(
             () => folder.CreateMarkdownFileAsync("Notes.md", "# Notes", CancellationToken.None));
         Assert.False(storage.IsLocal);
-        Assert.False(folder.IsLocal);
         Assert.False(File.Exists(GetFullPath("Notes.md")));
         Assert.False(File.Exists(GetFullPath("Docs/Notes.md")));
     }
@@ -629,7 +653,6 @@ public class MarkdownFileWriteTests : IDisposable
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
             () => folder.CreateMarkdownFileAsync("Notes.md", "# Notes", CancellationToken.None));
-        Assert.False(folder.IsLocal);
     }
 
     [Theory]
@@ -647,7 +670,7 @@ public class MarkdownFileWriteTests : IDisposable
 
         // Assert
         Assert.Equal(expected, storage.IsLocal);
-        Assert.Equal(expected, new VirtualFolder(storage, "Docs/").IsLocal);
+        Assert.Equal(expected, MarkdownWriteRules.IsLocal(storage));
     }
 
     [Fact]
@@ -773,9 +796,9 @@ public class MarkdownFileWriteTests : IDisposable
         // Assert
         Assert.All([replaceText, replaceContent, create], exception =>
             Assert.Equal(MarkdownFile.DocumentationFolderMessage, Assert.IsType<ArgumentException>(exception).Message));
-        Assert.True(guide.IsInDocumentationFolder);
-        Assert.True(docs.IsInDocumentationFolder);
-        Assert.False(notes.IsInDocumentationFolder);
+        Assert.True(storage.IsPathInDocumentationFolder(guide.FullPath));
+        Assert.True(storage.IsPathInDocumentationFolder(docs.RelativePath));
+        Assert.False(storage.IsPathInDocumentationFolder(notes.FullPath));
         Assert.Equal("# Guide", ReadFile("Docs/Guide.md"));
         Assert.False(File.Exists(GetFullPath("Docs/New.md")));
         Assert.Equal("# Changed notes", ReadFile("Notes.md"));
@@ -1095,6 +1118,11 @@ public class MarkdownFileWriteTests : IDisposable
         :::
         ::
 
+        :: HomeBlaze.Components.ValueList#values
+        ::: Value Label=Speed Map=lostmap
+        :::
+        ::
+
         :: HomeBlaze.Components.Card#info Title=Info
         ::
         """;
@@ -1102,6 +1130,7 @@ public class MarkdownFileWriteTests : IDisposable
     [Theory]
     [InlineData("Title=Info", "Title=Details")]
     [InlineData("Rows=1 Columns=2", "Rows=1 Columns=3")]
+    [InlineData("::: Value Label=Speed Map=lostmap\n:::\n", "::: Value Label=Speed Map=lostmap\n:::\n::: Value Label=Other\n:::\n")]
     public async Task WhenThePageAlreadyHasDanglingReferences_ThenALayoutEditThatKeepsThemIsWritten(string oldText, string newText)
     {
         // Arrange
@@ -1121,6 +1150,8 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Path=gone\n", "Path=missing\n")]
     [InlineData("Path=lost\n", "Path=missing\n")]
     [InlineData("# Plant\n", "# Plant\n\n:: HomeBlaze.Components.Widget Path=gone\n::\n")]
+    [InlineData("Map=lostmap\n", "Map=missing\n")]
+    [InlineData("::: Value Label=Speed Map=lostmap\n:::\n", "::: Value Label=Speed Map=lostmap\n:::\n::: Value Label=New Map=missing\n:::\n")]
     public async Task WhenALayoutEditAddsOrChangesADanglingReference_ThenItIsRejected(string oldText, string newText)
     {
         // Arrange

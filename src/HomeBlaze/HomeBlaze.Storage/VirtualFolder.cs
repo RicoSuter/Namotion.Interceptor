@@ -40,17 +40,6 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <inheritdoc />
     public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
 
-    /// <summary>
-    /// Whether the folder is in local storage (on disk or in memory), the only storage the Markdown write operations change.
-    /// </summary>
-    public bool IsLocal => MarkdownWriteRules.IsLocal(Storage);
-
-    /// <summary>
-    /// Whether the folder is in the documentation folder, which is replaced on every start and in which the write
-    /// operations create no file.
-    /// </summary>
-    public bool IsInDocumentationFolder => MarkdownWriteRules.IsInDocumentationFolder(Storage, RelativePath);
-
     public VirtualFolder(IStorageContainer storage, string relativePath)
     {
         Storage = storage;

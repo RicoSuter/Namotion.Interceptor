@@ -54,7 +54,6 @@ public partial class RenderExpression : ITitleProvider
     {
         try
         {
-            // Only a displayable property: never a secret, the raw source of a page or a plain property.
             return _pathResolver.ResolveScopedDisplayableProperty(Path, PathStyle.Canonical, Parent);
         }
         catch

@@ -139,8 +139,14 @@ public partial class ConfigTestSubject
     public partial string? RuntimeState { get; set; }
 }
 
+public interface IPlainStateTestSource
+{
+    [State]
+    string? InterfaceStateText { get; }
+}
+
 [InterceptorSubject]
-public partial class SecretConfigTestSubject
+public partial class SecretConfigTestSubject : IPlainStateTestSource
 {
     [Configuration(IsSecret = true)]
     public partial string? SecretKey { get; set; }
@@ -155,6 +161,11 @@ public partial class SecretConfigTestSubject
 
     [Derived]
     public string? DerivedText => PublicConfig + "!";
+
+    [State]
+    public string? StateText => PublicConfig + " state";
+
+    public string? InterfaceStateText => PublicConfig + " interface state";
 }
 
 [InterceptorSubject]

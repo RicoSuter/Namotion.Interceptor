@@ -17,7 +17,7 @@ public class SubjectPathResolverSecretTests
         var (resolver, _) = CreateResolver();
 
         // Act
-        var property = resolver.ResolveDisplayableProperty("/SecretKey", PathStyle.Canonical);
+        var property = resolver.ResolveProperty("/SecretKey", PathStyle.Canonical).AsDisplayable();
         var value = resolver.ResolveValue("/SecretKey", PathStyle.Canonical);
 
         // Assert
@@ -33,7 +33,7 @@ public class SubjectPathResolverSecretTests
         var (resolver, _) = CreateResolver();
 
         // Act
-        var property = resolver.ResolveDisplayableProperty("/PublicConfig", PathStyle.Canonical);
+        var property = resolver.ResolveProperty("/PublicConfig", PathStyle.Canonical).AsDisplayable();
         var value = resolver.ResolveValue("PublicConfig", PathStyle.Canonical);
 
         // Assert
@@ -49,7 +49,7 @@ public class SubjectPathResolverSecretTests
         root.RawSource = "Password=s3cr3t";
 
         // Act
-        var property = resolver.ResolveDisplayableProperty("/RawSource", PathStyle.Canonical);
+        var property = resolver.ResolveProperty("/RawSource", PathStyle.Canonical).AsDisplayable();
         var scopedValue = resolver.ResolveScopedValue("RawSource", PathStyle.Canonical, root);
 
         // Assert
@@ -66,13 +66,30 @@ public class SubjectPathResolverSecretTests
         var (resolver, _) = CreateResolver();
 
         // Act
-        var plain = resolver.ResolveDisplayableProperty("/PlainText", PathStyle.Canonical);
+        var plain = resolver.ResolveProperty("/PlainText", PathStyle.Canonical).AsDisplayable();
         var derived = resolver.ResolveValue("/DerivedText", PathStyle.Canonical);
 
         // Assert
         Assert.Null(plain);
         Assert.NotNull(resolver.ResolveProperty("/PlainText", PathStyle.Canonical));
         Assert.Equal("visible!", derived);
+    }
+
+    [Theory]
+    [InlineData("/StateText", "visible state")]
+    [InlineData("/InterfaceStateText", "visible interface state")]
+    public void WhenResolvingAPlainPropertyWithStateForDisplay_ThenItsValueIsResolved(string path, string expected)
+    {
+        // Arrange
+        var (resolver, root) = CreateResolver();
+
+        // Act
+        var value = resolver.ResolveValue(path, PathStyle.Canonical);
+        var scopedValue = resolver.ResolveScopedValue(path, PathStyle.Canonical, root);
+
+        // Assert
+        Assert.Equal(expected, value);
+        Assert.Equal(expected, scopedValue);
     }
 
     private static (SubjectPathResolver Resolver, SecretConfigTestSubject Root) CreateResolver()

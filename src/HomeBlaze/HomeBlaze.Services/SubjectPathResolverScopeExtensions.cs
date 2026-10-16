@@ -96,8 +96,7 @@ public static class SubjectPathResolverScopeExtensions
         PathStyle style,
         IInterceptorSubject from)
     {
-        var property = resolver.ResolveScopedProperty(path, style, from);
-        return property is not null && property.IsDisplayable() ? property : null;
+        return resolver.ResolveScopedProperty(path, style, from).AsDisplayable();
     }
 
     /// <summary>

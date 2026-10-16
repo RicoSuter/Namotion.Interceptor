@@ -23,14 +23,10 @@ internal static partial class MarkdownWriteRules
     private static readonly char[] InvalidFileNameCharacters = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
     /// <summary>
-    /// Whether the storage is a <see cref="FluentStorageContainer"/> on the local disk or in memory, or a folder of one.
+    /// Whether the storage is a <see cref="FluentStorageContainer"/> on the local disk or in memory. The files it loads,
+    /// also those in its folders, have it as their storage.
     /// </summary>
-    public static bool IsLocal(IStorageContainer storage) => storage switch
-    {
-        FluentStorageContainer container => container.IsLocal,
-        VirtualFolder folder => IsLocal(folder.Storage),
-        _ => false
-    };
+    public static bool IsLocal(IStorageContainer storage) => storage is FluentStorageContainer { IsLocal: true };
 
     /// <exception cref="ArgumentException">The storage is not local.</exception>
     public static void EnsureLocal(IStorageContainer storage)
@@ -49,12 +45,8 @@ internal static partial class MarkdownWriteRules
     /// Whether the path, relative to the storage, is in the documentation folder of the data directory, which is
     /// replaced from the image on every start.
     /// </summary>
-    public static bool IsInDocumentationFolder(IStorageContainer storage, string path) => storage switch
-    {
-        FluentStorageContainer container => container.IsPathInDocumentationFolder(path),
-        VirtualFolder folder => IsInDocumentationFolder(folder.Storage, path),
-        _ => false
-    };
+    public static bool IsInDocumentationFolder(IStorageContainer storage, string path) =>
+        storage is FluentStorageContainer container && container.IsPathInDocumentationFolder(path);
 
     /// <exception cref="ArgumentException">The path is in the documentation folder.</exception>
     public static void EnsureNotInDocumentationFolder(IStorageContainer storage, string path)
@@ -72,14 +64,7 @@ internal static partial class MarkdownWriteRules
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage.</exception>
     public static void EnsureNotWithinStorageWork(IStorageContainer storage)
     {
-        var container = storage switch
-        {
-            FluentStorageContainer fluentContainer => fluentContainer,
-            VirtualFolder { Storage: FluentStorageContainer fluentContainer } => fluentContainer,
-            _ => null
-        };
-
-        if (container is { IsWithinRunningOperation: true })
+        if (storage is FluentStorageContainer { IsWithinRunningOperation: true })
         {
             throw new InvalidOperationException(StorageWorker.CallFromWithinItemMessage);
         }
@@ -264,8 +249,9 @@ internal static partial class MarkdownWriteRules
     }
 
     /// <summary>
-    /// Ensures that the reference paths of each layout block of the new page that the old page does not have with the
-    /// same text lead to subjects, so that a dangling reference the page already has does not block every layout edit.
+    /// Ensures that the reference paths of each layout block of the new page that configures a subject, a widget block or
+    /// a slot block that is not open, and that the old page does not have with the same text lead to subjects, so that a
+    /// dangling reference the page already has does not block every layout edit.
     /// </summary>
     /// <exception cref="ArgumentException">A layout block or a subject in it refers to a path that leads to no subject.</exception>
     private static void EnsureReferencesResolve(
@@ -273,13 +259,8 @@ internal static partial class MarkdownWriteRules
     {
         Dictionary<string, int>? oldBlockTexts = null;
         List<int>? newLineEnds = null;
-        foreach (var block in newLayout.LayoutBlocks)
+        foreach (var (block, type) in newLayout.LayoutTypes)
         {
-            if (block is not { Kind: MarkdownBlockKind.Widget, Head: { } head } || layout.FindType(head.Name) is not { } type)
-            {
-                continue;
-            }
-
             if (oldBlockTexts is null)
             {
                 var oldLineEnds = GetLineEnds(oldPage.Source);
@@ -302,7 +283,7 @@ internal static partial class MarkdownWriteRules
                 if (!layout.ResolvesToSubject(path))
                 {
                     throw new ArgumentException(
-                        $"The {head.Name} block at line {block.Line} refers to '{path}', which leads to no existing subject.",
+                        $"The {block.Head!.Name} block at line {block.Line} refers to '{path}', which leads to no existing subject.",
                         parameterName);
                 }
             }
@@ -339,52 +320,38 @@ internal static partial class MarkdownWriteRules
             throw new ArgumentException(message, parameterName);
         }
 
-        // A unit of the new content takes the source text of the unit of the view that it repeats: in order without the
-        // permission, and by its place among the blocks with it, because layout around the units can move them.
-        var matchedSourceSpans = new MarkdownSpan[newUnits.Count];
+        // A unit of the new content takes the source text of the next unit of the view that it repeats, so units in the
+        // same order match one to one. Layout around the units can move them, and without the permission a moved unit
+        // fails the check of the result below.
         var unmatched = new Dictionary<string, Queue<MarkdownSpan>>(StringComparer.Ordinal);
-        for (var index = 0; index < units.Count; index++)
+        foreach (var unit in units)
         {
-            var start = MapToView(units[index].Span.Start, redactions);
-            var end = MapToView(units[index].Span.End, redactions);
+            var start = MapToView(unit.Span.Start, redactions);
+            var end = MapToView(unit.Span.End, redactions);
             if (start < 0 || end < start || end > redactedSource.Length)
             {
                 throw new ArgumentException(message, parameterName);
             }
 
-            var viewKey = units[index].Identity + "\n" + units[index].Kind + ":" + NormalizeLineEndings(redactedSource[start..end]);
-            if (layout is null)
+            var viewKey = unit.Identity + "\n" + unit.Kind + ":" + NormalizeLineEndings(redactedSource[start..end]);
+            if (!unmatched.TryGetValue(viewKey, out var spans))
             {
-                if (!string.Equals(viewKey, newUnits[index].Identity + "\n" + newUnits[index].Text, StringComparison.Ordinal))
-                {
-                    throw new ArgumentException(message, parameterName);
-                }
-
-                matchedSourceSpans[index] = units[index].Span;
+                unmatched[viewKey] = spans = new Queue<MarkdownSpan>();
             }
-            else
-            {
-                if (!unmatched.TryGetValue(viewKey, out var spans))
-                {
-                    unmatched[viewKey] = spans = new Queue<MarkdownSpan>();
-                }
 
-                spans.Enqueue(units[index].Span);
-            }
+            spans.Enqueue(unit.Span);
         }
 
-        if (layout is not null)
+        var matchedSourceSpans = new MarkdownSpan[newUnits.Count];
+        for (var index = 0; index < newUnits.Count; index++)
         {
-            for (var index = 0; index < newUnits.Count; index++)
+            if (!unmatched.TryGetValue(newUnits[index].Identity + "\n" + newUnits[index].Text, out var spans) ||
+                !spans.TryDequeue(out var span))
             {
-                if (!unmatched.TryGetValue(newUnits[index].Identity + "\n" + newUnits[index].Text, out var spans) ||
-                    !spans.TryDequeue(out var span))
-                {
-                    throw new ArgumentException(message, parameterName);
-                }
-
-                matchedSourceSpans[index] = span;
+                throw new ArgumentException(message, parameterName);
             }
+
+            matchedSourceSpans[index] = span;
         }
 
         var restored = new StringBuilder(newContent.Length);
@@ -579,11 +546,8 @@ internal static partial class MarkdownWriteRules
         }
     }
 
-    private static UnitText CreateBlockUnit(MarkdownBlock block, string source, List<int> lineEnds, string identity)
-    {
-        var span = GetBlockSpan(block, lineEnds);
-        return new UnitText(block.Kind.ToString(), block.Kind + ":" + NormalizeLineEndings(source.Substring(span.Start, span.Length)), span, identity);
-    }
+    private static UnitText CreateBlockUnit(MarkdownBlock block, string source, List<int> lineEnds, string identity) =>
+        new(block.Kind.ToString(), block.Kind + ":" + GetBlockText(block, source, lineEnds), GetBlockSpan(block, lineEnds), identity);
 
     // The text of a block from its head line to its last line, with line feeds as line endings.
     private static string GetBlockText(MarkdownBlock block, string source, List<int> lineEnds)
@@ -612,7 +576,9 @@ internal static partial class MarkdownWriteRules
             places[keyed.Segment.Block] = keyed.Place;
         }
 
-        return new LayoutAnalysis(MarkdownPageLayout.FindLayoutBlocks(page, layout.FindType), keyedBlocks, places);
+        var layoutTypes = new Dictionary<MarkdownBlock, Type>(ReferenceEqualityComparer.Instance);
+        var layoutBlocks = MarkdownPageLayout.FindLayoutBlocks(page, layout.FindType, layoutTypes);
+        return new LayoutAnalysis(layoutBlocks, layoutTypes, keyedBlocks, places);
     }
 
     private static List<string> GetConfigurationNames(MarkdownBlock block)
@@ -727,9 +693,15 @@ internal static partial class MarkdownWriteRules
     private sealed record ActiveContentOfPage(
         List<UnitText> Units, List<string> UnnamedBlockPositions, List<string> ActiveMarkup, LayoutAnalysis? Layout);
 
-    /// <summary>The layout blocks of a page, its blocks with their places, and the place of each block.</summary>
+    /// <summary>
+    /// The layout blocks of a page, the type of each one that configures a subject, its blocks with their places, and the
+    /// place of each block.
+    /// </summary>
     private sealed record LayoutAnalysis(
-        HashSet<MarkdownBlock> LayoutBlocks, List<KeyedBlock> KeyedBlocks, Dictionary<MarkdownBlock, string> Places);
+        HashSet<MarkdownBlock> LayoutBlocks,
+        Dictionary<MarkdownBlock, Type> LayoutTypes,
+        List<KeyedBlock> KeyedBlocks,
+        Dictionary<MarkdownBlock, string> Places);
 }
 
 /// <summary>

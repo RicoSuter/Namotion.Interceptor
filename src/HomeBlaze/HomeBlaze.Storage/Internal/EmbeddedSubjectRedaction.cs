@@ -38,20 +38,12 @@ internal static class EmbeddedSubjectRedaction
     /// <param name="blockSubjects">The subjects of the blocks of <paramref name="page"/> by <see cref="MarkdownBlock.Index"/>.</param>
     /// <param name="layoutBlocks">The layout blocks of the page (<see cref="MarkdownPageLayout"/>), which hold nothing
     /// secret and are kept as they are, also without a subject.</param>
-    public static string Redact(
-        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IReadOnlySet<MarkdownBlock>? layoutBlocks = null) =>
-        Redact(page, blockSubjects, out _, layoutBlocks);
-
-    /// <inheritdoc cref="Redact(MarkdownPage, IReadOnlyDictionary{int, IInterceptorSubject}, IReadOnlySet{MarkdownBlock})"/>
-    /// <param name="page">The page as last parsed.</param>
-    /// <param name="blockSubjects">The subjects of the blocks of <paramref name="page"/> by <see cref="MarkdownBlock.Index"/>.</param>
     /// <param name="redactions">Each replaced span of the source with the span of its replacement in the returned view, in order.</param>
-    /// <param name="layoutBlocks">The layout blocks of the page, which are kept as they are.</param>
     public static string Redact(
         MarkdownPage page,
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
-        out List<Redaction> redactions,
-        IReadOnlySet<MarkdownBlock>? layoutBlocks = null)
+        IReadOnlySet<MarkdownBlock> layoutBlocks,
+        out List<Redaction> redactions)
     {
         var source = page.Source;
         var replacements = new List<(MarkdownSpan Span, string Text)>();
@@ -60,7 +52,7 @@ internal static class EmbeddedSubjectRedaction
         foreach (var container in page.Document.Descendants<MarkdownBlockContainer>())
         {
             var block = page.DescribeBlock(container);
-            if (block.Kind == MarkdownBlockKind.Style || layoutBlocks?.Contains(block) == true)
+            if (block.Kind == MarkdownBlockKind.Style || layoutBlocks.Contains(block))
             {
                 continue;
             }
@@ -223,9 +215,10 @@ internal static class EmbeddedSubjectRedaction
             return null;
         }
 
-        // Without the subject the secret properties are unknown, so every value is hidden.
-        var secretNames = subject?.GetConfigurationProperties()
-            .Where(property => property.GetConfigurationMetadata()?.IsSecret == true)
+        // Only the values that the subject vouches for as non-secret configuration are shown, as in the json block. A
+        // subject that is no longer registered, such as one a reload detached, vouches for none.
+        var visibleNames = subject?.GetConfigurationProperties()
+            .Where(property => property.GetConfigurationMetadata()?.IsSecret != true)
             .Select(property => property.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -233,7 +226,7 @@ internal static class EmbeddedSubjectRedaction
         var arguments = new List<MarkdownBlockArgument>(head.Arguments.Count);
         foreach (var argument in head.Arguments)
         {
-            if (secretNames is null || secretNames.Contains(argument.Key))
+            if (visibleNames?.Contains(argument.Key) != true)
             {
                 arguments.Add(argument with { Value = RedactedValue, IsQuoted = false });
                 isRedacted = true;
@@ -276,6 +269,26 @@ internal static class EmbeddedSubjectRedaction
     private static bool RedactObject(JsonObject jsonObject, IInterceptorSubject subject)
     {
         var properties = subject.GetConfigurationProperties().ToList();
+        return RedactMembers(jsonObject, (string key, out object? value) =>
+        {
+            var property = properties.Find(candidate => candidate.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (property is null || property.GetConfigurationMetadata()?.IsSecret == true)
+            {
+                value = null;
+                return false;
+            }
+
+            value = property.GetValue();
+            return true;
+        });
+    }
+
+    /// <summary>
+    /// Hides each value of the object whose key the lookup does not vouch for, then the values below the others as
+    /// <see cref="RedactNested"/> does. The type discriminator is kept.
+    /// </summary>
+    private static bool RedactMembers(JsonObject jsonObject, TryGetVisibleValue tryGetVisibleValue)
+    {
         var isRedacted = false;
         foreach (var (key, node) in jsonObject.ToList())
         {
@@ -284,20 +297,7 @@ internal static class EmbeddedSubjectRedaction
                 continue;
             }
 
-            var property = properties.Find(candidate => candidate.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
-            if (property is null || property.GetConfigurationMetadata()?.IsSecret == true)
-            {
-                jsonObject[key] = RedactedValue;
-                isRedacted = true;
-            }
-            else if (RedactNested(node, property.GetValue(), out var isReplaced))
-            {
-                isRedacted = true;
-                if (isReplaced)
-                {
-                    jsonObject[key] = RedactedValue;
-                }
-            }
+            isRedacted |= tryGetVisibleValue(key, out var value) ? RedactNested(node, value) : Hide(node);
         }
 
         return isRedacted;
@@ -308,13 +308,11 @@ internal static class EmbeddedSubjectRedaction
     /// property, so that nothing that the metadata cannot vouch for is shown: an object or a list for a missing value or a
     /// value of another kind, a subject of another type, a list item or a dictionary entry without a counterpart.
     /// </summary>
-    /// <param name="node">The JSON of the value.</param>
+    /// <param name="node">The JSON of the value, which is replaced by <c>***</c> when it is hidden as a whole.</param>
     /// <param name="value">The value of the property.</param>
-    /// <param name="isReplaced">Set when the whole node must be replaced by <c>***</c>.</param>
     /// <returns>Whether anything was hidden.</returns>
-    private static bool RedactNested(JsonNode node, object? value, out bool isReplaced)
+    private static bool RedactNested(JsonNode node, object? value)
     {
-        isReplaced = false;
         if (node is JsonValue)
         {
             return false;
@@ -336,9 +334,26 @@ internal static class EmbeddedSubjectRedaction
                 return RedactPlainObject(plainObject, value);
 
             default:
-                isReplaced = true;
-                return true;
+                return Hide(node);
         }
+    }
+
+    // Replaces the node in its parent object or list, so a caller that enumerates the parent must enumerate a copy.
+    private static bool Hide(JsonNode node)
+    {
+        switch (node.Parent)
+        {
+            case JsonObject parentObject:
+                parentObject[node.GetPropertyName()] = RedactedValue;
+                break;
+            case JsonArray parentArray:
+                parentArray[node.GetElementIndex()] = RedactedValue;
+                break;
+            default:
+                throw new InvalidOperationException("A JSON node without a parent cannot be hidden.");
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -349,32 +364,19 @@ internal static class EmbeddedSubjectRedaction
     private static bool RedactPlainObject(JsonObject jsonObject, object value)
     {
         var properties = value.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var isRedacted = false;
-        foreach (var (key, node) in jsonObject.ToList())
+        return RedactMembers(jsonObject, (string key, out object? propertyValue) =>
         {
-            if (key == ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName || node is null)
-            {
-                continue;
-            }
-
             var property = Array.Find(properties, candidate =>
                 candidate.GetIndexParameters().Length == 0 && candidate.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
             if (property is null || property.GetCustomAttribute<ConfigurationAttribute>(true) is { IsSecret: true })
             {
-                jsonObject[key] = RedactedValue;
-                isRedacted = true;
+                propertyValue = null;
+                return false;
             }
-            else if (RedactNested(node, property.GetValue(value), out var isReplaced))
-            {
-                isRedacted = true;
-                if (isReplaced)
-                {
-                    jsonObject[key] = RedactedValue;
-                }
-            }
-        }
 
-        return isRedacted;
+            propertyValue = property.GetValue(value);
+            return true;
+        });
     }
 
     private static bool RedactEntries(JsonObject entries, IDictionary dictionary)
@@ -397,19 +399,7 @@ internal static class EmbeddedSubjectRedaction
                 continue;
             }
 
-            if (!keys.TryGetValue(keyText, out var key))
-            {
-                entries[keyText] = RedactedValue;
-                isRedacted = true;
-            }
-            else if (RedactNested(entry, dictionary[key], out var isReplaced))
-            {
-                isRedacted = true;
-                if (isReplaced)
-                {
-                    entries[keyText] = RedactedValue;
-                }
-            }
+            isRedacted |= keys.TryGetValue(keyText, out var key) ? RedactNested(entry, dictionary[key]) : Hide(entry);
         }
 
         return isRedacted;
@@ -426,19 +416,7 @@ internal static class EmbeddedSubjectRedaction
                 continue;
             }
 
-            if (index >= values.Count)
-            {
-                array[index] = RedactedValue;
-                isRedacted = true;
-            }
-            else if (RedactNested(element, values[index], out var isReplaced))
-            {
-                isRedacted = true;
-                if (isReplaced)
-                {
-                    array[index] = RedactedValue;
-                }
-            }
+            isRedacted |= index < values.Count ? RedactNested(element, values[index]) : Hide(element);
         }
 
         return isRedacted;
@@ -448,6 +426,9 @@ internal static class EmbeddedSubjectRedaction
         jsonObject[ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName] is JsonValue type &&
         type.TryGetValue<string>(out var typeName) &&
         typeName == subject.GetType().FullName;
+
+    /// <summary>Gets the value of the member with the key, or false when the member is unknown or secret.</summary>
+    private delegate bool TryGetVisibleValue(string key, out object? value);
 
     /// <summary>A replaced span of the source and the span of its replacement in the view.</summary>
     internal readonly record struct Redaction(MarkdownSpan Source, MarkdownSpan Redacted);

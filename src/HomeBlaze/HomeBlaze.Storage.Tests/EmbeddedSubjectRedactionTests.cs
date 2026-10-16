@@ -11,6 +11,49 @@ namespace HomeBlaze.Storage.Tests;
 
 public class EmbeddedSubjectRedactionTests
 {
+    private static readonly HashSet<MarkdownBlock> NoLayoutBlocks = [];
+
+    [Fact]
+    public void WhenTheSubjectOfABlockIsNoLongerRegistered_ThenEveryArgumentAndJsonValueIsRedacted()
+    {
+        // Arrange: the subject that a reload detached, which tells no configuration property anymore.
+        var device = new EmbeddedSecretDevice { Host = "detached-host", Password = "detached-secret" };
+        var source = $$"""
+            :: {{typeof(EmbeddedSecretDevice).FullName}}#gateway Host=detached-host Password=detached-secret
+            ```json
+            { "Host": "json-host", "Password": "json-secret" }
+            ```
+            ::
+            """;
+
+        // Act
+        var result = EmbeddedSubjectRedaction.Redact(
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = device }, NoLayoutBlocks, out _);
+
+        // Assert
+        Assert.DoesNotContain("detached-secret", result);
+        Assert.DoesNotContain("json-secret", result);
+        Assert.DoesNotContain("detached-host", result);
+        Assert.DoesNotContain("json-host", result);
+        Assert.Contains("#gateway Host=*** Password=***\n", result);
+    }
+
+    [Fact]
+    public void WhenAnArgumentIsNoConfigurationPropertyOfTheSubject_ThenItIsRedactedAndTheOthersAreShown()
+    {
+        // Arrange
+        var context = SubjectContextFactory.Create(new ServiceCollection());
+        var device = new EmbeddedSecretDevice(context) { Host = "visible-host", Password = "s3cr3t" };
+        var source = $":: {typeof(EmbeddedSecretDevice).FullName}#gateway Host=visible-host Password=s3cr3t Token=unknown\n::";
+
+        // Act
+        var result = EmbeddedSubjectRedaction.Redact(
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = device }, NoLayoutBlocks, out _);
+
+        // Assert
+        Assert.Equal($":: {typeof(EmbeddedSecretDevice).FullName}#gateway Host=visible-host Password=*** Token=***\n::", result);
+    }
+
     [Fact]
     public void WhenSecretsAreInANestedSubjectADictionaryAndAnArray_ThenAllAreRedacted()
     {
@@ -40,7 +83,7 @@ public class EmbeddedSubjectRedactionTests
 
         // Act
         var result = EmbeddedSubjectRedaction.Redact(
-            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = group });
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = group }, NoLayoutBlocks, out _);
 
         // Assert
         Assert.DoesNotContain("primary-secret", result);
@@ -79,7 +122,7 @@ public class EmbeddedSubjectRedactionTests
 
         // Act
         var result = EmbeddedSubjectRedaction.Redact(
-            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = group });
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = group }, NoLayoutBlocks, out _);
 
         // Assert
         Assert.DoesNotContain("primary-secret", result);
@@ -121,7 +164,7 @@ public class EmbeddedSubjectRedactionTests
 
         // Act
         var result = EmbeddedSubjectRedaction.Redact(
-            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = group });
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = group }, NoLayoutBlocks, out _);
 
         // Assert
         Assert.DoesNotContain("primary-secret", result);
@@ -151,7 +194,7 @@ public class EmbeddedSubjectRedactionTests
 
         // Act
         var result = EmbeddedSubjectRedaction.Redact(
-            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = host });
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = host }, NoLayoutBlocks, out _);
 
         // Assert
         Assert.DoesNotContain("api-secret", result);
@@ -178,7 +221,7 @@ public class EmbeddedSubjectRedactionTests
 
         // Act
         var result = EmbeddedSubjectRedaction.Redact(
-            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = host });
+            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = host }, NoLayoutBlocks, out _);
 
         // Assert
         Assert.DoesNotContain("plain-secret", result);
@@ -201,7 +244,7 @@ public class EmbeddedSubjectRedactionTests
             """;
 
         // Act
-        var result = EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>());
+        var result = EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>(), NoLayoutBlocks, out _);
 
         // Assert
         Assert.Equal("""
@@ -222,7 +265,7 @@ public class EmbeddedSubjectRedactionTests
     public void WhenAHeadLineCannotBeRead_ThenEverythingAfterTheFenceAndTheNameIsRedacted(string source, string expected)
     {
         // Act
-        var result = EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>());
+        var result = EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>(), NoLayoutBlocks, out _);
 
         // Assert
         Assert.Equal(expected, result);
@@ -235,7 +278,7 @@ public class EmbeddedSubjectRedactionTests
     public void WhenAnInvalidBlockHasArgumentsAndAJsonBlock_ThenBothAreRedacted(string source)
     {
         // Act
-        var result = EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>());
+        var result = EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>(), NoLayoutBlocks, out _);
 
         // Assert
         Assert.DoesNotContain("s3cr3t", result);
@@ -250,7 +293,7 @@ public class EmbeddedSubjectRedactionTests
         const string source = "# Old\n\n```subject(gateway)\n{\n  \"$type\": \"Some.Device\",\n  \"password\": \"s3cr3t\"\n}\n```\n\nText";
 
         // Act
-        var result = EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>());
+        var result = EmbeddedSubjectRedaction.Redact(MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject>(), NoLayoutBlocks, out _);
 
         // Assert
         Assert.Equal("# Old\n\n```subject(gateway)\n***\n```\n\nText", result);

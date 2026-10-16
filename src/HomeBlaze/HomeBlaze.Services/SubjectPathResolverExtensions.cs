@@ -9,53 +9,28 @@ namespace HomeBlaze.Services;
 public static class SubjectPathResolverExtensions
 {
     /// <summary>
-    /// Resolves a property value from a path for display, through <see cref="ResolveDisplayableProperty"/>, so the
-    /// value of a secret configuration property is never returned.
+    /// Resolves a property value from a path for display. The value of a property that is not
+    /// <see cref="SubjectRegistryExtensions.IsDisplayable"/>, such as a secret configuration property, is never returned.
     /// </summary>
     /// <param name="resolver">The path resolver.</param>
     /// <param name="path">Path to resolve (e.g., "/Demo/Conveyor/Temperature" or "motor/Speed").</param>
     /// <param name="style">Path style (Canonical or Route).</param>
     /// <param name="relativeTo">Base subject for relative paths.</param>
-    /// <returns>Resolved property value, or null if not found or secret.</returns>
+    /// <returns>Resolved property value, or null if not found or not displayable.</returns>
     public static object? ResolveValue(
         this SubjectPathResolver resolver,
         string path,
         PathStyle style,
         IInterceptorSubject? relativeTo = null)
     {
-        return resolver.ResolveDisplayableProperty(path, style, relativeTo)?.GetValue();
+        return resolver.ResolveProperty(path, style, relativeTo).AsDisplayable()?.GetValue();
     }
 
     /// <summary>
-    /// Resolves a property from a path for showing its value, for example in a page expression: the same as
-    /// <see cref="ResolveProperty"/>, except that a property that is not <see cref="SubjectRegistryExtensions.IsDisplayable"/>, such as a secret configuration property, resolves to null, as if it did not exist.
+    /// Resolves a property from a path: the part up to the last '/' resolves the subject, the rest names the property.
     /// </summary>
-    /// <param name="resolver">The path resolver.</param>
-    /// <param name="path">Path to resolve (e.g., "/Demo/Conveyor/Temperature" or "motor/Speed").</param>
-    /// <param name="style">Path style (Canonical or Route).</param>
-    /// <param name="relativeTo">Base subject for relative paths.</param>
-    /// <returns>The resolved property, or null if not found or secret.</returns>
-    public static RegisteredSubjectProperty? ResolveDisplayableProperty(
-        this SubjectPathResolver resolver,
-        string path,
-        PathStyle style,
-        IInterceptorSubject? relativeTo = null)
-    {
-        var property = resolver.ResolveProperty(path, style, relativeTo);
-        return property is not null && property.IsDisplayable() ? property : null;
-    }
-
-    /// <summary>
-    /// Resolves a property from a path.
-    /// Splits on last '/' to separate subject path from property name,
-    /// resolves the subject, then gets the registered property.
-    /// </summary>
-    /// <param name="resolver">The path resolver.</param>
-    /// <param name="path">Path to resolve (e.g., "/Demo/Conveyor/Temperature" or "motor/Speed").</param>
-    /// <param name="style">Path style (Canonical or Route).</param>
-    /// <param name="relativeTo">Base subject for relative paths.</param>
     /// <returns>The resolved property, or null if not found.</returns>
-    public static RegisteredSubjectProperty? ResolveProperty(
+    internal static RegisteredSubjectProperty? ResolveProperty(
         this SubjectPathResolver resolver,
         string path,
         PathStyle style,

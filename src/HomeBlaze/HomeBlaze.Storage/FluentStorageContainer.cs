@@ -126,12 +126,6 @@ public partial class FluentStorageContainer :
     /// </summary>
     public bool IsLocal => StorageType is "disk" or "filesystem" or "inmemory";
 
-    /// <summary>
-    /// Whether the storage is in the documentation folder, which is replaced on every start and in which the write
-    /// operations create no file.
-    /// </summary>
-    public bool IsInDocumentationFolder => IsPathInDocumentationFolder(string.Empty);
-
     public string Title => string.IsNullOrEmpty(ConnectionString)
         ? "Storage"
         : Path.GetFileName(ConnectionString.TrimEnd('/', '\\'));

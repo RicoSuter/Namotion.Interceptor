@@ -76,8 +76,6 @@ namespace HomeBlaze.Storage.Files
         public HomeBlaze.Storage.Internal.MarkdownFrontmatter? Frontmatter { get; }
         public string FullPath { get; }
         public string? IconName { get; }
-        public bool IsInDocumentationFolder { get; }
-        public bool IsLocal { get; }
         [HomeBlaze.Abstractions.Attributes.State("Modified", Position=2)]
         public System.DateTime LastModified { get; set; }
         public string Name { get; }
@@ -113,6 +111,7 @@ namespace HomeBlaze.Storage.Files
         public string ResolveLink(string link) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteAsync(string content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
 }
@@ -139,7 +138,6 @@ namespace HomeBlaze.Storage
         [Namotion.Interceptor.Attributes.Derived]
         public string IconColor { get; }
         public string IconName { get; }
-        public bool IsInDocumentationFolder { get; }
         public bool IsLocal { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int ReconcileIntervalSeconds { get; set; }
@@ -189,8 +187,6 @@ namespace HomeBlaze.Storage
         [Namotion.Interceptor.Registry.Attributes.InlinePaths]
         public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; set; }
         public string IconName { get; }
-        public bool IsInDocumentationFolder { get; }
-        public bool IsLocal { get; }
         public string RelativePath { get; }
         public HomeBlaze.Storage.Abstractions.StorageStatus Status { get; }
         public HomeBlaze.Storage.Abstractions.IStorageContainer Storage { get; }

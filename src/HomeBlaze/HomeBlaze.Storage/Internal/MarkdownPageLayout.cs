@@ -27,9 +27,12 @@ internal static class MarkdownPageLayout
             return null;
         }
 
+        // A slot is filled by blocks, never by a configuration value, as for a parse.
+        var slots = SlotMap.For(key);
         var properties = key
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is { IsSecret: false })
+            .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is { IsSecret: false } &&
+                               slots.FindByPropertyName(property.Name) is null)
             .ToList();
 
         return new LayoutType(
@@ -48,15 +51,28 @@ internal static class MarkdownPageLayout
     /// </summary>
     /// <param name="page">The parsed page.</param>
     /// <param name="findType">Gets the type that a widget block names with its full name, or null when there is none.</param>
-    public static HashSet<MarkdownBlock> FindLayoutBlocks(MarkdownPage page, Func<string, Type?> findType)
+    public static HashSet<MarkdownBlock> FindLayoutBlocks(MarkdownPage page, Func<string, Type?> findType) =>
+        FindLayoutBlocks(page, findType, layoutTypes: null);
+
+    /// <inheritdoc cref="FindLayoutBlocks(MarkdownPage, Func{string, Type?})"/>
+    /// <param name="page">The parsed page.</param>
+    /// <param name="findType">Gets the type that a widget block names with its full name, or null when there is none.</param>
+    /// <param name="layoutTypes">Gets the type of each layout block that configures a subject: a widget block or a slot
+    /// block that is not open.</param>
+    public static HashSet<MarkdownBlock> FindLayoutBlocks(
+        MarkdownPage page, Func<string, Type?> findType, Dictionary<MarkdownBlock, Type>? layoutTypes)
     {
         var layoutBlocks = new HashSet<MarkdownBlock>(ReferenceEqualityComparer.Instance);
-        Collect(page.Blocks, ownerType: null, findType, layoutBlocks);
+        Collect(page.Blocks, ownerType: null, findType, layoutBlocks, layoutTypes);
         return layoutBlocks;
     }
 
     private static void Collect(
-        IReadOnlyList<MarkdownBlock> blocks, Type? ownerType, Func<string, Type?> findType, HashSet<MarkdownBlock> layoutBlocks)
+        IReadOnlyList<MarkdownBlock> blocks,
+        Type? ownerType,
+        Func<string, Type?> findType,
+        HashSet<MarkdownBlock> layoutBlocks,
+        Dictionary<MarkdownBlock, Type>? layoutTypes)
     {
         foreach (var block in blocks)
         {
@@ -86,7 +102,12 @@ internal static class MarkdownPageLayout
             if (isLayout)
             {
                 layoutBlocks.Add(block);
-                Collect(block.Children, type, findType, layoutBlocks);
+                if (type is not null && layoutTypes is not null)
+                {
+                    layoutTypes[block] = type;
+                }
+
+                Collect(block.Children, type, findType, layoutBlocks, layoutTypes);
             }
         }
     }
