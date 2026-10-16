@@ -104,12 +104,12 @@ public class HistoryChartWidgetTests
             Has = page.GetByTestId("history-chart-legend-entry").GetByText(legendLabel, new() { Exact = true })
         });
 
-    private sealed record Box(double X, double Y, double Width, double Height);
-
+    // The legend is null for a chart that shows no lines.
     private sealed record ChartLayout(
         Box Widget,
         Box Lines,
         Box Chart,
+        Box? Legend,
         string[] ValueLabels,
         string[] TimeLabels,
         double LineTop,
@@ -147,6 +147,7 @@ public class HistoryChartWidgetTests
             ReadBox(snapshot.GetProperty("widget")),
             ReadBox(snapshot.GetProperty("lines")),
             ReadBox(snapshot.GetProperty("chart")),
+            snapshot.GetProperty("legend").ValueKind == JsonValueKind.Null ? null : ReadBox(snapshot.GetProperty("legend")),
             snapshot.GetProperty("values").EnumerateArray().Select(text => text.GetString()!).ToArray(),
             snapshot.GetProperty("times").EnumerateArray().Select(text => text.GetString()!).ToArray(),
             snapshot.GetProperty("top").GetDouble(),
@@ -188,10 +189,12 @@ public class HistoryChartWidgetTests
                 return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
             };
             const pathBoxes = paths.map(path => path.getBBox());
+            const legend = widget.querySelector("[data-testid=history-chart-legend]");
             return {
                 widget: rect(widget),
                 lines: rect(lines),
                 chart: rect(chart),
+                legend: legend ? rect(legend) : null,
                 values: valueTexts.map(text => text.textContent),
                 times: [...chart.querySelectorAll(".mud-charts-xaxis text")].map(text => text.textContent),
                 top: Math.min(...pathBoxes.map(path => path.y)),
@@ -324,16 +327,15 @@ public class HistoryChartWidgetTests
         // Act
         await page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Speed" }).ClickAsync();
         var layout = await GetLayoutAsync(page, "Tab speed");
-        var legend = await chart.GetByTestId("history-chart-legend").BoundingBoxAsync()
-            ?? throw new InvalidOperationException("The legend has no box");
 
         // Assert
+        var legend = layout.Legend ?? throw new InvalidOperationException("The chart has no legend");
         var expectedHeight = Math.Min(height, layout.Lines.Width / 2);
         Assert.InRange(layout.Lines.Height, expectedHeight - 2, expectedHeight + 2);
         Assert.InRange(layout.Chart.Height, layout.Lines.Height - 1, layout.Lines.Height + 1);
-        Assert.InRange(layout.Chart.Y + layout.Chart.Height, layout.Lines.Y, layout.Lines.Y + layout.Lines.Height + 1);
-        Assert.True(layout.Chart.Y + layout.Chart.Height <= legend.Y + 1,
-            $"The chart ends at {layout.Chart.Y + layout.Chart.Height} px, below the top of the legend at {legend.Y} px");
+        Assert.InRange(layout.Chart.Bottom, layout.Lines.Top, layout.Lines.Bottom + 1);
+        Assert.True(layout.Chart.Bottom <= legend.Top + 1,
+            $"The chart ends at {layout.Chart.Bottom} px, below the top of the legend at {legend.Top} px");
     }
 
     [Theory]
@@ -349,41 +351,53 @@ public class HistoryChartWidgetTests
         await Assertions.Expect(band).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act - MudChart widens the space left of the plot once it has measured its value labels, and the band follows
-        // the plot area it drew, so the edges are read once they agree.
+        // the plot area it drew, so the edges are read once they agree. The other boxes are read in the same poll,
+        // because the values of the legend change every second and can move what follows them.
         var edges = await page.WaitForFunctionAsync(
             """
-            ([lines, band]) => {
+            ([widget, band]) => {
+                const lines = widget.querySelector("[data-testid=history-chart-lines]");
+                const legend = widget.querySelector("[data-testid=history-chart-legend]");
                 const gridLine = [...lines.querySelectorAll(".mud-charts-grid path")]
                     .map(path => path.getBoundingClientRect())
                     .find(box => box.height < 1 && box.width > 0);
                 const bandBox = band.getBoundingClientRect();
-                return gridLine && Math.abs(bandBox.left - gridLine.left) <= 2 && Math.abs(bandBox.right - gridLine.right) <= 2
-                    ? { bandLeft: bandBox.left, bandRight: bandBox.right, plotLeft: gridLine.left, plotRight: gridLine.right }
-                    : null;
+                if (!gridLine || Math.abs(bandBox.left - gridLine.left) > 2 || Math.abs(bandBox.right - gridLine.right) > 2) {
+                    return null;
+                }
+
+                const rect = element => {
+                    const bounds = element.getBoundingClientRect();
+                    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+                };
+                const legendEntries = legend.querySelectorAll("[data-testid=history-chart-legend-entry]");
+                return {
+                    bandLeft: bandBox.left, plotLeft: gridLine.left, plotRight: gridLine.right,
+                    lines: rect(lines),
+                    legend: rect(legend),
+                    lastLegendEntry: rect(legendEntries[legendEntries.length - 1]),
+                    header: rect(widget.querySelector("[data-testid=history-chart-band-header]"))
+                };
             }
             """,
-            new object[] { await chart.GetByTestId("history-chart-lines").ElementHandleAsync(), await band.ElementHandleAsync() },
+            new object[] { await chart.ElementHandleAsync(), await band.ElementHandleAsync() },
             new() { Timeout = Timeout });
         var aligned = await edges.JsonValueAsync<JsonElement>();
-        var legend = await chart.GetByTestId("history-chart-legend").BoundingBoxAsync()
-            ?? throw new InvalidOperationException("The legend has no box");
-        var lastLegendEntry = await chart.GetByTestId("history-chart-legend").GetByTestId("history-chart-legend-entry").Last.BoundingBoxAsync()
-            ?? throw new InvalidOperationException("The legend entry has no box");
-        var header = await chart.GetByTestId("history-chart-band-header").First.BoundingBoxAsync()
-            ?? throw new InvalidOperationException("The band header has no box");
-        var lines = await chart.GetByTestId("history-chart-lines").BoundingBoxAsync()
-            ?? throw new InvalidOperationException("The lines have no box");
+        var lines = ReadBox(aligned.GetProperty("lines"));
+        var legend = ReadBox(aligned.GetProperty("legend"));
+        var lastLegendEntry = ReadBox(aligned.GetProperty("lastLegendEntry"));
+        var header = ReadBox(aligned.GetProperty("header"));
 
         // Assert
         var plotLeft = aligned.GetProperty("plotLeft").GetDouble();
-        Assert.True(plotLeft > lines.X + 10, $"The plot starts at {plotLeft} px, at the left edge of the lines at {lines.X} px");
+        Assert.True(plotLeft > lines.Left + 10, $"The plot starts at {plotLeft} px, at the left edge of the lines at {lines.Left} px");
         Assert.InRange(aligned.GetProperty("bandLeft").GetDouble(), plotLeft - 2, plotLeft + 2);
         var plotRight = aligned.GetProperty("plotRight").GetDouble();
-        Assert.InRange(lastLegendEntry.X + lastLegendEntry.Width, plotRight - 2, plotRight + 2);
-        Assert.True(legend.Y >= lines.Y + lines.Height - 1,
-            $"The legend starts at {legend.Y} px, above the bottom of the lines at {lines.Y + lines.Height} px");
-        Assert.True(legend.Y + legend.Height <= header.Y + 1,
-            $"The legend ends at {legend.Y + legend.Height} px, below the top of the band header at {header.Y} px");
+        Assert.InRange(lastLegendEntry.Right, plotRight - 2, plotRight + 2);
+        Assert.True(legend.Top >= lines.Bottom - 1,
+            $"The legend starts at {legend.Top} px, above the bottom of the lines at {lines.Bottom} px");
+        Assert.True(legend.Bottom <= header.Top + 1,
+            $"The legend ends at {legend.Bottom} px, below the top of the band header at {header.Top} px");
         await Assertions.Expect(chart.GetByTestId("history-chart-band-header").GetByTestId("history-chart-legend-entry"))
             .ToContainTextAsync("Chart status");
         await Assertions.Expect(chart.GetByTestId("history-chart-legend").GetByText("Chart status")).ToHaveCountAsync(0);
@@ -416,18 +430,18 @@ public class HistoryChartWidgetTests
 
                 const plot = paths.reduce((widest, path) => path.width > widest.width ? path : widest);
                 const box = lines.getBoundingClientRect();
+                const legendEntry = lines.closest("[data-testid=history-chart]").querySelector("[data-testid=history-chart-legend-entry]");
                 return {
                     labels: [...chart.querySelectorAll(".mud-charts-yaxis text, .mud-charts-xaxis text")]
                         .filter(text => text.textContent.trim().length > 0).length,
-                    boxLeft: box.left, boxRight: box.right, plotLeft: plot.left, plotRight: plot.right
+                    boxLeft: box.left, boxRight: box.right, plotLeft: plot.left, plotRight: plot.right,
+                    legendEntryRight: legendEntry.getBoundingClientRect().right
                 };
             }
             """,
             await lines.ElementHandleAsync(),
             new() { Timeout = Timeout });
         var drawn = await drawing.JsonValueAsync<JsonElement>();
-        var legendEntry = await chart.GetByTestId("history-chart-legend-entry").BoundingBoxAsync()
-            ?? throw new InvalidOperationException("The legend entry has no box");
 
         // Assert
         Assert.Equal(0, drawn.GetProperty("labels").GetInt32());
@@ -436,7 +450,8 @@ public class HistoryChartWidgetTests
         var boxRight = drawn.GetProperty("boxRight").GetDouble();
         Assert.InRange(drawn.GetProperty("plotLeft").GetDouble(), boxLeft - 2, boxLeft + 2);
         Assert.InRange(drawn.GetProperty("plotRight").GetDouble(), boxRight - 2, boxRight + 2);
-        Assert.InRange(legendEntry.X + legendEntry.Width, boxRight - 2, boxRight + 2);
+        Assert.InRange(drawn.GetProperty("legendEntryRight").GetDouble(), boxRight - 2, boxRight + 2);
+        await Assertions.Expect(chart.GetByTestId("history-chart-legend-entry")).ToHaveCountAsync(1);
     }
 
     // A dialog is identified by its title, which names the series.
