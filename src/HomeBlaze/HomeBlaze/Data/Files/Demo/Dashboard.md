@@ -6,7 +6,7 @@ position: 7
 
 # Dashboard Demo
 
-This page is a complete dashboard that uses every widget for pages: maps, value tiles, gauges, indicators, controls, history charts, a table of subjects, blocks that depend on the width of the screen, expansion panels with cards and value lists, tabs inside tabs, a grid and a canvas. Every value is live, and every motor is the same motor wherever it is shown. [Widgets](../Docs/administration/widgets/overview.md) is the reference of each widget, with live samples.
+This page is a complete dashboard that uses every widget for pages: maps, value tiles, gauges, indicators, progress bars, controls, history charts, a table of subjects, blocks that depend on the width of the screen, expansion panels with cards and value lists, tabs inside tabs, a grid and a canvas. Every value is live, and every motor is the same motor wherever it is shown. [Widgets](../Docs/administration/widgets/overview.md) is the reference of each widget, with live samples.
 
 :: HomeBlaze.Components.Alert
 Every motor on this page is simulated. The speeds climb to the target of the motor, and the temperatures follow the speeds and the load. The controls change the power, the mode and the load of a motor until the next restart. They never change the files of the motors.
@@ -35,58 +35,58 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 :::::: HomeBlaze.Components.ValueList
 ::::::: Value Path=/Demo/Compressor/Status Label="Compressor" Map=motorstate
 {{ /Demo/Compressor/CurrentSpeed }} RPM
-::::::: Value Path=/Demo/WaterPump/Status Label="Water pump" Map=motorstate
+::::::: Value Path=/Demo/WaterPump/Status Label="Water Pump" Map=motorstate
 {{ /Demo/WaterPump/CurrentSpeed }} RPM
 ::::::: Value Path=/Demo/Conveyor/Status Label="Conveyor" Map=motorstate
 {{ /Demo/Conveyor/CurrentSpeed }} RPM
-::::::: Value Path=/Demo/CoolingFan/Status Label="Cooling fan" Map=motorstate
+::::::: Value Path=/Demo/CoolingFan/Status Label="Cooling Fan" Map=motorstate
 {{ /Demo/CoolingFan/CurrentSpeed }} RPM
-::::::: Value Path=/Demo/ExhaustFan/Status Label="Exhaust fan" Map=motorstate
+::::::: Value Path=/Demo/ExhaustFan/Status Label="Exhaust Fan" Map=motorstate
 {{ /Demo/ExhaustFan/CurrentSpeed }} RPM
 :::: HomeBlaze.Components.Responsive Show=NotPhone
 ::::: HomeBlaze.Components.FlowLayout MinWidth=180
 :::::: Item
 ::::::: HomeBlaze.Components.ValueTile Path=/Demo/Compressor/CurrentSpeed Label="Compressor RPM" Icon=Bolt
 :::::: Item
-::::::: HomeBlaze.Components.ValueTile Path=/Demo/WaterPump/CurrentSpeed Label="Water pump RPM" Icon=WaterDrop
+::::::: HomeBlaze.Components.ValueTile Path=/Demo/WaterPump/CurrentSpeed Label="Water Pump RPM" Icon=WaterDrop
 :::::: Item
 ::::::: HomeBlaze.Components.ValueTile Path=/Demo/Conveyor/CurrentSpeed Label="Conveyor RPM" Icon=Settings
 :::::: Item
-::::::: HomeBlaze.Components.ValueTile Path=/Demo/CoolingFan/CurrentSpeed Label="Cooling fan RPM" Icon=AcUnit
+::::::: HomeBlaze.Components.ValueTile Path=/Demo/CoolingFan/CurrentSpeed Label="Cooling Fan RPM" Icon=AcUnit
 :::::: Item
-::::::: HomeBlaze.Components.ValueTile Path=/Demo/ExhaustFan/CurrentSpeed Label="Exhaust fan RPM" Icon=Air
-::::: HomeBlaze.Components.Card Title="Current temperatures" Icon=Thermostat
+::::::: HomeBlaze.Components.ValueTile Path=/Demo/ExhaustFan/CurrentSpeed Label="Exhaust Fan RPM" Icon=Air
+::::: HomeBlaze.Components.Card Title="Current Temperatures" Icon=Thermostat
 :::::: HomeBlaze.Components.FlowLayout MinWidth=120
 ::::::: Item
 :::::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/Temperature Label="Compressor" Minimum=20 Maximum=100
 ::::::: Item
-:::::::: HomeBlaze.Components.Gauge Path=/Demo/WaterPump/Temperature Label="Water pump" Minimum=20 Maximum=100
+:::::::: HomeBlaze.Components.Gauge Path=/Demo/WaterPump/Temperature Label="Water Pump" Minimum=20 Maximum=100
 ::::::: Item
 :::::::: HomeBlaze.Components.Gauge Path=/Demo/Conveyor/Temperature Label="Conveyor" Minimum=20 Maximum=100
 ::::::: Item
-:::::::: HomeBlaze.Components.Gauge Path=/Demo/CoolingFan/Temperature Label="Cooling fan" Minimum=20 Maximum=100
+:::::::: HomeBlaze.Components.Gauge Path=/Demo/CoolingFan/Temperature Label="Cooling Fan" Minimum=20 Maximum=100
 ::::::: Item
-:::::::: HomeBlaze.Components.Gauge Path=/Demo/ExhaustFan/Temperature Label="Exhaust fan" Minimum=20 Maximum=100
-:::: HomeBlaze.Components.Card Title="Temperature trends, last hour" Icon=Timeline
+:::::::: HomeBlaze.Components.Gauge Path=/Demo/ExhaustFan/Temperature Label="Exhaust Fan" Minimum=20 Maximum=100
+:::: HomeBlaze.Components.Card Title="Temperature Trends, Last Hour" Icon=Timeline
 ::::: HomeBlaze.Components.FlowLayout MinWidth=180
 :::::: Item
 ::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
 :::::::: Series Path=/Demo/Compressor/Temperature Label="Compressor"
 :::::: Item
 ::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
-:::::::: Series Path=/Demo/WaterPump/Temperature Label="Water pump"
+:::::::: Series Path=/Demo/WaterPump/Temperature Label="Water Pump"
 :::::: Item
 ::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
 :::::::: Series Path=/Demo/Conveyor/Temperature Label="Conveyor"
 :::::: Item
 ::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
-:::::::: Series Path=/Demo/CoolingFan/Temperature Label="Cooling fan"
+:::::::: Series Path=/Demo/CoolingFan/Temperature Label="Cooling Fan"
 :::::: Item
 ::::::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=100 Compact=true
-:::::::: Series Path=/Demo/ExhaustFan/Temperature Label="Exhaust fan"
+:::::::: Series Path=/Demo/ExhaustFan/Temperature Label="Exhaust Fan"
 ::::
 
-A phone shows the status list above, a wider screen the speed tiles and the temperature gauges. The small charts show the temperature of each motor in the last hour. The cards below show the status as chips, whether a motor is at its target as an icon, and the temperatures as bars:
+A phone shows the status list above, a wider screen the speed tiles and the temperature gauges. The small charts show the temperature of each motor in the last hour. Click a small chart to open its history. The cards below show the status as chips, whether a motor is at its target as an icon, and the temperatures as bars:
 
 :::: HomeBlaze.Components.FlowLayout MinWidth=300
 ::::: Item
@@ -128,9 +128,7 @@ A phone shows the status list above, a wider screen the speed tiles and the temp
 ::::::::: HomeBlaze.Components.Progress Path=/Demo/CoolingFan/Temperature Minimum=20 Maximum=100
 :::::::: Value Path=/Demo/ExhaustFan/Temperature Label="Exhaust Fan" Icon=Air
 ::::::::: HomeBlaze.Components.Progress Path=/Demo/ExhaustFan/Temperature Minimum=20 Maximum=100
-::::
-
-:::: HomeBlaze.Components.Card Title="Gauge sizes" Icon=Speed
+:::: HomeBlaze.Components.Card Title="Gauge Sizes" Icon=Speed
 The speed of the compressor in the three sizes of a gauge.
 
 ::::: HomeBlaze.Components.FlowLayout MinWidth=168
@@ -144,18 +142,19 @@ The speed of the compressor in the three sizes of a gauge.
 
 Widgets of this tab: [Responsive](../Docs/administration/widgets/responsive.md), [Gauge](../Docs/administration/widgets/gauge.md) and [HistoryChart](../Docs/administration/widgets/history-chart.md).
 ::: Tab#controls Title="Controls" Icon=Tune
-:::: HomeBlaze.Components.Card Title="Load" Icon=DonutLarge
-::::: HomeBlaze.Components.FlowLayout MinWidth=120
-:::::: Item
-::::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/Load Label="Compressor"
-:::::: Item
-::::::: HomeBlaze.Components.Gauge Path=/Demo/WaterPump/Load Label="Water Pump"
-:::::: Item
-::::::: HomeBlaze.Components.Gauge Path=/Demo/Conveyor/Load Label="Conveyor"
-:::::: Item
-::::::: HomeBlaze.Components.Gauge Path=/Demo/CoolingFan/Load Label="Cooling Fan"
-:::::: Item
-::::::: HomeBlaze.Components.Gauge Path=/Demo/ExhaustFan/Load Label="Exhaust Fan"
+:::: HomeBlaze.Components.Responsive Show=NotPhone
+::::: HomeBlaze.Components.Card Title="Load" Icon=DonutLarge
+:::::: HomeBlaze.Components.FlowLayout MinWidth=120
+::::::: Item
+:::::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/Load Label="Compressor"
+::::::: Item
+:::::::: HomeBlaze.Components.Gauge Path=/Demo/WaterPump/Load Label="Water Pump"
+::::::: Item
+:::::::: HomeBlaze.Components.Gauge Path=/Demo/Conveyor/Load Label="Conveyor"
+::::::: Item
+:::::::: HomeBlaze.Components.Gauge Path=/Demo/CoolingFan/Load Label="Cooling Fan"
+::::::: Item
+:::::::: HomeBlaze.Components.Gauge Path=/Demo/ExhaustFan/Load Label="Exhaust Fan"
 :::: HomeBlaze.Components.FlowLayout#controlroom MinWidth=300
 ::::: Item
 :::::: HomeBlaze.Components.Card Title="Compressor" Icon=Bolt IconColor=Primary Href="/browser/Demo/Compressor"
@@ -209,27 +208,24 @@ Widgets of this tab: [Responsive](../Docs/administration/widgets/responsive.md),
 :::::::: HomeBlaze.Components.Control Path=/Demo/ExhaustFan/GetDiagnostics
 ::::
 
-The gauges show the load of each motor, which its slider sets. Power, mode and load are runtime values of a motor: they last until the next restart, see [Basics](../Docs/administration/widgets/basics.md#control-writes). The emergency stop asks for confirmation, and **Power** brings the motor back. **Get Diagnostics** shows what the motor reports. Widgets of this tab: [Gauge](../Docs/administration/widgets/gauge.md), [Switch](../Docs/administration/widgets/switch.md), [Select](../Docs/administration/widgets/select.md), [Slider](../Docs/administration/widgets/slider.md), [OperationButton](../Docs/administration/widgets/operation-button.md) and [Control](../Docs/administration/widgets/control.md).
+A wider screen shows the load of each motor as a gauge, which its slider sets. Power, mode and load are runtime values of a motor: they last until the next restart, see [Basics](../Docs/administration/widgets/basics.md#control-writes). The emergency stop asks for confirmation, and **Power** brings the motor back. **Get Diagnostics** shows what the motor reports. Widgets of this tab: [Gauge](../Docs/administration/widgets/gauge.md), [Switch](../Docs/administration/widgets/switch.md), [Select](../Docs/administration/widgets/select.md), [Slider](../Docs/administration/widgets/slider.md), [OperationButton](../Docs/administration/widgets/operation-button.md) and [Control](../Docs/administration/widgets/control.md).
 ::: Tab#history Title="History" Icon=Timeline
-:::: HomeBlaze.Components.Card Title="Speeds, last hour" Icon=Timeline
+:::: HomeBlaze.Components.Card Title="Speeds, Last Hour" Icon=Timeline
 ::::: HomeBlaze.History.Blazor.HistoryChart#trends Range=1h Height=320
 :::::: Series Path=/Demo/Compressor/CurrentSpeed Label="Compressor"
-:::::: Series Path=/Demo/WaterPump/CurrentSpeed Label="Water pump"
+:::::: Series Path=/Demo/WaterPump/CurrentSpeed Label="Water Pump"
 :::::: Series Path=/Demo/Conveyor/CurrentSpeed Label="Conveyor"
-:::::: Series Path=/Demo/CoolingFan/CurrentSpeed Label="Cooling fan"
-:::::: Series Path=/Demo/ExhaustFan/CurrentSpeed Label="Exhaust fan"
-:::::: Series Path=/Demo/Compressor/Status Label="Compressor status"
+:::::: Series Path=/Demo/CoolingFan/CurrentSpeed Label="Cooling Fan"
+:::::: Series Path=/Demo/ExhaustFan/CurrentSpeed Label="Exhaust Fan"
+:::::: Series Path=/Demo/Compressor/Status Label="Compressor Status"
 ::::
 
-The speeds of the last hour as lines, and the status of the compressor as a band below them. The load of each motor over the last six hours, in percent:
+The speeds of the last hour as lines, and the status of the compressor as a band below them. The CPU and memory usage of the machine that runs HomeBlaze in the last hour, in percent:
 
-:::: HomeBlaze.Components.Card Title="Load, last six hours" Icon=DonutLarge
-::::: HomeBlaze.History.Blazor.HistoryChart#loadtrends Range=6h Height=200
-:::::: Series Path=/Demo/Compressor/Load Label="Compressor"
-:::::: Series Path=/Demo/WaterPump/Load Label="Water pump"
-:::::: Series Path=/Demo/Conveyor/Load Label="Conveyor"
-:::::: Series Path=/Demo/CoolingFan/Load Label="Cooling fan"
-:::::: Series Path=/Demo/ExhaustFan/Load Label="Exhaust fan"
+:::: HomeBlaze.Components.Card Title="Host CPU and Memory, Last Hour" Icon=Computer
+::::: HomeBlaze.History.Blazor.HistoryChart#hosttrends Range=1h Height=200
+:::::: Series Path=/Servers/HostSystem/CpuUsage Label="CPU"
+:::::: Series Path=/Servers/HostSystem/MemoryUsage Label="Memory"
 ::::
 
 Widget of this tab: [HistoryChart](../Docs/administration/widgets/history-chart.md).

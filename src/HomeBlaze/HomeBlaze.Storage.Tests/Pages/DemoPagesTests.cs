@@ -171,10 +171,11 @@ public class DemoPagesTests
 
         IPathScope scope = page;
         Assert.IsType<HistoryChart>(scope.TryGetNamedSubject("trends"));
-        Assert.IsType<HistoryChart>(scope.TryGetNamedSubject("loadtrends"));
+        Assert.IsType<HistoryChart>(scope.TryGetNamedSubject("hosttrends"));
+        Assert.Equal(5, subjects.OfType<HistoryChart>().Count(chart => chart.Compact));
         Assert.IsType<SubjectTable>(scope.TryGetNamedSubject("motortable"));
         Assert.Equal(5, Assert.IsType<FlowLayout>(scope.TryGetNamedSubject("controlroom")).Items.Length);
-        Assert.Equal([ResponsiveShow.Phone, ResponsiveShow.NotPhone], subjects.OfType<Responsive>().Select(block => block.Show));
+        Assert.Equal([ResponsiveShow.Phone, ResponsiveShow.NotPhone, ResponsiveShow.NotPhone], subjects.OfType<Responsive>().Select(block => block.Show));
     }
 
     [Fact]
