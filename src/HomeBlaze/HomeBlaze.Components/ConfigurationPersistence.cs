@@ -7,7 +7,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Persists the configuration that a subject is part of.
 /// </summary>
-public static class ConfigurationPersistence
+internal static class ConfigurationPersistence
 {
     /// <summary>
     /// Finds the configuration owner of the subject, writes it through its configuration writer, see

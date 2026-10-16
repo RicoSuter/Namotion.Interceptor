@@ -6,7 +6,7 @@ namespace HomeBlaze.History.Blazor;
 /// <summary>
 /// The colours of history charts and the background that draws a state band.
 /// </summary>
-public static class HistoryChartPalette
+internal static class HistoryChartPalette
 {
     /// <summary>The hatch of a span whose value is unknown: no store vouches for it, or nothing was recorded in it yet.</summary>
     public const string UnknownFill =

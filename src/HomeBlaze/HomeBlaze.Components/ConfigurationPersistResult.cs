@@ -3,7 +3,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// The result of <see cref="ConfigurationPersistence.PersistOwnerAsync"/>.
 /// </summary>
-public enum ConfigurationPersistResult
+internal enum ConfigurationPersistResult
 {
     /// <summary>The configuration owner was written and applied.</summary>
     Written,

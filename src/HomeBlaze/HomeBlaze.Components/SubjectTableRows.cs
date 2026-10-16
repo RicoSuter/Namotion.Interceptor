@@ -13,7 +13,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Finds the rows of a <see cref="SubjectTable"/>, the headers of its columns and what its rows link to.
 /// </summary>
-public static class SubjectTableRows
+internal static class SubjectTableRows
 {
     /// <summary>The widget argument error of a table without a source.</summary>
     public const string MissingSourceError = "Needs a Source: a folder or a property that holds subjects";

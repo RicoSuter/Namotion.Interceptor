@@ -1,4 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.E2E.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.History.Blazor.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace HomeBlaze.History.Blazor
 {
@@ -36,21 +38,6 @@ namespace HomeBlaze.History.Blazor
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public static class HistoryChartAxis
-    {
-        public const double FullPercent = 100D;
-        public const int MaximumTimeLabelCount = 9;
-        public const double PixelsPerTimeLabel = 90D;
-        public const double PixelsPerValueLabel = 55D;
-        public static readonly System.Collections.Generic.IReadOnlyList<System.TimeSpan> TimeLabelSteps;
-        public static HomeBlaze.History.Blazor.HistoryChartValueAxis GetPercentValueAxis(double minimum, double maximum, double height) { }
-        public static int GetTimeLabelCount(double width) { }
-        public static string GetTimeLabelFormat(System.TimeSpan range, System.TimeSpan spacing) { }
-        public static System.TimeSpan GetTimeLabelSpacing(System.TimeSpan range, System.TimeSpan? bucket, double width) { }
-        public static HomeBlaze.History.Blazor.HistoryChartValueAxis GetValueAxis(double minimum, double maximum, double height) { }
-        public static int GetValueLabelCount(double height) { }
-        public static double ToPercent(double fraction) { }
-    }
     public sealed class HistoryChartBand : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartBand>
     {
         public HistoryChartBand(string Label, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> Segments, string Background, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> Legend) { }
@@ -83,30 +70,6 @@ namespace HomeBlaze.History.Blazor
         public string Label { get; init; }
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs { get; init; }
     }
-    public static class HistoryChartPalette
-    {
-        public const string NoValueFill = "#455A64";
-        public const string NoValueLabel = "(no value)";
-        public const string UnknownFill = "repeating-linear-gradient(45deg, #BDBDBD, #BDBDBD 4px, #E0E0E0 4px, #E0E0E0 8px)";
-        public const string UnknownLabel = "No data";
-        public static readonly System.Collections.Generic.IReadOnlyList<string> LineColors;
-        public static string BuildBandBackground(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> segments, System.DateTimeOffset from, System.DateTimeOffset to, HomeBlaze.History.Blazor.HistoryStatePalette palette) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> BuildBandLegend(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> segments, HomeBlaze.History.Blazor.HistoryStatePalette palette) { }
-        public static string DescribeSegment(HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment segment) { }
-        public static string GetLineColor(int index) { }
-    }
-    public static class HistoryChartQuery
-    {
-        public static System.TimeSpan? GetAvailableCoverage(System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.IHistoryStore> stores, System.DateTimeOffset to) { }
-        public static System.Threading.Tasks.Task<HomeBlaze.History.Blazor.HistoryChartResult> QueryAsync(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.IHistoryStore> stores, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesRequest> requests, System.DateTimeOffset from, System.DateTimeOffset to, System.TimeSpan? bucket, System.Threading.CancellationToken cancellationToken) { }
-    }
-    public sealed class HistoryChartResult : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartResult>
-    {
-        public HistoryChartResult(HomeBlaze.History.Blazor.HistoryChartData Data, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistorySeries> Series, bool IsTruncated) { }
-        public HomeBlaze.History.Blazor.HistoryChartData Data { get; init; }
-        public bool IsTruncated { get; init; }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistorySeries> Series { get; init; }
-    }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class HistoryChartSeries : HomeBlaze.Abstractions.IConfigurable, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
@@ -131,52 +94,11 @@ namespace HomeBlaze.History.Blazor
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public sealed class HistoryChartSeriesInfo : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartSeriesInfo>
-    {
-        public HistoryChartSeriesInfo(string Label, string? Color, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property, HomeBlaze.History.Blazor.HistoryChartSeriesKind Kind, HomeBlaze.Abstractions.Attributes.StateUnit Unit, bool HasHistory, bool IsCumulative, string? Aggregation = null) { }
-        public string? Aggregation { get; init; }
-        public string? Color { get; init; }
-        public bool HasHistory { get; init; }
-        public bool IsCumulative { get; init; }
-        public HomeBlaze.History.Blazor.HistoryChartSeriesKind Kind { get; init; }
-        public string Label { get; init; }
-        public string? Note { get; }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; init; }
-        public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; init; }
-    }
     public enum HistoryChartSeriesKind
     {
         Missing = 0,
         Line = 1,
         Band = 2,
-    }
-    public sealed class HistoryChartSeriesRequest : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartSeriesRequest>
-    {
-        public HistoryChartSeriesRequest(string PropertyPath, string Label, System.Type PropertyType, bool IsBand, string Aggregation, string? Color = null, HomeBlaze.Abstractions.Attributes.StateUnit Unit = 0) { }
-        public string Aggregation { get; init; }
-        public string? Color { get; init; }
-        public bool IsBand { get; init; }
-        public string Label { get; init; }
-        public string PropertyPath { get; init; }
-        public System.Type PropertyType { get; init; }
-        public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; init; }
-    }
-    public static class HistoryChartSeriesResolver
-    {
-        public static string?[] AssignLineColors(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
-        public static string ChooseAggregation(System.Type propertyType, bool isBand, bool isCumulative, bool isRaw, System.Collections.Generic.IReadOnlySet<string> storeAggregations, string? requested = null) { }
-        public static string? FindArgumentError(string? range, string? bucket, string? aggregation, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
-        public static int FindFirstRecordedLine(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> series) { }
-        public static string? GetAggregationNote(HomeBlaze.History.Blazor.HistoryChartSeriesInfo series, bool isRaw, string chosen) { }
-        public static HomeBlaze.History.Blazor.PropertyHistoryDialogSettings GetDialogSettings(HomeBlaze.History.Blazor.HistoryChartSeriesInfo series, string? range, string? bucket) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartSeriesInfo> Resolve(HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.History.Blazor.HistoryChart chart) { }
-    }
-    public readonly struct HistoryChartValueAxis : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartValueAxis>
-    {
-        public HistoryChartValueAxis(int Step, bool IncludesZero, double? SuggestedMaximum) { }
-        public bool IncludesZero { get; init; }
-        public int Step { get; init; }
-        public double? SuggestedMaximum { get; init; }
     }
     public class HistoryChartView : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
@@ -225,20 +147,6 @@ namespace HomeBlaze.History.Blazor
         public void Dispose() { }
         protected override void OnAfterRender(bool firstRender) { }
         protected override void OnInitialized() { }
-    }
-    public sealed class HistoryRefreshThrottle : System.IDisposable
-    {
-        public static readonly System.TimeSpan MinimumInterval;
-        public HistoryRefreshThrottle(System.TimeProvider timeProvider, System.Action callback) { }
-        public bool Arm(System.TimeSpan window) { }
-        public void Dispose() { }
-        public static System.TimeSpan GetWindow(System.TimeSpan refreshInterval, System.TimeSpan? bucket) { }
-    }
-    public sealed class HistoryStatePalette
-    {
-        public HistoryStatePalette() { }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> Assigned { get; }
-        public string GetColor(string label) { }
     }
     public static class PropertyHistoryChartModel
     {

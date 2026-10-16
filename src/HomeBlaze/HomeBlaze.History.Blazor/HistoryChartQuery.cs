@@ -13,7 +13,7 @@ namespace HomeBlaze.History.Blazor;
 /// <param name="Aggregation">The aggregation of a line query; lines with the same aggregation share one batch. Ignored for a band, which is always queried as raw samples.</param>
 /// <param name="Color">The CSS colour of a line, or null for the next of <see cref="HistoryChartPalette.LineColors"/>.</param>
 /// <param name="Unit">The unit of the property. A line in <see cref="StateUnit.Percent"/> is drawn in percent, except a count of samples.</param>
-public sealed record HistoryChartSeriesRequest(
+internal sealed record HistoryChartSeriesRequest(
     string PropertyPath,
     string Label,
     Type PropertyType,
@@ -28,13 +28,13 @@ public sealed record HistoryChartSeriesRequest(
 /// <param name="Data">What the chart draws.</param>
 /// <param name="Series">The query result of each request, in request order.</param>
 /// <param name="IsTruncated">Whether a series was cut to the point cap.</param>
-public sealed record HistoryChartResult(HistoryChartData Data, IReadOnlyList<HistorySeries> Series, bool IsTruncated);
+internal sealed record HistoryChartResult(HistoryChartData Data, IReadOnlyList<HistorySeries> Series, bool IsTruncated);
 
 /// <summary>
 /// Queries the history of the series of a chart and builds what the chart draws. Used by the history
 /// dialog and the history chart widget, so both draw the same chart.
 /// </summary>
-public static class HistoryChartQuery
+internal static class HistoryChartQuery
 {
     /// <summary>
     /// Gets how much recorded history lies before <paramref name="to"/>: from the earliest instant a store

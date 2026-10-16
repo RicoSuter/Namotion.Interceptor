@@ -10,12 +10,12 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// The range of a number from <see cref="Minimum"/> to <see cref="Maximum"/>.
 /// </summary>
-public readonly record struct ValueRange(double Minimum, double Maximum);
+internal readonly record struct ValueRange(double Minimum, double Maximum);
 
 /// <summary>
 /// Finds the range of a number that a widget shows or sets.
 /// </summary>
-public static class ValueRangeResolver
+internal static class ValueRangeResolver
 {
     /// <summary>
     /// The error of a widget whose number has no range.

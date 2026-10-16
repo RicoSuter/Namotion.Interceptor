@@ -7,7 +7,7 @@ namespace HomeBlaze.Components.Controls;
 /// <summary>
 /// Decides which widget a control widget renders for its target.
 /// </summary>
-public static class ControlKindResolver
+internal static class ControlKindResolver
 {
     /// <summary>
     /// Gets the kind of control for a property or a method property.

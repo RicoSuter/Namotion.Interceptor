@@ -8,7 +8,7 @@ namespace HomeBlaze.Components.Inputs;
 /// <summary>
 /// Decides what a path picker lets the user select for a property marked with <see cref="SubjectPathAttribute"/>.
 /// </summary>
-public static class SubjectPathSelection
+internal static class SubjectPathSelection
 {
     /// <summary>
     /// Gets whether the path of the property can be selected: without a <paramref name="subjectType"/> a value that

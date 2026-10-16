@@ -6,12 +6,12 @@ namespace HomeBlaze.History.Blazor;
 /// <param name="Step">The whole number between two value labels.</param>
 /// <param name="IncludesZero">Whether the axis reaches to zero.</param>
 /// <param name="SuggestedMaximum">The value the axis reaches at least, or null.</param>
-public readonly record struct HistoryChartValueAxis(int Step, bool IncludesZero, double? SuggestedMaximum);
+internal readonly record struct HistoryChartValueAxis(int Step, bool IncludesZero, double? SuggestedMaximum);
 
 /// <summary>
 /// Spaces the labels of the axes of a history chart by the size it is drawn at.
 /// </summary>
-public static class HistoryChartAxis
+internal static class HistoryChartAxis
 {
     /// <summary>The height one value label takes, in pixels.</summary>
     public const double PixelsPerValueLabel = 55;

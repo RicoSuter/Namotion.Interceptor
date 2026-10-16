@@ -23,16 +23,16 @@ public class ControlKindResolverTests
     [InlineData(nameof(ControlTargetSubject.Pressure), ControlKind.Value)]
     [InlineData(nameof(ControlTargetSubject.Temperature), ControlKind.Value)]
     [InlineData(nameof(ControlTargetSubject.Name), ControlKind.Value)]
-    public void WhenControlTargetsAPropertyOrAMethod_ThenItRendersTheWidgetForItsKind(string propertyName, ControlKind expected)
+    public void WhenControlTargetsAPropertyOrAMethod_ThenItRendersTheWidgetForItsKind(string propertyName, object expected)
     {
-        // Arrange
+        // Arrange (ControlKind is internal, so a public theory takes the expected kind as object)
         var property = ControlTestContext.GetProperty(_subject, propertyName);
 
         // Act
         var kind = ControlKindResolver.Resolve(property, null, null);
 
         // Assert
-        Assert.Equal(expected, kind);
+        Assert.Equal(expected, (object)kind);
     }
 
     [Fact]

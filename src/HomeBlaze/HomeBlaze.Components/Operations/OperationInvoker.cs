@@ -21,7 +21,7 @@ public static class OperationInvoker
     /// Gets what the user is asked before the method runs: the parameters when one of them requires input, else
     /// a confirmation when the method requires one.
     /// </summary>
-    public static OperationPrompt GetPrompt(MethodMetadata method)
+    internal static OperationPrompt GetPrompt(MethodMetadata method)
     {
         foreach (var parameter in method.Parameters)
         {

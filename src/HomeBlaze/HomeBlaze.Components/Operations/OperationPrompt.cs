@@ -3,7 +3,7 @@ namespace HomeBlaze.Components.Operations;
 /// <summary>
 /// What the user is asked before an operation or query runs.
 /// </summary>
-public enum OperationPrompt
+internal enum OperationPrompt
 {
     /// <summary>The method runs without asking.</summary>
     None,

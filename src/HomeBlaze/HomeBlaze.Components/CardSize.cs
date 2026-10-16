@@ -5,7 +5,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Turns the <see cref="Card.Height"/> and <see cref="Card.AspectRatio"/> of a card into its size.
 /// </summary>
-public static class CardSize
+internal static class CardSize
 {
     /// <summary>
     /// Parses an aspect ratio written as width and height with a colon between them, for example <c>4:3</c>.

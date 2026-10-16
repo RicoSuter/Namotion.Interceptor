@@ -3,7 +3,7 @@ namespace HomeBlaze.Components.Controls;
 /// <summary>
 /// The choices of a property that holds an enum.
 /// </summary>
-public static class EnumChoices
+internal static class EnumChoices
 {
     /// <summary>
     /// Gets the enum type of a property type, looking through nullable, or null when it holds no enum.

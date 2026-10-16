@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.History.Blazor.Tests" />
+        <InternalsVisibleTo Include="HomeBlaze.E2E.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.History\HomeBlaze.History.csproj" />
         <ProjectReference Include="..\HomeBlaze.History.Abstractions\HomeBlaze.History.Abstractions.csproj" />

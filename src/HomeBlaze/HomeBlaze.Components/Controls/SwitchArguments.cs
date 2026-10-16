@@ -6,7 +6,7 @@ namespace HomeBlaze.Components.Controls;
 /// <summary>
 /// Checks the operations of a switch widget.
 /// </summary>
-public static class SwitchArguments
+internal static class SwitchArguments
 {
     /// <summary>
     /// Gets the widget argument error of the operations of a switch, or null when they can be used. A path that

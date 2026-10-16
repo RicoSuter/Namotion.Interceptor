@@ -9,7 +9,7 @@ namespace HomeBlaze.Components.Controls;
 /// Converts between the value of a property and the position of a slider. Range and step are in the unit of the
 /// property; the slider shows them times the scale.
 /// </summary>
-public static class SliderMath
+internal static class SliderMath
 {
     private const double PercentScale = 100;
     private const int DefaultStepCount = 100;

@@ -5,7 +5,7 @@ namespace HomeBlaze.History.Blazor;
 /// always the highlighted state rather than whichever appeared first. One instance per chart, so a label
 /// has one colour in every band of that chart. Not thread-safe.
 /// </summary>
-public sealed class HistoryStatePalette
+internal sealed class HistoryStatePalette
 {
     private const string PinnedOnColor = "#2979FF";
     private const string PinnedOffColor = "#9E9E9E";

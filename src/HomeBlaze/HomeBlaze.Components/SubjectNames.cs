@@ -10,7 +10,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Names a subject for a heading, such as the title and subtitle of its edit dialog.
 /// </summary>
-public static class SubjectNames
+internal static class SubjectNames
 {
     /// <summary>The name of the text property that names a widget without a title.</summary>
     public const string LabelPropertyName = "Label";

@@ -3,7 +3,7 @@ namespace HomeBlaze.Components.Controls;
 /// <summary>
 /// The widget that a control widget renders for its target.
 /// </summary>
-public enum ControlKind
+internal enum ControlKind
 {
     /// <summary>A row with the label and the formatted value, for every target that no other kind takes.</summary>
     Value,

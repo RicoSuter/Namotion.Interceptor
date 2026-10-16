@@ -10,7 +10,7 @@ namespace HomeBlaze.History.Blazor;
 /// <c>InvokeAsync</c>, is fine even when the dispatcher runs the work inline on the timer thread, but the callback
 /// must never block waiting for the dispatcher or for another thread that arms or disposes the throttle.
 /// </remarks>
-public sealed class HistoryRefreshThrottle : IDisposable
+internal sealed class HistoryRefreshThrottle : IDisposable
 {
     /// <summary>The shortest window. It also covers the flush interval of a buffering history store.</summary>
     public static readonly TimeSpan MinimumInterval = TimeSpan.FromSeconds(60);

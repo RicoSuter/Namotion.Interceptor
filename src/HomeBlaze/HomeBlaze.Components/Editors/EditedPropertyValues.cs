@@ -6,7 +6,7 @@ namespace HomeBlaze.Components.Editors;
 /// <summary>
 /// Applies the values of a properties editor to the properties they were edited for.
 /// </summary>
-public static class EditedPropertyValues
+internal static class EditedPropertyValues
 {
     /// <summary>
     /// Gets whether a property of the type must have a value, which holds for a value type that is not nullable.

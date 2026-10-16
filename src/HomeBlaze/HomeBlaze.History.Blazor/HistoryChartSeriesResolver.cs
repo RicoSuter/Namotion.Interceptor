@@ -32,7 +32,7 @@ public enum HistoryChartSeriesKind
 /// <param name="HasHistory">Whether the property is recorded.</param>
 /// <param name="IsCumulative">Whether the property is a counter that only grows.</param>
 /// <param name="Aggregation">The aggregation the series asks for as written, its own or else the one of the chart, or null or empty for the automatic choice.</param>
-public sealed record HistoryChartSeriesInfo(
+internal sealed record HistoryChartSeriesInfo(
     string Label,
     string? Color,
     RegisteredSubjectProperty? Property,
@@ -51,7 +51,7 @@ public sealed record HistoryChartSeriesInfo(
 /// <summary>
 /// Resolves and checks the series of a <see cref="HistoryChart"/>.
 /// </summary>
-public static class HistoryChartSeriesResolver
+internal static class HistoryChartSeriesResolver
 {
     private static readonly string AggregationChoices = string.Join(", ", HistoryAggregations.All.SelectMany(aggregation =>
         aggregation == HistoryAggregations.TimeWeightedAverage

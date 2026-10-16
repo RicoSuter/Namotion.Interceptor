@@ -6,7 +6,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Decides what a <see cref="Gauge"/> shows for a reading.
 /// </summary>
-public static class GaugeDisplay
+internal static class GaugeDisplay
 {
     // Built once, so that a render does not format the style of the ring again.
     private static readonly string SmallRingStyle = CreateRingStyle(GaugeSize.Small);

@@ -1,4 +1,5 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Components.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace HomeBlaze.Components
 {
@@ -127,21 +128,6 @@ namespace HomeBlaze.Components
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-    }
-    public static class CardSize
-    {
-        public static string? GetStyle(int? height, string? aspectRatio, out string? error) { }
-        public static bool TryParseAspectRatio(string? value, out double width, out double height) { }
-    }
-    public enum ConfigurationPersistResult
-    {
-        Written = 0,
-        NotWritten = 1,
-        NoOwner = 2,
-    }
-    public static class ConfigurationPersistence
-    {
-        public static System.Threading.Tasks.Task<HomeBlaze.Components.ConfigurationPersistResult> PersistOwnerAsync(HomeBlaze.Services.RootManager rootManager, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("SettingsRemote")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -278,29 +264,11 @@ namespace HomeBlaze.Components
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public static class GaugeDisplay
-    {
-        public static string? FormatNumber(double? number) { }
-        public static MudBlazor.Color GetColor(HomeBlaze.Components.ValueReading reading) { }
-        public static int GetPixelSize(HomeBlaze.Components.GaugeSize size) { }
-        public static string GetRingStyle(HomeBlaze.Components.GaugeSize size) { }
-        public static HomeBlaze.Components.GaugeState GetState(HomeBlaze.Components.ValueReading reading, double? minimum, double? maximum) { }
-        public static MudBlazor.Typo GetValueTypo(HomeBlaze.Components.GaugeSize size) { }
-    }
     public enum GaugeSize
     {
         Small = 0,
         Medium = 1,
         Large = 2,
-    }
-    public readonly struct GaugeState : System.IEquatable<HomeBlaze.Components.GaugeState>
-    {
-        public GaugeState(double? Value, double? AriaValue, double? Percent, HomeBlaze.Components.ValueRange? Range, string? Error) { }
-        public double? AriaValue { get; init; }
-        public string? Error { get; init; }
-        public double? Percent { get; init; }
-        public HomeBlaze.Components.ValueRange? Range { get; init; }
-        public double? Value { get; init; }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -564,14 +532,6 @@ namespace HomeBlaze.Components
         protected override void OnInitialized() { }
         protected override void OnParametersSet() { }
     }
-    public static class SubjectNames
-    {
-        public const string LabelPropertyName = "Label";
-        public static string GetTypeName(System.Type type) { }
-        public static string? TryGetContentTitle(Namotion.Interceptor.IInterceptorSubject subject) { }
-        public static string? TryGetTitle(Namotion.Interceptor.IInterceptorSubject subject) { }
-        public static string? TryGetTitle(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? labelProperty) { }
-    }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("TableChart")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("Dashboard")]
@@ -620,15 +580,6 @@ namespace HomeBlaze.Components
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-    }
-    public static class SubjectTableRows
-    {
-        public const string MissingSourceError = "Needs a Source: a folder or a property that holds subjects";
-        public static string GetHeader(HomeBlaze.Components.SubjectTableColumn column, System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild> rows) { }
-        public static string? GetLink(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject subject) { }
-        public static string GetTitle(Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild row) { }
-        public static bool MatchesType(System.Type type, string typeName) { }
-        public static bool TryGetRows(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? source, string? typeName, out System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild> rows, out string? error) { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("ToggleOn")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -776,18 +727,6 @@ namespace HomeBlaze.Components
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-    }
-    public readonly struct ValueRange : System.IEquatable<HomeBlaze.Components.ValueRange>
-    {
-        public ValueRange(double Minimum, double Maximum) { }
-        public double Maximum { get; init; }
-        public double Minimum { get; init; }
-    }
-    public static class ValueRangeResolver
-    {
-        public const string MissingRangeError = "Needs a range: set Minimum and Maximum";
-        public static bool TryResolve(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, double? minimum, double? maximum, out HomeBlaze.Components.ValueRange range, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
-        public static string? Validate(HomeBlaze.Components.ValueRange range) { }
     }
     public static class ValueReader
     {
@@ -1310,25 +1249,6 @@ namespace HomeBlaze.Components.Components
 }
 namespace HomeBlaze.Components.Controls
 {
-    public enum ControlKind
-    {
-        Value = 0,
-        OperationButton = 1,
-        Switch = 2,
-        Indicator = 3,
-        Select = 4,
-        Slider = 5,
-    }
-    public static class ControlKindResolver
-    {
-        public static HomeBlaze.Components.Controls.ControlKind Resolve(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, double? minimum, double? maximum) { }
-    }
-    public static class EnumChoices
-    {
-        public static System.Type? GetEnumType(System.Type propertyType) { }
-        public static string GetFlagsError(System.Type enumType) { }
-        public static bool IsFlags(System.Type enumType) { }
-    }
     public sealed class PropertyWriter : System.IDisposable
     {
         public static readonly System.TimeSpan PersistDelay;
@@ -1337,19 +1257,6 @@ namespace HomeBlaze.Components.Controls
         public bool TryWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? value) { }
         public static bool IsWritable(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property) { }
         public static bool IsWritable(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? currentValue) { }
-    }
-    public static class SliderMath
-    {
-        public static double GetDefaultStep(System.Type? propertyType, HomeBlaze.Components.ValueRange range) { }
-        public static double GetScale(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property) { }
-        public static double ToPropertyValue(double sliderValue, HomeBlaze.Components.ValueRange range, double step, double scale, System.Type? propertyType) { }
-        public static double ToSliderScale(double value, double scale) { }
-        public static double ToSliderValue(object? value, HomeBlaze.Components.ValueRange range, double scale) { }
-        public static string? ValidateStep(System.Type? propertyType, double? step) { }
-    }
-    public static class SwitchArguments
-    {
-        public static string? Validate(string? on, string? off, HomeBlaze.Abstractions.Metadata.MethodMetadata? onMethod, HomeBlaze.Abstractions.Metadata.MethodMetadata? offMethod) { }
     }
 }
 namespace HomeBlaze.Components.Dialogs
@@ -1459,11 +1366,6 @@ namespace HomeBlaze.Components.Editors
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override void OnInitialized() { }
     }
-    public static class EditedPropertyValues
-    {
-        public static System.Collections.Generic.List<string> Apply(System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>> editedValues) { }
-        public static bool IsRequired(System.Type propertyType) { }
-    }
     public class PropertyEditor : Microsoft.AspNetCore.Components.ComponentBase
     {
         public PropertyEditor() { }
@@ -1572,20 +1474,12 @@ namespace HomeBlaze.Components.Inputs
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnInitialized() { }
     }
-    public static class SubjectPathSelection
-    {
-        public static bool CanSelectProperty(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, System.Type? subjectType) { }
-        public static bool CanSelectProperty(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, System.Type? subjectType, HomeBlaze.Abstractions.Attributes.SubjectPathKinds kind, bool writable) { }
-        public static bool CanSelectSubject(Namotion.Interceptor.IInterceptorSubject subject, System.Type? subjectType) { }
-        public static bool MatchesKind(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, HomeBlaze.Abstractions.Attributes.SubjectPathKinds kind) { }
-    }
 }
 namespace HomeBlaze.Components.Operations
 {
     public static class OperationInvoker
     {
         public static string GetIconName(HomeBlaze.Abstractions.Metadata.MethodMetadata method) { }
-        public static HomeBlaze.Components.Operations.OperationPrompt GetPrompt(HomeBlaze.Abstractions.Metadata.MethodMetadata method) { }
         public static System.Threading.Tasks.Task<HomeBlaze.Components.Operations.OperationOutcome> InvokeAsync(MudBlazor.IDialogService dialogService, System.IServiceProvider serviceProvider, HomeBlaze.Abstractions.Metadata.MethodMetadata method, System.Threading.CancellationToken lifetime) { }
     }
     public enum OperationOutcome
@@ -1593,11 +1487,5 @@ namespace HomeBlaze.Components.Operations
         Cancelled = 0,
         Succeeded = 1,
         Failed = 2,
-    }
-    public enum OperationPrompt
-    {
-        None = 0,
-        Parameters = 1,
-        Confirmation = 2,
     }
 }
