@@ -6,6 +6,11 @@
     padding-right: 11rem;
 }
 
+/* In the split mode they stand above the editor instead. */
+.page-split-preview .markdown-content > h1:first-of-type {
+    padding-right: 0;
+}
+
 /* The blocks of a page are 1rem apart, from each other and from the text around them. */
 .markdown-content > .subject-component-wrapper {
     margin: 1rem 0;

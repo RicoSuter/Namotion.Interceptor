@@ -27,12 +27,17 @@
     {
         <CascadingValue Value="@IsEditing" Name="IsEditing">
         <CascadingValue Value="_widgetSelection" IsFixed="true">
-            @* The head of the page in every mode: what the page shows there, such as the time of its last change, and the
-               button of the edit modes, side by side. In the view modes a markdown page leaves room for them next to its
-               title, and in the editing modes they stand at the end of the bar above the editor. One outlet that stays in
-               place, because a second outlet of the same section while the mode changes would end the circuit. *@
-            <div class="d-flex align-center gap-2" style="position: absolute; top: 84px; right: 20px; z-index: 100;" data-testid="page-head">
-                <SectionOutlet SectionName="PageHeadInfo" />
+            @* The head of the page in every mode: the actions of the editor, what the page shows there, such as the time of
+               its last change, and the button of the edit modes, side by side. In the view modes a markdown page leaves room
+               for them next to its title, and in the editing modes they stand at the end of the bar above the editor. One
+               outlet per section that stays in place, because a second outlet of the same section while the mode changes
+               would end the circuit. *@
+            <div class="d-flex align-center gap-2" style="@GetPageHeadStyle()" data-testid="page-head">
+                <SectionOutlet SectionName="EditActions" />
+                @* Next to the actions, the bar of the editor is too narrow for the time on a phone. *@
+                <div class="@(ShowEditor ? "d-none d-sm-flex" : "d-flex")">
+                    <SectionOutlet SectionName="PageHeadInfo" />
+                </div>
                 @if (CanEdit())
                 {
                     @RenderEditMenu()
@@ -47,7 +52,7 @@
                                  EnableSlide="true"
                                  OnDoubleClicked="ResetSplitDimension">
                         <StartContent>
-                            <div style="width: 100%; height: 100%; overflow-y: auto;" @onclick="ClearSelectionCallback">
+                            <div class="page-split-preview" style="width: 100%; height: 100%; overflow-y: auto;" @onclick="ClearSelectionCallback">
                                 <SubjectComponent @key="_componentKey"
                                                   Subject="@_subject"
                                                   Type="SubjectComponentType.Page"/>
@@ -55,11 +60,7 @@
                         </StartContent>
                         <EndContent>
                             <div class="d-flex flex-column" style="height: 100%; width: 100%">
-                                <div class="d-flex align-center justify-space-between gap-2 px-4 py-2" style="height: 56px; flex-shrink: 0; border-bottom: 1px solid var(--mud-palette-divider); width: 100%">
-                                    <div class="d-flex gap-2">
-                                        <SectionOutlet SectionName="EditActions" />
-                                    </div>
-                                </div>
+                                <div style="@EditorBarStyle"></div>
                                 <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                                     <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
                                         <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>
@@ -81,11 +82,7 @@
             else if (_editMode == PageEditMode.Source && CanEdit())
             {
                 <div class="d-flex flex-column" style="height: calc(100vh - 80px); width: 100%">
-                    <div class="d-flex align-center justify-space-between gap-2 px-4 py-2" style="height: 56px; flex-shrink: 0; border-bottom: 1px solid var(--mud-palette-divider); width: 100%">
-                        <div class="d-flex gap-2">
-                            <SectionOutlet SectionName="EditActions" />
-                        </div>
-                    </div>
+                    <div style="@EditorBarStyle"></div>
                     <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                         <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
                             <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>
@@ -157,6 +154,19 @@
 
     private bool IsEditing => _editMode != PageEditMode.View;
     private bool ShowEditor => _editMode is PageEditMode.Split or PageEditMode.Source;
+
+    // The bar above the editor, in which the page head stands.
+    private const string EditorBarStyle = "height: 56px; flex-shrink: 0; border-bottom: 1px solid var(--mud-palette-divider); width: 100%";
+
+    // The page head is placed on the document below the app bar. The layout has 16px of padding at the sides (px-4), the
+    // head stands 16px inside the end of the bar of the editor, which in the split mode is inside the 8px margin of the
+    // splitter content, and in the view modes 20px below the app bar on the line of the title.
+    private string GetPageHeadStyle() => _editMode switch
+    {
+        PageEditMode.Split => "position: absolute; z-index: 100; top: calc(var(--mud-appbar-height) + 8px); right: 40px; height: 56px;",
+        PageEditMode.Source => "position: absolute; z-index: 100; top: var(--mud-appbar-height); right: 32px; height: 56px;",
+        _ => "position: absolute; z-index: 100; top: calc(var(--mud-appbar-height) + 20px); right: 16px;"
+    };
 
     protected override void OnInitialized()
     {

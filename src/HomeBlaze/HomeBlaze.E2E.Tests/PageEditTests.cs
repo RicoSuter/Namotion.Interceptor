@@ -125,6 +125,92 @@ public class PageEditTests
     }
 
     [Fact]
+    public async Task WhenTheEditModeChangesBetweenAllModes_ThenTheCircuitStaysAndTheEditorWorksAfterEachChange()
+    {
+        // Arrange
+        var page = await OpenWidgetsDemoPageAsync();
+        var splitter = page.GetByTestId("edit-splitter");
+        var monacoEditor = page.Locator(".monaco-editor");
+
+        // Act & Assert: Split to Source once ended the circuit, because both modes had an outlet of the edit actions.
+        foreach (var mode in new[] { "Split", "Source", "Split", "Inline", "Source", "View" })
+        {
+            await SelectEditModeAsync(page, mode);
+
+            if (mode is "Split" or "Source")
+            {
+                await Assertions.Expect(splitter).ToHaveCountAsync(mode == "Split" ? 1 : 0, new() { Timeout = 30000 });
+                await Assertions.Expect(monacoEditor).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+                // A dialog that opens and closes needs the circuit.
+                await page.GetByTestId("create-subject-button").ClickAsync();
+                var dialog = page.GetByTestId("create-subject-dialog");
+                await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 30000 });
+                await page.GetByTestId("cancel-button").ClickAsync();
+                await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = 30000 });
+            }
+            else
+            {
+                await Assertions.Expect(monacoEditor).ToHaveCountAsync(0, new() { Timeout = 30000 });
+                await Assertions.Expect(splitter).ToHaveCountAsync(0);
+                var selectableWidgets = page.Locator(".subject-component-wrapper.selectable");
+                if (mode == "Inline")
+                {
+                    await Assertions.Expect(selectableWidgets.First).ToBeVisibleAsync(new() { Timeout = 30000 });
+                }
+                else
+                {
+                    await Assertions.Expect(selectableWidgets).ToHaveCountAsync(0, new() { Timeout = 30000 });
+                }
+            }
+
+            await Assertions.Expect(page.Locator("#blazor-error-ui")).ToBeHiddenAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheSplitModeIsNarrow_ThenTheCreateButtonCanBeClicked()
+    {
+        // Arrange
+        var page = await OpenWidgetsDemoPageAsync(width: 400);
+        await SelectEditModeAsync(page, "Split");
+        var createButton = page.GetByTestId("create-subject-button");
+        await Assertions.Expect(createButton).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Act: not forced, so that the click fails when another element covers the button.
+        await createButton.ClickAsync(new() { Timeout = 10000 });
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = 30000 });
+    }
+
+    private async Task<IPage> OpenWidgetsDemoPageAsync(int? width = null)
+    {
+        var page = await _fixture.CreatePageAsync();
+
+        // Before the page opens: a narrower window closes the navigation drawer with a transition.
+        if (width is { } viewportWidth)
+        {
+            await page.SetViewportSizeAsync(viewportWidth, 900);
+        }
+
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // The edit menu is prerendered, and a click before the circuit is connected is lost.
+        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = 30000 });
+        return page;
+    }
+
+    private static async Task SelectEditModeAsync(IPage page, string mode)
+    {
+        var editMenu = page.GetByTestId("edit-mode-menu");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editMenu.ClickAsync();
+        await page.Locator(".mud-popover-open").GetByText(mode, new() { Exact = true }).ClickAsync();
+    }
+
+    [Fact]
     public async Task WhenTheFormOfThePageEditorIsInvalid_ThenSaveIsDisabledUntilItIsCorrected()
     {
         // Arrange - the subject has no page component, but the page editor shows the generated properties
