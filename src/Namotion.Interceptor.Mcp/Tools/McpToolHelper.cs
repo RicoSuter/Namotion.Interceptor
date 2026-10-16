@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -58,7 +59,8 @@ internal static class McpToolHelper
         bool includeProperties,
         bool includeAttributes,
         bool includeMethods,
-        bool includeInterfaces)
+        bool includeInterfaces,
+        IReadOnlySet<string>? propertyNames = null)
     {
         var path = TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
 
@@ -99,9 +101,9 @@ internal static class McpToolHelper
             enrichments.Remove("$interfaces");
         }
 
-        // Build scalar properties
+        // Build scalar properties; a property selection implies including properties.
         Dictionary<string, SubjectNodeProperty>? properties = null;
-        if (includeProperties)
+        if (includeProperties || propertyNames is not null)
         {
             properties = new Dictionary<string, SubjectNodeProperty>();
             foreach (var property in subject.Properties)
@@ -112,6 +114,11 @@ internal static class McpToolHelper
                 }
 
                 var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
+                if (propertyNames is not null && !propertyNames.Contains(segment))
+                {
+                    continue;
+                }
+
                 properties[segment] = BuildScalarPropertyDto(property, configuration, includeAttributes);
             }
         }
@@ -125,6 +132,29 @@ internal static class McpToolHelper
             Interfaces = interfaces,
             Properties = properties
         };
+    }
+
+    /// <summary>
+    /// Reads the optional <c>properties</c> selection. Returns the error response when it is present but not an
+    /// array of strings, otherwise null.
+    /// </summary>
+    internal static object? TryReadPropertyNames(JsonElement input, out HashSet<string>? propertyNames)
+    {
+        propertyNames = null;
+        if (!input.TryGetProperty("properties", out var element) || element.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (element.ValueKind != JsonValueKind.Array ||
+            element.EnumerateArray().Any(item => item.ValueKind != JsonValueKind.String))
+        {
+            return new { error = "Parameter 'properties' must be an array of property names." };
+        }
+
+        propertyNames = new HashSet<string>(
+            element.EnumerateArray().Select(item => item.GetString()!), StringComparer.Ordinal);
+        return null;
     }
 
     internal static string? TryGetSubjectPath(

@@ -53,3 +53,14 @@ public partial class TestNumbers
     public partial long LongValue { get; set; }
     public partial float FloatValue { get; set; }
 }
+
+[InterceptorSubject]
+public partial class TestDeviceGroup
+{
+    public partial Dictionary<string, TestDevice> Devices { get; set; }
+
+    public TestDeviceGroup()
+    {
+        Devices = new Dictionary<string, TestDevice>();
+    }
+}
