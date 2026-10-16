@@ -568,6 +568,7 @@ namespace HomeBlaze.Components
     {
         public const string LabelPropertyName = "Label";
         public static string GetTypeName(System.Type type) { }
+        public static string? TryGetContentTitle(Namotion.Interceptor.IInterceptorSubject subject) { }
         public static string? TryGetTitle(Namotion.Interceptor.IInterceptorSubject subject) { }
         public static string? TryGetTitle(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? labelProperty) { }
     }

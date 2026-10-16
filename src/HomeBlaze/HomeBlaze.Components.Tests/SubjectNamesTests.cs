@@ -1,3 +1,4 @@
+using HomeBlaze.Components.Tests.Models;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Xunit;
@@ -90,6 +91,70 @@ public class SubjectNamesTests
         // Assert
         Assert.Null(widgetTitle);
         Assert.Null(layoutTitle);
+    }
+
+    [Fact]
+    public void WhenSubjectHasATitle_ThenContentTitleIsItsOwnTitle()
+    {
+        // Arrange
+        var card = new Card(_context) { Title = "Overview" };
+        var folder = new TestFolder(_context) { Label = "Folder" };
+        folder.Children = new Dictionary<string, IInterceptorSubject> { ["card"] = card };
+
+        // Act
+        var title = SubjectNames.TryGetContentTitle(folder);
+
+        // Assert
+        Assert.Equal("Folder", title);
+    }
+
+    [Fact]
+    public void WhenContentHasNoTitle_ThenContentTitleIsTheTitleOfTheFirstTitledChildInItsOrder()
+    {
+        // Arrange: the order of the dictionary, not of the keys.
+        var folder = new TestFolder(_context);
+        folder.Children = new Dictionary<string, IInterceptorSubject>
+        {
+            ["c"] = new Switch(_context),
+            ["b"] = new Card(_context) { Title = "First" },
+            ["a"] = new Card(_context) { Title = "Second" }
+        };
+
+        // Act
+        var title = SubjectNames.TryGetContentTitle(folder);
+
+        // Assert
+        Assert.Equal("First", title);
+    }
+
+    [Fact]
+    public void WhenContentIsAList_ThenContentTitleIsTheTitleOfTheFirstTitledItem()
+    {
+        // Arrange
+        var layout = new FlowLayout(_context)
+        {
+            Items = [new Switch(_context), new Switch(_context) { Label = "Fan" }]
+        };
+
+        // Act
+        var title = SubjectNames.TryGetContentTitle(layout);
+
+        // Assert
+        Assert.Equal("Fan", title);
+    }
+
+    [Fact]
+    public void WhenNeitherContentNorChildrenHaveATitle_ThenNoContentTitleIsReturned()
+    {
+        // Arrange
+        var folder = new TestFolder(_context);
+        folder.Children = new Dictionary<string, IInterceptorSubject> { ["switch"] = new Switch(_context) };
+
+        // Act
+        var title = SubjectNames.TryGetContentTitle(folder);
+
+        // Assert
+        Assert.Null(title);
     }
 
     private sealed class NestedGeneric<T>;

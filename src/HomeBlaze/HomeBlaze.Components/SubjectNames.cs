@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Text;
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
@@ -49,6 +50,62 @@ public static class SubjectNames
         }
 
         return labelProperty?.GetValue() is string { Length: > 0 } label ? label : null;
+    }
+
+    /// <summary>
+    /// Gets the title of the subject like <see cref="TryGetTitle(IInterceptorSubject)"/>, otherwise the title of the first
+    /// of its child subjects that has one, in the order of its properties and of their values. This names the content of a
+    /// layout cell, which on a page is the page content that holds the widgets of the cell.
+    /// </summary>
+    public static string? TryGetContentTitle(IInterceptorSubject subject)
+    {
+        if (TryGetTitle(subject) is { } title)
+        {
+            return title;
+        }
+
+        if (subject.TryGetRegisteredSubject() is not { } registeredSubject)
+        {
+            return null;
+        }
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (!property.CanContainSubjects)
+            {
+                continue;
+            }
+
+            // The value and not the children of the registry, which keeps a reused child at its old position when the
+            // content is parsed again.
+            var childTitle = property.GetValue() switch
+            {
+                IInterceptorSubject child => TryGetTitle(child),
+                IDictionary dictionary => TryGetFirstTitle(dictionary.Values),
+                IEnumerable children => TryGetFirstTitle(children),
+                _ => null
+            };
+
+            if (childTitle is not null)
+            {
+                return childTitle;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryGetFirstTitle(IEnumerable children)
+    {
+        foreach (var child in children)
+        {
+            if (child is IInterceptorSubject subject && TryGetTitle(subject) is { } title)
+            {
+                return title;
+            }
+        }
+
+        return null;
     }
 
     private static void AppendGenericTypeName(StringBuilder builder, Type type)

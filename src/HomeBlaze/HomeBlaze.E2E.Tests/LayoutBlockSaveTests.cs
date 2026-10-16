@@ -143,6 +143,27 @@ public class LayoutBlockSaveTests
     }
 
     [Fact]
+    public async Task WhenCellOfGridOnPageHoldsACardBelowText_ThenItsEditDialogIsNamedAfterTheCard()
+    {
+        // Arrange: on a page the subject of a cell is its page content, which has no title of its own.
+        await WithPageAsync(GridPage, CreateGridPage("::: Cell Row=0 Column=0", "Text above.", "", ":::: HomeBlaze.Components.Card Title=\"Cell Card\""), async () =>
+        {
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
+            var cell = page.Locator(".grid-cell.editing");
+            await Assertions.Expect(cell.GetByText("Cell Card", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+            // Act
+            await cell.GetByTitle("Edit Cell").ClickAsync();
+
+            // Assert
+            var dialog = page.Locator(".mud-dialog");
+            await Assertions.Expect(dialog.Locator(".mud-dialog-title h6")).ToHaveTextAsync("Edit Cell: Cell Card", new() { Timeout = Timeout });
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        });
+    }
+
+    [Fact]
     public async Task WhenNodeOfCanvasOnPageIsDragged_ThenOnlyTheLineOfThatNodeChanges()
     {
         // Arrange
