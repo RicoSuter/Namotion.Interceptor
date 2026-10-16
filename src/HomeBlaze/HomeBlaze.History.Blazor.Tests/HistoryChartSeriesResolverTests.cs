@@ -437,15 +437,16 @@ public class HistoryChartSeriesResolverTests
     }
 
     [Theory]
-    [InlineData(HistoryChartSeriesKind.Line, "maximum", false, HistoryAggregations.Maximum)]
-    [InlineData(HistoryChartSeriesKind.Line, "average", false, HistoryAggregations.TimeWeightedAverage)]
-    [InlineData(HistoryChartSeriesKind.Line, "maximum", true, HistoryAggregations.Last)]
-    [InlineData(HistoryChartSeriesKind.Band, "maximum", false, HistoryAggregations.Last)]
-    [InlineData(HistoryChartSeriesKind.Line, null, false, HistoryAggregations.TimeWeightedAverage)]
+    [InlineData(false, "maximum", false, HistoryAggregations.Maximum)]
+    [InlineData(false, "average", false, HistoryAggregations.TimeWeightedAverage)]
+    [InlineData(false, "maximum", true, HistoryAggregations.Last)]
+    [InlineData(true, "maximum", false, HistoryAggregations.Last)]
+    [InlineData(false, null, false, HistoryAggregations.TimeWeightedAverage)]
     public void WhenTheRequestedAggregationIsShownOrDoesNotApply_ThenThereIsNoNote(
-        HistoryChartSeriesKind kind, string? requested, bool isRaw, string chosen)
+        bool isBand, string? requested, bool isRaw, string chosen)
     {
         // Arrange
+        var kind = isBand ? HistoryChartSeriesKind.Band : HistoryChartSeriesKind.Line;
         var series = new HistoryChartSeriesInfo("Pump", null, null, kind, StateUnit.Default, true, false, requested);
 
         // Act

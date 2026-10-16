@@ -65,10 +65,10 @@ public static class PropertyHistoryChartModel
     /// <param name="ShortName">The name a page writes, for example "24h".</param>
     /// <param name="Label">The text of the range select.</param>
     /// <param name="Range">The time span.</param>
-    public readonly record struct RangePreset(string ShortName, string Label, TimeSpan Range);
+    internal readonly record struct RangePreset(string ShortName, string Label, TimeSpan Range);
 
     /// <summary>The range presets in display order, from the shortest to the longest.</summary>
-    public static readonly IReadOnlyList<RangePreset> RangePresets = new[]
+    internal static readonly IReadOnlyList<RangePreset> RangePresets = new[]
     {
         new RangePreset("1h", "Last hour", TimeSpan.FromHours(1)),
         new RangePreset("6h", "Last 6 hours", TimeSpan.FromHours(6)),
@@ -78,7 +78,7 @@ public static class PropertyHistoryChartModel
     };
 
     /// <summary>Finds the span of a range preset by its short name, ignoring case.</summary>
-    public static bool TryGetRange(string? shortName, out TimeSpan range)
+    internal static bool TryGetRange(string? shortName, out TimeSpan range)
     {
         foreach (var preset in RangePresets)
         {
@@ -94,7 +94,7 @@ public static class PropertyHistoryChartModel
     }
 
     /// <summary>Finds a period by its short name, ignoring case.</summary>
-    public static bool TryGetPeriod(string? shortName, out ChartPeriod period)
+    internal static bool TryGetPeriod(string? shortName, out ChartPeriod period)
     {
         foreach (var candidate in Periods)
         {
@@ -116,7 +116,7 @@ public static class PropertyHistoryChartModel
     /// Finds an aggregation of <see cref="HistoryAggregations.All"/> by its name, or the time-weighted average by
     /// <see cref="AverageAlias"/>, ignoring case.
     /// </summary>
-    public static bool TryGetAggregation(string? name, out string aggregation)
+    internal static bool TryGetAggregation(string? name, out string aggregation)
     {
         if (string.Equals(name, AverageAlias, StringComparison.OrdinalIgnoreCase))
         {
@@ -138,7 +138,7 @@ public static class PropertyHistoryChartModel
     }
 
     /// <summary>Gets the name of an aggregation in a select or a note, for example "Average" for the time-weighted average.</summary>
-    public static string GetAggregationLabel(string aggregation) => aggregation switch
+    internal static string GetAggregationLabel(string aggregation) => aggregation switch
     {
         HistoryAggregations.TimeWeightedAverage => "Average",
         HistoryAggregations.SampleAverage => "Sample Average",
@@ -151,7 +151,7 @@ public static class PropertyHistoryChartModel
     /// <param name="RangeIndex">The index in <see cref="RangePresets"/>.</param>
     /// <param name="PeriodIndex">The index in <see cref="Periods"/>.</param>
     /// <param name="Aggregation">The aggregation.</param>
-    public readonly record struct DialogSelection(int RangeIndex, int PeriodIndex, string Aggregation);
+    internal readonly record struct DialogSelection(int RangeIndex, int PeriodIndex, string Aggregation);
 
     /// <summary>
     /// Gets the selections the history dialog opens with: those of <paramref name="settings"/> that it can show, otherwise
@@ -161,7 +161,7 @@ public static class PropertyHistoryChartModel
     /// <param name="settings">The selections asked for, or null.</param>
     /// <param name="offeredAggregations">The aggregations the dialog offers for the property, see <see cref="GateAggregations"/>.</param>
     /// <param name="isDiscrete">Whether the property holds a discrete state.</param>
-    public static DialogSelection GetInitialSelection(
+    internal static DialogSelection GetInitialSelection(
         PropertyHistoryDialogSettings? settings, IReadOnlyList<string> offeredAggregations, bool isDiscrete)
     {
         var rangeIndex = 0;
@@ -252,9 +252,6 @@ public static class PropertyHistoryChartModel
         return (from, to);
     }
 
-    /// <summary>Formats a bucket size as a short human label (for example "10s", "5m", "1h", "1d"), see <see cref="FormatDuration"/>.</summary>
-    public static string FormatBucket(TimeSpan bucket) => FormatDuration(bucket);
-
     /// <summary>
     /// Formats a duration as a short human label in its largest unit up to days: seconds and minutes as whole numbers,
     /// hours and days with up to one decimal, for example "10s", "5m", "1.5h" or "2d".
@@ -290,10 +287,10 @@ public static class PropertyHistoryChartModel
     {
         if (period.IsAuto)
         {
-            return resolvedBucket is { } bucket ? $"about {FormatBucket(bucket)}" : "auto";
+            return resolvedBucket is { } bucket ? $"about {FormatDuration(bucket)}" : "auto";
         }
 
-        return period.Bucket is { } fixedBucket ? $"{FormatBucket(fixedBucket)} buckets" : "raw samples";
+        return period.Bucket is { } fixedBucket ? $"{FormatDuration(fixedBucket)} buckets" : "raw samples";
     }
 
     /// <summary>

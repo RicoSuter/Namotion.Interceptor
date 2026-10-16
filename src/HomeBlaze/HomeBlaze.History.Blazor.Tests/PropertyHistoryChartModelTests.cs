@@ -159,9 +159,13 @@ public class PropertyHistoryChartModelTests
     }
 
     [Theory]
+    [InlineData(10, 10d, "s")]
     [InlineData(30, 30d, "s")]
     [InlineData(120, 2d, "m")]
+    [InlineData(5 * 60, 5d, "m")]
+    [InlineData(60 * 60, 1d, "h")]
     [InlineData(90 * 60, 1.5, "h")]
+    [InlineData(24 * 60 * 60, 1d, "d")]
     [InlineData(36 * 60 * 60, 1.5, "d")]
     [InlineData(7 * 24 * 60 * 60, 7d, "d")]
     public void WhenADurationIsFormatted_ThenItIsInItsLargestUnitUpToDays(int totalSeconds, double number, string unit)
@@ -171,20 +175,6 @@ public class PropertyHistoryChartModelTests
 
         // Assert
         Assert.Equal(number.ToString("0.#") + unit, label);
-    }
-
-    [Theory]
-    [InlineData(10, "10s")]
-    [InlineData(5 * 60, "5m")]
-    [InlineData(60 * 60, "1h")]
-    [InlineData(24 * 60 * 60, "1d")]
-    public void WhenFormatBucket_ThenReturnsShortHumanLabel(int totalSeconds, string expected)
-    {
-        // Act
-        var label = PropertyHistoryChartModel.FormatBucket(TimeSpan.FromSeconds(totalSeconds));
-
-        // Assert
-        Assert.Equal(expected, label);
     }
 
     [Theory]

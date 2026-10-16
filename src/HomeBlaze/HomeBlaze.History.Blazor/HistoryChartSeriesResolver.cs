@@ -10,7 +10,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace HomeBlaze.History.Blazor;
 
 /// <summary>How a series of a <see cref="HistoryChart"/> is drawn.</summary>
-public enum HistoryChartSeriesKind
+internal enum HistoryChartSeriesKind
 {
     /// <summary>The path leads nowhere.</summary>
     Missing,
