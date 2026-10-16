@@ -47,6 +47,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // reload lock, which the reload inside the write takes while this one is held.
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
+    // The write-back of this page that the flow runs in, so that a save from inside it is refused instead of waiting
+    // for _writeLock. Off the worker, the reload after a refused write applies configuration within the write.
+    private readonly AsyncLocal<WriteOfFlow?> _writeOfFlow = new();
+
     // Each access reads the current snapshot. Code that needs two of these together must take
     // _parseResult into a local once and read both from that local.
     private IReadOnlyDictionary<int, IInterceptorSubject> _blockSubjects => _parseResult.BlockSubjects;
@@ -217,20 +221,26 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
-        // From work on the worker, such as the configuration that the reload inside a save applies, the call would
-        // wait for the lock that the save holds while it waits for that work. The worker would refuse it later.
-        if (Storage is FluentStorageContainer { IsCallFromWithinWorkerItem: true })
+        // From work on the worker or within a write of this page, such as the configuration that the reload inside a
+        // save applies, the call would wait for the lock that the save holds while it waits for that work. The worker
+        // would refuse it later.
+        if (Storage is FluentStorageContainer { IsCallFromWithinWorkerItem: true } ||
+            _writeOfFlow.Value is { IsFinished: false })
         {
             throw new InvalidOperationException(StorageWorker.CallFromWithinItemMessage);
         }
 
         await _writeLock.WaitAsync(cancellationToken);
+        var write = new WriteOfFlow();
+        _writeOfFlow.Value = write;
         try
         {
             return await WriteBlockAsync(subject, cancellationToken);
         }
         finally
         {
+            // A flow that the write started and did not await keeps the value, and may save once the write is over.
+            write.IsFinished = true;
             _writeLock.Release();
         }
     }
@@ -353,6 +363,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         });
 
         return blockIndex;
+    }
+
+    private sealed class WriteOfFlow
+    {
+        public volatile bool IsFinished;
     }
 
     private static string FormatFilename(string name)

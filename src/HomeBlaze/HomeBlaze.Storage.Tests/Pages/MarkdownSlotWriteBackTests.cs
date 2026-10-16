@@ -656,6 +656,42 @@ public class MarkdownSlotWriteBackTests
     }
 
     [Fact]
+    public async Task WhenConfigurationThatTheReloadOfARefusedWriteAppliesSavesThePage_ThenTheCallIsRefusedAndTheWriteCompletes()
+    {
+        // Arrange: the lone carriage return refuses the removal, and the reload after it applies the callback
+        // inside the first tile again, which saves the page and waits for that save.
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content =
+            $"intro\ra\n\n:: {BoardType}#board Columns=2\n" +
+            $"::: Tile Position=1\n:::: {Namespace}.TestCallback#callback Label=a\n::::\n:::\n::: Tile Position=2\n:::\n::\n";
+        var (page, board) = await AddBoardPageAsync(fixture, content);
+        var callback = Assert.IsType<TestCallback>(page.GetBlockSubject(2));
+        Exception? refusal = null;
+        callback.OnApply = async () =>
+        {
+            callback.OnApply = null;
+            try
+            {
+                await page.WriteConfigurationAsync(callback, CancellationToken.None);
+            }
+            catch (InvalidOperationException exception)
+            {
+                refusal = exception;
+            }
+        };
+        board.Tiles = [board.Tiles[0]];
+
+        // Act
+        var handled = await page.WriteConfigurationAsync(board, CancellationToken.None).WaitAsync(DeadlockTimeout);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(StorageWorker.CallFromWithinItemMessage, Assert.IsType<InvalidOperationException>(refusal).Message);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+        Assert.Equal([1, 2], board.Tiles.Select(tile => tile.Position));
+    }
+
+    [Fact]
     public async Task WhenThePageCannotBeReadAgainAfterARefusedWrite_ThenFalseIsReturnedAndTheFailureIsLogged()
     {
         // Arrange: the lone carriage return refuses the removal, and the second read of the file fails.
