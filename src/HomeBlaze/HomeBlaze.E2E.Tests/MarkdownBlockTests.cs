@@ -239,11 +239,10 @@ public class MarkdownBlockTests
         await Assertions.Expect(item.GetByTestId("card")).ToBeVisibleAsync(new() { Timeout = 30000 });
 
         // Act
-        var itemHeight = await GetContentHeightAsync(item);
-        var card = (await GetBoxesAsync(item.GetByTestId("card"))).Single();
+        var (itemHeight, cardHeight) = await GetContentAndCardHeightsAsync(item);
 
         // Assert: the margin that separates cards on a page would make the item higher than its card.
-        Assert.Equal(card.Bottom - card.Top, itemHeight, 1.0);
+        Assert.Equal(cardHeight, itemHeight, 1.0);
     }
 
     [Fact]
@@ -255,11 +254,10 @@ public class MarkdownBlockTests
         await Assertions.Expect(panel.GetByTestId("card")).ToBeVisibleAsync(new() { Timeout = 30000 });
 
         // Act
-        var panelHeight = await GetContentHeightAsync(panel);
-        var card = (await GetBoxesAsync(panel.GetByTestId("card"))).Single();
+        var (panelHeight, cardHeight) = await GetContentAndCardHeightsAsync(panel);
 
         // Assert
-        Assert.Equal(card.Bottom - card.Top, panelHeight, 1.0);
+        Assert.Equal(cardHeight, panelHeight, 1.0);
     }
 
     [Fact]
@@ -1054,16 +1052,23 @@ public class MarkdownBlockTests
         return rectangles.Select(values => new Box(values[0], values[1], values[2], values[3])).ToArray();
     }
 
-    // The height that the children of an element take, without its own padding.
-    private static Task<double> GetContentHeightAsync(ILocator locator)
+    // The height that the children of an element take without its own padding, and the height of the card in it. Both
+    // come from one call, so that a layout that is still moving cannot give heights of different moments.
+    private static async Task<(double Content, double Card)> GetContentAndCardHeightsAsync(ILocator locator)
     {
-        return locator.EvaluateAsync<double>(
+        var heights = await locator.EvaluateAsync<double[]>(
             """
             element => {
                 const style = getComputedStyle(element);
-                return element.getBoundingClientRect().height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+                const card = element.querySelector('[data-testid=card]');
+                return [
+                    element.getBoundingClientRect().height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+                    card.getBoundingClientRect().height,
+                ];
             }
             """);
+
+        return (heights[0], heights[1]);
     }
 
     // The page content without the space of the navigation drawer, which no longer sits beside it at this width.
