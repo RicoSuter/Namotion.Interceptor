@@ -108,4 +108,35 @@ public class SubjectPaneOperationTests
             _fixture.RemoveSubjectFromRoot(name, subject);
         }
     }
+
+    [Fact]
+    public async Task WhenAnErrorDialogIsShownInDarkMode_ThenItsAlertHasTheLightenedErrorTone()
+    {
+        // Arrange: the app starts in the dark theme.
+        var (name, subject) = await _fixture.AddSubjectToRootAsync<FailingOperationSubject>();
+        try
+        {
+            var page = await _fixture.CreatePageAsync();
+            await page.SetViewportSizeAsync(1280, 720);
+            await page.GotoAsync($"{_fixture.ServerAddress}browser/{name}");
+            await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+            var pane = page.Locator("#scrollContainer [data-testid='subject-pane']").Last;
+            var operation = Method(pane, "Time Out");
+            await Assertions.Expect(operation).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
+
+            // Act
+            await operation.ClickAsync();
+
+            // Assert: the dialog renders outside the layout, and still gets the styles of the mode.
+            var alert = page.Locator(".mud-dialog .mud-alert-text-error");
+            await Assertions.Expect(alert).ToContainTextAsync("The request timed out.", new() { Timeout = PageLoadTimeout });
+            var expected = await page.ResolveColourAsync("var(--mud-palette-error-lighten)");
+            Assert.NotEqual(await page.ResolveColourAsync("var(--mud-palette-error-darken)"), expected);
+            await Assertions.Expect(alert.Locator(".mud-alert-message")).ToHaveCSSAsync("color", expected);
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
 }

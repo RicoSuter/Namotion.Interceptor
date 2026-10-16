@@ -896,7 +896,7 @@ public class MarkdownBlockTests
 
         // Assert: #3f2ddd, the primary colour of the light palette.
         await Assertions.Expect(link).ToHaveCSSAsync("color", "rgb(63, 45, 221)");
-        Assert.Equal("rgb(63, 45, 221)", await ResolveColourAsync(page, "var(--mud-palette-primary)"));
+        Assert.Equal("rgb(63, 45, 221)", await page.ResolveColourAsync("var(--mud-palette-primary)"));
     }
 
     [Fact]
@@ -908,8 +908,8 @@ public class MarkdownBlockTests
         await Assertions.Expect(page.Locator(".homeblaze-dark-mode")).ToHaveCountAsync(1);
 
         // Assert
-        var expected = await ResolveColourAsync(page, "var(--mud-palette-primary-lighten)");
-        Assert.NotEqual(await ResolveColourAsync(page, "var(--mud-palette-primary)"), expected);
+        var expected = await page.ResolveColourAsync("var(--mud-palette-primary-lighten)");
+        Assert.NotEqual(await page.ResolveColourAsync("var(--mud-palette-primary)"), expected);
         await Assertions.Expect(link).ToHaveCSSAsync("color", expected);
     }
 
@@ -919,23 +919,6 @@ public class MarkdownBlockTests
         var page = await OpenPageAsync(ScratchPage);
         await Assertions.Expect(page.GetByText("Theme link")).ToBeVisibleAsync(new() { Timeout = 30000 });
         return page;
-    }
-
-    // The computed colour of a CSS colour value, in the form the browser reports for an element.
-    private static Task<string> ResolveColourAsync(IPage page, string value)
-    {
-        return page.EvaluateAsync<string>(
-            """
-            value => {
-                const probe = document.createElement('span');
-                probe.style.color = value;
-                document.body.appendChild(probe);
-                const colour = getComputedStyle(probe).color;
-                probe.remove();
-                return colour;
-            }
-            """,
-            value);
     }
 
     private static ILocator GetTab(ILocator tabLayout, string title)

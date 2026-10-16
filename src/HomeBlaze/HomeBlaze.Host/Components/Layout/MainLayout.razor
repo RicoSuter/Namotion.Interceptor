@@ -12,66 +12,70 @@
 @implements IDisposable
 
 <MudThemeProvider Theme="@_theme" IsDarkMode="_isDarkMode"/>
-<MudPopoverProvider/>
-<MudDialogProvider/>
-<MudSnackbarProvider/>
 
-<CascadingValue Value="@_isDarkMode" Name="IsDarkMode">
-    @* MudBlazor marks no element with the mode, so styles that differ by mode beyond the palette scope to this class. *@
-    <MudLayout Class="@(_isDarkMode ? DarkModeClass : null)">
-        <TimeZoneInitializer />
-        <PropertyRowLayoutInitializer />
-        <MudAppBar Elevation="1">
-            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                           OnClick="@(_ => DrawerToggle())"/>
-            @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
-            {
-                <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                               Href="@item.PageUrl"
-                               Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                               title="@item.Title"/>
-            }
-            <MudSpacer/>
-            @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
-            {
-                <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                               Href="@item.PageUrl"
-                               Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                               title="@item.Title"/>
-            }
-            <MudIconButton Icon="@(DeveloperModeIcon)"
-                           Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
-                           OnClick="@DeveloperMode.Toggle"
-                           title="Toggle Developer Mode"/>
-            <TimeZoneSelector />
-            <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"
-                           title="Toggle Dark Mode"/>
-            <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
-        </MudAppBar>
-        <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
-            <NavMenu Root="@RootManager.Root"/>
-        </MudDrawer>
-        <MudMainContent Class="pt-16 px-4 pt-4">
-            @if (_isRootLoaded || IsErrorPage)
-            {
-                @Body
-            }
-            else if (_rootLoadFailed)
-            {
-                <MudAlert Severity="Severity.Error">
-                    The configuration could not be loaded. See the server log for details.
-                </MudAlert>
-            }
-            else
-            {
-                <div class="d-flex flex-column justify-center align-center" style="height: calc(100vh - 128px);">
-                    <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large"/>
-                    <MudText Class="mt-4">Loading configuration...</MudText>
-                </div>
-            }
-        </MudMainContent>
-    </MudLayout>
-</CascadingValue>
+@* MudBlazor marks no element with the mode, so styles that differ by mode beyond the palette scope to this class. It wraps
+   the providers too, because dialogs, popovers and snackbars render there and not inside the layout. *@
+<div class="@(_isDarkMode ? DarkModeClass : null)" style="display: contents">
+    <MudPopoverProvider/>
+    <MudDialogProvider/>
+    <MudSnackbarProvider/>
+
+    <CascadingValue Value="@_isDarkMode" Name="IsDarkMode">
+        <MudLayout>
+            <TimeZoneInitializer />
+            <PropertyRowLayoutInitializer />
+            <MudAppBar Elevation="1">
+                <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                               OnClick="@(_ => DrawerToggle())"/>
+                @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
+                {
+                    <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                                   Href="@item.PageUrl"
+                                   Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                                   title="@item.Title"/>
+                }
+                <MudSpacer/>
+                @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
+                {
+                    <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                                   Href="@item.PageUrl"
+                                   Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                                   title="@item.Title"/>
+                }
+                <MudIconButton Icon="@(DeveloperModeIcon)"
+                               Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
+                               OnClick="@DeveloperMode.Toggle"
+                               title="Toggle Developer Mode"/>
+                <TimeZoneSelector />
+                <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"
+                               title="Toggle Dark Mode"/>
+                <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
+            </MudAppBar>
+            <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
+                <NavMenu Root="@RootManager.Root"/>
+            </MudDrawer>
+            <MudMainContent Class="pt-16 px-4 pt-4">
+                @if (_isRootLoaded || IsErrorPage)
+                {
+                    @Body
+                }
+                else if (_rootLoadFailed)
+                {
+                    <MudAlert Severity="Severity.Error">
+                        The configuration could not be loaded. See the server log for details.
+                    </MudAlert>
+                }
+                else
+                {
+                    <div class="d-flex flex-column justify-center align-center" style="height: calc(100vh - 128px);">
+                        <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large"/>
+                        <MudText Class="mt-4">Loading configuration...</MudText>
+                    </div>
+                }
+            </MudMainContent>
+        </MudLayout>
+    </CascadingValue>
+</div>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
