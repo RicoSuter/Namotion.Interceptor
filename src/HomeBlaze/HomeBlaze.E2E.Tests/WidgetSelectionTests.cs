@@ -283,8 +283,7 @@ public class WidgetSelectionTests
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The edit menu is prerendered, and a click before the circuit is connected is lost.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
-            .ToBeVisibleAsync(new() { Timeout = Timeout });
+        await page.WaitUntilInteractiveAsync(Timeout);
         return page;
     }
 

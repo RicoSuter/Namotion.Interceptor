@@ -35,7 +35,7 @@ public class ValueWidgetTests
 
         // The circuit replaces the prerendered elements when it connects. A box measured across that moment belongs
         // to an element that has left the page, and is empty.
-        await ExpectInteractiveAsync(page);
+        await page.WaitUntilInteractiveAsync();
         return page;
     }
 
@@ -56,13 +56,9 @@ public class ValueWidgetTests
 
         // A change of the graph before the circuit is connected would be picked up by its first render, which proves
         // nothing about a page that is open.
-        await ExpectInteractiveAsync(page);
+        await page.WaitUntilInteractiveAsync();
         return page;
     }
-
-    // The automatic time zone resolves through JS after interactive rendering, so its title tells that the circuit is connected.
-    private static Task ExpectInteractiveAsync(IPage page) =>
-        Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = Timeout });
 
     private static string CreateTilePage(string subjectName) =>
         $":: HomeBlaze.Components.ValueTile Path=\"/{subjectName}/Label\" Label=\"Followed\"\n::\n";
@@ -78,7 +74,7 @@ public class ValueWidgetTests
     // first other text proves no live update. The second one comes after the circuit is interactive and after a first change.
     private static async Task ExpectTextToKeepChangingAsync(IPage page, ILocator text)
     {
-        await ExpectInteractiveAsync(page);
+        await page.WaitUntilInteractiveAsync();
 
         var first = await text.InnerTextAsync();
         await Assertions.Expect(text).Not.ToHaveTextAsync(first, new() { Timeout = Timeout });

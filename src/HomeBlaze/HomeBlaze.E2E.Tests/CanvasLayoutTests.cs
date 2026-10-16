@@ -515,6 +515,7 @@ public class CanvasLayoutTests
         });
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync(Timeout);
 
         if (editMode is not null)
         {

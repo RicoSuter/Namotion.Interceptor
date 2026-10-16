@@ -27,6 +27,7 @@ public class MarkdownEditorTests
         // Navigate to Inline.md (has the :: HomeBlaze.Samples.Motor#mymotor block)
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Open Split mode via dropdown menu
         var editMenu = page.Locator("[data-testid='edit-mode-menu']");
@@ -62,6 +63,7 @@ public class MarkdownEditorTests
         // Navigate to Inline.md (has {{ mymotor/Temperature }})
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Open Split mode via dropdown menu
         var editMenu = page.Locator("[data-testid='edit-mode-menu']");
@@ -100,6 +102,7 @@ public class MarkdownEditorTests
         // Navigate to Inline.md (has a motor widget)
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Act
         // Open Inline mode via dropdown menu (enables IsEditing on widgets)
@@ -120,6 +123,7 @@ public class MarkdownEditorTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Values.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // A top-level indicator, not one in a card header, whose wrapper would also hold the card's button.
         var indicatorWrapper = page.Locator(".subject-component-wrapper:has(> .mud-chip-container > [data-testid=indicator])").First;
@@ -155,6 +159,7 @@ public class MarkdownEditorTests
         // Navigate to Inline.md
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Act
         // Open Split mode via dropdown menu

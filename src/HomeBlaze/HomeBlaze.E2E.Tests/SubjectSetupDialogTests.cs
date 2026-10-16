@@ -68,10 +68,8 @@ public class SubjectSetupDialogTests
         await page.GotoAsync($"{_fixture.ServerAddress}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // The automatic timezone resolves through JS after interactive rendering. Prerendered
-        // links are already clickable, but navigating then can race the old page's hydration.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
-            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        // Prerendered links are already clickable, but navigating then can race the old page's hydration.
+        await page.WaitUntilInteractiveAsync(PageLoadTimeout);
 
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
         await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
@@ -121,8 +119,7 @@ public class SubjectSetupDialogTests
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The edit button is prerendered, and a click before the circuit is connected is lost.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
-            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await page.WaitUntilInteractiveAsync(PageLoadTimeout);
 
         // Every pane of the path has an edit button, and the last pane shows the subject at the path. A path that
         // does not resolve ends at an earlier pane, whose edit button would open the dialog of another subject.

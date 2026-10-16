@@ -32,8 +32,7 @@ public class DisplayWidgetTests
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Displays.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // The automatic time zone resolves through JS after interactive rendering, so its title tells that the circuit is connected.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await page.WaitUntilInteractiveAsync(Timeout);
         return page;
     }
 

@@ -30,6 +30,7 @@ public class MarkdownBlockTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{name}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
         return page;
     }
 
@@ -487,6 +488,7 @@ public class MarkdownBlockTests
 
         // Act
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        await page.WaitUntilInteractiveAsync();
         var tabs = page.GetByTestId("tab-layout");
         await Assertions.Expect(tabs.GetByText("Content of alpha").First).ToBeVisibleAsync(new() { Timeout = 30000 });
 
@@ -689,9 +691,6 @@ public class MarkdownBlockTests
         await WriteScratchPageAsync(source);
 
         var page = await OpenPageAsync(ScratchPage);
-
-        // The edit menu is prerendered, and a click before the circuit is connected is lost.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = 30000 });
         await SelectEditModeAsync(page, "Split");
 
         // The editor only knows its block regions once the decorations are applied.
@@ -921,10 +920,6 @@ public class MarkdownBlockTests
         await WriteScratchPageAsync("# Scratch\n\nText with a [Theme link](https://example.com).\n");
         var page = await OpenPageAsync(ScratchPage);
         await Assertions.Expect(page.GetByText("Theme link")).ToBeVisibleAsync(new() { Timeout = 30000 });
-
-        // The theme button is prerendered, and a click before the circuit is connected is lost. The automatic time
-        // zone resolves through JS after interactive rendering, so its title tells that the circuit is connected.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = 30000 });
         return page;
     }
 

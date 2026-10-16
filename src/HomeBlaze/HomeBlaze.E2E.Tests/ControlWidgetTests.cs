@@ -53,7 +53,7 @@ public class ControlWidgetTests
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The controls are prerendered, and a click before the circuit is connected is lost.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await page.WaitUntilInteractiveAsync(Timeout);
         return page;
     }
 

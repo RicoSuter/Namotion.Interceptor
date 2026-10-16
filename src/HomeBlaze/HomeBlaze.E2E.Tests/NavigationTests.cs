@@ -187,6 +187,7 @@ public class NavigationTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync(_fixture.ServerAddress);
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         var navigation = page.Locator(".mud-navmenu");
         var folderHeader = navigation.GetByRole(AriaRole.Button, new() { Name = "Demo" });

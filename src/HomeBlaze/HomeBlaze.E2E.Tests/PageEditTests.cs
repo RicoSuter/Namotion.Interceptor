@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
 
@@ -41,6 +40,7 @@ public class PageEditTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Act - Open Split mode via dropdown menu
         var editMenu = page.Locator("[data-testid='edit-mode-menu']");
@@ -60,6 +60,7 @@ public class PageEditTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Act - Open Split mode via dropdown menu
         var editMenu = page.Locator("[data-testid='edit-mode-menu']");
@@ -83,6 +84,7 @@ public class PageEditTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Act - Open Split mode
         var editMenu = page.Locator("[data-testid='edit-mode-menu']");
@@ -109,6 +111,7 @@ public class PageEditTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Act - Open Source mode via dropdown menu
         var editMenu = page.Locator("[data-testid='edit-mode-menu']");
@@ -251,7 +254,7 @@ public class PageEditTests
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The edit menu is prerendered, and a click before the circuit is connected is lost.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await page.WaitUntilInteractiveAsync();
         return page;
     }
 
@@ -276,8 +279,7 @@ public class PageEditTests
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
             // The edit menu is prerendered, and a click before the circuit is connected is lost.
-            await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
-                .ToBeVisibleAsync(new() { Timeout = 30000 });
+            await page.WaitUntilInteractiveAsync();
 
             var editMenu = page.Locator("[data-testid='edit-mode-menu']");
             await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });

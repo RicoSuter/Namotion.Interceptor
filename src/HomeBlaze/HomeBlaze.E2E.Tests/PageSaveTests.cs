@@ -46,6 +46,7 @@ public class PageSaveTests
             var page = await _fixture.CreatePageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await page.WaitUntilInteractiveAsync();
 
             var editMenu = page.Locator("[data-testid='edit-mode-menu']");
             await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -95,6 +96,7 @@ public class PageSaveTests
             var page = await _fixture.CreatePageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await page.WaitUntilInteractiveAsync();
 
             var editMenu = page.Locator("[data-testid='edit-mode-menu']");
             await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -140,6 +142,7 @@ public class PageSaveTests
             var page = await _fixture.CreatePageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{CardsPageName}");
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await page.WaitUntilInteractiveAsync();
 
             var editMenu = page.Locator("[data-testid='edit-mode-menu']");
             await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
