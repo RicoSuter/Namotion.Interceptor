@@ -3,6 +3,7 @@ using System.Collections;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MQTTnet;
 using MQTTnet.Packets;
@@ -70,6 +71,107 @@ public partial class MqttClientLivenessTests
         Assert.False(source.Diagnostics.IsOperational);
 
         await broker.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task WhenEveryMappedPropertyIsOwnedByAnotherSource_ThenTheClientStillSynchronizes()
+    {
+        // Arrange - the other source holds the only mapped property, so this client has no topic to subscribe.
+        var brokerPort = GetFreeTcpPort();
+        await using var broker = CreateBroker(brokerPort);
+        await using var source = CreateClientSource(brokerPort);
+        await using var otherSource = new MqttSubjectClientSource(
+            source.RootSubject,
+            new MqttClientConfiguration
+            {
+                BrokerHost = "127.0.0.1",
+                BrokerPort = brokerPort,
+                Mapper = CreateMapper()
+            },
+            NullLogger<MqttSubjectClientSource>.Instance);
+        Assert.True(otherSource.Ownership.ClaimSource(
+            source.RootSubject.GetPropertyReference(nameof(LivenessTestRoot.Name))));
+        using var stateRecorder = SourceStateRecorder.SubscribeTo(source);
+
+        await broker.StartAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            await source.StartAsync(CancellationToken.None);
+
+            // Assert
+            await stateRecorder.WaitForStatesAsync(
+                TimeSpan.FromSeconds(30),
+                "A client with no topic to subscribe should still complete its connect.",
+                SourceState.Synchronized);
+            Assert.Null(source.Diagnostics.LastError);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await broker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAPropertyStaysOwnedByAnotherSourceAcrossConnectAttempts_ThenTheConflictIsLoggedOnceUntilAClaimSucceeds()
+    {
+        // Arrange - no broker listens, so every connection attempt fails and claims again.
+        var logger = new RecordingLogger<MqttSubjectClientSource>();
+        await using var source = CreateClientSource(GetFreeTcpPort(), logger: logger, retryTime: TimeSpan.FromMilliseconds(100));
+        await using var otherSource = new MqttSubjectClientSource(
+            source.RootSubject,
+            new MqttClientConfiguration { BrokerHost = "127.0.0.1", BrokerPort = GetFreeTcpPort(), Mapper = CreateMapper() },
+            NullLogger<MqttSubjectClientSource>.Instance);
+        var property = source.RootSubject.GetPropertyReference(nameof(LivenessTestRoot.Name));
+        Assert.True(otherSource.Ownership.ClaimSource(property));
+
+        try
+        {
+            // Act
+            await source.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => CountConnectAttempts(logger) >= 3,
+                message: "The client should keep retrying while no broker is listening.");
+
+            // Assert
+            Assert.Single(GetOwnershipConflicts(logger));
+
+            // Act - the client wins the property once released, then loses it to the other source again.
+            otherSource.Ownership.ReleaseSource(property);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Ownership.Count == 1,
+                message: "The next connection attempt should claim the released property.");
+
+            // A retry can reclaim the property between the release and the claim, so the swap repeats until the other source holds it.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    source.Ownership.ReleaseSource(property);
+                    return otherSource.Ownership.ClaimSource(property);
+                },
+                message: "The other source should take the property over.");
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => GetOwnershipConflicts(logger).Length == 2,
+                message: "A conflict after a successful claim should be logged again.");
+            var attemptsAfterSecondReport = CountConnectAttempts(logger);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => CountConnectAttempts(logger) >= attemptsAfterSecondReport + 2,
+                message: "The client should keep retrying while no broker is listening.");
+            Assert.Equal(2, GetOwnershipConflicts(logger).Length);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+
+        static int CountConnectAttempts(RecordingLogger logger) =>
+            logger.Entries.Count(entry => entry.Message.StartsWith("Connecting to MQTT broker", StringComparison.Ordinal));
+
+        static string[] GetOwnershipConflicts(RecordingLogger logger) =>
+            logger.Errors.Where(message => message.Contains("already owned by another source", StringComparison.Ordinal)).ToArray();
     }
 
     [Fact]
@@ -413,7 +515,9 @@ public partial class MqttClientLivenessTests
         int brokerPort,
         TimeSpan? reconnectDelay = null,
         IMqttValueConverter? valueConverter = null,
-        IWriteInterceptor? writeInterceptor = null)
+        IWriteInterceptor? writeInterceptor = null,
+        ILogger<MqttSubjectClientSource>? logger = null,
+        TimeSpan? retryTime = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -440,9 +544,10 @@ public partial class MqttClientLivenessTests
                 ValueConverter = valueConverter ?? new JsonMqttValueConverter(),
                 ReconnectDelay = reconnectDelay ?? TimeSpan.FromSeconds(1),
                 MaximumReconnectDelay = TimeSpan.FromSeconds(4),
-                HealthCheckInterval = TimeSpan.FromSeconds(1)
+                HealthCheckInterval = TimeSpan.FromSeconds(1),
+                RetryTime = retryTime ?? TimeSpan.FromSeconds(10)
             },
-            NullLogger<MqttSubjectClientSource>.Instance);
+            logger ?? NullLogger<MqttSubjectClientSource>.Instance);
 
         return source;
     }

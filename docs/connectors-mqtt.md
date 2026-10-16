@@ -352,7 +352,7 @@ Both built-in MQTT connectors implement liveness monitoring and report through t
 
 Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`.
 
-The client's diagnostics are a plain `SourceDiagnostics` with no MQTT specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`; at capacity 0 no writes are retained, but failed, terminally unconfirmed, and owned connect-window writes are still counted in `TotalDropped`. Writes made before the source claims their property remain unattributable; see [Known Limitations](connectors.md#known-limitations). The built-in client registers the `ClaimedPropertyCount` gauge, so it reports a measured value, including zero. The count rises as topics are claimed during the subscribe step of the connect, which runs before the initial state is loaded, and falls as subjects detach.
+The client's diagnostics are a plain `SourceDiagnostics` with no MQTT specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`; at capacity 0 no writes are retained, but failed, terminally unconfirmed, and owned connect-window writes are still counted in `TotalDropped`. Writes made before the source claims their property remain unattributable; see [Known Limitations](connectors.md#known-limitations). The built-in client registers the `ClaimedPropertyCount` gauge, so it reports a measured value, including zero. The count rises as properties are claimed at the start of each connection attempt, before the client connects to the broker, and falls as subjects detach.
 
 The server's diagnostics are an `MqttServerDiagnostics`, which adds one member:
 
@@ -394,7 +394,7 @@ The MQTT integration hooks into the interceptor lifecycle system (see [Subject L
 
 ## Known Limitations
 
-- **Client structural changes**: The client subscribes to the topics of the subject graph and claims their properties when it connects, and does not follow [structural changes](connectors.md#structural-changes) after that. A subject attached later gets no subscription, so its values are not received and its local writes are not published until the next reconnect binds the current graph. Detached subjects are released immediately, see [Automatic Cleanup on Subject Detach](#automatic-cleanup-on-subject-detach).
+- **Client structural changes**: The client claims the properties of the subject graph at the start of each connection attempt and subscribes to their topics once connected, and does not follow [structural changes](connectors.md#structural-changes) after that. A subject attached later gets no subscription, so its values are not received and its local writes are not published until the next reconnect binds the current graph. Detached subjects are released immediately, see [Automatic Cleanup on Subject Detach](#automatic-cleanup-on-subject-detach). A property already owned by another source is neither subscribed nor published; the conflict is logged as an error once, not on every retry, and logged again only if the client owned the property in between.
 
 ## Performance
 
