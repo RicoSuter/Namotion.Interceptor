@@ -40,7 +40,7 @@ internal sealed class SlotMap
 
     public SlotDefinition? Default { get; }
 
-    /// <summary>All slots in declaration order, including the default slot.</summary>
+    /// <summary>All slots, including the default slot, in their declaration order within a type.</summary>
     public ImmutableArray<SlotDefinition> Slots { get; }
 
     /// <summary>All slots by block name, including the default slot.</summary>
@@ -80,7 +80,8 @@ internal sealed class SlotMap
 
         SlotMap Invalid(string error) => new(null, [], $"{type.Name}: {error}");
 
-        // GetProperties returns no defined order, the metadata token is the declaration order.
+        // GetProperties returns no defined order. The metadata token is the declaration order within one type; the
+        // slots of a base class keep a stable order, but not necessarily before those of the derived class.
         foreach (var property in type
                      .GetProperties(BindingFlags.Public | BindingFlags.Instance)
                      .OrderBy(property => property.MetadataToken))
