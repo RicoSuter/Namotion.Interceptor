@@ -105,9 +105,9 @@ Each browser session has isolated tracking. Server-side Blazor with multiple con
 
 ## Limitations
 
-### Content Rendered Outside the Scope's Render Pass
+### Reads Recorded While the Scope Is Open
 
-Recording covers property reads that happen during the scope's own render pass: the content directly inside `<TrackingScope>` and any descendant that renders as part of that same pass. See [Data Flow](#data-flow) for exactly when that pass starts and ends. Content that a component renders later, in a render pass of its own, for example a virtualized grid cell or a canvas node that defers rendering until after a JavaScript callback, falls outside the scope's pass. Reads inside such deferred content are recorded only the next time that content renders as part of the scope, not when it renders on its own.
+Recording covers the property reads that happen while the scope is open: from the moment Blazor invokes the scope's render fragment until the scope's `OnAfterRender`. See [Data Flow](#data-flow) for exactly when that starts and ends. This covers the content directly inside `<TrackingScope>` and every descendant rendered in the same batch, but also the reads of other components that Blazor renders later in that batch, or otherwise before `OnAfterRender`, in the same flow. Those reads are attributed to the open scope as well: the scope over-tracks, which causes extra re-renders but never a missed one. Content that a component renders in a later batch of its own, for example a virtualized grid cell or content that renders only after a JavaScript callback, falls outside the scope. Reads inside such deferred content are recorded only the next time that content renders while the scope is open, not when it renders on its own.
 
 To keep the guarantee "at least once" even for this deferred content, TrackingScope tracks the **subjects** whose properties were read, not just the individual properties, and re-renders when any descendant of a tracked subject changes:
 
@@ -120,7 +120,7 @@ To keep the guarantee "at least once" even for this deferred content, TrackingSc
 
 If `motor.Temperature` changes, even though only `motor.Speed` was read, the component still re-renders because `motor` was read.
 
-**Impact**: more re-renders than strictly necessary in some scenarios, and content that renders outside the scope's pass is only ever captured by this subject-level fallback. In practice, the content that layout containers render for a cell or a node runs inside the scope's own pass, so it does not need a nested scope; a component found to defer its content to a later pass of its own can wrap that content in its own nested `<TrackingScope>` to bring it back into a recorded pass.
+**Impact**: more re-renders than strictly necessary in some scenarios, and content that renders outside the scope is only ever captured by this subject-level fallback. A component that defers its content to a later render of its own can wrap that content in a nested `<TrackingScope>` to bring it back into a recorded pass.
 
 ---
 

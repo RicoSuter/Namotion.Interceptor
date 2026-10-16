@@ -39,6 +39,26 @@ public class ReadPropertyRecorder : IReadInterceptor
         return scope;
     }
 
+    /// <summary>
+    /// Gets the number of scopes that record in the current async context.
+    /// </summary>
+    internal static int ActiveScopeCount
+    {
+        get
+        {
+            var scopes = _activeScopes.Value;
+            if (scopes is null)
+            {
+                return 0;
+            }
+
+            lock (scopes)
+            {
+                return scopes.Count;
+            }
+        }
+    }
+
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
