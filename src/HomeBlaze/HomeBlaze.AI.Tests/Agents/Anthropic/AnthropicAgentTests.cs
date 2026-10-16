@@ -1171,11 +1171,14 @@ public class AnthropicAgentProfileTests
 {
     private const string ApiKey = "sk-ant-test-key-1234";
 
-    // Each one, when set, makes the SDK skip the local profile, so a test of the profile must clear them all.
+    // The SDK reads these for credentials, the address, headers or the choice and place of a profile, so each test
+    // clears them and only sets the one it is about; a developer machine's own values must not decide the outcome.
     private static readonly string[] CredentialVariables =
     [
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_PROFILE",
-        "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_FEDERATION_RULE_ID"
+        "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_CUSTOM_HEADERS",
+        "ANTHROPIC_IDENTITY_TOKEN", "ANTHROPIC_IDENTITY_TOKEN_FILE", "ANTHROPIC_SERVICE_ACCOUNT_ID",
+        "ANTHROPIC_WORKSPACE_ID", "ANTHROPIC_ORGANIZATION_ID"
     ];
 
     [Fact]
@@ -1224,6 +1227,9 @@ public class AnthropicAgentProfileTests
     private static async Task SendWithEnvironmentAsync(AnthropicStubHandler handler, (string Name, string Value) variable)
     {
         var previousValues = Array.ConvertAll(CredentialVariables, Environment.GetEnvironmentVariable);
+
+        // Without a config directory the SDK would read the developer's own profiles.
+        var emptyConfigDirectory = Directory.CreateTempSubdirectory("anthropic-config-empty").FullName;
         try
         {
             foreach (var name in CredentialVariables)
@@ -1231,6 +1237,7 @@ public class AnthropicAgentProfileTests
                 Environment.SetEnvironmentVariable(name, null);
             }
 
+            Environment.SetEnvironmentVariable("ANTHROPIC_CONFIG_DIR", emptyConfigDirectory);
             Environment.SetEnvironmentVariable(variable.Name, variable.Value);
             await using var test = await AgentTestContext<TestableAnthropicAgent>.StartAsync(
                 services => new TestableAnthropicAgent(services),
@@ -1249,6 +1256,8 @@ public class AnthropicAgentProfileTests
             {
                 Environment.SetEnvironmentVariable(CredentialVariables[index], previousValues[index]);
             }
+
+            Directory.Delete(emptyConfigDirectory, recursive: true);
         }
     }
 }
