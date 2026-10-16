@@ -61,6 +61,12 @@
     }
 }
 
+/* Text in a grid cell or a canvas node has the room of a card body at the edges, because the cell or the node draws a
+   frame. A block that is the only content, such as a card, fills the cell or the node instead (see card-widget.css). */
+.markdown-content :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:not(:has(> .subject-component-wrapper:only-child)) {
+    padding: 12px;
+}
+
 /* The blocks of a card footer, such as buttons, stand in a row, and the footer padding is the space at its edges. */
 .markdown-content .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment {
     display: flex;

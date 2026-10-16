@@ -115,8 +115,9 @@ public class SpacingLayoutTests
                     if (blocks.length === 0) continue;
                     const label = container.closest('[data-testid=card]')?.querySelector('[data-testid=card-title]')?.textContent
                         ?? container.className;
-                    // The body of a card in a flow grows to the height of the row, below its content.
-                    const grows = container.matches('.mud-card-content') && container.closest('.flow-layout-item') !== null;
+                    // The body of a card in a flow grows to the height of the row, and in a grid cell or a canvas node to
+                    // the height of it, below its content.
+                    const grows = container.matches('.mud-card-content') && container.closest('.flow-layout-item, .grid-cell-content, .canvas-node-content') !== null;
                     const below = grows ? 0 : Math.round(bottom - blocks[blocks.length - 1].bottom);
                     results.push(`${label.trim()}: ${Math.round(blocks[0].top - top)} ${below}`);
                 }
@@ -200,6 +201,39 @@ public class SpacingLayoutTests
         // Assert
         Assert.Equal(TitleGap, gaps[0], Tolerance);
         Assert.Equal(CardPadding, gaps[1], Tolerance);
+    }
+
+    [Fact]
+    public async Task WhenTextStandsInAGridCellOrACanvasNode_ThenItHasTheRoomOfACardBodyAndALoneCardFillsTheCell()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await Assertions.Expect(page.GetByText("Text in a node.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetCard(page, "Cell Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act: the room between the content box of the cell or the node and the text or the card in it.
+        var edges = await page.EvaluateAsync<double[][]>(
+            """
+            () => {
+                const room = (element, contentSelector) => {
+                    const box = element.getBoundingClientRect();
+                    const content = element.closest(contentSelector).getBoundingClientRect();
+                    return [box.left - content.left, box.top - content.top, content.right - box.right];
+                };
+                const paragraph = text => [...document.querySelectorAll('p')].find(p => p.textContent === text);
+                const card = [...document.querySelectorAll('[data-testid=card]')].find(c => c.textContent.includes('Cell Card'));
+                return [
+                    room(paragraph('Text in a cell.'), '.grid-cell-content'),
+                    room(paragraph('Text in a node.'), '.canvas-node-content'),
+                    room(card, '.grid-cell-content')
+                ];
+            }
+            """);
+
+        // Assert
+        Assert.All(edges[0], edge => Assert.Equal(CardPadding, edge, Tolerance));
+        Assert.All(edges[1], edge => Assert.Equal(CardPadding, edge, Tolerance));
+        Assert.All(edges[2], edge => Assert.Equal(0, edge, Tolerance));
     }
 
     [Fact]

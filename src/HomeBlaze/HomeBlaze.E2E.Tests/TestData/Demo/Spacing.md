@@ -110,3 +110,16 @@ In a panel.
 ::
 
 Text after the panels.
+
+:: HomeBlaze.Components.GridLayout#spacinggrid Rows=1 Columns=2
+::: Cell Row=0 Column=0
+Text in a cell.
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.Card Title="Cell Card"
+In a cell.
+::
+
+:: HomeBlaze.Components.CanvasLayout#spacingcanvas MinHeight=200
+::: Node X=20 Y=20 Width=300 Height=120
+Text in a node.
+::
