@@ -131,8 +131,8 @@ public static class HistoryStoreMerger
     /// for its ending raw event. Only raw queries can actually exhaust the budget, and those run newest-first
     /// in a single pass, shrinking it by each returned count.
     ///
-    /// Bucketed <c>Delta</c> also serves every segment oldest-to-newest, but seeds each one with the newest
-    /// numeric reading before it instead of threading a held value, because that reading bridges coverage gaps.
+    /// Bucketed <c>Delta</c> also serves every segment oldest-to-newest, but threads the last counter reading the
+    /// previous segment consumed instead of a held value, because that reading bridges coverage gaps.
     /// </summary>
     internal static Task<HistorySeries> ExecuteWithBudget(
         IReadOnlyList<IHistoryStore> ordered,
@@ -236,10 +236,13 @@ public static class HistoryStoreMerger
     }
 
     /// <summary>
-    /// Bucketed <c>Delta</c>: serves every planned segment oldest to newest, each seeded with the newest numeric
-    /// reading any store holds before it. Unlike the held value of <c>Last</c>, the reading survives coverage gaps,
-    /// because a counter keeps counting while nothing records it. The bucketed grid is clipped to the budget before
-    /// planning, so serving every segment cannot exceed it.
+    /// Bucketed <c>Delta</c>: serves every planned segment oldest to newest. The first segment is seeded with the newest
+    /// numeric reading any store holds before it; each later segment with the last reading the previous segment
+    /// consumed: its store's newest reading inside the previous segment, else the previous segment's seed. A reading
+    /// another store holds inside the previous segment was never consumed, so seeding from it would lose the increase
+    /// up to it. Unlike the held value of <c>Last</c>, the reading survives coverage gaps, because a counter keeps
+    /// counting while nothing records it. The bucketed grid is clipped to the budget before planning, so serving every
+    /// segment cannot exceed it.
     /// </summary>
     private static async Task<HistorySeries> ExecuteDeltaThreaded(
         IReadOnlyList<IHistoryStore> ordered,
@@ -247,12 +250,26 @@ public static class HistoryStoreMerger
         HistoryQuery query,
         CancellationToken cancellationToken)
     {
+        HistoryPoint? seed = null;
+        PlannedSegment? previousSegment = null;
         foreach (var segment in segments)
         {
-            var seed = await ResolveLastNumericBeforeAsync(ordered, query.PropertyPath, segment.From, cancellationToken)
+            if (previousSegment is not null)
+            {
+                var lastOfPrevious = await previousSegment.Store
+                    .GetLastNumericSampleBeforeAsync(query.PropertyPath, segment.From, cancellationToken)
+                    .ConfigureAwait(false);
+                if (lastOfPrevious is not null && lastOfPrevious.Timestamp >= previousSegment.From)
+                {
+                    seed = lastOfPrevious;
+                }
+            }
+
+            seed ??= await ResolveLastNumericBeforeAsync(ordered, query.PropertyPath, segment.From, cancellationToken)
                 .ConfigureAwait(false);
             segment.Result = await QuerySegment(segment, query, query.MaxPoints, seed, cancellationToken)
                 .ConfigureAwait(false);
+            previousSegment = segment;
         }
 
         return MergeResults(segments, query, budgetExhaustedBeforeAllPlanned: false);

@@ -718,6 +718,85 @@ public class HistoryStoreMergerTests
         Assert.Equal(100d, liveQuery.CarrySeed?.Number);
     }
 
+    [Fact]
+    public async Task WhenDeltaHandsOverInsideTheLastBucket_ThenTheNextSegmentStartsFromTheReadingThePreviousConsumed()
+    {
+        // Arrange: the durable store covers [0,27) and owns [20,30) (7 of 10 minutes); the live store covers [24,40)
+        // and owns [30,40). The live reading at 29 lies inside the durable store's bucket, which never consumed it.
+        var durable = new FakeHistoryStore
+        {
+            Priority = 10,
+            CurrentCoverage = new HistoryCoverage(At(0), At(27))
+        }.AddSample(At(22), 120);
+        var live = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(24), At(40))
+        }.AddSample(At(29), 128).AddSample(At(35), 130);
+        var query = new HistoryQuery("/a/Energy", At(0), At(40), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { durable, live }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: seeding from 128 would lose the increase from 120 to 128.
+        var liveQuery = Assert.Single(live.ReceivedQueries);
+        Assert.Equal(At(30), liveQuery.From);
+        Assert.Equal(120d, liveQuery.CarrySeed?.Number);
+    }
+
+    [Fact]
+    public async Task WhenDeltaSegmentConsumedNoReadingOfItsOwn_ThenTheNextSegmentKeepsItsSeed()
+    {
+        // Arrange: the live store owns [30,40) and holds 128 at 29 only, which lies in the durable store's bucket.
+        // The archive store owns [40,50).
+        var durable = new FakeHistoryStore
+        {
+            Priority = 10,
+            CurrentCoverage = new HistoryCoverage(At(0), At(27))
+        }.AddSample(At(22), 120);
+        var live = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(24), At(40))
+        }.AddSample(At(29), 128);
+        var archive = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(40), At(50))
+        }.AddSample(At(45), 140);
+        var query = new HistoryQuery("/a/Energy", At(0), At(50), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { durable, live, archive }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: the live segment consumed only its seed 120, so the archive segment starts from 120, not 128.
+        Assert.Equal(120d, Assert.Single(live.ReceivedQueries).CarrySeed?.Number);
+        Assert.Equal(120d, Assert.Single(archive.ReceivedQueries).CarrySeed?.Number);
+    }
+
+    [Fact]
+    public async Task WhenDeltaFirstSegmentIsSeeded_ThenTheNewestReadingAcrossStoresWins()
+    {
+        // Arrange: the higher-priority store holds an older reading (90 at 2) than the lower-priority one (100 at 15).
+        var lowPriority = new FakeHistoryStore
+        {
+            Priority = 10,
+            CurrentCoverage = new HistoryCoverage(At(0), At(20))
+        }.AddSample(At(15), 100);
+        var highPriority = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(20), At(40))
+        }.AddSample(At(2), 90);
+        var query = new HistoryQuery("/a/Energy", At(20), At(40), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { lowPriority, highPriority }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(100d, Assert.Single(highPriority.ReceivedQueries).CarrySeed?.Number);
+    }
+
     // Eligibility -----------------------------------------------------------------------------
 
     [Fact]
