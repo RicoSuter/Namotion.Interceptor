@@ -58,9 +58,24 @@ internal sealed class HistoryRefreshThrottle : IDisposable
                 return false;
             }
 
-            // Assigned under the lock that OnElapsed takes first, so an early tick cannot see it unset.
-            _timer = _timeProvider.CreateTimer(
-                static state => ((HistoryRefreshThrottle)state!).OnElapsed(), this, window, Timeout.InfiniteTimeSpan);
+            // The caller's execution context, for example one of a render that holds the read recorder of a tracking
+            // scope, must not flow into the callback.
+            var isFlowSuppressed = ExecutionContext.IsFlowSuppressed();
+            var flowControl = isFlowSuppressed ? default : ExecutionContext.SuppressFlow();
+            try
+            {
+                // Assigned under the lock that OnElapsed takes first, so an early tick cannot see it unset.
+                _timer = _timeProvider.CreateTimer(
+                    static state => ((HistoryRefreshThrottle)state!).OnElapsed(), this, window, Timeout.InfiniteTimeSpan);
+            }
+            finally
+            {
+                if (!isFlowSuppressed)
+                {
+                    flowControl.Undo();
+                }
+            }
+
             return true;
         }
     }

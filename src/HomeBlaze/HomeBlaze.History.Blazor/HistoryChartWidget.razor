@@ -370,10 +370,9 @@
     // Runs on a timer thread under the lock of the throttle (see the remarks of HistoryRefreshThrottle).
     private void OnRefreshDue() => QueueRefresh();
 
-    // Every query starts on the thread pool without an execution context, never inline: after a render and in the
-    // throttle callback the execution context is the one of a render, which can hold the read recorder of the page
-    // tracking scope, and InvokeAsync runs inline on an idle dispatcher, so the query would also run under the lock
-    // of the throttle.
+    // Every query starts on the thread pool without an execution context, never inline: after a render the execution
+    // context is the one of the render, which can hold the read recorder of the page tracking scope, and InvokeAsync
+    // runs inline on an idle dispatcher, so from the throttle callback the query would run under the lock of the throttle.
     private void QueueRefresh()
     {
         if (_isDisposed)

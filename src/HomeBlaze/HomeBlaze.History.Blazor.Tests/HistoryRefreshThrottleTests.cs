@@ -90,6 +90,30 @@ public class HistoryRefreshThrottleTests
     }
 
     [Fact]
+    public void WhenArmedInAFlowWithAnAsyncLocalValue_ThenTheCallbackRunsWithoutIt()
+    {
+        // Arrange
+        var asyncLocal = new AsyncLocal<string?>();
+        string? valueInCallback = "not run";
+        using var callbackRan = new ManualResetEventSlim();
+        using var throttle = new HistoryRefreshThrottle(TimeProvider.System, () =>
+        {
+            valueInCallback = asyncLocal.Value;
+            callbackRan.Set();
+        });
+
+        // Act
+        asyncLocal.Value = "render";
+        throttle.Arm(TimeSpan.FromMilliseconds(1));
+        var hasRun = callbackRan.Wait(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.True(hasRun);
+        Assert.Null(valueInCallback);
+        Assert.False(ExecutionContext.IsFlowSuppressed());
+    }
+
+    [Fact]
     public void WhenNeverArmed_ThenTheCallbackNeverRuns()
     {
         // Arrange
