@@ -176,7 +176,8 @@
     // before it, otherwise an older fit that finishes last would replace the observer of the current bar.
     private Task _pageHeadFitTask = Task.CompletedTask;
 
-    // The selection is the receiver, so that a click on empty page space renders only the widget that it deselects.
+    // The selection is the receiver, so that a click on empty page space does not render the page, only the widget that it
+    // deselects together with the widgets inside it.
     private EventCallback<MouseEventArgs> _clearSelectionCallback;
 
     // How long the page waits after a change of the paths before it renders. Attaches and detaches come in bursts,
