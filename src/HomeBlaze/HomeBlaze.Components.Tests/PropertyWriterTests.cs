@@ -291,6 +291,30 @@ public sealed class PropertyWriterTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenWriterIsDisposedWhileASaveRuns_ThenItsResultIsNotShown()
+    {
+        // Arrange
+        var writeGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _graph.Store.WriteGate = writeGate.Task;
+        _graph.Store.WritesConfiguration = false;
+        var speed = GetProperty(_graph.Device, nameof(PersistedDevice.Speed));
+        _writer.TryWrite(speed, 100);
+        _timeProvider.Advance(PropertyWriter.PersistDelay);
+        await AsyncTestHelpers.WaitUntilAsync(() => _graph.Store.WrittenSpeeds.Count == 1);
+        _writer.TryWrite(speed, 200);
+
+        // Act
+        _writer.Dispose();
+        writeGate.SetResult();
+
+        // Assert
+        // The save that Dispose starts for the second write runs only after the running save has completed.
+        await AsyncTestHelpers.WaitUntilAsync(() => _graph.Store.WrittenSubjects.Count == 2);
+        Assert.Equal([100, 200], _graph.Store.WrittenSpeeds);
+        Assert.Empty(_snackbar.Messages);
+    }
+
+    [Fact]
     public async Task WhenWriterIsDisposedDuringAWrite_ThenOwnerIsPersistedAtOnceAndNothingIsShown()
     {
         // Arrange

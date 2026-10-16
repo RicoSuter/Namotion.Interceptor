@@ -176,25 +176,21 @@ public sealed class PropertyWriter : IDisposable
 
             // Runs on the thread pool and is not awaited, so a failing save must end here. The writer runs saves of
             // one file one after the other, but a save can still fail, for example on an IO error of the storage.
-            ConfigurationPersistResult result;
+            var result = ConfigurationPersistResult.Written;
+            string? errorMessage = null;
             try
             {
                 result = await ConfigurationPersistence.PersistOwnerAsync(_rootManager, owner, CancellationToken.None);
             }
             catch (Exception exception)
             {
-                if (isShown)
-                {
-                    // ISnackbar is safe to call from any thread: its provider re-renders through InvokeAsync.
-                    _snackbar.Add($"Error saving configuration: {exception.Message}", Severity.Error);
-                }
-
-                return;
+                errorMessage = exception.Message;
             }
 
-            if (isShown && result != ConfigurationPersistResult.Written)
+            // A save that completes after Dispose belongs to a circuit that is gone, and so is its snackbar.
+            if (isShown && !_isDisposed)
             {
-                _snackbar.AddConfigurationNotSavedWarning();
+                ShowSaveResult(result, errorMessage);
             }
         }
         finally
@@ -211,6 +207,26 @@ public sealed class PropertyWriter : IDisposable
         }
     }
 
+    private void ShowSaveResult(ConfigurationPersistResult result, string? errorMessage)
+    {
+        try
+        {
+            // ISnackbar is safe to call from any thread: its provider re-renders through InvokeAsync.
+            if (errorMessage is not null)
+            {
+                _snackbar.Add($"Error saving configuration: {errorMessage}", Severity.Error);
+            }
+            else if (result != ConfigurationPersistResult.Written)
+            {
+                _snackbar.AddConfigurationNotSavedWarning();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit was disposed after the check of the caller.
+        }
+    }
+
     private void ShowWriteError(RegisteredSubjectProperty property, string message)
     {
         _snackbar.Add($"Could not set '{property.GetDisplayName()}': {message}", Severity.Error);
@@ -218,7 +234,8 @@ public sealed class PropertyWriter : IDisposable
 
     /// <summary>
     /// Persists the owners that wait for their delay at once, each after its running save, in the background and
-    /// without snackbar, and stops all timers. A write in progress while the writer is disposed is saved the same way.
+    /// without snackbar, and stops all timers. A write in progress while the writer is disposed is saved the same way,
+    /// and a running save shows nothing when it completes.
     /// </summary>
     public void Dispose()
     {
