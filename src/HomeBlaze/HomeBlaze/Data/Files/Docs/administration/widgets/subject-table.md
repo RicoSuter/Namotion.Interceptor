@@ -27,7 +27,7 @@ A `Column` block has these arguments:
 |----------|---------------|---------|---------|
 | `Property` | Text | None | The name of a property of the row subject, for example `CurrentSpeed`. It is a name, not a path |
 | `Label` | Text | The title of the property | The header of the column |
-| `Map` | Name or path of a `ValueMap` | None | The map that gives text, colour and icon for a value, see [ValueMap](../page-widgets.md#valuemap) |
+| `Map` | Name or path of a `ValueMap` | None | The map that gives text, colour and icon for a value, see [ValueMap](value-map.md) |
 
 ## Samples
 

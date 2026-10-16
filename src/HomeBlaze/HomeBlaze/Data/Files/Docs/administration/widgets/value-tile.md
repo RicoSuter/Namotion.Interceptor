@@ -1,0 +1,60 @@
+---
+title: ValueTile
+navTitle: ValueTile
+position: 32
+---
+
+# ValueTile
+
+A small box with a label and one large value. Type name: `HomeBlaze.Components.ValueTile`.
+
+## Arguments
+
+| Argument | Kind of value | Default | Meaning |
+|----------|---------------|---------|---------|
+| `Path` | Path (Value) | None | The [path](basics.md#value-widgets) of the property whose value the tile shows |
+| `Label` | Text | The title of the property | The small text above the value. Without it the tile shows the title that the property declares, and the name of the property when it declares none |
+| `Icon` | Text | None | The [icon](basics.md#icons) next to the label |
+| `Map` | Text | None | The name or the path of a [ValueMap](value-map.md) |
+
+## Slots
+
+A `ValueTile` has no slots.
+
+## Samples
+
+Three tiles in a `FlowLayout`. The first has a label of its own and an icon, the second takes its label from the property, and the third shows the status through the map of [ValueMap](value-map.md):
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.FlowLayout MinWidth=140
+::: Item
+:::: HomeBlaze.Components.ValueTile Path=../Pump/CurrentSpeed Label="Pump speed" Icon=Speed
+::: Item
+:::: HomeBlaze.Components.ValueTile Path=../Pump/Temperature
+::: Item
+:::: HomeBlaze.Components.ValueTile Path=../Pump/Status Map=../value-map.md/motorstate
+::
+~~~~
+
+:: HomeBlaze.Components.FlowLayout MinWidth=140
+::: Item
+:::: HomeBlaze.Components.ValueTile Path=../Pump/CurrentSpeed Label="Pump speed" Icon=Speed
+::: Item
+:::: HomeBlaze.Components.ValueTile Path=../Pump/Temperature
+::: Item
+:::: HomeBlaze.Components.ValueTile Path=../Pump/Status Map=../value-map.md/motorstate
+::
+
+## Behaviour and Limits
+
+- **Colour and icon of a case**: A matching case gives the value its colour and the tile its icon, see [ValueMap](value-map.md).
+- **No distance to its surroundings**: A tile adds no distance above, below or beside itself. It is meant to stand in a layout such as `FlowLayout`, which does the spacing.
+- **As wide as its place**: A tile is as wide as the place it stands in.
+
+## Related
+
+- [Basics](basics.md) - Type names, paths, value widgets, colours and icons
+- [Overview](overview.md) - Every widget by group
+- [ValueMap](value-map.md) - The text, colour and icon of a value
+- [Gauge](gauge.md) - One value in a ring between a minimum and a maximum

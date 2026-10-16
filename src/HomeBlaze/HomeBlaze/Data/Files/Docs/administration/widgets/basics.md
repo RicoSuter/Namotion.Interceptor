@@ -64,7 +64,24 @@ A property that does not match is shown greyed out and cannot be selected. Opera
 
 ## Missing Values
 
-A value widget shows a dash for a value that is not set and for a path that leads nowhere, and no error box. [Value Widgets](../page-widgets.md#value-widgets) has the rules for values.
+A value widget shows a dash for a value that is not set and for a path that leads nowhere, and no error box. [Value Widgets](#value-widgets) has the rules for values.
+
+## Value Widgets
+
+`ValueList`, `ValueTile`, `Indicator`, `Progress` and `Gauge` show values of properties, and `ValueMap` says what text, colour and icon a value gets. The pages of these widgets refer to the rules in this section.
+
+- **The path**: `Path` is the path of a property. It is written like the path of an [expression](../pages.md#expression-paths): relative to the page, where the first segment can be the name of a block, or absolute.
+- **The formatted value**: A value is shown in the [formatted form of an expression](../pages.md#expression-formats). A map can replace the text.
+- **A missing value**: A value that is not set and a path that leads nowhere show a dash in place of the value, with the path as tooltip. This is no error box, because a device that is offline or still starting is normal. A misspelled path shows the same dash, so check the spelling when a dash stays. A `Progress` shows the dash for a value that is no number as well.
+- **Live**: A value changes on the page when the property changes.
+
+## Colours
+
+A colour is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning` and `Error`. They are the colours of the theme, so they follow it. `MudBlazor.Color` has a few more names that are accepted, but these are the ones meant for pages. The `IconColor` of a card, the `Color` of a case of a map and the `Color` of a progress bar take one.
+
+## Icons
+
+The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert and a case of a map is the name of a MudBlazor Material icon in its filled form, for example `Settings`, `Bolt`, `WaterDrop`, `AcUnit` or `Link`. The name is case-sensitive. An unknown name shows a default icon and no error.
 
 ## Control Writes
 

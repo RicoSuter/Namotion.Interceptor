@@ -35,11 +35,11 @@ The reference of each widget has its arguments, its slots and its samples. Some 
 
 | Widget | Purpose |
 |--------|---------|
-| [ValueMap](../page-widgets.md#valuemap) | Says what text, colour and icon a value gets in the widgets that refer to it |
-| [ValueList](../page-widgets.md#valuelist) | A list of rows, each with a label and a value |
-| [ValueTile](../page-widgets.md#valuetile) | A small box with a label and one large value |
-| [Indicator](../page-widgets.md#indicator) | Shows a state as a coloured chip, or as an icon alone |
-| [Progress](../page-widgets.md#progress) | A bar that shows where a number stands between a minimum and a maximum |
+| [ValueMap](value-map.md) | Says what text, colour and icon a value gets in the widgets that refer to it |
+| [ValueList](value-list.md) | A list of rows, each with a label and a value |
+| [ValueTile](value-tile.md) | A small box with a label and one large value |
+| [Indicator](indicator.md) | Shows a state as a coloured chip, or as an icon alone |
+| [Progress](progress.md) | A bar that shows where a number stands between a minimum and a maximum |
 | [Gauge](gauge.md) | A ring that shows where a number stands between a minimum and a maximum |
 | [SubjectTable](subject-table.md) | A table with a row per subject of a folder or a list and a column per property |
 

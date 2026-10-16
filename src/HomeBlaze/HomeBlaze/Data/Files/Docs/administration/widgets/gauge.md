@@ -16,7 +16,7 @@ A ring that shows where a number stands between a minimum and a maximum, with th
 | `Label` | Text | The title of the property, then its name | The text below the ring. Without it the gauge shows the title that the property declares, the name of the property when it declares none, and the path when the path leads nowhere |
 | `Minimum` | Number with a fraction | From the property | The value at which the ring is empty |
 | `Maximum` | Number with a fraction | From the property | The value at which the ring is full |
-| `Map` | Name or path of a `ValueMap` | None | The map that gives the text in the centre and the colour of the ring, see [ValueMap](../page-widgets.md#valuemap) |
+| `Map` | Name or path of a `ValueMap` | None | The map that gives the text in the centre and the colour of the ring, see [ValueMap](value-map.md) |
 | `Size` | `Small`, `Medium` or `Large` | `Medium` | The size of the ring: 72, 112 or 160 pixels |
 
 ## Slots
