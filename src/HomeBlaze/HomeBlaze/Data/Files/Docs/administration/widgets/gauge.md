@@ -12,7 +12,7 @@ A ring that shows where a number stands between a minimum and a maximum, with th
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path of a number | None | The path of the property whose value the gauge shows. The picker offers numbers only |
+| `Path` | Path (Number) | None | The path of the property whose value the gauge shows. The picker offers numbers only |
 | `Label` | Text | The title of the property, then its name | The text below the ring. Without it the gauge shows the title that the property declares, the name of the property when it declares none, and the path when the path leads nowhere |
 | `Minimum` | Number with a fraction | From the property | The value at which the ring is empty |
 | `Maximum` | Number with a fraction | From the property | The value at which the ring is full |

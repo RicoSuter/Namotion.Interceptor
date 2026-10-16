@@ -25,7 +25,7 @@ The arguments of a `Value` block:
 | `Path` | Path (Value) | None | The [path](basics.md#value-widgets) of the property whose value the row shows. A row with content needs none |
 | `Label` | Text | The title of the property | The label of the row. Without it the row shows the title that the property declares, and the name of the property when it declares none |
 | `Icon` | Text | None | The [icon](basics.md#icons) at the start of the row |
-| `Map` | Text | None | The name or the path of a [ValueMap](value-map.md) |
+| `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, colour and icon, see [ValueMap](value-map.md) |
 
 ## Samples
 

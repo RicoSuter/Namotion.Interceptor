@@ -17,7 +17,7 @@ Shows the control that fits its target: a button, a switch, an indicator, a sele
 | `Minimum` | Number with a fraction | See [Slider](slider.md) | The value at the left end of a slider |
 | `Maximum` | Number with a fraction | See [Slider](slider.md) | The value at the right end of a slider |
 | `Step` | Number with a fraction | See [Slider](slider.md) | The distance between two positions of a slider |
-| `Map` | Text | None | The name or the path of a `ValueMap`, for a select, an indicator or a value row |
+| `Map` | Name or path of a `ValueMap` | None | The map for a select, an indicator or a value row, see [ValueMap](value-map.md) |
 
 The control passes on the arguments that the chosen widget takes and ignores the others.
 

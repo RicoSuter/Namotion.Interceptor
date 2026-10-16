@@ -1,6 +1,6 @@
 ---
 title: OperationButton
-navTitle: Operation Button
+navTitle: OperationButton
 position: 43
 ---
 
@@ -14,8 +14,8 @@ A button that invokes an operation or a query of a subject. Type name: `HomeBlaz
 |----------|---------------|---------|---------|
 | `Path` | Path (Operation) | None | The path of the operation or the query, for example `pump/EmergencyStop` |
 | `Label` | Text | The title of the method | The text of the button |
-| `Icon` | Text | The icon of the method, else `PlayArrow` for an operation and `Search` for a query | The icon at the start of the button, the name of a MudBlazor Material icon in its filled form |
-| `Color` | Colour | `Primary` | The colour of the button |
+| `Icon` | Text | The icon of the method, else `PlayArrow` for an operation and `Search` for a query | The [icon](basics.md#icons) at the start of the button |
+| `Color` | Colour | `Primary` | The [colour](basics.md#colours) of the button |
 | `Variant` | `Filled`, `Outlined` or `Text` | `Filled` | A filled button, a button with a border, or text alone |
 
 ## Slots

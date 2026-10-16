@@ -13,7 +13,7 @@ Shows a state as a coloured chip, or as an icon alone. Type name: `HomeBlaze.Com
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Path` | Path (Value) | None | The [path](basics.md#value-widgets) of the property whose value the indicator shows |
-| `Map` | Text | None | The name or the path of a [ValueMap](value-map.md) |
+| `Map` | Name or path of a `ValueMap` | None | The map that gives the indicator its text, colour and icon, see [ValueMap](value-map.md) |
 | `Icon` | Text | None | The [icon](basics.md#icons) |
 | `Kind` | `Chip` or `Icon` | `Chip` | `Chip` is a chip with the icon and the text. `Icon` is the icon alone, with the text as its tooltip |
 

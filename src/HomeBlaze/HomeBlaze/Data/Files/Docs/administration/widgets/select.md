@@ -14,7 +14,7 @@ Picks one value of an enum from a list. Type name: `HomeBlaze.Components.Select`
 |----------|---------------|---------|---------|
 | `Path` | Path (Enum, writable) | None | The path of the property whose value the select shows and writes |
 | `Label` | Text | The title of the property | The label of the select. Without it the select shows the title that the property declares, and the name of the property when it declares none |
-| `Map` | Text | None | The name or the path of a `ValueMap` that gives each value its text and icon |
+| `Map` | Name or path of a `ValueMap` | None | The map that gives each value its text and icon, see [ValueMap](value-map.md) |
 
 ## Slots
 

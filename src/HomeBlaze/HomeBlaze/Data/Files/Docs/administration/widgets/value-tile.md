@@ -15,7 +15,7 @@ A small box with a label and one large value. Type name: `HomeBlaze.Components.V
 | `Path` | Path (Value) | None | The [path](basics.md#value-widgets) of the property whose value the tile shows |
 | `Label` | Text | The title of the property | The small text above the value. Without it the tile shows the title that the property declares, and the name of the property when it declares none |
 | `Icon` | Text | None | The [icon](basics.md#icons) next to the label |
-| `Map` | Text | None | The name or the path of a [ValueMap](value-map.md) |
+| `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, colour and icon, see [ValueMap](value-map.md) |
 
 ## Slots
 

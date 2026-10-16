@@ -22,6 +22,8 @@ The samples of these pages need subjects to show. They use two sample motors: th
 
 A sample refers to a motor relative to its page, for example `../Pump/CurrentSpeed` for the current speed of the pump. A sample that you copy to a page of your own needs the path of one of your subjects in its place.
 
+All samples on these pages are written in the short form, where the closing line of the last block ends the sample and the text of the page goes on below it, see [Closing and Nesting](../pages.md#closing-and-nesting). A name is unique on a page, so every name on a page, like the name of a tab, belongs to one sample only.
+
 <!-- sample: live -->
 ~~~~markdown
 :: HomeBlaze.Components.Card Title="Pump" Icon=WaterDrop
@@ -77,11 +79,11 @@ A value widget shows a dash for a value that is not set and for a path that lead
 
 ## Colours
 
-A colour is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning` and `Error`. They are the colours of the theme, so they follow it. `MudBlazor.Color` has a few more names that are accepted, but these are the ones meant for pages. The `IconColor` of a card, the `Color` of a case of a map and the `Color` of a progress bar take one.
+A colour is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning` and `Error`. They are the colours of the theme, so they follow it. `MudBlazor.Color` has a few more names that are accepted, but these are the ones meant for pages. The `IconColor` of a card, the `Color` of a case of a map, the `Color` of a progress bar and the `Color` of an operation button take one.
 
 ## Icons
 
-The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert and a case of a map is the name of a MudBlazor Material icon in its filled form, for example `Settings`, `Bolt`, `WaterDrop`, `AcUnit` or `Link`. The name is case-sensitive. An unknown name shows a default icon and no error.
+The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert, an operation button and a case of a map is the name of a MudBlazor Material icon in its filled form, for example `Settings`, `Bolt`, `WaterDrop`, `AcUnit` or `Link`. The name is case-sensitive. An unknown name shows a default icon and no error.
 
 ## Control Writes
 
