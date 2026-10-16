@@ -78,16 +78,12 @@
     // The legend of every series below the widget, while there is no chart view to hold it.
     private const string OwnLegendStyle = "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;";
 
-    private HistoryRefreshThrottle? _throttle;
+    private HistoryChartRefresh? _refresh;
     private CancellationTokenSource? _queryCancellation;
     private HistoryChartData? _data;
     private bool? _hasStores;
     private string? _queryError;
     private TimeSpan? _bucket;
-
-    // The values of the series after the last render. The page renders every widget on a change of any value it shows,
-    // so only a change of one of these arms the refresh.
-    private object?[] _lastValues = [];
 
     // The resolution of the series, kept until the configuration or the paths of the graph change, because the
     // legend renders on every change of a charted value.
@@ -126,6 +122,10 @@
 
     // Set when a render resolved other series, range or bucket than the last query used.
     private bool _isQueryOutdated;
+
+    // Set when the first render or changed series queue a query, and cleared by the query that completes next, which
+    // arms one more query: the stores may not have held the latest values yet, and constant values arm nothing.
+    private bool _isFirstQueryPending;
 
     // Incremented on the thread that changes the graph.
     private int _pathsVersion;
@@ -251,7 +251,7 @@
 
     protected override void OnInitialized()
     {
-        _throttle = new HistoryRefreshThrottle(TimeProvider, OnRefreshDue);
+        _refresh = new HistoryChartRefresh(TimeProvider, OnRefreshDue);
         PathResolver.PathsChanged += OnPathsChanged;
     }
 
@@ -262,14 +262,15 @@
         if (firstRender || _isQueryOutdated)
         {
             _isQueryOutdated = false;
+            _isFirstQueryPending = true;
             QueueRefresh();
             return;
         }
 
-        var isChanged = HistoryChartSeriesResolver.UpdateValues(_series, _lastValues);
-        if (isChanged && _error is null && Subject is HistoryChart)
+        // The page renders every widget on a change of any value it shows, so only a change of a value of this chart arms it.
+        if (_error is null && Subject is HistoryChart)
         {
-            _throttle?.Arm(HistoryRefreshThrottle.GetWindow(_resolvedRefreshInterval, _bucket));
+            _refresh?.OnRendered(HistoryRefreshThrottle.GetWindow(_resolvedRefreshInterval, _bucket));
         }
     }
 
@@ -341,8 +342,7 @@
         }
 
         _series = series;
-        _lastValues = new object?[series.Count];
-        HistoryChartSeriesResolver.UpdateValues(series, _lastValues);
+        _refresh?.SetSeries(series);
         _firstLine = HistoryChartSeriesResolver.FindFirstRecordedLine(series);
         _showHistory = new EventCallback[series.Count];
         _historyTitles = new string[series.Count];
@@ -420,6 +420,7 @@
             if (stores.Length == 0)
             {
                 _queryError = null;
+                ArmAfterFirstQuery();
                 StateHasChanged();
                 return;
             }
@@ -499,14 +500,24 @@
             _queryError = HistoryChartQuery.GetLoadError(exception);
         }
 
+        ArmAfterFirstQuery();
         StateHasChanged();
+    }
+
+    private void ArmAfterFirstQuery()
+    {
+        if (_isFirstQueryPending)
+        {
+            _isFirstQueryPending = false;
+            _refresh?.OnFirstQueryCompleted(HistoryRefreshThrottle.GetWindow(_resolvedRefreshInterval, _bucket));
+        }
     }
 
     public void Dispose()
     {
         _isDisposed = true;
         PathResolver.PathsChanged -= OnPathsChanged;
-        _throttle?.Dispose();
+        _refresh?.Dispose();
 
         // Cancel before disposing: disposing does not cancel the token of a running query.
         _queryCancellation?.Cancel();
