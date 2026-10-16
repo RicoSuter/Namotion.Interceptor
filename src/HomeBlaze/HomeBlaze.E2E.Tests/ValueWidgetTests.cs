@@ -210,6 +210,22 @@ public class ValueWidgetTests
     }
 
     [Fact]
+    public async Task WhenThePageIsEdited_ThenTheTitleOfACardLeadsNowhereAndTakesNoFocus()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var title = GetCard(page, "Linked Card").GetByTestId("card-title");
+        await Assertions.Expect(title).ToHaveAttributeAsync("href", "/pages/Demo/Blocks.md", new() { Timeout = Timeout });
+
+        // Act
+        await page.SwitchToInlineModeAsync();
+
+        // Assert
+        await Assertions.Expect(title).Not.ToHaveAttributeAsync("href", new Regex(".*"), new() { Timeout = Timeout });
+        await Assertions.Expect(title).ToHaveAttributeAsync("tabindex", "-1");
+    }
+
+    [Fact]
     public async Task WhenCardHasOnlyATitle_ThenItHasNoLinkAndNoHeaderParts()
     {
         // Arrange & Act
@@ -797,6 +813,20 @@ public class ValueWidgetTests
 
         // Assert
         await Assertions.Expect(page.Locator(".mud-tooltip.mud-popover-open")).ToHaveTextAsync(new Regex("^(steht|startet|läuft|stoppt)$"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenIndicatorIsAnIcon_ThenItIsAnImageNamedByTheTextOfTheCase()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var icon = page.GetByTestId("indicator").Nth(1);
+        var caseText = new Regex("^(steht|startet|läuft|stoppt)$");
+        await Assertions.Expect(icon).ToHaveAttributeAsync("role", "img", new() { Timeout = Timeout });
+        await Assertions.Expect(icon).ToHaveAttributeAsync("aria-label", caseText);
+        await Assertions.Expect(page.GetByRole(AriaRole.Img, new() { NameRegex = caseText }).First).ToBeVisibleAsync();
     }
 
     [Fact]

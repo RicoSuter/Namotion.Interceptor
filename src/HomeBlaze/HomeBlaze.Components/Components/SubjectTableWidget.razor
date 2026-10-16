@@ -51,13 +51,14 @@
                 <tbody>
                     @foreach (var row in rows)
                     {
-                        var link = SubjectTableRows.GetLink(PathResolver, row.Subject);
+                        // While the page is edited a link would leave it, also by keyboard, so the links lead nowhere and take no focus.
+                        var link = IsEditing ? null : SubjectTableRows.GetLink(PathResolver, row.Subject);
 
                         <tr @key="row.Subject" data-testid="subject-table-row">
                             @if (columns.Length == 0)
                             {
                                 <td>
-                                    <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">@SubjectTableRows.GetTitle(row)</MudLink>
+                                    <MudLink Href="@link" Typo="Typo.body2" tabindex="@(IsEditing ? "-1" : null)" data-testid="subject-table-link">@SubjectTableRows.GetTitle(row)</MudLink>
                                 </td>
                             }
 
@@ -69,7 +70,7 @@
                                 <td data-testid="subject-table-cell">
                                     @if (index == 0)
                                     {
-                                        <MudLink Href="@link" Typo="Typo.body2" data-testid="subject-table-link">
+                                        <MudLink Href="@link" Typo="Typo.body2" tabindex="@(IsEditing ? "-1" : null)" data-testid="subject-table-link">
                                             @if (reading.IsMissing)
                                             {
                                                 @SubjectTableRows.GetTitle(row)
@@ -97,4 +98,7 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
 }

@@ -818,6 +818,7 @@ namespace HomeBlaze.Components
     {
         public Widget(HomeBlaze.Services.SubjectPathResolver pathResolver) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(Namotion.Interceptor.IInterceptorSubject))]
         public string Path { get; set; }
         [Namotion.Interceptor.Attributes.Derived]
         public Namotion.Interceptor.IInterceptorSubject? ResolvedSubject { get; }
@@ -915,6 +916,8 @@ namespace HomeBlaze.Components.Components
     public class CardWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public CardWidget() { }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
+        public bool IsEditing { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
@@ -1140,6 +1143,8 @@ namespace HomeBlaze.Components.Components
     public class SubjectTableWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public SubjectTableWidget() { }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
+        public bool IsEditing { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }

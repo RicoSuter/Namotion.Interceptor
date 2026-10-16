@@ -135,6 +135,22 @@ public class DisplayWidgetTests
     }
 
     [Fact]
+    public async Task WhenThePageIsEdited_ThenTheLinksOfATableLeadNowhereAndTakeNoFocus()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var link = GetTableRow(GetTable(page, "Target"), "Display Motor").GetByTestId("subject-table-link");
+        await Assertions.Expect(link).ToHaveAttributeAsync("href", "/browser/Demo/Displays.md/dispmotor", new() { Timeout = Timeout });
+
+        // Act
+        await page.SwitchToInlineModeAsync();
+
+        // Assert
+        await Assertions.Expect(link).Not.ToHaveAttributeAsync("href", new Regex(".*"), new() { Timeout = Timeout });
+        await Assertions.Expect(link).ToHaveAttributeAsync("tabindex", "-1");
+    }
+
+    [Fact]
     public async Task WhenFirstColumnHasAMap_ThenItsLinkShowsTheMappedTextInTheColourOfTheCase()
     {
         // Arrange & Act

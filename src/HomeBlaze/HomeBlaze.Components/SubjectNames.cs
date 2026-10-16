@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Text;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -14,6 +15,41 @@ internal static class SubjectNames
 {
     /// <summary>The name of the text property that names a widget without a title.</summary>
     public const string LabelPropertyName = "Label";
+
+    /// <summary>
+    /// Gets the property that holds the main path of a widget: the first text property with a
+    /// <see cref="SubjectPathAttribute"/>, such as the <c>Path</c> of a control or the <c>Source</c> of a table, or null.
+    /// </summary>
+    public static RegisteredSubjectProperty? TryGetPathProperty(RegisteredSubject? subject)
+    {
+        if (subject is null)
+        {
+            return null;
+        }
+
+        foreach (var property in subject.Properties)
+        {
+            if (property.Type == typeof(string) && HasSubjectPathAttribute(property))
+            {
+                return property;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool HasSubjectPathAttribute(RegisteredSubjectProperty property)
+    {
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            if (attribute is SubjectPathAttribute)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Gets the name of the type as a block of a page names it: the full type name. A generic type is shown with its

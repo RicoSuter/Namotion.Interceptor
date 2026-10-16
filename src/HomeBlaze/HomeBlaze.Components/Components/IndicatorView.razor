@@ -11,8 +11,9 @@
 }
 else if (Kind == IndicatorKind.Icon)
 {
-    <MudTooltip Text="@(Reading.IsMissing ? Path : Reading.Text)">
-        <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color" Class="ma-1" data-testid="indicator" />
+    var text = Reading.IsMissing ? Path : Reading.Text;
+    <MudTooltip Text="@text">
+        <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color" Class="ma-1" role="img" aria-label="@text" data-testid="indicator" />
     </MudTooltip>
 }
 else if (Reading.IsMissing)

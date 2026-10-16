@@ -39,7 +39,8 @@
                     <CardHeaderContent>
                         @if (hasTitle && !string.IsNullOrEmpty(card.Href))
                         {
-                            <MudLink Href="@card.ResolveScopedLink(card.Href)" Typo="Typo.h6" Color="Color.Inherit" data-testid="card-title">@card.Title</MudLink>
+                            @* While the page is edited the link would leave it, also by keyboard, so it leads nowhere and takes no focus. *@
+                            <MudLink Href="@(IsEditing ? null : card.ResolveScopedLink(card.Href))" Typo="Typo.h6" Color="Color.Inherit" tabindex="@(IsEditing ? "-1" : null)" data-testid="card-title">@card.Title</MudLink>
                         }
                         else if (hasTitle)
                         {
@@ -80,4 +81,7 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
 }

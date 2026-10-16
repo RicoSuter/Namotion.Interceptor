@@ -292,7 +292,7 @@
             {
                 var registeredSubject = Subject?.TryGetRegisteredSubject();
                 _labelProperty = TryGetTextProperty(registeredSubject, SubjectNames.LabelPropertyName);
-                _pathProperty = TryGetTextProperty(registeredSubject, "Path");
+                _pathProperty = SubjectNames.TryGetPathProperty(registeredSubject);
             }
 
             _previousSubject = Subject;

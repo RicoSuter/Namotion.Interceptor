@@ -19,6 +19,7 @@
            Disabled="@(IsEditing || _isRunning || !isEnabled)"
            OnClick="_runCallback"
            title="@(method is null ? Path : method.Description)"
+           aria-busy="@(_isRunning ? "true" : null)"
            data-testid="operation-button">
     @* The spinner takes the start icon's place instead of adding one, so the button keeps its width while busy. *@
     @if (_isRunning)

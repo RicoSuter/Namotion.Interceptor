@@ -11,6 +11,23 @@ public class SubjectNamesTests
         .Create()
         .WithRegistry();
 
+    [Theory]
+    [InlineData(typeof(Switch), nameof(Switch.Path))]
+    [InlineData(typeof(Select), nameof(Select.Path))]
+    [InlineData(typeof(SubjectTable), nameof(SubjectTable.Source))]
+    [InlineData(typeof(Card), null)]
+    public void WhenWidgetIsNamed_ThenItsPathPropertyIsItsFirstPathProperty(Type widgetType, string? expected)
+    {
+        // Arrange
+        var widget = (IInterceptorSubject)Activator.CreateInstance(widgetType, _context)!;
+
+        // Act
+        var property = SubjectNames.TryGetPathProperty(widget.TryGetRegisteredSubject());
+
+        // Assert
+        Assert.Equal(expected, property?.Name);
+    }
+
     [Fact]
     public void WhenTypeIsNotGeneric_ThenTypeNameIsTheFullName()
     {
