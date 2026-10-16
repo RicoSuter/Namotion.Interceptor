@@ -519,7 +519,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     }
 
     /// <summary>
-    /// Gets the most recent sample with a numeric value strictly before <paramref name="before"/>, following move
+    /// Gets the most recent sample with a finite numeric value strictly before <paramref name="before"/>, following move
     /// chains and regardless of coverage, or null if none. See <see cref="IHistoryStore.GetLastNumericSampleBeforeAsync"/>.
     /// </summary>
     public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)

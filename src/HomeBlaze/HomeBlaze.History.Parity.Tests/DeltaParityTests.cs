@@ -232,4 +232,40 @@ public class DeltaParityTests
         Assert.Equal(Base.AddSeconds(1), sample.Timestamp);
         Assert.Null(atTheSampleItself);
     }
+
+    [Theory]
+    [MemberData(nameof(NonFiniteCases))]
+    public async Task WhenACounterReadingIsNotFinite_ThenDeltaSkipsIt(ParityStoreFactory factory, double reading)
+    {
+        // Arrange - daily buckets; the readings are 100, 110, the non-finite one, 120, 125.
+        using var store = factory.Create();
+        store.Record("/a/Energy", Base.AddHours(1), 100d, typeof(double));
+        store.Record("/a/Energy", Base.AddHours(2), 110d, typeof(double));
+        store.Record("/a/Energy", Base.AddHours(23), reading, typeof(double));
+        store.Record("/a/Energy", Base.AddHours(25), 120d, typeof(double));
+        store.Record("/a/Energy", Base.AddHours(26), 125d, typeof(double));
+        await store.FlushAsync();
+
+        // Act
+        var series = store.Query(new HistoryQuery(
+            "/a/Energy", Base, Base.AddDays(2), TimeSpan.FromDays(1), HistoryAggregations.Delta, MaxPoints: 1000));
+        var lastBeforeSecondDay = store.GetLastNumericSampleBefore("/a/Energy", Base.AddDays(1));
+
+        // Assert
+        ParityAssert.NumbersEqual([10d, 15d], series);
+        Assert.Equal(new HistoryPoint(Base.AddHours(2), 110d, null), lastBeforeSecondDay);
+    }
+
+    public static TheoryData<ParityStoreFactory, double> NonFiniteCases()
+    {
+        var cases = new TheoryData<ParityStoreFactory, double>();
+        foreach (var factory in ParityStores.Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]))
+        {
+            cases.Add(factory, double.NaN);
+            cases.Add(factory, double.PositiveInfinity);
+            cases.Add(factory, double.NegativeInfinity);
+        }
+
+        return cases;
+    }
 }

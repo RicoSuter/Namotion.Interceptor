@@ -123,12 +123,13 @@ internal static class InMemoryHistoryAggregation
     private static HistoryPoint Delta(
         DateTimeOffset bucketStart, ReadOnlySpan<Sample> samples, bool isUlong, ref double? carriedNumber)
     {
-        // Without a held value the first sample is the baseline and adds nothing.
+        // Without a held value the first sample is the baseline and adds nothing. A NaN or infinite reading is no
+        // counter reading, as in the SQLite store, which cannot hold NaN as a number.
         var hasValue = carriedNumber is not null;
         var increase = 0d;
         foreach (var sample in samples)
         {
-            if (Numeric(sample, isUlong) is not { } value)
+            if (Numeric(sample, isUlong) is not { } value || !double.IsFinite(value))
             {
                 continue;
             }

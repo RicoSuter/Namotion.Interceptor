@@ -346,7 +346,7 @@ internal static class SqliteBucketReader
     }
 
     // Delta for one coverage window: one ascending stream of numeric samples across partition files and move legs,
-    // as for TWA, adding each step to the bucket holding the later sample. Null samples are skipped. The segments
+    // as for TWA, adding each step to the bucket holding the later sample. Null and non-finite samples are skipped. The segments
     // list is sorted in place.
     private static void ReadDeltaWindow(
         SqliteReadContext context,
@@ -383,7 +383,13 @@ internal static class SqliteBucketReader
                     continue;
                 }
 
+                // An infinite reading is no counter reading; NaN never gets here, it is stored as JSON.
                 var value = reader.GetDouble(1);
+                if (!double.IsFinite(value))
+                {
+                    continue;
+                }
+
                 var (bucketStart, _) = cursor.Locate(reader.GetInt64(0));
                 ref var partial = ref CollectionsMarshal.GetValueRefOrAddDefault(result, bucketStart, out _);
                 var step = carry is { } previous ? HistoryDelta.Step(previous, value) : 0;

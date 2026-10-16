@@ -288,7 +288,10 @@ internal static class SqliteHistoryReader
         return null;
     }
 
-    // Newest row with a numeric value strictly before the given instant for a single path across its partitions.
+    // The largest finite double: comparing ABS(v) against it rejects NULL, NaN and the infinities in one predicate.
+    private const string MaximumFiniteSql = "1.7976931348623157e308";
+
+    // Newest row with a finite numeric value strictly before the given instant for a single path across its partitions.
     private static HistoryPoint? GetLegNumericSampleBefore(SqliteReadContext context, string path, DateTimeOffset before, bool isUlong)
     {
         var numeric = isUlong
@@ -311,7 +314,7 @@ internal static class SqliteHistoryReader
             using var command = connection.CreateCommand();
             command.CommandText =
                 "SELECT ts, " + numeric + " AS v FROM history " +
-                "WHERE path_id = @path_id AND ts < @before AND " + numeric + " IS NOT NULL ORDER BY ts DESC LIMIT 1;";
+                "WHERE path_id = @path_id AND ts < @before AND ABS(" + numeric + ") <= " + MaximumFiniteSql + " ORDER BY ts DESC LIMIT 1;";
             command.Parameters.AddWithValue("@path_id", pathId);
             command.Parameters.AddWithValue("@before", beforeTicks);
 

@@ -49,7 +49,7 @@ public interface IHistoryStore
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Gets the most recent sample with a numeric value strictly before <paramref name="before"/> for the property
+    /// Gets the most recent sample with a finite numeric value strictly before <paramref name="before"/> for the property
     /// path (following move chains), regardless of coverage, or null if none. The result's <see cref="HistoryPoint.Json"/>
     /// is null. Used by <see cref="HistoryAggregations.Delta"/>, which bridges coverage gaps.
     /// </summary>

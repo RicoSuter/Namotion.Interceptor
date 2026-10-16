@@ -412,7 +412,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
     }
 
     /// <summary>
-    /// Gets the most recent sample with a numeric value strictly before <paramref name="before"/>, following move
+    /// Gets the most recent sample with a finite numeric value strictly before <paramref name="before"/>, following move
     /// chains and regardless of coverage, or null if none. See <see cref="IHistoryStore.GetLastNumericSampleBeforeAsync"/>.
     /// </summary>
     public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
@@ -427,7 +427,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
             var ceiling = (before < leg.ValidTo ? before : leg.ValidTo) - new TimeSpan(1);
             while (buffer.AtOrBefore(ceiling) is { } sample && sample.Timestamp >= leg.ValidFrom)
             {
-                if (InMemoryHistoryAggregation.Numeric(sample, buffer.IsUlong) is { } number)
+                if (InMemoryHistoryAggregation.Numeric(sample, buffer.IsUlong) is { } number && double.IsFinite(number))
                 {
                     return new HistoryPoint(sample.Timestamp, number, null);
                 }
