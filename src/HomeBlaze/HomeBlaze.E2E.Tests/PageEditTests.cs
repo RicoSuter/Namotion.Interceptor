@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
@@ -169,14 +170,33 @@ public class PageEditTests
     }
 
     [Theory]
-    [InlineData(400)]
-    [InlineData(768)]
-    public async Task WhenTheSplitModeIsNarrow_ThenThePageHeadStaysInTheEditorBarAndItsButtonsCanBeClicked(int width)
+    [InlineData(400, null)]
+    [InlineData(768, null)]
+    [InlineData(960, null)]
+    [InlineData(1024, null)]
+    [InlineData(1400, 80)]
+    public async Task WhenTheEditorOfTheSplitModeIsNarrow_ThenThePageHeadStaysInTheEditorBarAndItsButtonsCanBeClicked(int width, int? previewPercent)
     {
         // Arrange
         var page = await OpenWidgetsDemoPageAsync(width);
         await SelectEditModeAsync(page, "Split");
         await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeAttachedAsync(new() { Timeout = 30000 });
+        if (previewPercent is { } percent)
+        {
+            // Dragged from the middle, where the splitter starts, to the share of the preview.
+            var splitter = await page.GetByTestId("edit-splitter").BoundingBoxAsync() ?? throw new InvalidOperationException("The splitter has no box");
+            // A double, because Playwright passes a float to the page as an object.
+            double previewWidth = (await page.GetByTestId("edit-splitter").Locator(".page-split-preview").BoundingBoxAsync())!.Width;
+            var y = splitter.Y + 300;
+            await page.Mouse.MoveAsync(splitter.X + splitter.Width / 2, y);
+            await page.Mouse.DownAsync();
+            await page.Mouse.MoveAsync(splitter.X + splitter.Width * percent / 100, y, new() { Steps = 10 });
+            await page.Mouse.UpAsync();
+            await page.WaitForFunctionAsync(
+                "minimum => document.querySelector('[data-testid=edit-splitter] .page-split-preview').getBoundingClientRect().width > minimum",
+                previewWidth + 100,
+                new() { Timeout = 10000 });
+        }
 
         // Act: the cursor in the motor block adds its edit button, which makes the head as wide as it gets. It is placed
         // through the editor, because a narrow editor wraps the block out of view.
@@ -191,18 +211,26 @@ public class PageEditTests
             """);
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Edit mymotor" })).ToBeVisibleAsync(new() { Timeout = 30000 });
 
-        // Assert: the bottoms agree only while the head is placed with the margin that MudSplitter gives its content.
-        var boxes = await page.EvaluateAsync<double[]>(
+        // Assert: the head follows the width of the bar a moment after it changed. The bottoms agree only while the head
+        // is placed with the margin that MudSplitter gives its content.
+        const string headInBarScript =
             """
             () => {
                 const head = document.querySelector('[data-testid=page-head]').getBoundingClientRect();
                 const bar = document.querySelector('[data-testid=edit-splitter] [data-testid=editor-bar]').getBoundingClientRect();
-                return [head.left, head.right, head.bottom, bar.left, bar.right, bar.bottom];
+                const isInside = head.left >= bar.left - 0.5 && head.right <= bar.right + 0.5 && Math.abs(head.bottom - bar.bottom) <= 1;
+                return { isInside, text: `head ${head.left}-${head.right} bottom ${head.bottom}, bar ${bar.left}-${bar.right} bottom ${bar.bottom}` };
             }
-            """);
-        Assert.True(boxes[0] >= boxes[3] - 0.5, $"The head starts at {boxes[0]} px, left of the editor bar at {boxes[3]} px");
-        Assert.True(boxes[1] <= boxes[4] + 0.5, $"The head ends at {boxes[1]} px, right of the editor bar at {boxes[4]} px");
-        Assert.Equal(boxes[5], boxes[2], 1.0);
+            """;
+        try
+        {
+            await page.WaitForFunctionAsync($"() => ({headInBarScript})().isInside", null, new() { Timeout = 10000 });
+        }
+        catch (TimeoutException)
+        {
+            var boxes = await page.EvaluateAsync<JsonElement>(headInBarScript);
+            Assert.Fail($"The page head is not inside the editor bar: {boxes.GetProperty("text").GetString()}");
+        }
 
         // Not forced, so that the click fails when another element covers the button.
         await page.GetByTestId("create-subject-button").ClickAsync(new() { Timeout = 10000 });

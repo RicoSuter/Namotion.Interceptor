@@ -5,6 +5,7 @@
 @using HomeBlaze.Components.Editors
 @using HomeBlaze.Services.Components
 @using Microsoft.AspNetCore.Components.Sections
+@using Microsoft.JSInterop
 @using Namotion.Interceptor.Blazor
 @using Toolbelt.Blazor.HotKeys2
 
@@ -15,6 +16,7 @@
 @inject SubjectPathResolver PathResolver
 @inject DeveloperModeService DeveloperMode
 @inject HotKeys HotKeys
+@inject IJSRuntime JsRuntime
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
@@ -32,16 +34,17 @@
                for them next to its title, and in the editing modes they stand at the end of the bar above the editor. One
                outlet per section that stays in place, because a second outlet of the same section while the mode changes
                would end the circuit. *@
-            <div class="d-flex align-center gap-2" style="@GetPageHeadStyle()" data-testid="page-head">
-                <SectionOutlet SectionName="EditActions" />
-                @* Next to the actions, the bar of the editor is too narrow for the time on a screen below md. *@
-                <div class="@(ShowEditor ? "d-none d-md-flex" : "d-flex")">
-                    <SectionOutlet SectionName="PageHeadInfo" />
+            <div class="d-flex align-center" style="@GetPageHeadStyle()" data-testid="page-head">
+                <div @ref="_pageHeadContent" class="@(ShowEditor ? "page-head-content page-head-editing" : "page-head-content")">
+                    <SectionOutlet SectionName="EditActions" />
+                    <div class="page-head-info">
+                        <SectionOutlet SectionName="PageHeadInfo" />
+                    </div>
+                    @if (CanEdit())
+                    {
+                        @RenderEditMenu()
+                    }
                 </div>
-                @if (CanEdit())
-                {
-                    @RenderEditMenu()
-                }
             </div>
 
             @if (_editMode == PageEditMode.Split && CanEdit())
@@ -60,7 +63,7 @@
                         </StartContent>
                         <EndContent>
                             <div class="d-flex flex-column" style="height: 100%; width: 100%">
-                                <div style="@EditorBarStyle" data-testid="editor-bar"></div>
+                                <div @ref="_editorBar" style="@EditorBarStyle" data-testid="editor-bar"></div>
                                 <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                                     <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
                                         <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>
@@ -82,7 +85,7 @@
             else if (_editMode == PageEditMode.Source && CanEdit())
             {
                 <div class="d-flex flex-column" style="height: calc(100vh - 80px); width: 100%">
-                    <div style="@EditorBarStyle" data-testid="editor-bar"></div>
+                    <div @ref="_editorBar" style="@EditorBarStyle" data-testid="editor-bar"></div>
                     <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                         <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
                             <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>
@@ -115,6 +118,34 @@
     }
 </TrackingScope>
 
+<style>
+    .page-head-content {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .page-head-info {
+        display: flex;
+    }
+
+    /* In the editing modes the head is as wide as the bar above the editor, less 16px at each end, and leaves out what
+       does not fit: first the labels of the editor actions (see MarkdownFileEditComponent), then the time of the last
+       change. Pages.razor.js keeps the width of the bar in the property. */
+    .page-head-editing {
+        width: calc(var(--editor-bar-width, 0px) - 32px);
+        justify-content: flex-end;
+        container: page-head / inline-size;
+    }
+
+    /* The icons of both actions, the time and the mode button need 252px. */
+    @@container page-head (max-width: 251.98px) {
+        .page-head-info {
+            display: none;
+        }
+    }
+</style>
+
 @code {
     [Parameter] public string? Path { get; set; }
 
@@ -131,6 +162,15 @@
     private HotKeysContext? _hotKeysContext;
 
     private readonly WidgetSelection _widgetSelection = new();
+
+    private const string ModulePath = "./Components/Pages/Pages.razor.js";
+    private ElementReference _pageHeadContent;
+    private ElementReference _editorBar;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _pageHeadFit;
+
+    // The mode whose editor bar the head follows, null while it follows none.
+    private PageEditMode? _fittedMode;
 
     // The selection is the receiver, so that a click on empty page space renders only the widget that it deselects.
     private EventCallback<MouseEventArgs> _clearSelectionCallback;
@@ -214,7 +254,7 @@
         }
     }
 
-    protected override Task OnAfterRenderAsync(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
@@ -224,7 +264,35 @@
                 .Add(Code.Escape, OnEscape, new HotKeyOptions { ExcludeSelector = ".mud-dialog-container, .mud-dialog-container *" });
         }
 
-        return Task.CompletedTask;
+        PageEditMode? mode = ShowEditor ? _editMode : null;
+        if (mode != _fittedMode)
+        {
+            _fittedMode = mode;
+            await FitPageHeadAsync(mode is null ? null : _editorBar);
+        }
+    }
+
+    // Each mode with an editor renders a bar of its own, so the head follows the bar of the current mode.
+    private async Task FitPageHeadAsync(ElementReference? editorBar)
+    {
+        try
+        {
+            if (_pageHeadFit is { } previous)
+            {
+                _pageHeadFit = null;
+                await previous.DisposeAsync();
+            }
+
+            if (editorBar is { } bar)
+            {
+                _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+                _pageHeadFit = await _module.InvokeAsync<IJSObjectReference>("fitToEditorBar", _pageHeadContent, bar);
+            }
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
+        {
+            // The circuit is gone, or the page was left while the call ran.
+        }
     }
 
     protected override void OnParametersSet()
@@ -386,6 +454,23 @@
         if (_hotKeysContext != null)
         {
             await _hotKeysContext.DisposeAsync();
+        }
+
+        try
+        {
+            if (_pageHeadFit is not null)
+            {
+                await _pageHeadFit.DisposeAsync();
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone, and the browser released the objects with it.
         }
     }
 }

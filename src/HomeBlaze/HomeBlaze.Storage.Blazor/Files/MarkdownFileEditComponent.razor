@@ -32,8 +32,8 @@
 }
 else
 {
-    @* The actions stand in the page head at the end of the bar above the editor, which on a screen below md is too narrow
-       for their labels. *@
+    @* The actions stand in the page head at the end of the bar above the editor, which can be too narrow for their
+       labels. *@
     <SectionContent SectionName="EditActions">
         <MudButton Variant="Variant.Filled"
                    Color="Color.Primary"
@@ -88,8 +88,9 @@ else
         vertical-align: bottom;
     }
 
-    /* Below md (960px) the actions show only their icons. */
-    @@media (max-width: 959.98px) {
+    /* In a page head narrower than the actions with their longest labels, the time and the mode button need (500px), the
+       actions show only their icons. */
+    @@container page-head (max-width: 499.98px) {
         .editor-action-label {
             display: none;
         }
