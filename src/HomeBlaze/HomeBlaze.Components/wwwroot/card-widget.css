@@ -19,19 +19,20 @@
 
 /* A card with a height, and a card that fills a grid cell or a canvas node: the header, the picture and the footer keep
    their size, and the body takes the rest and scrolls. Without min-height: 0 an aspect ratio would let the content make
-   the card higher. */
+   the card higher. A card fills a cell or a node when it is its child, as in a layout of a configuration file, or the
+   only block of its content on a page. */
 .card-widget.card-widget-sized,
-:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .card-widget {
+:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child) > .card-widget {
     min-height: 0;
 }
 
 .card-widget.card-widget-sized > *,
-:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .card-widget > * {
+:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child) > .card-widget > * {
     flex-shrink: 0;
 }
 
 .card-widget.card-widget-sized > .mud-card-content,
-:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .card-widget > .mud-card-content {
+:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child) > .card-widget > .mud-card-content {
     flex: 1 1 0;
     min-height: 0;
     overflow-y: auto;
@@ -39,11 +40,14 @@
 
 /* A card in a grid cell or a canvas node is as high as it, unless the card has a height of its own, which the inline
    style gives. The cell or the node is the frame, so the card draws none. */
-:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .card-widget) {
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .card-widget),
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:only-child > .card-widget),
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:only-child > .card-widget),
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child:has(> .card-widget) {
     height: 100%;
 }
 
-:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .card-widget {
+:is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:only-child) > .card-widget {
     height: 100%;
     border: 0;
     box-shadow: none;

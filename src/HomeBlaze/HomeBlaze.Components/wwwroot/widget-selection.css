@@ -84,6 +84,7 @@
 
 /* A grid cell and a canvas node cut off what does not fit into them, so the outline of a selectable widget in one is
    drawn inside. */
-:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper.selectable {
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper.selectable,
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.selectable {
     outline-offset: -2px;
 }
