@@ -58,18 +58,15 @@ public partial class HomeBlazeInstallation
     /// </summary>
     internal async Task<TimeSpan?> CheckForUpdatesCoreAsync(CancellationToken cancellationToken)
     {
-        var releaseClient = _releaseClient ?? throw new InvalidOperationException(_updateCheckUnavailableReason);
+        var gitHubClient = _gitHubClient ?? throw new InvalidOperationException(_updateCheckUnavailableReason);
         try
         {
-            var release = await releaseClient.GetLatestReleaseAsync(cancellationToken);
-
-            LatestVersion = release?.Version;
-            LatestReleaseDate = release?.PublishedAt;
-            LatestReleaseUrl = release?.Url;
-            UpdateAvailable = _runningVersion is null ? null : release is not null && IsNewer(release.Version, _runningVersion);
+            var status = Channel == InstallationChannel.Edge
+                ? await CompareWithBranchAsync(gitHubClient, cancellationToken)
+                : await CompareWithLatestReleaseAsync(gitHubClient, cancellationToken);
 
             LastUpdateCheck = _timeProvider.GetUtcNow();
-            UpdateCheckStatus = null;
+            UpdateCheckStatus = status;
 
             Volatile.Write(ref _gitHubWait, null);
 
@@ -92,6 +89,44 @@ public partial class HomeBlazeInstallation
             _logger.LogWarning(exception, "Checking for updates failed: {Message}", exception.Message);
             return ReportUpdateCheckFailure(exception.Message, retryAfter: null);
         }
+    }
+
+    /// <summary>
+    /// Writes the latest release and whether it is newer than the running version, and returns null.
+    /// </summary>
+    private async Task<string?> CompareWithLatestReleaseAsync(GitHubRepositoryClient gitHubClient, CancellationToken cancellationToken)
+    {
+        var release = await gitHubClient.GetLatestReleaseAsync(cancellationToken);
+
+        LatestVersion = release?.Version;
+        LatestReleaseDate = release?.PublishedAt;
+        LatestReleaseUrl = release?.Url;
+        UpdateAvailable = _runningVersion is null ? null : release is not null && IsNewer(release.Version, _runningVersion);
+        return null;
+    }
+
+    /// <summary>
+    /// Writes how many commits the branch of the edge build has that its commit lacks, and returns why the commit
+    /// could not be placed on the branch, or null when it is on the branch.
+    /// </summary>
+    private async Task<string?> CompareWithBranchAsync(GitHubRepositoryClient gitHubClient, CancellationToken cancellationToken)
+    {
+        // An edge build that lacks either has an unavailable reason and never checks.
+        var commit = Commit ?? throw new InvalidOperationException("The build has no commit.");
+        var branch = Branch ?? throw new InvalidOperationException("The build has no branch.");
+        var comparison = await gitHubClient.CompareWithBranchAsync(commit, branch, cancellationToken);
+
+        CommitsBehind = comparison?.CommitsBehind;
+        CompareUrl = comparison?.Url;
+        UpdateAvailable = comparison is null ? null : comparison.CommitsBehind > 0;
+
+        var shortCommit = commit.Length > 7 ? commit[..7] : commit;
+        if (comparison is null)
+        {
+            return $"GitHub could not compare commit {shortCommit} with {branch}.";
+        }
+
+        return comparison.CommitsAhead > 0 ? $"Commit {shortCommit} is not on {branch}." : null;
     }
 
     /// <summary>
@@ -127,12 +162,12 @@ public partial class HomeBlazeInstallation
         return _updateSchedule.GetDelayAfterFailure(retryAfter);
     }
 
-    private static string? GetUpdateCheckUnavailableReason(InstallationChannel channel, string? repositoryUrl) =>
+    private static string? GetUpdateCheckUnavailableReason(InstallationChannel channel, BuildInformation build) =>
         channel switch
         {
             InstallationChannel.Development => "Not available for development builds",
-            InstallationChannel.Edge => "Not available for edge builds",
-            _ => GitHubReleaseClient.GetUnsupportedReason(repositoryUrl)
+            InstallationChannel.Edge when build.Commit is null || build.Branch is null => "Not available for edge builds without a commit or branch",
+            _ => GitHubRepositoryClient.GetUnsupportedReason(build.RepositoryUrl)
         };
 
     private async Task RunUpdateChecksAsync(CancellationToken stoppingToken)

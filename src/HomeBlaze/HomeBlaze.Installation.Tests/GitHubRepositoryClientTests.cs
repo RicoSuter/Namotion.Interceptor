@@ -6,14 +6,14 @@ using static HomeBlaze.Installation.Tests.FakeHttpMessageHandler;
 
 namespace HomeBlaze.Installation.Tests;
 
-public class GitHubReleaseClientTests
+public class GitHubRepositoryClientTests
 {
     private const string RateLimitMessage = "GitHub rate limit reached.";
 
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
 
-    private static GitHubReleaseClient CreateClient(FakeHttpMessageHandler handler, string repositoryUrl = "https://github.com/owner/repo") =>
-        GitHubReleaseClient.TryCreate(repositoryUrl, () => new HttpClient(handler), "HomeBlaze/0.5.0", new TestTimeProvider(Now))!;
+    private static GitHubRepositoryClient CreateClient(FakeHttpMessageHandler handler, string repositoryUrl = "https://github.com/owner/repo") =>
+        GitHubRepositoryClient.TryCreate(repositoryUrl, () => new HttpClient(handler), "HomeBlaze/0.5.0", new TestTimeProvider(Now))!;
 
     [Theory]
     [InlineData("https://github.com/RicoSuter/Namotion.Interceptor", "https://api.github.com/repos/RicoSuter/Namotion.Interceptor/releases/latest")]
@@ -42,8 +42,8 @@ public class GitHubReleaseClientTests
     public void WhenTheUrlIsNotAGitHubRepository_ThenNoClientIsCreatedAndTheReasonIsReported(string? repositoryUrl, string expectedReason)
     {
         // Act
-        var client = GitHubReleaseClient.TryCreate(repositoryUrl, () => throw new InvalidOperationException(), "HomeBlaze/0.5.0", TimeProvider.System);
-        var reason = GitHubReleaseClient.GetUnsupportedReason(repositoryUrl);
+        var client = GitHubRepositoryClient.TryCreate(repositoryUrl, () => throw new InvalidOperationException(), "HomeBlaze/0.5.0", TimeProvider.System);
+        var reason = GitHubRepositoryClient.GetUnsupportedReason(repositoryUrl);
 
         // Assert
         Assert.Null(client);
@@ -111,6 +111,83 @@ public class GitHubReleaseClientTests
 
         // Assert
         Assert.Equal(expectedVersion, release!.Version);
+    }
+
+    // The commit is the base, so ahead_by counts the commits the commit lacks and behind_by those the branch lacks.
+    [Theory]
+    [InlineData(2, 0)]
+    [InlineData(0, 0)]
+    [InlineData(3, 1)]
+    [InlineData(0, 4)]
+    public async Task WhenACommitIsComparedWithABranch_ThenAheadByIsTheCommitsBehindAndBehindByTheCommitsAhead(int aheadBy, int behindBy)
+    {
+        // Arrange
+        var client = CreateClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ComparisonJson(aheadBy, behindBy))));
+
+        // Act
+        var comparison = await client.CompareWithBranchAsync("b1b7c2f", "master", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new BranchComparison(CommitsBehind: aheadBy, CommitsAhead: behindBy, new Uri(CompareUrl)), comparison);
+    }
+
+    [Theory]
+    [InlineData("master", "https://api.github.com/repos/owner/repo/compare/b1b7c2f...master?per_page=1&page=2")]
+    [InlineData("feature/name", "https://api.github.com/repos/owner/repo/compare/b1b7c2f...feature/name?per_page=1&page=2")]
+    [InlineData("a b#c", "https://api.github.com/repos/owner/repo/compare/b1b7c2f...a%20b%23c?per_page=1&page=2")]
+    public async Task WhenACommitIsComparedWithABranch_ThenThePageWithoutFilesIsRequestedWithoutAuthorization(string branch, string expectedRequestUri)
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ComparisonJson(1, 0)));
+        var client = CreateClient(handler);
+
+        // Act
+        await client.CompareWithBranchAsync("b1b7c2f", branch, CancellationToken.None);
+
+        // Assert
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(expectedRequestUri, request.RequestUri!.AbsoluteUri);
+        Assert.Equal("HomeBlaze/0.5.0", string.Join(' ', request.Headers.GetValues("User-Agent")));
+        Assert.False(request.Headers.Contains("Authorization"));
+    }
+
+    [Fact]
+    public async Task WhenGitHubDoesNotKnowTheCommitOrBranch_ThenNullIsReturned()
+    {
+        // Arrange
+        var client = CreateClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
+
+        // Act
+        var comparison = await client.CompareWithBranchAsync("b1b7c2f", "master", CancellationToken.None);
+
+        // Assert
+        Assert.Null(comparison);
+    }
+
+    [Fact]
+    public async Task WhenTheComparisonIsRateLimited_ThenTheExceptionCarriesTheRequestedWait()
+    {
+        // Arrange
+        var client = CreateClient(new FakeHttpMessageHandler(_ => CreateErrorAnswer("RateLimitWithReset")));
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<GitHubRequestException>(() => client.CompareWithBranchAsync("b1b7c2f", "master", CancellationToken.None));
+        Assert.Equal(RateLimitMessage, exception.Message);
+        Assert.Equal(TimeSpan.FromMinutes(90), exception.RetryAfter);
+    }
+
+    [Theory]
+    [InlineData("""{ "behind_by": 0 }""")]
+    [InlineData("""{ "ahead_by": "2", "behind_by": 0 }""")]
+    [InlineData("""{ "ahead_by": -1, "behind_by": 0 }""")]
+    [InlineData("[]")]
+    public async Task WhenTheComparisonAnswerHasNoValidCountsOrIsNotAnObject_ThenAJsonExceptionIsThrown(string json)
+    {
+        // Arrange
+        var client = CreateClient(new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(json)));
+
+        // Act & Assert
+        await Assert.ThrowsAsync<JsonException>(() => client.CompareWithBranchAsync("b1b7c2f", "master", CancellationToken.None));
     }
 
     [Fact]

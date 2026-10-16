@@ -38,10 +38,21 @@
             {
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                     <MudIcon Icon="@Icons.Material.Filled.Update" Color="Color.Warning" Size="Size.Small" />
-                    <MudText Typo="Typo.caption">Update available: @installation.LatestVersion @FormatDate(installation.LatestReleaseDate)</MudText>
-                    @if (installation.LatestReleaseUrl is { } releaseUrl)
+                    @if (installation.CommitsBehind is { } commitsBehind)
                     {
-                        <MudLink Href="@releaseUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Release notes</MudLink>
+                        <MudText Typo="Typo.caption">Update available: @commitsBehind @(commitsBehind == 1 ? "commit" : "commits") behind @installation.Branch</MudText>
+                        @if (installation.CompareUrl is { } compareUrl)
+                        {
+                            <MudLink Href="@compareUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Changes</MudLink>
+                        }
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption">Update available: @installation.LatestVersion @FormatDate(installation.LatestReleaseDate)</MudText>
+                        @if (installation.LatestReleaseUrl is { } releaseUrl)
+                        {
+                            <MudLink Href="@releaseUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Release notes</MudLink>
+                        }
                     }
                 </MudStack>
             }
