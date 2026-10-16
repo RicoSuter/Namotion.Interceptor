@@ -46,12 +46,35 @@ internal sealed class TestRenderer : Renderer
     /// The number of unacknowledged batches from which a render request waits in <see cref="TestRenderMode.Server"/>
     /// mode. The default is the default of a server circuit.
     /// </param>
-    public TestRenderer(TestRenderMode mode, int maximumUnacknowledgedBatches = 10)
-        : base(CreateServices(), NullLoggerFactory.Instance)
+    /// <param name="configureServices">Adds services, for example component tracking, which the renderer resolves.</param>
+    public TestRenderer(TestRenderMode mode, int maximumUnacknowledgedBatches = 10, Action<IServiceCollection>? configureServices = null)
+        : this(mode, maximumUnacknowledgedBatches, CreateServices(configureServices))
+    {
+    }
+
+    private TestRenderer(TestRenderMode mode, int maximumUnacknowledgedBatches, ServiceProvider services)
+        : base(services, NullLoggerFactory.Instance)
     {
         _mode = mode;
         _maximumUnacknowledgedBatches = maximumUnacknowledgedBatches;
+        Services = services;
+        RendererInfo = mode == TestRenderMode.Prerender
+            ? new RendererInfo("Static", isInteractive: false)
+            : new RendererInfo(mode.ToString(), isInteractive: true);
     }
+
+    public IServiceProvider Services { get; }
+
+    protected override RendererInfo RendererInfo { get; }
+
+    /// <summary>Gets the number of batches rendered so far.</summary>
+    public int BatchCount => Volatile.Read(ref _batchCount);
+
+    /// <summary>Gets the number of component renders in all batches so far.</summary>
+    public int RenderedComponentCount => Volatile.Read(ref _renderedComponentCount);
+
+    private int _batchCount;
+    private int _renderedComponentCount;
 
     public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
 
@@ -78,9 +101,11 @@ internal sealed class TestRenderer : Renderer
     public async Task<TComponent> RenderAsync<TComponent>(Dictionary<string, object?> parameters)
         where TComponent : IComponent, new()
     {
-        var component = new TComponent();
+        TComponent component = default!;
         await Dispatcher.InvokeAsync(() =>
         {
+            // Through the activator, as the root component of a circuit is.
+            component = (TComponent)InstantiateComponent(typeof(TComponent));
             var componentId = AssignRootComponentId(component);
             _ = RenderRootComponentAsync(componentId, ParameterView.FromDictionary(parameters));
         });
@@ -115,6 +140,8 @@ internal sealed class TestRenderer : Renderer
 
     protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
     {
+        Interlocked.Increment(ref _batchCount);
+        Interlocked.Add(ref _renderedComponentCount, renderBatch.UpdatedComponents.Count);
         switch (_mode)
         {
             case TestRenderMode.WebAssembly:
@@ -181,10 +208,11 @@ internal sealed class TestRenderer : Renderer
         }
     }
 
-    private static ServiceProvider CreateServices()
+    private static ServiceProvider CreateServices(Action<IServiceCollection>? configureServices)
     {
-        return new ServiceCollection()
-            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
-            .BuildServiceProvider();
+        var services = new ServiceCollection()
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        configureServices?.Invoke(services);
+        return services.BuildServiceProvider();
     }
 }
