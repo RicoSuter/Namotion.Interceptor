@@ -99,7 +99,7 @@ Each browser session has isolated tracking. Server-side Blazor with multiple con
 
 ## Guarantees
 
-- **At-Least-Once Rerender**: When a property that the scope recorded changes, or any property of a subject below a subject whose property it recorded, the scope renders again after the change. A change that arrives while a render is in progress, or before the client has acknowledged it, renders once more as well, so the last render always reads values at least as new as the last change the scope tracks. This holds for the reads the scope records, see [Reads Recorded While the Scope Is Open](#reads-recorded-while-the-scope-is-open).
+- **At-Least-Once Rerender**: When a property that the scope recorded changes, or any property of a subject below a subject whose property a completed render recorded, the scope renders again after the change. A change that arrives while a render is in progress, or before the client has acknowledged it, renders once more as well, so the last render always reads values at least as new as the last change the scope tracks. This holds for the reads the scope records, see [Reads Recorded While the Scope Is Open](#reads-recorded-while-the-scope-is-open).
 - **Session Isolation**: No cross-talk between browser sessions in server-side Blazor
 - **Thread Safety**: Safe for concurrent access from multiple threads
 
@@ -118,14 +118,15 @@ Content that a component renders later on its own, for example after awaiting a 
 </TrackingScope>
 ```
 
-If `motor.Temperature` changes, even though only `motor.Speed` was read, the component still re-renders because `motor` was read. A read in deferred content of a subject that no recorded pass read is not covered: wrap such content in a nested `<TrackingScope>` of its own, which records it when it renders.
+If `motor.Temperature` changes, even though only `motor.Speed` was read, the component still re-renders because `motor` was read. The tracked subjects are taken over when a render completes, in `OnAfterRender`, so a change below a subject that only the render still in progress has read is not matched. A read in deferred content of a subject that no completed render read is not covered: wrap such content in a nested `<TrackingScope>` of its own, which records it when it renders.
 
 ### Over-Tracking Within a Batch
 
 Every scope that is open in the async flow records every read in that flow, not only the reads of its own content. A scope stays open until its `OnAfterRender`, which runs after the whole batch has rendered, so it also records the reads of the components that Blazor renders after it in the same batch:
 
-- **Sibling scopes**: When a parent renders 20 sibling scopes in one batch, the first scope records the reads of all 20, the second those of 19, and so on. A change that only the last one reads then renders all 20 once. Each scope that renders on its own afterwards records only its own reads again. The render after the first render is one of these on WebAssembly, so siblings start out tracking their own reads there. On a server, render requests that wait for the client to acknowledge a batch render together in one batch, so the scopes in that batch over-track each other again.
+- **Sibling scopes**: When a parent renders 20 sibling scopes in one batch, the first scope records the reads of all 20, the second those of 19, and so on. A change that only the last one reads then renders all 20 once. Each scope that renders on its own afterwards records only its own reads again. The render after the first render is one of these on WebAssembly, so siblings start out tracking their own reads there. On a server, a render request waits for the client only when the client falls 10 batches behind, and the requests that wait then render together in one batch, so the scopes in that batch over-track each other again.
 - **Nested scopes**: The outer scope records everything that the inner scope records, so a change read inside the inner scope renders the outer scope as well.
+- **Unacknowledged batches**: On a server, `OnAfterRender` runs once the client acknowledges the batch, so until then a scope also records the reads of later batches that render in the same async flow. `OnAfterRender` and the renders requested from it run in the flow that rendered the batch, so a nested scope can, for example, record the reads of the outer scope's render after the first render.
 - **Cost of a read**: Each read is added to every open scope in the flow, so a read costs time in proportion to the number of open scopes.
 
 Over-tracking causes extra renders of the scope that over-tracks. It does not change what the other scopes record.
@@ -254,7 +255,7 @@ return false;
 
 All shared state is protected:
 
-- `Lock` for the swap of `_properties` and `_collectingProperties` and for `_trackedSubjects`; the change callback reads both sets and the recording flag under the same lock, so it always finds the reads of a render in one of them
+- `Lock` for the swap of `_properties` and `_collectingProperties` and for `_trackedSubjects`; the change callback reads both sets and the recording flag under the same lock. The flag is written outside the lock. The render sets it with a full fence (`Interlocked.Exchange`) before it reads anything, the recorder adds each property to the concurrent set before it reads the value, and the change path passes through locks before the callback runs, so a callback for a change written after a read sees the flag set. `OnAfterRender` clears the flag only after the swap, so a callback that sees it cleared finds the reads in `_properties`
 - `ConcurrentDictionary` for the property sets and `_ancestorCache`
 - `volatile` flags for `_disposed`, `_rerenderPending`, `_isRecording`; the pending and recording flags are set with a full fence before the render reads anything
 - Disposal guards to prevent callback exceptions during component teardown
