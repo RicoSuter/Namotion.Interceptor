@@ -34,11 +34,6 @@ public class MarkdownBlockTests
         return page;
     }
 
-    private static ILocator GetCard(IPage page, string title)
-    {
-        return page.GetByTestId("card").Filter(new() { HasText = title });
-    }
-
     [Fact]
     public async Task WhenPageHasCard_ThenTitleContentAndFooterAreInsideIt()
     {
@@ -83,7 +78,7 @@ public class MarkdownBlockTests
         var page = await OpenPageAsync("Blocks.md");
 
         // Assert
-        var card = GetCard(page, "Reference Card");
+        var card = page.GetCard("Reference Card");
         await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = 30000 });
         await Assertions.Expect(card).ToContainTextAsync("CardMotor", new() { Timeout = 30000 });
         await Assertions.Expect(card).ToContainTextAsync("Test Motor", new() { Timeout = 30000 });
@@ -95,7 +90,7 @@ public class MarkdownBlockTests
     {
         // Arrange
         var page = await OpenPageAsync("Blocks.md");
-        var card = GetCard(page, "Reference Card");
+        var card = page.GetCard("Reference Card");
         await Assertions.Expect(card).ToContainTextAsync(TemperaturePattern, new() { Timeout = 30000 });
 
         // Act
@@ -116,7 +111,7 @@ public class MarkdownBlockTests
         // Assert
         await Assertions.Expect(page.GetByText("Text after the cards.")).ToBeVisibleAsync(new() { Timeout = 30000 });
 
-        var selfCard = GetCard(page, "Self Card");
+        var selfCard = page.GetCard("Self Card");
         await Assertions.Expect(selfCard).ToHaveCountAsync(1);
         await Assertions.Expect(selfCard.GetByTestId("widget-cycle")).ToHaveCountAsync(1);
 
@@ -126,7 +121,7 @@ public class MarkdownBlockTests
         await Assertions.Expect(page.GetByText("Second Card", new() { Exact = true })).ToHaveCountAsync(3);
         await Assertions.Expect(page.GetByTestId("widget-cycle")).ToHaveCountAsync(3);
 
-        var firstCard = GetCard(page, "First Card").First;
+        var firstCard = page.GetCard("First Card").First;
         await Assertions.Expect(firstCard.GetByTestId("widget-cycle")).ToHaveCountAsync(1);
     }
 
@@ -135,8 +130,8 @@ public class MarkdownBlockTests
     {
         // Arrange
         var page = await OpenPageAsync("Blocks.md");
-        var firstCard = GetCard(page, "Motor Card");
-        var secondCard = GetCard(page, "Reference Card");
+        var firstCard = page.GetCard("Motor Card");
+        var secondCard = page.GetCard("Reference Card");
         await Assertions.Expect(secondCard).ToBeVisibleAsync(new() { Timeout = 30000 });
 
         // Act: both cards are measured in one call, because the live motor in the first one changes its height.
@@ -330,7 +325,7 @@ public class MarkdownBlockTests
             CreateTab("gamma", "Gamma")));
 
         // Assert
-        await Assertions.Expect(GetCard(page, "Inserted Card")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(page.GetCard("Inserted Card")).ToBeVisibleAsync(new() { Timeout = 30000 });
         await Assertions.Expect(tabs.GetByRole(AriaRole.Tab)).ToHaveTextAsync(new[] { "First", "Alpha", "Beta", "Gamma" });
         await Assertions.Expect(GetSelectedTab(tabs)).ToHaveTextAsync("Beta");
         await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
@@ -597,7 +592,7 @@ public class MarkdownBlockTests
         var sourceBefore = await File.ReadAllLinesAsync(GetPagePath(ScratchPage));
 
         var page = await OpenPageAsync(ScratchPage);
-        var card = GetCard(page, "Motor Card");
+        var card = page.GetCard("Motor Card");
         await Assertions.Expect(card).ToContainTextAsync("/ 1200 RPM", new() { Timeout = 30000 });
 
         // Act
@@ -648,9 +643,9 @@ public class MarkdownBlockTests
         await WriteScratchPageAsync(source);
 
         var page = await OpenPageAsync(ScratchPage);
-        var card = GetCard(page, "Short Card");
+        var card = page.GetCard("Short Card");
         await Assertions.Expect(card).ToContainTextAsync("/ 1200 RPM", new() { Timeout = 30000 });
-        await Assertions.Expect(GetCard(page, "Other Card")).ToContainTextAsync("The text of the other card.");
+        await Assertions.Expect(page.GetCard("Other Card")).ToContainTextAsync("The text of the other card.");
         await page.SelectEditModeAsync("Split");
 
         // The editor only knows its block regions once the decorations are applied.
@@ -671,7 +666,7 @@ public class MarkdownBlockTests
         await Assertions.Expect(writtenHeadLine).ToBeVisibleAsync(new() { Timeout = 30000 });
         await page.SelectEditModeAsync("View");
         await Assertions.Expect(card).ToContainTextAsync("/ 1500 RPM", new() { Timeout = 30000 });
-        await Assertions.Expect(GetCard(page, "Other Card")).ToContainTextAsync("The text of the other card.");
+        await Assertions.Expect(page.GetCard("Other Card")).ToContainTextAsync("The text of the other card.");
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
 
         var written = (await File.ReadAllTextAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n");
@@ -797,7 +792,7 @@ public class MarkdownBlockTests
         await WriteScratchPageAsync($"# Scratch\n\n{cardStart}Text inside the card\n::\n\nText after the card\n");
 
         var page = await OpenPageAsync(ScratchPage);
-        var card = GetCard(page, "Outer Card");
+        var card = page.GetCard("Outer Card");
         await Assertions.Expect(card.GetByText("Text inside the card")).ToBeVisibleAsync(new() { Timeout = 30000 });
         await page.SelectEditModeAsync("Split");
 

@@ -50,9 +50,6 @@ public class SpacingLayoutTests
         return page;
     }
 
-    private static ILocator GetCard(IPage page, string title) =>
-        page.GetByTestId("card").Filter(new() { Has = page.GetByTestId("card-title").GetByText(title, new() { Exact = true }) });
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -60,7 +57,7 @@ public class SpacingLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync(isInlineMode);
-        var card = GetCard(page, "Gauge Card");
+        var card = page.GetCard("Gauge Card");
         await Assertions.Expect(card.GetByTestId("gauge")).ToHaveCountAsync(2, new() { Timeout = Timeout });
 
         // Act
@@ -92,7 +89,7 @@ public class SpacingLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync(isInlineMode);
-        await Assertions.Expect(GetCard(page, "Panel Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard("Panel Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act: for every visible card body, tab panel and expansion panel, the room between its padding and the boxes of
         // its first and last visible block.
@@ -183,7 +180,7 @@ public class SpacingLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync(width: width);
-        var card = GetCard(page, "List Card");
+        var card = page.GetCard("List Card");
         await Assertions.Expect(card.GetByTestId("value-row")).ToHaveCountAsync(2, new() { Timeout = Timeout });
 
         // Act
@@ -208,7 +205,7 @@ public class SpacingLayoutTests
         // Arrange
         var page = await OpenPageAsync();
         await Assertions.Expect(page.GetByText("Text in a node.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(GetCard(page, "Cell Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard("Cell Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByTestId("value-tile").Filter(new() { HasText = "Cell Speed" })).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act: the room between the content box of the cell or the node and the text, the card or the tile in it.
@@ -244,7 +241,7 @@ public class SpacingLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var card = GetCard(page, "Heading Card");
+        var card = page.GetCard("Heading Card");
         await Assertions.Expect(card.Locator("h4")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -323,7 +320,7 @@ public class SpacingLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var footer = GetCard(page, "Footer Card").GetByTestId("card-footer");
+        var footer = page.GetCard("Footer Card").GetByTestId("card-footer");
         await Assertions.Expect(footer.Locator("button")).ToHaveCountAsync(2, new() { Timeout = Timeout });
 
         // Act
@@ -340,7 +337,7 @@ public class SpacingLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var card = GetCard(page, "Controls Card");
+        var card = page.GetCard("Controls Card");
         await Assertions.Expect(card.GetByTestId("slider")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -369,7 +366,7 @@ public class SpacingLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        await Assertions.Expect(GetCard(page, "Table Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard("Table Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         var gaps = await page.EvaluateAsync<double[]>(
@@ -396,7 +393,7 @@ public class SpacingLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync(width: 400);
-        await Assertions.Expect(GetCard(page, "Table Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard("Table Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         var result = await page.EvaluateAsync<Overflow>(

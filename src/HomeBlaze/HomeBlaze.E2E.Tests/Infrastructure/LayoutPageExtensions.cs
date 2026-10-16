@@ -44,10 +44,7 @@ internal static class LayoutPageExtensions
     public static async Task WithUnstoredLayoutAsync(
         this PlaywrightFixture fixture, IInterceptorSubject layout, Func<IPage, Task> testAsync)
     {
-        // A pass of the storage that finds a change sets the children of the folder anew from its files, which drops the
-        // layout. A pass now takes in what earlier tests left changed on disk, so that the pass they asked for finds nothing.
-        var root = (FluentStorageContainer)fixture.ServerServices.GetRequiredService<RootManager>().Root!;
-        await root.ReconcileAsync();
+        await fixture.ReconcileStorageAsync();
 
         var folder = fixture.GetDemoFolder();
         var originalChildren = folder.Children;

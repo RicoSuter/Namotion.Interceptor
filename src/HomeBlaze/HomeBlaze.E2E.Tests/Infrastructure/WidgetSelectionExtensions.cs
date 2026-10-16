@@ -37,6 +37,13 @@ internal static class WidgetSelectionExtensions
     }
 
     /// <summary>
+    /// Selects the first grid of the page through a click on its first free cell, which holds no widget, so that its
+    /// cells show their buttons. Returns the bar with the actions of the grid.
+    /// </summary>
+    public static Task<ILocator> SelectGridThroughFreeCellAsync(this IPage page)
+        => page.Locator(".grid-layout-container").First.Locator(":scope > .grid-cell.empty").First.SelectWidgetAsync();
+
+    /// <summary>
     /// The bar with the actions of the selected widget. A page has at most one.
     /// </summary>
     public static ILocator GetWidgetActionBar(this IPage page) => page.GetByTestId("widget-action-bar");

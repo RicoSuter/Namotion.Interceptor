@@ -181,9 +181,8 @@ public class LayoutBlockSaveTests
             var node = page.Locator(".canvas-node.editing");
             await Assertions.Expect(node.GetByText("Node Card", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-            // A click on the node selects the card in it, which shows the buttons of the node. The canvas selects a node
-            // with a press only once the library has drawn the area that moves it.
-            await Assertions.Expect(page.Locator(".canvas-layout-container.editing svg rect")).ToHaveCountAsync(2, new() { Timeout = Timeout });
+            // A click on the node selects the card in it, which shows the buttons of the node.
+            await page.Locator(".canvas-layout-container.editing").WaitForCanvasNodesAsync(1, Timeout);
             await node.SelectWidgetAsync();
 
             // Act
@@ -211,8 +210,7 @@ public class LayoutBlockSaveTests
             var canvas = page.Locator(".canvas-layout-container.editing");
             await Assertions.Expect(canvas).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-            // The library draws the area that moves a node only after it has measured the node.
-            await Assertions.Expect(canvas.Locator("svg rect")).ToHaveCountAsync(4, new() { Timeout = Timeout });
+            await canvas.WaitForCanvasNodesAsync(2, Timeout);
             var node = canvas.Locator(".canvas-node").Filter(new() { HasText = "first node" });
             await node.ScrollIntoViewIfNeededAsync();
             var box = await GetBoxAsync(node);

@@ -83,9 +83,6 @@ public class ValueWidgetTests
         await Assertions.Expect(text).Not.ToHaveTextAsync(second, new() { Timeout = Timeout });
     }
 
-    private static ILocator GetCard(IPage page, string title) =>
-        page.GetByTestId("card").Filter(new() { HasText = title });
-
     private static ILocator GetRow(IPage page, string label) =>
         page.GetByTestId("value-row").Filter(new() { Has = page.GetByTestId("value-label").GetByText(label, new() { Exact = true }) });
 
@@ -175,7 +172,7 @@ public class ValueWidgetTests
     {
         // The cells of the narrow card are narrower than 280 pixels only for a window of about 1236 to 1347 pixels.
         var page = await OpenPageAsync(viewportWidth: 1280);
-        await Assertions.Expect(GetCard(page, title).GetByTestId("value-text").Last).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard(title).GetByTestId("value-text").Last).ToBeVisibleAsync(new() { Timeout = Timeout });
         return page;
     }
 
@@ -186,7 +183,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Linked Card");
+        var card = page.GetCard("Linked Card");
         await Assertions.Expect(card.GetByTestId("card-subtitle")).ToHaveTextAsync("Card subtitle", new() { Timeout = Timeout });
         await Assertions.Expect(card.GetByTestId("card-icon")).ToBeVisibleAsync();
         await Assertions.Expect(card.GetByTestId("card-header-right")).ToContainTextAsync("Corner text");
@@ -201,7 +198,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var title = GetCard(page, "Linked Card").GetByTestId("card-title");
+        var title = page.GetCard("Linked Card").GetByTestId("card-title");
         await Assertions.Expect(title).ToHaveAttributeAsync("href", "/pages/Demo/Blocks.md", new() { Timeout = Timeout });
     }
 
@@ -210,7 +207,7 @@ public class ValueWidgetTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var title = GetCard(page, "Linked Card").GetByTestId("card-title");
+        var title = page.GetCard("Linked Card").GetByTestId("card-title");
         await Assertions.Expect(title).ToHaveAttributeAsync("href", "/pages/Demo/Blocks.md", new() { Timeout = Timeout });
 
         // Act
@@ -228,7 +225,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Plain Card");
+        var card = page.GetCard("Plain Card");
         await Assertions.Expect(card.GetByTestId("card-title")).ToHaveTextAsync("Plain Card", new() { Timeout = Timeout });
         await Assertions.Expect(card.Locator("a")).ToHaveCountAsync(0);
         await Assertions.Expect(card.GetByTestId("card-subtitle")).ToHaveCountAsync(0);
@@ -243,7 +240,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Plain Card");
+        var card = page.GetCard("Plain Card");
         await Assertions.Expect(card).ToHaveClassAsync(new Regex("mud-paper-outlined"), new() { Timeout = Timeout });
         await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex(@"mud-elevation-[1-9]"));
     }
@@ -255,7 +252,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Raised Card");
+        var card = page.GetCard("Raised Card");
         await Assertions.Expect(card).ToHaveClassAsync(new Regex(@"mud-elevation-[1-9]"), new() { Timeout = Timeout });
         await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-paper-outlined"));
         await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-elevation-0"));
@@ -268,7 +265,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        await Assertions.Expect(GetCard(page, "Plain Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard("Plain Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
     }
 
@@ -634,7 +631,7 @@ public class ValueWidgetTests
     {
         // Arrange: the cell of the card is narrow enough for its subtitle to wrap.
         var page = await OpenPageAsync(viewportWidth: 1280);
-        await Assertions.Expect(GetCard(page, "Wrapped Card").GetByTestId("card-subtitle")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard("Wrapped Card").GetByTestId("card-subtitle")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         var boxes = await GetBoxesAsync(page,
@@ -681,7 +678,7 @@ public class ValueWidgetTests
             new("Narrow Card", "Speed", "[data-testid=value-text]"),
             new("Narrow Card", "Speed", "[data-testid=progress]"),
             new("Narrow Card", null, ".mud-card-content"));
-        var overflow = await GetCard(page, "Narrow Card").EvaluateAsync<double[]>(
+        var overflow = await page.GetCard("Narrow Card").EvaluateAsync<double[]>(
             "card => [card, ...card.querySelectorAll('[data-testid=value-row]')].map(element => element.scrollWidth - element.clientWidth)");
 
         // Assert: the cell is narrower than the card of the dashboard, which has to fit as well.
@@ -719,7 +716,7 @@ public class ValueWidgetTests
         var page = await OpenPageWhenCardHasValuesAsync("Aligned Card");
 
         // Act: the variable is resolved next to the icon, because the theme may define it on an element below the body.
-        var colours = await GetCard(page, "Aligned Card").GetByTestId("value-icon").First.EvaluateAsync<string[]>(
+        var colours = await page.GetCard("Aligned Card").GetByTestId("value-icon").First.EvaluateAsync<string[]>(
             """
             icon => {
                 const probe = document.createElement('span');
@@ -891,7 +888,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Picture Card");
+        var card = page.GetCard("Picture Card");
         await Assertions.Expect(card.GetByTestId("card-footer")).ToHaveTextAsync("Picture card footer", new() { Timeout = Timeout });
         var media = card.Locator(".mud-card-media");
         await Assertions.Expect(media).ToHaveCountAsync(1);

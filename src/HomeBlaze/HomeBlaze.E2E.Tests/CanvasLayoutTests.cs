@@ -523,10 +523,7 @@ public class CanvasLayoutTests
             await Assertions.Expect(page.Locator(".canvas-layout-container.editing")).ToBeVisibleAsync(new() { Timeout = Timeout });
         }
 
-        // The library draws the border of a node and the area that a link starts from only after it has measured the node.
-        var nodeCount = withControlsWidget ? 1 : 2;
-        await Assertions.Expect(GetCanvas(page).Locator("svg rect")).ToHaveCountAsync(2 * nodeCount, new() { Timeout = Timeout });
-        await GetNodes(page).First.ScrollIntoViewIfNeededAsync();
+        await GetCanvas(page).WaitForCanvasNodesAsync(withControlsWidget ? 1 : 2, Timeout);
         await Assertions.Expect(GetNodes(page).First).ToBeVisibleAsync();
         return page;
     }

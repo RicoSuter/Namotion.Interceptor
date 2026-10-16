@@ -28,8 +28,7 @@ public class LayoutWidgetSaveTests
 
         await _fixture.WithUnstoredLayoutAsync(layout, async page =>
         {
-            // The cells show their buttons once the grid is selected, which a click on one of its free places does.
-            await page.Locator(".grid-layout-container").First.Locator(":scope > .grid-cell.empty").First.SelectWidgetAsync();
+            await page.SelectGridThroughFreeCellAsync();
 
             // Act
             await ConfirmDeleteAsync(page);
@@ -48,9 +47,8 @@ public class LayoutWidgetSaveTests
 
         await _fixture.WithUnstoredLayoutAsync(layout, async page =>
         {
-            // A click on the node selects the grid in it, which shows the buttons of the node. The canvas selects a node
-            // with a press only once the library has drawn the area that moves it.
-            await Assertions.Expect(page.Locator(".canvas-layout-container.editing svg rect")).ToHaveCountAsync(2, new() { Timeout = 30000 });
+            // A click on the node selects the grid in it, which shows the buttons of the node.
+            await page.Locator(".canvas-layout-container.editing").WaitForCanvasNodesAsync(1);
             await page.Locator(".canvas-node.editing").SelectWidgetAsync();
 
             // Act

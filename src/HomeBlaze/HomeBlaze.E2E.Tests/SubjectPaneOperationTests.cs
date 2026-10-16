@@ -12,12 +12,7 @@ namespace HomeBlaze.E2E.Tests;
 public class SubjectPaneOperationTests
 {
     private const int PageLoadTimeout = 30000;
-    private const string MotorPath = "browser/Demo/Motor";
-
-    // The page is prerendered, and a click before its circuit is interactive is lost. The pane width is set by the
-    // script the interactive browser runs, so it marks the point from which clicks arrive.
-    private const string BrowserIsInteractive =
-        "() => (document.getElementById('scrollContainer')?.style.getPropertyValue('--pane-width') ?? '') !== ''";
+    private const string MotorPath = "Demo/Motor";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -26,12 +21,17 @@ public class SubjectPaneOperationTests
         _fixture = fixture;
     }
 
-    private async Task<(IPage Page, ILocator Pane)> OpenMotorPaneAsync()
+    /// <summary>
+    /// Opens the subject browser at a subject, given by its path, and returns the pane of that subject.
+    /// </summary>
+    private async Task<(IPage Page, ILocator Pane)> OpenPaneAsync(string subjectPath)
     {
         var page = await _fixture.CreatePageAsync();
         await page.SetViewportSizeAsync(1280, 720);
-        await page.GotoAsync($"{_fixture.ServerAddress}{MotorPath}");
-        await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await page.GotoAsync($"{_fixture.ServerAddress}browser/{subjectPath}");
+
+        // The page is prerendered, and a click before its circuit is interactive is lost.
+        await page.WaitUntilInteractiveAsync(PageLoadTimeout);
         return (page, page.Locator("#scrollContainer [data-testid='subject-pane']").Last);
     }
 
@@ -42,7 +42,7 @@ public class SubjectPaneOperationTests
     public async Task WhenAQueryIsRun_ThenItsResultIsShownAndItsButtonIsEnabledAgain()
     {
         // Arrange
-        var (page, pane) = await OpenMotorPaneAsync();
+        var (page, pane) = await OpenPaneAsync(MotorPath);
         var query = Method(pane, "Get Diagnostics");
         await Assertions.Expect(query).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
 
@@ -62,7 +62,7 @@ public class SubjectPaneOperationTests
     public async Task WhenAConfirmationIsCancelled_ThenTheButtonIsEnabledAgain()
     {
         // Arrange
-        var (page, pane) = await OpenMotorPaneAsync();
+        var (page, pane) = await OpenPaneAsync(MotorPath);
         var operation = Method(pane, "Emergency Stop");
         await Assertions.Expect(operation).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
 
@@ -84,11 +84,7 @@ public class SubjectPaneOperationTests
         var (name, subject) = await _fixture.AddSubjectToRootAsync<FailingOperationSubject>();
         try
         {
-            var page = await _fixture.CreatePageAsync();
-            await page.SetViewportSizeAsync(1280, 720);
-            await page.GotoAsync($"{_fixture.ServerAddress}browser/{name}");
-            await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
-            var pane = page.Locator("#scrollContainer [data-testid='subject-pane']").Last;
+            var (page, pane) = await OpenPaneAsync(name);
             var operation = Method(pane, "Time Out");
             await Assertions.Expect(operation).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
 
@@ -116,11 +112,7 @@ public class SubjectPaneOperationTests
         var (name, subject) = await _fixture.AddSubjectToRootAsync<FailingOperationSubject>();
         try
         {
-            var page = await _fixture.CreatePageAsync();
-            await page.SetViewportSizeAsync(1280, 720);
-            await page.GotoAsync($"{_fixture.ServerAddress}browser/{name}");
-            await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
-            var pane = page.Locator("#scrollContainer [data-testid='subject-pane']").Last;
+            var (page, pane) = await OpenPaneAsync(name);
             var operation = Method(pane, "Time Out");
             await Assertions.Expect(operation).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
 

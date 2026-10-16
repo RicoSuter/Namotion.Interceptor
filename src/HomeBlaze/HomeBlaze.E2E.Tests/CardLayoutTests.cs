@@ -30,15 +30,12 @@ public class CardLayoutTests
         return page;
     }
 
-    private static ILocator GetCard(IPage page, string title) =>
-        page.GetByTestId("card").Filter(new() { Has = page.GetByTestId("card-title").GetByText(title, new() { Exact = true }) });
-
     [Fact]
     public async Task WhenACardHasOneSentence_ThenLittleRoomIsLeftAboveAndBelowTheText()
     {
         // Arrange
         var page = await OpenPageAsync();
-        var card = GetCard(page, "Sentence Card");
+        var card = page.GetCard("Sentence Card");
         await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act: the lines of the text, not the boxes of the elements, which include the margins and the line height.
@@ -70,7 +67,7 @@ public class CardLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var card = GetCard(page, "Fixed Card");
+        var card = page.GetCard("Fixed Card");
         await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -94,7 +91,7 @@ public class CardLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var card = GetCard(page, "Ratio Card");
+        var card = page.GetCard("Ratio Card");
         await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -126,7 +123,7 @@ public class CardLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var card = GetCard(page, title);
+        var card = page.GetCard(title);
         await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -164,7 +161,7 @@ public class CardLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var card = GetCard(page, title);
+        var card = page.GetCard(title);
         await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act: the size of the card and the content box of its container from one call.

@@ -7,7 +7,6 @@ using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Blazor;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
-using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
@@ -567,7 +566,6 @@ public class HistoryChartWidgetTests
     public async Task WhenTheGraphChangesWithoutChangingTheSeries_ThenTheBandKeepsItsCurrentValueInItsHeader()
     {
         // Arrange
-        var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
         var subjectFactory = _fixture.ServerServices.GetRequiredService<SubjectFactory>();
         var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children[MotorName];
         var originalTargetSpeed = motor.TargetSpeed;
@@ -576,9 +574,7 @@ public class HistoryChartWidgetTests
         var bandEntry = chart.GetByTestId("history-chart-band-header").GetByTestId("history-chart-legend-entry");
         await Assertions.Expect(bandEntry).ToContainTextAsync("Chart status", new() { Timeout = Timeout });
 
-        // A pass of the storage that finds a change sets the children of the folder anew from its files, so the changes
-        // that earlier tests left on disk are taken in before the children are set below.
-        await root.ReconcileAsync();
+        await _fixture.ReconcileStorageAsync();
         var folder = _fixture.GetDemoFolder();
         var originalChildren = folder.Children;
         var subject = subjectFactory.CreateSubject<HistoryValuesSubject>();

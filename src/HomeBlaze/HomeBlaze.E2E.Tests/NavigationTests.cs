@@ -177,12 +177,10 @@ public class NavigationTests
 
     private async Task<(IServiceProvider Services, FluentStorageContainer Root, VirtualFolder Folder)> GetDemoFolderAsync()
     {
+        await _fixture.ReconcileStorageAsync();
+
         var services = _fixture.ServerServices;
         var root = (FluentStorageContainer)services.GetRequiredService<RootManager>().Root!;
-
-        // A pass of the storage that finds a change sets the children of a folder anew from its files, which drops what
-        // a test adds. A pass now takes in what earlier tests left changed on disk, so that the pass they asked for finds nothing.
-        await root.ReconcileAsync();
         return (services, root, (VirtualFolder)root.Children["Demo"]);
     }
 

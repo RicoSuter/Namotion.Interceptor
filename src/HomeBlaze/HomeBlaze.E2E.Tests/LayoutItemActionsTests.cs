@@ -173,10 +173,5 @@ public class LayoutItemActionsTests
 
     private static ILocator GetNodes(IPage page) => page.Locator(".canvas-node.editing");
 
-    // The canvas selects a node with a press only after the library has measured the node and drawn the area that moves it.
-    private static async Task WaitForNodesAsync(IPage page)
-    {
-        await Assertions.Expect(page.Locator(".canvas-layout-container.editing svg rect")).ToHaveCountAsync(4, new() { Timeout = Timeout });
-        await GetNodes(page).First.ScrollIntoViewIfNeededAsync();
-    }
+    private static Task WaitForNodesAsync(IPage page) => page.Locator(".canvas-layout-container.editing").WaitForCanvasNodesAsync(2, Timeout);
 }
