@@ -37,7 +37,8 @@ public partial class HistoryChartSeries : IConfigurable
 
     /// <summary>
     /// The aggregation of a line in place of the one of the chart, a name of
-    /// <see cref="HomeBlaze.History.Abstractions.HistoryAggregations"/>. Null or empty for the one of the chart.
+    /// <see cref="HomeBlaze.History.Abstractions.HistoryAggregations"/> other than Delta, or Average for the time-weighted
+    /// average. Null or empty for the one of the chart.
     /// A band ignores it.
     /// </summary>
     [Configuration]
