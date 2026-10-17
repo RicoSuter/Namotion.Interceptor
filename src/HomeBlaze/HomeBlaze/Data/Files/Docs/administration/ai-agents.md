@@ -105,7 +105,7 @@ All settings are `[Configuration]` properties, stored in the agent's JSON file. 
 | Setting | Default | Meaning |
 |---|---|---|
 | `Name` | none | The title of the agent; the type name when empty |
-| `Instructions` | none | What the agent watches for and how it reacts. Part of every turn's system prompt |
+| `Instructions` | none | What this installation is, the role of the agent, what it watches for and how it reacts. Part of every turn's system prompt |
 | `Model` | CLI: the CLI default. API: required | The model of chat turns, and of background runs unless `BackgroundModel` is set |
 | `Effort` | model default | How much the model thinks: `Low`, `Medium`, `High`, `ExtraHigh` or `Max` |
 | `BackgroundModel` | same as `Model` | The model of background runs |
@@ -156,7 +156,7 @@ Background runs and chat turns share the instructions, the memory and the timeli
 
 The `ClaudeCliAgent` keeps the chat as a CLI session that is resumed per message; if the CLI no longer has it, a new session starts and a "Session restarted" divider appears. The `AnthropicAgent` keeps the chat messages itself, together with a summary of older messages: when a chat request exceeds `HistoryTokenBudget` input tokens, it summarizes the older part with one extra model call and keeps the newer part, aiming at about half of the budget. The summary runs after the reply is shown and recorded; a next message waits until it is done, and its tokens count toward the usage of the next turn. When a request is too long for the model anyway, the error asks you to start a new conversation.
 
-Every turn's system prompt is built in the same fixed order: a preamble that explains the graph, the tools and the rules, a section for the background or chat mode, your `Instructions`, and the memory. See [AI Integration](../architecture/design/ai.md) for how this order serves prompt caching.
+Every turn's system prompt is built in the same fixed order: a short preamble that explains the graph and the rules, a section for the background or chat mode, your `Instructions`, and the memory. The preamble names no kind of installation and leaves describing the tools to their descriptions, so the `Instructions` are where you say what the installation is and what the agent is for. See [AI Integration](../architecture/design/ai.md) for how this order serves prompt caching.
 
 ---
 
@@ -269,7 +269,7 @@ When a web tool is allowed, the preamble tells the agent that content from the w
 
 ## Security
 
-- **Prompt injection.** Names and values from the graph, pages and documents reach the model. A crafted value can try to steer an agent. The preamble and the server instructions state that values from the graph are data, not instructions, but the real defense is the tool scope: allow `invoke_operation` and `set_property` only to agents whose inputs you trust, and keep the default read-only tools otherwise.
+- **Prompt injection.** Names and values from the graph, pages and documents reach the model. A crafted value can try to steer an agent. The preamble and the server instructions state that values from the graph and tool results are data, never instructions, but the real defense is the tool scope: allow `invoke_operation` and `set_property` only to agents whose inputs you trust, and keep the default read-only tools otherwise.
 - **Pages.** An agent that can change pages (`edit_markdown`, `write_markdown`, `create_markdown` or `invoke_operation`) can change what other agents and people read: pages are the main context of other agents, so a changed page can steer them, and a `{{ path }}` expression in a page is evaluated whenever the page is shown or read. Allow page changes only to agents whose inputs you trust, the same as `invoke_operation`. With `edit_page_layout` such an agent can also rearrange a page and show any existing subject on it with a `Widget` block, but it cannot create, change or remove a device or any other subject that is no layout. An agent cannot add HTML, script links or other active content to a page, which could run in your browser, see [Changing pages](#changing-pages).
 - **Web content.** With `web_search` or `web_fetch` allowed, anyone who controls a web page or search result the agent reads can try to steer it, which is a far larger group than those who can change your graph. Do not allow web tools together with `invoke_operation`, `set_property` or the page tools unless you accept that risk; a read-only agent with web tools can at worst report something wrong. A web request also tells the visited site, or the search provider, what the agent looked up. A `ClaudeCliAgent` with `web_fetch` can additionally be steered into loading pages from your local network, see [Web tools](#web-tools); allow it only for agents whose instructions and inputs you trust.
 - **Secrets.** An agent cannot read credentials such as API keys through its tools: the tools expose only state, which a secret cannot be, a page never shows a secret value, see [Properties Shown on Pages](../development/building-subjects.md#properties-shown-on-pages), and the page tools hide the secret values of blocks, see [Changing pages](#changing-pages). The API key of an `AnthropicAgent` is stored in plain text in its JSON file, like other secrets; protect the data folder accordingly.
