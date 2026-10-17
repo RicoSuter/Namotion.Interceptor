@@ -1,4 +1,5 @@
 using FluentStorage.Blobs;
+using HomeBlaze.Storage.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
 
@@ -48,4 +49,8 @@ internal static class StoragePath
 
     public static int GetDepth(string path)
         => path.AsSpan().Count('/');
+
+    /// <summary>Checks whether the path is a JSON file, whose content can describe a subject.</summary>
+    public static bool IsJson(string path)
+        => path.EndsWith(FileExtensions.Json, StringComparison.OrdinalIgnoreCase);
 }

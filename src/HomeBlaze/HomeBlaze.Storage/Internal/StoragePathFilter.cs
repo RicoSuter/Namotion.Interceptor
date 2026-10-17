@@ -7,7 +7,8 @@ internal static class StoragePathFilter
 {
     /// <summary>
     /// Checks whether the path never becomes a subject: the path or one of its parent folders is hidden, which
-    /// is a name that starts with a dot (.DS_Store, .idea/workspace.xml), or has a temporary name.
+    /// is a name that starts with a dot (.DS_Store, .idea/workspace.xml), or has a temporary name. The metadata
+    /// file of a folder, <c>.metadata.json</c>, is not hidden.
     /// </summary>
     /// <remarks>
     /// Only for paths within the storage and with forward slashes: an absolute path can have such a folder
@@ -19,7 +20,8 @@ internal static class StoragePathFilter
         {
             var separatorIndex = path.IndexOf('/');
             var segment = separatorIndex < 0 ? path : path[..separatorIndex];
-            if (segment.StartsWith('.') || IsTemporaryName(segment))
+            var isFolderMetadataFile = separatorIndex < 0 && segment.SequenceEqual(StorageMetadataPath.FolderFileName);
+            if ((segment.StartsWith('.') && !isFolderMetadataFile) || IsTemporaryName(segment))
             {
                 return true;
             }

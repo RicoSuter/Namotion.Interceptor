@@ -333,12 +333,9 @@ internal sealed class StorageReconciler
     }
 
     private static string GetChildKey(string path, IInterceptorSubject subject)
-        => subject is IConfigurable && IsJson(path)
+        => subject is IConfigurable && StoragePath.IsJson(path)
             ? Path.GetFileNameWithoutExtension(path)
             : StoragePath.GetName(path);
-
-    private static bool IsJson(string path)
-        => Path.GetExtension(path).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase);
 
     private bool IsKeyFree(string parent, string key)
     {
@@ -466,7 +463,7 @@ internal sealed class StorageReconciler
     {
         var entry = new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version };
 
-        if (IsJson(listed.Path))
+        if (StoragePath.IsJson(listed.Path))
         {
             var content = await ReadAsync(listed.Path, cancellationToken);
             entry.Hash = StorageHash.Compute(content);
@@ -587,7 +584,7 @@ internal sealed class StorageReconciler
 
         // Text that is not valid JSON fails here for a configurable subject, which then keeps what it has:
         // a file that is being written is no reason to stop a device.
-        if (entry.Subject is IConfigurable configurable && (!IsJson(entry.Path) || FileSubjectFactory.DescribesTypeOf(entry.Subject, json)))
+        if (entry.Subject is IConfigurable configurable && (!StoragePath.IsJson(entry.Path) || FileSubjectFactory.DescribesTypeOf(entry.Subject, json)))
         {
             // From here on the subject holds neither content until the configuration is applied. Not earlier:
             // text that was rejected above has not touched the subject.
@@ -604,7 +601,7 @@ internal sealed class StorageReconciler
             return false;
         }
 
-        if (!IsJson(entry.Path))
+        if (!StoragePath.IsJson(entry.Path))
         {
             return false;
         }

@@ -19,6 +19,9 @@ public class StoragePathFilterTests
     [InlineData("/Build.tmp/Output.md")]
     [InlineData("Docs/~Backup/Notes.md")]
     [InlineData("Docs/Old~/Notes.md")]
+    [InlineData(".metadata.json/Notes.md")]
+    [InlineData(".metadata.json.tmp")]
+    [InlineData(".METADATA.JSON")]
     public void WhenPathHasHiddenOrTemporarySegment_ThenItIsIgnored(string path)
     {
         // Act
@@ -36,6 +39,9 @@ public class StoragePathFilterTests
     [InlineData("Docs/tmp/Notes.md")]
     [InlineData("Docs/a~b/Notes.md")]
     [InlineData("")]
+    [InlineData(".metadata.json")]
+    [InlineData("Docs/.metadata.json")]
+    [InlineData("Docs/Motor.metadata.json")]
     public void WhenNoSegmentIsHiddenOrTemporary_ThenItIsNotIgnored(string path)
     {
         // Act
