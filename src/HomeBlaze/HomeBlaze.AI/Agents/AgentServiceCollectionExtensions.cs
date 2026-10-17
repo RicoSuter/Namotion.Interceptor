@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace HomeBlaze.AI.Agents;
 
@@ -20,7 +21,8 @@ public static class AgentServiceCollectionExtensions
         }
 
         services.AddSingleton<AgentMcpListener>();
-        services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<AgentMcpListener>());
+        // First, so the route is served before agents start and stops only after their turns were cancelled.
+        services.Insert(0, ServiceDescriptor.Singleton<IHostedService>(serviceProvider => serviceProvider.GetRequiredService<AgentMcpListener>()));
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<AgentTurnTokenRegistry>();
         services.TryAddSingleton<IAgentToolSource, HomeBlazeAgentToolSource>();

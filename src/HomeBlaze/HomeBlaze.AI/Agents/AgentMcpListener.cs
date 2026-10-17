@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Server;
 using Namotion.Interceptor.Mcp;
 
@@ -29,6 +30,7 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
 
     private readonly AgentTurnTokenRegistry _tokenRegistry;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly ILogger<AgentMcpListener> _logger;
 
     private WebApplication? _application;
     private volatile Uri? _endpoint;
@@ -37,6 +39,7 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
     {
         _tokenRegistry = tokenRegistry;
         _loggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger<AgentMcpListener>();
     }
 
     /// <summary>The addresses the listener is bound to, empty until it started.</summary>
@@ -51,7 +54,7 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
         builder.WebHost.UseKestrelCore().ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
         builder.Services.AddRoutingCore();
-        builder.Services.AddSingleton(_loggerFactory);
+        builder.Services.AddSingleton<ILoggerFactory>(new WithoutLifetimeLoggerFactory(_loggerFactory));
         // The main host owns the process signals; a console lifetime here would handle them a second time.
         builder.Services.AddSingleton<IHostLifetime, OwnedLifetime>();
         builder.Services.AddMcpServer().WithHttpTransport(options =>
@@ -77,7 +80,9 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
         _application = application;
 
         BoundAddresses = application.Services.GetRequiredService<IServer>().Features.GetRequiredFeature<IServerAddressesFeature>().Addresses.ToArray();
-        _endpoint = new Uri(new Uri(BoundAddresses.Single()), Route);
+        var endpoint = new Uri(new Uri(BoundAddresses.Single()), Route);
+        _endpoint = endpoint;
+        _logger.LogInformation("The agent MCP listener for CLI agents serves {Endpoint}.", endpoint);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -121,6 +126,22 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
         handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
         handlers.CallToolHandler = (request, token) => McpToolDispatcher.CallToolAsync(tools, request.Params, logger: null, token);
         return Task.CompletedTask;
+    }
+
+    // The inner host would log "Now listening on" with its loopback address, which reads like the address of the UI.
+    private sealed class WithoutLifetimeLoggerFactory(ILoggerFactory loggerFactory) : ILoggerFactory
+    {
+        private const string LifetimeCategory = "Microsoft.Hosting.Lifetime";
+
+        public ILogger CreateLogger(string categoryName) =>
+            categoryName == LifetimeCategory ? NullLogger.Instance : loggerFactory.CreateLogger(categoryName);
+
+        public void AddProvider(ILoggerProvider provider) => loggerFactory.AddProvider(provider);
+
+        public void Dispose()
+        {
+            // The main host owns the wrapped factory.
+        }
     }
 
     private sealed class OwnedLifetime : IHostLifetime

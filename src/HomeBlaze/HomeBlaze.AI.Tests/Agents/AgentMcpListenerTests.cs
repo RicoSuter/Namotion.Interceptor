@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -302,6 +303,47 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
         Assert.Equal(["browse", "update_memory"], tools.Select(tool => tool.Name).Order());
     }
 
+    [Theory]
+    [InlineData("GET", AgentMcpListener.Route)]
+    [InlineData("DELETE", AgentMcpListener.Route)]
+    [InlineData("POST", "/other")]
+    [InlineData("GET", "/")]
+    public async Task WhenAnyRequestHasNoToken_ThenTheListenerRejectsIt(string method, string path)
+    {
+        // Arrange
+        using var httpClient = new HttpClient();
+        using var request = new HttpRequestMessage(new HttpMethod(method), new Uri(new Uri(_agentEndpoint), path));
+
+        // Act
+        using var response = await httpClient.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheListenerStarts_ThenItLogsItsEndpointButNotTheListeningLineOfAWebServer()
+    {
+        // Arrange
+        var logs = new RecordingLoggerProvider();
+        var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings());
+        builder.Services.AddLogging(logging => logging.AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
+        builder.Services.AddHomeBlazeAgents();
+        using var host = builder.Build();
+
+        // Act
+        await host.StartAsync();
+        var endpoint = host.Services.GetRequiredService<IAgentEndpointAddress>().GetAgentEndpoint()!;
+        await host.StopAsync();
+
+        // Assert
+        // The test host logs its own lifetime messages; the listener's must not name its address.
+        Assert.DoesNotContain(logs.Messages, message => message.Category == "Microsoft.Hosting.Lifetime" && message.Text.Contains(endpoint.Authority));
+        var listenerMessage = Assert.Single(logs.Messages, message => message.Category == typeof(AgentMcpListener).FullName);
+        Assert.Equal(LogLevel.Information, listenerMessage.Level);
+        Assert.Contains(endpoint.ToString(), listenerMessage.Text);
+    }
+
     [Fact]
     public async Task WhenTheHostStops_ThenTheListenerHasNoAddress()
     {
@@ -313,5 +355,42 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
 
         // Assert
         Assert.Null(endpointAddress.GetAgentEndpoint());
+    }
+
+    private sealed class RecordingLoggerProvider : ILoggerProvider
+    {
+        private readonly List<(string Category, LogLevel Level, string Text)> _messages = [];
+
+        public IReadOnlyList<(string Category, LogLevel Level, string Text)> Messages
+        {
+            get
+            {
+                lock (_messages)
+                {
+                    return _messages.ToArray();
+                }
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new RecordingLogger(this, categoryName);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class RecordingLogger(RecordingLoggerProvider provider, string category) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                lock (provider._messages)
+                {
+                    provider._messages.Add((category, logLevel, formatter(state, exception)));
+                }
+            }
+        }
     }
 }

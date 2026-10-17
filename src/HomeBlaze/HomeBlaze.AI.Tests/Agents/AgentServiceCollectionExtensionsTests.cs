@@ -43,4 +43,29 @@ public class AgentServiceCollectionExtensionsTests
         Assert.Single(services, descriptor => descriptor.ServiceType == typeof(AgentMcpListener));
         Assert.Single(services, descriptor => descriptor.ServiceType == typeof(IHostedService));
     }
+
+    [Fact]
+    public async Task WhenOtherHostedServicesAreRegisteredFirst_ThenTheListenerStartsBeforeThemAndStopsAfterThem()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddHostedService<OtherHostedService>();
+
+        // Act
+        services.AddHomeBlazeAgents();
+
+        // Assert - the host starts hosted services in this order and stops them in reverse.
+        await using var serviceProvider = services.BuildServiceProvider();
+        var hostedServices = serviceProvider.GetServices<IHostedService>().ToArray();
+        Assert.IsType<AgentMcpListener>(hostedServices[0]);
+        Assert.IsType<OtherHostedService>(hostedServices[1]);
+    }
+
+    private sealed class OtherHostedService : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
 }
