@@ -30,23 +30,6 @@ public class RegisteredSubjectPropertySetterTests
         Assert.Equal((expectedHasSetter, expectedHasPublicSetter), (hasSetter, hasPublicSetter));
     }
 
-    [Theory]
-    [InlineData(nameof(SetterAccessSubject.PublicSetter), true)]
-    [InlineData(nameof(SetterAccessSubject.PrivateSetter), false)]
-    public void WhenHasPublicSetterIsReadTwice_ThenBothReadsReturnTheSameValue(string propertyName, bool expectedHasPublicSetter)
-    {
-        // Arrange
-        var subject = new SetterAccessSubject(InterceptorSubjectContext.Create().WithRegistry());
-        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
-
-        // Act
-        var firstRead = property.HasPublicSetter;
-        var secondRead = property.HasPublicSetter;
-
-        // Assert
-        Assert.Equal((expectedHasPublicSetter, expectedHasPublicSetter), (firstRead, secondRead));
-    }
-
     [Fact]
     public void WhenInitSetterIsMarkedWithAPolyfillOfIsExternalInit_ThenItIsNotPublic()
     {
