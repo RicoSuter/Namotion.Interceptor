@@ -214,9 +214,13 @@ public class TileWidgetTests
 
         // Act
         var cell = await PageGeometry.GetBoxAsync(tile.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"));
+        var tileBox = await PageGeometry.GetBoxAsync(tile);
 
-        // Assert
+        // Assert: the tile is not taller than the cell although its own minimum height is 96 pixels, which is more than
+        // the cell is wide at 800 pixels.
         Assert.InRange(Math.Abs(cell.Width - cell.Height), 0, 1.5);
+        Assert.InRange(Math.Abs(cell.Width - tileBox.Width), 0, 2.5);
+        Assert.InRange(Math.Abs(cell.Height - tileBox.Height), 0, 2.5);
     }
 
     [Theory]

@@ -135,9 +135,9 @@
 }
 
 /* A widget that fills its place (a card, a tile: the class place-filler) in a grid cell or a canvas node is as high as
-   it, unless a card has a height of its own, which the inline style gives. It ignores an aspect ratio, which the inline
-   style also gives, so it is as wide as the cell or the node too. The cell or the node is the frame, so the widget draws
-   none. */
+   it, unless a card has a height of its own, which the inline style gives. It ignores its own minimum height, which a
+   place smaller than it would clip, and an aspect ratio, which the inline style also gives, so it is as wide as the cell
+   or the node too. The cell or the node is the frame, so the widget draws none. */
 ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .place-filler),
 ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler),
 ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler),
@@ -147,6 +147,7 @@
 
 ::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .place-filler {
     height: 100%;
+    min-height: 0;
     aspect-ratio: auto !important;
     border: 0;
     box-shadow: none;
