@@ -1,0 +1,167 @@
+@using HomeBlaze.Components.Abstractions.Pages
+
+@inject ISnackbar Snackbar
+
+<MudDialog data-testid="metadata-edit-dialog">
+    <DialogContent>
+        @if (Child is null)
+        {
+            <MudTextField @bind-Value="_title"
+                          Label="Title"
+                          Placeholder="@TitlePlaceholder"
+                          Clearable="true"
+                          data-testid="metadata-title" />
+        }
+        <MudTextField @bind-Value="_navigationTitle"
+                      Label="Navigation title"
+                      Placeholder="@NavigationTitlePlaceholder"
+                      Clearable="true"
+                      data-testid="metadata-navigation-title" />
+        <MudTextField @bind-Value="_icon"
+                      Label="Icon"
+                      Placeholder="@IconPlaceholder"
+                      Clearable="true"
+                      Immediate="true"
+                      Adornment="Adornment.End"
+                      AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? IconPlaceholder)"
+                      HelperText="A MudBlazor icon name, such as Dashboard or Settings"
+                      data-testid="metadata-icon" />
+        @if (Child is not null)
+        {
+            <MudSelect T="NavigationLocation?"
+                       @bind-Value="_location"
+                       Label="Location"
+                       Placeholder="Sidebar"
+                       Clearable="true"
+                       data-testid="metadata-location">
+                <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.NavBar)">Sidebar</MudSelectItem>
+                <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.AppBar)">Top bar</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="AppBarAlignment?"
+                       @bind-Value="_alignment"
+                       Label="Alignment"
+                       Placeholder="Left"
+                       Clearable="true"
+                       Disabled="@(_location != NavigationLocation.AppBar)"
+                       data-testid="metadata-alignment">
+                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Left)">Left</MudSelectItem>
+                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Right)">Right</MudSelectItem>
+            </MudSelect>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" OnClick="SaveAsync" Disabled="@_isSaving" data-testid="metadata-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>The container that stores the metadata.</summary>
+    [Parameter, EditorRequired] public IMetadataContainer Container { get; set; } = default!;
+
+    /// <summary>The subject whose metadata is edited, null for the container itself.</summary>
+    [Parameter] public IInterceptorSubject? Child { get; set; }
+
+    [Parameter] public string? TitlePlaceholder { get; set; }
+
+    [Parameter] public string? NavigationTitlePlaceholder { get; set; }
+
+    [Parameter] public string IconPlaceholder { get; set; } = "Article";
+
+    private string? _title;
+    private string? _navigationTitle;
+    private string? _icon;
+    private NavigationLocation? _location;
+    private AppBarAlignment? _alignment;
+    private bool _isSaving;
+
+    protected override void OnInitialized()
+    {
+        if (Child is null)
+        {
+            _title = Container.Metadata?.Title;
+            _navigationTitle = Container.Metadata?.NavigationTitle;
+            _icon = Container.Metadata?.Icon;
+        }
+        else if (Child.TryGetSubjectMetadata() is { } metadata)
+        {
+            _navigationTitle = metadata.NavigationTitle;
+            _icon = metadata.Icon;
+            _location = metadata.Location;
+            _alignment = metadata.Alignment;
+        }
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private async Task SaveAsync()
+    {
+        _isSaving = true;
+        try
+        {
+            if (Child is null)
+            {
+                await Container.WriteMetadataAsync(
+                    new FolderMetadata(GetValue(_title), GetValue(_navigationTitle), GetValue(_icon)),
+                    CancellationToken.None);
+            }
+            else
+            {
+                await Container.WriteChildMetadataAsync(
+                    Child,
+                    new SubjectMetadata(
+                        GetValue(_navigationTitle),
+                        GetValue(_icon),
+                        _location,
+                        _location == NavigationLocation.AppBar ? _alignment : null),
+                    CancellationToken.None);
+            }
+
+            MudDialog?.Close(DialogResult.Ok(true));
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add($"Error saving metadata: {exception.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private static string? GetValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// Shows the dialog for the metadata of a container itself, or of a subject stored in it.
+    /// </summary>
+    public static Task<IDialogReference> ShowAsync(
+        IDialogService dialogService,
+        IMetadataContainer container,
+        IInterceptorSubject? child,
+        string title,
+        string? titlePlaceholder,
+        string? navigationTitlePlaceholder,
+        string iconPlaceholder)
+    {
+        var parameters = new DialogParameters<MetadataEditDialog>
+        {
+            { x => x.Container, container },
+            { x => x.Child, child },
+            { x => x.TitlePlaceholder, titlePlaceholder },
+            { x => x.NavigationTitlePlaceholder, navigationTitlePlaceholder },
+            { x => x.IconPlaceholder, iconPlaceholder }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        return dialogService.ShowAsync<MetadataEditDialog>(title, parameters, options);
+    }
+}

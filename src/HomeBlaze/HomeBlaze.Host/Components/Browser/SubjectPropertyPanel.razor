@@ -7,6 +7,7 @@
 @using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Components.Abstractions.Pages
+@using HomeBlaze.Host.Components.Dialogs
 
 @implements IAsyncDisposable
 
@@ -30,6 +31,7 @@
                     @{
                         var canEdit = CanEdit();
                         var canDelete = Subject is IStorageFile or IConfigurable;
+                        var canEditMetadata = GetMetadataTarget() is not null;
                     }
 
                     @* Stays an h1: the page focuses the first h1 after navigation. *@
@@ -49,6 +51,17 @@
                                            data-testid="edit-subject-button" />
                         </MudTooltip>
                     }
+                    @if (canEditMetadata)
+                    {
+                        <MudTooltip Text="Metadata">
+                            <MudIconButton OnClick="@OpenMetadataDialogAsync"
+                                           Icon="@Icons.Material.Filled.Label"
+                                           Variant="Variant.Text"
+                                           Size="Size.Small"
+                                           aria-label="Metadata"
+                                           data-testid="edit-metadata-button" />
+                        </MudTooltip>
+                    }
                     @if (canDelete)
                     {
                         <MudTooltip Text="Delete">
@@ -61,7 +74,7 @@
                     }
                     @if (CanClose)
                     {
-                        @if (canEdit || canDelete)
+                        @if (canEdit || canDelete || canEditMetadata)
                         {
                             <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                         }
@@ -789,6 +802,44 @@
 
         var title = GetSubjectTitle();
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
+    }
+
+    // The container that stores the metadata of the shown subject, and the subject when it is not that container itself.
+    private (IMetadataContainer Container, IInterceptorSubject? Child)? GetMetadataTarget()
+    {
+        if (Subject is IMetadataContainer { HasOwnMetadata: true } folder)
+            return (folder, null);
+
+        if (Subject is IConfigurable and not IStorageFile && _registeredSubject is not null)
+        {
+            foreach (var parent in _registeredSubject.Parents)
+            {
+                if (GetOrderedContainer(parent.Property) is { } container)
+                    return (container, Subject);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task OpenMetadataDialogAsync()
+    {
+        if (Subject is null || GetMetadataTarget() is not { } target)
+            return;
+
+        var key = _registeredSubject?.Parents.FirstOrDefault().Index?.ToString();
+        var title = GetSubjectTitle();
+        if (target.Child is null)
+        {
+            await MetadataEditDialog.ShowAsync(DialogService, target.Container, null, $"Metadata of {title}",
+                titlePlaceholder: key, navigationTitlePlaceholder: title, iconPlaceholder: "Folder");
+        }
+        else
+        {
+            await MetadataEditDialog.ShowAsync(DialogService, target.Container, target.Child, $"Metadata of {title}",
+                titlePlaceholder: null, navigationTitlePlaceholder: title,
+                iconPlaceholder: (Subject as IIconProvider)?.IconName ?? "Article");
+        }
     }
 
     private bool CanShowHistory(RegisteredSubjectProperty property)
