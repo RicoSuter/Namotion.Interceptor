@@ -507,7 +507,7 @@ public class WebSocketClientLivenessTests
             // Act
             var cancellationTask = receiveCts.CancelAsync();
             await oldLoopReachedLivenessTransition.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            var replacementPublicationTask = Task.Run(() =>
+            var replacementPublicationTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 SetReceiveLoopCompletion(source, replacementCompletion);
                 PublishReceiveLoopAndMarkOperational(source, replacementCompletion);
