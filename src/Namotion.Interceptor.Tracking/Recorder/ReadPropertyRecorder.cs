@@ -24,10 +24,14 @@ public class ReadPropertyRecorder : IReadInterceptor
 
     internal static int ThreadTargetCount => Volatile.Read(ref _threadTargetCount);
 
-    internal static void RestoreCurrentThreadTarget(IReadPropertyRecorderTarget? target)
+    internal static void RestoreCurrentThreadTarget(IReadPropertyRecorderTarget target, IReadPropertyRecorderTarget? previousTarget)
     {
-        _currentThreadTarget = target;
-        Interlocked.Decrement(ref _threadTargetCount);
+        // A copy of a scope that is disposed again must not lower the count of the targets of other threads.
+        if (ReferenceEquals(_currentThreadTarget, target))
+        {
+            _currentThreadTarget = previousTarget;
+            Interlocked.Decrement(ref _threadTargetCount);
+        }
     }
 
     /// <summary>
@@ -44,7 +48,7 @@ public class ReadPropertyRecorder : IReadInterceptor
         Interlocked.Increment(ref _threadTargetCount);
         var previousTarget = _currentThreadTarget;
         _currentThreadTarget = target;
-        return new ReadPropertyRecorderTargetScope(previousTarget);
+        return new ReadPropertyRecorderTargetScope(target, previousTarget);
     }
 
     /// <summary>

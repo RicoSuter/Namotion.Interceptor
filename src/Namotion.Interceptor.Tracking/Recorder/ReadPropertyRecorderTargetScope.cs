@@ -6,23 +6,24 @@ namespace Namotion.Interceptor.Tracking.Recorder;
 /// </summary>
 public readonly ref struct ReadPropertyRecorderTargetScope
 {
+    private readonly IReadPropertyRecorderTarget? _target;
     private readonly IReadPropertyRecorderTarget? _previousTarget;
-    private readonly bool _isStarted;
 
-    internal ReadPropertyRecorderTargetScope(IReadPropertyRecorderTarget? previousTarget)
+    internal ReadPropertyRecorderTargetScope(IReadPropertyRecorderTarget target, IReadPropertyRecorderTarget? previousTarget)
     {
+        _target = target;
         _previousTarget = previousTarget;
-        _isStarted = true;
     }
 
     /// <summary>
     /// Restores the read target that was set when the scope started. Must run on the thread that started it.
+    /// Does nothing when the target of the scope is no longer the current one, such as when disposed a second time.
     /// </summary>
     public void Dispose()
     {
-        if (_isStarted)
+        if (_target is not null)
         {
-            ReadPropertyRecorder.RestoreCurrentThreadTarget(_previousTarget);
+            ReadPropertyRecorder.RestoreCurrentThreadTarget(_target, _previousTarget);
         }
     }
 }

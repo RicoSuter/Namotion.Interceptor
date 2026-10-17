@@ -57,7 +57,7 @@ public class ReadPropertyRecorderTargetTests
     }
 
     [Fact]
-    public void WhenTargetScopesAreDisposed_ThenNoTargetIsCounted()
+    public void WhenTargetScopesAreDisposedOnceOrTwice_ThenNoTargetIsCounted()
     {
         // Arrange
         var countBefore = ReadPropertyRecorder.ThreadTargetCount;
@@ -72,6 +72,10 @@ public class ReadPropertyRecorderTargetTests
         }
 
         default(ReadPropertyRecorderTargetScope).Dispose();
+        var scope = ReadPropertyRecorder.RecordOnCurrentThread(new RecordingTarget());
+        var copy = scope;
+        copy.Dispose();
+        scope.Dispose();
 
         // Assert
         Assert.Equal(countBefore, ReadPropertyRecorder.ThreadTargetCount);

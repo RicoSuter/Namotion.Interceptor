@@ -32,7 +32,8 @@ public partial class RenderExpression : ITitleProvider
     public string? Title => null;
 
     // No production code reads this: a render reads the value through GetText, which also reads the version of the paths,
-    // so it renders again when the target of an absolute path appears. Its change notification tells other observers.
+    // so it renders again when the target of an absolute path appears. Its change notification tells other observers when
+    // the value of a resolved target changes, but not when a target appears.
     [Derived]
     public object? Value => ResolveProperty()?.GetValue();
 

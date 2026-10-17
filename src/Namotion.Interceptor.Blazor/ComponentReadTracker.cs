@@ -178,7 +178,8 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
         }
         catch
         {
-            // The renderer keeps the output of the last render that succeeded, so its wrappers are the ones to reuse.
+            // Where the renderer keeps an output after a render throws, it is that of the last render that succeeded, so its
+            // wrappers are the ones to reuse.
             (_previousContentWrappers, _contentWrappers) = (_contentWrappers, _previousContentWrappers);
             throw;
         }
