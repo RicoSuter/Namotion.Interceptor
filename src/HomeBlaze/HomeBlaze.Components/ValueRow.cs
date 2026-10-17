@@ -21,7 +21,7 @@ public partial class ValueRow : IConfigurable
     public partial string? Path { get; set; }
 
     /// <summary>
-    /// The label of the row. Defaults to the title the property declares, then to its name.
+    /// The label of the row. Defaults to the title the property declares, then to its name, and to the path when the path leads nowhere.
     /// </summary>
     [Configuration]
     public partial string? Label { get; set; }

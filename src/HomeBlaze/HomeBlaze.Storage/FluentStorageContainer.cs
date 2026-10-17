@@ -71,6 +71,9 @@ public partial class FluentStorageContainer :
     /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
     internal bool IsStorageUnresponsive => _connection is { IsStorageUnresponsive: true };
 
+    /// <summary>Gets whether the caller runs within work of the worker of the current connection.</summary>
+    internal bool IsCallFromWithinWorkerItem => _connection?.Worker.IsCallFromWithinItem == true;
+
     /// <inheritdoc cref="StorageConnection.SimulateFileWatcherError"/>
     internal void SimulateFileWatcherError(Exception exception) => _connection?.SimulateFileWatcherError(exception);
 
@@ -883,12 +886,6 @@ public partial class FluentStorageContainer :
         return fullPath.Equals(documentationDirectory, comparison) ||
                fullPath.StartsWith(documentationDirectory + Path.DirectorySeparatorChar, comparison);
     }
-
-    /// <summary>
-    /// Whether the call comes from work that runs on the worker of this storage, such as the load of a file, where an
-    /// operation of the storage is refused.
-    /// </summary>
-    internal bool IsWithinRunningOperation => _connection is { } connection && connection.Worker.IsWithinRunningItem;
 
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the index.

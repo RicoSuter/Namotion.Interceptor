@@ -6,7 +6,7 @@ namespace HomeBlaze.Components.Editors;
 /// <summary>
 /// Applies the values of a properties editor to the properties they were edited for.
 /// </summary>
-public static class EditedPropertyValues
+internal static class EditedPropertyValues
 {
     /// <summary>
     /// Gets whether a property of the type must have a value, which holds for a value type that is not nullable.
@@ -74,7 +74,14 @@ public static class EditedPropertyValues
         return errors;
     }
 
-    private static object? ConvertTo(object? value, Type propertyType)
+    /// <summary>
+    /// Converts the value to the property type: null for a type that is not required, the name of an enum value, or
+    /// another value through <see cref="Convert.ChangeType(object, Type)"/>, which rounds a fraction for an integral type.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The value is null and the type is required.</exception>
+    /// <exception cref="FormatException">The value is no name of the enum, or a string in a wrong format.</exception>
+    /// <exception cref="OverflowException">The value is outside the range of the type.</exception>
+    internal static object? ConvertTo(object? value, Type propertyType)
     {
         if (value is null)
         {
@@ -82,7 +89,20 @@ public static class EditedPropertyValues
         }
 
         var underlyingType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
-        return value.GetType() != underlyingType ? Convert.ChangeType(value, underlyingType) : value;
+        if (value.GetType() == underlyingType)
+        {
+            return value;
+        }
+
+        if (underlyingType.IsEnum && value is string name)
+        {
+            // Enum.Parse alone would also accept a number that names no value; IsDefined matches names only.
+            return Enum.IsDefined(underlyingType, name)
+                ? Enum.Parse(underlyingType, name)
+                : throw new FormatException($"'{name}' is no value of {underlyingType.Name}.");
+        }
+
+        return Convert.ChangeType(value, underlyingType);
     }
 
     private static void Restore(

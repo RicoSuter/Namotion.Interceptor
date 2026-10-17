@@ -10,31 +10,13 @@
 @if (indicator is not null)
 {
     // Read once per render and never kept: the read is what the tracking scope records.
-    var reading = ValueReader.Read(PathResolver, indicator, indicator.Path, indicator.Map, TimeZone);
-    var color = ValueReader.GetIndicatorColor(reading, indicator.Map);
-    var icon = MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? indicator.Icon);
-
-    if (reading.MapError is not null)
-    {
-        @* The value text is the one place that shows the error of a map. *@
-        <ValueText Reading="@reading" />
-    }
-    else if (indicator.Kind == IndicatorKind.Icon)
-    {
-        <MudTooltip Text="@(reading.IsMissing ? indicator.Path : reading.Text)">
-            <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color" Class="ma-1" data-testid="indicator" />
-        </MudTooltip>
-    }
-    else if (reading.IsMissing)
-    {
-        <MudTooltip Text="@indicator.Path">
-            <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" data-testid="indicator">@reading.Text</MudChip>
-        </MudTooltip>
-    }
-    else
-    {
-        <MudChip T="string" Icon="@icon" Color="@color" Size="Size.Small" data-testid="indicator">@reading.Text</MudChip>
-    }
+    var path = indicator.Path;
+    var map = indicator.Map;
+    <IndicatorView Reading="@ValueReader.Read(PathResolver, indicator, path, map, TimeZone)"
+                   Map="@map"
+                   Icon="@indicator.Icon"
+                   Kind="@indicator.Kind"
+                   Path="@path" />
 }
 
 @code {

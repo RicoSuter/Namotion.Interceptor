@@ -86,8 +86,8 @@ public class ValueWidgetBlockTests
         Assert.Equal("states", icon.Map);
 
         var plainBar = Assert.IsType<Progress>(page.Children["plainbar"]);
-        Assert.Equal(0, plainBar.Minimum);
-        Assert.Equal(1, plainBar.Maximum);
+        Assert.Null(plainBar.Minimum);
+        Assert.Null(plainBar.Maximum);
         Assert.Equal(Color.Primary, plainBar.Color);
 
         var bar = Assert.IsType<Progress>(page.Children["bar"]);

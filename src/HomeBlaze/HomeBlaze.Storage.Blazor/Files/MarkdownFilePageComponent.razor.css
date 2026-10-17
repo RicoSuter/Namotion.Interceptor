@@ -1,0 +1,105 @@
+/* The spacing of the blocks of a markdown page: only containers and the page create space, and a widget has no outer
+   margin of its own. See "Spacing" in the widget basics. The rules are not nested, because CSS isolation does not
+   rewrite nested rules correctly. */
+
+/* The title makes room for the time of the last change and the button of the edit modes, which stand in its corner. The
+   width follows the page head in the view modes, see GetPageHeadStyle in Pages.razor of the app, and changes with it. In
+   the split mode they stand above the editor instead, see Pages.razor.css of the app. */
+.markdown-content > ::deep h1:first-of-type {
+    padding-right: 11rem;
+}
+
+/* The blocks of a page are 1rem apart, from each other and from the text around them. */
+.markdown-content > ::deep .subject-component-wrapper {
+    margin: 1rem 0;
+}
+
+/* A widget that shows nothing, such as a ValueMap, takes no space, in view mode as in edit mode (see
+   SubjectComponent.razor.css of HomeBlaze.Components). */
+.markdown-content ::deep .subject-component-wrapper:empty {
+    display: none;
+}
+
+/* The content of a container: a card body, a tab, an expansion panel, a layout cell, an alert or a Responsive. Its blocks
+   and paragraphs are 1rem apart, and the padding of the container alone is the space at its edges. The two empty boxes
+   cancel the outer margin of the first and of the last block in the collapsed margins, also when that block is hidden,
+   like a Responsive for other screens, which a first-child rule would take for the first block. Content that is part of
+   a widget, such as the value of a list row, keeps the margins of the page. */
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment {
+    display: flow-root;
+}
+
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > * {
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+}
+
+/* A heading is closer to the text below it than to the block above it. A heading that ends the content keeps its 1rem,
+   which the box at the end cancels. */
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6):not(:last-child) {
+    margin-bottom: 0.5rem;
+}
+
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + * {
+    margin-top: 0.5rem;
+}
+
+/* The boxes cancel exactly 1rem: a first or a last block with another outer margin would show the difference at the edge,
+   or be pulled over it. */
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::before,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::after {
+    content: "";
+    display: block;
+}
+
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::before {
+    margin-bottom: -1rem;
+}
+
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::after {
+    margin-top: -1rem;
+}
+
+/* The content of a grid cell or a canvas node has the room of a card body at the edges, because the cell or the node
+   draws a frame. A card that is the only content fills the cell or the node instead, by the rules and the selector in
+   SubjectComponent.razor.css of HomeBlaze.Components. */
+.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:not(:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget)) {
+    padding: 12px;
+}
+
+/* The blocks of a card footer, such as buttons, stand in a row, and the footer padding is the space at its edges. */
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > * {
+    margin: 0;
+}
+
+/* MudBlazor removes the outline of a focused link, so a link on a page that has the keyboard focus gets a ring of its own. */
+.markdown-content ::deep a:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+/* A table that is wider than its place scrolls sideways inside its box (see MarkdownSegmentBuilder) instead of widening
+   the page. The box takes the margins of the table, so the spacing rules above apply to it as to any block. */
+.markdown-content ::deep .markdown-table {
+    overflow-x: auto;
+    margin: 1rem 0;
+}
+
+.markdown-content ::deep .markdown-table > table {
+    margin: 0;
+}
+
+/* Code that is wider than its line breaks inside a word only where nothing else fits, so that a long path in the text
+   does not widen the page. Code in a table cell may also break after each dot (see MarkdownSegmentBuilder), and a table
+   that is still too wide scrolls in its box. */
+.markdown-content ::deep :not(pre) > code {
+    overflow-wrap: break-word;
+}

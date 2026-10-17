@@ -72,7 +72,7 @@ The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ va
 The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ valuemotor/CurrentSpeed }} RPM.
 ::
 
-The second cell has the name `speed`. A cell with a name keeps itself and everything in it when cells are added or removed before it. The nodes of a `CanvasLayout` are written the same way, as `Node` blocks with `X`, `Y`, `Width` and `Height`. In edit mode the grid has buttons that write these blocks for you, see [Editing in the Page Editor](../Docs/administration/pages.md#editing-in-the-page-editor).
+The second cell has the name `speed`. A cell with a name keeps itself and everything in it when cells are added or removed before it. The nodes of a `CanvasLayout` are written the same way, as `Node` blocks with `X`, `Y`, `Width` and `Height`. In edit mode the grid, once it is selected, has buttons that write these blocks for you, see [Editing in the Page Editor](../Docs/administration/pages.md#editing-in-the-page-editor).
 
 ## Style blocks
 

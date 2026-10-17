@@ -330,7 +330,7 @@ namespace HomeBlaze.Storage.Pages
     }
     public static class MarkdownBlockConfiguration
     {
-        public static string Serialize(HomeBlaze.Services.ConfigurableSubjectSerializer serializer, Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static string Serialize(HomeBlaze.Services.ConfigurableSubjectSerializer serializer, Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Storage.Pages.MarkdownBlock? block) { }
     }
     public sealed class MarkdownBlockHead : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownBlockHead>
     {

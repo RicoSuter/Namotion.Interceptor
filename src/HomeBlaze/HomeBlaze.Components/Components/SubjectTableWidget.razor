@@ -1,0 +1,117 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SubjectTable))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    var table = Subject as SubjectTable;
+}
+
+@if (table is not null)
+{
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    if (!SubjectTableRows.TryGetRows(PathResolver, table, table.Source, table.Type, out var rows, out var error))
+    {
+        <WidgetArgumentError Message="@error" />
+    }
+    else
+    {
+        var columns = table.Columns;
+
+        // Resolved once per render instead of once per cell. A map that cannot be resolved replaces the table with
+        // one error per column, not one per cell.
+        var maps = GetMapsBuffer(columns.Length);
+        var hasMapError = false;
+        for (var index = 0; index < columns.Length; index++)
+        {
+            maps[index] = ValueReader.ResolveMap(PathResolver, columns[index], columns[index].Map, out var mapError);
+            if (mapError is not null)
+            {
+                hasMapError = true;
+                <WidgetArgumentError @key="columns[index]" Message="@mapError" />
+            }
+        }
+
+        if (!hasMapError)
+        {
+            <MudSimpleTable Dense="true" Hover="true" Elevation="0" data-testid="subject-table">
+                <thead>
+                    <tr>
+                        @if (columns.Length == 0)
+                        {
+                            <th>Name</th>
+                        }
+
+                        @foreach (var column in columns)
+                        {
+                            <th @key="column">@SubjectTableRows.GetHeader(column, rows)</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in rows)
+                    {
+                        // While the page is edited a link would leave it, also by keyboard, so the links lead nowhere and take no focus.
+                        var link = IsEditing ? null : SubjectTableRows.GetLink(PathResolver, row.Subject);
+
+                        <tr @key="row.Subject" data-testid="subject-table-row">
+                            @if (columns.Length == 0)
+                            {
+                                <td>
+                                    <MudLink Href="@link" Typo="Typo.body2" tabindex="@(IsEditing ? "-1" : null)" data-testid="subject-table-link">@SubjectTableRows.GetTitle(row)</MudLink>
+                                </td>
+                            }
+
+                            @for (var index = 0; index < columns.Length; index++)
+                            {
+                                var column = columns[index];
+                                var reading = ValueReader.ReadProperty(row.Subject, column.Property, maps[index], TimeZone);
+
+                                <td data-testid="subject-table-cell">
+                                    @if (index == 0)
+                                    {
+                                        <MudLink Href="@link" Typo="Typo.body2" tabindex="@(IsEditing ? "-1" : null)" data-testid="subject-table-link">
+                                            @if (reading.IsMissing)
+                                            {
+                                                @SubjectTableRows.GetTitle(row)
+                                            }
+                                            else
+                                            {
+                                                <ValueText Reading="@reading" Path="@column.Property" />
+                                            }
+                                        </MudLink>
+                                    }
+                                    else
+                                    {
+                                        <ValueText Reading="@reading" Path="@column.Property" />
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    }
+}
+
+@code {
+    private ValueMap?[] _maps = [];
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    // Reused by the renders of this table, which every render fills completely before the rows read it.
+    private ValueMap?[] GetMapsBuffer(int count)
+    {
+        if (_maps.Length != count)
+        {
+            _maps = count == 0 ? [] : new ValueMap?[count];
+        }
+
+        return _maps;
+    }
+}

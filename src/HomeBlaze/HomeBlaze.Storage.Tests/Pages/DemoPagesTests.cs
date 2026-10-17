@@ -1,9 +1,13 @@
+using System.Reflection;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components;
+using HomeBlaze.History.Blazor;
 using HomeBlaze.Samples;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Breakpoint = MudBlazor.Breakpoint;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -75,10 +79,14 @@ public class DemoPagesTests
         // Act
         var page = await AddDemoPageAsync(fixture, "Dashboard.md");
 
-        // Assert
-        var dashboard = Assert.Single(page.Children.Values.OfType<TabLayout>());
+        // Assert: one tab layout holds the page, with the tabs of the widget groups first and the tabs of the views last.
+        var widgets = Assert.Single(page.Children.Values.OfType<TabLayout>());
+        Assert.Same(widgets, ((IPathScope)page).TryGetNamedSubject("widgets"));
+        Assert.Equal(["Values", "Controls", "History", "Table", "Motors", "More Views"], widgets.Tabs.Select(tab => tab.Title));
+        Assert.Single(FindInTab<ExpansionPanels>(widgets.Tabs[4]));
+        var dashboard = Assert.Single(FindInTab<TabLayout>(widgets.Tabs[5]));
         Assert.Equal(["Devices", "Grid and Canvas", "On This Page"], dashboard.Tabs.Select(tab => tab.Title));
-        Assert.Equal(4, PageErrorBoxes.Flatten(page.Children.Values).OfType<TabLayout>().Count());
+        Assert.Equal(5, PageErrorBoxes.Flatten(page.Children.Values).OfType<TabLayout>().Count());
 
         // Tabs three levels deep: the tab of the devices holds a tab layout, and its tab of the fans holds another one.
         var devices = Assert.Single(FindInTab<TabLayout>(dashboard.Tabs[0]));
@@ -101,7 +109,7 @@ public class DemoPagesTests
     }
 
     [Fact]
-    public async Task WhenDashboardPageIsLoaded_ThenItUsesEveryValueWidgetAndEachMapOfAWidgetIsTheMapOfThePage()
+    public async Task WhenDashboardPageIsLoaded_ThenItUsesEveryValueWidgetAndEachMapOfAWidgetIsAMapOfThePage()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
@@ -130,10 +138,72 @@ public class DemoPagesTests
         Assert.NotEmpty(subjects.OfType<Progress>());
         Assert.NotEmpty(subjects.OfType<Alert>());
 
+        var modeMap = Assert.IsType<ValueMap>(((IPathScope)page).TryGetNamedSubject("motormode"));
+        Assert.Equal(Enum.GetNames<MotorMode>(), modeMap.Cases.Select(valueCase => valueCase.Value));
+
         var maps = subjects.OfType<ValueRow>().Select(row => row.Map)
             .Concat(subjects.OfType<Indicator>().Select(indicator => indicator.Map))
+            .Concat(subjects.OfType<Select>().Select(control => control.Map))
+            .Concat(subjects.OfType<SubjectTableColumn>().Select(column => column.Map))
             .Where(name => name is not null);
-        Assert.All(maps, name => Assert.Equal("motorstate", name));
+        Assert.All(maps, name => Assert.Contains(name, new[] { "motorstate", "motormode" }));
+    }
+
+    [Fact]
+    public async Task WhenDashboardPageIsLoaded_ThenItShowsEveryWidgetThatShips()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+        var widgetTypes = WidgetDocumentation.GetShippedWidgetTypes();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Dashboard.md");
+
+        // Assert
+        var subjects = PageErrorBoxes.Flatten(page.Children.Values).ToList();
+        var shownTypes = subjects.Select(subject => subject.GetType()).ToHashSet();
+        Assert.Contains(widgetTypes, type => type.Name == nameof(Responsive));
+        Assert.Empty(widgetTypes.Where(type => !shownTypes.Contains(type)).Select(type => type.Name));
+
+        IPathScope scope = page;
+        Assert.IsType<HistoryChart>(scope.TryGetNamedSubject("trends"));
+        Assert.IsType<HistoryChart>(scope.TryGetNamedSubject("hosttrends"));
+        Assert.Equal(5, subjects.OfType<HistoryChart>().Count(chart => chart.Compact));
+        Assert.IsType<SubjectTable>(scope.TryGetNamedSubject("motortable"));
+        Assert.Equal(5, Assert.IsType<FlowLayout>(scope.TryGetNamedSubject("controlroom")).Items.Length);
+        Assert.Equal([(Breakpoint.Xs, Breakpoint.Xs), (Breakpoint.Sm, Breakpoint.Xxl), (Breakpoint.Sm, Breakpoint.Xxl)], subjects.OfType<Responsive>().Select(block => (block.From, block.To)));
+    }
+
+    [Fact]
+    public async Task WhenDashboardPageIsLoaded_ThenItsControlsWriteNoConfigurationOfTheDemoMotors()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Dashboard.md");
+
+        // Assert: development runs against the checked-in files, which a control that saves would change.
+        var subjects = PageErrorBoxes.Flatten(page.Children.Values).ToList();
+        var writtenPaths = subjects.OfType<Switch>().Select(control => control.Path)
+            .Concat(subjects.OfType<Slider>().Select(control => control.Path))
+            .Concat(subjects.OfType<Select>().Select(control => control.Path))
+            .ToList();
+        Assert.Equal(15, writtenPaths.Count);
+        Assert.All(writtenPaths, path =>
+        {
+            Assert.NotNull(path);
+            Assert.StartsWith("/Demo/", path);
+            var property = typeof(Motor).GetProperty(path[(path.LastIndexOf('/') + 1)..]);
+            Assert.NotNull(property);
+            Assert.Null(property.GetCustomAttribute<ConfigurationAttribute>());
+        });
+        Assert.All(subjects.OfType<Switch>(), control =>
+        {
+            Assert.NotNull(control.Path);
+            var motor = control.Path[..control.Path.LastIndexOf('/')];
+            Assert.Equal(($"{motor}/PowerOn", $"{motor}/PowerOff"), (control.On, control.Off));
+        });
     }
 
     [Fact]
@@ -153,8 +223,8 @@ public class DemoPagesTests
             "Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace.",
             "The type 'HomeBlaze.Storage.Files.MarkdownFile' cannot be used as a block because it does not implement IConfigurable.",
             "'Card' is not a type name. A slot block is only allowed directly inside a widget block.",
-            "Card has no configuration property 'Titel'. Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.",
-            "Card has no configuration property 'title'. Did you mean 'Title'? Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.",
+            "Card has no configuration property 'Titel'. Available: AspectRatio, Elevation, Height, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.",
+            "Card has no configuration property 'title'. Did you mean 'Title'? Available: AspectRatio, Elevation, Height, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.",
             "'fast' is not a valid value for 'TargetSpeed'. Expected a value of type Int32.",
             "Card has no slot 'Footr'. Available: Content, Footer, HeaderRight.",
             "Motor has no default slot, so it cannot have content.",

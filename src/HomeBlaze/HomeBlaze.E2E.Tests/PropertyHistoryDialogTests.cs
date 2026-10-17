@@ -33,6 +33,7 @@ public class PropertyHistoryDialogTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync(_fixture.ServerAddress);
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
         await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });

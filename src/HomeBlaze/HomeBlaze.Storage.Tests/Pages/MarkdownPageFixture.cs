@@ -1,5 +1,6 @@
 using System.Text;
 using HomeBlaze.Components;
+using HomeBlaze.History.Blazor;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
@@ -86,6 +87,7 @@ public sealed class MarkdownPageFixture
 
             typeProvider
                 .AddAssembly(typeof(Card).Assembly)
+                .AddAssembly(typeof(HistoryChart).Assembly)
                 .AddAssembly(typeof(Motor).Assembly);
         });
 

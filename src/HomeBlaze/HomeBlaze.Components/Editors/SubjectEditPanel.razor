@@ -1,5 +1,6 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Services
+@using Namotion.Interceptor.Tracking.Change
 
 @implements IAsyncDisposable
 
@@ -8,7 +9,7 @@
 @inject ISnackbar Snackbar
 @inject DeveloperModeService DeveloperMode
 
-<TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+<TrackingScope Context="TrackedContext" ShowDebugInfo="DeveloperMode.IsEnabled">
     @if (Subject != null)
     {
         @* A hosted form may change its validity without raising IsValidChanged, so the panel reads it again after
@@ -66,6 +67,11 @@
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
+
+    // A subject created without the root context, such as one whose constructor takes services, has no change
+    // tracking until it is added to the graph, and TrackingScope fails to subscribe to such a context.
+    private IInterceptorSubjectContext? TrackedContext =>
+        Subject?.Context is { } context && context.TryGetService<PropertyChangeInterceptor>() is not null ? context : null;
 
     private SubjectComponentType? HostedComponentType
     {
@@ -239,8 +245,8 @@
     }
 
     /// <summary>
-    /// Writes the configuration that contains the subject through its configuration writer, see
-    /// <see cref="RootManagerExtensions.GetConfigurationWriter"/>, and applies it. Nothing is written for a subject that is part of no
+    /// Writes and applies the configuration that contains the subject, see
+    /// <see cref="ConfigurationPersistence.PersistOwnerAsync"/>. Nothing is written for a subject that is part of no
     /// configuration, such as a file, which its edit component has saved. Warns when the writer wrote nothing,
     /// in which case the edits are applied but not saved.
     /// </summary>
@@ -251,24 +257,15 @@
 
         try
         {
-            // The first configurable parent would be wrong here: for a file that is its storage, whose
-            // configuration does not contain the file.
-            var isWritten = true;
-            var configurationOwner = subject.TryGetConfigurationOwner();
-            if (configurationOwner is IConfigurable configurable)
+            var result = await ConfigurationPersistence.PersistOwnerAsync(RootManager, subject, cancellationToken);
+            if (result == ConfigurationPersistResult.NotWritten)
             {
-                var configurationWriter = RootManager.GetConfigurationWriter(configurationOwner);
-                isWritten = await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
-                await configurable.ApplyConfigurationAsync(cancellationToken);
-            }
-
-            if (isWritten)
-            {
-                Snackbar.Add("Configuration saved.", Severity.Info);
+                Snackbar.AddConfigurationNotSavedWarning();
             }
             else
             {
-                Snackbar.AddConfigurationNotSavedWarning();
+                // NoOwner is a subject such as a file, which its edit component has saved.
+                Snackbar.Add("Configuration saved.", Severity.Info);
             }
         }
         catch (Exception ex)

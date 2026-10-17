@@ -285,3 +285,17 @@ public partial class SubjectWithValidatedProperty : IConfigurable
 /// <summary>A subject that is not configurable, so the serializer cannot write it.</summary>
 [InterceptorSubject]
 public partial class PlainSubject;
+
+/// <summary>Subject whose configuration property throws when it is read, so it cannot be serialized.</summary>
+[InterceptorSubject]
+public partial class SubjectWithUnreadableConfiguration : IConfigurable
+{
+    [Configuration]
+    public string Value
+    {
+        get => throw new InvalidOperationException("The value cannot be read.");
+        set { }
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
