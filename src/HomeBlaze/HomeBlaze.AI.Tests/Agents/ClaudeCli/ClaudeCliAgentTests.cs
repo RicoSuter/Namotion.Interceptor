@@ -288,7 +288,7 @@ public class ClaudeCliAgentTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
 
         // Assert
-        Assert.Contains("listener has not started", test.Agent.StatusMessage);
+        Assert.Contains("listener is not running", test.Agent.StatusMessage);
         Assert.Empty(cli.Invocations);
     }
 

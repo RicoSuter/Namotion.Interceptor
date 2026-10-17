@@ -52,7 +52,7 @@ public partial class ClaudeCliAgent : LlmAgentBase
         AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
         var endpoint = Services.EndpointAddress.GetAgentEndpoint()
-            ?? throw new AgentTurnException(AgentFailureKind.Transient, "The agent MCP listener has not started yet.");
+            ?? throw new AgentTurnException(AgentFailureKind.Transient, "The agent MCP listener is not running.");
 
         Directory.CreateDirectory(WorkingDirectory);
         using var registration = Services.TokenRegistry.Register(request.Tools);

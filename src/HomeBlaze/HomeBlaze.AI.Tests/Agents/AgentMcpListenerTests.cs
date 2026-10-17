@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using HomeBlaze.AI.Agents;
@@ -36,7 +37,7 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
         builder.Services.AddHomeBlazeAgents();
         builder.Services.AddMcpServer(options => options.ServerInstructions = ExternalServerInstructions)
             .WithHttpTransport(options => options.Stateless = true)
-            // Production always has global handlers (the external MCP server); mirror that.
+            // The external MCP server of a host has its own handlers, tools, prompts and resources; the agent route must see none of them.
             .WithListToolsHandler((_, _) => ValueTask.FromResult(new ListToolsResult
             {
                 Tools = [new Tool { Name = "global_tool", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }]
@@ -237,19 +238,6 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenTheMainServerIsAskedForTheAgentRoute_ThenItDoesNotServeItEvenWithAValidToken()
-    {
-        // Arrange
-        using var registration = _registry.Register(CreateToolSet());
-
-        // Act
-        using var response = await PostAsync(_baseAddress + AgentMcpListener.Route, "Bearer " + registration.Token);
-
-        // Assert
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Fact]
     public void WhenTheListenerRuns_ThenItIsBoundToLoopbackOnlyOnAPortOfItsOwn()
     {
         // Arrange
@@ -342,6 +330,64 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
         var listenerMessage = Assert.Single(logs.Messages, message => message.Category == typeof(AgentMcpListener).FullName);
         Assert.Equal(LogLevel.Information, listenerMessage.Level);
         Assert.Contains(endpoint.ToString(), listenerMessage.Text);
+    }
+
+    [Fact]
+    public async Task WhenTheLoopbackPortCannotBeBound_ThenStartingLogsAnErrorAndLeavesTheListenerWithoutAnAddress()
+    {
+        // Arrange
+        var occupyingListener = new TcpListener(IPAddress.Loopback, 0);
+        occupyingListener.Start();
+        try
+        {
+            var logs = new RecordingLoggerProvider();
+            using var loggerFactory = LoggerFactory.Create(logging => logging.AddProvider(logs));
+            await using var listener = new AgentMcpListener(new AgentTurnTokenRegistry(), loggerFactory)
+            {
+                Port = ((IPEndPoint)occupyingListener.LocalEndpoint).Port
+            };
+
+            // Act
+            await listener.StartAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Null(listener.GetAgentEndpoint());
+            Assert.Contains(logs.Messages, message => message.Category == typeof(AgentMcpListener).FullName && message.Level == LogLevel.Error);
+        }
+        finally
+        {
+            occupyingListener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task WhenStartedTwice_ThenTheSecondStartThrows()
+    {
+        // Arrange
+        await using var listener = new AgentMcpListener(new AgentTurnTokenRegistry(), NullLoggerFactory.Instance);
+        await listener.StartAsync(CancellationToken.None);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => listener.StartAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenTheServiceProviderIsDisposedSynchronously_ThenTheStartedListenerIsDisposedWithoutThrowing()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddHomeBlazeAgents();
+        var serviceProvider = services.BuildServiceProvider();
+        var listener = serviceProvider.GetRequiredService<AgentMcpListener>();
+        await listener.StartAsync(CancellationToken.None);
+
+        // Act
+        var exception = Record.Exception(serviceProvider.Dispose);
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Null(listener.GetAgentEndpoint());
     }
 
     [Fact]

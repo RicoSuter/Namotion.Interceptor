@@ -45,7 +45,7 @@ public class AgentServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public async Task WhenOtherHostedServicesAreRegisteredFirst_ThenTheListenerStartsBeforeThemAndStopsAfterThem()
+    public async Task WhenOtherHostedServicesAreRegisteredFirst_ThenTheListenerIsRegisteredBeforeThem()
     {
         // Arrange
         var services = new ServiceCollection();

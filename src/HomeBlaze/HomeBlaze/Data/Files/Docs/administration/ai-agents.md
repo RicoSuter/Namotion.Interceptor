@@ -322,7 +322,7 @@ Renaming or moving the agent's file changes its path and so starts with new, emp
 | The Claude usage limit is reached until ... | The subscription limit is used up; the message names it when the CLI does, for example "The Claude weekly Opus usage limit". Automatic runs resume after its reset time. Use a smaller background model or fewer runs |
 | The Claude CLI path '...' is a batch file ... | Set `CliPath` to `claude.exe` instead of the `claude.cmd` shim of an npm install |
 | The turn stopped after N model rounds, the limit set by MaxToolCallsPerTurn. | A `ClaudeCliAgent` turn ran out of model rounds, see `MaxToolCallsPerTurn` in [Settings](#settings). Raise `MaxToolCallsPerTurn`, or narrow the instructions |
-| The agent MCP listener has not started yet. | HomeBlaze is still starting or is shutting down, so the route the CLI calls back on is not served. Try again once HomeBlaze has started |
+| The agent MCP listener is not running. | HomeBlaze is still starting or is shutting down, so the route the CLI calls back on is not served. Try again once HomeBlaze has started |
 | The turn did not finish within ... | Raise `TurnTimeout`, or narrow the instructions and watch paths |
 | The tool call budget of N calls for this turn is exhausted. | Shown on a tool call of the agent. Raise `MaxToolCallsPerTurn` if the agent regularly needs more |
 | Set the API key of the agent. / The Anthropic API rejected the API key. | Enter a valid key in the edit form |
