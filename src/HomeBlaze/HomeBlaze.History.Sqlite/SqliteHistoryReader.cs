@@ -370,10 +370,11 @@ internal static class SqliteHistoryReader
     // The stored column kind and ulong flag for a single path, read from the paths table (written at
     // flush time). Returns null when the path has never been written.
     //
-    // Each file stores the kind as of the flush that last wrote the path, so the file holding the path's
-    // newest row answers. Walked like the look-backs, latest end first: once a file holds a row, the walk stops at the
-    // first file ending at or before it, so a single-interval store reads one file. A file that knows the
-    // path but holds no row for it only answers when no file holds a row, and then the first one walked wins.
+    // Each file stores the kind of its newest row for the path (see SqliteHistoryWriter.InternPath), so
+    // the file holding the path's newest row answers. Walked like the look-backs, latest end first: once a
+    // file holds a row, the walk stops at the first file ending at or before it, so a single-interval store
+    // reads one file. A file that knows the path but holds no row for it only answers when no file holds a
+    // row, and then the first one walked wins.
     private static ColumnMeta? ResolveColumnMetaForPath(SqliteReadContext context, string propertyPath)
     {
         ColumnMeta? newest = null;
