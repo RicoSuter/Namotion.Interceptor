@@ -570,14 +570,14 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Reads a metadata file into its entry. A file that is not a metadata file is logged and recorded with no
-    /// metadata, so that the next pass waits for another change of it.
+    /// Reads a metadata file into its entry. A file whose content is not valid metadata is logged and recorded with
+    /// no metadata, so that the next pass waits for another change of it.
     /// </summary>
     private async Task LoadMetadataAsync(StorageListing listed, StorageEntry? entry, CancellationToken cancellationToken)
     {
         var content = await ReadAsync(listed.Path, cancellationToken);
         var hash = StorageHash.Compute(content);
-        if (entry is { IsMetadata: true } && entry.Hash == hash)
+        if (entry != null && entry.Hash == hash)
         {
             entry.Version = listed.Version;
             return;
@@ -599,7 +599,6 @@ internal sealed class StorageReconciler
         {
             Path = listed.Path,
             IsFolder = false,
-            IsMetadata = true,
             Version = listed.Version,
             Hash = hash,
             Metadata = metadata

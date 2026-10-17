@@ -17,7 +17,15 @@ internal readonly record struct StorageVersion(long Size, DateTimeOffset? Modifi
 /// </summary>
 internal sealed class StorageEntry
 {
-    public required string Path { get; init; }
+    public required string Path
+    {
+        get;
+        init
+        {
+            field = value;
+            IsMetadata = StorageMetadataPath.IsMetadataFile(value);
+        }
+    }
 
     /// <summary>The path of the folder that holds the entry.</summary>
     public string Parent => field ??= StoragePath.GetParent(Path);
@@ -41,8 +49,10 @@ internal sealed class StorageEntry
     /// </summary>
     public string? Key { get; set; }
 
-    /// <summary>True for a metadata file, which never has a subject and holds <see cref="Metadata"/> instead.</summary>
-    public bool IsMetadata { get; init; }
+    /// <summary>
+    /// True for a metadata file, by its path, which never has a subject and holds <see cref="Metadata"/> instead.
+    /// </summary>
+    public bool IsMetadata { get; private init; }
 
     /// <summary>The content of a metadata file, null when the file could not be read as one.</summary>
     public StorageMetadataDocument? Metadata { get; set; }

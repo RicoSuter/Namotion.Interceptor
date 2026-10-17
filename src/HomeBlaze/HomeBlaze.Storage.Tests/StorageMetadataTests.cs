@@ -183,6 +183,31 @@ public class StorageMetadataTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenJsonSubjectMovesToAnotherFolder_ThenItTakesTheMetadataThereOrNone()
+    {
+        // Arrange
+        WriteFile("A/Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("A/Motor.metadata.json", """{ "navTitle": "Pump" }""");
+        WriteFile("B/x.md");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<VirtualFolder>(storage.Children["A"]).Children["Motor"];
+        Assert.Equal("Pump", motor.TryGetSubjectMetadata()?.NavigationTitle);
+
+        // Act
+        File.Move(GetFullPath("A/Motor.json"), GetFullPath("B/Motor.json"));
+        await storage.ReconcileAsync(Named("A/Motor.json", "B/Motor.json"));
+        var metadataAfterMove = motor.TryGetSubjectMetadata();
+        WriteFile("B/Motor.metadata.json", """{ "navTitle": "Moved" }""");
+        await storage.ReconcileAsync(Named("B/Motor.metadata.json"));
+
+        // Assert
+        var b = Assert.IsType<VirtualFolder>(storage.Children["B"]);
+        Assert.Same(motor, b.Children["Motor"]);
+        Assert.Null(metadataAfterMove);
+        Assert.Equal("Moved", motor.TryGetSubjectMetadata()?.NavigationTitle);
+    }
+
+    [Fact]
     public async Task WhenFolderMetadataFileIsWritten_ThenWatcherAppliesIt()
     {
         // Arrange
