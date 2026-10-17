@@ -6,6 +6,8 @@ using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Xunit;
+using static Namotion.Interceptor.Blazor.Tests.ComponentTrackingTestHelpers;
+using static Namotion.Interceptor.Blazor.Tests.TrackingScopeTests;
 
 namespace Namotion.Interceptor.Blazor.Tests;
 
@@ -114,15 +116,6 @@ public class ComponentTrackingMemoryTests
         ((IInterceptorSubject)person).Data.TryGetValue((nameof(Person.FirstName), PropertyChangeSubscription.ListenersKey), out var subscriptions) &&
         subscriptions is Array array ? array.Length : 0;
 
-    private static IInterceptorSubjectContext CreateContext() =>
-        InterceptorSubjectContext.Create().WithReadPropertyRecorder().WithFullPropertyTracking();
-
     private static TestRenderer CreateRenderer(TestRenderMode mode) =>
         new(mode, configureServices: services => services.AddComponentTracking(options => options.ThrottleMilliseconds = 0));
-
-    private static Task<Host> RenderAsync(TestRenderer renderer, RenderFragment content) =>
-        renderer.RenderAsync<Host>(new Dictionary<string, object?> { [nameof(Host.Content)] = content });
-
-    private static Task WaitAsync(Func<bool> condition) =>
-        AsyncTestHelpers.WaitUntilAsync(condition, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(5));
 }

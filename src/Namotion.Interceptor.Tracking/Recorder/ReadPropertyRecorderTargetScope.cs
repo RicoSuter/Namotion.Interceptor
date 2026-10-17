@@ -18,6 +18,6 @@ public readonly ref struct ReadPropertyRecorderTargetScope
     /// </summary>
     public void Dispose()
     {
-        ReadPropertyRecorder.CurrentThreadTarget = _previousTarget;
+        ReadPropertyRecorder.RestoreCurrentThreadTarget(_previousTarget);
     }
 }

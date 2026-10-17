@@ -16,11 +16,7 @@ public class ReadPropertyRecorder : IReadInterceptor
     [ThreadStatic]
     private static IReadPropertyRecorderTarget? _currentThreadTarget;
 
-    internal static IReadPropertyRecorderTarget? CurrentThreadTarget
-    {
-        get => _currentThreadTarget;
-        set => _currentThreadTarget = value;
-    }
+    internal static void RestoreCurrentThreadTarget(IReadPropertyRecorderTarget? target) => _currentThreadTarget = target;
 
     /// <summary>
     /// Sends the property reads of the current thread to the given target until the returned scope is disposed.

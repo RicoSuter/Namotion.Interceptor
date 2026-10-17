@@ -1,8 +1,9 @@
 using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.RenderTree;
 
-// Reads the frames of a render to find the content passed to components that are not a ComponentBase.
+// Names types of the render tree to reach their private members.
 #pragma warning disable BL0006
 
 namespace Namotion.Interceptor.Blazor.ComponentTracking;
@@ -12,9 +13,7 @@ namespace Namotion.Interceptor.Blazor.ComponentTracking;
 /// </summary>
 internal static class ComponentBaseAccessors
 {
-    private static readonly Lazy<bool> _isSupported = new(Verify);
-
-    public static bool IsSupported => _isSupported.Value;
+    public static readonly bool IsSupported = Verify();
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_renderFragment")]
     public static extern ref RenderFragment RenderFragmentOf(ComponentBase component);
@@ -30,7 +29,7 @@ internal static class ComponentBaseAccessors
 
     // Returns null once the renderer has disposed the component.
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "GetComponentState")]
-    public static extern Microsoft.AspNetCore.Components.Rendering.ComponentState? GetComponentState(Renderer renderer, IComponent component);
+    public static extern ComponentState? GetComponentState(Renderer renderer, IComponent component);
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "AttributeValueField")]
     public static extern ref object AttributeValueOf(ref RenderTreeFrame frame);

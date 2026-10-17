@@ -11,6 +11,8 @@ using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
 using Xunit.Abstractions;
+using static Namotion.Interceptor.Blazor.Tests.ComponentTrackingTestHelpers;
+using static Namotion.Interceptor.Blazor.Tests.TrackingScopeTests;
 
 namespace Namotion.Interceptor.Blazor.Tests;
 
@@ -502,14 +504,6 @@ public class ComponentTrackingEdgeCaseTests
         }
     };
 
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithReadPropertyRecorder()
-            .WithFullPropertyTracking();
-    }
-
     private static TestRenderer CreateRenderer(TestRenderMode mode)
     {
         var jsRuntime = new BrowserlessJSRuntime();
@@ -519,22 +513,6 @@ public class ComponentTrackingEdgeCaseTests
             .AddComponentTracking(options => options.ThrottleMilliseconds = 0));
         jsRuntime.Dispatcher = renderer.Dispatcher;
         return renderer;
-    }
-
-    private static Task<Host> RenderAsync(TestRenderer renderer, RenderFragment content)
-    {
-        return renderer.RenderAsync<Host>(new Dictionary<string, object?> { [nameof(Host.Content)] = content });
-    }
-
-    private static Task WaitAsync(Func<bool> condition)
-    {
-        return AsyncTestHelpers.WaitUntilAsync(condition, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(5));
-    }
-
-    private static Task SettleAsync(TestRenderer renderer)
-    {
-        var dispatcher = renderer.Services.GetRequiredService<ComponentTrackingDispatcher>();
-        return WaitAsync(() => dispatcher.IsIdle && renderer.UnacknowledgedBatchCount == 0);
     }
 
     /// <summary>

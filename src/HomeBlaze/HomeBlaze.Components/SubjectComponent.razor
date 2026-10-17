@@ -128,6 +128,7 @@
 
     // The widgets directly inside this one, in the order they were created. Allocated by the first of them.
     private List<SubjectComponent>? _childComponents;
+    private Action? _onTimeZoneChanged;
 
     // Created once: a method group in the markup would allocate a delegate on every render, and every widget renders here.
     // Only a selectable widget gets the handlers of the wrapper, so that an event on a viewed page stays in the browser.
@@ -205,7 +206,14 @@
 
     protected override void OnInitialized()
     {
-        TimeZone.Changed += OnTimeZoneChanged;
+        // Only the outermost wrappers subscribe and pass the change to the ones inside them, as hundreds of subscriptions
+        // of one event would copy its list of handlers on each subscription.
+        if (ParentComponent == null)
+        {
+            _onTimeZoneChanged = OnTimeZoneChanged;
+            TimeZone.Changed += _onTimeZoneChanged;
+        }
+
         _pointerDownCallback = EventCallback.Factory.Create<PointerEventArgs>(this, OnPointerDown);
         _clickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, OnClick);
         _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown);
@@ -352,11 +360,29 @@
 
     // A widget formats dates in the time zone of the viewer, which is not a tracked value, and this wrapper skips the
     // renders of its parent that pass the same parameters, so it renders the widget again itself.
-    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
+    private void OnTimeZoneChanged() => InvokeAsync(RenderWithNestedComponents);
+
+    private void RenderWithNestedComponents()
+    {
+        StateHasChanged();
+
+        // A copy, as a render can add or remove nested wrappers.
+        if (_childComponents is { Count: > 0 } children)
+        {
+            foreach (var child in children.ToArray())
+            {
+                child.RenderWithNestedComponents();
+            }
+        }
+    }
 
     public void Dispose()
     {
-        TimeZone.Changed -= OnTimeZoneChanged;
+        if (_onTimeZoneChanged != null)
+        {
+            TimeZone.Changed -= _onTimeZoneChanged;
+        }
+
         Selection?.Remove(this);
         ParentComponent?._childComponents?.Remove(this);
     }

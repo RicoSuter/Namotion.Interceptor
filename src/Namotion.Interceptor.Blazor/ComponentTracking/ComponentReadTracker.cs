@@ -200,19 +200,11 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
             return;
         }
 
+        // Removing the current entry while enumerating is supported by Dictionary, and Release does not touch it.
         var previousRender = _renderNumber - 1;
-        List<PropertyReference>? unread = null;
         foreach (var (property, mark) in _acquired)
         {
             if (mark.Render != _renderNumber && mark.Content != previousRender)
-            {
-                (unread ??= []).Add(property);
-            }
-        }
-
-        if (unread is not null)
-        {
-            foreach (var property in unread)
             {
                 _acquired.Remove(property);
                 _dispatcher!.Release(property, this);

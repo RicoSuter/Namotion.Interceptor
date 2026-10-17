@@ -41,6 +41,8 @@ internal static class FragmentOwnership
 
             if (isLastTypeTracked)
             {
+                // The subtree of a component frame is its attributes, which a tracked component needs no wrapper for.
+                index += array[index].ComponentSubtreeLength - 1;
                 continue;
             }
 

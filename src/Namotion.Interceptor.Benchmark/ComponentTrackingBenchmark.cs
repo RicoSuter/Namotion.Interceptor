@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using Microsoft.AspNetCore.Components;
@@ -49,7 +50,7 @@ public class ReadPropertyRecorderThreadTargetBenchmark
         }
     }
 
-    // Two hash set adds per read, as a component's read tracker does once the property is acquired.
+    // One dictionary lookup per read that marks the render number, as a component's read tracker does.
     [Benchmark(OperationsPerInvoke = Reads)]
     public int ReadWithTrackerLikeThreadTarget()
     {
@@ -80,13 +81,13 @@ public class ReadPropertyRecorderThreadTargetBenchmark
 
     private sealed class TrackerLikeTarget : IReadPropertyRecorderTarget
     {
-        private readonly HashSet<PropertyReference> _reads = [];
-        private readonly HashSet<PropertyReference> _acquired = [];
+        private readonly Dictionary<PropertyReference, int> _acquired = [];
+        private int _renderNumber = 1;
 
         public void OnRead(PropertyReference property)
         {
-            _reads.Add(property);
-            _acquired.Add(property);
+            ref var render = ref CollectionsMarshal.GetValueRefOrAddDefault(_acquired, property, out _);
+            render = _renderNumber;
         }
     }
 }

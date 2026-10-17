@@ -38,27 +38,12 @@ public abstract class TrackedComponentBase : ComponentBase
     // Returns whether a parameter changed, and keeps the parameters if one did.
     private bool UpdateParameters(ParameterView parameters)
     {
-        var index = 0;
-        var isChanged = false;
-        foreach (var parameter in parameters)
-        {
-            if (index >= _count ||
-                !string.Equals(_names[index], parameter.Name, StringComparison.Ordinal) ||
-                !AreEqual(_values[index], parameter.Value))
-            {
-                isChanged = true;
-                break;
-            }
-
-            index++;
-        }
-
-        if (!isChanged && index == _count)
+        if (AreUnchanged(parameters))
         {
             return false;
         }
 
-        index = 0;
+        var index = 0;
         foreach (var parameter in parameters)
         {
             if (index == _names.Length)
@@ -73,9 +58,27 @@ public abstract class TrackedComponentBase : ComponentBase
             index++;
         }
 
-        Array.Clear(_values, index, _count > index ? _count - index : 0);
+        Array.Clear(_values, index, Math.Max(0, _count - index));
         _count = index;
         return true;
+    }
+
+    private bool AreUnchanged(ParameterView parameters)
+    {
+        var index = 0;
+        foreach (var parameter in parameters)
+        {
+            if (index >= _count ||
+                !string.Equals(_names[index], parameter.Name, StringComparison.Ordinal) ||
+                !AreEqual(_values[index], parameter.Value))
+            {
+                return false;
+            }
+
+            index++;
+        }
+
+        return index == _count;
     }
 
     private static bool AreEqual(object? oldValue, object? newValue)

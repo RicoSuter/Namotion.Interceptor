@@ -127,8 +127,6 @@
     // arms one more query: the stores may not have held the latest values yet, and constant values arm nothing.
     private bool _isFirstQueryPending;
 
-    // Incremented on the thread that changes the graph.
-
     // Read on a timer thread by OnRefreshDue.
     private volatile bool _isDisposed;
 

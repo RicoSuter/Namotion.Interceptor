@@ -5,6 +5,8 @@ using Namotion.Interceptor.Blazor.ComponentTracking;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
+using static Namotion.Interceptor.Blazor.Tests.ComponentTrackingTestHelpers;
+using static Namotion.Interceptor.Blazor.Tests.TrackingScopeTests;
 
 namespace Namotion.Interceptor.Blazor.Tests;
 
@@ -184,34 +186,10 @@ public class TrackedComponentBaseTests
         Assert.Equal(1, log.Renders("reader") - before);
     }
 
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithReadPropertyRecorder()
-            .WithFullPropertyTracking();
-    }
-
-    private static Task<Host> RenderAsync(TestRenderer renderer, RenderFragment content)
-    {
-        return renderer.RenderAsync<Host>(new Dictionary<string, object?> { [nameof(Host.Content)] = content });
-    }
-
-    private static Task WaitAsync(Func<bool> condition)
-    {
-        return AsyncTestHelpers.WaitUntilAsync(condition, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(5));
-    }
-
     private static TestRenderer CreateRenderer(TestRenderMode mode)
     {
         return new TestRenderer(mode, configureServices: services => services
             .AddComponentTracking(options => options.ThrottleMilliseconds = 0));
-    }
-
-    private static Task SettleAsync(TestRenderer renderer)
-    {
-        var dispatcher = renderer.Services.GetRequiredService<ComponentTrackingDispatcher>();
-        return WaitAsync(() => dispatcher.IsIdle && renderer.UnacknowledgedBatchCount == 0);
     }
 
     private sealed record Label(string Text, int Number);

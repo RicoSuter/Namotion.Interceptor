@@ -25,7 +25,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     // (path, style) → Subject resolve cache (absolute paths only)
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
 
-    private SubjectPathsVersion? _pathsVersion;
+    // In a context of its own, so that a change of the version tells only the components that read it and not the
+    // observers of the graph's changes, such as connectors and the history.
+    private readonly SubjectPathsVersion _pathsVersion = new(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithReadPropertyRecorder());
     private long _pathsVersionValue;
 
     /// <summary>
@@ -34,11 +36,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     /// resolves it again.
     /// </summary>
     /// <remarks>
-    /// Raised once per attached or detached reference, so in bursts, on the thread that changes the graph and inside
-    /// the lock of the lifecycle interceptor that serializes all changes of the graph. A handler must return at once
-    /// and must not throw: it must not block, wait for another thread, change the graph or render. It notes the change
-    /// and does its work on another thread. Blazor's <c>InvokeAsync</c> does not qualify, because it runs the callback
-    /// inline when the dispatcher is idle.
+    /// Raised once per attached or detached reference, on the thread that changes the graph and inside the lock of the
+    /// lifecycle interceptor: a handler must return at once, must not throw and must not change the graph. A component
+    /// reads <see cref="PathsVersion"/> in its render instead.
     /// </remarks>
     public event Action? PathsChanged;
 
@@ -68,7 +68,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         IInterceptorSubject? relativeTo = null)
     {
         var root = _getRoot();
-        ReadPathsVersion(root);
+        // A cache hit reads no property of the graph, so this read is what a caller that tracks its reads depends on.
+        _ = _pathsVersion.Value;
 
         if (string.IsNullOrEmpty(path))
             return relativeTo ?? root;
@@ -149,7 +150,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         IInterceptorSubject subject,
         PathStyle style)
     {
-        ReadPathsVersion(_getRoot());
+        _ = _pathsVersion.Value;
         var canonicalPaths = _canonicalPathsCache.GetOrAdd(subject, ComputeCanonicalPaths);
 
         if (style == PathStyle.Canonical)
@@ -191,34 +192,19 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     // A property added to or removed from a subject at run time changes what a path to a property resolves to.
     void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change) => IncrementPathsVersion();
 
-    void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change) => IncrementPathsVersion();
-
-    private void IncrementPathsVersion()
+    // A detached property is followed by the change of its subject, which increments the version after it.
+    void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
     {
-        if (Volatile.Read(ref _pathsVersion) is { } pathsVersion)
-        {
-            pathsVersion.Value = Interlocked.Increment(ref _pathsVersionValue);
-        }
     }
+
+    private void IncrementPathsVersion() => _pathsVersion.Value = Interlocked.Increment(ref _pathsVersionValue);
 
     /// <summary>
     /// Gets a number that changes whenever the paths of subjects may have changed. Reading it in a render makes the
     /// component render again when the paths change, also when it keeps what it resolved instead of resolving again.
     /// </summary>
-    public long PathsVersion => ReadPathsVersion(_getRoot());
+    public long PathsVersion => _pathsVersion.Value;
 
-    // A cache hit reads no property of the graph, so this read is what a caller that tracks its reads depends on.
-    private long ReadPathsVersion(IInterceptorSubject? root)
-    {
-        var pathsVersion = Volatile.Read(ref _pathsVersion);
-        if (pathsVersion is null && root is not null)
-        {
-            Interlocked.CompareExchange(ref _pathsVersion, new SubjectPathsVersion(root.Context), null);
-            pathsVersion = _pathsVersion;
-        }
-
-        return pathsVersion?.Value ?? 0;
-    }
 
     private void ClearCaches()
     {
