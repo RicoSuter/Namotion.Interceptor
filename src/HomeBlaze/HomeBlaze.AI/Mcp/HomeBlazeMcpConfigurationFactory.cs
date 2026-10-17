@@ -17,6 +17,8 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 internal static class HomeBlazeMcpConfigurationFactory
 {
+    private const string PathPrefix = "/";
+
     private static readonly Func<RegisteredSubject, MethodMetadata, string?> RefuseAgentOperation =
         (subject, _) => subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
 
@@ -24,9 +26,10 @@ internal static class HomeBlazeMcpConfigurationFactory
         property => property.IsConfigurationProperty() ? "It is a configuration property; set_property cannot change configuration, an operation of the subject may." : null;
 
     /// <summary>
-    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the
-    /// Markdown page hints of browse and search, the Percent hint of search and every registered <see cref="McpToolProviderRegistration"/>. set_property
-    /// refuses every property marked with <see cref="ConfigurationAttribute"/>, regardless of <paramref name="forAgents"/>.
+    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the Markdown
+    /// search tool, the Markdown page hints of browse and search, the Percent hint of search and every registered
+    /// <see cref="McpToolProviderRegistration"/>. set_property refuses every property marked with <see cref="ConfigurationAttribute"/>,
+    /// regardless of <paramref name="forAgents"/>.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
@@ -63,14 +66,15 @@ internal static class HomeBlazeMcpConfigurationFactory
         var configuration = new McpServerConfiguration
         {
             PathProvider = pathProvider,
-            PathPrefix = "/",
+            PathPrefix = PathPrefix,
             ExcludeTypes = excludeTypes,
             SubjectEnrichers = { new HomeBlazeMcpSubjectEnricher(typeProviders, isReadOnly) },
             TypeProviders = typeProviders,
             ToolProviders =
             {
                 new HomeBlazeMcpToolProvider(invoker, isReadOnly),
-                new HomeBlazeMarkdownToolProvider(invoker, isReadOnly)
+                new HomeBlazeMarkdownToolProvider(invoker, isReadOnly),
+                new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix)
             },
             ToolDescriptionAdditions =
             {

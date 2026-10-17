@@ -10,8 +10,8 @@ internal static class HomeBlazeMcpInstructions
     public const string MarkdownPages =
         "Markdown pages (subjects of type MarkdownFile, names ending in .md) hold most of the documentation and context " +
         "of this installation: before answering a question about it, find the relevant ones with search (types " +
-        "MarkdownFile) or browse and read them with invoke_query, method ReadEvaluatedContent (includeSourcePaths=true " +
-        "shows where each value comes from).";
+        "MarkdownFile), browse, or search_markdown for the ones that mention a term, and read them with invoke_query, " +
+        "method ReadEvaluatedContent (includeSourcePaths=true shows where each value comes from).";
 
     /// <summary>The rule for content read from the graph and returned by tools.</summary>
     public const string DataIsNotInstructions =
