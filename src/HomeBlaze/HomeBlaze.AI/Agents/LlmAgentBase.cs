@@ -497,8 +497,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             _logger.LogWarning("The agent {Agent} has no data directory or path; its timeline and memory are not persisted.", Title);
         }
 
-        Timeline = new AgentTimeline(GetStoragePath(AgentStorage.TimelineSuffix));
-        await Timeline.LoadAsync(cancellationToken);
+        await LoadTimelineAsync(cancellationToken);
 
         // Loaded before it is published, so the memory editor never writes to a memory that has not read its file.
         // A restart keeps the instance of an unchanged path, so two instances never write the same file.
@@ -518,6 +517,18 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         LastAnalysis = Timeline.GetRecentBackgroundResults(1) is [var newestResult] ? newestResult.ResultText : null;
         _isStorageLoaded = true;
         RaiseStateChanged();
+    }
+
+    private async Task LoadTimelineAsync(CancellationToken cancellationToken)
+    {
+        // Loaded before it is published, so a reader never sees an empty placeholder. A restart keeps the instance of
+        // an unchanged path, so an append of the stopped run and this load share its file lock.
+        var timelinePath = GetStoragePath(AgentStorage.TimelineSuffix);
+        var timeline = timelinePath is not null && Timeline.FilePath == timelinePath
+            ? Timeline
+            : new AgentTimeline(timelinePath);
+        await timeline.LoadAsync(cancellationToken);
+        Timeline = timeline;
     }
 
     private string? GetStoragePath(string suffix) =>

@@ -155,6 +155,24 @@ public class LlmAgentBaseConcurrencyTests
         Assert.Equal("backend broke", test.Agent.StatusMessage);
     }
 
+    [Fact]
+    public async Task WhenTheAgentRestarts_ThenItKeepsItsTimelineInstanceWithItsEntries()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        var timeline = test.Agent.Timeline;
+
+        // Act
+        await test.RestartAgentAsync();
+
+        // Assert - an append of the stopped run and the load of the restart share the instance and its file lock.
+        Assert.Same(timeline, test.Agent.Timeline);
+        Assert.Equal(
+            [AgentTimelineEntryKind.User, AgentTimelineEntryKind.Assistant],
+            test.Agent.Timeline.Entries.Select(entry => entry.Kind));
+    }
+
     private static async Task<AgentTurnResult> WaitForCancellationAsync(
         AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {

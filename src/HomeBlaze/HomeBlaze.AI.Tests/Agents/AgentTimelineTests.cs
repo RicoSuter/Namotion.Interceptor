@@ -36,6 +36,25 @@ public sealed class AgentTimelineTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenATimelineReloadsAfterItsFileWasDeleted_ThenItIsEmptyAndAppendsAgain()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.timeline.jsonl");
+        var timeline = new AgentTimeline(path);
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.User, 0, "hello"), CancellationToken.None);
+        File.Delete(path);
+
+        // Act
+        await timeline.LoadAsync(CancellationToken.None);
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.User, 1, "again"), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(path, timeline.FilePath);
+        Assert.Equal(["again"], timeline.Entries.Select(entry => entry.Text));
+        Assert.Single(await File.ReadAllLinesAsync(path));
+    }
+
+    [Fact]
     public async Task WhenAnEntryHasAFinalText_ThenItIsReloadedAndAnEntryWithoutOneOmitsIt()
     {
         // Arrange
