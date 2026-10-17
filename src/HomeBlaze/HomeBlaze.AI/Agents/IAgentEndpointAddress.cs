@@ -6,7 +6,7 @@ namespace HomeBlaze.AI.Agents;
 public interface IAgentEndpointAddress
 {
     /// <summary>
-    /// The absolute URI of the agent route, or null while the web server has no address.
+    /// The absolute URI of the agent route, or null while the listener that serves it is not running.
     /// </summary>
     Uri? GetAgentEndpoint();
 }

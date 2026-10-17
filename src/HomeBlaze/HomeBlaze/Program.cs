@@ -65,12 +65,14 @@ builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvid
     context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
 builder.Services.AddHomeBlazeAgents();
 
-// The MCP server is always registered because the built-in agents use it; McpServer:Enabled only decides
-// whether the external /mcp route is mapped (default: false, enabled in Development).
+// The external MCP server at /mcp (default: off, enabled in Development). The built-in agents do not use it.
 var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
-builder.Services.AddMcpServer()
-    .WithHttpTransport(options => options.Stateless = true)
-    .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
+if (mcpEnabled)
+{
+    builder.Services.AddMcpServer()
+        .WithHttpTransport(options => options.Stateless = true)
+        .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
+}
 
 // Add services to the container.
 builder.Services
@@ -166,19 +168,10 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
-}
-
-if (!app.Environment.IsDevelopment())
-{
-    // The CLI agent calls back over HTTP on the same host; a redirect would drop its bearer token.
-    app.UseWhen(
-        context => !context.Request.Path.StartsWithSegments(AgentMcpEndpoint.Route),
-        branch => branch.UseHttpsRedirection());
+    app.UseHttpsRedirection();
 }
 
 app.UseAntiforgery();
-
-app.MapHomeBlazeAgentMcp();
 
 // Map the external MCP server endpoint if enabled
 if (mcpEnabled)

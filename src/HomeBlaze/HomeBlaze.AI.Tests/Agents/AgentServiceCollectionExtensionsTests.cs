@@ -1,6 +1,7 @@
 using HomeBlaze.AI.Agents;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
@@ -10,47 +11,25 @@ namespace HomeBlaze.AI.Tests.Agents;
 
 public class AgentServiceCollectionExtensionsTests
 {
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task WhenASessionOptionsCallbackIsAlreadyConfigured_ThenItStillRuns(bool addAgentsFirst)
+    [Fact]
+    public async Task WhenTheHostHasAnMcpServer_ThenAddingTheAgentsLeavesItsTransportAsConfigured()
     {
         // Arrange
-        var previousCallCount = 0;
+        Func<HttpContext, McpServerOptions, CancellationToken, Task> configureSessionOptions = (_, _, _) => Task.CompletedTask;
         var services = new ServiceCollection();
-        if (addAgentsFirst)
-        {
-            services.AddHomeBlazeAgents();
-        }
-
-        services.AddMcpServer().WithHttpTransport(options =>
-        {
-            options.Stateless = true;
-            options.ConfigureSessionOptions = (_, _, _) =>
-            {
-                previousCallCount++;
-                return Task.CompletedTask;
-            };
-        });
-
-        if (!addAgentsFirst)
-        {
-            services.AddHomeBlazeAgents();
-        }
-
-        await using var serviceProvider = services.BuildServiceProvider();
-        var transportOptions = serviceProvider.GetRequiredService<IOptions<HttpServerTransportOptions>>().Value;
-        Assert.NotNull(transportOptions.ConfigureSessionOptions);
+        services.AddMcpServer().WithHttpTransport(options => options.ConfigureSessionOptions = configureSessionOptions);
 
         // Act
-        await transportOptions.ConfigureSessionOptions(new DefaultHttpContext(), new McpServerOptions(), CancellationToken.None);
+        services.AddHomeBlazeAgents();
 
         // Assert
-        Assert.Equal(1, previousCallCount);
+        await using var serviceProvider = services.BuildServiceProvider();
+        var transportOptions = serviceProvider.GetRequiredService<IOptions<HttpServerTransportOptions>>().Value;
+        Assert.Same(configureSessionOptions, transportOptions.ConfigureSessionOptions);
     }
 
     [Fact]
-    public void WhenAddedTwice_ThenTheAgentServicesAreRegisteredOnce()
+    public void WhenAddedTwice_ThenTheAgentServicesAndTheListenerAreRegisteredOnce()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -61,6 +40,32 @@ public class AgentServiceCollectionExtensionsTests
 
         // Assert
         Assert.Single(services, descriptor => descriptor.ServiceType == typeof(AgentServices));
-        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(IPostConfigureOptions<HttpServerTransportOptions>));
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(AgentMcpListener));
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(IHostedService));
+    }
+
+    [Fact]
+    public async Task WhenOtherHostedServicesAreRegisteredFirst_ThenTheListenerIsRegisteredBeforeThem()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddHostedService<OtherHostedService>();
+
+        // Act
+        services.AddHomeBlazeAgents();
+
+        // Assert - the host starts hosted services in this order and stops them in reverse.
+        await using var serviceProvider = services.BuildServiceProvider();
+        var hostedServices = serviceProvider.GetServices<IHostedService>().ToArray();
+        Assert.IsType<AgentMcpListener>(hostedServices[0]);
+        Assert.IsType<OtherHostedService>(hostedServices[1]);
+    }
+
+    private sealed class OtherHostedService : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }
