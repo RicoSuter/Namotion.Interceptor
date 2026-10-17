@@ -138,6 +138,9 @@ public class ClaudeCliProcessEnvironmentTests
     [InlineData("nas.example", "nas.example,127.0.0.1")]
     [InlineData("nas.example, 127.0.0.1", "nas.example, 127.0.0.1")]
     [InlineData("127.0.0.1,nas.example", "127.0.0.1,nas.example")]
+    [InlineData("*", "*")]
+    [InlineData(" * ", " * ")]
+    [InlineData("nas.example,*", "nas.example,*")]
     public void WhenAddingTheLoopbackAddressToAProxyExclusionList_ThenExistingEntriesAreKeptAndItIsAddedOnce(string? value, string expected)
     {
         // Act

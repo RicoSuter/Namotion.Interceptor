@@ -254,7 +254,7 @@ internal static class ClaudeCliProcess
         return path;
     }
 
-    /// <summary>Adds 127.0.0.1 to a comma-separated proxy exclusion list unless it is listed already.</summary>
+    /// <summary>Adds 127.0.0.1 to a comma-separated proxy exclusion list unless it or <c>*</c> is listed already.</summary>
     /// <param name="value">The list, or null when the variable is not set.</param>
     internal static string WithLoopbackProxyExclusion(string? value)
     {
@@ -265,7 +265,8 @@ internal static class ClaudeCliProcess
 
         foreach (var entry in value.Split(','))
         {
-            if (entry.Trim() == LoopbackAddress)
+            // Some tools honour "*" only as the whole value, so appending to it could route every request through the proxy.
+            if (entry.Trim() is LoopbackAddress or "*")
             {
                 return value;
             }
