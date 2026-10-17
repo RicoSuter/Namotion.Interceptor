@@ -19,7 +19,8 @@ public sealed class HistoryDispatchPlannerTests
             stores.OrderByDescending(store => store.Priority)
                 .Select(store => new StoreCoverageSnapshot(store, store.CoverageRanges))
                 .ToArray(),
-            query);
+            query,
+            CancellationToken.None);
 
     /// <summary>
     /// The carry-threaded executor serves every planned segment without budget accounting, which is
@@ -162,6 +163,19 @@ public sealed class HistoryDispatchPlannerTests
         var segment = Assert.Single(segments);
         Assert.Equal(At(30), segment.To);
         Assert.Null(segment.EndCoverageFrom);
+    }
+
+    [Fact]
+    public void WhenCancelled_ThenBucketedPlanningStops()
+    {
+        // Arrange
+        var store = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(0), At(30)) };
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        // Act & Assert
+        Assert.Throws<OperationCanceledException>(() => HistoryDispatchPlanner.PlanBucketed(
+            [new StoreCoverageSnapshot(store, store.CoverageRanges)], TenMinuteQuery(0, 30), cancellation.Token));
     }
 
     // Coverage over every other 10-minute slot, so neither store owns the whole range.

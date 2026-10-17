@@ -64,7 +64,7 @@ internal readonly record struct HistoryChartSeriesConfiguration(string? Path, st
 /// </summary>
 internal static class HistoryChartSeriesResolver
 {
-    private static readonly string AggregationChoices = string.Join(", ", HistoryAggregations.All.SelectMany(aggregation =>
+    private static readonly string AggregationChoices = string.Join(", ", PropertyHistoryChartModel.ChartAggregations.SelectMany(aggregation =>
         aggregation == HistoryAggregations.TimeWeightedAverage
             ? new[] { aggregation, PropertyHistoryChartModel.AverageAlias }
             : new[] { aggregation }));

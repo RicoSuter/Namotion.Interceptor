@@ -1,4 +1,4 @@
-﻿Trigger: change at 2026-10-10 14:30 UTC
+﻿Trigger: change at 2026-10-10 14:30 UTC (server time zone Europe/Zurich, UTC+02:00)
 
 # Recent results
 - 2026-10-10 14:00 UTC: Freezer at -12 C, rising.

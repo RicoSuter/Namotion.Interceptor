@@ -192,9 +192,9 @@ internal static class HistoryChartQuery
                 // A raw query returns the samples whatever its aggregation, and a count of samples is no percent.
                 var isPercent = request.Unit == StateUnit.Percent &&
                     (bucket is null || request.Aggregation != HistoryAggregations.Count);
-                var runs = HasNumber(result)
-                    ? PropertyHistoryChartModel.SplitIntoGapRuns(result.Points, bucket, to)
-                    : [];
+                var points = PropertyHistoryChartModel.HidePartialTotals(
+                    result.Points, request.Aggregation, bucket, to, result.CoverageRanges);
+                var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket, to);
                 lines.Add(new HistoryChartLine(
                     request.Label, request.Color ?? HistoryChartPalette.GetLineColor(lines.Count), runs, isPercent));
             }

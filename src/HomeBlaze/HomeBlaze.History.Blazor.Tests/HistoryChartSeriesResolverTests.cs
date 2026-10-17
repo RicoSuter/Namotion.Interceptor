@@ -239,6 +239,29 @@ public class HistoryChartSeriesResolverTests
         Assert.StartsWith("Unknown aggregation 'Mean' of series 'Fan'", error);
     }
 
+    [Fact]
+    public void WhenTheAggregationOfTheChartIsDelta_ThenItIsUnknown()
+    {
+        // Act
+        var error = FindArgumentError("24h", "Auto", "Delta", [Line("Energy", aggregation: "Delta")]);
+
+        // Assert
+        Assert.NotNull(error);
+        Assert.StartsWith("Unknown aggregation 'Delta': use one of ", error);
+    }
+
+    [Fact]
+    public void WhenTheAggregationOfASeriesIsDelta_ThenItIsUnknownForThatSeries()
+    {
+        // Act
+        var error = FindArgumentError(
+            "24h", "Auto", "Maximum", [Line("Pump", aggregation: "Maximum"), Line("Energy", aggregation: "delta")]);
+
+        // Assert
+        Assert.NotNull(error);
+        Assert.StartsWith("Unknown aggregation 'delta' of series 'Energy'", error);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

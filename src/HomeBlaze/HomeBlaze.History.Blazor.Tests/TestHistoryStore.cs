@@ -72,6 +72,12 @@ internal sealed class TestHistoryStore : IHistoryStore
         return new(Samples(propertyPath).LastOrDefault(point => point.Timestamp <= asOf));
     }
 
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        return new(Samples(propertyPath).LastOrDefault(point => point.Timestamp < before && point.Number is { } number && double.IsFinite(number)));
+    }
+
     private IReadOnlyList<HistoryPoint> Samples(string propertyPath) =>
         _samples.TryGetValue(propertyPath, out var samples) ? samples : [];
 }

@@ -1,0 +1,172 @@
+using System.Collections.Immutable;
+using HomeBlaze.History.Abstractions;
+using Xunit;
+
+namespace HomeBlaze.History.Mcp.Tests;
+
+public class HistoryToolFormattingTests
+{
+    [Theory]
+    [InlineData("2026-06-24T00:05:00Z", "2026-06-24T00:05:00Z")]
+    [InlineData("2026-06-24T00:05:00.250Z", "2026-06-24T00:05:00.25Z")]
+    [InlineData("2026-06-24T00:05:00.0000001Z", "2026-06-24T00:05:00.0000001Z")]
+    [InlineData("2026-06-24T02:05:00+02:00", "2026-06-24T00:05:00Z")]
+    public void WhenFormattingTimestamp_ThenUtcWithoutZeroFraction(string input, string expected)
+    {
+        // Arrange
+        var value = DateTimeOffset.Parse(input, System.Globalization.CultureInfo.InvariantCulture);
+
+        // Act
+        var formatted = HistoryToolFormatting.FormatTimestamp(value);
+
+        // Assert
+        Assert.Equal(expected, formatted);
+    }
+
+    [Theory]
+    [InlineData(0, "0s")]
+    [InlineData(5_000_000, "<1s")]
+    [InlineData(450_000_000, "45s")]
+    [InlineData(80_400_000_000, "2h14m")]
+    [InlineData(2_736_000_000_000, "3d4h")]
+    [InlineData(867_000_000_000, "1d5m")]
+    public void WhenFormattingDuration_ThenNonZeroUnitsAreListed(long ticks, string expected)
+    {
+        // Act
+        var formatted = HistoryToolFormatting.FormatDuration(TimeSpan.FromTicks(ticks));
+
+        // Assert
+        Assert.Equal(expected, formatted);
+    }
+
+    [Fact]
+    public void WhenCoverageHasGaps_ThenSummaryCountsThemAndFindsTheLargest()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 24, 0, 0, 0, TimeSpan.Zero);
+        ImmutableArray<HistoryCoverage> ranges =
+        [
+            new(start.AddMinutes(5), start.AddMinutes(20)),
+            new(start.AddMinutes(30), start.AddMinutes(55))
+        ];
+
+        // Act
+        var summary = HistoryToolFormatting.Summarize(ranges, start, start.AddHours(1));
+
+        // Assert
+        Assert.Equal(0.666, summary.Ratio);
+        Assert.Equal(3, summary.Gaps);
+        Assert.Equal(TimeSpan.FromMinutes(10), summary.LargestGap);
+    }
+
+    [Fact]
+    public void WhenCoverageIsComplete_ThenRatioIsOneAndNoGaps()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 24, 0, 0, 0, TimeSpan.Zero);
+        ImmutableArray<HistoryCoverage> ranges = [new(start, start.AddHours(1))];
+
+        // Act
+        var summary = HistoryToolFormatting.Summarize(ranges, start, start.AddHours(1));
+
+        // Assert
+        Assert.Equal(1, summary.Ratio);
+        Assert.Equal(0, summary.Gaps);
+        Assert.Equal(TimeSpan.Zero, summary.LargestGap);
+    }
+
+    [Fact]
+    public void WhenCoverageMissesOneSecondOfADay_ThenRatioStaysBelowOne()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 24, 0, 0, 0, TimeSpan.Zero);
+        ImmutableArray<HistoryCoverage> ranges = [new(start.AddSeconds(1), start.AddDays(1))];
+
+        // Act
+        var summary = HistoryToolFormatting.Summarize(ranges, start, start.AddDays(1));
+
+        // Assert
+        Assert.Equal(0.999, summary.Ratio);
+        Assert.Equal(1, summary.Gaps);
+    }
+
+    [Theory]
+    [InlineData("2025-12-31T23:00:00Z", "2026-01-01T00:00:00+01:00")]
+    [InlineData("2026-06-30T22:00:00Z", "2026-07-01T00:00:00+02:00")]
+    [InlineData("2026-06-30T22:00:00.5Z", "2026-07-01T00:00:00.5+02:00")]
+    public void WhenFormattingInAZone_ThenLocalTimeWithOffset(string input, string expected)
+    {
+        // Arrange
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
+        var value = DateTimeOffset.Parse(input, System.Globalization.CultureInfo.InvariantCulture);
+
+        // Act
+        var formatted = HistoryToolFormatting.FormatTimestamp(value, zone);
+
+        // Assert
+        Assert.Equal(expected, formatted);
+    }
+
+    [Theory]
+    [InlineData(500.18000000000757, 500.18)]
+    [InlineData(345.39999999999964, 345.4)]
+    [InlineData(-12345.678901234567, -12345.6789012)]
+    [InlineData(0.30000000000000004, 0.3)]
+    [InlineData(1.2345678901234567e20, 1.23456789012e20)]
+    [InlineData(1.2345678901234567e-7, 1.23456789012e-7)]
+    [InlineData(123456789012.0, 123456789012.0)]
+    [InlineData(0d, 0d)]
+    [InlineData(double.PositiveInfinity, double.PositiveInfinity)]
+    public void WhenRoundingAComputedValue_ThenTwelveSignificantDigitsRemain(double value, double expected)
+    {
+        // Act
+        var rounded = HistoryToolFormatting.RoundToSignificantDigits(value);
+
+        // Assert
+        Assert.Equal(expected, rounded);
+    }
+
+    [Fact]
+    public void WhenRoundingNaN_ThenItStaysNaN()
+    {
+        // Act
+        var rounded = HistoryToolFormatting.RoundToSignificantDigits(double.NaN);
+
+        // Assert
+        Assert.True(double.IsNaN(rounded));
+    }
+
+    [Fact]
+    public void WhenTheZoneOffsetIsZero_ThenTheTimestampEndsInZ()
+    {
+        // Arrange - London is at +00:00 in winter.
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+
+        // Act
+        var formatted = HistoryToolFormatting.FormatTimestamp(new DateTimeOffset(2026, 1, 15, 8, 0, 0, TimeSpan.Zero), zone);
+
+        // Assert
+        Assert.Equal("2026-01-15T08:00:00Z", formatted);
+    }
+
+    [Theory]
+    [InlineData("2026-03-28T23:00:00Z", HistoryCalendarUnit.Day, "2026-03-29")]
+    [InlineData("2026-03-22T23:00:00Z", HistoryCalendarUnit.Week, "2026-W13")]
+    // ISO weeks belong to the year of their Thursday.
+    [InlineData("2024-12-29T23:00:00Z", HistoryCalendarUnit.Week, "2025-W01")]
+    [InlineData("2026-12-27T23:00:00Z", HistoryCalendarUnit.Week, "2026-W53")]
+    [InlineData("2026-02-28T23:00:00Z", HistoryCalendarUnit.Month, "2026-03")]
+    [InlineData("2025-12-31T23:00:00Z", HistoryCalendarUnit.Year, "2026")]
+    public void WhenLabelingACalendarBucket_ThenThePeriodIsNamedInTheZone(string bucketStart, HistoryCalendarUnit unit, string expected)
+    {
+        // Arrange
+        var bucket = HistoryBucket.Calendar(unit, TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich"));
+        var start = DateTimeOffset.Parse(bucketStart, System.Globalization.CultureInfo.InvariantCulture);
+
+        // Act
+        var label = HistoryToolFormatting.FormatPeriodLabel(start, bucket);
+
+        // Assert
+        Assert.Equal(expected, label);
+    }
+}

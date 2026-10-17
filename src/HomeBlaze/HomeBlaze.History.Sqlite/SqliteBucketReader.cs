@@ -7,8 +7,8 @@ namespace HomeBlaze.History.Sqlite;
 
 /// <summary>
 /// Pure bucketed-aggregation read SQL for the SQLite history engine: the bucketed query orchestration
-/// plus the four partial readers (first/last edge, count, numeric reductions, and the
-/// time-weighted-average ordered event scan). It reuses <see cref="SqliteHistoryReader"/> for move-chain
+/// plus the partial readers (first/last edge, count, numeric reductions, and the time-weighted-average
+/// and Delta ordered event scans). It reuses <see cref="SqliteHistoryReader"/> for move-chain
 /// resolution and column metadata, <see cref="SqliteValueRouting"/> for value mapping, and
 /// <see cref="BucketAssembler"/> for final assembly. Every method takes a <see cref="SqliteReadContext"/>
 /// (the engine's open-connection delegates plus partition layout); these helpers never lock and never
@@ -16,16 +16,16 @@ namespace HomeBlaze.History.Sqlite;
 /// </summary>
 internal static class SqliteBucketReader
 {
-    // The time-weighted-average scan. The value is read as REAL so value * duration is floating point: tick
+    // The ordered value scan (TWA and Delta). The value is read as REAL so value * duration is floating point: tick
     // products are huge (value ~tens times ~10^8 ticks per 10s) and an integer sum could overflow; the
     // weightedSum/totalDuration ratio is unit-free.
-    private const string TimeWeightedAverageSql =
-        "SELECT ts, CAST(COALESCE(value_double, value_long) AS REAL) AS v FROM history " +
+    private const string OrderedValueSql =
+        "SELECT ts, " + SqliteValueRouting.NumericValueSql + " AS v FROM history " +
         "WHERE path_id = @path_id AND ts >= @from AND ts < @to ORDER BY ts;";
 
-    // As TimeWeightedAverageSql, also folding a ulong overflow stored as a JSON number.
-    private const string UlongTimeWeightedAverageSql =
-        "SELECT ts, CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL) AS v FROM history " +
+    // As OrderedValueSql, also folding a ulong overflow stored as a JSON number.
+    private const string UlongOrderedValueSql =
+        "SELECT ts, " + SqliteValueRouting.UlongNumericValueSql + " AS v FROM history " +
         "WHERE path_id = @path_id AND ts >= @from AND ts < @to ORDER BY ts;";
 
     public static HistorySeries QueryBucketed(
@@ -39,7 +39,6 @@ internal static class SqliteBucketReader
 
         var bucket = query.Bucket!.Value;
         var aggregation = query.Aggregation;
-        var bucketTicks = bucket.Ticks;
 
         // Resolve the move chain once: each leg owns its [ValidFrom, ValidTo) slice of time and stores its
         // samples under its own path. With no moves this is a single unbounded leg under query.PropertyPath.
@@ -69,17 +68,27 @@ internal static class SqliteBucketReader
 
         var isCarryDependent = aggregation is
             HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
-        var carrySeed = isCarryDependent ? query.CarrySeed : null;
-        var originalAlignedFrom = BucketAlignment.BucketStart(query.From, bucket);
+        var isDelta = aggregation == HistoryAggregations.Delta;
+        var carrySeed = isCarryDependent || isDelta ? query.CarrySeed : null;
+        var originalAlignedFrom = BucketAlignment.Start(query.From, bucket);
 
         // When MaxPoints clipped older buckets, the look-back at the clipped boundary replaces the seed even
         // when nothing is held there, since the seed may not survive a coverage gap in between. Otherwise
-        // this store's own held value stands in when the merger supplied no seed.
-        if (isCarryDependent &&
-            (alignedFrom > originalAlignedFrom || query.CarrySeed is null))
+        // this store's own held value stands in when the merger supplied no seed. Delta looks back to the
+        // last counter reading wherever it lies (see HistoryAggregations.Delta).
+        if (alignedFrom > originalAlignedFrom || query.CarrySeed is null)
         {
-            carrySeed = getSampleAtOrBefore(query.PropertyPath, alignedFrom);
+            if (isCarryDependent)
+            {
+                carrySeed = getSampleAtOrBefore(query.PropertyPath, alignedFrom);
+            }
+            else if (isDelta)
+            {
+                carrySeed = SqliteHistoryReader.GetLastNumericSampleBefore(context, query.PropertyPath, alignedFrom);
+            }
         }
+
+        var deltaCarry = carrySeed?.Number;
 
         // Reads are limited to what this store covers, so samples outside coverage never reach a bucket.
         var windows = HistoryCoverage.Clip(coverageRanges, new HistoryCoverage(alignedFrom, query.To));
@@ -99,7 +108,10 @@ internal static class SqliteBucketReader
 
             var pathIds = new Dictionary<(string PartitionKey, string Path), long?>();
             var segments = new List<ChainSegment>();
-            var timeWeightedAverageSql = isUlong ? UlongTimeWeightedAverageSql : TimeWeightedAverageSql;
+            var deltaCursor = new BucketCursor(bucket);
+            using var orderedScan = aggregation == HistoryAggregations.TimeWeightedAverage || isDelta
+                ? new OrderedScanMerge(context, pathIds, segments, isUlong ? UlongOrderedValueSql : OrderedValueSql)
+                : null;
             var firstPartition = 0;
             for (var windowIndex = 0; windowIndex < windows.Length; windowIndex++)
             {
@@ -109,9 +121,14 @@ internal static class SqliteBucketReader
                 {
                     // The held value only enters the scan when this store covers the first bucket's start.
                     var seed = windowIndex == 0 && window.From == alignedFrom ? carrySeed?.Number : null;
-                    ReadTimeWeightedAverageWindow(
-                        context, pathIds, segments, window, timeWeightedAverageSql, bucketTicks, seed, partials,
-                        cancellationToken);
+                    ReadTimeWeightedAverageWindow(orderedScan!, window, bucket, seed, partials, cancellationToken);
+                    continue;
+                }
+
+                if (isDelta)
+                {
+                    // The held value threads through every window: gaps between them are bridged.
+                    ReadDeltaWindow(orderedScan!, ref deltaCarry, partials, ref deltaCursor, cancellationToken);
                     continue;
                 }
 
@@ -124,23 +141,30 @@ internal static class SqliteBucketReader
                         continue; // unreadable partition, or one that never saw the path
                     }
 
-                    foreach (var partial in ReadPartials(connection, pathId, aggregation, isUlong,
-                                 bucketTicks, segment.FromTicks, segment.ToTicks))
+                    // A fixed bucket is one read on the epoch grid.
+                    if (bucket.FixedSize is { } size)
                     {
-                        partials[partial.BucketStartTicks] = partials.TryGetValue(partial.BucketStartTicks, out var existing)
-                            ? BucketPartial.Combine(existing, partial)
-                            : partial;
+                        AddPartials(partials, ReadPartials(connection, pathId, aggregation, isUlong,
+                            0, size.Ticks, segment.FromTicks, segment.ToTicks));
+                        continue;
+                    }
+
+                    foreach (var (originTicks, widthTicks, fromTicks, toTicks) in GroupCalendarRanges(bucket, segment.FromTicks, segment.ToTicks))
+                    {
+                        AddPartials(partials, ReadPartials(connection, pathId, aggregation, isUlong,
+                            originTicks, widthTicks, fromTicks, toTicks));
                     }
                 }
             }
         }
 
         return BucketAssembler.Assemble(
-            query, partials, aggregation == HistoryAggregations.Last ? carrySeed : null, windows);
+            query, partials, aggregation is HistoryAggregations.Last or HistoryAggregations.Delta ? carrySeed : null,
+            windows);
     }
 
     // Replaces segments with the window's (path, partitionKey, tickWindow) slices: per leg, the window
-    // intersected with the leg's [ValidFrom, ValidTo), split across the partitions it overlaps, legs in chain
+    // intersected with the leg's [ValidFrom, ValidTo) and each overlapping partition's range, legs in chain
     // order and partitions in the given ascending-start order. Windows must be passed ascending; the return
     // value is the first partition a later window can still overlap, to pass back in as firstPartition.
     private static int CollectWindowSegments(
@@ -165,13 +189,17 @@ internal static class SqliteBucketReader
                 continue;
             }
 
-            var fromTicks = EpochTicks.ToEpochTicks(legFrom);
-            var toTicks = EpochTicks.ToEpochTicks(legTo);
             for (var index = firstPartition; index < partitions.Count && partitions[index].Start < legTo; index++)
             {
-                if (partitions[index].End > legFrom)
+                // Clipped to the partition's range, which holds every row the file can contain, so a calendar
+                // query walks only the buckets of its own partition instead of the whole window per partition.
+                var (_, partitionStart, partitionEnd) = partitions[index];
+                if (partitionEnd > legFrom)
                 {
-                    segments.Add(new ChainSegment(leg.Path, partitions[index].Key, fromTicks, toTicks));
+                    var segmentFrom = partitionStart > legFrom ? partitionStart : legFrom;
+                    var segmentTo = partitionEnd < legTo ? partitionEnd : legTo;
+                    segments.Add(new ChainSegment(
+                        leg.Path, partitions[index].Key, EpochTicks.ToEpochTicks(segmentFrom), EpochTicks.ToEpochTicks(segmentTo)));
                 }
             }
         }
@@ -196,26 +224,75 @@ internal static class SqliteBucketReader
     private static bool IsNumericAggregation(string aggregation) =>
         aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
             or HistoryAggregations.Minimum or HistoryAggregations.Maximum
-            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation;
+            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation or HistoryAggregations.Delta;
+
+    private static void AddPartials(Dictionary<long, BucketPartial> partials, List<BucketPartial> read)
+    {
+        foreach (var partial in read)
+        {
+            partials[partial.BucketStartTicks] = partials.TryGetValue(partial.BucketStartTicks, out var existing)
+                ? BucketPartial.Combine(existing, partial)
+                : partial;
+        }
+    }
+
+    // The grouped reads of a calendar bucket for one segment. A calendar bucket has no constant width, so each
+    // bucket the segment touches is one read grouped onto that bucket's own start.
+    private static IEnumerable<(long OriginTicks, long WidthTicks, long FromTicks, long ToTicks)> GroupCalendarRanges(
+        HistoryBucket bucket, long fromTicks, long toTicks)
+    {
+        var start = fromTicks;
+        while (start < toTicks)
+        {
+            var (bucketStart, bucketEnd) = LocateBucket(start, bucket);
+            var end = Math.Min(bucketEnd, toTicks);
+            yield return (bucketStart, bucketEnd - bucketStart, start, end);
+            start = end;
+        }
+    }
+
+    private static (long Start, long End) LocateBucket(long ticks, HistoryBucket bucket)
+    {
+        if (bucket.FixedSize is { } size)
+        {
+            var fixedStart = AlignBucketStart(ticks, size.Ticks);
+            return (fixedStart, fixedStart + size.Ticks);
+        }
+
+        var instant = EpochTicks.FromEpochTicks(ticks);
+        var bucketStart = BucketAlignment.Start(instant, bucket);
+        var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
+
+        // The loops that walk buckets advance to the located end, so a bucket that does not contain the instant would
+        // spin forever under the connection lock.
+        if (bucketStart > instant || bucketEnd <= instant)
+        {
+            throw new InvalidOperationException(
+                $"The {bucket} bucket located for {instant:O} spans [{bucketStart:O}, {bucketEnd:O}), which does not contain it.");
+        }
+
+        return (EpochTicks.ToEpochTicks(bucketStart), EpochTicks.ToEpochTicks(bucketEnd));
+    }
 
     // One grouped query per partition producing the partials for the requested aggregation. Only the
-    // columns the aggregation needs are fetched. The bucket key is (ts/@b)*@b on epoch ticks, which equals
-    // BucketAlignment.BucketStart for the same bucket size.
-    private static IEnumerable<BucketPartial> ReadPartials(
+    // columns the aggregation needs are fetched. The bucket key is @o + floor((ts - @o) / @b) * @b on epoch
+    // ticks: the epoch grid of BucketAlignment.BucketStart for fixed buckets, the bucket's own start for a
+    // calendar bucket queried alone.
+    private static List<BucketPartial> ReadPartials(
         SqliteConnection connection, long pathId, string aggregation, bool isUlong,
-        long bucketTicks, long fromTicks, long toTicks)
+        long originTicks, long bucketTicks, long fromTicks, long toTicks)
     {
         if (aggregation is HistoryAggregations.First or HistoryAggregations.Last)
         {
-            return ReadEdgePartials(connection, pathId, aggregation, isUlong, bucketTicks, fromTicks, toTicks);
+            return ReadEdgePartials(connection, pathId, aggregation, isUlong, originTicks, bucketTicks, fromTicks, toTicks);
         }
 
         if (aggregation == HistoryAggregations.Count)
         {
-            return ReadCountPartials(connection, pathId, bucketTicks, fromTicks, toTicks);
+            return ReadCountPartials(connection, pathId, originTicks, bucketTicks, fromTicks, toTicks);
         }
 
-        return ReadNumericPartials(connection, pathId, isUlong, bucketTicks, fromTicks, toTicks);
+        return ReadNumericPartials(connection, pathId, isUlong, originTicks, bucketTicks, fromTicks, toTicks);
     }
 
     // Time-weighted average for one coverage window: integrates value * duration per bucket over covered
@@ -225,51 +302,237 @@ internal static class SqliteBucketReader
     // interval up to the next numeric event adds nothing.
     //
     // Unlike the other aggregations, TWA must see one ascending event stream across partition files and
-    // move legs. The segments of a window are disjoint time slices, so ordering them and streaming each
-    // SQL reader in timestamp order reconstructs that stream with constant sample memory and no SQLite
-    // ATTACH limit. The segments list is sorted in place.
+    // move legs, which OrderedScanMerge provides with constant sample memory and no SQLite ATTACH limit.
     private static void ReadTimeWeightedAverageWindow(
-        SqliteReadContext context,
-        Dictionary<(string PartitionKey, string Path), long?> pathIds,
-        List<ChainSegment> segments,
+        OrderedScanMerge orderedScan,
         HistoryCoverage window,
-        string sql,
-        long bucketTicks,
+        HistoryBucket bucket,
         double? seed,
         Dictionary<long, BucketPartial> result,
         CancellationToken cancellationToken)
     {
         var previousTicks = EpochTicks.ToEpochTicks(window.From);
         var previousValue = seed;
+        var cursor = new BucketCursor(bucket);
 
-        segments.Sort(CompareByTime);
-        foreach (var segment in segments)
+        orderedScan.Start(cancellationToken);
+        while (orderedScan.MoveNext(out var ticks, out var value))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var connection = context.OpenPartition(segment.PartitionKey);
-            if (connection is null || ResolvePathId(pathIds, connection, segment) is not { } pathId)
+            Integrate(result, previousTicks, ticks, previousValue, ref cursor);
+            previousTicks = ticks;
+            previousValue = value;
+        }
+
+        Integrate(result, previousTicks, EpochTicks.ToEpochTicks(window.To), previousValue, ref cursor);
+    }
+
+    // Delta for one coverage window: one ascending stream of numeric samples across partition files and move legs,
+    // as for TWA, adding each step to the bucket holding the later sample. Null and non-finite samples are skipped.
+    private static void ReadDeltaWindow(
+        OrderedScanMerge orderedScan,
+        ref double? carry,
+        Dictionary<long, BucketPartial> result,
+        ref BucketCursor cursor,
+        CancellationToken cancellationToken)
+    {
+        orderedScan.Start(cancellationToken);
+        while (orderedScan.MoveNext(out var ticks, out var reading))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // An infinite reading is no counter reading; NaN never gets here, it is stored as JSON.
+            if (reading is not { } value || !double.IsFinite(value))
             {
-                continue; // unreadable partition, or one that never saw the path
+                continue;
             }
 
-            using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            command.Parameters.AddWithValue("@path_id", pathId);
-            command.Parameters.AddWithValue("@from", segment.FromTicks);
-            command.Parameters.AddWithValue("@to", segment.ToTicks);
+            var (bucketStart, _) = cursor.Locate(ticks);
+            ref var partial = ref CollectionsMarshal.GetValueRefOrAddDefault(result, bucketStart, out _);
+            var step = carry is { } previous ? HistoryDelta.Step(previous, value) : 0;
+            partial = partial with { BucketStartTicks = bucketStart, Sum = (partial.Sum ?? 0) + step };
+            carry = value;
+        }
+    }
 
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+    /// <summary>
+    /// Streams the rows of the current window's segments ascending by timestamp, merging the per-segment
+    /// ordered scans. Segments overlap in time when the partition interval was changed while data existed:
+    /// rows of one span are then split between a file of the old interval and one of the new interval.
+    /// Rows with equal timestamps come in segment order. Dispose closes the scans a failed read left open.
+    /// </summary>
+    private sealed class OrderedScanMerge(
+        SqliteReadContext context,
+        Dictionary<(string PartitionKey, string Path), long?> pathIds,
+        List<ChainSegment> segments,
+        string sql) : IDisposable
+    {
+        private int _nextSegment;
+        private long _nextStartTicks;
+        private CancellationToken _cancellationToken;
+
+        // The open scans in segment order, each positioned on its next row. A segment is opened only once the
+        // stream reaches its start, so disjoint segments are read one at a time and only overlapping ones are
+        // open together. Exhausted scans are removed by shifting, which keeps the segment order for ties.
+        private OpenScan[] _scans = new OpenScan[2];
+        private int _scanCount;
+
+        // Sorts the segments in place by start and begins the stream over them; the previous one must have ended.
+        public void Start(CancellationToken cancellationToken)
+        {
+            segments.Sort(CompareByTime);
+            _nextSegment = 0;
+            _nextStartTicks = segments.Count > 0 ? segments[0].FromTicks : long.MaxValue;
+            _cancellationToken = cancellationToken;
+        }
+
+        public bool MoveNext(out long ticks, out double? value)
+        {
+            var earliest = OpenSegmentsStartingBy();
+            if (earliest < 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var ticks = reader.GetInt64(0);
-                Integrate(result, previousTicks, ticks, previousValue, bucketTicks);
-                previousTicks = ticks;
-                previousValue = reader.IsDBNull(1) ? null : reader.GetDouble(1);
+                ticks = 0;
+                value = null;
+                return false;
+            }
+
+            ref var scan = ref _scans[earliest];
+            ticks = scan.Ticks;
+            value = scan.Value;
+            if (!scan.Advance())
+            {
+                scan.Dispose();
+                Array.Copy(_scans, earliest + 1, _scans, earliest, --_scanCount - earliest);
+                _scans[_scanCount] = default;
+            }
+
+            return true;
+        }
+
+        // Opens every pending segment that can hold a row at or before the earliest open row, and returns
+        // that row's scan index, or -1 when the stream has ended.
+        private int OpenSegmentsStartingBy()
+        {
+            while (true)
+            {
+                var earliest = FindEarliest();
+                if (earliest >= 0 ? _nextStartTicks > _scans[earliest].Ticks : _nextSegment >= segments.Count)
+                {
+                    return earliest; // no pending segment leaves _nextStartTicks at long.MaxValue, above every row
+                }
+
+                _cancellationToken.ThrowIfCancellationRequested();
+                Open(segments[_nextSegment]);
+                _nextSegment++;
+                _nextStartTicks = _nextSegment < segments.Count ? segments[_nextSegment].FromTicks : long.MaxValue;
             }
         }
 
-        Integrate(result, previousTicks, EpochTicks.ToEpochTicks(window.To), previousValue, bucketTicks);
+        private int FindEarliest()
+        {
+            var earliest = -1;
+            for (var index = 0; index < _scanCount; index++)
+            {
+                ref var scan = ref _scans[index];
+                if (earliest < 0 || scan.Ticks < _scans[earliest].Ticks)
+                {
+                    earliest = index;
+                }
+            }
+
+            return earliest;
+        }
+
+        private void Open(ChainSegment segment)
+        {
+            var command = CreateOrderedScan(context, pathIds, segment, sql);
+            if (command is null)
+            {
+                return;
+            }
+
+            SqliteDataReader? reader = null;
+            try
+            {
+                reader = command.ExecuteReader();
+                var scan = new OpenScan(command, reader);
+                if (!scan.Advance())
+                {
+                    scan.Dispose();
+                    return;
+                }
+
+                if (_scanCount == _scans.Length)
+                {
+                    Array.Resize(ref _scans, _scans.Length * 2);
+                }
+
+                _scans[_scanCount++] = scan;
+            }
+            catch
+            {
+                reader?.Dispose();
+                command.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            for (var index = 0; index < _scanCount; index++)
+            {
+                _scans[index].Dispose();
+                _scans[index] = default;
+            }
+
+            _scanCount = 0;
+        }
+    }
+
+    // One segment's open ordered scan and the row it is positioned on.
+    private struct OpenScan(SqliteCommand command, SqliteDataReader reader)
+    {
+        public long Ticks;
+        public double? Value;
+
+        public bool Advance()
+        {
+            if (!reader.Read())
+            {
+                return false;
+            }
+
+            Ticks = reader.GetInt64(0);
+            Value = reader.IsDBNull(1) ? null : reader.GetDouble(1);
+            return true;
+        }
+
+        public readonly void Dispose()
+        {
+            reader.Dispose();
+            command.Dispose();
+        }
+    }
+
+    // The ordered value scan of one segment, or null for an unreadable partition or one that never saw the path.
+    private static SqliteCommand? CreateOrderedScan(
+        SqliteReadContext context,
+        Dictionary<(string PartitionKey, string Path), long?> pathIds,
+        ChainSegment segment,
+        string sql)
+    {
+        var connection = context.OpenPartition(segment.PartitionKey);
+        if (connection is null || ResolvePathId(pathIds, connection, segment) is not { } pathId)
+        {
+            return null;
+        }
+
+        var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("@path_id", pathId);
+        command.Parameters.AddWithValue("@from", segment.FromTicks);
+        command.Parameters.AddWithValue("@to", segment.ToTicks);
+        return command;
     }
 
     private static int CompareByTime(ChainSegment left, ChainSegment right)
@@ -281,7 +544,7 @@ internal static class SqliteBucketReader
     // Spreads value * duration over every bucket [fromTicks, toTicks) touches; a null value is unknown
     // and adds nothing.
     private static void Integrate(
-        Dictionary<long, BucketPartial> result, long fromTicks, long toTicks, double? value, long bucketTicks)
+        Dictionary<long, BucketPartial> result, long fromTicks, long toTicks, double? value, ref BucketCursor cursor)
     {
         if (value is not { } number)
         {
@@ -291,8 +554,8 @@ internal static class SqliteBucketReader
         var start = fromTicks;
         while (start < toTicks)
         {
-            var bucketStart = AlignBucketStart(start, bucketTicks);
-            var end = Math.Min(bucketStart + bucketTicks, toTicks);
+            var (bucketStart, bucketEnd) = cursor.Locate(start);
+            var end = Math.Min(bucketEnd, toTicks);
             var duration = (double)(end - start);
             ref var partial = ref CollectionsMarshal.GetValueRefOrAddDefault(result, bucketStart, out _);
             partial = partial with
@@ -305,6 +568,27 @@ internal static class SqliteBucketReader
         }
     }
 
+    /// <summary>
+    /// Locates the bucket containing a timestamp, caching the last located bounds. Ascending lookups relocate
+    /// once per bucket; lookups in any order stay correct. Pass it by reference so the cache is kept.
+    /// </summary>
+    private struct BucketCursor(HistoryBucket bucket)
+    {
+        // Empty bounds, so the first lookup locates.
+        private long _start;
+        private long _end;
+
+        public (long Start, long End) Locate(long ticks)
+        {
+            if (ticks < _start || ticks >= _end)
+            {
+                (_start, _end) = LocateBucket(ticks, bucket);
+            }
+
+            return (_start, _end);
+        }
+    }
+
     private static long AlignBucketStart(long ticks, long bucketTicks)
     {
         var quotient = Math.DivRem(ticks, bucketTicks, out var remainder);
@@ -314,7 +598,7 @@ internal static class SqliteBucketReader
     // First/Last: the earliest (MIN ts) or latest (MAX ts) row per bucket, with its raw value columns.
     private static List<BucketPartial> ReadEdgePartials(
         SqliteConnection connection, long pathId, string aggregation, bool isUlong,
-        long bucketTicks, long fromTicks, long toTicks)
+        long originTicks, long bucketTicks, long fromTicks, long toTicks)
     {
         var isFirst = aggregation == HistoryAggregations.First;
         var edge = isFirst ? "MIN(ts)" : "MAX(ts)";
@@ -331,6 +615,7 @@ internal static class SqliteBucketReader
             "WHERE path_id = @path_id AND ts >= @from AND ts < @to " +
             "GROUP BY bucket;";
         command.Parameters.AddWithValue("@path_id", pathId);
+        command.Parameters.AddWithValue("@o", originTicks);
         command.Parameters.AddWithValue("@b", bucketTicks);
         command.Parameters.AddWithValue("@from", fromTicks);
         command.Parameters.AddWithValue("@to", toTicks);
@@ -378,13 +663,14 @@ internal static class SqliteBucketReader
     // Count: total number of samples per bucket (COUNT(*)), matching InMemory's samples.Count, which
     // includes non-numeric and explicit-null samples (Count is allowed on any column type).
     private static List<BucketPartial> ReadCountPartials(
-        SqliteConnection connection, long pathId, long bucketTicks, long fromTicks, long toTicks)
+        SqliteConnection connection, long pathId, long originTicks, long bucketTicks, long fromTicks, long toTicks)
     {
         using var command = connection.CreateCommand();
         command.CommandText =
             "SELECT " + FloorBucketExpression("ts") + " AS bucket, COUNT(*) AS cnt FROM history " +
             "WHERE path_id = @path_id AND ts >= @from AND ts < @to GROUP BY bucket ORDER BY bucket;";
         command.Parameters.AddWithValue("@path_id", pathId);
+        command.Parameters.AddWithValue("@o", originTicks);
         command.Parameters.AddWithValue("@b", bucketTicks);
         command.Parameters.AddWithValue("@from", fromTicks);
         command.Parameters.AddWithValue("@to", toTicks);
@@ -407,14 +693,11 @@ internal static class SqliteBucketReader
     // COALESCE includes value_json (numeric text parses to a number) so the reductions fold it in too.
     private static List<BucketPartial> ReadNumericPartials(
         SqliteConnection connection, long pathId, bool isUlong,
-        long bucketTicks, long fromTicks, long toTicks)
+        long originTicks, long bucketTicks, long fromTicks, long toTicks)
     {
-        // The numeric expression: for ulong properties also fold value_json (a JSON number stored as text).
-        // Read as REAL like TimeWeightedAverageSql: an integer SUM errors on long overflow, which the sum of
+        // Read as REAL like OrderedValueSql: an integer SUM errors on long overflow, which the sum of
         // squares reaches for values in the billions.
-        var numeric = isUlong
-            ? "CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL)"
-            : "CAST(COALESCE(value_double, value_long) AS REAL)";
+        var numeric = isUlong ? SqliteValueRouting.UlongNumericValueSql : SqliteValueRouting.NumericValueSql;
 
         using var command = connection.CreateCommand();
         command.CommandText =
@@ -427,6 +710,7 @@ internal static class SqliteBucketReader
             "FROM history WHERE path_id = @path_id AND ts >= @from AND ts < @to " +
             "GROUP BY bucket ORDER BY bucket;";
         command.Parameters.AddWithValue("@path_id", pathId);
+        command.Parameters.AddWithValue("@o", originTicks);
         command.Parameters.AddWithValue("@b", bucketTicks);
         command.Parameters.AddWithValue("@from", fromTicks);
         command.Parameters.AddWithValue("@to", toTicks);
@@ -450,7 +734,9 @@ internal static class SqliteBucketReader
         return result;
     }
 
+    // Floors ts onto the grid that starts at @o with width @b. Fixed buckets pass @o = 0, which is the epoch
+    // grid of BucketAlignment.BucketStart; a calendar bucket is queried alone with its own start and length.
     private static string FloorBucketExpression(string timestampExpression) =>
-        "((" + timestampExpression + " / @b) - CASE WHEN " + timestampExpression +
-        " < 0 AND " + timestampExpression + " % @b <> 0 THEN 1 ELSE 0 END) * @b";
+        "(@o + (((" + timestampExpression + " - @o) / @b) - CASE WHEN " + timestampExpression +
+        " - @o < 0 AND (" + timestampExpression + " - @o) % @b <> 0 THEN 1 ELSE 0 END) * @b)";
 }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -58,7 +59,8 @@ internal static class McpToolHelper
         bool includeProperties,
         bool includeAttributes,
         bool includeMethods,
-        bool includeInterfaces)
+        bool includeInterfaces,
+        IReadOnlySet<string>? propertyNames = null)
     {
         var path = TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
 
@@ -99,19 +101,19 @@ internal static class McpToolHelper
             enrichments.Remove("$interfaces");
         }
 
-        // Build scalar properties
+        // A property selection implies including properties.
         Dictionary<string, SubjectNodeProperty>? properties = null;
-        if (includeProperties)
+        if (includeProperties || propertyNames is not null)
         {
             properties = new Dictionary<string, SubjectNodeProperty>();
             foreach (var property in subject.Properties)
             {
-                if (property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects)
+                if (TryGetSelectableSegment(property, pathProvider) is not { } segment ||
+                    (propertyNames is not null && !propertyNames.Contains(segment)))
                 {
                     continue;
                 }
 
-                var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
                 properties[segment] = BuildScalarPropertyDto(property, configuration, includeAttributes);
             }
         }
@@ -125,6 +127,67 @@ internal static class McpToolHelper
             Interfaces = interfaces,
             Properties = properties
         };
+    }
+
+    /// <summary>
+    /// Reads the optional <c>properties</c> selection. Returns the error response when it is present but not an
+    /// array of strings, otherwise null.
+    /// </summary>
+    internal static object? TryReadPropertyNames(JsonElement input, out HashSet<string>? propertyNames)
+    {
+        propertyNames = null;
+        if (!input.TryGetProperty("properties", out var element) || element.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return InvalidPropertiesError();
+        }
+
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                return InvalidPropertiesError();
+            }
+
+            names.Add(item.GetString()!);
+        }
+
+        propertyNames = names;
+        return null;
+
+        static object InvalidPropertiesError() => new { error = "Parameter 'properties' must be an array of property names." };
+    }
+
+    /// <summary>
+    /// The name a scalar property is listed and selected under: its path segment, else its browse name. Null for an
+    /// attribute, a property holding subjects or one the path provider excludes.
+    /// </summary>
+    internal static string? TryGetSelectableSegment(RegisteredSubjectProperty property, PathProviderBase pathProvider) =>
+        property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects
+            ? null
+            : pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
+
+    /// <summary>
+    /// Resolves <paramref name="segment"/> to a scalar property of <paramref name="subject"/> that the path provider
+    /// exposes, or null when there is none.
+    /// </summary>
+    internal static RegisteredSubjectProperty? TryGetScalarProperty(
+        RegisteredSubject subject,
+        PathProviderBase pathProvider,
+        string segment)
+    {
+        var property = pathProvider.TryGetPropertyFromSegment(subject, segment);
+        return property is null ||
+               property.IsAttribute ||
+               property.CanContainSubjects ||
+               !pathProvider.IsPropertyIncluded(property)
+            ? null
+            : property;
     }
 
     internal static string? TryGetSubjectPath(
