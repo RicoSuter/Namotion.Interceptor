@@ -49,26 +49,27 @@ public class AgentPromptBuilderTests
     }
 
     [Fact]
-    public void WhenTheAgentMayEditPageLayout_ThenThePreambleSaysWhichBlocksItMayChangeAndWhichMustStay()
+    public async Task WhenTheAgentMayEditPageLayoutAndUseWebTools_ThenThePreambleSaysWhichBlocksItMayChangeAndWhichMustStay()
     {
         // Act
-        var prompt = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty, canEditPageLayout: true);
+        var prompt = AgentPromptBuilder.BuildSystemPrompt(
+            AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty, hasWebTools: true, canEditPageLayout: true);
         var withoutPermission = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty);
 
         // Assert
         var preamble = prompt[..prompt.IndexOf("# Mode", StringComparison.Ordinal)];
-        Assert.Contains("You may add, change, move and remove layout blocks on Markdown pages", preamble);
         Assert.Contains("HistoryChart", preamble);
-        Assert.Contains("Cell, Node, Column and Series blocks", preamble);
-        Assert.Contains("no chart series color", preamble);
-        Assert.Contains("controls one (Switch, Slider, Select, Control, OperationButton), must stay exactly as ReadRawContent shows it", preamble);
+        Assert.Contains("ValueMap", preamble);
+        Assert.Contains("Switch", preamble);
+        Assert.Contains("ReadRawContent", preamble);
         Assert.DoesNotContain("layout blocks", withoutPermission);
+        await Verifier.Verify(prompt);
     }
 
     [Theory]
     [InlineData(AgentTurnKind.Background)]
     [InlineData(AgentTurnKind.Chat)]
-    public void WhenBuildingASystemPrompt_ThenThePreambleSharesTheMarkdownAndDataRulesAndNamesNoDomain(AgentTurnKind kind)
+    public void WhenBuildingASystemPrompt_ThenThePreambleSharesTheMarkdownAndDataRulesAndDoesNotMentionHomeAutomation(AgentTurnKind kind)
     {
         // Act
         var prompt = AgentPromptBuilder.BuildSystemPrompt(kind, null, AgentMemorySnapshot.Empty);

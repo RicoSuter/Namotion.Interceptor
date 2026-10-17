@@ -73,9 +73,10 @@ internal static partial class MarkdownWriteRules
     private const string LayoutMessage =
         "With the permission to edit page layout, only layout blocks can be added, changed, removed or moved: cards, tabs, " +
         "tab, flow, grid and canvas layouts, Responsive blocks, expansion panels, alerts, style blocks, value widgets such " +
-        "as ValueTile, Indicator, Progress, Gauge, ValueList and SubjectTable, HistoryChart charts, and Widget references " +
-        "to existing subjects, with single values of their configuration on the head line or in the json block (the Cell, " +
-        "Node, Column and Series blocks of a grid, a canvas, a table and a chart follow the same rules), links only to " +
+        "as ValueTile, Indicator, Progress, Gauge, ValueList, SubjectTable and ValueMap, HistoryChart charts, and Widget " +
+        "references to existing subjects, with single values of their configuration on the head line or in the json block " +
+        "(the Cell, Node, Column, Series, Value and Case blocks of a grid, a canvas, a table, a chart, a value list and a " +
+        "value map follow the same rules), links only to " +
         "http, https, mailto or relative addresses, no picture and no color of a chart series. Control blocks such as " +
         "Switch, Slider, Select, Control and OperationButton are no layout blocks. Every other block, and each " +
         "old subject(name) code block, " +
