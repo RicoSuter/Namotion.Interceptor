@@ -77,7 +77,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         _logger = logger;
         SupportedBackendTools = supportedBackendTools ?? [];
         Timeline = new AgentTimeline(filePath: null);
-        Memory = new AgentMemory(filePath: null, services.TimeProvider);
+        Memory = new AgentMemory(filePath: null, services.TimeProvider, logger);
         Memory.Changed += RaiseStateChanged;
         WatchPaths = [];
         AllowedTools = [.. AgentToolSet.DefaultAllowedTools];
@@ -571,8 +571,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         lock (_stateLock)
         {
             // The failure of a turn that ended during the pause replaced the pause status and stays until the next
-            // turn. A running turn shows its own status until its failure status is written, so a pause status
-            // while busy is the one of a failed turn that has not ended yet, which reports it when it ends.
+            // turn. A pause status while busy belongs to a failed turn that has not ended yet, or to a new turn that
+            // has not written its running status yet; either reports the end of the pause when it ends.
             if (Status != ServiceStatus.Unavailable)
             {
                 return;

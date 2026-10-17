@@ -386,6 +386,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
 
+    /// <inheritdoc />
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
+    /// load of a file, or from within a write of this page.</exception>
     public async Task WriteAsync(Stream content, CancellationToken cancellationToken)
     {
         EnsureNotWithinWrite();
