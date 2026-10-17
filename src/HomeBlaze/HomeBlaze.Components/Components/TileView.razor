@@ -8,8 +8,8 @@
     <button type="button"
             class="tile-widget-button"
             disabled="@Disabled"
-            role="@Role"
-            aria-checked="@AriaChecked"
+            role="@(Checked is null ? null : "switch")"
+            aria-checked="@(Checked is { } isChecked ? (isChecked ? "true" : "false") : null)"
             aria-label="@AccessibleName"
             aria-busy="@(IsBusy ? "true" : null)"
             title="@Tooltip"
@@ -42,11 +42,8 @@
 @code {
     [Parameter] public string? TestId { get; set; }
 
-    /// <summary>The ARIA role of the button, "switch" for a switch tile, null for a plain button.</summary>
-    [Parameter] public string? Role { get; set; }
-
-    /// <summary>"true" or "false" for a switch tile, null otherwise.</summary>
-    [Parameter] public string? AriaChecked { get; set; }
+    /// <summary>Whether a switch tile is on, which makes the button a switch; null for a plain button.</summary>
+    [Parameter] public bool? Checked { get; set; }
 
     /// <summary>The accessible name when the tile shows no label, such as the title of the operation of an icon tile.</summary>
     [Parameter] public string? AccessibleName { get; set; }

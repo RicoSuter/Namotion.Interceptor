@@ -1251,9 +1251,9 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public string? AccessibleName { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public string? AriaChecked { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Badge { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool? Checked { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public MudBlazor.Color Color { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1266,8 +1266,6 @@ namespace HomeBlaze.Components.Components
         public string? Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<Microsoft.AspNetCore.Components.Web.MouseEventArgs> OnClick { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? Role { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Subtitle { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

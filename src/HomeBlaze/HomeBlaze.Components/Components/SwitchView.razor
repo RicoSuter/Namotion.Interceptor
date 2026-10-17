@@ -47,8 +47,7 @@
         : MudBlazorIconResolver.ResolveOrNull(string.IsNullOrEmpty(matched?.Icon) ? Icon : matched.Icon);
     @* The label alone is the accessible name, as for the toggle switch: the subtitle is the state, which aria-checked gives. *@
     <TileView TestId="switch-tile"
-              Role="switch"
-              AriaChecked="@((_pending ?? isOn) ? "true" : "false")"
+              Checked="@(_pending ?? isOn)"
               AccessibleName="@label"
               Label="@label"
               Subtitle="@subtitle"
