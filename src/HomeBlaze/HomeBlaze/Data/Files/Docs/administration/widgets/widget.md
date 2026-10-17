@@ -48,7 +48,7 @@ A path that leads nowhere shows a message in place of a widget. Nothing exists a
 :: HomeBlaze.Components.Widget Path=/Missing/Motor
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **Not a copy**: The widget shows the subject itself. A motor that is shown twice is one motor.
 - **A path that leads nowhere**: The widget shows the notice `Cannot resolve path` with the path. This is no error box, and a `Widget` without a `Path` shows it too, see [Notices That Are No Errors](../page-errors.md#notices-that-are-no-errors).

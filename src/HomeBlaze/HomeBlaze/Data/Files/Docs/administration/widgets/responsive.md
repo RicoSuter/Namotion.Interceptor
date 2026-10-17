@@ -88,7 +88,7 @@ A table of the sample motors on desktops and a list of their speeds on smaller s
 :::: Value Path=../Fan/CurrentSpeed Label="Fan"
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **The width**: It is the width of the browser window, not of the place where the block stands. A narrow card on a desktop still counts as a desktop.
 - **Always rendered**: The content is rendered and kept live on every screen, and only the styles of the page hide it. This works without JavaScript and when the window is resized. Content that is hidden still costs its rendering, so a page that shows the same values twice for two screens does twice the work.

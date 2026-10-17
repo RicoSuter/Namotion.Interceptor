@@ -215,7 +215,7 @@ public class ControlWidgetTests
     }
 
     [Fact]
-    public async Task WhenConfirmationOfTheOperationOfASwitchIsCancelled_ThenTheSwitchKeepsItsState()
+    public async Task WhenConfirmationOfTheOperationOfASwitchIsCanceled_ThenTheSwitchKeepsItsState()
     {
         try
         {

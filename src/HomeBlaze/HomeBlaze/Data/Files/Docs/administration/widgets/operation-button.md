@@ -15,7 +15,7 @@ A button that invokes an operation or a query of a subject. Type name: `HomeBlaz
 | `Path` | Path (Operation) | None | The [path](basics.md#paths) of the operation or the query, for example `pump/EmergencyStop` |
 | `Label` | Text | From the method, see [Labels](basics.md#labels) | The text of the button |
 | `Icon` | Text | The icon of the method, else `PlayArrow` for an operation and `Search` for a query | The [icon](basics.md#icons) at the start of the button |
-| `Color` | Colour | `Primary` | The [colour](basics.md#colours) of the button |
+| `Color` | Color | `Primary` | The [color](basics.md#colors) of the button |
 | `Variant` | `Filled`, `Outlined` or `Text` | `Filled` | A filled button, a button with a border, or text alone |
 
 ## Slots
@@ -61,7 +61,7 @@ A query with a label, an icon and a variant of its own. `GetDiagnostics` changes
 :: HomeBlaze.Components.OperationButton Path=../Fan/GetDiagnostics Label="Fan diagnostics" Icon=Info Color=Info Variant=Outlined
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **As in the property panel**: The button invokes the method the same way the property panel of a subject does. A method with parameters shows a dialog for them, a method that asks for confirmation shows the confirmation dialog, a result is shown in a dialog, and a failure shows an error dialog, also a request to a device that timed out.
 - **Operations and queries**: Both work. A query shows its result.

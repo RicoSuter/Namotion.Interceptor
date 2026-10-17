@@ -62,7 +62,7 @@ Each path argument says what it can lead to, and the arguments table of each wid
 | `Operation` | An operation or a query of a subject, such as `EmergencyStop` of a motor |
 | `writable` | Only a property that a widget can write, combined with the filters above |
 
-A property that does not match is shown greyed out and cannot be selected. Operations are listed only for an argument that takes one. For a path to a subject, such as the `Map` of a value widget, the tree offers the subjects of the matching type.
+A property that does not match is shown grayed out and cannot be selected. Operations are listed only for an argument that takes one. For a path to a subject, such as the `Map` of a value widget, the tree offers the subjects of the matching type.
 
 ## Slot Blocks
 
@@ -82,7 +82,7 @@ A widget with a `Label` argument shows the label that is set. Without it, a widg
 
 ## Value Widgets
 
-`ValueList`, `ValueTile`, `Indicator`, `Progress`, `Gauge` and `SubjectTable` show values of properties, and `ValueMap` says what text, colour and icon a value gets. The pages of these widgets refer to the rules in this section.
+`ValueList`, `ValueTile`, `Indicator`, `Progress`, `Gauge` and `SubjectTable` show values of properties, and `ValueMap` says what text, color and icon a value gets. The pages of these widgets refer to the rules in this section.
 
 - **The formatted value**: A value is shown in the [formatted form of an expression](../pages.md#expression-formats). A map can replace the text.
 - **Live**: A value changes on the page when the property changes.
@@ -105,9 +105,9 @@ Rules for all ranges:
 - **An empty range**: A `Maximum` that is not above `Minimum` shows `Maximum must be above Minimum` with both ends in place of the widget.
 - **The unit of the property**: `Minimum` and `Maximum` are in the unit of the property, so a percent runs from 0 to 1.
 
-## Colours
+## Colors
 
-A colour is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning` and `Error`. They are the colours of the theme, so they follow it. `MudBlazor.Color` has a few more names that are accepted, but these are the ones meant for pages. The `IconColor` of a card, the `Color` of a case of a map, the `Color` of a progress bar and the `Color` of an operation button take one.
+A color is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning` and `Error`. They are the colors of the theme, so they follow it. `MudBlazor.Color` has a few more names that are accepted, but these are the ones meant for pages. The `IconColor` of a card, the `Color` of a case of a map, the `Color` of a progress bar and the `Color` of an operation button take one.
 
 ## Icons
 

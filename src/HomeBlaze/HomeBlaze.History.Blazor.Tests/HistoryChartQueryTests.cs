@@ -311,7 +311,7 @@ public class HistoryChartQueryTests
     }
 
     [Fact]
-    public async Task WhenTheTokenIsCancelled_ThenTheQueryIsCancelled()
+    public async Task WhenTheTokenIsCanceled_ThenTheQueryIsCanceled()
     {
         // Arrange
         var store = CreateStore().Add("/pump/CurrentSpeed", At(10), 100);

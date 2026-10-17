@@ -55,7 +55,7 @@ The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/Targ
 The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/TargetSpeed }}**.
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **Equal rows and columns**: All rows have the same height and all columns the same width, and the grid is at least 400 pixels high.
 - **Cards**: A [Card](card.md) in a cell fills the cell and ignores its `AspectRatio`, unless it has a `Height` of its own. Its body scrolls when its content does not fit.
@@ -65,7 +65,7 @@ The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/Targ
 
 ## Related
 
-- [Basics](basics.md) - Type names, paths, spacing, colours and icons
+- [Basics](basics.md) - Type names, paths, spacing, colors and icons
 - [Overview](overview.md) - All widgets by group
 - [FlowLayout](flow-layout.md) - Cells that wrap to the width of the screen
 - [CanvasLayout](canvas-layout.md) - Content at any position in pixels

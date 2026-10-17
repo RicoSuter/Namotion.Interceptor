@@ -12,7 +12,7 @@ namespace HomeBlaze.History.Blazor;
 /// <param name="PropertyType">The type of the property, used to name its states.</param>
 /// <param name="IsBand">Whether the series is drawn as a state band rather than a line.</param>
 /// <param name="Aggregation">The aggregation of a line query; lines with the same aggregation share one batch. Ignored for a band, which is always queried as raw samples.</param>
-/// <param name="Color">The CSS colour of a line, or null for the next of <see cref="HistoryChartPalette.LineColors"/>.</param>
+/// <param name="Color">The CSS color of a line, or null for the next of <see cref="HistoryChartPalette.LineColors"/>.</param>
 /// <param name="Unit">The unit of the property. A line in <see cref="StateUnit.Percent"/> is drawn in percent, except a count of samples.</param>
 internal sealed record HistoryChartSeriesRequest(
     string PropertyPath,
@@ -94,7 +94,7 @@ internal static class HistoryChartQuery
     /// <param name="cancellationToken">Cancels the queries.</param>
     /// <returns>What the chart draws and the query result of each request.</returns>
     /// <exception cref="HistoryAggregationNotSupportedException">No store supports an aggregation.</exception>
-    /// <exception cref="OperationCanceledException">The token was cancelled.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
     public static async Task<HistoryChartResult> QueryAsync(
         IReadOnlyList<IHistoryStore> stores,
         IReadOnlyList<HistoryChartSeriesRequest> requests,
@@ -182,7 +182,7 @@ internal static class HistoryChartQuery
                     to,
                     result.CoverageRanges,
                     point => PropertyHistoryChartModel.FormatDiscreteValue(point, request.PropertyType));
-                // The background colours the states first, so the legend finds them in the palette.
+                // The background colors the states first, so the legend finds them in the palette.
                 var background = HistoryChartPalette.BuildBandBackground(segments, from, to, palette);
                 bands.Add(new HistoryChartBand(
                     request.Label, segments, background, HistoryChartPalette.BuildBandLegend(segments, palette)));

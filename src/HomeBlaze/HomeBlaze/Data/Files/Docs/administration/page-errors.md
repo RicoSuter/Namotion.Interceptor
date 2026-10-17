@@ -136,7 +136,7 @@ These notices are no error boxes. They come from a widget while it is shown:
 | `Cannot resolve path` | The `Path` of a `Widget` block leads to no subject |
 | `Cannot show path` | The `Path` of a `Widget` block leads to the widget itself or to a block that contains it |
 | `No Widget component for` | The type of the block, or of the subject that a `Widget` shows, has no widget |
-| `(oldest samples not shown)` in the legend of a `HistoryChart` | A band or a raw line of the chart has more recorded samples in its range than a query returns, 1000. The chart shows the newest, see [HistoryChart](widgets/history-chart.md#behaviour-and-limits) |
+| `(oldest samples not shown)` in the legend of a `HistoryChart` | A band or a raw line of the chart has more recorded samples in its range than a query returns, 1000. The chart shows the newest, see [HistoryChart](widgets/history-chart.md#behavior-and-limits) |
 | A dash in place of a value | The `Path` of a `ValueList` row, a `ValueTile`, an `Indicator`, a `Progress` or a `Gauge` leads nowhere, the `Property` of a `SubjectTable` column is not a property of the row, or the value is not set. The path is the tooltip of the dash, or for a `SubjectTable` column the name of the property, see [Missing Values](widgets/basics.md#missing-values). A `Progress` shows it also for a value that is no number |
 
 ---

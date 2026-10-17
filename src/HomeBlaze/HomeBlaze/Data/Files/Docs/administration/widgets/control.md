@@ -70,7 +70,7 @@ A control with a label and a range of its own, which gives the load of the fan a
 :: HomeBlaze.Components.Control Path=../Fan/Load Label="Fan load" Minimum=0.2 Maximum=0.8
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **Chosen on every render**: The control decides on its widget each time it renders, so a target that a device adds later gets its widget when it appears.
 - **As the widget it renders**: A chosen widget behaves exactly as on its own page, with its rules for writes, saving, confirmation, enabled state and messages, see [Basics](basics.md#control-writes).

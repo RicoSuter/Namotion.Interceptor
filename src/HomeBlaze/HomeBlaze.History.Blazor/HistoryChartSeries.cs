@@ -26,8 +26,8 @@ public partial class HistoryChartSeries : IConfigurable
     public partial string? Label { get; set; }
 
     /// <summary>
-    /// The CSS colour of a line, for example "#E4572E". Defaults to the next colour of the chart.
-    /// A state band has one colour per state and ignores it.
+    /// The CSS color of a line, for example "#E4572E". Defaults to the next color of the chart.
+    /// A state band has one color per state and ignores it.
     /// </summary>
     [Configuration]
     public partial string? Color { get; set; }

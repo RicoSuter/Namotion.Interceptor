@@ -14,9 +14,9 @@ Shows the recorded history of properties in one chart: numbers as lines on one v
 |----------|---------------|---------|---------|
 | `Range` | `1h`, `6h`, `24h`, `7d` or `30d` | `24h` | The time span that ends now |
 | `Bucket` | `Auto`, `Raw`, `1s`, `10s`, `60s`, `5m`, `10m`, `15m`, `1h`, `4h`, `6h`, `12h` or `24h` | `Auto` | The interval that one point of a line stands for. `Auto` picks one from the range, `Raw` shows every recorded sample. A fixed bucket must divide the range into at most 1000 intervals, for example at least `10s` for `1h` and `1h` for `30d`. The bucket applies to lines only, a band always shows the recorded samples |
-| `Aggregation` | `TimeWeightedAverage` (or `Average`), `SampleAverage`, `Minimum`, `Maximum`, `Sum`, `StandardDeviation`, `Last`, `First` or `Count` | Automatic | How the values in a bucket become one point of a line, see [Behaviour and Limits](#behaviour-and-limits). Without it a line takes the time-weighted average when a history store offers it, and a counter its last value. A band ignores it, and with `Bucket=Raw` it does not apply, because every recorded sample is shown. An aggregation that the property or the history stores do not offer, for example `Sum` for a counter, falls back to the automatic one, and the legend says so |
+| `Aggregation` | `TimeWeightedAverage` (or `Average`), `SampleAverage`, `Minimum`, `Maximum`, `Sum`, `StandardDeviation`, `Last`, `First` or `Count` | Automatic | How the values in a bucket become one point of a line, see [Behavior and Limits](#behavior-and-limits). Without it a line takes the time-weighted average when a history store offers it, and a counter its last value. A band ignores it, and with `Bucket=Raw` it does not apply, because every recorded sample is shown. An aggregation that the property or the history stores do not offer, for example `Sum` for a counter, falls back to the automatic one, and the legend says so |
 | `Height` | Whole number above 0 | `300` | The height of the lines in pixels. The lines fill the width of the chart, and on a narrow screen they get lower to stay at least twice as wide as high |
-| `RefreshInterval` | Time span up to a day, for example `00:05:00` | `00:01:00` | How often the chart queries again at most while its values change. Less than a minute counts as a minute, and a bucket longer than the interval lengthens it to the bucket, see [Behaviour and Limits](#behaviour-and-limits) |
+| `RefreshInterval` | Time span up to a day, for example `00:05:00` | `00:01:00` | How often the chart queries again at most while its values change. Less than a minute counts as a minute, and a bucket longer than the interval lengthens it to the bucket, see [Behavior and Limits](#behavior-and-limits) |
 | `Compact` | Yes or no | `false` | Leaves out the numbers of the value axis, the times of the time axis, the grid lines and the tooltips of the lines, so the lines fill the whole width. For a small chart next to others, whose detail is in the history dialog |
 
 `Range`, `Bucket` and `Aggregation` ignore case.
@@ -33,7 +33,7 @@ The arguments of a `Series` block:
 |----------|---------------|---------|---------|
 | `Path` | Path (Number, Boolean or Enum) | None | The [path](basics.md#paths) of the property whose history the series shows. A number is a line, and a boolean, an enum, a text and a number whose state is marked as discrete are a band. The picker offers no text, so type the path of a text |
 | `Label` | Text | From the property, see [Labels](basics.md#labels) | The label in the legend of the lines or above a band |
-| `Color` | Text, a CSS colour such as `"#E4572E"` | The next colour of the chart | The colour of a line. A band has one colour per state and ignores it |
+| `Color` | Text, a CSS color such as `"#E4572E"` | The next color of the chart | The color of a line. A band has one color per state and ignores it |
 | `Aggregation` | Like `Aggregation` of the chart | The aggregation of the chart | The aggregation of this line in place of the one of the chart. A band ignores it |
 
 ## Samples
@@ -55,7 +55,7 @@ The speed of both motors in one chart. Neither speed has a unit, so they share t
 ::: Series Path=../Fan/CurrentSpeed Label="Fan"
 ::
 
-The status of the pump as a band below its speed. The band has one colour per state, and its header names its current value on the left and its states on the right. A status that has not changed since HomeBlaze started shows "No data" until it changes, see [Behaviour and Limits](#behaviour-and-limits):
+The status of the pump as a band below its speed. The band has one color per state, and its header names its current value on the left and its states on the right. A status that has not changed since HomeBlaze started shows "No data" until it changes, see [Behavior and Limits](#behavior-and-limits):
 
 <!-- sample: live -->
 ~~~~markdown
@@ -70,7 +70,7 @@ The status of the pump as a band below its speed. The band has one colour per st
 ::: Series Path=../Pump/Status Label="Pump status"
 ::
 
-The last hour with the bucket that the chart picks from the range, a colour of its own and a refresh every five minutes at most:
+The last hour with the bucket that the chart picks from the range, a color of its own and a refresh every five minutes at most:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -127,12 +127,12 @@ Three compact charts in a row: the temperature of each motor and the speed of th
 ::::: Series Path=../Pump/CurrentSpeed Label="Pump speed"
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **One unit**: All lines share one value axis, so every recorded number series needs the unit of the first one. A series with another unit, for example a temperature next to a speed, shows an error that names both series in place of the chart, see [Value Widget Errors](../page-errors.md#value-widget-errors). Put it in a second chart. A line with the aggregation `Count` counts samples and has no unit, unless the bucket is `Raw`.
 - **Percent**: A percent value is recorded as a fraction from 0 to 1 and drawn times 100, on a value axis from 0 % to 100 % that grows only when a value leaves that range. The history dialog draws it the same way, and its count of samples stays a count.
 - **Small differences**: The value axis steps by at least 1, so lines whose values differ by only a fraction of 1, for example from 0.25 to 0.30, are drawn nearly flat.
-- **States as bands**: A boolean, an enum, a text and a number whose state is marked as discrete (`IsDiscrete` of its `[State]` attribute) are a band below the lines, one per series with a header above it: the label and the current value, and the states that the band shows. Below lines a band starts and ends where the lines do, so a change of state sits under its time. A chart without lines names its range below the bands. A state has the same colour in every band of a chart, and "Yes" is always blue. A band is always queried as recorded samples, together with the value held when the range starts, whatever the bucket.
+- **States as bands**: A boolean, an enum, a text and a number whose state is marked as discrete (`IsDiscrete` of its `[State]` attribute) are a band below the lines, one per series with a header above it: the label and the current value, and the states that the band shows. Below lines a band starts and ends where the lines do, so a change of state sits under its time. A chart without lines names its range below the bands. A state has the same color in every band of a chart, and "Yes" is always blue. A band is always queried as recorded samples, together with the value held when the range starts, whatever the bucket.
 - **"No data" and "(no value)"**: A hatched span marked "No data" in a band has no known value: no history store recorded it, or nothing was recorded in it since recording started. "(no value)" is a value that was recorded as empty. A value never reaches across a span that no store recorded. Over a long range a band holds only the newest samples up to a limit, and the span before the oldest of them shows "No data". The [history design](../../architecture/design/history.md#state-timeline) has the details.
 - **Point limit**: A query returns at most 1000 points of a series. A band, or a line with `Bucket=Raw`, with more recorded samples in the range shows the newest of them, and its legend entry says "(oldest samples not shown)". A fixed bucket that would divide the range into more intervals is an error, and `Auto` never picks one.
 - **Recorded on change**: History is recorded when a value changes. A value that has not changed since HomeBlaze started shows "No data" in a band until it changes.
@@ -146,6 +146,6 @@ Three compact charts in a row: the temperature of each motor and the speed of th
 
 ## Related
 
-- [Basics](basics.md) - Type names, paths and colours
+- [Basics](basics.md) - Type names, paths and colors
 - [Overview](overview.md) - All widgets by group
 - [History design](../../architecture/design/history.md) - How history is recorded and queried

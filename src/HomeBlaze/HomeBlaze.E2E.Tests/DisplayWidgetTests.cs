@@ -161,7 +161,7 @@ public class DisplayWidgetTests
     }
 
     [Fact]
-    public async Task WhenFirstColumnHasAMap_ThenItsLinkShowsTheMappedTextInTheColourOfTheCase()
+    public async Task WhenFirstColumnHasAMap_ThenItsLinkShowsTheMappedTextInTheColorOfTheCase()
     {
         // Arrange & Act
         var page = await OpenPageAsync();

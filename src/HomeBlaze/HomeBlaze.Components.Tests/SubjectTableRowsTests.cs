@@ -181,18 +181,18 @@ public class SubjectTableRowsTests
         // Arrange
         var graph = CreateGraph();
         SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices", typeof(TestDevice).FullName, out var rows, out _);
-        var labelled = new SubjectTableColumn(_context) { Property = nameof(TestDevice.Speed), Label = "Speed" };
+        var labeled = new SubjectTableColumn(_context) { Property = nameof(TestDevice.Speed), Label = "Speed" };
         var titled = new SubjectTableColumn(_context) { Property = nameof(TestDevice.Speed) };
         var unknown = new SubjectTableColumn(_context) { Property = "Missing" };
 
         // Act
-        var labelledHeader = SubjectTableRows.GetHeader(labelled, rows);
+        var labeledHeader = SubjectTableRows.GetHeader(labeled, rows);
         var titledHeader = SubjectTableRows.GetHeader(titled, rows);
         var unknownHeader = SubjectTableRows.GetHeader(unknown, rows);
         var withoutRowsHeader = SubjectTableRows.GetHeader(titled, []);
 
         // Assert
-        Assert.Equal("Speed", labelledHeader);
+        Assert.Equal("Speed", labeledHeader);
         Assert.Equal("Rotation speed", titledHeader);
         Assert.Equal("Missing", unknownHeader);
         Assert.Equal(nameof(TestDevice.Speed), withoutRowsHeader);

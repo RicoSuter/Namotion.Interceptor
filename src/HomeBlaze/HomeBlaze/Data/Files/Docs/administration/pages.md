@@ -871,7 +871,7 @@ A widget block is allowed in three places: directly on the page, directly inside
 
 ## Widgets
 
-HomeBlaze ships widgets that are made for pages. [Widgets](widgets/overview.md) lists them by group, and each one has a page of its own with its arguments, its slots, live samples and its limits. [Widget Basics](widgets/basics.md) has the rules that they share, among them the names for an [icon](widgets/basics.md#icons) and for a [colour](widgets/basics.md#colours).
+HomeBlaze ships widgets that are made for pages. [Widgets](widgets/overview.md) lists them by group, and each one has a page of its own with its arguments, its slots, live samples and its limits. [Widget Basics](widgets/basics.md) has the rules that they share, among them the names for an [icon](widgets/basics.md#icons) and for a [color](widgets/basics.md#colors).
 
 Every other type that can be configured works as a block as well, for example the sample motor or a device: its arguments are its configuration properties, and it shows the widget that its type has. A type without a widget shows the notice "No Widget component for" with its name.
 

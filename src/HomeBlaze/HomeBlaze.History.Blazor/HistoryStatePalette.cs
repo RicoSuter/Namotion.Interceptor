@@ -1,15 +1,15 @@
 namespace HomeBlaze.History.Blazor;
 
 /// <summary>
-/// Gives each state label a colour in first-seen order, with the common boolean pair pinned so "Yes" is
+/// Gives each state label a color in first-seen order, with the common boolean pair pinned so "Yes" is
 /// always the highlighted state rather than whichever appeared first. One instance per chart, so a label
-/// has one colour in every band of that chart. Not thread-safe.
+/// has one color in every band of that chart. Not thread-safe.
 /// </summary>
 internal sealed class HistoryStatePalette
 {
     private const string PinnedOffColor = "#9E9E9E";
 
-    // The first line colour is pinned to the on state, so the other states take the line colours after it.
+    // The first line color is pinned to the on state, so the other states take the line colors after it.
     private static readonly string PinnedOnColor = HistoryChartPalette.LineColors[0];
     private static readonly string[] Colors = HistoryChartPalette.LineColors.Skip(1).ToArray();
 
@@ -17,12 +17,12 @@ internal sealed class HistoryStatePalette
     private readonly List<HistoryChartLegendEntry> _assigned = [];
     private int _cursor;
 
-    /// <summary>Gets the labels coloured so far with their colours, in first-seen order.</summary>
+    /// <summary>Gets the labels colored so far with their colors, in first-seen order.</summary>
     public IReadOnlyList<HistoryChartLegendEntry> Assigned => _assigned;
 
-    /// <summary>Gets the colour of a label, assigning the next one on first use.</summary>
+    /// <summary>Gets the color of a label, assigning the next one on first use.</summary>
     /// <param name="label">The state label.</param>
-    /// <returns>The CSS colour of the label.</returns>
+    /// <returns>The CSS color of the label.</returns>
     public string GetColor(string label)
     {
         if (_colors.TryGetValue(label, out var existing))
@@ -31,7 +31,7 @@ internal sealed class HistoryStatePalette
         }
 
         // Only a label that takes a palette slot moves the cursor, so a pinned label does not push a
-        // later label onto a colour already in use.
+        // later label onto a color already in use.
         var color = label switch
         {
             "Yes" or "True" or "On" => PinnedOnColor,

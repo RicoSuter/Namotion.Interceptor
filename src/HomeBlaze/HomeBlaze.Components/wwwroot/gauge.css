@@ -1,4 +1,4 @@
-/* The ring of a Gauge: the track and the value are two MudProgressCircular on top of each other, with the text in their centre. */
+/* The ring of a Gauge: the track and the value are two MudProgressCircular on top of each other, with the text in their center. */
 
 .gauge-ring {
     position: relative;

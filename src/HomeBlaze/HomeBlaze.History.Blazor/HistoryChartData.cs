@@ -43,7 +43,7 @@ public sealed record HistoryChartData(
 
 /// <summary>A number series: its gap-free runs of points, each drawn as one line in <paramref name="Color"/>.</summary>
 /// <param name="Label">The name of the series.</param>
-/// <param name="Color">The CSS colour of the line.</param>
+/// <param name="Color">The CSS color of the line.</param>
 /// <param name="Runs">The gap-free runs of points in time order.</param>
 /// <param name="IsPercent">Whether the points are fractions that are drawn in percent, see <see cref="HistoryChartAxis.ToPercent"/>.</param>
 public sealed record HistoryChartLine(
@@ -62,5 +62,5 @@ public sealed record HistoryChartBand(
 
 /// <summary>A state of the legend and its CSS fill.</summary>
 /// <param name="Label">The text of the state.</param>
-/// <param name="Fill">The CSS fill of the state, a colour or a gradient.</param>
+/// <param name="Fill">The CSS fill of the state, a color or a gradient.</param>
 public readonly record struct HistoryChartLegendEntry(string Label, string Fill);

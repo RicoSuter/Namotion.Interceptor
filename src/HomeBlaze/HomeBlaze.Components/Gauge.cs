@@ -7,10 +7,10 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Components;
 
 /// <summary>
-/// Shows a number as a ring between a minimum and a maximum, with the value in its centre.
+/// Shows a number as a ring between a minimum and a maximum, with the value in its center.
 /// </summary>
 [Category("Dashboard")]
-[Description("Shows a number as a ring with the value in its centre")]
+[Description("Shows a number as a ring with the value in its center")]
 [DisplayName("Gauge")]
 [SubjectIcon("Speed")]
 [InterceptorSubject]
@@ -47,7 +47,7 @@ public partial class Gauge : IConfigurable, ITitleProvider
     public partial double? Maximum { get; set; }
 
     /// <summary>
-    /// Name or path of the <see cref="ValueMap"/> that gives the text in the centre and the colour of the ring.
+    /// Name or path of the <see cref="ValueMap"/> that gives the text in the center and the color of the ring.
     /// </summary>
     [Configuration]
     [SubjectPath(typeof(ValueMap))]

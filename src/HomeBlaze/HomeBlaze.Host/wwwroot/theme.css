@@ -1,7 +1,7 @@
 /* Styles that differ by mode beyond the palette. MainLayout puts the class homeblaze-dark-mode on an element around the
    layout and the providers of dialogs, popovers and snackbars while the dark mode is on. */
 
-/* Text in a status colour in dark mode gets the lightened tone of the palette. MudBlazor gives alert text the darker
+/* Text in a status color in dark mode gets the lightened tone of the palette. MudBlazor gives alert text the darker
    tone, which is below 4.5:1 on cards, and that tone cannot be raised because filled buttons and chips use it on hover. */
 .homeblaze-dark-mode :is(.mud-alert-text-info, .mud-alert-outlined-info),
 .homeblaze-dark-mode :is(.mud-alert-text-info, .mud-alert-outlined-info) .mud-alert-icon {
@@ -23,7 +23,7 @@
     color: var(--mud-palette-error-lighten);
 }
 
-/* Outlined and text buttons in the info and error colours, which are below 4.5:1 on cards in dark mode. */
+/* Outlined and text buttons in the info and error colors, which are below 4.5:1 on cards in dark mode. */
 .homeblaze-dark-mode :is(.mud-button-outlined-info, .mud-button-text-info) {
     color: var(--mud-palette-info-lighten);
 }

@@ -40,7 +40,7 @@ public static class ValueReader
 
     /// <summary>
     /// Reads a property that <see cref="ResolveProperty"/> already resolved and applies a map that
-    /// <see cref="ResolveMap"/> already resolved, with the same text, colour and missing value as <see cref="Read"/>.
+    /// <see cref="ResolveMap"/> already resolved, with the same text, color and missing value as <see cref="Read"/>.
     /// </summary>
     /// <param name="property">The property, or null for a missing reading.</param>
     /// <param name="valueMap">The resolved map, or null for none.</param>
@@ -55,7 +55,7 @@ public static class ValueReader
 
     /// <summary>
     /// Reads the property with the name on a subject and applies a map that <see cref="ResolveMap"/> already
-    /// resolved, with the same text, colour and missing value as <see cref="Read"/> gives for a path.
+    /// resolved, with the same text, color and missing value as <see cref="Read"/> gives for a path.
     /// </summary>
     /// <param name="subject">The subject that has the property, for example a row of a table.</param>
     /// <param name="propertyName">The name of the property. Null, empty or unknown gives a missing reading.</param>

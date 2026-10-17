@@ -234,7 +234,7 @@ namespace HomeBlaze.Components
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Speed")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("Dashboard")]
-    [System.ComponentModel.Description("Shows a number as a ring with the value in its centre")]
+    [System.ComponentModel.Description("Shows a number as a ring with the value in its center")]
     [System.ComponentModel.DisplayName("Gauge")]
     public class Gauge : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
@@ -1485,7 +1485,7 @@ namespace HomeBlaze.Components.Operations
     }
     public enum OperationOutcome
     {
-        Cancelled = 0,
+        Canceled = 0,
         Succeeded = 1,
         Failed = 2,
     }

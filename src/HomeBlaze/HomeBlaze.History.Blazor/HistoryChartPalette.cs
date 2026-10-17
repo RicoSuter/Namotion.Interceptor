@@ -4,7 +4,7 @@ using System.Text;
 namespace HomeBlaze.History.Blazor;
 
 /// <summary>
-/// The colours of history charts and the background that draws a state band.
+/// The colors of history charts and the background that draws a state band.
 /// </summary>
 internal static class HistoryChartPalette
 {
@@ -24,13 +24,13 @@ internal static class HistoryChartPalette
     /// <summary>The legend text of a span whose value was recorded as absent.</summary>
     public const string NoValueLabel = "(no value)";
 
-    /// <summary>The line colours in the order the lines of a chart take them; the first is that of the history dialog.</summary>
+    /// <summary>The line colors in the order the lines of a chart take them; the first is that of the history dialog.</summary>
     public static readonly IReadOnlyList<string> LineColors =
         ["#2979FF", "#00B8A9", "#F6A609", "#8E44AD", "#E4572E", "#3D5A80", "#C2185B"];
 
-    /// <summary>Gets the colour of the line at <paramref name="index"/>, repeating after the last colour.</summary>
+    /// <summary>Gets the color of the line at <paramref name="index"/>, repeating after the last color.</summary>
     /// <param name="index">The zero-based position of the line in its chart.</param>
-    /// <returns>The CSS colour of the line.</returns>
+    /// <returns>The CSS color of the line.</returns>
     public static string GetLineColor(int index) => LineColors[index % LineColors.Count];
 
     /// <summary>Gets the text a segment stands for in a legend or a table.</summary>
@@ -40,7 +40,7 @@ internal static class HistoryChartPalette
         segment.IsUnknown ? UnknownLabel : segment.Label ?? NoValueLabel;
 
     /// <summary>
-    /// Builds the CSS background of a band as one gradient with hard colour stops rather than one element
+    /// Builds the CSS background of a band as one gradient with hard color stops rather than one element
     /// per run. A chattering property yields hundreds of sub-pixel runs, and as elements those cannot
     /// shrink below their minimum width, so the long runs lose their proportion and the newest runs are
     /// clipped off the end.
@@ -48,7 +48,7 @@ internal static class HistoryChartPalette
     /// <param name="segments">The runs of the band in time order, filling the window.</param>
     /// <param name="from">The start of the window.</param>
     /// <param name="to">The end of the window.</param>
-    /// <param name="palette">The state palette of the chart; colours the labels on first use.</param>
+    /// <param name="palette">The state palette of the chart; colors the labels on first use.</param>
     /// <returns>The CSS background, or <see cref="UnknownFill"/> for an empty window.</returns>
     public static string BuildBandBackground(
         IReadOnlyList<PropertyHistoryChartModel.StateSegment> segments,
@@ -72,7 +72,7 @@ internal static class HistoryChartPalette
             var segment = segments[index];
             hasUnknown |= segment.IsUnknown;
 
-            // An unknown run punches a transparent hole into the colour layer, through which the hatch shows.
+            // An unknown run punches a transparent hole into the color layer, through which the hatch shows.
             var fill = segment.IsUnknown
                 ? "transparent"
                 : segment.Label is { } label ? palette.GetColor(label) : NoValueFill;
@@ -98,11 +98,11 @@ internal static class HistoryChartPalette
     }
 
     /// <summary>
-    /// Builds the legend of a band: the states it shows in the order the palette coloured them, then the unknown
+    /// Builds the legend of a band: the states it shows in the order the palette colored them, then the unknown
     /// and the absent value when it shows them.
     /// </summary>
     /// <param name="segments">The runs of the band.</param>
-    /// <param name="palette">The state palette that coloured the band.</param>
+    /// <param name="palette">The state palette that colored the band.</param>
     /// <returns>The legend entries in display order.</returns>
     public static IReadOnlyList<HistoryChartLegendEntry> BuildBandLegend(
         IReadOnlyList<PropertyHistoryChartModel.StateSegment> segments, HistoryStatePalette palette)

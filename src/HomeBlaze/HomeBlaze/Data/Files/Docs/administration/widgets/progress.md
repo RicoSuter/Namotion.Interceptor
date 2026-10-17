@@ -15,7 +15,7 @@ A bar that shows where a number stands between a minimum and a maximum. Type nam
 | `Path` | Path (Number) | None | The [path](basics.md#paths) of the property whose value the bar shows |
 | `Minimum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the bar is empty, in the unit of the property |
 | `Maximum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the bar is full, in the unit of the property |
-| `Color` | Colour | `Primary` | The [colour](basics.md#colours) of the bar |
+| `Color` | Color | `Primary` | The [color](basics.md#colors) of the bar |
 
 ## Slots
 
@@ -23,7 +23,7 @@ A `Progress` has no slots.
 
 ## Samples
 
-Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so that is the end of the range. The second bar has another colour:
+Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so that is the end of the range. The second bar has another color:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -40,7 +40,7 @@ Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so
 :: HomeBlaze.Components.Progress Path=../Fan/CurrentSpeed Minimum=0 Maximum=3000 Color=Success
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **The range**: [Ranges](basics.md#ranges) has where the ends of the range come from and the messages for a missing or an empty range, the same as for a [Gauge](gauge.md) and a [Slider](slider.md).
 - **Outside the range**: A value below the minimum gives an empty bar and a value above the maximum a full one.
@@ -50,7 +50,7 @@ Two bars for a speed. The highest target speed of a sample motor is 3000 RPM, so
 
 ## Related
 
-- [Basics](basics.md) - Type names, paths, value widgets, colours and icons
+- [Basics](basics.md) - Type names, paths, value widgets, colors and icons
 - [Overview](overview.md) - All widgets by group
 - [Gauge](gauge.md) - A number as a ring between a minimum and a maximum
 - [Slider](slider.md) - Sets a number between a minimum and a maximum

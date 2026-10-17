@@ -140,7 +140,7 @@ The speed of the compressor in the three sizes of a gauge.
 ::::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/CurrentSpeed Label="Large" Minimum=0 Maximum=3000 Size=Large
 ::::
 
-Widgets of this tab: [ValueList](../Docs/administration/widgets/value-list.md), [ValueTile](../Docs/administration/widgets/value-tile.md), [Gauge](../Docs/administration/widgets/gauge.md), [HistoryChart](../Docs/administration/widgets/history-chart.md), [Indicator](../Docs/administration/widgets/indicator.md), [Progress](../Docs/administration/widgets/progress.md), [Card](../Docs/administration/widgets/card.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md) and [Responsive](../Docs/administration/widgets/responsive.md). The texts, colours and icons of the status and the mode come from the two [ValueMap](../Docs/administration/widgets/value-map.md) blocks at the top of this page.
+Widgets of this tab: [ValueList](../Docs/administration/widgets/value-list.md), [ValueTile](../Docs/administration/widgets/value-tile.md), [Gauge](../Docs/administration/widgets/gauge.md), [HistoryChart](../Docs/administration/widgets/history-chart.md), [Indicator](../Docs/administration/widgets/indicator.md), [Progress](../Docs/administration/widgets/progress.md), [Card](../Docs/administration/widgets/card.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md) and [Responsive](../Docs/administration/widgets/responsive.md). The texts, colors and icons of the status and the mode come from the two [ValueMap](../Docs/administration/widgets/value-map.md) blocks at the top of this page.
 ::: Tab#controls Title="Controls" Icon=Tune
 :::: HomeBlaze.Components.Responsive From=Sm
 ::::: HomeBlaze.Components.Card Title="Load" Icon=DonutLarge

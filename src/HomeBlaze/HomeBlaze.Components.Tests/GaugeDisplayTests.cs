@@ -191,7 +191,7 @@ public class GaugeDisplayTests
     [InlineData(Color.Default, Color.Primary)]
     [InlineData(Color.Success, Color.Success)]
     [InlineData(Color.Error, Color.Error)]
-    public void WhenReadingHasTheColourOfACase_ThenRingHasItAndPrimaryWithoutOne(Color caseColor, Color expected)
+    public void WhenReadingHasTheColorOfACase_ThenRingHasItAndPrimaryWithoutOne(Color caseColor, Color expected)
     {
         // Arrange
         var subject = new MeasuredSubject(_context) { Speed = 500 };
