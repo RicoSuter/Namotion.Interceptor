@@ -605,7 +605,7 @@ public partial class FluentStorageContainer :
     /// <param name="folder">The path of the folder within the storage, not empty.</param>
     /// <param name="metadata">The metadata, null to remove it.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    /// <exception cref="InvalidOperationException">The folder is not in the tree.</exception>
+    /// <exception cref="InvalidOperationException">The folder is not in the tree, or its metadata file could not be read.</exception>
     internal async Task WriteFolderMetadataAsync(string folder, FolderMetadata? metadata, CancellationToken cancellationToken)
     {
         var connection = Connection;
@@ -616,9 +616,9 @@ public partial class FluentStorageContainer :
 
             var path = StorageMetadataPath.GetFolderFilePath(folder);
             var document = GetMetadataDocument(connection, path);
-            document.Title = metadata?.Title;
-            document.NavigationTitle = metadata?.NavigationTitle;
-            document.Icon = metadata?.Icon;
+            document.Title = GetValue(metadata?.Title);
+            document.NavigationTitle = GetValue(metadata?.NavigationTitle);
+            document.Icon = GetValue(metadata?.Icon);
             return WriteMetadataDocumentAsync(connection, path, document, token);
         }, cancellationToken);
     }
@@ -626,7 +626,9 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Writes the metadata of the subject of a JSON file to the metadata file beside it, keeping the keys it does not know.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject is not the subject of a JSON file in this storage.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The subject is not the subject of a JSON file in this storage, or its metadata file could not be read.
+    /// </exception>
     internal async Task WriteSubjectMetadataAsync(IInterceptorSubject subject, SubjectMetadata? metadata, CancellationToken cancellationToken)
     {
         var connection = Connection;
@@ -640,8 +642,8 @@ public partial class FluentStorageContainer :
 
             var path = StorageMetadataPath.GetSubjectFilePath(entry.Path);
             var document = GetMetadataDocument(connection, path);
-            document.NavigationTitle = metadata?.NavigationTitle;
-            document.Icon = metadata?.Icon;
+            document.NavigationTitle = GetValue(metadata?.NavigationTitle);
+            document.Icon = GetValue(metadata?.Icon);
             document.Location = metadata?.Location;
             document.Alignment = metadata?.Alignment;
             return WriteMetadataDocumentAsync(connection, path, document, token);
@@ -656,7 +658,7 @@ public partial class FluentStorageContainer :
     /// <param name="name">The name of the child to move.</param>
     /// <param name="neighborName">The name of the child whose place it takes.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    /// <exception cref="InvalidOperationException">The folder is not in the tree, or a name is not a child of it.</exception>
+    /// <exception cref="InvalidOperationException">The folder is not in the tree, a name is not a child of it, or its metadata file could not be read.</exception>
     internal async Task MoveChildAsync(string folder, string name, string neighborName, CancellationToken cancellationToken)
     {
         var connection = Connection;
@@ -693,11 +695,22 @@ public partial class FluentStorageContainer :
             ? virtualFolder
             : throw new InvalidOperationException($"No folder at '{folder}'.");
 
-    // A copy, so that the entry keeps what the file holds until the write has succeeded.
+    // A copy, so that the entry keeps what the file holds until the write has succeeded. A file that could not be read
+    // is refused, because writing it would replace what someone wrote by hand.
     private static StorageMetadataDocument GetMetadataDocument(StorageConnection connection, string path)
-        => connection.Index.TryGet(path, out var entry) && entry.Metadata is { } metadata
-            ? metadata.Clone()
-            : new StorageMetadataDocument();
+    {
+        if (!connection.Index.TryGet(path, out var entry) || entry.IsFolder)
+        {
+            return new StorageMetadataDocument();
+        }
+
+        return entry.Metadata?.Clone()
+            ?? throw new InvalidOperationException($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
+    }
+
+    // Blank means not set, so that a value of only spaces is never written and a save with only such values deletes the file.
+    private static string? GetValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value;
 
     // Runs on the worker. A file that would be empty is deleted, so that a metadata file exists only while it holds something.
     private async Task WriteMetadataDocumentAsync(
@@ -706,16 +719,17 @@ public partial class FluentStorageContainer :
         if (document.IsEmpty)
         {
             await DeleteMetadataFileAsync(connection, path, cancellationToken);
+            connection.Reconciler.Apply();
+            _logger?.LogDebug("Removed empty metadata from storage: {Path}", path);
         }
         else
         {
             var entry = new StorageEntry { Path = path, IsFolder = false, Metadata = document };
             await WriteAndRecordAsync(connection, entry, document.Serialize(), cancellationToken);
             connection.Index.Set(entry);
+            connection.Reconciler.Apply();
+            _logger?.LogDebug("Wrote metadata to storage: {Path}", path);
         }
-
-        connection.Reconciler.Apply();
-        _logger?.LogDebug("Wrote metadata to storage: {Path}", path);
     }
 
     private static async Task DeleteMetadataFileAsync(StorageConnection connection, string path, CancellationToken cancellationToken)

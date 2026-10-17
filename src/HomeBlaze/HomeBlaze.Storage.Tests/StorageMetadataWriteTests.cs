@@ -1,3 +1,4 @@
+using System.Text;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
@@ -61,6 +62,55 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
         Assert.Null(docs.Metadata);
         Assert.Equal("Docs", docs.Title);
+    }
+
+    [Fact]
+    public async Task WhenFolderMetadataIsOnlyBlank_ThenNoFileIsWritten()
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+
+        // Act
+        await docs.WriteMetadataAsync(new FolderMetadata(" ", "", null), CancellationToken.None);
+
+        // Assert
+        Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
+        Assert.Null(docs.Metadata);
+    }
+
+    [Fact]
+    public async Task WhenFolderMetadataFileCannotBeRead_ThenWritingMetadataFailsAndKeepsTheFile()
+    {
+        // Arrange
+        const string content = """{"order":["a.md"],"color":"red",}x""";
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/.metadata.json", content);
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            docs.WriteMetadataAsync(new FolderMetadata("Documentation", null, null), CancellationToken.None));
+        Assert.Equal(Encoding.UTF8.GetBytes(content), File.ReadAllBytes(GetFullPath("Docs/.metadata.json")));
+    }
+
+    [Fact]
+    public async Task WhenFolderMetadataFileCannotBeRead_ThenMoveFailsAndKeepsTheFile()
+    {
+        // Arrange
+        const string content = """{"order":["a.md"],"color":"red",}x""";
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/b.md");
+        WriteFile("Docs/.metadata.json", content);
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            docs.MoveChildAsync("b.md", "a.md", CancellationToken.None));
+        Assert.Equal(Encoding.UTF8.GetBytes(content), File.ReadAllBytes(GetFullPath("Docs/.metadata.json")));
     }
 
     [Fact]
