@@ -46,14 +46,12 @@
     color: var(--mud-palette-primary-lighten) !important;
 }
 
-/* The bar with the actions of the selected widget (see SubjectComponent of HomeBlaze.Components) is a popover, which
-   MudBlazor renders in the provider above and not inside the widget, so its styles are here. MudBlazor moves a popover
-   whose top would be less than 24px (its overflowPadding) below the top of the window down to that line while the anchor
-   starts inside the window, so an unflipped bar can end up on the top edge of its widget. */
+/* The bar with the actions of the selected widget is a popover, which MudBlazor renders in the provider above and not
+   inside the widget, so the rules for the root of the popover are here. The content of the bar is styled in
+   SubjectComponent.razor.css of HomeBlaze.Components. MudBlazor moves a popover whose top would be less than 24px (its
+   overflowPadding) below the top of the window down to that line while the anchor starts inside the window, so an
+   unflipped bar can end up on the top edge of its widget. */
 ::deep .subject-action-bar {
-    display: flex;
-    gap: 2px;
-    padding: 2px;
     margin-top: calc(var(--mud-appbar-height, 64px) - 4px);
     /* MudBlazor lifts a popover that comes close to the app bar above it. The bar stays below the app bar like the page. */
     z-index: calc(var(--mud-zindex-popover) + 1) !important;
@@ -61,14 +59,4 @@
 
 ::deep .subject-action-bar[data-mudpopover-flip^="bottom"] {
     margin-top: 4px;
-}
-
-::deep .subject-action-bar .mud-icon-button {
-    padding: 4px;
-}
-
-@media (pointer: coarse) {
-    ::deep .subject-action-bar .mud-icon-button {
-        padding: 10px;
-    }
 }

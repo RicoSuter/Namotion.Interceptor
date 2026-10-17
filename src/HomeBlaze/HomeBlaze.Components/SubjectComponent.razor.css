@@ -58,6 +58,24 @@
     pointer-events: none;
 }
 
+/* MudBlazor renders the popover of the bar in its provider, where the rules of this file reach the element around the
+   buttons but not the root of the popover. The rules that place the root are in MainLayout.razor.css of HomeBlaze.Host. */
+.subject-action-bar-content {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+}
+
+.subject-action-bar-content ::deep .mud-icon-button {
+    padding: 4px;
+}
+
+@media (pointer: coarse) {
+    .subject-action-bar-content ::deep .mud-icon-button {
+        padding: 10px;
+    }
+}
+
 /* A grid cell and a canvas node cut off what does not fit into them, so the outline of a selectable widget in one is
    drawn inside. */
 :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper.selectable,
