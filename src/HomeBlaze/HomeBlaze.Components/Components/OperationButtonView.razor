@@ -11,6 +11,8 @@
     var isEnabled = method is not null && property!.IsMethodEnabled();
     var text = !string.IsNullOrEmpty(Label) ? Label : method?.Title ?? Path ?? string.Empty;
     var icon = MudBlazorIconResolver.ResolveOrNull(!string.IsNullOrEmpty(Icon) ? Icon : method is null ? null : OperationInvoker.GetIconName(method));
+    // A tile shows the icon alone when the method gives one, but never nothing: without a method it shows the path.
+    var tileLabel = !string.IsNullOrEmpty(Label) ? Label : method is null ? text : null;
     var tooltip = method is null ? Path : method.Description;
     var isDisabled = IsEditing || _isRunning || !isEnabled;
 }
@@ -18,9 +20,9 @@
 @if (Kind == OperationButtonKind.Tile)
 {
     <TileView TestId="operation-button-tile"
-              AccessibleName="@(string.IsNullOrEmpty(Label) ? text : null)"
+              AccessibleName="@(string.IsNullOrEmpty(tileLabel) ? text : null)"
               Tooltip="@tooltip"
-              Label="@Label"
+              Label="@tileLabel"
               Subtitle="@Subtitle"
               Icon="@icon"
               Color="@Color"

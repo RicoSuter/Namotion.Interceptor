@@ -208,6 +208,18 @@ public class TileWidgetTests
     }
 
     [Fact]
+    public async Task WhenOperationButtonTilePathLeadsNowhereAndHasNoLabel_ThenItShowsThePathAsItsLabel()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var tile = page.GetByRole(AriaRole.Button, new() { Name = "tilemotor/DoesNotExistEither", Exact = true });
+
+        // Assert
+        await Assertions.Expect(tile).ToBeDisabledAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveTextAsync("tilemotor/DoesNotExistEither");
+    }
+
+    [Fact]
     public async Task WhenTileIsTheOnlyContentOfAGridCell_ThenItFillsTheCell()
     {
         // Arrange & Act
