@@ -835,7 +835,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration]` | User-editable settings | Yes | No (unless also `[State]`) |
 | `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
-| `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
+| `[Configuration] + [State]` | Editable and displayed, but not writable through MCP's `set_property`, see [AI Agents](../administration/ai-agents.md#tools-and-permissions); expose a write through an operation instead | Yes | Yes |
 | `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
 | `[State] + [SubjectPath(type)]` | Link to the subject at a canonical path, see [Path Properties](#path-properties) | No | Yes (as the subject) |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |

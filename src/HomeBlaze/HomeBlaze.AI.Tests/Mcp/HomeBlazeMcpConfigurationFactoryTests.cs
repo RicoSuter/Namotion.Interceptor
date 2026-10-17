@@ -85,13 +85,15 @@ public class HomeBlazeMcpConfigurationFactoryTests
         Assert.Equal("Host instructions.", options.ServerInstructions);
     }
 
-    [Fact]
-    public async Task WhenAnAgentSetsAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenSettingAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged(bool forAgents)
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
         room.TargetTemperature = 20m;
-        var setProperty = CreateTools(room, forAgents: true)["set_property"];
+        var setProperty = CreateTools(room, forAgents)["set_property"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
@@ -104,47 +106,14 @@ public class HomeBlazeMcpConfigurationFactoryTests
         Assert.Equal(20m, room.TargetTemperature);
     }
 
-    [Fact]
-    public async Task WhenAnAgentSetsAStateProperty_ThenItIsWritten()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenSettingAStateProperty_ThenItIsWritten(bool forAgents)
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
-        var setProperty = CreateTools(room, forAgents: true)["set_property"];
-
-        // Act
-        var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
-            JsonSerializer.SerializeToElement(new { path = "/Temperature", value = 23 }), CancellationToken.None));
-
-        // Assert
-        Assert.True(result.GetProperty("success").GetBoolean());
-        Assert.Equal(23m, room.Temperature);
-    }
-
-    [Fact]
-    public async Task WhenTheExternalServerSetsAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged()
-    {
-        // Arrange
-        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
-        room.TargetTemperature = 20m;
-        var setProperty = CreateTools(room, forAgents: false)["set_property"];
-
-        // Act
-        var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
-            JsonSerializer.SerializeToElement(new { path = "/TargetTemperature", value = 30 }), CancellationToken.None));
-
-        // Assert
-        Assert.Equal(
-            "Property is not writable: /TargetTemperature. It is a configuration property; configuration cannot be changed through MCP.",
-            result.GetProperty("error").GetString());
-        Assert.Equal(20m, room.TargetTemperature);
-    }
-
-    [Fact]
-    public async Task WhenTheExternalServerSetsAStateProperty_ThenItIsWritten()
-    {
-        // Arrange
-        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
-        var setProperty = CreateTools(room, forAgents: false)["set_property"];
+        var setProperty = CreateTools(room, forAgents)["set_property"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await setProperty.Handler(

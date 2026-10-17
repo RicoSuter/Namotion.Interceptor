@@ -25,16 +25,15 @@ internal static class HomeBlazeMcpConfigurationFactory
 
     /// <summary>
     /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the
-    /// Markdown page hints of browse and search and every registered <see cref="McpToolProviderRegistration"/>.
+    /// Markdown page hints of browse and search and every registered <see cref="McpToolProviderRegistration"/>. set_property
+    /// refuses every property marked with <see cref="ConfigurationAttribute"/>, regardless of <paramref name="forAgents"/>.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
     /// <param name="forAgents">
-    /// Whether the tools serve the built-in agents: invoke_operation and the Markdown tools then refuse every
-    /// operation of an agent (<see cref="LlmAgentBase"/>). set_property refuses every property marked with
-    /// <see cref="ConfigurationAttribute"/> regardless of this flag, so configuration cannot be changed through
-    /// either the agent tools or the external MCP server.
+    /// Whether the tools serve the built-in agents; invoke_operation and the Markdown tools then refuse every
+    /// operation of an agent (<see cref="LlmAgentBase"/>).
     /// </param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
