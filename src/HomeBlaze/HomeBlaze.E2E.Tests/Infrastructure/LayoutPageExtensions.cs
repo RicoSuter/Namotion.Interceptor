@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -31,13 +30,9 @@ internal static class LayoutPageExtensions
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The edit menu is prerendered, and a click before the circuit is connected is lost.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
-            .ToBeVisibleAsync(new() { Timeout = 30000 });
+        await page.WaitUntilInteractiveAsync();
 
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.Locator(".mud-popover-open").GetByText(editMode, new() { Exact = true }).ClickAsync();
+        await page.SelectEditModeAsync(editMode);
 
         return page;
     }
@@ -49,6 +44,8 @@ internal static class LayoutPageExtensions
     public static async Task WithUnstoredLayoutAsync(
         this PlaywrightFixture fixture, IInterceptorSubject layout, Func<IPage, Task> testAsync)
     {
+        await fixture.ReconcileStorageAsync();
+
         var folder = fixture.GetDemoFolder();
         var originalChildren = folder.Children;
 

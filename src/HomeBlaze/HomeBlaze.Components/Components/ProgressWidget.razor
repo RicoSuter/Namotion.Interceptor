@@ -9,26 +9,31 @@
 
 @if (progress is not null)
 {
-    // Read once per render and never kept: the read is what the tracking scope records.
-    var value = ValueReader.ReadValue(PathResolver, progress, progress.Path);
-    var percent = ValueReader.GetProgressPercent(value, progress.Minimum, progress.Maximum);
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var path = progress.Path;
+    var property = ValueReader.ResolveProperty(PathResolver, progress, path);
+    var state = ValueRangeResolver.GetState(property, property?.GetValue(), progress.Minimum, progress.Maximum);
 
-    if (percent is null)
+    if (state.Error is not null)
     {
-        // A value that is no number has no bar, and neither has an empty range.
-        <ValueText Reading="@ValueReading.Missing" Path="@progress.Path" />
+        <WidgetArgumentError Message="@state.Error" />
+    }
+    else if (state.Percent is not { } percent)
+    {
+        // A missing value, a value that is no number and a path that leads nowhere have no bar.
+        <ValueText Reading="@ValueReading.Missing" Path="@path" />
     }
     else
     {
         @* In a row the bar fills the room between the label and the value. The minimum width keeps it visible when that room is small. *@
-        <MudProgressLinear Value="@percent.Value"
+        <MudProgressLinear Value="@percent"
                            Min="0"
                            Max="100"
                            Color="@progress.Color"
                            Rounded="true"
                            Style="min-width: 48px;"
                            data-testid="progress"
-                           data-percent="@percent.Value.ToString("0.##", CultureInfo.InvariantCulture)" />
+                           data-percent="@percent.ToString("0.##", CultureInfo.InvariantCulture)" />
     }
 }
 

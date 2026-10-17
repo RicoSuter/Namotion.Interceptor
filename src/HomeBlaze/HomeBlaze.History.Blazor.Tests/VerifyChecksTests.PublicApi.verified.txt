@@ -1,7 +1,151 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.E2E.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.History.Blazor.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace HomeBlaze.History.Blazor
 {
+    [HomeBlaze.Abstractions.Attributes.PageLayout]
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("ShowChart")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Dashboard")]
+    [System.ComponentModel.Description("Shows the recorded history of numbers as lines and of states as bands")]
+    [System.ComponentModel.DisplayName("History chart")]
+    public class HistoryChart : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public HistoryChart() { }
+        public HistoryChart(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Aggregation { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Bucket { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Compact { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int Height { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Range { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RefreshInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.Slot("Series")]
+        public HomeBlaze.History.Blazor.HistoryChartSeries[] Series { get; set; }
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class HistoryChartBand : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartBand>
+    {
+        public HistoryChartBand(string Label, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> Segments, string Background, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> Legend) { }
+        public string Background { get; init; }
+        public string Label { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLegendEntry> Legend { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> Segments { get; init; }
+    }
+    public sealed class HistoryChartData : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartData>
+    {
+        public HistoryChartData(System.DateTimeOffset From, System.DateTimeOffset To, System.TimeSpan? Bucket, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands { get; init; }
+        public System.TimeSpan? Bucket { get; init; }
+        public System.DateTimeOffset From { get; init; }
+        public bool IsEmpty { get; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines { get; init; }
+        public System.DateTimeOffset To { get; init; }
+    }
+    public readonly struct HistoryChartLegendEntry : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartLegendEntry>
+    {
+        public HistoryChartLegendEntry(string Label, string Fill) { }
+        public string Fill { get; init; }
+        public string Label { get; init; }
+    }
+    public sealed class HistoryChartLine : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartLine>
+    {
+        public HistoryChartLine(string Label, string Color, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs, bool IsPercent = false) { }
+        public string Color { get; init; }
+        public bool IsPercent { get; init; }
+        public string Label { get; init; }
+        public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs { get; init; }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [HomeBlaze.Abstractions.Attributes.PageLayout]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class HistoryChartSeries : HomeBlaze.Abstractions.IConfigurable, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public HistoryChartSeries() { }
+        public HistoryChartSeries(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Aggregation { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.MediaAddress]
+        public string? Color { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Label { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
+                typeof(System.Numerics.INumber<!0>),
+                typeof(bool),
+                typeof(System.Enum)})]
+        public string? Path { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public class HistoryChartView : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
+    {
+        public HistoryChartView() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment<int>? BandHeader { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int BandHeight { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.History.Blazor.HistoryChartData? Data { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? LineLegend { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback LinesClicked { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? LinesTitle { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int? MaxHeight { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool ShowAxes { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool ShowRange { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool ShowStateTable { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Style { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override void OnInitialized() { }
+        protected override void OnParametersSet() { }
+        protected override bool ShouldRender() { }
+    }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.History.Blazor.HistoryChart))]
+    public class HistoryChartWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IDisposable
+    {
+        public HistoryChartWidget() { }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
+        public bool IsEditing { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnAfterRender(bool firstRender) { }
+        protected override void OnInitialized() { }
+    }
     public static class PropertyHistoryChartModel
     {
         public const int MaxPoints = 1000;
@@ -10,7 +154,6 @@ namespace HomeBlaze.History.Blazor
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> BuildStateSegments(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, HomeBlaze.History.Abstractions.HistoryPoint? valueAtStart, System.DateTimeOffset from, System.DateTimeOffset to, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryCoverage> coverage, System.Func<HomeBlaze.History.Abstractions.HistoryPoint, string?> format) { }
         public static string DescribeAggregation(string aggregation) { }
         public static string DescribePeriod(HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod period, System.TimeSpan? resolvedBucket) { }
-        public static string FormatBucket(System.TimeSpan bucket) { }
         public static string? FormatDiscreteValue(HomeBlaze.History.Abstractions.HistoryPoint point, System.Type propertyType) { }
         public static System.Collections.Generic.IReadOnlyList<string> GateAggregations(HomeBlaze.History.Abstractions.ValueColumn column, bool isCumulative, System.Collections.Generic.IReadOnlySet<string> storeUnion, bool isDiscrete = false) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> HidePartialTotals(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, string aggregation, System.TimeSpan? bucket, System.DateTimeOffset from, System.DateTimeOffset to, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryCoverage> coverage) { }
@@ -23,10 +166,12 @@ namespace HomeBlaze.History.Blazor
         public static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> SplitIntoGapRuns(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, System.TimeSpan? singlePointWidth, System.DateTimeOffset windowEnd) { }
         public readonly struct ChartPeriod : System.IEquatable<HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod>
         {
-            public ChartPeriod(string Label, System.TimeSpan? Bucket, bool IsAuto) { }
+            public ChartPeriod(string ShortName, string Label, System.TimeSpan? Bucket, bool IsAuto) { }
             public System.TimeSpan? Bucket { get; init; }
             public bool IsAuto { get; init; }
+            public bool IsRaw { get; }
             public string Label { get; init; }
+            public string ShortName { get; init; }
         }
         public readonly struct StateSegment : System.IEquatable<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment>
         {
@@ -53,10 +198,22 @@ namespace HomeBlaze.History.Blazor
         public System.Type PropertyType { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry Registry { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.History.Blazor.PropertyHistoryDialogSettings? Settings { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, string propertyPath, string displayName, System.Type propertyType, bool isCumulative, string? unit = null, bool isDiscreteState = false) { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference?> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, HomeBlaze.Abstractions.ISubjectPathResolver pathResolver, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string displayName, HomeBlaze.History.Blazor.PropertyHistoryDialogSettings? settings = null) { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, string propertyPath, string displayName, System.Type propertyType, bool isCumulative, HomeBlaze.Abstractions.Attributes.StateUnit unit = 0, bool isDiscreteState = false, HomeBlaze.History.Blazor.PropertyHistoryDialogSettings? settings = null) { }
+    }
+    public sealed class PropertyHistoryDialogSettings : System.IEquatable<HomeBlaze.History.Blazor.PropertyHistoryDialogSettings>
+    {
+        public PropertyHistoryDialogSettings(System.TimeSpan? Range = default, HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod? Period = default, string? Aggregation = null) { }
+        public string? Aggregation { get; init; }
+        public HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod? Period { get; init; }
+        public System.TimeSpan? Range { get; init; }
     }
     public class _Imports
     {

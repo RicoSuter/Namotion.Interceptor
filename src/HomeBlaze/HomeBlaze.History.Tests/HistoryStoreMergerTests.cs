@@ -1045,4 +1045,30 @@ public class HistoryStoreMergerTests
         Assert.Equal(6, series.Points.Length);
         Assert.Equal(series.Points.Select(point => point.Timestamp).Distinct().Count(), series.Points.Length);
     }
+
+    // Held value lookup -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenStoresHoldAValueBeforeAnInstant_ThenTheHigherPriorityStoreAnswersTheLookup()
+    {
+        // Arrange
+        var persistent = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
+        }.AddSample(At(10), 1);
+        var live = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
+        }.AddSample(At(20), 2);
+
+        // Act
+        var held = await new[] { persistent, live }.GetValueAtAsync("temp", At(30), CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(held);
+        Assert.Equal(2d, held.Number);
+        Assert.Equal(At(20), held.Timestamp);
+    }
 }

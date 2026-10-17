@@ -138,6 +138,7 @@ The library has specialized support for:
 ## Coding Style
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
+- **US English spelling** in code, comments and documentation (e.g., `color`, `behavior`, `canceled`, `center`).
 - **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
 - **No hard wrapping** in markdown. Keep a paragraph on one line instead of breaking at a column.
 - **Inline comments: the why a reader cannot derive.** Length is earned by preventing a plausible wrong edit, such as a lock discipline, a pooled buffer that must not be read after release, or an ordering constraint. It is not earned by defending a decision against alternatives, which belongs in the pull request or `docs/design/`. Never restate the line below.

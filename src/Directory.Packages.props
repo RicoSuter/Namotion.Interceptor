@@ -10,7 +10,7 @@
     <PackageVersion Include="BlazorMonaco" Version="3.4.0" />
     <PackageVersion Include="Bogus" Version="35.6.5" />
     <PackageVersion Include="Castle.Core" Version="5.2.1" />
-    <PackageVersion Include="CodeBeam.MudBlazor.Extensions" Version="9.0.3" />
+    <PackageVersion Include="CodeBeam.MudBlazor.Extensions" Version="9.2.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="Excubo.Blazor.Diagrams" Version="4.1.136" />
     <PackageVersion Include="FluentModbus" Version="5.3.2" />
@@ -34,6 +34,7 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.11.0" />
     <PackageVersion Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageVersion Include="Microsoft.Playwright" Version="1.63.0" />
@@ -43,7 +44,7 @@
     <PackageVersion Include="Moq" Version="4.20.72" />
     <PackageVersion Include="MQTTnet" Version="5.1.0.1559" />
     <PackageVersion Include="MQTTnet.Server" Version="5.1.0.1559" />
-    <PackageVersion Include="MudBlazor" Version="9.2.0" />
+    <PackageVersion Include="MudBlazor" Version="9.11.0" />
     <PackageVersion Include="NBench" Version="2.0.1" />
     <PackageVersion Include="NSwag.AspNetCore" Version="14.6.1" />
     <PackageVersion Include="NuGet.Frameworks" Version="7.3.1" />

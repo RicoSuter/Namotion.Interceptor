@@ -46,19 +46,22 @@ public static class HistoryStoreMerger
         registry.KnownSubjects.Keys.OfType<IHistoryStore>().QueryHistoryAsync(query, cancellationToken);
 
     /// <summary>
-    /// Gets the value held at <paramref name="asOf"/> from the registry's history stores: the newest
-    /// sample at or before it, taking the first hit in priority order. A raw query only returns the
-    /// samples inside its window, so a caller that renders a held value (the state timeline) needs
-    /// this to know what the value was entering the window. Returns null when no store has a sample
-    /// it can vouch for.
+    /// Gets the value held at <paramref name="asOf"/> from the store set: the newest sample at or before
+    /// it, taking the first hit in priority order. A raw query only returns the samples inside its window,
+    /// so a caller that renders a held value (the state timeline) needs this to know what the value was
+    /// entering the window. Returns null when no store has a sample it can vouch for.
+    /// </summary>
+    public static Task<HistoryPoint?> GetValueAtAsync(
+        this IEnumerable<IHistoryStore> stores, string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken) =>
+        ResolveHeldValueAsync(OrderByPriority(stores), propertyPath, asOf, cancellationToken);
+
+    /// <summary>
+    /// Gets the value held at <paramref name="asOf"/> from the registry's history stores. Convenience
+    /// overload over the store-set lookup.
     /// </summary>
     public static Task<HistoryPoint?> GetValueAtAsync(
         this ISubjectRegistry registry, string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken) =>
-        ResolveHeldValueAsync(
-            OrderByPriority(registry.KnownSubjects.Keys.OfType<IHistoryStore>()),
-            propertyPath,
-            asOf,
-            cancellationToken);
+        registry.KnownSubjects.Keys.OfType<IHistoryStore>().GetValueAtAsync(propertyPath, asOf, cancellationToken);
 
     /// <summary>
     /// Orders the stores highest priority first. The store set comes from a dictionary's key

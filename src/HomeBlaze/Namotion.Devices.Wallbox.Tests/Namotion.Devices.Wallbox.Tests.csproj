@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Devices.Wallbox\Namotion.Devices.Wallbox.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
   </ItemGroup>
 
 </Project>

@@ -80,7 +80,7 @@ internal sealed class MarkdownBlockReconciler
         }
 
         // Changes lines but neither the blocks nor their order, so the block table stays valid.
-        var configurationJson = MarkdownBlockConfiguration.Serialize(serializer, owner);
+        var configurationJson = MarkdownBlockConfiguration.Serialize(serializer, owner, page.AllBlocks[blockIndex]);
         var reconciler = new MarkdownBlockReconciler(
             owner,
             blockIndex,
@@ -281,13 +281,13 @@ internal sealed class MarkdownBlockReconciler
                 return false;
             }
 
-            var childJson = MarkdownBlockConfiguration.Serialize(_serializer, child);
+            var childJson = MarkdownBlockConfiguration.Serialize(_serializer, child, block: null);
             content = MarkdownBlockWriter.CreateBlock(
                 child.GetType().FullName!, null, childJson, fenceLength + 1, placement.LineEnding, placement.HasClosingLine);
             blockCount++;
         }
 
-        var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, value);
+        var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, value, block: null);
         var text = MarkdownBlockWriter.Indent(
             MarkdownBlockWriter.CreateBlock(
                 slot.Name, null, configurationJson, fenceLength, placement.LineEnding, placement.HasClosingLine, content),

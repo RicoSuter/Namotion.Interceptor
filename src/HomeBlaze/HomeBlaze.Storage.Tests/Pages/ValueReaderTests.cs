@@ -182,6 +182,110 @@ public class ValueReaderTests
     }
 
     [Fact]
+    public async Task WhenPropertyOfASubjectIsRead_ThenTextIsTheDisplayValue()
+    {
+        // Arrange
+        var (_, page) = await AddPageAsync();
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+
+        // Act
+        var reading = ValueReader.ReadProperty(meter, nameof(TestMeter.Power), null, null);
+
+        // Assert
+        Assert.False(reading.IsMissing);
+        Assert.Equal("1.23 kW", reading.Text);
+        Assert.Equal(nameof(TestMeter.Power), reading.Property?.Name);
+        Assert.Null(reading.MapError);
+    }
+
+    [Fact]
+    public async Task WhenPropertyOfASubjectIsReadWithAMap_ThenTheCaseApplies()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
+
+        // Act
+        var reading = ValueReader.ReadProperty(meter, nameof(TestMeter.IsOn), valueMap, null);
+
+        // Assert
+        Assert.Equal("an", reading.Text);
+        Assert.Equal(Color.Success, reading.Color);
+        Assert.Equal("Lightbulb", reading.Icon);
+    }
+
+    [Theory]
+    [InlineData("Temperature")]
+    [InlineData("Missing")]
+    [InlineData("")]
+    [InlineData(null)]
+    public async Task WhenPropertyOfASubjectIsNotSetOrUnknown_ThenReadingIsMissing(string? propertyName)
+    {
+        // Arrange
+        var (_, page) = await AddPageAsync();
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+
+        // Act
+        var reading = ValueReader.ReadProperty(meter, propertyName, null, null);
+
+        // Assert
+        Assert.True(reading.IsMissing);
+        Assert.Equal(ValueReader.MissingText, reading.Text);
+        Assert.Null(reading.MapError);
+    }
+
+    [Fact]
+    public async Task WhenMapIsNoValueMap_ThenResolvingItGivesTheMapError()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var map = ValueReader.ResolveMap(resolver, page, "nomap", out var error);
+
+        // Assert
+        Assert.Null(map);
+        Assert.Equal("Cannot resolve map: nomap", error);
+    }
+
+    [Fact]
+    public async Task WhenPropertyOfASubjectIsReadWithAResolvedMap_ThenReadingEqualsThatOfThePath()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
+
+        // Act
+        var fromSubject = ValueReader.ReadProperty(meter, nameof(TestMeter.IsOn), valueMap, null);
+        var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+
+        // Assert
+        Assert.Equal(fromPath, fromSubject);
+        Assert.Equal("an", fromSubject.Text);
+    }
+
+    [Fact]
+    public async Task WhenResolvedPropertyIsRead_ThenReadingEqualsThatOfThePath()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var property = ValueReader.ResolveProperty(resolver, page, "meter/IsOn");
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
+
+        // Act
+        var fromProperty = ValueReader.ReadResolved(property, valueMap, null);
+        var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+        var withoutProperty = ValueReader.ReadResolved(null, valueMap, null);
+
+        // Assert
+        Assert.Equal(fromPath, fromProperty);
+        Assert.True(withoutProperty.IsMissing);
+        Assert.Null(withoutProperty.MapError);
+    }
+
+    [Fact]
     public void WhenReadingIsTheMissingOne_ThenItShowsTheDashAndNoError()
     {
         // Act
@@ -197,23 +301,26 @@ public class ValueReaderTests
     }
 
     [Fact]
-    public async Task WhenLabelIsNotGiven_ThenItIsTheTitleOrTheNameOfTheProperty()
+    public async Task WhenLabelIsNotGiven_ThenItIsTheTitleOrTheNameOfThePropertyOrThePath()
     {
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var reading = ValueReader.Read(resolver, page, "meter/Power", null, null);
+        var missing = ValueReader.Read(resolver, page, "meter/Missing", null, null);
 
         // Act
-        var given = ValueReader.GetLabel(reading, "Leistung");
-        var fromProperty = ValueReader.GetLabel(reading, null);
-        var withoutReading = ValueReader.GetLabel(null, null);
-        var fromTitle = ValueReader.GetLabel(ValueReader.Read(resolver, page, "meter/Flow", null, null), null);
+        var given = ValueReader.GetLabel(reading.Property, "Leistung", "meter/Power");
+        var fromProperty = ValueReader.GetLabel(reading.Property, null, "meter/Power");
+        var fromTitle = ValueReader.GetLabel(ValueReader.Read(resolver, page, "meter/Flow", null, null).Property, null, "meter/Flow");
+        var fromPath = ValueReader.GetLabel(missing.Property, null, "meter/Missing");
+        var withoutPath = ValueReader.GetLabel(null, null, null);
 
         // Assert
         Assert.Equal("Leistung", given);
         Assert.Equal("Power", fromProperty);
         Assert.Equal("Flow rate", fromTitle);
-        Assert.Equal(string.Empty, withoutReading);
+        Assert.Equal("meter/Missing", fromPath);
+        Assert.Equal(string.Empty, withoutPath);
     }
 
     [Fact]

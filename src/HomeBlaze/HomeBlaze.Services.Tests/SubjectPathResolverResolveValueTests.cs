@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Models;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -188,5 +189,25 @@ public class SubjectPathResolverResolveValueTests : SubjectPathResolverTestBase
 
         // Assert
         Assert.Null(property);
+    }
+
+    [Fact]
+    public void WhenAPathEndsAtAnAttribute_ThenItResolvesTheValueOfTheAttribute()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Motor" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+        var attribute = child.TryGetRegisteredProperty(nameof(TestContainer.Name))!
+            .AddAttribute("Unit", typeof(string), _ => "rpm", null);
+
+        // Act
+        var value = Resolver.ResolveValue($"/Child/{attribute.Name}", PathStyle.Canonical);
+        var property = Resolver.ResolveScopedProperty($"/Child/{attribute.Name}", PathStyle.Canonical, root);
+
+        // Assert
+        Assert.Equal("Name@Unit", attribute.Name);
+        Assert.Equal("rpm", value);
+        Assert.Same(attribute, property);
     }
 }

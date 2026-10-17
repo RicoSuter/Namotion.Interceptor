@@ -2,7 +2,7 @@
 
 @if (Reading.MapError is not null)
 {
-    <MudAlert Severity="Severity.Error" Dense="true" data-testid="value-map-error">@Reading.MapError</MudAlert>
+    <WidgetArgumentError Message="@Reading.MapError" />
 }
 else if (Reading.IsMissing)
 {

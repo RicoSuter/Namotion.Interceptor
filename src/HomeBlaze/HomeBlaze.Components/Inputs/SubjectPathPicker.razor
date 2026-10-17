@@ -1,3 +1,5 @@
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Operations
 @using Namotion.Interceptor.Registry.Attributes
 
 @inject RootManager RootManager
@@ -15,7 +17,7 @@
     @if (_previewValue != null || _isValidPath)
     {
         <MudText Typo="Typo.caption" Class="mt-1 mb-2">
-            Preview: @(_previewValue?.ToString() ?? "(subject)")
+            Preview: @(_previewValue is MethodMetadata method ? method.Title : _previewValue?.ToString() ?? "(subject)")
         </MudText>
     }
 
@@ -81,6 +83,10 @@
     [Parameter]
     public Func<RegisteredSubjectProperty, bool>? IsPropertyVisible { get; set; }
 
+    /// <summary>
+    /// Decides whether a property can be selected, every listed property when null. An operation and an attribute are
+    /// listed only when this accepts them, an attribute below its property.
+    /// </summary>
     [Parameter]
     public Func<RegisteredSubjectProperty, bool>? CanSelectProperty { get; set; }
 
@@ -243,6 +249,10 @@
         {
             return LoadPropertiesFromSubject(parent.Subject, parent.Path);
         }
+        else if (parent.Property is { CanContainSubjects: false } && CanSelectProperty is not null)
+        {
+            return LoadAttributes(parent.Property, parent.Path);
+        }
 
         return children;
     }
@@ -290,9 +300,18 @@
                 {
                     isExpandable = HasExpandableProperties(property.Children[0].Subject);
                 }
+                else if (property is { IsAttribute: false, CanContainSubjects: false })
+                {
+                    isExpandable = HasListedAttributes(property);
+                }
 
-                // Include if: has State attribute OR is expandable
-                if (!hasState && !isExpandable)
+                // Only methods can be listed, and only when a predicate is set to accept them; skip the metadata
+                // lookup otherwise, as it evaluates getters for interface- and object-typed properties.
+                var method = CanSelectProperty is not null ? property.TryGetMethodMetadata() : null;
+                var isListedMethod = IsListedMethod(property, method);
+
+                // Include if: has State attribute OR is expandable, also by its attributes, OR is an operation that can be selected
+                if (!hasState && !isExpandable && !isListedMethod)
                     continue;
 
                 var propertyPath = $"{basePath.TrimEnd('/')}/{property.Name}";
@@ -301,14 +320,15 @@
                 var isEnabledAttribute = property.TryGetAttribute(KnownAttributes.IsEnabled);
                 var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
 
-                // Check if property can be selected
-                var canSelect = CanSelectProperty == null || CanSelectProperty(property);
+                // Check if property can be selected; for a method reuse IsListedMethod's result instead of calling the
+                // predicate a second time for the same property.
+                var canSelect = method is not null ? isListedMethod : CanSelectProperty == null || CanSelectProperty(property);
 
                 var pathItem = new PathTreeItem
                 {
                     DisplayName = property.Name,
                     Path = propertyPath,
-                    Icon = GetPropertyIcon(property),
+                    Icon = method is not null ? GetMethodIcon(method) : GetPropertyIcon(property),
                     Property = property,
                     IsExpandable = isExpandable,
                     IsEnabled = isEnabled,
@@ -326,6 +346,59 @@
         }
 
         return children;
+    }
+
+    // An attribute is a property of the subject, so its path is a sibling of the path of its property: "/Motor/Speed"
+    // has the attribute "/Motor/Speed_Minimum".
+    private List<TreeItemData<PathTreeItem>> LoadAttributes(RegisteredSubjectProperty property, string propertyPath)
+    {
+        var subjectPath = propertyPath[..(propertyPath.LastIndexOf('/') + 1)];
+        var children = new List<TreeItemData<PathTreeItem>>();
+        foreach (var attribute in SubjectPathSelection.GetListedAttributes(property, CanSelectProperty!))
+        {
+            var isExpandable = HasListedAttributes(attribute);
+            children.Add(new TreeItemData<PathTreeItem>
+            {
+                Value = new PathTreeItem
+                {
+                    DisplayName = attribute.BrowseName,
+                    Path = subjectPath + attribute.Name,
+                    Icon = Icons.Material.Filled.LocalOffer,
+                    Property = attribute,
+                    IsExpandable = isExpandable,
+                    CanSelect = CanSelectProperty!(attribute)
+                },
+                Expanded = false,
+                Expandable = isExpandable,
+                Children = isExpandable ? CreatePlaceholderChildren() : null
+            });
+        }
+
+        return children;
+    }
+
+    // Only a predicate that accepts an attribute lists one, like an operation.
+    private bool HasListedAttributes(RegisteredSubjectProperty property)
+    {
+        return CanSelectProperty is not null && SubjectPathSelection.GetListedAttributes(property, CanSelectProperty).Any();
+    }
+
+    private static bool IsUnderAttributeItem(PathTreeItem item, string targetPath)
+    {
+        if (item.Property is not { CanContainSubjects: false } property)
+        {
+            return false;
+        }
+
+        var subjectPathLength = item.Path.LastIndexOf('/') + 1;
+        if (targetPath.Length <= subjectPathLength ||
+            string.Compare(targetPath, 0, item.Path, 0, subjectPathLength, StringComparison.OrdinalIgnoreCase) != 0 ||
+            targetPath.IndexOf('/', subjectPathLength) >= 0)
+        {
+            return false;
+        }
+
+        return SubjectPathSelection.IsAttributeOf(property.Parent.TryGetProperty(targetPath[subjectPathLength..]), property);
     }
 
     private void ExpandToSelectedPath()
@@ -362,7 +435,8 @@
             var isUnderItem = itemPath == "/"
                 ? targetPath.StartsWith("/", StringComparison.OrdinalIgnoreCase)
                 : targetPath.StartsWith(itemPath + "/", StringComparison.OrdinalIgnoreCase) ||
-                  targetPath.StartsWith(itemPath + "[", StringComparison.OrdinalIgnoreCase);
+                  targetPath.StartsWith(itemPath + "[", StringComparison.OrdinalIgnoreCase) ||
+                  IsUnderAttributeItem(item.Value, targetPath);
             if (isUnderItem)
             {
                 // Expand this node
@@ -419,6 +493,12 @@
             if (p.GetStateMetadata() != null)
                 return true;
 
+            // Operation that can be selected - will be shown; skip the metadata lookup when no predicate is
+            // set, as it evaluates getters for interface- and object-typed properties.
+            var method = CanSelectProperty is not null ? p.TryGetMethodMetadata() : null;
+            if (IsListedMethod(p, method))
+                return true;
+
             // Collection/Dictionary with children - will be shown
             if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Length > 0)
                 return true;
@@ -427,7 +507,8 @@
             if (p is { IsSubjectReference: true, Children.Length: > 0 })
                 return HasExpandableProperties(p.Children[0].Subject);
 
-            return false;
+            // Property with attributes that can be selected - will be shown
+            return !p.IsAttribute && !p.CanContainSubjects && HasListedAttributes(p);
         });
     }
 
@@ -440,6 +521,18 @@
         if (property.IsSubjectReference)
             return Icons.Material.Filled.Link;
         return Icons.Material.Filled.Label;
+    }
+
+    // Only a predicate that accepts an operation lists one, so the expression picker (no predicate) and the pickers
+    // for subjects never offer an operation.
+    private bool IsListedMethod(RegisteredSubjectProperty property, MethodMetadata? method)
+    {
+        return method is not null && CanSelectProperty is not null && CanSelectProperty(property);
+    }
+
+    private static string GetMethodIcon(MethodMetadata method)
+    {
+        return MudBlazorIconResolver.Resolve(OperationInvoker.GetIconName(method));
     }
 
     private static string? GetItemClass(PathTreeItem? item)

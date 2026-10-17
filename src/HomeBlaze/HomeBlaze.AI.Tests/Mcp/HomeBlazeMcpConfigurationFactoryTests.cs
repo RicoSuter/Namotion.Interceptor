@@ -102,13 +102,15 @@ public class HomeBlazeMcpConfigurationFactoryTests
         Assert.Equal("Host instructions.", options.ServerInstructions);
     }
 
-    [Fact]
-    public async Task WhenAnAgentSetsAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenSettingAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged(bool forAgents)
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
         room.TargetTemperature = 20m;
-        var setProperty = CreateTools(room, forAgents: true)["set_property"];
+        var setProperty = CreateTools(room, forAgents)["set_property"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
@@ -116,17 +118,19 @@ public class HomeBlazeMcpConfigurationFactoryTests
 
         // Assert
         Assert.Equal(
-            "Property is not writable: /TargetTemperature. It is a configuration property; agents cannot change configuration.",
+            "Property is not writable: /TargetTemperature. It is a configuration property; set_property cannot change configuration, an operation of the subject may.",
             result.GetProperty("error").GetString());
         Assert.Equal(20m, room.TargetTemperature);
     }
 
-    [Fact]
-    public async Task WhenAnAgentSetsAStateProperty_ThenItIsWritten()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenSettingAStateProperty_ThenItIsWritten(bool forAgents)
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
-        var setProperty = CreateTools(room, forAgents: true)["set_property"];
+        var setProperty = CreateTools(room, forAgents)["set_property"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
@@ -135,23 +139,6 @@ public class HomeBlazeMcpConfigurationFactoryTests
         // Assert
         Assert.True(result.GetProperty("success").GetBoolean());
         Assert.Equal(23m, room.Temperature);
-    }
-
-    [Fact]
-    public async Task WhenTheServerConfigurationIsWritable_ThenConfigurationPropertiesCanStillBeSet()
-    {
-        // Arrange
-        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
-        room.TargetTemperature = 20m;
-        var setProperty = CreateTools(room, forAgents: false)["set_property"];
-
-        // Act
-        var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
-            JsonSerializer.SerializeToElement(new { path = "/TargetTemperature", value = 30 }), CancellationToken.None));
-
-        // Assert
-        Assert.True(result.GetProperty("success").GetBoolean());
-        Assert.Equal(30m, room.TargetTemperature);
     }
 
     /// <summary>Creates the services the configuration factory needs, after <paramref name="configure"/> added others.</summary>

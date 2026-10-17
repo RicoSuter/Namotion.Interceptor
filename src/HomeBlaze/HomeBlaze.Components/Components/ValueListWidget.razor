@@ -21,7 +21,7 @@
     }
 }
 
-<MudList T="string" Dense="true" ReadOnly="true" Padding="false" data-testid="value-list">
+<MudList T="string" Dense="true" ReadOnly="true" Padding="false" Class="value-list" data-testid="value-list">
     @for (var index = 0; index < rows.Length; index++)
     {
         var row = rows[index];
@@ -46,10 +46,10 @@
                 }
 
                 @* The label takes the free room, and with content it is the content that does. *@
-                <MudText Typo="Typo.body2" Class="@(content is null ? "flex-grow-1 ma-0" : "ma-0")" data-testid="value-label">@ValueReader.GetLabel(reading, row.Label)</MudText>
+                <MudText Typo="Typo.body2" Class="@(content is null ? "flex-grow-1 ma-0" : "ma-0")" data-testid="value-label">@ValueReader.GetLabel(reading?.Property, row.Label, path)</MudText>
                 @if (content is not null)
                 {
-                    @* MudBlazor 9.2 has no text alignment utility other than this class of MudText. A flex layout is no alternative, because the bar of a Progress has to fill the room. *@
+                    @* MudBlazor has no text alignment utility other than this class of MudText. A flex layout is no alternative, because the bar of a Progress has to fill the room. *@
                     <div class="flex-grow-1 mud-typography-align-right" data-testid="value-content">
                         <SubjectComponent Subject="@content" Type="SubjectComponentType.Widget" />
                     </div>
@@ -63,13 +63,6 @@
         </MudListItem>
     }
 </MudList>
-
-<style>
-    /* A page gives every paragraph a distance above and below. A utility class cannot reach the paragraph that MudListItem wraps its content in or the paragraphs of the content of a row, and this rule removes the distance of both. Content with several paragraphs loses the distance between them. */
-    .mud-list-item.value-list-item p {
-        margin: 0;
-    }
-</style>
 
 @code {
     [Parameter]

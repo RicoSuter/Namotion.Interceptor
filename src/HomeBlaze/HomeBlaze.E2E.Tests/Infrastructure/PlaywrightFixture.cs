@@ -31,10 +31,15 @@ public class PlaywrightFixture : IAsyncLifetime
     /// </summary>
     public IServiceProvider ServerServices => _factory?.ServerServices ?? throw new InvalidOperationException("Server not started");
 
+    /// <summary>
+    /// The warnings and errors that the server under test logs.
+    /// </summary>
+    public ServerLogRecorder ServerLog => _factory?.ServerLog ?? throw new InvalidOperationException("Server not started");
+
     public async Task InitializeAsync()
     {
-        // Start the test server with Kestrel. It learns the test subject and its widget before it loads anything.
-        _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget)]);
+        // Start the test server with Kestrel. It learns the test subjects and the widget before it loads anything.
+        _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget), typeof(HistoryValuesSubject)]);
         // Force server to start by accessing ServerAddress which calls EnsureServer
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
@@ -131,14 +136,21 @@ public class PlaywrightFixture : IAsyncLifetime
     /// </summary>
     private async Task AttachSubjectToRootAsync(string name, IInterceptorSubject subject)
     {
+        await ReconcileStorageAsync();
+
         var root = GetRoot();
-
-        // A pass of the storage that finds a change sets the children of the root anew from its files, which drops
-        // this subject. A pass now takes in what earlier tests left changed on disk, so that the pass they asked
-        // for, which runs seconds later, finds nothing.
-        await root.ReconcileAsync();
-
         root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
+    }
+
+    /// <summary>
+    /// Runs a pass of the storage now. Call it before a test sets the children of a folder or of the root itself.
+    /// </summary>
+    public async Task ReconcileStorageAsync()
+    {
+        // A pass of the storage that finds a change sets the children of a folder anew from its files, which drops what
+        // a test put there. A pass now takes in what earlier tests left changed on disk, so that the pass they asked for,
+        // which runs seconds later, finds nothing.
+        await GetRoot().ReconcileAsync();
     }
 
     /// <summary>

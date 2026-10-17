@@ -1,0 +1,5 @@
+/* FocusOnNavigate (Routes.razor) focuses the title for screen readers, which gives it tabindex="-1". Tab never reaches
+   it, so the outline only marks this programmatic focus, which Chrome treats as :focus-visible after a full page load. */
+h1[tabindex="-1"]:focus {
+    outline: none;
+}

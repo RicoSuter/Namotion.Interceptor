@@ -64,7 +64,7 @@ internal static partial class MarkdownWriteRules
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage.</exception>
     public static void EnsureNotWithinStorageWork(IStorageContainer storage)
     {
-        if (storage is FluentStorageContainer { IsWithinRunningOperation: true })
+        if (storage is FluentStorageContainer { IsCallFromWithinWorkerItem: true })
         {
             throw new InvalidOperationException(StorageWorker.CallFromWithinItemMessage);
         }
@@ -107,10 +107,12 @@ internal static partial class MarkdownWriteRules
 
     private const string LayoutMessage =
         "With the permission to edit page layout, only layout blocks can be added, changed, removed or moved: cards, tabs, " +
-        "tab, flow, grid and canvas layouts, expansion panels, alerts, style blocks, value widgets such as ValueTile, " +
-        "Indicator, Progress and ValueList, and Widget references to existing subjects, with single values of their " +
-        "configuration on the head line or in the json block (the Cell and Node blocks of a grid and a canvas follow the " +
-        "same rules), links only to http, https, mailto or relative addresses and no picture. Every other block, and each " +
+        "tab, flow, grid and canvas layouts, Responsive blocks, expansion panels, alerts, style blocks, value widgets such " +
+        "as ValueTile, Indicator, Progress, Gauge, ValueList and SubjectTable, HistoryChart charts, and Widget references " +
+        "to existing subjects, with single values of their configuration on the head line or in the json block (the Cell, " +
+        "Node, Column and Series blocks of a grid, a canvas, a table and a chart follow the same rules), links only to " +
+        "http, https, mailto or relative addresses, no picture and no color of a chart series. Control blocks such as " +
+        "Switch, Slider, Select, Control and OperationButton are no layout blocks. Every other block, and each " +
         "old subject(name) code block, " +
         "must stay exactly as ReadRawContent shows it, with *** where it hides a secret value, inside the same blocks and " +
         $"at the same position among the content around it, and {MarkdownFile.ActiveContent} cannot be added or changed.";

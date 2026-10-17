@@ -45,6 +45,9 @@ public class LayoutBlockSaveTests
             var emptyCell = page.Locator(".grid-cell.empty[style*='grid-column: 3']");
             await Assertions.Expect(emptyCell).ToBeVisibleAsync(new() { Timeout = Timeout });
 
+            // The empty cells of a grid add a widget once the grid is selected.
+            await emptyCell.SelectWidgetAsync();
+
             // Act
             await emptyCell.ClickAsync();
             await Assertions.Expect(SubjectSetupDialogTests.TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -61,19 +64,19 @@ public class LayoutBlockSaveTests
                 "The page was not written with a block for the new cell");
 
             Assert.Contains(
-                $"{GridHeadLine}\n::: Cell Row=0 Column=2 RowSpan=1 ColumnSpan=1\n:::: HomeBlaze.Samples.Motor Name={motorName}",
+                $"{GridHeadLine}\n::: Cell Row=0 Column=2\n:::: HomeBlaze.Samples.Motor Name={motorName}",
                 text);
             Assert.DoesNotContain("json", text);
             await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
 
-            // The buttons of the cell are below the edit button of the widget in it, and not over it.
+            // The buttons of the cell are below the edit button of the selected widget in it, and not over it.
             var cell = page.Locator(".grid-cell.editing[style*='grid-column: 3 / span 1']");
             await Assertions.Expect(cell).ToContainTextAsync(motorName, new() { Timeout = Timeout });
             await Assertions.Expect(cell.GetByTitle("Edit Cell")).ToBeVisibleAsync();
-            await Assertions.Expect(cell.GetByTestId("edit-subject-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            var actionBar = await cell.GetByText(motorName).First.SelectWidgetAsync();
 
             var cellButtons = await GetBoxAsync(cell.Locator(".layout-item-actions"));
-            var widgetButton = await GetBoxAsync(cell.GetByTestId("edit-subject-button"));
+            var widgetButton = await GetBoxAsync(actionBar.GetByTestId("edit-subject-button"));
             Assert.True(
                 widgetButton.Bottom <= cellButtons.Top,
                 $"The buttons of the cell start at {cellButtons.Top} and cover the edit button of the widget, which ends at {widgetButton.Bottom}.");
@@ -90,7 +93,9 @@ public class LayoutBlockSaveTests
         {
             var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
             var firstCell = page.Locator(".grid-cell.editing").Filter(new() { HasText = "first cell" });
-            await Assertions.Expect(firstCell).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+            // The cells show their buttons once the grid is selected, which a click on text in a cell does.
+            await firstCell.SelectWidgetAsync();
 
             // Act
             await firstCell.GetByTitle("Delete", new() { Exact = true }).ClickAsync();
@@ -110,17 +115,19 @@ public class LayoutBlockSaveTests
     }
 
     [Fact]
-    public async Task WhenEmptyCellOfGridOnPageIsShownInEditMode_ThenItHasItsButtons()
+    public async Task WhenGridWithAnEmptyCellIsSelected_ThenTheEmptyCellHasItsButtons()
     {
         // Arrange
         await WithPageAsync(GridPage, CreateGridPage("::: Cell Row=0 Column=0"), async () =>
         {
-            // Act
             var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
-
-            // Assert
             var cell = page.Locator(".grid-cell.editing");
             await Assertions.Expect(cell).ToHaveCountAsync(1, new() { Timeout = Timeout });
+
+            // Act: the cell has no widget, so a click on it selects the grid.
+            await cell.SelectWidgetAsync();
+
+            // Assert
             await Assertions.Expect(cell.GetByTitle("Edit Cell")).ToBeVisibleAsync();
             await Assertions.Expect(cell.GetByTitle("Delete", new() { Exact = true })).ToBeVisibleAsync();
 
@@ -140,6 +147,56 @@ public class LayoutBlockSaveTests
     }
 
     [Fact]
+    public async Task WhenCellOfGridOnPageHoldsACardBelowText_ThenItsEditDialogIsNamedAfterTheCard()
+    {
+        // Arrange: on a page the subject of a cell is its page content, which has no title of its own.
+        await WithPageAsync(GridPage, CreateGridPage("::: Cell Row=0 Column=0", "Text above.", "", ":::: HomeBlaze.Components.Card Title=\"Cell Card\""), async () =>
+        {
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
+            var cell = page.Locator(".grid-cell.editing");
+            await cell.GetByText("Cell Card", new() { Exact = true }).SelectWidgetAsync();
+
+            // Act
+            await cell.GetByTitle("Edit Cell").ClickAsync();
+
+            // Assert
+            var dialog = page.Locator(".mud-dialog");
+            await Assertions.Expect(dialog.Locator(".mud-dialog-title h6")).ToHaveTextAsync("Edit Cell: Cell Card", new() { Timeout = Timeout });
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        });
+    }
+
+    [Fact]
+    public async Task WhenNodeOfCanvasOnPageHoldsACardBelowText_ThenItsEditDialogIsNamedAfterTheCard()
+    {
+        // Arrange
+        const string content = "---\ntitle: Canvas Demo\n---\n\n# Canvas Demo\n\n"
+            + ":: HomeBlaze.Components.CanvasLayout#canvas MinHeight=400\n"
+            + "::: Node X=40 Y=40 Width=300 Height=200\nText above.\n\n:::: HomeBlaze.Components.Card Title=\"Node Card\"\n::\n";
+
+        await WithPageAsync(CanvasPage, content, async () =>
+        {
+            var page = await _fixture.OpenPageInEditModeAsync($"Demo/{CanvasPage}");
+            var node = page.Locator(".canvas-node.editing");
+            await Assertions.Expect(node.GetByText("Node Card", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+            // A click on the node selects the card in it, which shows the buttons of the node.
+            await page.Locator(".canvas-layout-container.editing").WaitForCanvasNodesAsync(1, Timeout);
+            await node.SelectWidgetAsync();
+
+            // Act
+            await node.GetByTitle("Edit Node").ClickAsync();
+
+            // Assert
+            var dialog = page.Locator(".mud-dialog");
+            await Assertions.Expect(dialog.Locator(".mud-dialog-title h6")).ToHaveTextAsync("Edit Node: Node Card", new() { Timeout = Timeout });
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        });
+    }
+
+    [Fact]
     public async Task WhenNodeOfCanvasOnPageIsDragged_ThenOnlyTheLineOfThatNodeChanges()
     {
         // Arrange
@@ -153,8 +210,7 @@ public class LayoutBlockSaveTests
             var canvas = page.Locator(".canvas-layout-container.editing");
             await Assertions.Expect(canvas).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-            // The library draws the area that moves a node only after it has measured the node.
-            await Assertions.Expect(canvas.Locator("svg rect")).ToHaveCountAsync(4, new() { Timeout = Timeout });
+            await canvas.WaitForCanvasNodesAsync(2, Timeout);
             var node = canvas.Locator(".canvas-node").Filter(new() { HasText = "first node" });
             await node.ScrollIntoViewIfNeededAsync();
             var box = await GetBoxAsync(node);
@@ -200,7 +256,7 @@ public class LayoutBlockSaveTests
         {
             var page = await _fixture.OpenPageInEditModeAsync($"Demo/{GridPage}");
             var cell = page.Locator(".grid-cell.editing").Filter(new() { HasText = "the cell" });
-            await Assertions.Expect(cell).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await cell.SelectWidgetAsync();
 
             // Act
             await cell.GetByTitle("Edit Cell").ClickAsync();
@@ -217,7 +273,7 @@ public class LayoutBlockSaveTests
                 written => written.Contains("ColumnSpan=2"),
                 "The page was not written with the new column span of the cell");
 
-            Assert.Equal(CreateGridPage("::: Cell Row=0 Column=0 RowSpan=1 ColumnSpan=2", "the cell"), text);
+            Assert.Equal(CreateGridPage("::: Cell Row=0 Column=0 ColumnSpan=2", "the cell"), text);
             await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator(".grid-cell.editing").GetByText("the cell")).ToBeVisibleAsync(new() { Timeout = Timeout });
         });

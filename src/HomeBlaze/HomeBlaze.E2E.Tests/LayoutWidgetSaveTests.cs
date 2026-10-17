@@ -28,6 +28,8 @@ public class LayoutWidgetSaveTests
 
         await _fixture.WithUnstoredLayoutAsync(layout, async page =>
         {
+            await page.SelectGridThroughFreeCellAsync();
+
             // Act
             await ConfirmDeleteAsync(page);
 
@@ -45,6 +47,10 @@ public class LayoutWidgetSaveTests
 
         await _fixture.WithUnstoredLayoutAsync(layout, async page =>
         {
+            // A click on the node selects the grid in it, which shows the buttons of the node.
+            await page.Locator(".canvas-layout-container.editing").WaitForCanvasNodesAsync(1);
+            await page.Locator(".canvas-node.editing").SelectWidgetAsync();
+
             // Act
             await ConfirmDeleteAsync(page);
 

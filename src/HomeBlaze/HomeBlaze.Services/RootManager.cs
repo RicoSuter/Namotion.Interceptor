@@ -22,6 +22,10 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     // Continuations run off the loading thread so a UI waiter cannot resume inline inside the load.
     private readonly TaskCompletionSource<IInterceptorSubject> _rootLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    // Serializes the writes of the root configuration file. Two at once would both open the file, and the one that
+    // serialized the earlier state could write last.
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
     /// <summary>
     /// The root subject loaded from configuration.
     /// </summary>
@@ -136,6 +140,7 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
 
     /// <summary>
     /// Writes the root configuration to disk when the subject is the root or nested in its configuration.
+    /// Writes run one after the other.
     /// </summary>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
@@ -143,12 +148,21 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         if (root == null || subject.TryGetConfigurationOwner(candidate => ReferenceEquals(candidate, root)) == null)
             return false;
 
-        _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
 
-        var json = _serializer.Serialize(root);
-        await File.WriteAllTextAsync(ConfigurationPath, json, cancellationToken);
+            var json = _serializer.Serialize(root);
+            await File.WriteAllTextAsync(ConfigurationPath, json, cancellationToken);
 
-        _logger?.LogInformation("Root configuration saved successfully");
+            _logger?.LogInformation("Root configuration saved successfully");
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+
         return true;
     }
 }

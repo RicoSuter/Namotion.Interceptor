@@ -172,7 +172,8 @@ public partial class FritzBox : BackgroundService,
     public partial decimal? DownloadRate { get; internal set; }
 
     /// <summary>
-    /// Every device the router lists, keyed by MAC address. Owns the client subjects.
+    /// Every device the router lists, keyed by MAC address, and for one more poll as absent a device it stopped
+    /// listing. Owns the client subjects.
     /// </summary>
     [State(Position = 962)]
     public partial Dictionary<string, FritzBoxClient> Clients { get; internal set; }

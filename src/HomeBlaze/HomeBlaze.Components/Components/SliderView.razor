@@ -1,0 +1,162 @@
+@using System.Diagnostics.CodeAnalysis
+@using System.Globalization
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Components.Controls
+@using HomeBlaze.Services.Display
+@inject PropertyWriter Writer
+
+@{
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var property = Property;
+    var isNumber = IsNumber(property);
+}
+
+@if (!TryResolveScale(property, isNumber, out var range, out var step, out var scale, out var error))
+{
+    <WidgetArgumentError Message="@error" />
+}
+else
+{
+    var value = property?.GetValue();
+    var canWrite = isNumber && PropertyWriter.IsWritable(property!, value);
+    var label = ValueReader.GetLabel(property, Label, Path);
+
+    @* The input events of the range input bubble here, so the text follows the thumb while the slider writes only on release.
+       A drag that ends where it started writes nothing, so the pointer up clears the drag text as well. *@
+    <div class="slider-widget" data-testid="slider" @oninput="_dragCallback" @onpointerup="_clearDragCallback" @onfocusout="_clearDragCallback">
+        <div class="d-flex align-center gap-2">
+            <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="slider-label">@label</MudText>
+            <MudText Typo="Typo.subtitle2" Class="ma-0" data-testid="slider-value">@GetValueText(property, value, range, step, scale)</MudText>
+        </div>
+        <MudSlider T="double"
+                   @key="_resetKey"
+                   Value="@SliderMath.ToSliderValue(value, range, scale)"
+                   ValueChanged="_releaseCallback"
+                   Min="@SliderMath.ToSliderScale(range.Minimum, scale)"
+                   Max="@SliderMath.ToSliderScale(range.Maximum, scale)"
+                   Step="@SliderMath.ToSliderScale(step, scale)"
+                   Immediate="false"
+                   Disabled="@(IsEditing || !canWrite)"
+                   aria-label="@label" />
+    </div>
+}
+
+@code {
+    private double? _dragValue;
+    // An object, not a counter: a boxed int as @key would allocate on every render.
+    private object _resetKey = new();
+    private EventCallback<ChangeEventArgs> _dragCallback;
+    private EventCallback _clearDragCallback;
+    private EventCallback<double> _releaseCallback;
+
+    /// <summary>
+    /// The number property that the slider shows, or null when the path leads nowhere.
+    /// </summary>
+    [Parameter]
+    public RegisteredSubjectProperty? Property { get; set; }
+
+    /// <summary>
+    /// The path as written, the label when the path leads nowhere and no label is given.
+    /// </summary>
+    [Parameter]
+    public string? Path { get; set; }
+
+    /// <summary>
+    /// The label above the slider, the title that the property declares when it is not set.
+    /// </summary>
+    [Parameter]
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// The value at the left end, in the unit of the property, or null for the range of the property.
+    /// </summary>
+    [Parameter]
+    public double? Minimum { get; set; }
+
+    /// <summary>
+    /// The value at the right end, in the unit of the property, or null for the range of the property.
+    /// </summary>
+    [Parameter]
+    public double? Maximum { get; set; }
+
+    /// <summary>
+    /// The distance between two positions, in the unit of the property, or null for the default step.
+    /// </summary>
+    [Parameter]
+    public double? Step { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    protected override void OnInitialized()
+    {
+        // Created once: binding method groups or lambdas in the markup would allocate new delegates on every render.
+        _dragCallback = EventCallback.Factory.Create<ChangeEventArgs>(this, OnDragged);
+        _clearDragCallback = EventCallback.Factory.Create(this, ClearDrag);
+        _releaseCallback = EventCallback.Factory.Create<double>(this, Release);
+    }
+
+    private static bool IsNumber([NotNullWhen(true)] RegisteredSubjectProperty? property) =>
+        property is not null && NumberValues.IsNumberType(property.Type);
+
+    private bool TryResolveScale(RegisteredSubjectProperty? property, bool isNumber, out ValueRange range, out double step,
+        out double scale, [NotNullWhen(false)] out string? error)
+    {
+        step = 0;
+        scale = 1;
+        if (!SliderMath.TryGetRange(property, isNumber, Minimum, Maximum, out range, out error))
+        {
+            return false;
+        }
+
+        error = SliderMath.ValidateStep(property?.Type, Step);
+        if (error is not null)
+        {
+            return false;
+        }
+
+        step = Step ?? SliderMath.GetDefaultStep(property?.Type, range);
+        scale = SliderMath.GetScale(property);
+        return true;
+    }
+
+    private string GetValueText(RegisteredSubjectProperty? property, object? value, ValueRange range, double step, double scale)
+    {
+        if (property is null)
+        {
+            return ValueReader.MissingText;
+        }
+
+        if (_dragValue is { } dragValue)
+        {
+            return property.GetPropertyDisplayValue(SliderMath.ToPropertyValue(dragValue, range, step, scale, property.Type));
+        }
+
+        return value is null ? ValueReader.MissingText : property.GetPropertyDisplayValue(value);
+    }
+
+    private void OnDragged(ChangeEventArgs args) =>
+        _dragValue = double.TryParse(args.Value as string, NumberStyles.Float, CultureInfo.InvariantCulture, out var dragValue)
+            ? dragValue
+            : null;
+
+    private void ClearDrag() => _dragValue = null;
+
+    private void Release(double sliderValue)
+    {
+        _dragValue = null;
+        var property = Property;
+        if (!IsNumber(property) || !TryResolveScale(property, isNumber: true, out var range, out var step, out var scale, out _))
+        {
+            return;
+        }
+
+        Writer.TryWrite(property, SliderMath.ToPropertyValue(sliderValue, range, step, scale, property.Type));
+
+        // The slider keeps the position the user gave it, and only a new key makes it show the property again.
+        if (Math.Abs(SliderMath.ToSliderValue(property.GetValue(), range, scale) - sliderValue) > step * scale / 2)
+        {
+            _resetKey = new object();
+        }
+    }
+}

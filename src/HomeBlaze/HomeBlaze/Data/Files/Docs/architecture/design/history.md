@@ -340,17 +340,19 @@ A discrete property renders as a state timeline instead: a proportional band of 
 
 The reason is that a line chart misrepresents a discrete value three ways at once: the value axis auto-scales far past a 0/1 range, an averaging default reports fractions for a state that was never fractional, and joining the points implies the value passed through everything in between.
 
-Discrete properties default to the raw period, so transitions keep their exact times rather than being rounded to a bucket edge, and only `Last`, `First` and `Count` are offered.
+Discrete properties default to the raw period, so transitions keep their exact times rather than being rounded to a bucket edge, and only `Last`, `First` and `Count` are offered. A state band is always queried as raw samples, also in a bucketed chart, because a bucket without a sample cannot tell an unknown value from one recorded as empty; the period applies to lines only. Over a long range a band holds only the newest raw samples up to the point cap, and the span before the oldest of them shows as "No data".
 
 The band distinguishes three states, which is the distinction a line chart cannot draw at all:
 
 | Rendering | Meaning |
 |---|---|
 | Coloured run | a value was held over this span |
-| Neutral run, "(no value)" | the span is covered, and the value there is genuinely absent (an explicit null, or a bucket with no sample under an aggregation that does not carry forward) |
-| Hatched run, "No data" | no store covers this span, so nothing can be said about it |
+| Neutral run, "(no value)" | the value was recorded as empty (an explicit null) |
+| Hatched run, "No data" | the value is unknown: no store covers this span, or no sample was recorded in its coverage session before it |
 
-Filling the start of a window needs the value held entering it, which a raw query does not return, so the merger exposes `GetValueAtAsync`. Without it a property whose last change predates the window renders as empty rather than as its actual state.
+Filling the start of a window needs the value held entering it, which a raw query does not return, so the merger exposes `GetValueAtAsync`. Without it a property whose last change predates the window renders as unknown rather than as its actual state.
+
+A held value never crosses a coverage gap. The look-back stays inside the coverage range of the window start, and a value recorded before a gap ends at the gap, so the band shows "No data" from the gap until the next sample. A value that holds since startup or since a restart therefore shows as "No data" until it next changes, because nothing records it when recording starts (see the known limitations below). Recording a starting sample is planned separately.
 
 `get_property_history` takes:
 
@@ -402,7 +404,7 @@ Queries should send the relevant range predicate to PostgreSQL rather than loadi
 - Per-property time resolution is bounded by the change queue's coalescing interval.
 - When the requested bucket size exceeds `InMemory.MaxAge`, no store covers the whole newest bucket, so it is served partially, usually by the persistent store, whose coverage covers the bucket start but ends at its last flush. It omits the samples outside that store's coverage, so its `Count` and `Sum` are lower bounds. Raise `MaxAgeSeconds` for a complete live edge.
 - For a value that has not changed within `InMemory.MaxAge`, `Last` and `TimeWeightedAverage` can be briefly null at the live edge: right after a bucket boundary, until the persistent store flushes past it. The held value is not looked up across stores.
-- No sample is recorded when recording resumes, so after a restart a property shows no value until it next changes.
+- No sample is recorded when recording starts or resumes, so a value set at startup or held across a restart is unknown until it next changes, and the state timeline shows it as "No data". Recording a starting sample is planned separately.
 - Subject-bearing state, full graph snapshots, `Rate`, `StateDuration`, interpolation, compression, and continuous aggregates are future work.
 
 The planned snapshot layer stores periodic compressed whole-graph snapshots and reconstructs a requested time by finding the nearest prior snapshot and replaying scalar, structural, and move events. Planned MCP tools are `get_snapshot` and capped `get_snapshots`.

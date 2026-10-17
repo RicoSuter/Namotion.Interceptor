@@ -24,7 +24,7 @@ public partial class ValueTile : IConfigurable, ITitleProvider
     public partial string? Path { get; set; }
 
     /// <summary>
-    /// The label of the tile. Defaults to the title the property declares, then to its name.
+    /// The label of the tile. Defaults to the title the property declares, then to its name, and to the path when the path leads nowhere.
     /// </summary>
     [Configuration]
     public partial string? Label { get; set; }

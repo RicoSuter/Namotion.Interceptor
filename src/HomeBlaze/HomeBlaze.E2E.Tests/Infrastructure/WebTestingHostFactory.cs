@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
@@ -27,6 +28,11 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     {
         _testTypes = testTypes;
     }
+
+    /// <summary>
+    /// The warnings and errors that the server logs.
+    /// </summary>
+    public ServerLogRecorder ServerLog { get; } = new();
 
     public string ServerAddress
     {
@@ -67,6 +73,8 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // before every other one: added after the start of the server, they are missed whenever the root loads first.
         builder.ConfigureServices(services => services.Insert(0, ServiceDescriptor.Singleton<IHostedService>(
             provider => new TestTypeRegistration(provider.GetRequiredService<TypeProvider>(), _testTypes))));
+
+        builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(ServerLog));
     }
 
     private sealed class TestTypeRegistration(TypeProvider typeProvider, IReadOnlyCollection<Type> types) : IHostedService

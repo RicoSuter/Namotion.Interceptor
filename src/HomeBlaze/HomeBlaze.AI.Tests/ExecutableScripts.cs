@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 
-namespace Namotion.Interceptor.Testing;
+namespace HomeBlaze.AI.Tests;
 
 /// <summary>
 /// Writes executable scripts that tests start as processes while other tests start processes in parallel.
 /// </summary>
-public static class ExecutableScripts
+internal static class ExecutableScripts
 {
     private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(30);
 

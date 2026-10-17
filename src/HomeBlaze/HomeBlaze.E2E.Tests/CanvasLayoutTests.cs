@@ -239,9 +239,8 @@ public class CanvasLayoutTests
         // Act: a click on the title, which would follow its link while the page is viewed.
         await page.Mouse.ClickAsync((float)(titleBox.Left + 5), (float)(titleBox.Top + titleBox.Height / 2));
 
-        // Assert: the click is the click on a node, which offers to add a node at that place. Closing the dialog is the round trip
-        // after which the page would have navigated.
-        await page.GetByTestId("cancel-button").ClickAsync();
+        // Assert: the click selects the widget of the node. Its actions are the round trip after which the page would have navigated.
+        await Assertions.Expect(page.GetWidgetActionBar()).ToBeVisibleAsync(new() { Timeout = Timeout });
         Assert.Equal(urlBefore, page.Url);
     }
 
@@ -409,6 +408,9 @@ public class CanvasLayoutTests
         var page = await OpenCanvasPageAsync(editMode: "Split");
         var node = GetNodes(page).First;
 
+        // A click on the node selects the widget in it, which shows the buttons of the nodes.
+        await node.SelectWidgetAsync();
+
         // Act
         await node.GetByTitle("Edit Node").ClickAsync();
 
@@ -426,7 +428,7 @@ public class CanvasLayoutTests
         // Arrange: the inline mode keeps the widget of the page, so that this is the diagram that was read-only.
         var page = await OpenCanvasPageAsync();
         await MarkCanvasAsync(page);
-        await SelectModeAsync(page, "Inline");
+        await page.SelectEditModeAsync("Inline");
         await Assertions.Expect(page.Locator(".canvas-layout-container.editing")).ToBeVisibleAsync(new() { Timeout = Timeout });
         Assert.True(await IsCanvasMarkedAsync(page), "The canvas was built again, so the test would not show that the diagram of the viewed page is changed");
 
@@ -452,7 +454,7 @@ public class CanvasLayoutTests
         // Arrange: the inline mode keeps the widget of the page, so that this is the diagram that could be edited.
         var page = await OpenCanvasPageAsync(withTextBelow: true, editMode: "Inline");
         await MarkCanvasAsync(page);
-        await SelectModeAsync(page, "View");
+        await page.SelectEditModeAsync("View");
         await Assertions.Expect(page.Locator(".canvas-layout-container:not(.editing)")).ToBeVisibleAsync(new() { Timeout = Timeout });
         Assert.True(await IsCanvasMarkedAsync(page), "The canvas was built again, so the test would not show that the diagram that was edited is read-only");
 
@@ -513,33 +515,24 @@ public class CanvasLayoutTests
         });
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync(Timeout);
 
         if (editMode is not null)
         {
-            await Assertions.Expect(page.GetByTestId("edit-mode-menu")).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await SelectModeAsync(page, editMode);
+            await page.SelectEditModeAsync(editMode, Timeout);
             await Assertions.Expect(page.Locator(".canvas-layout-container.editing")).ToBeVisibleAsync(new() { Timeout = Timeout });
         }
 
-        // The library draws the border of a node and the area that a link starts from only after it has measured the node.
-        var nodeCount = withControlsWidget ? 1 : 2;
-        await Assertions.Expect(GetCanvas(page).Locator("svg rect")).ToHaveCountAsync(2 * nodeCount, new() { Timeout = Timeout });
-        await GetNodes(page).First.ScrollIntoViewIfNeededAsync();
+        await GetCanvas(page).WaitForCanvasNodesAsync(withControlsWidget ? 1 : 2, Timeout);
         await Assertions.Expect(GetNodes(page).First).ToBeVisibleAsync();
         return page;
-    }
-
-    private static async Task SelectModeAsync(IPage page, string mode)
-    {
-        await page.GetByTestId("edit-mode-menu").ClickAsync();
-        await page.Locator(".mud-popover-open").GetByText(mode, new() { Exact = true }).ClickAsync();
     }
 
     // Opens the menu of the edit modes and closes it with the mode that is already selected. Each step is a round
     // trip with a visible result, and the second one comes after every event that the mouse caused before.
     private static async Task WaitForServerAsync(IPage page, string currentMode = "View")
     {
-        await SelectModeAsync(page, currentMode);
+        await page.SelectEditModeAsync(currentMode);
         await Assertions.Expect(page.Locator(".mud-popover-open")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 

@@ -129,7 +129,7 @@ public class LayoutSlotBlockTests
 
         // Assert
         Assert.True(handled);
-        Assert.Contains("::: Cell Row=0 Column=1 RowSpan=1 ColumnSpan=1\n:::: HomeBlaze.Samples.Motor Name=Added", written);
+        Assert.Contains("::: Cell Row=0 Column=1\n:::: HomeBlaze.Samples.Motor Name=Added", written);
         Assert.Equal(1, parentCountBeforeReload);
         Assert.Same(cell, Assert.Single(grid.Cells));
         var reloaded = Assert.IsType<MarkdownFragment>(cell.Child).Children.Values.OfType<Motor>().Single();
@@ -161,7 +161,7 @@ public class LayoutSlotBlockTests
         // Assert
         Assert.True(handled);
         Assert.Equal(
-            content.Replace("::: Node X=60 Y=80", "::: Node X=100 Y=120 Width=200 Height=150"),
+            content.Replace("::: Node X=60 Y=80", "::: Node X=100 Y=120"),
             await fixture.ReadAsync("page.md"));
     }
 
@@ -211,7 +211,7 @@ public class LayoutSlotBlockTests
             Dashboard.Replace(
                 ":::::::: HomeBlaze.Components.Widget Path=/Demo/ExhaustFan\n",
                 ":::::::: HomeBlaze.Components.Widget Path=/Demo/ExhaustFan\n" +
-                "::::::: Cell Row=0 Column=2 RowSpan=1 ColumnSpan=1\n" +
+                "::::::: Cell Row=0 Column=2\n" +
                 ":::::::: HomeBlaze.Components.Widget Path=/Demo/Conveyor\n"),
             written);
         Assert.Same(grid, ((IPathScope)page).TryGetNamedSubject("dashboardgrid"));

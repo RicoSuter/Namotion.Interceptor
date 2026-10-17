@@ -242,7 +242,7 @@ internal static class McpToolHelper
     /// Whether set_property may write the property: <see cref="GetWriteError"/> returns null for it.
     /// </summary>
     internal static bool IsWritable(RegisteredSubjectProperty property, McpServerConfiguration configuration) =>
-        !configuration.IsReadOnly && HasPublicSetter(property) && configuration.PropertyWriteFilter?.Invoke(property) is null;
+        !configuration.IsReadOnly && property.HasPublicSetter && configuration.PropertyWriteFilter?.Invoke(property) is null;
 
     /// <summary>
     /// The error set_property returns for the property, or null when it may be written: the server is read-only, the
@@ -258,7 +258,7 @@ internal static class McpToolHelper
             return "Server is in read-only mode.";
         }
 
-        if (!HasPublicSetter(property))
+        if (!property.HasPublicSetter)
         {
             return $"Property is not writable: {path}";
         }
@@ -267,10 +267,6 @@ internal static class McpToolHelper
             ? $"Property is not writable: {path}. {reason}"
             : null;
     }
-
-    // TODO: Clean up when HasSetter in registry respects access modifiers (see #102)
-    private static bool HasPublicSetter(RegisteredSubjectProperty property) =>
-        property.HasSetter && property.Reference.Metadata.PropertyInfo?.SetMethod?.IsPublic != false;
 
     private static string[]? ToStringArray(object? value)
     {
