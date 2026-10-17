@@ -148,7 +148,7 @@ Controls the built-in Model Context Protocol server that exposes the knowledge g
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `McpServer:Enabled` | bool | `true` in Development, `false` otherwise | Maps the `/mcp` endpoint; the MCP server itself is always registered |
+| `McpServer:Enabled` | bool | `true` in Development, `false` otherwise | Registers the MCP server and maps the `/mcp` endpoint. The built-in agents do not need it |
 | `McpServer:ReadOnly` | bool | `true` | Restricts the tools of the `/mcp` endpoint to read-only operations; set to `false` to allow property writes and operation invocations. `set_property` keeps refusing configuration properties either way, see [AI Agents](ai-agents.md#tools-and-permissions). The built-in agents are not affected: each gets the tools in its own `AllowedTools`, see the same section |
 
 ### Example: Development override
