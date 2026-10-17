@@ -103,7 +103,7 @@ internal static class ClaudeCliArguments
 
         if (options.Effort is { } effort)
         {
-            arguments.AddRange(["--effort", ClaudeEffort.ToWireValue(effort)]);
+            arguments.AddRange(["--effort", ToEffortValue(effort)]);
         }
 
         if (!string.IsNullOrWhiteSpace(options.FallbackModel))
@@ -129,6 +129,19 @@ internal static class ClaudeCliArguments
 
         return arguments;
     }
+
+    /// <summary>
+    /// The value of the Claude CLI <c>--effort</c> flag.
+    /// </summary>
+    private static string ToEffortValue(AgentEffort effort) => effort switch
+    {
+        AgentEffort.Low => "low",
+        AgentEffort.Medium => "medium",
+        AgentEffort.High => "high",
+        AgentEffort.ExtraHigh => "xhigh",
+        AgentEffort.Max => "max",
+        _ => throw new ArgumentOutOfRangeException(nameof(effort), effort, null)
+    };
 
     /// <summary>
     /// Builds the MCP configuration JSON pointing the CLI at the agent route with the turn's bearer token.

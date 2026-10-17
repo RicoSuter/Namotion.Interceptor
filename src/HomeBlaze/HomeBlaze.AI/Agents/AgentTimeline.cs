@@ -27,15 +27,19 @@ public sealed class AgentTimeline
         _capacity = capacity;
     }
 
+    /// <summary>The JSONL file, null when the timeline is kept in-process only.</summary>
+    public string? FilePath => _filePath;
+
     /// <summary>A snapshot of the entries, oldest first.</summary>
     public IReadOnlyList<AgentTimelineEntry> Entries => Volatile.Read(ref _entries);
 
     /// <summary>
     /// Loads the file, skipping corrupt lines, keeps the newest entries up to the capacity and rewrites the file with them.
+    /// A missing file loads as no entries, also when the timeline is loaded again after its file was deleted.
     /// </summary>
     public async Task LoadAsync(CancellationToken cancellationToken)
     {
-        if (_filePath is null || !File.Exists(_filePath))
+        if (_filePath is null)
         {
             return;
         }
@@ -44,17 +48,16 @@ public sealed class AgentTimeline
         await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var entries = new List<AgentTimelineEntry>();
-            foreach (var line in await File.ReadAllLinesAsync(_filePath, cancellationToken))
+            var kept = ImmutableList<AgentTimelineEntry>.Empty;
+            if (File.Exists(_filePath))
             {
-                if (TryDeserialize(line) is { } entry)
-                {
-                    entries.Add(entry);
-                }
+                kept = await ReadFileLockedAsync(cancellationToken);
+                await WriteFileLockedAsync(kept, cancellationToken);
             }
-
-            var kept = entries.TakeLast(_capacity).ToImmutableList();
-            await WriteFileLockedAsync(kept, cancellationToken);
+            else
+            {
+                _fileLineCount = 0;
+            }
 
             lock (_entriesLock)
             {
@@ -122,6 +125,21 @@ public sealed class AgentTimeline
     {
         var entries = _entries.Add(entry);
         _entries = entries.Count > _capacity ? entries.RemoveRange(0, entries.Count - _capacity) : entries;
+    }
+
+    /// <summary>Reads the newest entries of the file up to the capacity. Caller must hold <see cref="_fileLock"/>.</summary>
+    private async Task<ImmutableList<AgentTimelineEntry>> ReadFileLockedAsync(CancellationToken cancellationToken)
+    {
+        var entries = new List<AgentTimelineEntry>();
+        foreach (var line in await File.ReadAllLinesAsync(_filePath!, cancellationToken))
+        {
+            if (TryDeserialize(line) is { } entry)
+            {
+                entries.Add(entry);
+            }
+        }
+
+        return entries.TakeLast(_capacity).ToImmutableList();
     }
 
     /// <summary>Rewrites the file with exactly the given entries. Caller must hold <see cref="_fileLock"/>.</summary>

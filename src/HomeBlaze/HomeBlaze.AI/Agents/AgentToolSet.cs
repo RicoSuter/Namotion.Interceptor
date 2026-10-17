@@ -10,7 +10,7 @@ namespace HomeBlaze.AI.Agents;
 /// <summary>
 /// The tools of one turn: the agent's allowed graph tools plus update_memory, each wrapped to enforce the
 /// turn's tool-call budget and record the call. Both backends call tools only through this set. Once the turn ends,
-/// the set is closed and every call returns an error without running the tool.
+/// the set is closed and every new call returns an error without running the tool.
 /// </summary>
 public sealed class AgentToolSet
 {
@@ -54,8 +54,15 @@ public sealed class AgentToolSet
 
     private readonly int _maxToolCalls;
     private readonly IProgress<AgentTurnUpdate>? _progress;
+    private readonly TaskCompletionSource _runningCallsEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _callCount;
-    private volatile bool _isClosed;
+
+    // Guards _isClosed, _runningCallCount, _onLateCall and the writes of _calls, so a call either starts before the
+    // set closes and is waited for, or is refused, and either records before the wait gave up or reports itself late.
+    private readonly Lock _lock = new();
+    private bool _isClosed;
+    private int _runningCallCount;
+    private Action<string>? _onLateCall;
     private ImmutableList<AgentToolCall> _calls = ImmutableList<AgentToolCall>.Empty;
 
     private AgentToolSet(int maxToolCalls, IProgress<AgentTurnUpdate>? progress)
@@ -72,11 +79,50 @@ public sealed class AgentToolSet
     public IReadOnlyList<AgentToolCall> Calls => Volatile.Read(ref _calls);
 
     /// <summary>
-    /// Closes the set when its turn ends. A call that started before keeps running; a call that starts later returns
-    /// an error and is not recorded, for example one that passed the authentication of the agent MCP route just before
-    /// the token was revoked.
+    /// Closes the set when its turn ends. A call that started before keeps running, see
+    /// <see cref="WaitForRunningCallsAsync"/>; a call that starts later returns an error and is not recorded, for
+    /// example one that passed the authentication of the agent MCP route just before the token was revoked.
     /// </summary>
-    internal void Close() => _isClosed = true;
+    internal void Close()
+    {
+        lock (_lock)
+        {
+            _isClosed = true;
+            if (_runningCallCount == 0)
+            {
+                _runningCallsEnded.TrySetResult();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Waits, after <see cref="Close"/>, until the calls that started before have ended, at most
+    /// <paramref name="timeout"/>, so <see cref="Calls"/> read afterwards holds them. A call that ends after the wait
+    /// gave up is passed to <paramref name="onLateCall"/> by its tool name. Never throws.
+    /// </summary>
+    internal async Task WaitForRunningCallsAsync(TimeSpan timeout, TimeProvider timeProvider, Action<string> onLateCall)
+    {
+        var runningCallsEnded = _runningCallsEnded.Task;
+        if (!runningCallsEnded.IsCompleted)
+        {
+            try
+            {
+                await runningCallsEnded.WaitAsync(timeout, timeProvider);
+            }
+            catch (TimeoutException)
+            {
+                // The calls still running report themselves when they end.
+            }
+        }
+
+        lock (_lock)
+        {
+            if (!runningCallsEnded.IsCompleted)
+            {
+                _onLateCall = onLateCall;
+            }
+        }
+    }
 
     /// <summary>
     /// Whether the allowed names grant the permission to edit page layout: <see cref="EditPageLayoutPermission"/> together
@@ -127,37 +173,75 @@ public sealed class AgentToolSet
     {
         Handler = async (input, cancellationToken) =>
         {
-            if (_isClosed)
+            if (!TryBeginCall())
             {
                 return new { error = ClosedMessage };
             }
 
-            var arguments = Truncate(input.GetRawText());
-            if (countsAgainstBudget && Interlocked.Increment(ref _callCount) > _maxToolCalls)
-            {
-                var message = $"The tool call budget of {_maxToolCalls} calls for this turn is exhausted. Answer with what you have.";
-                Record(new AgentToolCall(tool.Name, arguments, message, IsError: true));
-                return new { error = message };
-            }
-
-            object? result;
             try
             {
-                result = await tool.Handler(input, cancellationToken);
+                return await CallAsync(tool, countsAgainstBudget, input, cancellationToken);
             }
-            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            finally
             {
-                Record(new AgentToolCall(tool.Name, arguments, Truncate(exception.Message), IsError: true));
-                throw;
+                EndCall();
             }
-
-            var element = result is null or string ? default : JsonSerializer.SerializeToElement(result, PreviewSerializerOptions);
-            var isError = element.ValueKind == JsonValueKind.Object && element.TryGetProperty("error", out _);
-            var preview = result as string ?? (element.ValueKind == JsonValueKind.Undefined ? "null" : element.GetRawText());
-            Record(new AgentToolCall(tool.Name, arguments, Truncate(preview), isError));
-            return result;
         }
     };
+
+    private bool TryBeginCall()
+    {
+        lock (_lock)
+        {
+            if (_isClosed)
+            {
+                return false;
+            }
+
+            _runningCallCount++;
+            return true;
+        }
+    }
+
+    private void EndCall()
+    {
+        lock (_lock)
+        {
+            _runningCallCount--;
+            if (_isClosed && _runningCallCount == 0)
+            {
+                _runningCallsEnded.TrySetResult();
+            }
+        }
+    }
+
+    private async Task<object?> CallAsync(McpToolInfo tool, bool countsAgainstBudget, JsonElement input, CancellationToken cancellationToken)
+    {
+        var arguments = Truncate(input.GetRawText());
+        if (countsAgainstBudget && Interlocked.Increment(ref _callCount) > _maxToolCalls)
+        {
+            var message = $"The tool call budget of {_maxToolCalls} calls for this turn is exhausted. Answer with what you have.";
+            Record(new AgentToolCall(tool.Name, arguments, message, IsError: true));
+            return new { error = message };
+        }
+
+        object? result;
+        try
+        {
+            result = await tool.Handler(input, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            Record(new AgentToolCall(tool.Name, arguments, Truncate(exception.Message), IsError: true));
+            throw;
+        }
+
+        var element = result is null or string ? default : JsonSerializer.SerializeToElement(result, PreviewSerializerOptions);
+        var isError = element.ValueKind == JsonValueKind.Object && element.TryGetProperty("error", out _);
+        var preview = result as string ?? (element.ValueKind == JsonValueKind.Undefined ? "null" : element.GetRawText());
+        Record(new AgentToolCall(tool.Name, arguments, Truncate(preview), isError));
+        return result;
+    }
 
     /// <summary>
     /// Records a call of a backend tool, which the backend ran itself, so it shows in the timeline and counts against
@@ -176,7 +260,14 @@ public sealed class AgentToolSet
 
     private void Record(AgentToolCall call)
     {
-        ImmutableInterlocked.Update(ref _calls, calls => calls.Add(call));
+        Action<string>? onLateCall;
+        lock (_lock)
+        {
+            Volatile.Write(ref _calls, _calls.Add(call));
+            onLateCall = _onLateCall;
+        }
+
+        onLateCall?.Invoke(call.Name);
         _progress?.Report(new AgentToolCallCompleted(call));
     }
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.AI.Agents;
+using HomeBlaze.AI.Mcp;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
@@ -48,17 +49,37 @@ public class AgentPromptBuilderTests
     }
 
     [Fact]
-    public void WhenTheAgentMayEditPageLayout_ThenThePreambleSaysWhichBlocksItMayChange()
+    public async Task WhenTheAgentMayEditPageLayoutAndUseWebTools_ThenThePreambleSaysWhichBlocksItMayChangeAndWhichMustStay()
     {
         // Act
-        var prompt = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty, canEditPageLayout: true);
+        var prompt = AgentPromptBuilder.BuildSystemPrompt(
+            AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty, hasWebTools: true, canEditPageLayout: true);
         var withoutPermission = AgentPromptBuilder.BuildSystemPrompt(AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty);
 
         // Assert
         var preamble = prompt[..prompt.IndexOf("# Mode", StringComparison.Ordinal)];
-        Assert.Contains("You may edit the layout of Markdown pages", preamble);
-        Assert.Contains("Every other block, such as one that creates a device or a service, must stay exactly as ReadRawContent shows it", preamble);
-        Assert.DoesNotContain("layout of Markdown pages", withoutPermission);
+        Assert.Contains("HistoryChart", preamble);
+        Assert.Contains("ValueMap", preamble);
+        Assert.Contains("Switch", preamble);
+        Assert.Contains("ReadRawContent", preamble);
+        Assert.DoesNotContain("layout blocks", withoutPermission);
+        await Verifier.Verify(prompt);
+    }
+
+    [Theory]
+    [InlineData(AgentTurnKind.Background)]
+    [InlineData(AgentTurnKind.Chat)]
+    public void WhenBuildingASystemPrompt_ThenThePreambleSharesTheMarkdownAndDataRulesAndDoesNotMentionHomeAutomation(AgentTurnKind kind)
+    {
+        // Act
+        var prompt = AgentPromptBuilder.BuildSystemPrompt(kind, null, AgentMemorySnapshot.Empty);
+
+        // Assert
+        var preamble = prompt[..prompt.IndexOf("# Mode", StringComparison.Ordinal)];
+        Assert.Contains(HomeBlazeMcpInstructions.MarkdownPages, preamble);
+        Assert.Contains(HomeBlazeMcpInstructions.DataIsNotInstructions, preamble);
+        Assert.Contains("Your instructions below describe this installation and your role.", preamble);
+        Assert.DoesNotContain("home automation", prompt, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

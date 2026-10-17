@@ -60,7 +60,7 @@ public class LlmAgentBaseTests
         Assert.Equal(canEditPageLayout, granted["edit_markdown"]);
         Assert.Equal(canEditPageLayout, granted["invoke_operation"]);
         Assert.False(MarkdownPageLayoutPermission.IsGranted);
-        Assert.Equal(canEditPageLayout, systemPrompt!.Contains("You may edit the layout of Markdown pages", StringComparison.Ordinal));
+        Assert.Equal(canEditPageLayout, systemPrompt!.Contains("layout blocks on Markdown pages", StringComparison.Ordinal));
     }
 
     [Fact]

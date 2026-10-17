@@ -44,7 +44,7 @@ internal sealed class AnthropicHistory
     private const string IsErrorPropertyName = "isError";
 
     private const string SummarizerInstructions =
-        "Summarize this conversation between an operator and a home automation agent. Keep facts, decisions, open questions and values the agent may need later. Be concise.";
+        "Summarize this conversation between an operator and an agent. Keep facts, decisions, open questions and values the agent may need later. Be concise.";
 
     // The source-generated contracts of Microsoft.Extensions.AI cover messages, their content types and the tool
     // values the Anthropic client itself serializes, so persisting and describing them needs no further metadata.
