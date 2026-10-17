@@ -328,13 +328,6 @@ public class PlaywrightFixture : IAsyncLifetime
         }
 
         _context = await Browser.NewContextAsync(contextOptions);
-
-        // The app loads its font from Google, and a navigation waits for the load event, which waits for that request.
-        // On a runner whose connection to Google stalls, every page loaded meanwhile timed out, so the font is answered
-        // here with an empty response and the tests never leave the machine.
-        await _context.RouteAsync("https://fonts.googleapis.com/**", route => route.FulfillAsync(new() { ContentType = "text/css", Body = "" }));
-        await _context.RouteAsync("https://fonts.gstatic.com/**", route => route.FulfillAsync(new() { Body = "" }));
-
         return await _context.NewPageAsync();
     }
 }
