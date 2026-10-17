@@ -35,7 +35,7 @@ The arguments of a `Node` block:
 
 ## Samples
 
-A canvas with two nodes that show the two sample motors. A canvas does not adapt to the width of the screen: every node keeps its position and its size in pixels. The two nodes here are placed below each other, so that a narrow window shows both:
+A canvas with two nodes that show the two sample motors. Without `Scale=FitWidth`, a canvas does not adapt to the width of the screen: every node keeps its position and its size in pixels. The two nodes here are placed below each other, so that a narrow window shows both:
 
 <!-- sample: live -->
 ~~~~markdown
