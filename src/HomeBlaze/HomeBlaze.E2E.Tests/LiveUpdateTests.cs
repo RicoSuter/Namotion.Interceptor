@@ -39,7 +39,7 @@ public class LiveUpdateTests
         { "Alert", ":: HomeBlaze.Components.Alert Severity=Info\nAlert {{ $P/Text }}\n::\n" },
         { "Card", ":: HomeBlaze.Components.Card Title=\"Live Card\"\n::: HomeBlaze.Components.ValueTile Path=$P/Text Label=\"Live\"\n::\n" },
         { "Card text", ":: HomeBlaze.Components.Card Title=\"Live Card\"\nCard {{ $P/Text }}\n::\n" },
-        { "Responsive", ":: HomeBlaze.Components.Responsive Show=NotPhone\n::: HomeBlaze.Components.ValueTile Path=$P/Text Label=\"Live\"\n::\n" },
+        { "Responsive", ":: HomeBlaze.Components.Responsive From=Sm\n::: HomeBlaze.Components.ValueTile Path=$P/Text Label=\"Live\"\n::\n" },
         { "FlowLayout", ":: HomeBlaze.Components.FlowLayout MinWidth=200\n::: Item\n:::: HomeBlaze.Components.ValueTile Path=$P/Text Label=\"Live\"\n::\n" },
         { "GridLayout", ":: HomeBlaze.Components.GridLayout Rows=1 Columns=1\n::: Cell Row=0 Column=0\n:::: HomeBlaze.Components.ValueTile Path=$P/Text Label=\"Live\"\n::\n" },
         { "CanvasLayout", ":: HomeBlaze.Components.CanvasLayout\n::: Node X=20 Y=20 Width=300 Height=150\n:::: HomeBlaze.Components.ValueTile Path=$P/Text Label=\"Live\"\n::\n" },
