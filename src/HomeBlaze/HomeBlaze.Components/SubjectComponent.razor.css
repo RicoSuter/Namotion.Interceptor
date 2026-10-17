@@ -134,14 +134,15 @@
     overflow-y: auto;
 }
 
-/* A widget that fills its place (a card, a tile: the class place-filler) in a grid cell or a canvas node is as high as
-   it, unless a card has a height of its own, which the inline style gives. It ignores its own minimum height, which a
-   place smaller than it would clip, and an aspect ratio, which the inline style also gives, so it is as wide as the cell
-   or the node too. The cell or the node is the frame, so the widget draws none. */
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .place-filler),
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler),
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler),
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> .place-filler) {
+/* A widget that fills its place (a card, a tile: the class place-filler) or is centered in it (a gauge: the class
+   place-centered, below) in a grid cell or a canvas node is as high as it, unless a card has a height of its own, which
+   the inline style gives. A place-filler ignores its own minimum height, which a place smaller than it would clip, and an
+   aspect ratio, which the inline style also gives, so it is as wide as the cell or the node too. The cell or the node is
+   the frame, so the widget draws none. */
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> :is(.place-filler, .place-centered)),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered)),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered)),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> :is(.place-filler, .place-centered)) {
     height: 100%;
 }
 
@@ -151,6 +152,17 @@
     aspect-ratio: auto !important;
     border: 0;
     box-shadow: none;
+}
+
+/* A widget of its own size that is centered in its place (a gauge: the class place-centered) takes the whole grid cell
+   or canvas node it is the only content of, found as for place-filler above, and centers what it holds in both
+   directions. Elsewhere, as in a flow item, it keeps its size and stands at the start of its place. */
+::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .place-centered {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    justify-content: center;
+    align-items: center;
 }
 
 /* ValueList: a page gives every paragraph a distance above and below. A utility class cannot reach the paragraph that

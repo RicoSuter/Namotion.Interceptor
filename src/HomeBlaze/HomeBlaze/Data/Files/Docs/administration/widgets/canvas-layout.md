@@ -83,7 +83,7 @@ Fan
 - **An invalid width**: A `Width` of 0 or less shows `Width must be above 0` with the value in place of the canvas, see [Value Widget Errors](../page-errors.md#value-widget-errors).
 - **Fixed size**: A node has a fixed size and cuts off content that needs more room.
 - **Names**: Give a node a `#name` to keep it and everything in it when nodes are added or removed, as for the cells of a [GridLayout](grid-layout.md).
-- **Cards and tiles**: A [Card](card.md) in a node fills the node, as in a cell of a `GridLayout`, and so does a tile ([Switch](switch.md) or [OperationButton](operation-button.md) with `Kind=Tile`).
+- **Cards and tiles**: A [Card](card.md) in a node fills the node, as in a cell of a `GridLayout`, and so does a tile ([Switch](switch.md), [OperationButton](operation-button.md) or [ValueTile](value-tile.md) with `Kind=Tile`). A [Gauge](gauge.md) that is the only content of a node stands in the middle of the node.
 
 ## Related
 

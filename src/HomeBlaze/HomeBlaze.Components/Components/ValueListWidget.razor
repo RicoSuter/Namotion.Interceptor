@@ -46,7 +46,7 @@
                 }
 
                 @* The label takes the free room, and with content it is the content that does. *@
-                <MudText Typo="Typo.body2" Class="@(content is null ? "flex-grow-1 ma-0" : "ma-0")" data-testid="value-label">@ValueReader.GetLabel(reading?.Property, row.Label, path)</MudText>
+                <HistoryLabel Property="@reading?.Property" Text="@ValueReader.GetLabel(reading?.Property, row.Label, path)" Typo="Typo.body2" Class="@(content is null ? "flex-grow-1 ma-0" : "ma-0")" />
                 @if (content is not null)
                 {
                     @* MudBlazor has no text alignment utility other than this class of MudText. A flex layout is no alternative, because the bar of a Progress has to fill the room. *@

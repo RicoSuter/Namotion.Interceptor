@@ -30,17 +30,25 @@ public partial class ValueTile : IConfigurable, ITitleProvider
     public partial string? Label { get; set; }
 
     /// <summary>
-    /// Name of the icon next to the label, for example "Bolt".
+    /// Name of the icon next to the label of a box and above the value of a tile, for example "Bolt". The icon of a
+    /// matched case of the map replaces it.
     /// </summary>
     [Configuration]
     public partial string? Icon { get; set; }
 
     /// <summary>
-    /// Name or path of the <see cref="ValueMap"/> that says what the value gets.
+    /// Name or path of the <see cref="ValueMap"/> that says what the value gets. A box takes the color of the matched
+    /// case for the value, a tile is filled with it.
     /// </summary>
     [Configuration]
     [SubjectPath(typeof(ValueMap))]
     public partial string? Map { get; set; }
+
+    /// <summary>
+    /// Whether the value is drawn as a box or as a tile.
+    /// </summary>
+    [Configuration]
+    public partial ValueTileKind Kind { get; set; }
 
     public string? Title => null;
 

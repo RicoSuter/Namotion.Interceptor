@@ -98,7 +98,7 @@ The three sizes next to each other in a [FlowLayout](flow-layout.md), whose colu
 
 ## Gauge Rows
 
-A gauge has a fixed size and stands at the start of its column, so a row of gauges in a [FlowLayout](flow-layout.md) looks even when the columns are only a little wider than the rings. The rings are 72 pixels (`Small`), 112 pixels (`Medium`) and 160 pixels (`Large`) wide; a `MinWidth` of the ring size plus 8 pixels fits them: 80 for `Small`, 120 for `Medium` and 168 for `Large`, and the size of the largest ring for a row of mixed sizes. The gap of 16 pixels between the columns comes on top. A wider column leaves more room after each gauge than between the gauges. A label that is wider than the ring needs a wider column.
+A gauge has a fixed size and stands at the start of its column and at the top of its row, so a row of gauges in a [FlowLayout](flow-layout.md) looks even when the columns are only a little wider than the rings. The rings are 72 pixels (`Small`), 112 pixels (`Medium`) and 160 pixels (`Large`) wide; a `MinWidth` of the ring size plus 8 pixels fits them: 80 for `Small`, 120 for `Medium` and 168 for `Large`, and the size of the largest ring for a row of mixed sizes. The gap of 16 pixels between the columns comes on top. A wider column leaves more room after each gauge than between the gauges. A label that is wider than the ring needs a wider column.
 
 ## Behavior and Limits
 
@@ -107,7 +107,9 @@ A gauge has a fixed size and stands at the start of its column, so a row of gaug
 - **A missing value**: The dash of a [missing value](basics.md#missing-values) stands in the center, and the ring is empty.
 - **The text in the center**: The formatted value with its unit, or the text of the matched case of the map.
 - **The color**: The color of the matched case of the map, otherwise the primary color of the theme.
-- **Accessibility**: The gauge is a meter for screen readers, with the label as its name, the value kept inside the range and the range as its numbers, and the text in the center as its spoken value. A gauge without a value is read as a group with its label.
+- **In a cell or a node**: A gauge that is the only content of a cell of a [GridLayout](grid-layout.md) or a node of a [CanvasLayout](canvas-layout.md) stands in the middle of it, in both directions. In a [FlowLayout](flow-layout.md) it stands at the start, see [Gauge Rows](#gauge-rows).
+- **History**: The label below the ring opens the history of a property that has one, see [Value Widgets](basics.md#value-widgets).
+- **Accessibility**: The ring is a meter for screen readers, with the label as its name, the value kept inside the range and the range as its numbers, and the text in the center as its spoken value. A ring without a value is read as a group with its label.
 
 ## Related
 

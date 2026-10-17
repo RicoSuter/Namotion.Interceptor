@@ -213,6 +213,10 @@ namespace HomeBlaze.History.Blazor
         public HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod? Period { get; init; }
         public System.TimeSpan? Range { get; init; }
     }
+    public static class ServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPropertyHistoryViewer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
     public class _Imports
     {
         public _Imports() { }

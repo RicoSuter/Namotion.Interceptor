@@ -1,0 +1,59 @@
+@* The label of a value widget. Outside edit mode, when the host registers an IPropertyHistoryViewer that can show the
+   history of the property, the text is a button that shows it. *@
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceProvider ServiceProvider
+
+@{
+    var property = Property;
+    var canShowHistory = !IsEditing && property is not null && _viewer is not null && _viewer.CanShow(property);
+}
+
+<MudText Typo="@Typo" Class="@Class" aria-hidden="@(IsNamedElsewhere && !canShowHistory ? "true" : null)" data-testid="value-label">
+    @if (canShowHistory)
+    {
+        <button type="button" class="history-label-button" title="Show history" data-testid="history-label-button" @onclick="_showHistoryCallback">@Text</button>
+    }
+    else
+    {
+        @Text
+    }
+</MudText>
+
+@code {
+    private IPropertyHistoryViewer? _viewer;
+    private EventCallback _showHistoryCallback;
+
+    /// <summary>The property whose history the label shows, or null for a label that only shows its text.</summary>
+    [Parameter]
+    public RegisteredSubjectProperty? Property { get; set; }
+
+    /// <summary>The text of the label, which is also the name of the history.</summary>
+    [Parameter]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether another element already gives the text to screen readers as its name, which hides the text from them
+    /// while it is no button.
+    /// </summary>
+    [Parameter]
+    public bool IsNamedElsewhere { get; set; }
+
+    [Parameter]
+    public Typo Typo { get; set; } = Typo.body2;
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    protected override void OnInitialized()
+    {
+        _viewer = ServiceProvider.GetService<IPropertyHistoryViewer>();
+        // Created once: binding the method group directly in the markup would allocate a new delegate on every render.
+        _showHistoryCallback = EventCallback.Factory.Create(this, ShowHistoryAsync);
+    }
+
+    private Task ShowHistoryAsync() =>
+        Property is { } property && _viewer is not null && !IsEditing ? _viewer.ShowAsync(property, Text) : Task.CompletedTask;
+}

@@ -1,0 +1,21 @@
+/* A button that looks like the text around it, marked by a dotted underline. */
+.history-label-button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+
+.history-label-button:hover {
+    text-decoration-style: solid;
+}
+
+.history-label-button:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
