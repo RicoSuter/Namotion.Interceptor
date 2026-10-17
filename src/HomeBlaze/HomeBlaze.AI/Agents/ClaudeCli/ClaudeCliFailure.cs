@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace HomeBlaze.AI.Agents.Cli;
+namespace HomeBlaze.AI.Agents.ClaudeCli;
 
 /// <summary>
 /// Classifies failed CLI runs.

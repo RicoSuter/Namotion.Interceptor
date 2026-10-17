@@ -1,5 +1,5 @@
 using HomeBlaze.AI.Agents;
-using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Agents.ClaudeCli;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -10,7 +10,7 @@ using ModelContextProtocol.Protocol;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace HomeBlaze.AI.Tests.Agents.Cli;
+namespace HomeBlaze.AI.Tests.Agents.ClaudeCli;
 
 /// <summary>
 /// Runs two turns against the real, logged-in Claude CLI, the second resuming the session of the first, which spends a

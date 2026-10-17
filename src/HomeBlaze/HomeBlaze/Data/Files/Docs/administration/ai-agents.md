@@ -70,7 +70,7 @@ Create a subject of type `ClaudeCliAgent` or `AnthropicAgent` (category AI) in t
 
 ```json
 {
-  "$type": "HomeBlaze.AI.Agents.Cli.ClaudeCliAgent",
+  "$type": "HomeBlaze.AI.Agents.ClaudeCli.ClaudeCliAgent",
   "name": "Energy Advisor",
   "instructions": "You watch the PV system, battery and wallbox. Send me a notification when the battery stays below 10 % for more than an hour.",
   "model": "opus",

@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
-namespace HomeBlaze.AI.Agents.Cli;
+namespace HomeBlaze.AI.Agents.ClaudeCli;
 
 /// <summary>
 /// The settings of one CLI invocation.
@@ -103,7 +103,7 @@ internal static class ClaudeCliArguments
 
         if (options.Effort is { } effort)
         {
-            arguments.AddRange(["--effort", effort.ToWireValue()]);
+            arguments.AddRange(["--effort", ClaudeEffort.ToWireValue(effort)]);
         }
 
         if (!string.IsNullOrWhiteSpace(options.FallbackModel))

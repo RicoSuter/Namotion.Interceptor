@@ -30,8 +30,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Update="Agents\Cli\Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
-        <None Update="Agents\Cli\fake-claude.sh" CopyToOutputDirectory="PreserveNewest" />
+        <None Update="Agents\ClaudeCli\Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+        <None Update="Agents\ClaudeCli\fake-claude.sh" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
 </Project>

@@ -1,4 +1,4 @@
-namespace HomeBlaze.AI.Tests.Agents.Cli;
+namespace HomeBlaze.AI.Tests.Agents.ClaudeCli;
 
 /// <summary>
 /// Writes a shell script that stands in for the Claude CLI: it records each invocation's arguments, environment,
@@ -119,7 +119,7 @@ internal sealed class FakeClaudeCli : IDisposable
         }
 
         var directory = System.IO.Directory.CreateTempSubdirectory("fake-claude").FullName;
-        var fixtures = Path.Combine(AppContext.BaseDirectory, "Agents", "Cli", "Fixtures");
+        var fixtures = Path.Combine(AppContext.BaseDirectory, "Agents", "ClaudeCli", "Fixtures");
         var resumeBranch = resumeFixture is null
             ? string.Empty
             : $"""

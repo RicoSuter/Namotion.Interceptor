@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
 
-namespace HomeBlaze.AI.Agents.Cli;
+namespace HomeBlaze.AI.Agents.ClaudeCli;
 
 /// <summary>One CLI invocation.</summary>
 /// <param name="FileName">Path or name of the CLI executable.</param>
