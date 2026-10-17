@@ -513,16 +513,17 @@ public partial class FluentStorageContainer :
     }
 
     /// <inheritdoc />
+    /// <exception cref="NotSupportedException">Always: the root of a storage has no metadata of its own.</exception>
     public Task WriteMetadataAsync(FolderMetadata? metadata, CancellationToken cancellationToken)
-        => throw new NotImplementedException();
+        => Task.FromException(new NotSupportedException("The root of a storage has no metadata of its own."));
 
     /// <inheritdoc />
     public Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken)
-        => throw new NotImplementedException();
+        => WriteSubjectMetadataAsync(child, metadata, cancellationToken);
 
     /// <inheritdoc />
     public Task MoveChildAsync(string name, string neighborName, CancellationToken cancellationToken)
-        => throw new NotImplementedException();
+        => MoveChildAsync(string.Empty, name, neighborName, cancellationToken);
 
     /// <summary>
     /// IConfigurationWriter - Saves the file of the subject, or of the subject it is nested in through
@@ -563,13 +564,16 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Adds a new subject to storage at the specified path.
     /// </summary>
-    /// <exception cref="ArgumentException">The path is hidden or temporary and would not be loaded again.</exception>
+    /// <exception cref="ArgumentException">The path is hidden, temporary or the name of a metadata file, and would not be loaded again.</exception>
     /// <exception cref="InvalidOperationException">A file exists at the path, or its key in the hierarchy is taken.</exception>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var relativePath = StoragePath.Normalize(path);
         if (StoragePathFilter.IsIgnored(relativePath))
             throw new ArgumentException($"A subject at '{path}' would not be loaded again: the path is hidden or temporary.", nameof(path));
+
+        if (StorageMetadataPath.IsMetadataFile(relativePath))
+            throw new ArgumentException($"A subject at '{path}' would be read as a metadata file: names that end with '.metadata' are reserved.", nameof(path));
 
         var connection = Connection;
         await RunOperationAsync(connection, async token =>
@@ -593,6 +597,154 @@ public partial class FluentStorageContainer :
 
             _logger?.LogInformation("Added subject to storage: {Path}", relativePath);
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes the metadata of a folder to its <c>.metadata.json</c>, keeping the order and the keys it does not know.
+    /// </summary>
+    /// <param name="folder">The path of the folder within the storage, not empty.</param>
+    /// <param name="metadata">The metadata, null to remove it.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="InvalidOperationException">The folder is not in the tree.</exception>
+    internal async Task WriteFolderMetadataAsync(string folder, FolderMetadata? metadata, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        await RunOperationAsync(connection, token =>
+        {
+            // Checked, because writing into a folder that is gone would create it again.
+            _ = GetPlacedFolder(connection, folder);
+
+            var path = StorageMetadataPath.GetFolderFilePath(folder);
+            var document = GetMetadataDocument(connection, path);
+            document.Title = metadata?.Title;
+            document.NavigationTitle = metadata?.NavigationTitle;
+            document.Icon = metadata?.Icon;
+            return WriteMetadataDocumentAsync(connection, path, document, token);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes the metadata of the subject of a JSON file to the metadata file beside it, keeping the keys it does not know.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The subject is not the subject of a JSON file in this storage.</exception>
+    internal async Task WriteSubjectMetadataAsync(IInterceptorSubject subject, SubjectMetadata? metadata, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        await RunOperationAsync(connection, token =>
+        {
+            if (!connection.Index.TryGetEntry(subject, out var entry) || entry.IsFolder ||
+                subject is not IConfigurable || !StoragePath.IsJson(entry.Path))
+            {
+                throw new InvalidOperationException("Only the subject of a JSON file in this storage has metadata.");
+            }
+
+            var path = StorageMetadataPath.GetSubjectFilePath(entry.Path);
+            var document = GetMetadataDocument(connection, path);
+            document.NavigationTitle = metadata?.NavigationTitle;
+            document.Icon = metadata?.Icon;
+            document.Location = metadata?.Location;
+            document.Alignment = metadata?.Alignment;
+            return WriteMetadataDocumentAsync(connection, path, document, token);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Swaps two children of a folder in the order in which they are shown, and writes the whole resulting order,
+    /// which drops the names of children that are gone.
+    /// </summary>
+    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
+    /// <param name="name">The name of the child to move.</param>
+    /// <param name="neighborName">The name of the child whose place it takes.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="InvalidOperationException">The folder is not in the tree, or a name is not a child of it.</exception>
+    internal async Task MoveChildAsync(string folder, string name, string neighborName, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        await RunOperationAsync(connection, token =>
+        {
+            // Read on the worker, so that a move starts from the order the move before it wrote.
+            var virtualFolder = folder.Length == 0 ? null : GetPlacedFolder(connection, folder);
+            var children = virtualFolder?.Children ?? Children;
+            var childOrder = virtualFolder?.ChildOrder ?? ChildOrder;
+
+            var names = ChildOrdering
+                .Order(children, childOrder, static child => child.Key, static child => child.Value.GetNavigationTitle(child.Key))
+                .Select(static child => child.Key)
+                .ToList();
+
+            var index = names.IndexOf(name);
+            var neighborIndex = names.IndexOf(neighborName);
+            if (index < 0 || neighborIndex < 0)
+            {
+                throw new InvalidOperationException($"'{name}' and '{neighborName}' are not both children of the folder.");
+            }
+
+            (names[index], names[neighborIndex]) = (names[neighborIndex], names[index]);
+
+            var path = StorageMetadataPath.GetFolderFilePath(folder);
+            var document = GetMetadataDocument(connection, path);
+            document.Order = [.. names];
+            return WriteMetadataDocumentAsync(connection, path, document, token);
+        }, cancellationToken);
+    }
+
+    private static VirtualFolder GetPlacedFolder(StorageConnection connection, string folder)
+        => connection.Index.TryGet(folder, out var entry) && entry is { IsFolder: true, IsPlaced: true, Subject: VirtualFolder virtualFolder }
+            ? virtualFolder
+            : throw new InvalidOperationException($"No folder at '{folder}'.");
+
+    // A copy, so that the entry keeps what the file holds until the write has succeeded.
+    private static StorageMetadataDocument GetMetadataDocument(StorageConnection connection, string path)
+        => connection.Index.TryGet(path, out var entry) && entry.Metadata is { } metadata
+            ? metadata.Clone()
+            : new StorageMetadataDocument();
+
+    // Runs on the worker. A file that would be empty is deleted, so that a metadata file exists only while it holds something.
+    private async Task WriteMetadataDocumentAsync(
+        StorageConnection connection, string path, StorageMetadataDocument document, CancellationToken cancellationToken)
+    {
+        if (document.IsEmpty)
+        {
+            await DeleteMetadataFileAsync(connection, path, cancellationToken);
+        }
+        else
+        {
+            var entry = new StorageEntry { Path = path, IsFolder = false, Metadata = document };
+            await WriteAndRecordAsync(connection, entry, document.Serialize(), cancellationToken);
+            connection.Index.Set(entry);
+        }
+
+        connection.Reconciler.Apply();
+        _logger?.LogDebug("Wrote metadata to storage: {Path}", path);
+    }
+
+    private static async Task DeleteMetadataFileAsync(StorageConnection connection, string path, CancellationToken cancellationToken)
+    {
+        if (connection.Index.TryGet(path, out var entry))
+        {
+            // A folder with the name of a metadata file is no metadata file, and deleting the path would delete it with all it holds.
+            if (entry.IsFolder)
+            {
+                return;
+            }
+        }
+        else if (!await connection.Client.ExistsAsync(path, cancellationToken))
+        {
+            // A file that no pass has listed yet is deleted as well.
+            return;
+        }
+
+        try
+        {
+            await connection.Client.DeleteAsync(path, cancellationToken: cancellationToken);
+        }
+        catch (Exception exception) when (CanHaveReachedStorage(exception))
+        {
+            connection.NotifyChanged(path);
+            throw;
+        }
+
+        connection.Index.Remove(path);
     }
 
     // Recording version and hash is what keeps the event that this write raises from reloading the subject.
@@ -818,6 +970,21 @@ public partial class FluentStorageContainer :
         connection.NotifyChanged(entry.Path);
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", entry.Path);
+
+        // The metadata of a subject goes with it. A failure here leaves the subject deleted, and only the file behind.
+        if (entry.Subject is IConfigurable && StoragePath.IsJson(entry.Path))
+        {
+            var metadataPath = StorageMetadataPath.GetSubjectFilePath(entry.Path);
+            try
+            {
+                await DeleteMetadataFileAsync(connection, metadataPath, cancellationToken);
+                connection.Reconciler.Apply();
+            }
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger?.LogWarning(exception, "Failed to delete the metadata file of a deleted subject: {Path}", metadataPath);
+            }
+        }
     }
 
     /// <summary>

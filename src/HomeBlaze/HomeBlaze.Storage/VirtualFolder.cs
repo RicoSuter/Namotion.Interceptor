@@ -82,15 +82,18 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
 
     /// <inheritdoc />
     public Task WriteMetadataAsync(FolderMetadata? metadata, CancellationToken cancellationToken)
-        => throw new NotImplementedException();
+        => RootStorage.WriteFolderMetadataAsync(StoragePath.Normalize(RelativePath), metadata, cancellationToken);
 
     /// <inheritdoc />
     public Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken)
-        => throw new NotImplementedException();
+        => RootStorage.WriteSubjectMetadataAsync(child, metadata, cancellationToken);
 
     /// <inheritdoc />
     public Task MoveChildAsync(string name, string neighborName, CancellationToken cancellationToken)
-        => throw new NotImplementedException();
+        => RootStorage.MoveChildAsync(StoragePath.Normalize(RelativePath), name, neighborName, cancellationToken);
+
+    private FluentStorageContainer RootStorage => Storage as FluentStorageContainer
+        ?? throw new NotSupportedException("Only a folder of a FluentStorageContainer stores metadata.");
 
     /// <summary>
     /// Gets metadata about a blob. Path is relative to the storage root.
