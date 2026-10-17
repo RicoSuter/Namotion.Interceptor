@@ -470,6 +470,101 @@ public class HomeBlazeMcpToolProviderTests
         Assert.Contains("failed", error.GetString());
     }
 
+    [Fact]
+    public async Task WhenListMethods_ThenOnlyTheMethodsForAgentsAreListed()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, "ForAll", MethodAudience.All, () => { });
+        AddMethod(room, "ForPeople", MethodAudience.People, () => { });
+        AddMethod(room, "ForAgents", MethodAudience.Agents, () => { });
+        var tool = factory.CreateTools().First(t => t.Name == "list_methods");
+
+        // Act
+        var result = await tool.Handler(JsonSerializer.SerializeToElement(new { path = "" }), CancellationToken.None);
+
+        // Assert
+        var names = JsonSerializer.SerializeToElement(result).GetProperty("methods").EnumerateArray()
+            .Select(method => method.GetProperty("name").GetString());
+        Assert.Equal(["ForAll", "ForAgents"], names);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodOnlyForPeople_ThenItIsNotFoundAndNotInvoked()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        AddMethod(room, "ForPeople", MethodAudience.People, () => isInvoked = true);
+
+        // Act
+        var error = await InvokeForErrorAsync(factory, "ForPeople", parameters: null);
+
+        // Assert
+        Assert.Equal("Method not found: ForPeople", error);
+        Assert.False(isInvoked);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodOnlyForAgents_ThenItIsInvoked()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        AddMethod(room, "ForAgents", MethodAudience.Agents, () => isInvoked = true);
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "ForAgents" });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.True(isInvoked);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodWithStringArrayArgument_ThenItIsPassedAsArray()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        object? capturedNames = null;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetOrder", _ => new MethodMetadata(arguments =>
+        {
+            capturedNames = arguments?[0];
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SetOrder",
+            Parameters = [new MethodParameter { Name = "names", Type = typeof(string[]) }]
+        });
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "SetOrder", parameters = new { names = new[] { "b", "a" } } });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.Equal(new[] { "b", "a" }, Assert.IsType<string[]>(capturedNames));
+    }
+
+    private static void AddMethod(TestThing room, string name, MethodAudience audience, Action invoke)
+    {
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>(name, _ => new MethodMetadata(_ =>
+        {
+            invoke();
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            Title = name,
+            PropertyName = name,
+            Audience = audience
+        });
+    }
+
     internal static (TestThing room, McpServerConfiguration config, McpToolFactory factory) CreateTestSetup(bool isReadOnly)
     {
         var context = InterceptorSubjectContext.Create()

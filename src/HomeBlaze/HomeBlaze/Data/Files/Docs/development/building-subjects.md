@@ -465,6 +465,7 @@ public partial class Motor
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
+| `Audience` | Who the method is for: `People` (user interfaces such as the browser), `Agents` (agent interfaces such as MCP) or `All` (the default) | `MethodAudience.Agents` |
 
 **Key points:**
 - Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
@@ -473,6 +474,15 @@ public partial class Motor
 - Methods returning values display the result in a dialog
 - Errors are caught and shown in an error dialog
 - Operations with `RequiresConfirmation = true` show a confirmation dialog first
+
+**Audience:**
+
+`Audience` is available on `[Operation]` and `[Query]`. A method for `People` only is listed in the browser and in the path picker of widgets, but not by MCP `list_methods`, and `invoke_method` treats it as unknown. A method for `Agents` only is listed and run by MCP, but shows no button in the browser and is not offered by the path picker. A path to it that a person types into a widget, such as an operation button, still runs it. Use `Agents` for methods that give an agent what a person does through other controls, such as reading and changing the order of a folder that people change by dragging:
+
+```csharp
+[Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.", Audience = MethodAudience.Agents)]
+public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
+```
 
 **Supported parameter types:**
 - `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`

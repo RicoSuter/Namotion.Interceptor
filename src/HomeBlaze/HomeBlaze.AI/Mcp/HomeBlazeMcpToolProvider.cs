@@ -85,7 +85,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return Task.FromResult<object?>(new { error = "Subject not found." });
         }
 
-        var methods = subject.GetAllMethods().Select(method => new
+        var methods = subject.GetAllMethods(MethodAudience.Agents).Select(method => new
         {
             name = method.PropertyName,
             kind = method.Kind.ToString().ToLowerInvariant(),
@@ -112,7 +112,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
         var methodName = input.GetProperty("method").GetString()!;
         var methodProperty = subject.TryGetProperty(methodName);
-        if (methodProperty?.GetValue() is not MethodMetadata method)
+        // A method only for people is not offered to agents, so it is unknown to them.
+        if (methodProperty?.TryGetMethodMetadata() is not { } method || !method.IsFor(MethodAudience.Agents))
         {
             return new { error = $"Method not found: {methodName}" };
         }

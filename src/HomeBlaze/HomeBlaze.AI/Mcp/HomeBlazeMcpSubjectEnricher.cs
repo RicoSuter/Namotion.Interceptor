@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 
@@ -56,7 +57,7 @@ public class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             metadata["$interfaces"] = interfaces;
         }
 
-        var methods = subject.GetAllMethods()
+        var methods = subject.GetAllMethods(MethodAudience.Agents)
             .Where(method => !_isReadOnly || method.Kind == MethodKind.Query)
             .Select(method => method.PropertyName)
             .ToArray();

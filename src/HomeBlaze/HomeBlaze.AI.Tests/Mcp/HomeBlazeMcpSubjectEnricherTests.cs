@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services.Lifecycle;
@@ -186,6 +187,39 @@ public class HomeBlazeMcpSubjectEnricherTests
         var methods = (string[])enrichments["$methods"]!;
         Assert.Contains("Refresh", methods);
         Assert.DoesNotContain("Reset", methods);
+    }
+
+    [Fact]
+    public void WhenMethodIsOnlyForPeople_ThenItIsExcluded()
+    {
+        // Arrange
+        var context = CreateContext();
+        var thing = new TestThing(context) { Name = "My Thing", Temperature = 20m };
+        var registered = thing.TryGetRegisteredSubject()!;
+
+        registered.AddProperty<MethodMetadata>("Open", _ => new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            Title = "Open",
+            PropertyName = "Open",
+            Audience = MethodAudience.People
+        });
+
+        registered.AddProperty<MethodMetadata>("GetOrder", _ => new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Query,
+            Title = "Get Order",
+            PropertyName = "GetOrder",
+            Audience = MethodAudience.Agents
+        });
+
+        var enricher = CreateEnricher();
+
+        // Act
+        var enrichments = enricher.GetSubjectEnrichments(registered);
+
+        // Assert
+        Assert.Equal(["GetOrder"], (string[])enrichments["$methods"]!);
     }
 
     [Fact]

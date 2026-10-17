@@ -61,6 +61,7 @@ namespace HomeBlaze.Services
     public static class RegisteredSubjectMethodExtensions
     {
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.MethodAudience audience) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetOperationMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetQueryMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public static bool IsMethodEnabled(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty methodProperty) { }

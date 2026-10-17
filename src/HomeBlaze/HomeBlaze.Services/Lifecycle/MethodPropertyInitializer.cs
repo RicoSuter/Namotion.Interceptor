@@ -127,6 +127,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             Position = attribute.Position,
             Category = GetCategory(subject.GetType(), method),
             RequiresConfirmation = requiresConfirmation,
+            Audience = attribute.Audience,
             Parameters = parameters,
             ResultType = resultType,
         };

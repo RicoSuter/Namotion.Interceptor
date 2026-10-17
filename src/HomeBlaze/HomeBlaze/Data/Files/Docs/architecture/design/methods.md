@@ -19,6 +19,7 @@ Operations and queries are implemented in HomeBlaze today:
 - `MethodPropertyInitializer` registers `MethodMetadata` (with `InvokeAsync` capability) as dynamic properties, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled` for conditional enable/disable)
 - Blazor UI renders operations as buttons with parameter dialogs, confirmation, and result display
 - MCP tools `list_methods` and `invoke_method` in `HomeBlaze.AI`, see [AI](ai.md) for their parameter hints and argument handling
+- `Audience` on `[Operation]` and `[Query]` (`MethodAudience.People`, `Agents` or `All`, the default) decides who a method is for: the browser and the path picker list only methods for people, and the MCP tools list and run only methods for agents. A path a person types into a widget is not checked, so it runs any method
 
 ## Migration to Namotion.Interceptor.Reflection [Planned]
 

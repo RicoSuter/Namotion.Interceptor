@@ -23,6 +23,13 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public FromServicesAttribute() { }
     }
+    [System.Flags]
+    public enum MethodAudience
+    {
+        People = 1,
+        Agents = 2,
+        All = 3,
+    }
     [System.AttributeUsage(System.AttributeTargets.Method)]
     public class OperationAttribute : HomeBlaze.Abstractions.Attributes.SubjectMethodAttribute
     {
@@ -124,6 +131,7 @@ namespace HomeBlaze.Abstractions.Attributes
     public abstract class SubjectMethodAttribute : System.Attribute
     {
         protected SubjectMethodAttribute() { }
+        public HomeBlaze.Abstractions.Attributes.MethodAudience Audience { get; set; }
         public string? Description { get; set; }
         public string? Icon { get; set; }
         public int Position { get; set; }
@@ -728,6 +736,7 @@ namespace HomeBlaze.Abstractions.Metadata
     {
         public MethodMetadata(System.Func<object?[]?, object?> invoke) { }
         public MethodMetadata(Namotion.Interceptor.IInterceptorSubject subject, System.Reflection.MethodInfo method) { }
+        public HomeBlaze.Abstractions.Attributes.MethodAudience Audience { get; init; }
         public string? Category { get; init; }
         public string? Description { get; init; }
         public string? Icon { get; init; }
@@ -739,6 +748,7 @@ namespace HomeBlaze.Abstractions.Metadata
         public System.Type? ResultType { get; init; }
         public string Title { get; init; }
         public System.Threading.Tasks.Task<object?> InvokeAsync(object?[]? parameters, System.IServiceProvider? serviceProvider, System.Threading.CancellationToken cancellationToken) { }
+        public bool IsFor(HomeBlaze.Abstractions.Attributes.MethodAudience audience) { }
     }
     public class MethodParameter
     {

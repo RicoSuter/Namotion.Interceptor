@@ -216,6 +216,79 @@ public class RegisteredSubjectMethodExtensionsTests
         Assert.Null(unavailableMetadata);
         Assert.Equal("Object", objectMetadata?.Title);
     }
+
+    [Fact]
+    public void WhenMethodsAreListedForPeople_ThenOnlyTheMethodsForPeopleAreListed()
+    {
+        // Arrange
+        var registered = new MethodAudienceTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var methods = registered.GetAllMethods(MethodAudience.People);
+
+        // Assert
+        Assert.Equal(new[] { "Everyone", "People" }, methods.Select(method => method.Title));
+    }
+
+    [Fact]
+    public void WhenMethodsAreListedForAgents_ThenOnlyTheMethodsForAgentsAreListed()
+    {
+        // Arrange
+        var registered = new MethodAudienceTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var methods = registered.GetAllMethods(MethodAudience.Agents);
+
+        // Assert
+        Assert.Equal(new[] { "Everyone", "Agents" }, methods.Select(method => method.Title));
+    }
+
+    [Fact]
+    public void WhenMethodsAreListedForAll_ThenEveryMethodIsListed()
+    {
+        // Arrange
+        var registered = new MethodAudienceTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var methods = registered.GetAllMethods(MethodAudience.All);
+
+        // Assert
+        Assert.Equal(new[] { "Everyone", "People", "Agents" }, methods.Select(method => method.Title));
+    }
+
+    [Theory]
+    [InlineData(MethodAudience.All, MethodAudience.People, true)]
+    [InlineData(MethodAudience.All, MethodAudience.Agents, true)]
+    [InlineData(MethodAudience.People, MethodAudience.People, true)]
+    [InlineData(MethodAudience.People, MethodAudience.Agents, false)]
+    [InlineData(MethodAudience.Agents, MethodAudience.Agents, true)]
+    [InlineData(MethodAudience.Agents, MethodAudience.People, false)]
+    [InlineData(MethodAudience.Agents, MethodAudience.All, true)]
+    public void WhenMethodHasAnAudience_ThenItIsForTheAudiencesItShares(
+        MethodAudience methodAudience, MethodAudience audience, bool expected)
+    {
+        // Arrange
+        var method = new MethodMetadata(_ => null) { Audience = methodAudience };
+
+        // Act
+        var isFor = method.IsFor(audience);
+
+        // Assert
+        Assert.Equal(expected, isFor);
+    }
+}
+
+[InterceptorSubject]
+public partial class MethodAudienceTestSubject
+{
+    [Operation(Title = "Everyone", Position = 1)]
+    public void Everyone() { }
+
+    [Operation(Title = "People", Position = 2, Audience = MethodAudience.People)]
+    public void People() { }
+
+    [Query(Title = "Agents", Position = 3, Audience = MethodAudience.Agents)]
+    public string Agents() => "result";
 }
 
 [InterceptorSubject]

@@ -1000,7 +1000,7 @@
             GetPrimitiveProperties().ToList(),
             static property => property.GetStateMetadata()?.Category,
             static property => property.GetDisplayPosition(),
-            _registeredSubject?.GetAllMethods() ?? [],
+            _registeredSubject?.GetAllMethods(MethodAudience.People) ?? [],
             static method => method.Category,
             static method => method.Position);
 

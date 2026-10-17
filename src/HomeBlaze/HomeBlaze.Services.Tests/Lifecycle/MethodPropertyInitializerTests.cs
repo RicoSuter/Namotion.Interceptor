@@ -65,6 +65,23 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
+    public void WhenAMethodHasAnAudience_ThenItsMetadataHasIt()
+    {
+        // Arrange
+        var registered = new MethodAudienceTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var everyone = registered.TryGetProperty("Everyone")?.GetValue() as MethodMetadata;
+        var people = registered.TryGetProperty("People")?.GetValue() as MethodMetadata;
+        var agents = registered.TryGetProperty("Agents")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal(MethodAudience.All, everyone?.Audience);
+        Assert.Equal(MethodAudience.People, people?.Audience);
+        Assert.Equal(MethodAudience.Agents, agents?.Audience);
+    }
+
+    [Fact]
     public void WhenAnOperationHasParameters_ThenItsMetadataDescribesThem()
     {
         // Arrange

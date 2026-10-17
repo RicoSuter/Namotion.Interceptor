@@ -1,4 +1,5 @@
 using System.Reflection;
+using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Abstractions.Metadata;
@@ -80,6 +81,11 @@ public class MethodMetadata
     public bool RequiresConfirmation { get; init; }
 
     /// <summary>
+    /// Who the method is meant for, see <see cref="IsFor"/>.
+    /// </summary>
+    public MethodAudience Audience { get; init; } = MethodAudience.All;
+
+    /// <summary>
     /// The method's parameter descriptors.
     /// </summary>
     public MethodParameter[] Parameters { get; init; } = [];
@@ -89,6 +95,11 @@ public class MethodMetadata
     /// For <c>Task&lt;T&gt;</c> return types this is <c>T</c>.
     /// </summary>
     public Type? ResultType { get; init; }
+
+    /// <summary>
+    /// Gets whether the method is meant for any of the given audiences.
+    /// </summary>
+    public bool IsFor(MethodAudience audience) => (Audience & audience) != 0;
 
     /// <summary>
     /// Invokes the method on the bound subject with the provided user-input parameters.

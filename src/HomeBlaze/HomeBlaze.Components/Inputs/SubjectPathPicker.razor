@@ -1,3 +1,4 @@
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Components.Operations
 @using Namotion.Interceptor.Registry.Attributes
@@ -524,10 +525,11 @@
     }
 
     // Only a predicate that accepts an operation lists one, so the expression picker (no predicate) and the pickers
-    // for subjects never offer an operation.
+    // for subjects never offer an operation. One meant only for agents is not offered, but a path to it that a person
+    // types is still accepted.
     private bool IsListedMethod(RegisteredSubjectProperty property, MethodMetadata? method)
     {
-        return method is not null && CanSelectProperty is not null && CanSelectProperty(property);
+        return method is not null && method.IsFor(MethodAudience.People) && CanSelectProperty is not null && CanSelectProperty(property);
     }
 
     private static string GetMethodIcon(MethodMetadata method)

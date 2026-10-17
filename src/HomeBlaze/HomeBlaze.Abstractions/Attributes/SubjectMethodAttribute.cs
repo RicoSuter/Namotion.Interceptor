@@ -25,4 +25,9 @@ public abstract class SubjectMethodAttribute : Attribute
     /// Sort position in UI.
     /// </summary>
     public int Position { get; set; }
+
+    /// <summary>
+    /// Who the method is meant for. Defaults to <see cref="MethodAudience.All"/>.
+    /// </summary>
+    public MethodAudience Audience { get; set; } = MethodAudience.All;
 }

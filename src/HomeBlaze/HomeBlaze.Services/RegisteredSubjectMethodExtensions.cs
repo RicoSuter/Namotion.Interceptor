@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -18,6 +19,21 @@ public static class RegisteredSubjectMethodExtensions
             .Where(CanContainMethodMetadata)
             .Select(p => p.GetValue())
             .OfType<MethodMetadata>()
+            .OrderBy(m => m.Position)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Gets the methods (operations and queries) of the subject that are meant for any of the given audiences, see
+    /// <see cref="MethodMetadata.IsFor"/>, ordered by Position.
+    /// </summary>
+    public static IReadOnlyList<MethodMetadata> GetAllMethods(this RegisteredSubject subject, MethodAudience audience)
+    {
+        return subject.Properties
+            .Where(CanContainMethodMetadata)
+            .Select(p => p.GetValue())
+            .OfType<MethodMetadata>()
+            .Where(m => m.IsFor(audience))
             .OrderBy(m => m.Position)
             .ToList();
     }
