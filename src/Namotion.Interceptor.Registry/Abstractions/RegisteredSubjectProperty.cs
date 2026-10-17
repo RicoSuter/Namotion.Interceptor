@@ -19,6 +19,9 @@ public class RegisteredSubjectProperty
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
+    // 0: not computed yet, 1: no public setter, 2: public setter. Computed on first read because it reflects over the setter.
+    private byte _hasPublicSetter;
+
     internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name,
@@ -160,7 +163,20 @@ public class RegisteredSubjectProperty
     /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> counts as public when it has a setter.
     /// </summary>
     // TODO: Read the accessibility from the generated metadata instead of the PropertyInfo (see #732)
-    public bool HasPublicSetter => HasSetter && IsSetterPublic(Reference.Metadata.PropertyInfo);
+    public bool HasPublicSetter
+    {
+        get
+        {
+            var hasPublicSetter = _hasPublicSetter;
+            if (hasPublicSetter == 0)
+            {
+                hasPublicSetter = HasSetter && IsSetterPublic(Reference.Metadata.PropertyInfo) ? (byte)2 : (byte)1;
+                _hasPublicSetter = hasPublicSetter;
+            }
+
+            return hasPublicSetter == 2;
+        }
+    }
 
     /// <summary>
     /// Gets the current value of the property.
