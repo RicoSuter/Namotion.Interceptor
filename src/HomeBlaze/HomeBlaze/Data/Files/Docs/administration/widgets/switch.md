@@ -89,7 +89,7 @@ Rules of a tile:
 - **The fill**: A tile takes the color of the matched case of its map. Without a map, or without a matching case, it has the primary color while the value is true and the color of the surface while it is false. A matched case without a `Color` stays on the surface.
 - **The text**: The subtitle is `Subtitle`. Without it, a tile with a map shows the text of the matched case, else the formatted value.
 - **A missing value**: A value that is not set shows a `?` in place of the icon. The tile is disabled only when there is nothing to write or invoke, such as a path that leads nowhere. A writable `bool?` without a value, or a switch whose `On` operation is enabled, can still be turned on.
-- **Disabled**: A tile shows the disabled colors of the theme while the page is edited, while a toggle is pending, and when the write or the operation is not possible, for the same reasons as the toggle switch. A progress circle at the bottom right shows a toggle that is pending.
+- **Disabled**: A tile is disabled while the page is edited, while a toggle is pending, and when the write or the operation is not possible, for the same reasons as the toggle switch. A disabled tile keeps the fill of its state and is dimmed, so a light that is on stays yellow while it cannot be switched. A progress circle at the bottom right shows a toggle that is pending.
 - **Name**: The accessible name of a tile is its label.
 
 ## Behavior and Limits
