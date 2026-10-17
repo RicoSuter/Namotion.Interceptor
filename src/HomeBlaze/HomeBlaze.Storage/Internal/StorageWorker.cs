@@ -12,7 +12,10 @@ internal sealed class StorageWorker : IDisposable
     internal const string CallFromWithinItemMessage =
         "An operation of a storage was called from work that runs on the worker of that storage, such as the load " +
         "of a file or the ApplyConfigurationAsync of a subject. The operation would wait for the work that waits " +
-        "for it. Call it from a task that is started inside using (ExecutionContext.SuppressFlow()), for example " +
+        "for it. " + CallFromWithinWorkRemedy;
+
+    internal const string CallFromWithinWorkRemedy =
+        "Call it from a task that is started inside using (ExecutionContext.SuppressFlow()), for example " +
         "with Task.Run, and do not wait for that task: the call then runs once the work has returned. A call that " +
         "is made directly inside that scope is refused like this one.";
 
@@ -44,6 +47,11 @@ internal sealed class StorageWorker : IDisposable
     }
 
     /// <summary>
+    /// Gets whether the caller runs within an item of this worker, where <see cref="RunAsync"/> refuses it.
+    /// </summary>
+    public bool IsCallFromWithinItem => _itemOfFlow.Value is { IsFinished: false };
+
+    /// <summary>
     /// Runs the work after everything handed in before it. After disposal the returned task is cancelled.
     /// </summary>
     /// <remarks>
@@ -54,7 +62,7 @@ internal sealed class StorageWorker : IDisposable
         // Queued, the call would wait for the item that waits for it, and nothing would ever run again. That
         // the flow carries an item is not enough: a task that an item started keeps the flow of that item
         // after it has finished.
-        if (_itemOfFlow.Value is { IsFinished: false })
+        if (IsCallFromWithinItem)
         {
             return Task.FromException(new InvalidOperationException(CallFromWithinItemMessage));
         }

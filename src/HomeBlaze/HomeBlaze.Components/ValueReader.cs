@@ -1,10 +1,10 @@
-using System.Globalization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using MudBlazor;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Components;
@@ -35,8 +35,48 @@ public static class ValueReader
         ITimeZoneDisplay? timeZone)
     {
         var valueMap = ResolveMap(resolver, widget, map, out var mapError);
+        return ReadCore(ResolveProperty(resolver, widget, path), valueMap, mapError, timeZone);
+    }
 
-        var property = ResolveProperty(resolver, widget, path);
+    /// <summary>
+    /// Reads a property that <see cref="ResolveProperty"/> already resolved and applies a map that
+    /// <see cref="ResolveMap"/> already resolved, with the same text, color and missing value as <see cref="Read"/>.
+    /// </summary>
+    /// <param name="property">The property, or null for a missing reading.</param>
+    /// <param name="valueMap">The resolved map, or null for none.</param>
+    /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    public static ValueReading ReadResolved(
+        RegisteredSubjectProperty? property,
+        ValueMap? valueMap,
+        ITimeZoneDisplay? timeZone)
+    {
+        return ReadCore(property, valueMap, mapError: null, timeZone);
+    }
+
+    /// <summary>
+    /// Reads the property with the name on a subject and applies a map that <see cref="ResolveMap"/> already
+    /// resolved, with the same text, color and missing value as <see cref="Read"/> gives for a path.
+    /// </summary>
+    /// <param name="subject">The subject that has the property, for example a row of a table.</param>
+    /// <param name="propertyName">The name of the property. Null, empty or unknown gives a missing reading.</param>
+    /// <param name="valueMap">The resolved map, or null for none.</param>
+    /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    public static ValueReading ReadProperty(
+        IInterceptorSubject subject,
+        string? propertyName,
+        ValueMap? valueMap,
+        ITimeZoneDisplay? timeZone)
+    {
+        var property = string.IsNullOrEmpty(propertyName) ? null : subject.TryGetRegisteredProperty(propertyName);
+        return ReadCore(property, valueMap, mapError: null, timeZone);
+    }
+
+    private static ValueReading ReadCore(
+        RegisteredSubjectProperty? property,
+        ValueMap? valueMap,
+        string? mapError,
+        ITimeZoneDisplay? timeZone)
+    {
         var value = property?.GetValue();
         if (property is null || value is null)
         {
@@ -65,16 +105,17 @@ public static class ValueReader
         ResolveProperty(resolver, widget, path)?.GetValue();
 
     /// <summary>
-    /// Gets the label of a value: the given one, otherwise the title the property declares, otherwise its name.
+    /// Gets the label of a value or a control: the given one, otherwise the title the property declares, otherwise its
+    /// name, and the path when the path leads nowhere.
     /// </summary>
-    public static string GetLabel(ValueReading? reading, string? label)
+    public static string GetLabel(RegisteredSubjectProperty? property, string? label, string? path)
     {
         if (!string.IsNullOrEmpty(label))
         {
             return label;
         }
 
-        return reading?.Property?.GetDisplayName() ?? string.Empty;
+        return property?.GetDisplayName() ?? path ?? string.Empty;
     }
 
     /// <summary>
@@ -96,13 +137,7 @@ public static class ValueReader
     /// </summary>
     public static double? GetProgressPercent(object? value, double minimum, double maximum)
     {
-        if (double.IsNaN(minimum) || double.IsNaN(maximum) || maximum <= minimum || !IsNumber(value))
-        {
-            return null;
-        }
-
-        var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
-        if (double.IsNaN(number))
+        if (double.IsNaN(minimum) || double.IsNaN(maximum) || maximum <= minimum || !NumberValues.TryGetNumber(value, out var number))
         {
             return null;
         }
@@ -110,10 +145,14 @@ public static class ValueReader
         return Math.Clamp((number - minimum) / (maximum - minimum) * FullPercent, 0, FullPercent);
     }
 
-    private static bool IsNumber(object? value) =>
-        value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal;
-
-    private static ValueMap? ResolveMap(SubjectPathResolver resolver, IInterceptorSubject widget, string? map, out string? error)
+    /// <summary>
+    /// Resolves the name or path of a <see cref="ValueMap"/>. Null or empty gives no map and no error.
+    /// </summary>
+    /// <param name="resolver">The resolver of the map.</param>
+    /// <param name="widget">The subject the map is relative to, usually the widget itself.</param>
+    /// <param name="map">The name or path of the map as written.</param>
+    /// <param name="error">The widget argument error when the map leads nowhere or to no <see cref="ValueMap"/>, otherwise null.</param>
+    public static ValueMap? ResolveMap(SubjectPathResolver resolver, IInterceptorSubject widget, string? map, out string? error)
     {
         error = null;
         if (string.IsNullOrEmpty(map))
@@ -130,9 +169,10 @@ public static class ValueReader
         return null;
     }
 
-    // The path of a property and that of a map are written by the author of a page, and a malformed one
-    // must not take the page down. This holds for both resolving methods below.
-    private static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string? path)
+    /// <summary>
+    /// Resolves the path of a widget to a property, or to null when the path is null, empty, malformed or leads nowhere.
+    /// </summary>
+    public static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string? path)
     {
         if (string.IsNullOrEmpty(path))
         {
@@ -149,7 +189,9 @@ public static class ValueReader
         }
     }
 
-    private static IInterceptorSubject? ResolveSubject(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
+    // The path of a property and that of a map are written by the author of a page, and a malformed one
+    // must not take the page down. This holds for ResolveProperty above as well.
+    internal static IInterceptorSubject? ResolveSubject(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
     {
         try
         {

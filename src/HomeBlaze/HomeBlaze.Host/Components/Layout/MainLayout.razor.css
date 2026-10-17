@@ -1,0 +1,62 @@
+/* Styles that differ by mode beyond the palette. The class homeblaze-dark-mode is on the element around the layout and
+   the providers of dialogs, popovers and snackbars while the dark mode is on. */
+
+/* Text in a status color in dark mode gets the lightened tone of the palette. MudBlazor gives alert text the darker
+   tone, which is below 4.5:1 on cards, and that tone cannot be raised because filled buttons and chips use it on hover. */
+.homeblaze-dark-mode ::deep :is(.mud-alert-text-info, .mud-alert-outlined-info),
+.homeblaze-dark-mode ::deep :is(.mud-alert-text-info, .mud-alert-outlined-info) .mud-alert-icon {
+    color: var(--mud-palette-info-lighten);
+}
+
+.homeblaze-dark-mode ::deep :is(.mud-alert-text-success, .mud-alert-outlined-success),
+.homeblaze-dark-mode ::deep :is(.mud-alert-text-success, .mud-alert-outlined-success) .mud-alert-icon {
+    color: var(--mud-palette-success-lighten);
+}
+
+.homeblaze-dark-mode ::deep :is(.mud-alert-text-warning, .mud-alert-outlined-warning),
+.homeblaze-dark-mode ::deep :is(.mud-alert-text-warning, .mud-alert-outlined-warning) .mud-alert-icon {
+    color: var(--mud-palette-warning-lighten);
+}
+
+.homeblaze-dark-mode ::deep :is(.mud-alert-text-error, .mud-alert-outlined-error),
+.homeblaze-dark-mode ::deep :is(.mud-alert-text-error, .mud-alert-outlined-error) .mud-alert-icon {
+    color: var(--mud-palette-error-lighten);
+}
+
+/* Outlined and text buttons in the info and error colors, which are below 4.5:1 on cards in dark mode. */
+.homeblaze-dark-mode ::deep :is(.mud-button-outlined-info, .mud-button-text-info) {
+    color: var(--mud-palette-info-lighten);
+}
+
+.homeblaze-dark-mode ::deep :is(.mud-button-outlined-error, .mud-button-text-error) {
+    color: var(--mud-palette-error-lighten);
+}
+
+/* The active drawer link: the dark primary is below 4.5:1 on the drawer. */
+.homeblaze-dark-mode ::deep .mud-navmenu .mud-nav-link.active:not(.mud-nav-link-disabled) {
+    color: var(--mud-palette-primary-lighten);
+}
+
+/* The selection of a widget in edit mode: the dark primary is below 3:1 on cards for its outline and its Edit action. */
+.homeblaze-dark-mode ::deep .subject-component-wrapper.selectable.selected {
+    outline-color: var(--mud-palette-primary-lighten);
+}
+
+.homeblaze-dark-mode ::deep .subject-action-bar .mud-primary-text {
+    color: var(--mud-palette-primary-lighten) !important;
+}
+
+/* The bar with the actions of the selected widget is a popover, which MudBlazor renders in the provider above and not
+   inside the widget, so the rules for the root of the popover are here. The content of the bar is styled in
+   SubjectComponent.razor.css of HomeBlaze.Components. MudBlazor moves a popover whose top would be less than 24px (its
+   overflowPadding) below the top of the window down to that line while the anchor starts inside the window, so an
+   unflipped bar can end up on the top edge of its widget. */
+::deep .subject-action-bar {
+    margin-top: calc(var(--mud-appbar-height, 64px) - 4px);
+    /* MudBlazor lifts a popover that comes close to the app bar above it. The bar stays below the app bar like the page. */
+    z-index: calc(var(--mud-zindex-popover) + 1) !important;
+}
+
+::deep .subject-action-bar[data-mudpopover-flip^="bottom"] {
+    margin-top: 4px;
+}

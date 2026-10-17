@@ -30,6 +30,7 @@ public partial class Widget : ITitleProvider, IConfigurable
     /// the name of a block on that page, or from the widget itself when it is not on a page.
     /// </summary>
     [Configuration]
+    [SubjectPath(typeof(IInterceptorSubject))]
     public partial string Path { get; set; }
 
     public string? Title => null;

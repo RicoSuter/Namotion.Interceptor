@@ -48,13 +48,13 @@ The names, numbers and lines in the messages below are examples.
 
 | Message | Cause | Fix |
 |---------|-------|-----|
-| `Card has no configuration property 'Titel'. Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.` | The key of an argument, or a name at the top level of the `json` block, is no configuration property of the type | Use one of the names that the message lists |
-| `Card has no configuration property 'title'. Did you mean 'Title'? Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.` | The key differs from the name of a property only in upper and lower case, for example because it was copied from a JSON file | Write the name that the message suggests |
+| `Card has no configuration property 'Titel'. Available: AspectRatio, Elevation, Height, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.` | The key of an argument, or a name at the top level of the `json` block, is no configuration property of the type | Use one of the names that the message lists |
+| `Card has no configuration property 'title'. Did you mean 'Title'? Available: AspectRatio, Elevation, Height, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.` | The key differs from the name of a property only in upper and lower case, for example because it was copied from a JSON file | Write the name that the message suggests |
 | `ValueList has no configuration properties, so 'Label' cannot be set.` | An argument, or a name at the top level of the `json` block, on a type that has no configuration at all | Remove it. The label of a row belongs on its `Value` block |
 | `'fast' is not a valid value for 'TargetSpeed'. Expected a value of type Int32.` | The value of an argument, or a single value at the top level of the `json` block, does not fit the property | Write a value of the kind that the property takes, see [Values](pages.md#values) |
 | `The value of 'Zones' in the json block cannot be read at Zones[1].Sensor: Read unrecognized type discriminator id 'My.Plugin.Sensr'.` | A list or an object at the top level of the `json` block cannot be read. The message names the place inside the value where the reader of the JSON stopped, when the mistake is inside the value, and goes on with what the reader found. Here `Zones` is a list, and the `$type` of the subject that its second entry holds as `Sensor` names no type | Fix the value at the place that the message names |
 | `The value of 'Zones' in the json block cannot be read at Zones[0].Sensor: A subject in the json block needs a '$type' with its full type name, as the first name in its braces.` | A subject inside a value of the `json` block has no `$type`, or its `$type` stands after another name. The message names the place of that subject | Write `"$type"` with the full type name as the first name of that subject |
-| `'Cells' is written as blocks on a page: one 'Cell' block per value inside this block.` | An argument, or a name at the top level of the `json` block, is the property of a slot that takes any number of blocks, like `Cells` of a `GridLayout` and `Nodes` of a `CanvasLayout`. On a page a slot is filled by blocks and not by configuration. An empty list in the `json` block is no error: it is ignored, and the next save of the block leaves it out | Write one block of the name that the message gives for each value, inside the block of the widget. For cells and nodes see [GridLayout](page-widgets.md#gridlayout) and [CanvasLayout](page-widgets.md#canvaslayout) |
+| `'Cells' is written as blocks on a page: one 'Cell' block per value inside this block.` | An argument, or a name at the top level of the `json` block, is the property of a slot that takes any number of blocks, like `Cells` of a `GridLayout` and `Nodes` of a `CanvasLayout`. On a page a slot is filled by blocks and not by configuration. An empty list in the `json` block is no error: it is ignored, and the next save of the block leaves it out | Write one block of the name that the message gives for each value, inside the block of the widget. For cells and nodes see [GridLayout](widgets/grid-layout.md) and [CanvasLayout](widgets/canvas-layout.md) |
 | `'Footer' is written as a block on a page: a 'Footer' block inside this block.` | The same for the property of a slot that takes one block, like `Footer` of a `Card` | Write the slot block inside the block of the widget and put the content into it |
 | `'Child' is the content of the block on a page, so it cannot be set as configuration.` | An argument, or a name at the top level of the `json` block, is the property of the default slot, like `Child` of a `Cell` or a `Node` and `Content` of a `Card` | Remove it and write the content inside the block |
 | `The json block must contain a valid JSON object without duplicate keys.` | The `json` block is no valid JSON, is empty, or has a name twice. The message goes on with what the reader of the JSON found and where | Fix the JSON |
@@ -85,11 +85,30 @@ An expression with a wrong format does not take a block down. The page shows the
 
 ## Value Widget Errors
 
-A map that cannot be found does not take a block down either. The widget shows the message in a small red alert in place of its value, without a line number, and the rest of the page is shown as usual.
+A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual.
 
 | Message | Cause | Fix |
 |---------|-------|-----|
-| `Cannot resolve map: motorstat` | The `Map` of a `ValueList` row, a `ValueTile` or an `Indicator` leads to no subject, or to a subject that is no `ValueMap`. The message shows the map as written | Check the name or the path in `Map`. The name is that of the block of the map, and a map on another page is reached through that page, see [ValueMap](page-widgets.md#valuemap) |
+| `Cannot resolve map: motorstat` | The `Map` of a `ValueList` row, a `ValueTile`, an `Indicator`, a `Select`, a `Control`, a `Gauge` or a `Column` of a `SubjectTable` leads to no subject, or to a subject that is no `ValueMap`. The message shows the map as written | Check the name or the path in `Map`. The name is that of the block of the map, and a map on another page is reached through that page, see [ValueMap](widgets/value-map.md) |
+| `Set both On and Off, or neither` | A `Switch` has only one of `On` and `Off` | Set both, so that the switch invokes an operation per state, or remove both, so that it writes its property, see [Switch](widgets/switch.md) |
+| `On needs an operation without input: pump/SetTargetSpeed` | `On` of a `Switch` leads to an operation with a parameter that needs input. `Off` gives the same message with its own name. The message shows the path as written | Use an operation whose parameters need no input, see [Switch](widgets/switch.md) |
+| `Needs a range: set Minimum and Maximum` | A `Slider`, a `Gauge` or a `Progress` of a number finds no end of its range, neither in its arguments nor on its property, see [Ranges](widgets/basics.md#ranges) | Set `Minimum` and `Maximum` on the block |
+| `Maximum must be above Minimum: 0.8 to 0.2` | The range of a `Slider`, a `Gauge` or a `Progress` is empty or reversed, from its arguments or from the attributes of its property, see [Ranges](widgets/basics.md#ranges). The message shows the minimum and the maximum it found | Set a `Maximum` above the `Minimum` |
+| `Step must be above 0: 0` | The `Step` of a `Slider` is 0 or less. The message shows the step as written | Set a step above 0, or remove `Step` for the default |
+| `Step must be a whole number for a whole number property: 0.5` | A `Slider` of a property that holds whole numbers has a `Step` with a fraction | Use a whole number, or remove `Step` for the default of 1 |
+| `Height must be above 0: 0` | The `Height` of a `Card` or a `HistoryChart` is 0 or less. The message shows the height as written | Set a height above 0, or remove `Height`: a card is then as high as its content, see [Card](widgets/card.md), and the lines of a chart 300 pixels high, see [HistoryChart](widgets/history-chart.md) |
+| `AspectRatio must look like 4:3: wide` | The `AspectRatio` of a `Card` is not two numbers above 0 with a colon between them. The message shows the value as written | Write the width and the height as `W:H`, for example `4:3` |
+| `Cannot select a value of the flags enum MotorFeatures` | The property of a `Select` holds an enum whose values combine as flags. The message shows the name of the enum | Show the value with a value widget instead, see [Select](widgets/select.md) |
+| `Needs a Source: a folder or a property that holds subjects` | A `SubjectTable` has no `Source` | Set `Source` to a folder, a page or a property that holds subjects, see [SubjectTable](widgets/subject-table.md) |
+| `Cannot list subjects of: ../Motors` | The `Source` of a `SubjectTable` leads nowhere, to a subject that is no folder or page, or to a property that holds no subjects. The message shows the source as written | Check the path in `Source`. A path to a folder or a page lists what it holds, a path to a property lists its subjects |
+| `Unknown range '2h': use one of 1h, 6h, 24h, 7d, 30d` | The `Range` of a `HistoryChart` is none of the listed values. The message shows the range as written | Use one of the listed values, or remove `Range` for `24h`, see [HistoryChart](widgets/history-chart.md) |
+| `Unknown bucket '2m': use one of Auto, Raw, 1s, 10s, 60s, 5m, 10m, 15m, 1h, 4h, 6h, 12h, 24h` | The `Bucket` of a `HistoryChart` is none of the listed values. The message shows the bucket as written | Use one of the listed values, or remove `Bucket` for `Auto` |
+| `Unknown aggregation 'Median': use one of TimeWeightedAverage, Average, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count` | The `Aggregation` of a `HistoryChart` or of one of its `Series` blocks is none of the listed values. The message shows the aggregation as written, and for a series also its label | Use one of the listed values, or remove `Aggregation` for the automatic choice, see [HistoryChart](widgets/history-chart.md) |
+| `Bucket '1s' is too small for range '1h': use 10s or more, or Auto` | The fixed `Bucket` of a `HistoryChart` divides its `Range` into more than 1000 intervals, more than a chart query returns. The message names the smallest bucket that fits | Use the named bucket or a larger one, or `Auto`, see [HistoryChart](widgets/history-chart.md) |
+| `RefreshInterval '2.00:00:00' is too long: use at most 1.00:00:00` | The `RefreshInterval` of a `HistoryChart` is longer than a day | Use a time span up to a day, or remove `RefreshInterval` for a minute, see [HistoryChart](widgets/history-chart.md) |
+| `Series 'Fan temperature' (°C) has another unit than 'Pump' (no unit): show it in a second chart` | A recorded number series of a `HistoryChart` has another unit than its first recorded number series. A series with the aggregation `Count` counts samples and has no unit; the message calls it a count | Put the series in a second chart, see [HistoryChart](widgets/history-chart.md) |
+| `From must be one of Xs, Sm, Md, Lg, Xl, Xxl: SmAndUp` | The `From` of a `Responsive` is a combined breakpoint of MudBlazor, such as `SmAndUp`, `None` or `Always`. `To` gives the same message with its own name. The message shows the breakpoint | Use one of the listed breakpoints, see [Responsive](widgets/responsive.md) |
+| `From must not be after To: Lg to Sm` | The `From` of a `Responsive` is a larger breakpoint than its `To`, so no width shows the content. The message shows both | Swap them, or set `From` to the smallest and `To` to the largest breakpoint that shows the content |
 
 ## Other Messages
 
@@ -114,15 +133,16 @@ These notices are no error boxes. They come from a widget while it is shown:
 
 | Notice | Cause |
 |--------|-------|
-| Cannot resolve path | The `Path` of a `Widget` block leads to no subject |
-| Cannot show path | The `Path` of a `Widget` block leads to the widget itself or to a block that contains it |
-| No Widget component for | The type of the block, or of the subject that a `Widget` shows, has no widget |
-| A dash in place of a value | The `Path` of a `ValueList` row, a `ValueTile`, an `Indicator` or a `Progress` leads nowhere, or the value is not set. The path is the tooltip of the dash, see [Value Widgets](page-widgets.md#value-widgets). A `Progress` shows it also for a value that is no number |
+| `Cannot resolve path` | The `Path` of a `Widget` block leads to no subject |
+| `Cannot show path` | The `Path` of a `Widget` block leads to the widget itself or to a block that contains it |
+| `No Widget component for` | The type of the block, or of the subject that a `Widget` shows, has no widget |
+| `(oldest samples not shown)` in the legend of a `HistoryChart` | A band or a raw line of the chart has more recorded samples in its range than a query returns, 1000. The chart shows the newest, see [HistoryChart](widgets/history-chart.md#behavior-and-limits) |
+| A dash in place of a value | The `Path` of a `ValueList` row, a `ValueTile`, an `Indicator`, a `Progress` or a `Gauge` leads nowhere, the `Property` of a `SubjectTable` column is not a property of the row, or the value is not set. The path is the tooltip of the dash, or for a `SubjectTable` column the name of the property, see [Missing Values](widgets/basics.md#missing-values). A `Progress` shows it also for a value that is no number |
 
 ---
 
 ## Related Documentation
 
 - [Markdown Pages](pages.md) - The syntax of pages: expressions, blocks, slots and the `json` block
-- [Page Widgets](page-widgets.md) - Reference of the widgets for pages
+- [Widgets](widgets/overview.md) - Every widget for pages, each with a page of its own
 - [Building Custom Subjects](../development/building-subjects.md) - The rules for the slots of a widget type

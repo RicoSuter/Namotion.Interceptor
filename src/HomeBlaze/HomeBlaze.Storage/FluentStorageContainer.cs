@@ -68,6 +68,9 @@ public partial class FluentStorageContainer :
     /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
     internal bool IsStorageUnresponsive => _connection is { IsStorageUnresponsive: true };
 
+    /// <summary>Gets whether the caller runs within work of the worker of the current connection.</summary>
+    internal bool IsCallFromWithinWorkerItem => _connection?.Worker.IsCallFromWithinItem == true;
+
     /// <inheritdoc cref="StorageConnection.SimulateFileWatcherError"/>
     internal void SimulateFileWatcherError(Exception exception) => _connection?.SimulateFileWatcherError(exception);
 

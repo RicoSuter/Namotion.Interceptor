@@ -64,7 +64,7 @@ internal class SetPropertyTool
             });
         }
 
-        if (!property.HasSetter || !McpToolHelper.HasPublicSetter(property))
+        if (!property.HasPublicSetter)
         {
             return Task.FromResult<object?>(new { error = $"Property is not writable: {path}" });
         }

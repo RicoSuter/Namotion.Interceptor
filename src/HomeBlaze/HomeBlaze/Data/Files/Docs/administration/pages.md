@@ -6,7 +6,7 @@ position: 4
 
 # Markdown Pages
 
-HomeBlaze transforms markdown files into interactive pages with live data binding. This page is the guide for people who write pages: frontmatter, links, live expressions and blocks. Two pages next to it are the reference: [Page Widgets](page-widgets.md) has the widgets that are made for pages, and [Page Errors](page-errors.md) has every error message with its cause and its fix. People who write widget types find their side in [Building Custom Subjects](../development/building-subjects.md), section "Content Slots".
+HomeBlaze transforms markdown files into interactive pages with live data binding. This page is the guide for people who write pages: frontmatter, links, live expressions and blocks. Two places next to it are the reference: [Widgets](widgets/overview.md) has the widgets that are made for pages, one page each, and [Page Errors](page-errors.md) has every error message with its cause and its fix. People who write widget types find their side in [Building Custom Subjects](../development/building-subjects.md), section "Content Slots".
 
 On this page:
 
@@ -263,7 +263,7 @@ The rest of this section is the reference:
 - [Names and the Page](#names-and-the-page): what a name and a relative path refer to
 - [Where a Block Is Allowed](#where-a-block-is-allowed)
 
-[Page Widgets](page-widgets.md) shows every widget for pages live, with the source of each sample above its result. The sample data of a development checkout also has demo pages to try each area: `Demo/Blocks.md` for an overview, `Demo/Dashboard.md` as the full example of a dashboard, `Demo/References.md` for names and paths, `Demo/Configuration.md` for arguments, the `json` block, a grid with `Cell` blocks, style blocks and the page editor, and `Demo/Errors.md` for the common error boxes. An installed HomeBlaze does not ship the demo pages.
+The [widget pages](widgets/overview.md) show every widget for pages live, with the source of each sample above its result. The sample data of a development checkout also has demo pages to try each area: `Demo/Blocks.md` for an overview, `Demo/Dashboard.md` as the full example of a dashboard, `Demo/References.md` for names and paths, `Demo/Configuration.md` for arguments, the `json` block, a grid with `Cell` blocks, style blocks and the page editor, and `Demo/Errors.md` for the common error boxes. An installed HomeBlaze does not ship the demo pages.
 
 ### The Head Line
 
@@ -349,7 +349,7 @@ All names are case-sensitive: `HomeBlaze.Components.Card` is a type, `homeblaze.
 - **Type names**: A widget block has the full .NET type name with its namespace, like `HomeBlaze.Components.Card`. It is the name that the `$type` property has in the JSON file of a subject. There are no short names.
 - **Configuration names**: The key of an argument is the name of a property of the type, written exactly as the type declares it in C#, like `TargetSpeed`. It is the same name that a path uses, so the argument `TargetSpeed=1200` and the expression `{{ mymotor/TargetSpeed }}` spell the property the same way. Only the properties that the type marks as configuration can be set, and the error for an unknown key lists them.
 - **Block names**: A `#name` starts with a letter or `_` and continues with letters, digits, `_` or `-`. Letters are `a` to `z` and `A` to `Z`. A name is unique on the page, however deeply the blocks are nested. See [Names and the Page](#names-and-the-page) for what a name is good for.
-- **Slot names**: The widget type decides the names of its slots, like `Footer`, `Item` and `Tab`. The section of each widget on [Page Widgets](page-widgets.md) lists them.
+- **Slot names**: The widget type decides the names of its slots, like `Footer`, `Item` and `Tab`. The page of each widget, see [Widgets](widgets/overview.md), lists them.
 
 A configuration file spells the same properties in camelCase, and a page does not. The file `Conveyor.json` of a motor:
 
@@ -379,7 +379,7 @@ The body of the card.
 ~~~~
 
 ~~~~text
-Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Available: Elevation, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.
+Line 1: Card has no configuration property 'title'. Did you mean 'Title'? Available: AspectRatio, Elevation, Height, Href, Icon, IconColor, Image, Outlined, Subtitle, Title.
 ~~~~
 
 ### Closing and Nesting
@@ -605,7 +605,7 @@ Line 2: Expected key=value but found 'that this line is read as a head line'.
 
 ### Content and Slots
 
-A widget can take page content: text, expressions and other blocks. Its type declares the places for content as slots. A type has at most one default slot and any number of named slots, and each widget on [Page Widgets](page-widgets.md) lists its slots.
+A widget can take page content: text, expressions and other blocks. Its type declares the places for content as slots. A type has at most one default slot and any number of named slots, and the page of each widget, see [Widgets](widgets/overview.md), lists its slots.
 
 **The default slot.** Everything inside a widget block that is not a slot block goes to the default slot of the widget. For a card that is its body:
 
@@ -871,25 +871,7 @@ A widget block is allowed in three places: directly on the page, directly inside
 
 ## Widgets
 
-These widgets ship with HomeBlaze and are made for pages. [Page Widgets](page-widgets.md) is their reference: the arguments, the slots, the samples and the limits of each. That page shows each widget live, with the source of every sample above its result.
-
-| Widget | What it is for | Reference |
-|--------|----------------|-----------|
-| `Card` | A titled box around page content, with a subtitle, a link, a header corner and a footer if you want them | [Card](page-widgets.md#card) |
-| `FlowLayout` | Cells next to each other that wrap to the width of the screen, for example cards side by side | [FlowLayout](page-widgets.md#flowlayout) |
-| `TabLayout` | Several tabs with page content, one of them shown at a time | [TabLayout](page-widgets.md#tablayout) |
-| `Widget` | The widget of a subject that exists somewhere else: in a file of its own, or in another block of the page | [Widget](page-widgets.md#widget) |
-| `GridLayout` | A grid with a fixed number of rows and columns and page content in each cell | [GridLayout](page-widgets.md#gridlayout) |
-| `CanvasLayout` | An area on which page content is placed at any position | [CanvasLayout](page-widgets.md#canvaslayout) |
-| `ValueMap` | Text, colour and icon per value, read by the value widgets. It shows nothing itself | [ValueMap](page-widgets.md#valuemap) |
-| `ValueList` | Rows that each show a label and a value, for example the values of a device | [ValueList](page-widgets.md#valuelist) |
-| `ValueTile` | A small box with a label and one large value | [ValueTile](page-widgets.md#valuetile) |
-| `Indicator` | A state as a coloured chip or as an icon | [Indicator](page-widgets.md#indicator) |
-| `Progress` | A number as a bar between a minimum and a maximum | [Progress](page-widgets.md#progress) |
-| `ExpansionPanels` | Page content in panels that open and close | [ExpansionPanels](page-widgets.md#expansionpanels) |
-| `Alert` | A highlighted box for a note or a warning | [Alert](page-widgets.md#alert) |
-
-The names for an `Icon` are described under [Icons](page-widgets.md#icons), and the names for a colour under [Colours](page-widgets.md#colours).
+HomeBlaze ships widgets that are made for pages. [Widgets](widgets/overview.md) lists them by group, and each one has a page of its own with its arguments, its slots, live samples and its limits. [Widget Basics](widgets/basics.md) has the rules that they share, among them the names for an [icon](widgets/basics.md#icons) and for a [color](widgets/basics.md#colors).
 
 Every other type that can be configured works as a block as well, for example the sample motor or a device: its arguments are its configuration properties, and it shows the widget that its type has. A type without a widget shows the notice "No Widget component for" with its name.
 
@@ -959,17 +941,17 @@ What the editor writes:
 - **On the head line**: Text without a line break, numbers, yes or no and durations, each as one argument. A text is put in double quotes only when it needs them.
 - **In the `json` block**: Lists, objects and text with a line break. When nothing of that kind is left, the `json` block is removed.
 - **Names**: Both are written with the property names.
-- **All values**: Every configuration property that has a value is written, also one that the block did not set before. Values that are not set are left out.
+- **Values**: A configuration property is written when its value differs from the default of its type, which is the value that a new block of that type without the argument gets. A value that equals the default is left out, unless the block already had that argument, which then stays. Values that are not set are left out too. A block without an argument follows the default of its type, so when a later version of the type changes that default, such pages change with it. A default that the type computes from the host, such as from its culture, machine name or time zone, can differ from one host to another, and so can the value of a block without the argument.
 - **Colons**: The head line keeps its number of colons and its `#name` and gets one space after the colons. The arguments are written anew, so arguments that you wrote by hand can change their order.
 
-Editing a subject elsewhere in the UI, for example through the edit button of its widget, writes its block in the same way.
+Editing a subject elsewhere in the UI, for example through "Edit" in the bar of its selected widget in the Inline or Split mode of the page, writes its block in the same way.
 
-While the page is in edit mode, which is with "Split" or "Inline" in the menu at the top right of the page, a `GridLayout` shows a plus in every free place, and a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas. Each cell and each node has buttons to edit and remove it, and a node can be moved with the mouse. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
+While the page is in edit mode, which is with "Split" or "Inline" in the menu at the top right of the page, a `GridLayout` shows a plus in every free place, and once the grid itself is selected, a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas, a click on a node selects the widget in it, or the canvas when the node has no widget, and a node can be moved with the mouse. Each cell and each node has buttons to edit and remove it, which show while its layout or a widget in the layout is selected, so a click on a cell without a widget selects the grid and shows the buttons of all its cells. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
 
 - **Add**: The click opens the dialog "Create subject". The new cell or node is a `Cell` or `Node` block after the last one of its layout, with the widget that you chose as a block inside it. It is written like the block before it: with as many colons, and with a closing line only when that block has one. In a layout without a cell or a node, the new block has one colon more than the layout. It then gets a closing line when every widget block and slot block of the page has one, and none otherwise.
-- **Edit and move**: Editing a cell or a node, or moving a node, writes the head line of its block again, with all its arguments. A node that had only `X` and `Y` has `Width` and `Height` on its head line afterwards. The content of the block stays as it is.
+- **Edit and move**: Editing a cell or a node, or moving a node, writes the head line of its block again, by the rules of the editor above. A node that had only `X` and `Y` gets `Width` and `Height` only when they differ from their defaults. The content of the block stays as it is.
 - **Remove**: Removing a cell or a node removes its block with everything in it. Where the text before the block and the text after it would then stand directly below each other, one empty line stays between them.
-- **A change that the page cannot keep**: When the page cannot keep a change, nothing is written, and the notification "Configuration applied but not saved. It will be lost on restart." appears. When adding or removing the block would change another block or other text of the page, or the cells or nodes were put into another order outside of the page, for example by a method or another tool, the page is read again at once, and the layout shows what the page holds. When the page is being read again at that moment, or another change was saved while this one was written, the layout shows the change until the page is read again, which every save of its text and a restart do, so save it again. The order of cells and nodes is the order of their blocks, so change it in the text of the page.
+- **A change that the page cannot keep**: When the page cannot keep a change, nothing is written, and the notification "Configuration applied but not saved. It will be lost on restart." appears. When adding or removing the block would change another block or other text of the page, or the cells or nodes were put into another order outside of the page, for example by a method or another tool, the page is read again at once, and the layout shows what the page holds. When the page is being read again at that moment, or the page text was saved elsewhere while this change was written, the layout shows the change until the page is read again, which every save of its text and a restart do, so save it again. The order of cells and nodes is the order of their blocks, so change it in the text of the page.
 
 Use these buttons with "Inline". In "Split", the editor next to the page does not show what the buttons wrote until the page is opened again, so do not save the text of the editor after using them, because it would write its older text over theirs.
 
@@ -1076,7 +1058,7 @@ What the sample uses:
 
 ## Related Documentation
 
-- [Page Widgets](page-widgets.md) - Reference of the widgets for pages
+- [Widgets](widgets/overview.md) - Every widget for pages, each with a page of its own
 - [Page Errors](page-errors.md) - Every error message with its cause and its fix
 - [Subjects, Storage & Files](subjects.md) - Configure subjects and file layout
 - [Paths](paths.md) - Path syntax reference

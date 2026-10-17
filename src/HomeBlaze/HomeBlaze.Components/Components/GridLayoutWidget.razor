@@ -13,36 +13,26 @@
      style="display: grid;
             grid-template-rows: repeat(@(Grid?.Rows ?? 1), 1fr);
             grid-template-columns: repeat(@(Grid?.Columns ?? 1), 1fr);
-            gap: 8px;
+            gap: 16px;
             width: 100%;
             min-height: 400px;
             position: relative;">
-
-    @* Layout edit button - top right of container *@
-    @if (IsEditing)
-    {
-        <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                       Size="Size.Small"
-                       Color="Color.Primary"
-                       Class="layout-edit-button"
-                       title="Edit Layout"
-                       OnClick="EditLayout" />
-    }
 
     @* Render cells *@
     @foreach (var cell in Cells)
     {
         <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
+            <div class="grid-cell-content">
+                <SubjectComponent Subject="@cell.Child"
+                                  Type="SubjectComponentType.Widget" />
+            </div>
+            @* After the content, so that Tab reaches them right after a selected widget in the cell. *@
             @if (IsEditing)
             {
                 <LayoutItemActions EditTitle="Edit Cell"
                                    OnEdit="() => EditCell(cell)"
                                    OnDelete="() => DeleteCell(cell)" />
             }
-            <div class="grid-cell-content">
-                <SubjectComponent Subject="@cell.Child"
-                                  Type="SubjectComponentType.Widget" />
-            </div>
         </div>
     }
 
@@ -51,7 +41,7 @@
     {
         @foreach (var (row, col) in GetEmptyCellPositions())
         {
-            <div class="grid-cell empty"
+            <div class="grid-cell empty edit-mode-selected-interactive"
                  style="grid-row: @(row + 1); grid-column: @(col + 1);"
                  @onclick="() => AddCellAt(row, col)">
                 <MudIcon Icon="@Icons.Material.Filled.Add"
@@ -63,15 +53,6 @@
 </div>
 
 <style>
-    .layout-edit-button {
-        position: absolute;
-        top: -36px;
-        right: 4px;
-        z-index: 20;
-        background: rgba(255,255,255,0.9);
-        border-radius: 4px;
-    }
-
     .grid-cell {
         background: var(--mud-palette-surface);
         border: 1px solid rgba(128,128,128,0.2);
@@ -186,15 +167,10 @@
         });
     }
 
-    private async Task EditLayout()
-    {
-        if (Grid == null) return;
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Grid, "Edit Grid Layout");
-    }
-
     private async Task EditCell(GridCell cell)
     {
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, cell, "Edit Cell");
+        var title = cell.Child is { } child ? SubjectNames.TryGetContentTitle(child) : null;
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, cell, SubjectEditDialog.GetTitle("Cell", title));
     }
 
     private async Task DeleteCell(GridCell cell)

@@ -7,6 +7,7 @@ using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Blazor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit.Abstractions;
@@ -68,10 +69,8 @@ public class SubjectSetupDialogTests
         await page.GotoAsync($"{_fixture.ServerAddress}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // The automatic timezone resolves through JS after interactive rendering. Prerendered
-        // links are already clickable, but navigating then can race the old page's hydration.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
-            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        // Prerendered links are already clickable, but navigating then can race the old page's hydration.
+        await page.WaitUntilInteractiveAsync(PageLoadTimeout);
 
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
         await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
@@ -121,8 +120,7 @@ public class SubjectSetupDialogTests
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The edit button is prerendered, and a click before the circuit is connected is lost.
-        await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
-            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await page.WaitUntilInteractiveAsync(PageLoadTimeout);
 
         // Every pane of the path has an edit button, and the last pane shows the subject at the path. A path that
         // does not resolve ends at an earlier pane, whose edit button would open the dialog of another subject.
@@ -617,6 +615,29 @@ public class SubjectSetupDialogTests
     }
 
     [Fact]
+    public async Task WhenATypeWhoseConstructorTakesServicesIsPicked_ThenItsFormLogsNoTrackingWarning()
+    {
+        // Arrange - such a subject is created without the root context, and so without change tracking.
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        var logCount = _fixture.ServerLog.Count;
+
+        // Act
+        await PickTypeAsync(page, "inmemoryhistorystoresubject");
+        var field = Dialog(page).GetByLabel("Max Points Per Property");
+        await Assertions.Expect(field).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await field.FillAsync("500");
+        await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Assert - the tracking scope of the form subscribes while it renders, so a warning is logged by now.
+        var trackingScopeEntries = _fixture.ServerLog.GetEntriesSince(logCount)
+            .Where(entry => entry.Category == typeof(TrackingScope).FullName)
+            .Select(entry => entry.Message)
+            .ToArray();
+        Assert.Empty(trackingScopeEntries);
+    }
+
+    [Fact]
     public async Task WhenAnotherTypeIsPickedAfterGoingBack_ThenAnEditedNameIsKeptAndAClearedNameIsSuggestedAgain()
     {
         // Arrange
@@ -775,6 +796,23 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create Plain configurable");
         await Assertions.Expect(Dialog(page).GetByText("Not a valid number")).ToBeVisibleAsync();
+    }
+
+    [Theory]
+    [InlineData("Demo/HistoryChartValues.md/constant", "Range", "Series")]
+    [InlineData("Demo/Displays.md/disptable", "Source", "Columns")]
+    public async Task WhenAWidgetWithAListSlotIsEdited_ThenTheDialogHasNoFieldForTheSlot(string subjectPath, string argument, string slot)
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+
+        // Act
+        var editDialog = await OpenEditDialogAsync(page, subjectPath);
+
+        // Assert
+        await Assertions.Expect(editDialog.GetByLabel(argument, new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(editDialog.GetByText(slot)).ToHaveCountAsync(0);
     }
 
     [Fact]
@@ -1205,6 +1243,9 @@ public class SubjectSetupDialogTests
             // The cell that the layout has holds a grid with empty cells of its own, so only the ones of the layout itself count.
             var emptyCell = page.Locator(".grid-layout-container").First.Locator(":scope > .grid-cell.empty").First;
             await Assertions.Expect(emptyCell).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+
+            // The empty cells of a grid add a widget once the grid is selected.
+            await emptyCell.SelectWidgetAsync();
             await emptyCell.ClickAsync();
 
             await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });

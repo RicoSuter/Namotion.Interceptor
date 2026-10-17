@@ -1,0 +1,24 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Slider))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+
+@{
+    var slider = Subject as Slider;
+}
+
+@if (slider is not null)
+{
+    // Read once per render and never kept: the reads are what the tracking scope records.
+    var path = slider.Path;
+    <SliderView Property="@ValueReader.ResolveProperty(PathResolver, slider, path)"
+                Path="@path"
+                Label="@slider.Label"
+                Minimum="@slider.Minimum"
+                Maximum="@slider.Maximum"
+                Step="@slider.Step" />
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

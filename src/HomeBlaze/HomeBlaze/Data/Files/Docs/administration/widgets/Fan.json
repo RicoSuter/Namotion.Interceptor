@@ -1,0 +1,5 @@
+{
+  "$type": "HomeBlaze.Samples.Motor",
+  "name": "Fan",
+  "targetSpeed": 800
+}

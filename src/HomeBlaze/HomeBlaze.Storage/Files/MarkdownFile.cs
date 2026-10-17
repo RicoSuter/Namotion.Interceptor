@@ -42,6 +42,20 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // remove a block then. A reload that publishes while a write-back works makes its exchange fail instead.
     private volatile bool _isGraphAheadOfSnapshot;
 
+    // Serializes the write-backs of the page: each one computes its text from the snapshot that the one before it
+    // left, and the reload inside that write has applied the page before the next one reads the graph. Not the
+    // reload lock, which the reload inside the write takes while this one is held.
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    internal const string CallFromWithinWriteMessage =
+        "A write of the configuration of a page was called from within a write of the same page, such as from the " +
+        "ApplyConfigurationAsync of a subject that the reload inside that write applies. The call would wait for " +
+        "the write that waits for it. " + StorageWorker.CallFromWithinWorkRemedy;
+
+    // The write-back of this page that the flow runs in, so that a save from inside it is refused instead of waiting
+    // for _writeLock. Off the worker, the reload after a refused write applies configuration within the write.
+    private readonly AsyncLocal<WriteOfFlow?> _writeOfFlow = new();
+
     // Each access reads the current snapshot. Code that needs two of these together must take
     // _parseResult into a local once and read both from that local.
     private IReadOnlyDictionary<int, IInterceptorSubject> _blockSubjects => _parseResult.BlockSubjects;
@@ -204,12 +218,43 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// is removed with its content. Returns false, and writes nothing, when the page has no block for the subject,
     /// when the page cannot keep the change or the change cannot be made without touching other content, when
     /// blocks would be inserted or removed while a reload runs or after one that failed, until the page has been
-    /// read again, or when another write-back or a reload changed the page while this one ran. When the page cannot
-    /// keep the change, it is read again from its file before this returns, so the graph matches the text again unless that read fails.
+    /// read again, or when a reload changed the page while this one ran. When the page cannot keep the change, it is
+    /// read again from its file before this returns, so the graph matches the text again unless that read fails.
+    /// Saves of one page run one after the other.
     /// </remarks>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
+    {
+        // From work on the worker or within a write of this page, such as the configuration that the reload inside a
+        // save applies, the call would wait for the lock that the save holds while it waits for that work. The worker
+        // would refuse it later.
+        if (Storage is FluentStorageContainer { IsCallFromWithinWorkerItem: true })
+        {
+            throw new InvalidOperationException(StorageWorker.CallFromWithinItemMessage);
+        }
+
+        if (_writeOfFlow.Value is { IsFinished: false })
+        {
+            throw new InvalidOperationException(CallFromWithinWriteMessage);
+        }
+
+        await _writeLock.WaitAsync(cancellationToken);
+        var write = new WriteOfFlow();
+        _writeOfFlow.Value = write;
+        try
+        {
+            return await WriteBlockAsync(subject, cancellationToken);
+        }
+        finally
+        {
+            // A flow that the write started and did not await keeps the value, and may save once the write is over.
+            write.IsFinished = true;
+            _writeLock.Release();
+        }
+    }
+
+    private async Task<bool> WriteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var snapshot = _parseResult;
         var blockIndex = FindBlock(snapshot.BlockSubjects, subject);
@@ -226,7 +271,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             _parser.LogRefusedWrite(FullPath, refusal!);
 
             // The graph keeps the refused values of a slot, and a later reload would give the blocks to them by
-            // their position, so a value would take the block of another one.
+            // their position, so a value would take the block of another one. The reload keeps the blocks whose
+            // text did not change as they are in memory, so this block and the blocks inside it are made to take
+            // their text again, and the blocks around it are read in full so that the reload reaches them.
+            ForgetAppliedConfigurations(page.AllBlocks[blockIndex], snapshot.BlockSubjects);
+            ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             try
             {
                 await OnFileChangedAsync(cancellationToken);
@@ -250,14 +299,18 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return false;
         }
 
-        // The text was computed from the snapshot, so it would undo what another write-back or a reload
-        // published since then.
+        // The text was computed from the snapshot, so it would undo what a reload published since then.
         var published = snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects };
         if (!ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, published, snapshot), snapshot))
         {
             _parser.LogRefusedWrite(FullPath, "The page changed while the configuration was written; save again.");
             return false;
         }
+
+        // The text of the block and of the blocks around it changes in the file, so a later read of the text that
+        // they had before is a change that must be applied, also when the read inside the write is skipped or fails.
+        // The blocks inside it keep their text.
+        ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
 
         // Before the write, because the storage reloads this file from inside WriteAsync. The reload
         // must find the keys that are now in the file, or a value that became null would recreate the subject.
@@ -271,6 +324,32 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         await Storage.WriteBlobAsync(FullPath, Encoding.UTF8.GetBytes(content), cancellationToken);
         return true;
+    }
+
+    // The block itself and every block whose lines contain its lines.
+    private void ForgetAppliedBlocksAround(MarkdownPage page, MarkdownBlock block, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects)
+    {
+        foreach (var candidate in page.AllBlocks)
+        {
+            if (candidate.Line <= block.Line && candidate.EndLine >= block.EndLine &&
+                blockSubjects.TryGetValue(candidate.Index, out var subject))
+            {
+                _parser.ForgetAppliedBlock(subject);
+            }
+        }
+    }
+
+    private void ForgetAppliedConfigurations(MarkdownBlock block, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects)
+    {
+        if (blockSubjects.TryGetValue(block.Index, out var subject))
+        {
+            _parser.ForgetAppliedConfiguration(subject);
+        }
+
+        foreach (var child in block.Children)
+        {
+            ForgetAppliedConfigurations(child, blockSubjects);
+        }
     }
 
     // The index of the block whose subject is the subject or holds it in its configuration, for example a new grid
@@ -293,6 +372,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         });
 
         return blockIndex;
+    }
+
+    private sealed class WriteOfFlow
+    {
+        public volatile bool IsFinished;
     }
 
     private static string FormatFilename(string name)

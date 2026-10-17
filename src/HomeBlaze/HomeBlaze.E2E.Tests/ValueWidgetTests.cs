@@ -22,7 +22,7 @@ public class ValueWidgetTests
         _fixture = fixture;
     }
 
-    private async Task<IPage> OpenPageAsync(int? viewportWidth = null)
+    private async Task<IPage> OpenPageAsync(int? viewportWidth = null, string pageName = "Values.md")
     {
         var page = await _fixture.CreatePageAsync();
         if (viewportWidth is not null)
@@ -30,12 +30,12 @@ public class ValueWidgetTests
             await page.SetViewportSizeAsync(viewportWidth.Value, 800);
         }
 
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Values.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{pageName}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The circuit replaces the prerendered elements when it connects. A box measured across that moment belongs
         // to an element that has left the page, and is empty.
-        await ExpectInteractiveAsync(page);
+        await page.WaitUntilInteractiveAsync();
         return page;
     }
 
@@ -56,13 +56,9 @@ public class ValueWidgetTests
 
         // A change of the graph before the circuit is connected would be picked up by its first render, which proves
         // nothing about a page that is open.
-        await ExpectInteractiveAsync(page);
+        await page.WaitUntilInteractiveAsync();
         return page;
     }
-
-    // The automatic time zone resolves through JS after interactive rendering, so its title tells that the circuit is connected.
-    private static Task ExpectInteractiveAsync(IPage page) =>
-        Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \("))).ToBeVisibleAsync(new() { Timeout = Timeout });
 
     private static string CreateTilePage(string subjectName) =>
         $":: HomeBlaze.Components.ValueTile Path=\"/{subjectName}/Label\" Label=\"Followed\"\n::\n";
@@ -78,7 +74,7 @@ public class ValueWidgetTests
     // first other text proves no live update. The second one comes after the circuit is interactive and after a first change.
     private static async Task ExpectTextToKeepChangingAsync(IPage page, ILocator text)
     {
-        await ExpectInteractiveAsync(page);
+        await page.WaitUntilInteractiveAsync();
 
         var first = await text.InnerTextAsync();
         await Assertions.Expect(text).Not.ToHaveTextAsync(first, new() { Timeout = Timeout });
@@ -87,8 +83,9 @@ public class ValueWidgetTests
         await Assertions.Expect(text).Not.ToHaveTextAsync(second, new() { Timeout = Timeout });
     }
 
-    private static ILocator GetCard(IPage page, string title) =>
-        page.GetByTestId("card").Filter(new() { HasText = title });
+    // An indicator of the icon kind is the svg of a MudIcon, which tells it from a chip wherever it is on the page.
+    private static ILocator GetFirstIconIndicator(IPage page) =>
+        page.Locator("svg[data-testid=indicator]").First;
 
     private static ILocator GetRow(IPage page, string label) =>
         page.GetByTestId("value-row").Filter(new() { Has = page.GetByTestId("value-label").GetByText(label, new() { Exact = true }) });
@@ -179,7 +176,7 @@ public class ValueWidgetTests
     {
         // The cells of the narrow card are narrower than 280 pixels only for a window of about 1236 to 1347 pixels.
         var page = await OpenPageAsync(viewportWidth: 1280);
-        await Assertions.Expect(GetCard(page, title).GetByTestId("value-text").Last).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard(title).GetByTestId("value-text").Last).ToBeVisibleAsync(new() { Timeout = Timeout });
         return page;
     }
 
@@ -190,7 +187,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Linked Card");
+        var card = page.GetCard("Linked Card");
         await Assertions.Expect(card.GetByTestId("card-subtitle")).ToHaveTextAsync("Card subtitle", new() { Timeout = Timeout });
         await Assertions.Expect(card.GetByTestId("card-icon")).ToBeVisibleAsync();
         await Assertions.Expect(card.GetByTestId("card-header-right")).ToContainTextAsync("Corner text");
@@ -205,8 +202,24 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var title = GetCard(page, "Linked Card").GetByTestId("card-title");
+        var title = page.GetCard("Linked Card").GetByTestId("card-title");
         await Assertions.Expect(title).ToHaveAttributeAsync("href", "/pages/Demo/Blocks.md", new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenThePageIsEdited_ThenTheTitleOfACardLeadsNowhereAndTakesNoFocus()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var title = page.GetCard("Linked Card").GetByTestId("card-title");
+        await Assertions.Expect(title).ToHaveAttributeAsync("href", "/pages/Demo/Blocks.md", new() { Timeout = Timeout });
+
+        // Act
+        await page.SwitchToInlineModeAsync();
+
+        // Assert
+        await Assertions.Expect(title).Not.ToHaveAttributeAsync("href", new Regex(".*"), new() { Timeout = Timeout });
+        await Assertions.Expect(title).ToHaveAttributeAsync("tabindex", "-1");
     }
 
     [Fact]
@@ -216,7 +229,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Plain Card");
+        var card = page.GetCard("Plain Card");
         await Assertions.Expect(card.GetByTestId("card-title")).ToHaveTextAsync("Plain Card", new() { Timeout = Timeout });
         await Assertions.Expect(card.Locator("a")).ToHaveCountAsync(0);
         await Assertions.Expect(card.GetByTestId("card-subtitle")).ToHaveCountAsync(0);
@@ -231,7 +244,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Plain Card");
+        var card = page.GetCard("Plain Card");
         await Assertions.Expect(card).ToHaveClassAsync(new Regex("mud-paper-outlined"), new() { Timeout = Timeout });
         await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex(@"mud-elevation-[1-9]"));
     }
@@ -243,7 +256,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Raised Card");
+        var card = page.GetCard("Raised Card");
         await Assertions.Expect(card).ToHaveClassAsync(new Regex(@"mud-elevation-[1-9]"), new() { Timeout = Timeout });
         await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-paper-outlined"));
         await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-elevation-0"));
@@ -256,7 +269,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        await Assertions.Expect(GetCard(page, "Plain Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard("Plain Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
     }
 
@@ -622,7 +635,7 @@ public class ValueWidgetTests
     {
         // Arrange: the cell of the card is narrow enough for its subtitle to wrap.
         var page = await OpenPageAsync(viewportWidth: 1280);
-        await Assertions.Expect(GetCard(page, "Wrapped Card").GetByTestId("card-subtitle")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetCard("Wrapped Card").GetByTestId("card-subtitle")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         var boxes = await GetBoxesAsync(page,
@@ -669,14 +682,14 @@ public class ValueWidgetTests
             new("Narrow Card", "Speed", "[data-testid=value-text]"),
             new("Narrow Card", "Speed", "[data-testid=progress]"),
             new("Narrow Card", null, ".mud-card-content"));
-        var overflow = await GetCard(page, "Narrow Card").EvaluateAsync<double[]>(
+        var overflow = await page.GetCard("Narrow Card").EvaluateAsync<double[]>(
             "card => [card, ...card.querySelectorAll('[data-testid=value-row]')].map(element => element.scrollWidth - element.clientWidth)");
 
         // Assert: the cell is narrower than the card of the dashboard, which has to fit as well.
         Assert.True(boxes[0].Width < 280, $"The card is {boxes[0].Width} pixels wide");
         Assert.All(overflow, scrollOverflow => Assert.Equal(0, scrollOverflow));
         Assert.True(boxes[1].Right <= boxes[0].Right, $"The value ends at {boxes[1].Right}, the card at {boxes[0].Right}");
-        Assert.Equal(boxes[3].Right - 16, boxes[1].Right, PositionTolerance);
+        Assert.Equal(boxes[3].Right - 12, boxes[1].Right, PositionTolerance);
         Assert.True(boxes[2].Width >= 40, $"The bar is {boxes[2].Width} pixels wide");
     }
 
@@ -701,13 +714,13 @@ public class ValueWidgetTests
     }
 
     [Fact]
-    public async Task WhenRowHasAnIcon_ThenItHasTheMutedColourOfTheIconsOfAList()
+    public async Task WhenRowHasAnIcon_ThenItHasTheMutedColorOfTheIconsOfAList()
     {
         // Arrange
         var page = await OpenPageWhenCardHasValuesAsync("Aligned Card");
 
         // Act: the variable is resolved next to the icon, because the theme may define it on an element below the body.
-        var colours = await GetCard(page, "Aligned Card").GetByTestId("value-icon").First.EvaluateAsync<string[]>(
+        var colors = await page.GetCard("Aligned Card").GetByTestId("value-icon").First.EvaluateAsync<string[]>(
             """
             icon => {
                 const probe = document.createElement('span');
@@ -720,8 +733,8 @@ public class ValueWidgetTests
             """);
 
         // Assert
-        Assert.Equal(colours[1], colours[0]);
-        Assert.NotEqual("rgba(0, 0, 0, 0)", colours[1]);
+        Assert.Equal(colors[1], colors[0]);
+        Assert.NotEqual("rgba(0, 0, 0, 0)", colors[1]);
     }
 
     [Theory]
@@ -779,7 +792,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var icon = page.GetByTestId("indicator").Nth(1);
+        var icon = GetFirstIconIndicator(page);
         await Assertions.Expect(icon).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(icon).ToHaveTextAsync(string.Empty);
     }
@@ -789,7 +802,7 @@ public class ValueWidgetTests
     {
         // Arrange
         var page = await OpenPageAsync();
-        var icon = page.GetByTestId("indicator").Nth(1);
+        var icon = GetFirstIconIndicator(page);
         await Assertions.Expect(icon).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -797,6 +810,20 @@ public class ValueWidgetTests
 
         // Assert
         await Assertions.Expect(page.Locator(".mud-tooltip.mud-popover-open")).ToHaveTextAsync(new Regex("^(steht|startet|läuft|stoppt)$"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenIndicatorIsAnIcon_ThenItIsAnImageNamedByTheTextOfTheCase()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var icon = GetFirstIconIndicator(page);
+        var caseText = new Regex("^(steht|startet|läuft|stoppt)$");
+        await Assertions.Expect(icon).ToHaveAttributeAsync("role", "img", new() { Timeout = Timeout });
+        await Assertions.Expect(icon).ToHaveAttributeAsync("aria-label", caseText);
+        await Assertions.Expect(page.GetByRole(AriaRole.Img, new() { NameRegex = caseText }).First).ToBeVisibleAsync();
     }
 
     [Fact]
@@ -811,7 +838,7 @@ public class ValueWidgetTests
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
 
         // The map error that the page shows is that of the indicator with a map that does not exist.
-        await Assertions.Expect(page.GetByTestId("value-map-error")).ToHaveCountAsync(1);
+        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(1);
 
         await chip.HoverAsync();
         await Assertions.Expect(page.Locator(".mud-tooltip").GetByText("valuemotor/Missing")).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -824,7 +851,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        await Assertions.Expect(page.GetByTestId("value-map-error")).ToHaveTextAsync("Cannot resolve map: nomap", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveTextAsync("Cannot resolve map: nomap", new() { Timeout = Timeout });
         // Outside the cards are the three indicators of the first blocks and the two chips that follow them.
         await Assertions.Expect(page.Locator("[data-testid=indicator]:not([data-testid=card] *)")).ToHaveCountAsync(5);
     }
@@ -865,7 +892,7 @@ public class ValueWidgetTests
         var page = await OpenPageAsync();
 
         // Assert
-        var card = GetCard(page, "Picture Card");
+        var card = page.GetCard("Picture Card");
         await Assertions.Expect(card.GetByTestId("card-footer")).ToHaveTextAsync("Picture card footer", new() { Timeout = Timeout });
         var media = card.Locator(".mud-card-media");
         await Assertions.Expect(media).ToHaveCountAsync(1);
@@ -902,6 +929,32 @@ public class ValueWidgetTests
         var text = content.GetByText("Closed panel temperature");
         await Assertions.Expect(text).ToHaveTextAsync(new Regex(@"^Closed panel temperature -?\d+(\.\d+)?°C$"), new() { Timeout = Timeout });
         await ExpectTextToKeepChangingAsync(page, text);
+    }
+
+    [Fact]
+    public async Task WhenValueIsInAGridCell_ThenItUpdatesLive()
+    {
+        // Arrange & Act: the motor of the page changes its temperature by itself.
+        var page = await OpenPageAsync(pageName: "LiveLayouts.md");
+        var text = page.Locator(".grid-cell").GetByTestId("value-tile").GetByTestId("value-text");
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern, new() { Timeout = Timeout });
+
+        // Assert
+        await ExpectTextToKeepChangingAsync(page, text);
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern);
+    }
+
+    [Fact]
+    public async Task WhenValueIsInACanvasNode_ThenItUpdatesLive()
+    {
+        // Arrange & Act: the motor of the page changes its temperature by itself.
+        var page = await OpenPageAsync(pageName: "LiveLayouts.md");
+        var text = page.Locator(".canvas-node").GetByTestId("value-tile").GetByTestId("value-text");
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern, new() { Timeout = Timeout });
+
+        // Assert
+        await ExpectTextToKeepChangingAsync(page, text);
+        await Assertions.Expect(text).ToHaveTextAsync(TemperaturePattern);
     }
 
     [Fact]

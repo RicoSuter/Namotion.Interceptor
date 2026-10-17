@@ -32,7 +32,7 @@ Setup, deployment, and runtime configuration for operators and administrators.
 - [Configuration](administration/configuration.md): Application settings (data folder, logging, plugins, MCP server, telemetry)
 - [Subjects, Storage & Files](administration/subjects.md): Creating and editing subjects, `Root.json`, file layout
 - [Markdown Pages](administration/pages.md): Interactive pages with live expressions and widget blocks
-- [Page Widgets](administration/page-widgets.md): Reference of the widgets for markdown pages
+- [Widgets](administration/widgets/overview.md): Every widget for markdown pages, each with a page of its own
 - [Page Errors](administration/page-errors.md): Every error message of a markdown page with its cause and its fix
 - [Paths](administration/paths.md): Path syntax for referencing subjects
 - [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
