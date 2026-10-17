@@ -1,6 +1,7 @@
 /* Alone on a page a tile is as wide as its place and 96 pixels high; in a grid cell, a canvas node or a flow row the
    class place-filler makes it fill its place (SubjectComponent.razor.css). */
 .tile-widget {
+    container-name: tile;
     position: relative;
     width: 100%;
     height: 100%;
@@ -9,12 +10,19 @@
     overflow: hidden;
 }
 
-/* Dims the fill, the content, the badge and the progress circle of a tile that cannot be used. */
+/* A tile that cannot be used keeps its fill, dimmed with the badge and the progress circle, and its content is dimmed more,
+   to about the 38 percent of a disabled control, so that it differs from a usable tile also on the surface, where the
+   fill hardly changes, in the light and the dark theme. */
 .tile-widget-disabled {
-    opacity: 0.5;
+    opacity: 0.6;
 }
 
-.tile-widget-button {
+.tile-widget-disabled > .tile-widget-face {
+    opacity: 0.6;
+}
+
+/* The face holds the content: the button of a tile with a click, a plain box of one without. */
+.tile-widget-face {
     width: 100%;
     height: 100%;
     min-height: inherit;
@@ -22,13 +30,16 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: var(--place-gap, 4px);
     padding: 12px;
+    text-align: center;
+}
+
+.tile-widget-button {
     border: 0;
     background: transparent;
     color: inherit;
     font: inherit;
-    text-align: center;
     cursor: pointer;
 }
 
@@ -41,19 +52,21 @@
     outline-offset: -4px;
 }
 
+/* The sizes of the lines and the icon are those of the place in a grid cell or a canvas node (SubjectComponent.razor.css),
+   and these elsewhere. */
 .tile-widget-label {
     font-weight: 700;
-    font-size: 1.125rem;
+    font-size: var(--place-primary-text, 1.125rem);
     line-height: 1.25;
 }
 
 .tile-widget-subtitle {
-    font-size: 1rem;
+    font-size: var(--place-secondary-text, 1rem);
     line-height: 1.25;
 }
 
 .tile-widget ::deep .tile-widget-icon {
-    font-size: 2.5rem;
+    font-size: var(--place-icon, 2.5rem);
 }
 
 .tile-widget ::deep .tile-widget-progress {
@@ -68,4 +81,13 @@
     top: 8px;
     right: 8px;
     pointer-events: none;
+}
+
+/* A tile in a grid cell or a canvas node (a size container, SubjectComponent.razor.css) that is lower than its icon, its
+   two lines and their room at their least sizes, such as in a square cell of a grid on a phone, leaves out the icon, so
+   that its text stays whole. A tile without text keeps its icon. */
+@container tile (height < 115px) {
+    .tile-widget-face:has(> .tile-widget-label, > .tile-widget-subtitle) ::deep .tile-widget-icon {
+        display: none;
+    }
 }

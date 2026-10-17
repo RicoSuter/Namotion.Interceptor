@@ -1,7 +1,9 @@
+@using Microsoft.Extensions.DependencyInjection
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueTile))]
 @implements ISubjectComponent
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
+@inject IServiceProvider ServiceProvider
 
 @{
     var tile = Subject as ValueTile;
@@ -19,22 +21,64 @@
     else
     {
         var icon = MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? tile.Icon);
+        var label = ValueReader.GetLabel(reading.Property, tile.Label, path);
 
-        <MudPaper Class="pa-3" Elevation="1" data-testid="value-tile">
-            <div class="d-flex align-center gap-1">
-                @if (icon is not null)
-                {
-                    <MudIcon Icon="@icon" Size="Size.Small" />
-                }
+        if (tile.Kind == ValueTileKind.Tile)
+        {
+            // The value is the large line and the label the small one below it, so that a row of tiles reads as numbers.
+            // The tile is a button only while it can show the history of the property.
+            var canShowHistory = _viewer.CanShow(reading.Property, IsEditing);
+            <TileView TestId="value-tile"
+                      Label="@reading.Text"
+                      Subtitle="@label"
+                      Icon="@icon"
+                      Color="@reading.Color"
+                      Tooltip="@(canShowHistory ? "Show history" : reading.IsMissing ? path : null)"
+                      OnClick="@(canShowHistory ? _showHistoryCallback : default)" />
+        }
+        else
+        {
+            <MudPaper Class="pa-3" Elevation="1" data-testid="value-tile">
+                <div class="d-flex align-center gap-1">
+                    @if (icon is not null)
+                    {
+                        <MudIcon Icon="@icon" Size="Size.Small" />
+                    }
 
-                <MudText Typo="Typo.caption" data-testid="value-label">@ValueReader.GetLabel(reading.Property, tile.Label, path)</MudText>
-            </div>
-            <ValueText Reading="@reading" Path="@path" Typo="Typo.h5" />
-        </MudPaper>
+                    <HistoryLabel Property="@reading.Property" Text="@label" Typo="Typo.caption" />
+                </div>
+                <ValueText Reading="@reading" Path="@path" Typo="Typo.h5" />
+            </MudPaper>
+        }
     }
 }
 
 @code {
+    private IPropertyHistoryViewer? _viewer;
+    private EventCallback<MouseEventArgs> _showHistoryCallback;
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    protected override void OnInitialized()
+    {
+        _viewer = ServiceProvider.GetService<IPropertyHistoryViewer>();
+        // Created once: binding the method group directly in the markup would allocate a new delegate on every render.
+        _showHistoryCallback = EventCallback.Factory.Create<MouseEventArgs>(this, ShowHistoryAsync);
+    }
+
+    private Task ShowHistoryAsync()
+    {
+        if (Subject is not ValueTile tile)
+        {
+            return Task.CompletedTask;
+        }
+
+        var path = tile.Path;
+        var property = ValueReader.ResolveProperty(PathResolver, tile, path);
+        return _viewer.TryShowAsync(property, IsEditing, ValueReader.GetLabel(property, tile.Label, path));
+    }
 }

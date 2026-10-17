@@ -18,14 +18,21 @@
     var canvas = Canvas;
     var nodes = Nodes;
     var scale = canvas?.Scale ?? CanvasScale.None;
-    var widthError = CanvasExtent.Validate(canvas?.Width);
+    var widthError = CanvasExtent.Validate(canvas?.Width, canvas?.MinWidth);
     var height = canvas?.MinHeight ?? 400;
     var designWidth = CanvasExtent.GetDesignWidth(canvas?.Width, nodes);
-    var factor = CanvasExtent.GetFactor(scale, IsEditing, designWidth, _availableWidth);
+    var factor = CanvasExtent.GetFactor(scale, IsEditing, designWidth, _availableWidth, canvas?.MinWidth);
     var isScaled = CanvasExtent.IsScaled(scale, IsEditing, designWidth);
-    var frameStyle = isScaled
-        ? string.Create(CultureInfo.InvariantCulture, $"width: 100%; height: {height * factor}px; overflow: hidden;")
-        : "width: 100%; overflow-x: auto;";
+    var drawnWidth = designWidth * factor;
+    // A canvas held at its least width is wider than the frame, which then scrolls it. A transform leaves the layout box
+    // at the design width, so the sizer gives the frame the drawn size to scroll and to be as high as.
+    var isHeldAtMinWidth = isScaled && _availableWidth > 0 && drawnWidth > _availableWidth + 0.5;
+    var frameStyle = !isScaled ? "width: 100%; overflow-x: auto;"
+        : isHeldAtMinWidth ? "width: 100%; overflow-x: auto; overflow-y: hidden;"
+        : "width: 100%; overflow: hidden;";
+    var sizerStyle = isScaled
+        ? string.Create(CultureInfo.InvariantCulture, $"width: {drawnWidth}px; height: {height * factor}px; overflow: hidden;")
+        : null;
     var containerStyle = isScaled
         ? string.Create(CultureInfo.InvariantCulture, $"position: relative; width: {designWidth}px; min-height: {height}px; transform: scale({factor}); transform-origin: 0 0;")
         : scale == CanvasScale.FitWidth
@@ -84,11 +91,15 @@
 }
 else if (scale == CanvasScale.FitWidth)
 {
-    @* The frame is the width the canvas fits. While viewed it cuts off the space that the scaled canvas no longer takes,
-       while edited it scrolls a canvas that is wider than the page. A canvas that does not fit the width needs none and
-       stays a direct child of its widget, where the styles and the tests of the layouts expect it. *@
+    @* The frame is the width the canvas fits. While viewed it cuts off the space that the scaled canvas no longer takes
+       and scrolls a canvas held at its MinWidth, while edited it scrolls a canvas that is wider than the page. A canvas
+       that does not fit the width needs none and stays a direct child of its widget, where the styles and the tests of
+       the layouts expect it. *@
     <div class="canvas-scale-frame" @ref="_frame" style="@frameStyle" data-testid="canvas-scale-frame">
-        @container
+        @* Always rendered, also unstyled while edited, so that entering edit mode keeps the diagram. *@
+        <div style="@sizerStyle">
+            @container
+        </div>
     </div>
 }
 else
@@ -162,14 +173,19 @@ else
     }
 
     /*
-     * The outline of the selected widget is the only highlight of a node. The library draws its own around the node
-     * that a press selected: an animated dashed stroke on the rect that moves the node, and a stroke on the border
-     * strip. Both rects are told apart by their cursor attribute (checked for 4.1.136); the animation is an inline style.
+     * The node draws its own frame, and the outline of the selected widget is its only highlight. The library draws rects
+     * of its own: a light box under every node, and in edit mode an animated dashed stroke on the rect that moves the node
+     * that a press selected and a stroke on its border strip. Every rect loses its stroke, and the box under a node, the
+     * rect with the cursor default (checked for 4.1.136), also its fill, which would show at the rounded corners of the
+     * node. The animation is an inline style.
      */
-    .canvas-diagram > svg rect[cursor="move"],
-    .canvas-diagram > svg rect[cursor="pointer"] {
+    .canvas-diagram > svg rect {
         stroke: transparent;
         animation: none !important;
+    }
+
+    .canvas-diagram > svg rect[cursor="default"] {
+        fill: transparent;
     }
 
     .canvas-node-content {

@@ -134,23 +134,41 @@
     overflow-y: auto;
 }
 
-/* A widget that fills its place (a card, a tile: the class place-filler) in a grid cell or a canvas node is as high as
-   it, unless a card has a height of its own, which the inline style gives. It ignores its own minimum height, which a
-   place smaller than it would clip, and an aspect ratio, which the inline style also gives, so it is as wide as the cell
-   or the node too. The cell or the node is the frame, so the widget draws none. */
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .place-filler),
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler),
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler),
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> .place-filler) {
+/* A widget that fills its place (a card, a tile: the class place-filler) or is centered in it (a gauge: the class
+   place-centered) and is the only content of a grid cell or a canvas node takes the whole cell or node, unless a card has
+   a height of its own, which the inline style gives. It ignores its own minimum height, which a place smaller than it
+   would clip, and an aspect ratio, which the inline style also gives. The cell or the node is the frame, so the widget
+   draws none. It is a size container and gives its content the sizes of the place, which grow with the smaller side of
+   the place, from their least sizes at about 150 pixels to twice them, so that a tile and a gauge side by side show the
+   same kind of text in the same size: the primary line (the value of a value, the name of a switch), the secondary line
+   (the label of a value, the state of a switch), the icon and the gap between them. A widget inside one of them, such as
+   in the body of a card, has its own sizes again. */
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> :is(.place-filler, .place-centered)),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered)),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered)),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> :is(.place-filler, .place-centered)) {
     height: 100%;
 }
 
-::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .place-filler {
+::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > :is(.place-filler, .place-centered) {
+    width: 100%;
     height: 100%;
     min-height: 0;
     aspect-ratio: auto !important;
     border: 0;
     box-shadow: none;
+    container-type: size;
+    --place-primary-text: clamp(1.125rem, 12cqmin, 2.25rem);
+    --place-secondary-text: clamp(1rem, 10.5cqmin, 2rem);
+    --place-icon: clamp(2.5rem, 27cqmin, 5rem);
+    --place-gap: clamp(4px, 2.5cqmin, 8px);
+}
+
+::deep :is(.place-filler, .place-centered) .subject-component-wrapper {
+    --place-primary-text: initial;
+    --place-secondary-text: initial;
+    --place-icon: initial;
+    --place-gap: initial;
 }
 
 /* ValueList: a page gives every paragraph a distance above and below. A utility class cannot reach the paragraph that

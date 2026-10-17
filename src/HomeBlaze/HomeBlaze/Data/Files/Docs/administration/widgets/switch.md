@@ -85,11 +85,12 @@ With `Kind=Tile` the switch is a tile in place of a toggle switch: the icon, the
 Rules of a tile:
 
 - **Fills its place**: A tile fills a grid cell, a canvas node or a flow row like a [Card](card.md) when it is their only content. Alone on a page it is as wide as its place and 96 pixels high, see [Spacing](basics.md#spacing).
+- **Size of the content**: In a grid cell or a canvas node the icon and the text grow with a large place, and a place that is too low for the icon leaves it out, see [Spacing](basics.md#spacing).
 - **One click target**: The whole tile toggles the state, also where the badge stands. A click on the badge reaches the tile.
 - **The fill**: A tile takes the color of the matched case of its map. Without a map, or without a matching case, it has the primary color while the value is true and the color of the surface while it is false. A matched case without a `Color` stays on the surface.
 - **The text**: The subtitle is `Subtitle`. Without it, a tile with a map shows the text of the matched case, else the formatted value.
 - **A missing value**: A value that is not set shows a `?` in place of the icon. The tile is disabled only when there is nothing to write or invoke, such as a path that leads nowhere. A writable `bool?` without a value, or a switch whose `On` operation is enabled, can still be turned on.
-- **Disabled**: A tile is disabled while the page is edited, while a toggle is pending, and when the write or the operation is not possible, for the same reasons as the toggle switch. A disabled tile keeps the fill of its state and is dimmed, so a light that is on stays yellow while it cannot be switched. A progress circle at the bottom right shows a toggle that is pending, and a pending tile shows the state it goes to (fill, icon and subtitle) until the operation ends.
+- **Disabled**: A tile is disabled while the page is edited, while a toggle is pending, and when the write or the operation is not possible, for the same reasons as the toggle switch. A disabled tile keeps the fill of its state and is dimmed, its icon and text more than its fill, so a light that is on stays yellow while it cannot be switched. A progress circle at the bottom right shows a toggle that is pending, and a pending tile shows the state it goes to (fill, icon and subtitle) until the operation ends.
 - **Name**: The accessible name of a tile is its label.
 
 ## Behavior and Limits

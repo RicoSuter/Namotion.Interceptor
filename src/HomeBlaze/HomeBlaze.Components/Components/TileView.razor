@@ -1,33 +1,33 @@
-@* A tile: one click target that fills its place, with icon, label and subtitle centered, a badge over its top right
-   corner and, while it works, a progress circle over its bottom right corner. The badge and the progress circle are
-   siblings of the button, not inside it, so the markup stays valid; they take no pointer input, so a click on them
-   reaches the button below. The style is on the root, so that they inherit the text color of the tile. A disabled tile
-   (also a busy one and every tile in edit mode) keeps its fill and is dimmed as a whole by its class. *@
+@* A tile that fills its place, with icon, label and subtitle centered. With OnClick it is one click target, with a
+   badge over its top right corner and, while it works, a progress circle over its bottom right corner; without OnClick it
+   only shows its content and takes no input. The badge and the progress circle are siblings of the button, not inside
+   it, so the markup stays valid; they take no pointer input, so a click on them reaches the button below. The style is
+   on the root, so that they inherit the text color of the tile. A disabled tile (also a busy one and every tile in edit
+   mode) keeps its fill and is dimmed as a whole by its class. *@
 @using HomeBlaze.Components.Controls
+@using Microsoft.AspNetCore.Components.Rendering
 
 <div class="@(Disabled ? "tile-widget place-filler tile-widget-disabled" : "tile-widget place-filler")" style="@TileStyle.GetStyle(Color, Variant)" data-testid="@TestId">
-    <button type="button"
-            class="tile-widget-button"
-            disabled="@Disabled"
-            role="@(Checked is null ? null : "switch")"
-            aria-checked="@(Checked is { } isChecked ? (isChecked ? "true" : "false") : null)"
-            aria-label="@AccessibleName"
-            aria-busy="@(IsBusy ? "true" : null)"
-            title="@Tooltip"
-            @onclick="OnClick">
-        @if (Icon is not null)
-        {
-            <MudIcon Icon="@Icon" Class="tile-widget-icon" data-testid="tile-icon" />
-        }
-        @if (!string.IsNullOrEmpty(Label))
-        {
-            <span class="tile-widget-label" data-testid="tile-label">@Label</span>
-        }
-        @if (!string.IsNullOrEmpty(Subtitle))
-        {
-            <span class="tile-widget-subtitle" data-testid="tile-subtitle">@Subtitle</span>
-        }
-    </button>
+    @if (OnClick.HasDelegate)
+    {
+        <button type="button"
+                class="tile-widget-face tile-widget-button"
+                disabled="@Disabled"
+                role="@(Checked is null ? null : "switch")"
+                aria-checked="@(Checked is { } isChecked ? (isChecked ? "true" : "false") : null)"
+                aria-label="@AccessibleName"
+                aria-busy="@(IsBusy ? "true" : null)"
+                title="@Tooltip"
+                @onclick="OnClick">
+            @_content
+        </button>
+    }
+    else
+    {
+        <div class="tile-widget-face" title="@Tooltip">
+            @_content
+        </div>
+    }
     @if (IsBusy)
     {
         <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="tile-widget-progress" data-testid="tile-progress" />
@@ -41,6 +41,14 @@
 </div>
 
 @code {
+    // Created once: a template in the markup would allocate a new delegate on every render.
+    private readonly RenderFragment _content;
+
+    public TileView()
+    {
+        _content = RenderContent;
+    }
+
     [Parameter] public string? TestId { get; set; }
 
     /// <summary>Whether a switch tile is on, which makes the button a switch; null for a plain button.</summary>
@@ -69,5 +77,22 @@
     /// <summary>The content of the badge slot, or null for none.</summary>
     [Parameter] public IInterceptorSubject? Badge { get; set; }
 
+    /// <summary>What a click does. Without it the tile is no button and takes no input.</summary>
     [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+
+    private void RenderContent(RenderTreeBuilder __builder)
+    {
+        @if (Icon is not null)
+        {
+            <MudIcon Icon="@Icon" Class="tile-widget-icon" data-testid="tile-icon" />
+        }
+        @if (!string.IsNullOrEmpty(Label))
+        {
+            <span class="tile-widget-label" data-testid="tile-label">@Label</span>
+        }
+        @if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <span class="tile-widget-subtitle" data-testid="tile-subtitle">@Subtitle</span>
+        }
+    }
 }
