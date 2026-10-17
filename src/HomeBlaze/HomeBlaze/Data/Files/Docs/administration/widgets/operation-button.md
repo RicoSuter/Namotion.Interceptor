@@ -16,11 +16,15 @@ A button that invokes an operation or a query of a subject. Type name: `HomeBlaz
 | `Label` | Text | From the method, see [Labels](basics.md#labels) | The text of the button |
 | `Icon` | Text | The icon of the method, else `PlayArrow` for an operation and `Search` for a query | The [icon](basics.md#icons) at the start of the button |
 | `Color` | Color | `Primary` | The [color](basics.md#colors) of the button |
-| `Variant` | `Filled`, `Outlined` or `Text` | `Filled` | A filled button, a button with a border, or text alone |
+| `Variant` | `Filled`, `Outlined` or `Text` | `Filled` | A filled button, a button with a border, or text alone. A tile takes its fill from `Color` and `Variant`, see [Tiles](#tiles) |
+| `Kind` | `Button` or `Tile` | `Button` | `Button` is a button. `Tile` is a tile that fills its place, see [Tiles](#tiles) |
+| `Subtitle` | Text | None | A second line below the label of a tile |
 
 ## Slots
 
-An `OperationButton` has no slots.
+| Slot | Blocks | Holds |
+|------|--------|-------|
+| `Badge` | One | Content over the top right corner of a tile, for example an [Indicator](indicator.md) with `Kind=Icon`. A click on it reaches the tile. Only a tile shows it |
 
 ## Samples
 
@@ -60,6 +64,35 @@ A query with a label, an icon and a variant of its own. `GetDiagnostics` changes
 
 :: HomeBlaze.Components.OperationButton Path=../Fan/GetDiagnostics Label="Fan diagnostics" Icon=Info Color=Info Variant=Outlined
 ::
+
+## Tiles
+
+With `Kind=Tile` the operation is a tile in place of a button. The two tiles below stand in square cells of a [GridLayout](grid-layout.md) and show only the icon of their operation, because they have no label:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.GridLayout#buttongrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.OperationButton Kind=Tile Path=../Pump/PowerOn Color=Default
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.OperationButton Kind=Tile Path=../Pump/PowerOff Color=Default
+::
+~~~~
+
+:: HomeBlaze.Components.GridLayout#buttongrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.OperationButton Kind=Tile Path=../Pump/PowerOn Color=Default
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.OperationButton Kind=Tile Path=../Pump/PowerOff Color=Default
+::
+
+Rules of a tile:
+
+- **Fills its place**: A tile fills a grid cell, a canvas node or a flow row like a [Card](card.md) when it is their only content. Alone on a page it is as wide as its place and 96 pixels high, see [Spacing](basics.md#spacing).
+- **Without a label**: A tile without `Label` shows the icon of the operation alone, and its accessible name is the title of the operation. With a `Label` it shows the label, and `Subtitle` below it.
+- **The fill**: `Color` and `Variant` give the fill. `Filled` fills the tile with the color, `Outlined` draws a border in the color on the surface, and `Text` shows colored text on the surface.
+- **Disabled**: A tile is disabled while its operation is not enabled, as the button is. The two tiles above are enabled in turn, because `PowerOn` is enabled only while the pump is off and `PowerOff` only while it is powered. A device can limit its operations in the same way, so that for example the open and close tiles of a cover are disabled at the end position they move to.
+- **Badge**: A badge shows over the top right corner of a tile only, and a click on it reaches the tile.
 
 ## Behavior and Limits
 
