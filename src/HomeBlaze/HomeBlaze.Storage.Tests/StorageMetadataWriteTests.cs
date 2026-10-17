@@ -289,15 +289,20 @@ public class StorageMetadataWriteTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenMovedNameIsNoChild_ThenMoveFails()
+    public async Task WhenMovedNameIsNoChild_ThenMoveFailsNamingIt()
     {
         // Arrange
         WriteFile("a.md");
         var storage = await ConnectAsync();
 
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        // Act
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
             storage.MoveChildAsync("a.md", "gone.md", CancellationToken.None));
+
+        // Assert
+        Assert.Contains("'gone.md'", exception.Message);
+        Assert.Contains("Its children: 'a.md'", exception.Message);
+        Assert.Equal("targetName", exception.ParamName);
     }
 
     [Fact]

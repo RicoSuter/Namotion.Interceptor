@@ -1,3 +1,4 @@
+using System.Text;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
@@ -185,6 +186,39 @@ public class StorageMetadataMethodTests : StorageTestBase
         Assert.Contains("'b.md'", exception.Message);
         Assert.DoesNotContain("'a.md'", exception.Message);
         Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
+    }
+
+    [Fact]
+    public async Task WhenFolderMetadataFileCannotBeRead_ThenSettingTheOrderFailsAndKeepsTheFile()
+    {
+        // Arrange
+        const string content = """{"order":["a.md"],"color":"red",}x""";
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/b.md");
+        WriteFile("Docs/.metadata.json", content);
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            docs.SetOrderAsync(["b.md"], CancellationToken.None));
+        Assert.Equal(Encoding.UTF8.GetBytes(content), File.ReadAllBytes(GetFullPath("Docs/.metadata.json")));
+    }
+
+    [Fact]
+    public async Task WhenChildMetadataFileCannotBeRead_ThenSettingTheChildMetadataFailsAndKeepsTheFile()
+    {
+        // Arrange
+        const string content = """{"navTitle":"Pump",}x""";
+        WriteFile("Devices/Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("Devices/Motor.metadata.json", content);
+        var storage = await ConnectAsync();
+        var devices = Assert.IsType<VirtualFolder>(storage.Children["Devices"]);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            devices.SetChildMetadataAsync("Motor", "Water", null, null, null, CancellationToken.None));
+        Assert.Equal(Encoding.UTF8.GetBytes(content), File.ReadAllBytes(GetFullPath("Devices/Motor.metadata.json")));
     }
 
     [Fact]

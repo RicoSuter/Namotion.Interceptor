@@ -13,7 +13,7 @@ internal static class MetadataMethodDescriptions
         "Sets the order in which the children of this folder are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as Get Order returns it, and may be given only once.";
 
     public const string GetMetadata =
-        "Gets the metadata of this folder (Title, NavigationTitle, Icon; null when it has none, always null for the root of a storage) and the navigation metadata of each child stored as a JSON file (NavigationTitle, Icon, Location, Alignment; null when it has none), keyed by the name of the child. Set Metadata and Set Child Metadata replace every value, so read it first to keep the values that are not changed.";
+        "Gets the metadata of this folder as Metadata (Title, NavigationTitle, Icon; null when it has none, always null for the root of a storage) and the navigation metadata of each child stored as a JSON file as Children, keyed by the name of the child (NavigationTitle, Icon, Location, Alignment; null when it has none). Set Metadata and Set Child Metadata replace every value, so read it first to keep the values that are not changed.";
 
     public const string SetMetadata =
         "Replaces the metadata of this folder. A value that is null or blank is removed. title: the title of the folder everywhere, without one the name of the folder. navigationTitle: the title in navigation, without one the title. icon: a MudBlazor icon name such as Devices, without one Folder.";

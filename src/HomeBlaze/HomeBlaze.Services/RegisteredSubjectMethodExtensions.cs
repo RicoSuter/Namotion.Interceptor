@@ -14,14 +14,7 @@ public static class RegisteredSubjectMethodExtensions
     /// Gets all methods (operations and queries) for the subject, ordered by Position.
     /// </summary>
     public static IReadOnlyList<MethodMetadata> GetAllMethods(this RegisteredSubject subject)
-    {
-        return subject.Properties
-            .Where(CanContainMethodMetadata)
-            .Select(p => p.GetValue())
-            .OfType<MethodMetadata>()
-            .OrderBy(m => m.Position)
-            .ToList();
-    }
+        => subject.GetAllMethods(MethodAudience.All);
 
     /// <summary>
     /// Gets the methods (operations and queries) of the subject that are meant for any of the given audiences, see

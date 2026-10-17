@@ -50,6 +50,6 @@ public interface IMetadataContainer
     /// <param name="name">The name of the child to move.</param>
     /// <param name="targetName">The name of the child whose place it takes.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <exception cref="InvalidOperationException">One of the names is not a child of the container.</exception>
+    /// <exception cref="ArgumentException">One of the names is not a child of the container. The message names it.</exception>
     Task MoveChildAsync(string name, string targetName, CancellationToken cancellationToken);
 }

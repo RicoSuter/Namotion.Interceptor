@@ -729,7 +729,8 @@ public partial class FluentStorageContainer :
     /// <param name="name">The name of the child to move.</param>
     /// <param name="targetName">The name of the child whose place it takes.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    /// <exception cref="InvalidOperationException">The folder is not in the tree, a name is not a child of it, or its metadata file could not be read.</exception>
+    /// <exception cref="ArgumentException">A name is not a child of the folder.</exception>
+    /// <exception cref="InvalidOperationException">The folder is not in the tree, or its metadata file could not be read.</exception>
     internal async Task MoveChildAsync(string folder, string name, string targetName, CancellationToken cancellationToken)
     {
         var connection = Connection;
@@ -743,7 +744,12 @@ public partial class FluentStorageContainer :
             var targetIndex = names.IndexOf(targetName);
             if (index < 0 || targetIndex < 0)
             {
-                throw new InvalidOperationException($"'{name}' and '{targetName}' are not both children of the folder.");
+                string[] unknownNames = index < 0 && targetIndex < 0 && name != targetName ? [name, targetName]
+                    : index < 0 ? [name]
+                    : [targetName];
+                throw new ArgumentException(
+                    $"Names that are not children of the folder: {FormatNames(unknownNames)}. Its children: {FormatNames(children.Keys.Order(StringComparer.Ordinal))}.",
+                    index < 0 ? nameof(name) : nameof(targetName));
             }
 
             names.RemoveAt(index);
