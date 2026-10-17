@@ -11,7 +11,7 @@
 
 @if (tile is not null)
 {
-    // Read once per render and never kept: the reads are what the tracking scope records.
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = tile.Path;
     var reading = ValueReader.Read(PathResolver, tile, path, tile.Map, TimeZone);
     if (reading.MapError is not null)

@@ -1,0 +1,249 @@
+using System.Runtime.InteropServices;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
+using Microsoft.AspNetCore.Components.RenderTree;
+using Namotion.Interceptor.Tracking.Recorder;
+
+// Counts the frames of a render to find where its output starts, and keeps the renderer to test whether the component is alive.
+#pragma warning disable BL0006
+
+namespace Namotion.Interceptor.Blazor;
+
+/// <summary>
+/// Records the property reads of one component's renders, and of the content it passes to components that are not
+/// a <see cref="ComponentBase"/>, and renders the component again when one of them changes.
+/// </summary>
+/// <remarks>Accessed on the renderer's dispatcher only.</remarks>
+internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
+{
+    private readonly ComponentBase _component;
+    private readonly RenderFragment _renderFragment;
+    private readonly ComponentTrackingActivator _activator;
+    private ComponentTrackingDispatcher? _dispatcher;
+
+    [ThreadStatic]
+    private static ComponentReadTracker? _current;
+
+    // The wrappers of content that this component passes to components that are not a ComponentBase, by the content
+    // they wrap, for this render and the one before. A wrapper is reused while its content is equal, so that a
+    // component that compares or keys by its content, as SectionOutlet does, sees the same delegate.
+    private Dictionary<RenderFragment, RenderFragment>? _contentWrappers;
+    private Dictionary<RenderFragment, RenderFragment>? _previousContentWrappers;
+
+    // The properties acquired from the dispatcher, each with the number of the last render that read it and of the last
+    // render after which content read it. Content that components which are not a ComponentBase render for this one
+    // reads after its render, so such a read stays acquired until the end of the render after the next one. Renders are
+    // numbered from 1, so that 0 means never.
+    private Dictionary<PropertyReference, ReadMark>? _acquired;
+    private int _renderNumber;
+    private int _renderReadCount;
+    private int _contentReadCount;
+    private int _previousContentReadCount;
+    private bool? _isInteractive;
+    private Renderer? _renderer;
+
+    public ComponentReadTracker(ComponentBase component, RenderFragment renderFragment, ComponentTrackingActivator activator)
+    {
+        _component = component;
+        _renderFragment = renderFragment;
+        _activator = activator;
+        Render = RenderCore;
+    }
+
+    public RenderFragment Render { get; }
+
+    /// <summary>Gets the tracker whose component renders on the current thread, if any.</summary>
+    internal static ComponentReadTracker? Current => _current;
+
+    internal bool IsRenderRequested { get; set; }
+
+    /// <summary>Gets a value indicating whether the renders of the component record their reads.</summary>
+    internal bool IsRecording => _isInteractive == true;
+
+    /// <summary>Gets a value indicating whether the renderer has not disposed the component yet.</summary>
+    public bool IsAlive => _renderer is null || ComponentBaseAccessors.GetComponentState(_renderer, _component) is not null;
+
+    /// <summary>Gets the wrapper of the given content that records into this component, reusing the one of the last render.</summary>
+    internal RenderFragment GetContentWrapper(RenderFragment content)
+    {
+        // Neither the previous wrappers nor Wrap touch this dictionary, so the reference stays valid until it is set.
+        ref var wrapper = ref CollectionsMarshal.GetValueRefOrAddDefault(_contentWrappers ??= [], content, out var exists);
+        if (!exists && (_previousContentWrappers is null || !_previousContentWrappers.TryGetValue(content, out wrapper)))
+        {
+            wrapper = FragmentOwnership.Wrap(this, content);
+        }
+
+        return wrapper!;
+    }
+
+    public void OnRead(PropertyReference property)
+    {
+        ref var mark = ref Acquire(property);
+        if (mark.Render != _renderNumber)
+        {
+            mark.Render = _renderNumber;
+            _renderReadCount++;
+        }
+    }
+
+    /// <summary>Records a read of content that this component passed to a component that is not a ComponentBase.</summary>
+    public void OnContentRead(PropertyReference property)
+    {
+        ref var mark = ref Acquire(property);
+        if (mark.Content != _renderNumber)
+        {
+            mark.Content = _renderNumber;
+            _contentReadCount++;
+        }
+    }
+
+    // One lookup per read. The reference is used before anything else changes the dictionary.
+    private ref ReadMark Acquire(PropertyReference property)
+    {
+        ref var mark = ref CollectionsMarshal.GetValueRefOrAddDefault(_acquired ??= [], property, out var exists);
+        if (!exists)
+        {
+            // Before the value is read, so that a change written after the read is delivered.
+            _dispatcher!.Acquire(property, this);
+        }
+
+        return ref mark;
+    }
+
+    public void RequestRender()
+    {
+        IsRenderRequested = false;
+        // As StateHasChanged does, but without asking ShouldRender: the component's own reasons not to render cannot
+        // know that a value its render read has changed.
+        ref var hasPendingQueuedRender = ref ComponentBaseAccessors.HasPendingQueuedRenderOf(_component);
+        if (hasPendingQueuedRender)
+        {
+            return;
+        }
+
+        hasPendingQueuedRender = true;
+        try
+        {
+            ComponentBaseAccessors.RenderHandleOf(_component).Render(ComponentBaseAccessors.RenderFragmentOf(_component));
+        }
+        catch
+        {
+            hasPendingQueuedRender = false;
+            throw;
+        }
+    }
+
+    public void ReleaseAll()
+    {
+        if (_acquired is not null)
+        {
+            foreach (var property in _acquired.Keys)
+            {
+                _dispatcher!.Release(property, this);
+            }
+        }
+
+        _acquired = null;
+    }
+
+    private void RenderCore(RenderTreeBuilder builder)
+    {
+        if (!IsInteractive())
+        {
+            using (ReadPropertyRecorder.RecordOnCurrentThread(DiscardingTarget.Instance))
+            {
+                _renderFragment(builder);
+            }
+
+            return;
+        }
+
+        _dispatcher!.OnRenderStarting(this);
+        _renderNumber++;
+        _renderReadCount = 0;
+        _previousContentReadCount = _contentReadCount;
+        _contentReadCount = 0;
+        (_previousContentWrappers, _contentWrappers) = (_contentWrappers, _previousContentWrappers);
+        _contentWrappers?.Clear();
+
+        var start = builder.GetFrames().Count;
+        var previous = _current;
+        _current = this;
+        try
+        {
+            using (ReadPropertyRecorder.RecordOnCurrentThread(this))
+            {
+                _renderFragment(builder);
+            }
+        }
+        catch
+        {
+            // Where the renderer keeps an output after a render throws, it is that of the last render that succeeded, so its
+            // wrappers are the ones to reuse.
+            (_previousContentWrappers, _contentWrappers) = (_contentWrappers, _previousContentWrappers);
+            throw;
+        }
+        finally
+        {
+            _current = previous;
+        }
+
+        // Not reached by a render that throws, which keeps what it acquired for the output that the renderer keeps.
+        FragmentOwnership.TakeOwnership(builder, start, this);
+        ReleaseUnread();
+    }
+
+    // Releases what neither this render nor the content rendered after the last one read.
+    private void ReleaseUnread()
+    {
+        // Every property this render read is acquired, so when it read as many as are acquired and no content read
+        // something after the last render, nothing is unread.
+        if (_acquired is null || (_previousContentReadCount == 0 && _renderReadCount == _acquired.Count))
+        {
+            return;
+        }
+
+        // Removing the current entry while enumerating is supported by Dictionary, and Release does not touch it.
+        var previousRender = _renderNumber - 1;
+        foreach (var (property, mark) in _acquired)
+        {
+            if (mark.Render != _renderNumber && mark.Content != previousRender)
+            {
+                _acquired.Remove(property);
+                _dispatcher!.Release(property, this);
+            }
+        }
+    }
+
+    private bool IsInteractive()
+    {
+        if (_isInteractive is null)
+        {
+            ref var renderHandle = ref ComponentBaseAccessors.RenderHandleOf(_component);
+            _isInteractive = renderHandle.RendererInfo.IsInteractive;
+            if (_isInteractive == true)
+            {
+                _renderer = ComponentBaseAccessors.RendererOf(ref renderHandle);
+                _dispatcher = _activator.Dispatcher;
+                _dispatcher.Attach(renderHandle.Dispatcher);
+            }
+        }
+
+        return _isInteractive == true;
+    }
+
+    private sealed class DiscardingTarget : IReadPropertyRecorderTarget
+    {
+        public static readonly DiscardingTarget Instance = new();
+
+        public void OnRead(PropertyReference property)
+        {
+        }
+    }
+
+    private struct ReadMark
+    {
+        public int Render;
+        public int Content;
+    }
+}

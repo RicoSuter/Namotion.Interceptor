@@ -74,7 +74,6 @@ public partial class HueBridge : BackgroundService,
     // nothing is left to release.
     private bool _disposed;
 
-    private LocatedBridge? _bridge;
     private HttpClient? _httpClient;
     private LocalHueApi? _client;
 
@@ -119,11 +118,14 @@ public partial class HueBridge : BackgroundService,
     [State]
     public partial ServiceStatus Status { get; internal set; }
 
+    // Tracked, so that the derived properties that read it change when it is fetched or reset.
+    internal partial LocatedBridge? Bridge { get; set; }
+
     [State]
     public partial string? StatusMessage { get; internal set; }
 
     [Derived]
-    public string? Title => "Hue Bridge (" + (_bridge?.IpAddress ?? "?") + ")";
+    public string? Title => "Hue Bridge (" + (Bridge?.IpAddress ?? "?") + ")";
 
     [Derived]
     public string IconName => IsConnected ? "Hub" : "HubOutlined";
@@ -201,7 +203,7 @@ public partial class HueBridge : BackgroundService,
                 return _client;
             }
 
-            if (AppKey == null || _bridge == null)
+            if (AppKey == null || Bridge == null)
             {
                 throw new InvalidOperationException("Bridge is not configured or not discovered.");
             }
@@ -219,7 +221,7 @@ public partial class HueBridge : BackgroundService,
 
             try
             {
-                var client = new LocalHueApi(_bridge.IpAddress, AppKey, httpClient);
+                var client = new LocalHueApi(Bridge.IpAddress, AppKey, httpClient);
                 _httpClient = httpClient;
                 _client = client;
                 return client;
@@ -318,7 +320,7 @@ public partial class HueBridge : BackgroundService,
                     continue;
                 }
 
-                _bridge = bridge;
+                Bridge = bridge;
 
                 client = ConnectClient();
 

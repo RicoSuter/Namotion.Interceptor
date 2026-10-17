@@ -549,7 +549,7 @@ namespace HomeBlaze.Components
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public class SubjectComponent : Microsoft.AspNetCore.Components.ComponentBase, Microsoft.AspNetCore.Components.IHandleEvent, System.IDisposable
+    public class SubjectComponent : Namotion.Interceptor.Blazor.TrackedComponentBase, Microsoft.AspNetCore.Components.IHandleEvent, System.IDisposable
     {
         public SubjectComponent() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1331,6 +1331,22 @@ namespace HomeBlaze.Components.Components
         public MudBlazor.Variant Variant { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class ValueListRow : Namotion.Interceptor.Blazor.TrackedComponentBase
+    {
+        public ValueListRow() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool AnyIcon { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Icon { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Path { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Components.ValueReading? Reading { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Components.ValueRow Row { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ValueList))]
     public class ValueListWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
@@ -1347,7 +1363,7 @@ namespace HomeBlaze.Components.Components
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public class ValueText : Microsoft.AspNetCore.Components.ComponentBase
+    public class ValueText : Namotion.Interceptor.Blazor.TrackedComponentBase
     {
         public ValueText() { }
         [Microsoft.AspNetCore.Components.Parameter]

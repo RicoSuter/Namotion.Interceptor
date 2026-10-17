@@ -5,7 +5,7 @@
 @inject IServiceProvider ServiceProvider
 
 @{
-    // Read once per render and never kept: the reads are what the tracking scope records.
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var property = Property;
     var method = property?.GetValue() as MethodMetadata;
     var isEnabled = method is not null && property!.IsMethodEnabled();

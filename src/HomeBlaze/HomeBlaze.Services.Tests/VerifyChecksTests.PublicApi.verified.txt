@@ -124,10 +124,10 @@ namespace HomeBlaze.Services
     {
         public static string? ResolveScopedLink(this Namotion.Interceptor.IInterceptorSubject subject, string? link) { }
     }
-    public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
-        public event System.Action? PathsChanged;
+        public long PathsVersion { get; }
         public string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
         public System.Collections.Generic.IReadOnlyList<string> GetPaths(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }

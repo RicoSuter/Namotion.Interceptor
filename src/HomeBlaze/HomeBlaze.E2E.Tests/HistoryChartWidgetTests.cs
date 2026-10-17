@@ -319,9 +319,9 @@ public class HistoryChartWidgetTests
         var page = await OpenPageAsync(width);
         var chart = GetChart(page, "Tab speed");
 
-        // The chart has drawn its lines box while its tab is hidden.
-        await Assertions.Expect(chart.GetByTestId("history-chart-lines")).ToBeAttachedAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(chart).ToBeHiddenAsync();
+        // A hidden tab is not rendered, so the chart is first drawn when its tab is shown.
+        await Assertions.Expect(page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Speed" })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(chart).ToHaveCountAsync(0);
 
         // Act
         await page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Speed" }).ClickAsync();
@@ -582,7 +582,7 @@ public class HistoryChartWidgetTests
         try
         {
             // Act - a subject that comes and goes changes the paths of the graph but none of the series.
-            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren) { ["PathsChangedSubject"] = subject };
+            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren) { ["TransientSubject"] = subject };
             folder.Children = originalChildren;
 
             // A new speed renders the chart after the change of the paths.

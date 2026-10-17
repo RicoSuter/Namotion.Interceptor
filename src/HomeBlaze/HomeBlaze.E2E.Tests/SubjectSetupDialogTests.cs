@@ -7,7 +7,6 @@ using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Blazor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit.Abstractions;
@@ -629,12 +628,12 @@ public class SubjectSetupDialogTests
         await field.FillAsync("500");
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
 
-        // Assert - the tracking scope of the form subscribes while it renders, so a warning is logged by now.
-        var trackingScopeEntries = _fixture.ServerLog.GetEntriesSince(logCount)
-            .Where(entry => entry.Category == typeof(TrackingScope).FullName)
+        // Assert - the form subscribes the properties it reads while it renders, so a warning would be logged by now if a property could not be tracked.
+        var trackingEntries = _fixture.ServerLog.GetEntriesSince(logCount)
+            .Where(entry => entry.Category.StartsWith("Namotion.Interceptor.Blazor", StringComparison.Ordinal))
             .Select(entry => entry.Message)
             .ToArray();
-        Assert.Empty(trackingScopeEntries);
+        Assert.Empty(trackingEntries);
     }
 
     [Fact]
