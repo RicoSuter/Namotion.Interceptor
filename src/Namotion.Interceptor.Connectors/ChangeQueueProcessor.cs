@@ -306,8 +306,10 @@ public class ChangeQueueProcessor : IDisposable
         {
             using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
 
+            // PreferFairness queues globally: this pool thread runs the dequeue loop next, and an item in its
+            // local queue waits for that loop to go idle or for a steal, which a busy global queue prevents.
             var flushTask = periodicTimer is not null
-                ? Task.Run(async () =>
+                ? Task.Factory.StartNew(async () =>
                 {
                     var flushFailureReported = false;
                     try
@@ -331,7 +333,7 @@ public class ChangeQueueProcessor : IDisposable
                     {
                         ReportFlushFailure(exception, ref flushFailureReported);
                     }
-                })
+                }, CancellationToken.None, TaskCreationOptions.PreferFairness | TaskCreationOptions.DenyChildAttach, TaskScheduler.Default).Unwrap()
                 : Task.CompletedTask;
 
             if (periodicTimer is null)

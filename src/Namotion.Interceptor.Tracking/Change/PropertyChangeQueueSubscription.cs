@@ -158,10 +158,9 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// next wait starts.
     /// </summary>
     /// <remarks>
-    /// The continuation never runs inline on the writing thread but is scheduled from it, so await with
-    /// <c>ConfigureAwait(false)</c> unless resuming on the captured context is required: posting to that
-    /// context then happens inside the property setter. <see cref="TryDequeueImmediate"/> takes no token, so
-    /// a drain loop checks cancellation before each dequeue.
+    /// The continuation never runs on the writing thread: the wake-up is queued to the thread pool, which
+    /// then resumes the consumer or posts to its captured context. <see cref="TryDequeueImmediate"/> takes
+    /// no token, so a drain loop checks cancellation before each dequeue.
     /// </remarks>
     /// <param name="cancellationToken">Cancellation token to abort the wait.</param>
     /// <returns>True when a change may be available, so the caller re-checks; false when cancellation is
@@ -220,11 +219,12 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
         // _signal is never disposed: a producer or consumer racing this call may still use it.
     }
 
-    private sealed class AsyncDequeueWaiter : IValueTaskSource<bool>
+    private sealed class AsyncDequeueWaiter : IValueTaskSource<bool>, IThreadPoolWorkItem
     {
-        // Completed from a producer's property write, which must not run the consumer's loop inline.
-        private ManualResetValueTaskSourceCore<bool> _core = new() { RunContinuationsAsynchronously = true };
+        // Continuations run inline in Execute, which is already off the waking thread.
+        private ManualResetValueTaskSourceCore<bool> _core = new() { RunContinuationsAsynchronously = false };
         private CancellationTokenRegistration _cancellation;
+        private bool _pendingResult;
 
         public short Reset()
         {
@@ -234,7 +234,16 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
 
         public void SetCancellationRegistration(CancellationTokenRegistration cancellation) => _cancellation = cancellation;
 
-        public void SetResult(bool result) => _core.SetResult(result);
+        // Completed from a property write, a cancellation callback or Dispose. Queued globally rather than
+        // to the waking thread's local queue: a pool thread that blocks after its write would otherwise
+        // hold the consumer until another thread steals it, which a busy global queue can delay for seconds.
+        public void SetResult(bool result)
+        {
+            _pendingResult = result;
+            ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
+        }
+
+        void IThreadPoolWorkItem.Execute() => _core.SetResult(_pendingResult);
 
         public bool GetResult(short token)
         {
