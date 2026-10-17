@@ -101,7 +101,7 @@ public sealed class AgentMemory
     }
 
     /// <summary>The JSON file, null when the memory is kept in-process only.</summary>
-    public string? FilePath { get; }
+    internal string? FilePath { get; }
 
     /// <summary>Returns the entries of the latest write as one immutable snapshot.</summary>
     public AgentMemorySnapshot GetSnapshot() => _snapshot;
