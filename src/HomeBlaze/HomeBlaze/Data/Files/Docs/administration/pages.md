@@ -1116,7 +1116,7 @@ What the sample uses:
 3. **Use property names, not the names of a JSON file**: `TargetSpeed`, not `targetSpeed`, also deep inside a `json` block
 4. **Show shared subjects by path**: Keep a device in a file of its own and show it with a `Widget` block. Create a subject in a block only when it belongs to this page
 5. **Fit `MinWidth` to the widgets**: A flow layout needs a `MinWidth` that is at least as wide as its widest widget
-6. **Order your pages**: Use the arrows in the browser to put the pages and folders of a folder in order
+6. **Order your pages**: Click **Reorder** in the header of a folder in the browser and drag its pages and folders into place
 7. **Keep pages focused**: One topic per page makes navigation cleaner
 
 ---
