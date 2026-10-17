@@ -148,7 +148,8 @@ public class RegisteredSubjectProperty
     public bool HasGetter => Reference.Metadata.GetValue is not null;
 
     /// <summary>
-    /// Gets a value indicating whether the property has a setter.
+    /// Gets a value indicating whether the property has a setter of any accessibility, see <see cref="HasPublicSetter"/>;
+    /// an init-only setter counts as no setter.
     /// </summary>
     public bool HasSetter => Reference.Metadata.SetValue is not null;
 
@@ -158,7 +159,7 @@ public class RegisteredSubjectProperty
     /// interface implementation has the accessibility of the implemented interface member. A dynamic property without
     /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> counts as public when it has a setter.
     /// </summary>
-    // TODO: Read the accessibility from the generated metadata instead of the PropertyInfo (see #102)
+    // TODO: Read the accessibility from the generated metadata instead of the PropertyInfo (see #732)
     public bool HasPublicSetter => HasSetter && IsSetterPublic(Reference.Metadata.PropertyInfo);
 
     /// <summary>
