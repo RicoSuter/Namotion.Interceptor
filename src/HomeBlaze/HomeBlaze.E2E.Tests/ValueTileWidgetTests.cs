@@ -6,7 +6,8 @@ using Microsoft.Playwright;
 namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
-/// E2E tests for the tile kind of the value tile, the gauge in a layout and the history that value widgets open.
+/// E2E tests for the tile kind of the value tile, tiles in small places, the gauge in a layout and the history that
+/// value widgets open.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
 [Trait("Category", "Integration")]
@@ -25,9 +26,17 @@ public class ValueTileWidgetTests
     private Motor GetMotor() =>
         (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["valuemotor"];
 
-    private async Task<IPage> OpenPageAsync()
+    private async Task<IPage> OpenPageAsync(int? width = null)
     {
         var page = await _fixture.CreatePageAsync();
+
+        // Before the page opens: a narrower window closes the navigation drawer with a transition, which the page
+        // follows for a moment after the resize.
+        if (width is { } viewportWidth)
+        {
+            await page.SetViewportSizeAsync(viewportWidth, 900);
+        }
+
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
         await page.WaitUntilInteractiveAsync(Timeout);
@@ -156,13 +165,14 @@ public class ValueTileWidgetTests
         var gauge = GetGauge(page, "Canvas gauge");
         await Assertions.Expect(gauge).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        // Assert: the ring and the label together are centered, so the middle of the ring is half the label higher.
+        // Assert: the ring and the label together are centered, so the middle of the ring is half the label and the gap of 8
+        // pixels higher.
         var node = gauge.Locator("xpath=ancestor::div[contains(@class,'canvas-node')][1]");
         var nodeCenter = await GetCenterAsync(node);
         var ringCenter = await GetCenterAsync(gauge.GetByTestId("gauge-meter"));
         var labelBox = await PageGeometry.GetBoxAsync(gauge.GetByTestId("value-label"));
         Assert.InRange(ringCenter[0] - nodeCenter[0], -1.5, 1.5);
-        Assert.InRange(nodeCenter[1] - ringCenter[1] - (labelBox.Height + 4) / 2, -1.5, 1.5);
+        Assert.InRange(nodeCenter[1] - ringCenter[1] - (labelBox.Height + 8) / 2, -1.5, 1.5);
     }
 
     [Fact]
@@ -181,5 +191,80 @@ public class ValueTileWidgetTests
         Assert.InRange(smallBox.Top - largeBox.Top, -0.5, 0.5);
         Assert.InRange(smallBox.Left - itemBox.Left, -0.5, 0.5);
         Assert.True(smallBox.Height < largeBox.Height);
+    }
+
+    [Fact]
+    public async Task WhenGridCellIsTooLowForTheIconAndTheTextOfATile_ThenTheTileLeavesOutTheIconAndKeepsItsText()
+    {
+        // Arrange & Act: four square cells on a phone are about 80 pixels high, lower than the icon and two lines.
+        var page = await OpenPageAsync(width: 390);
+        var tile = GetValueTile(page, "Target");
+        await Assertions.Expect(tile.GetByTestId("tile-label")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-icon")).ToBeHiddenAsync(new() { Timeout = Timeout });
+        var tileBox = await PageGeometry.GetBoxAsync(tile);
+        var labelBox = await PageGeometry.GetBoxAsync(tile.GetByTestId("tile-subtitle"));
+        Assert.True(labelBox.Top + labelBox.Height <= tileBox.Top + tileBox.Height);
+    }
+
+    [Fact]
+    public async Task WhenGridCellIsTooLowForATileThatShowsOnlyItsIcon_ThenTheTileKeepsTheIcon()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync(width: 390);
+        var tile = page.GetByTestId("operation-button-tile");
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-icon")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenCanvasIsViewed_ThenTheLibraryDrawsNoBoxUnderItsNodes()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        await Assertions.Expect(GetGauge(page, "Canvas gauge")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert: the library draws a light rect under every node, whose stroke would stand out at the edges of the node.
+        var paints = await page.Locator(".canvas-diagram > svg rect").EvaluateAllAsync<string[]>(
+            "rects => rects.map(rect => getComputedStyle(rect).stroke + ' ' + getComputedStyle(rect).fill)");
+        Assert.NotEmpty(paints);
+        Assert.All(paints, paint => Assert.Contains(paint, new[] { "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0) none" }));
+    }
+
+    [Fact]
+    public async Task WhenTileFillsALargeGridCell_ThenItsTextIsLargerThanThatOfATileAloneOnThePage()
+    {
+        // Arrange & Act: four square cells on a wide page are about 240 pixels.
+        var page = await OpenPageAsync(width: 1280);
+        var inCell = GetValueTile(page, "Target").GetByTestId("tile-label");
+        var alone = GetValueTile(page, "Alone").GetByTestId("tile-label");
+        await Assertions.Expect(alone).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert
+        static Task<double> GetFontSizeAsync(ILocator element) =>
+            element.EvaluateAsync<double>("element => parseFloat(getComputedStyle(element).fontSize)");
+        Assert.Equal(18, await GetFontSizeAsync(alone), 0.5);
+        Assert.True(await GetFontSizeAsync(inCell) > 24);
+    }
+
+    [Fact]
+    public async Task WhenGridCellIsLowerThanAGauge_ThenTheRingGetsSmallerAndTheGaugeFitsTheCell()
+    {
+        // Arrange & Act: four square cells on a phone are about 80 pixels, lower than the medium ring of 112 pixels.
+        var page = await OpenPageAsync(width: 390);
+        var gauge = GetGauge(page, "Grid gauge");
+        await Assertions.Expect(gauge).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert
+        var cellBox = await PageGeometry.GetBoxAsync(gauge.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"));
+        var ringBox = await PageGeometry.GetBoxAsync(gauge.GetByTestId("gauge-meter"));
+        var labelBox = await PageGeometry.GetBoxAsync(gauge.GetByTestId("value-label"));
+        Assert.True(ringBox.Height < 112);
+        Assert.Equal(ringBox.Width, ringBox.Height, 1);
+        Assert.True(ringBox.Top >= cellBox.Top);
+        Assert.True(labelBox.Top + labelBox.Height <= cellBox.Top + cellBox.Height);
     }
 }

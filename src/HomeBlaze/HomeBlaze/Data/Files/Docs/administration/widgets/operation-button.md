@@ -89,6 +89,7 @@ With `Kind=Tile` the operation is a tile in place of a button. The two tiles bel
 Rules of a tile:
 
 - **Fills its place**: A tile fills a grid cell, a canvas node or a flow row like a [Card](card.md) when it is their only content. Alone on a page it is as wide as its place and 96 pixels high, see [Spacing](basics.md#spacing).
+- **Size of the content**: In a grid cell or a canvas node the icon and the text grow with a large place, and a place that is too low for the icon leaves it out, see [Spacing](basics.md#spacing).
 - **Without a label**: A tile without `Label` shows the icon of the operation alone, and its accessible name is the title of the operation. A path that leads to no operation shows the path in place of the label, and a tile without a path, a label and an icon shows a dash, so the tile is never empty. With a `Label` it shows the label, and `Subtitle` below it.
 - **The fill**: `Color` and `Variant` give the fill. `Filled` fills the tile with the color, `Outlined` draws a border in the color on the surface, and `Text` shows colored text on the surface.
 - **Disabled**: A tile is disabled while its operation is not enabled or is running, as the button is, and is then dimmed with its fill kept. The two tiles above are enabled in turn, because `PowerOn` is enabled only while the pump is off and `PowerOff` only while it is powered. A device can limit its operations in the same way, so that for example the open and close tiles of a cover are disabled at the end position they move to.

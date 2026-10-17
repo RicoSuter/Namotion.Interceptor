@@ -28,9 +28,8 @@
 
         @* The ring is the meter, and the label is next to it rather than inside, because a meter hides what is inside it
            from screen readers and the label can be a button. *@
-        <div class="gauge-widget place-centered" data-testid="gauge">
+        <div class="gauge-widget place-centered" style="@GaugeDisplay.GetSizeStyle(size)" data-testid="gauge">
             <div class="gauge-ring"
-                 style="@GaugeDisplay.GetRingStyle(size)"
                  role="@(isMeter ? "meter" : "group")"
                  aria-label="@label"
                  aria-valuenow="@GaugeDisplay.FormatNumber(state.AriaValue)"
@@ -43,10 +42,10 @@
                 <MudProgressCircular Value="100" Min="0" Max="100" StrokeWidth="4" Class="gauge-track" Style="width: 100%; height: 100%;" aria-hidden="true" />
                 <MudProgressCircular Value="@(state.Percent ?? 0)" Min="0" Max="100" StrokeWidth="4" Rounded="true" Color="@GaugeDisplay.GetColor(reading)" Class="gauge-value" Style="width: 100%; height: 100%;" aria-hidden="true" />
                 <div class="gauge-text">
-                    <ValueText Reading="@reading" Path="@path" Typo="@GaugeDisplay.GetValueTypo(size)" />
+                    <ValueText Reading="@reading" Path="@path" />
                 </div>
             </div>
-            <HistoryLabel Property="@reading.Property" Text="@label" Typo="Typo.caption" Class="ma-0" IsNamedElsewhere="true" />
+            <HistoryLabel Property="@reading.Property" Text="@label" Class="ma-0 gauge-label" IsNamedElsewhere="true" />
         </div>
     }
 }

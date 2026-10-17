@@ -17,7 +17,7 @@ A ring that shows where a number stands between a minimum and a maximum, with th
 | `Minimum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the ring is empty |
 | `Maximum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the ring is full |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the text in the center and the color of the ring, see [ValueMap](value-map.md) |
-| `Size` | `Small`, `Medium` or `Large` | `Medium` | The size of the ring: 72, 112 or 160 pixels |
+| `Size` | `Small`, `Medium` or `Large` | `Medium` | The size of the ring: 72, 112 or 160 pixels. In a cell or a node the ring fills the place instead, see [Behavior and Limits](#behavior-and-limits) |
 
 ## Slots
 
@@ -107,7 +107,8 @@ A gauge has a fixed size and stands at the start of its column and at the top of
 - **A missing value**: The dash of a [missing value](basics.md#missing-values) stands in the center, and the ring is empty.
 - **The text in the center**: The formatted value with its unit, or the text of the matched case of the map.
 - **The color**: The color of the matched case of the map, otherwise the primary color of the theme.
-- **In a cell or a node**: A gauge that is the only content of a cell of a [GridLayout](grid-layout.md) or a node of a [CanvasLayout](canvas-layout.md) stands in the middle of it, in both directions. In a [FlowLayout](flow-layout.md) it stands at the start, see [Gauge Rows](#gauge-rows).
+- **Text sizes**: The value and the label below the ring, 8 pixels apart, have text sizes in proportion to the ring, the value in bold and larger. In a cell or a node they have the sizes of the value and the label of a tile next to the gauge instead, see [Spacing](basics.md#spacing). A long value wraps inside the ring.
+- **In a cell or a node**: A gauge that is the only content of a cell of a [GridLayout](grid-layout.md) or a node of a [CanvasLayout](canvas-layout.md) stands in the middle of it, and its ring fills the place, up to twice its `Size`. In a small place, such as a square cell on a phone, the ring gets smaller, and the label stays on one line and is cut off with an ellipsis when it is too wide. In a [FlowLayout](flow-layout.md) a gauge has its `Size` and stands at the start, see [Gauge Rows](#gauge-rows).
 - **History**: The label below the ring opens the history of a property that has one, see [Value Widgets](basics.md#value-widgets).
 - **Accessibility**: The ring is a meter for screen readers, with the label as its name, the value kept inside the range and the range as its numbers, and the text in the center as its spoken value. A ring without a value is read as a group with its label.
 

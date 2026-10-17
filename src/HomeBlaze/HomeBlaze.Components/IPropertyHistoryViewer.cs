@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Components;
@@ -17,4 +18,16 @@ public interface IPropertyHistoryViewer
     /// Shows the history of the property under the display name.
     /// </summary>
     Task ShowAsync(RegisteredSubjectProperty property, string displayName);
+}
+
+internal static class PropertyHistoryViewerExtensions
+{
+    /// <summary>
+    /// Gets whether a widget offers the history of the property: outside edit mode, with a viewer that can show it.
+    /// </summary>
+    public static bool CanShow(
+        [NotNullWhen(true)] this IPropertyHistoryViewer? viewer,
+        [NotNullWhen(true)] RegisteredSubjectProperty? property,
+        bool isEditing) =>
+        !isEditing && viewer is not null && property is not null && viewer.CanShow(property);
 }

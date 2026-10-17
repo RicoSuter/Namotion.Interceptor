@@ -71,6 +71,7 @@ With `Kind=Tile` the value stands on a tile like the tiles of a [Switch](switch.
 Rules of a tile:
 
 - **Fills its place**: A tile fills a grid cell, a canvas node or a flow row like a [Card](card.md) when it is their only content, and draws no frame of its own there. Alone on a page it is as wide as its place and 96 pixels high, see [Spacing](basics.md#spacing).
+- **Size of the content**: In a grid cell or a canvas node the icon and the text grow with a large place, and a place that is too low for the icon leaves it out, see [Spacing](basics.md#spacing).
 - **The fill**: A tile takes the color of the matched case of its map, and its text the color that goes with it. Without a map, without a matching case or for a case without a `Color` it stays on the surface.
 - **A missing value**: The tile shows the dash of a [missing value](basics.md#missing-values) as its value, with the path as tooltip.
 - **A click**: A tile only shows its value. When the property has a [history](basics.md#value-widgets), the whole tile is a button that opens it.

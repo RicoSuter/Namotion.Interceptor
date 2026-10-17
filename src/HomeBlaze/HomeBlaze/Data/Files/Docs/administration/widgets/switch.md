@@ -85,6 +85,7 @@ With `Kind=Tile` the switch is a tile in place of a toggle switch: the icon, the
 Rules of a tile:
 
 - **Fills its place**: A tile fills a grid cell, a canvas node or a flow row like a [Card](card.md) when it is their only content. Alone on a page it is as wide as its place and 96 pixels high, see [Spacing](basics.md#spacing).
+- **Size of the content**: In a grid cell or a canvas node the icon and the text grow with a large place, and a place that is too low for the icon leaves it out, see [Spacing](basics.md#spacing).
 - **One click target**: The whole tile toggles the state, also where the badge stands. A click on the badge reaches the tile.
 - **The fill**: A tile takes the color of the matched case of its map. Without a map, or without a matching case, it has the primary color while the value is true and the color of the surface while it is false. A matched case without a `Color` stays on the surface.
 - **The text**: The subtitle is `Subtitle`. Without it, a tile with a map shows the text of the matched case, else the formatted value.

@@ -28,7 +28,7 @@
             // The value is the large line and the label the small one below it, so that a row of tiles reads as numbers.
             // The tile is a button only while it can show the history of the property.
             var property = reading.Property;
-            var canShowHistory = !IsEditing && property is not null && _viewer is not null && _viewer.CanShow(property);
+            var canShowHistory = _viewer.CanShow(property, IsEditing);
             _shownProperty = property;
             _shownLabel = label;
             <TileView TestId="value-tile"
@@ -76,6 +76,9 @@
         _showHistoryCallback = EventCallback.Factory.Create<MouseEventArgs>(this, ShowHistoryAsync);
     }
 
-    private Task ShowHistoryAsync() =>
-        _shownProperty is { } property && _viewer is not null && !IsEditing ? _viewer.ShowAsync(property, _shownLabel) : Task.CompletedTask;
+    private Task ShowHistoryAsync()
+    {
+        var property = _shownProperty;
+        return _viewer.CanShow(property, IsEditing) ? _viewer.ShowAsync(property, _shownLabel) : Task.CompletedTask;
+    }
 }

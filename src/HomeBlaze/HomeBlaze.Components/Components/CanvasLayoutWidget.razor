@@ -162,14 +162,19 @@ else
     }
 
     /*
-     * The outline of the selected widget is the only highlight of a node. The library draws its own around the node
-     * that a press selected: an animated dashed stroke on the rect that moves the node, and a stroke on the border
-     * strip. Both rects are told apart by their cursor attribute (checked for 4.1.136); the animation is an inline style.
+     * The node draws its own frame, and the outline of the selected widget is its only highlight. The library draws rects
+     * of its own: a light box under every node, and in edit mode an animated dashed stroke on the rect that moves the node
+     * that a press selected and a stroke on its border strip. Every rect loses its stroke, and the box under a node, the
+     * rect with the cursor default (checked for 4.1.136), also its fill, which would show at the rounded corners of the
+     * node. The animation is an inline style.
      */
-    .canvas-diagram > svg rect[cursor="move"],
-    .canvas-diagram > svg rect[cursor="pointer"] {
+    .canvas-diagram > svg rect {
         stroke: transparent;
         animation: none !important;
+    }
+
+    .canvas-diagram > svg rect[cursor="default"] {
+        fill: transparent;
     }
 
     .canvas-node-content {
