@@ -218,4 +218,68 @@ public class TileWidgetTests
         // Assert
         Assert.InRange(Math.Abs(cell.Width - cell.Height), 0, 1.5);
     }
+
+    [Theory]
+    [InlineData(1280)]
+    [InlineData(800)]
+    public async Task WhenCanvasFitsTheWidth_ThenItsNodesScaleWithTheWidthOfThePage(int width)
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await page.SetViewportSizeAsync(width, 900);
+        var frame = page.GetByTestId("canvas-scale-frame").Last;
+        var node = page.Locator(".canvas-node").Filter(new() { Has = GetSwitchTile(page, "Canvas tile") });
+        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act: the node is half of the 400 pixel design width, so it is half of the frame once the frame is measured.
+        var frameBox = await PageGeometry.GetBoxAsync(frame);
+        await page.WaitForFunctionAsync(
+            "([node, expected]) => Math.abs(node.getBoundingClientRect().width - expected) < 2",
+            new object[] { await node.ElementHandleAsync(), frameBox.Width / 2 },
+            new() { Timeout = Timeout });
+        var nodeBox = await PageGeometry.GetBoxAsync(node);
+
+        // Assert
+        Assert.InRange(Math.Abs(nodeBox.Width - frameBox.Width / 2), 0, 2);
+        Assert.InRange(Math.Abs(nodeBox.Height - frameBox.Width / 2), 0, 2);
+    }
+
+    [Fact]
+    public async Task WhenCanvasThatFitsTheWidthIsEdited_ThenItIsDrawnUnscaled()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await page.SetViewportSizeAsync(1280, 900);
+        var node = page.Locator(".canvas-node").Filter(new() { Has = GetSwitchTile(page, "Canvas tile") });
+        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await page.SelectEditModeAsync("Inline");
+
+        // Assert
+        await page.WaitForFunctionAsync(
+            "node => Math.abs(node.getBoundingClientRect().width - 200) < 3",
+            await node.ElementHandleAsync(),
+            new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenCanvasThatFitsTheWidthIsEditedOnANarrowPage_ThenItScrollsHorizontally()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await page.SetViewportSizeAsync(375, 812);
+        var frame = page.GetByTestId("canvas-scale-frame").Last;
+        var node = page.Locator(".canvas-node").Filter(new() { Has = GetSwitchTile(page, "Canvas tile") });
+        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await page.SelectEditModeAsync("Inline");
+
+        // Assert: the 400 pixel design width is wider than the frame, which scrolls instead of scaling the node.
+        await page.WaitForFunctionAsync(
+            "([frame, node]) => frame.scrollWidth > frame.clientWidth && Math.abs(node.getBoundingClientRect().width - 200) < 3",
+            new object[] { await frame.ElementHandleAsync(), await node.ElementHandleAsync() },
+            new() { Timeout = Timeout });
+    }
 }

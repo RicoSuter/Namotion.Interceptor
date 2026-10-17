@@ -47,3 +47,8 @@ This page is changed by the tile widget tests.
 ::: Cell Row=0 Column=0
 :::: HomeBlaze.Components.Switch#narrowtile Kind=Tile Path=tilemotor/IsPowered Label="Narrow"
 ::
+
+:: HomeBlaze.Components.CanvasLayout#fitcanvas MinHeight=200 Width=400 Scale=FitWidth
+::: Node X=0 Y=0 Width=200 Height=200
+:::: HomeBlaze.Components.Switch#canvastile Kind=Tile Path=tilemotor/IsPowered Label="Canvas tile"
+::

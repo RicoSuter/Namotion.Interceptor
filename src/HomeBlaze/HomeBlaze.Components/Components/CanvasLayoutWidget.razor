@@ -1,25 +1,48 @@
+@using System.Globalization
+@using Microsoft.JSInterop
+@using HomeBlaze.Components.Controls
 @using HomeBlaze.Components.Dialogs
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(CanvasLayout))]
 @implements ISubjectComponent
+@implements IAsyncDisposable
 
 @inject IDialogService DialogService
 @inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
+@inject IJSRuntime JsRuntime
 
-<div class="canvas-layout-container @(IsEditing ? "editing edit-mode-interactive" : "")"
-     style="position: relative; width: 100%; min-height: @(Canvas?.MinHeight ?? 400)px;"
+@{
+    var canvas = Canvas;
+    var nodes = Nodes;
+    var scale = canvas?.Scale ?? CanvasScale.None;
+    var widthError = CanvasExtent.Validate(canvas?.Width);
+    var height = canvas?.MinHeight ?? 400;
+    var designWidth = CanvasExtent.GetDesignWidth(canvas?.Width, nodes);
+    var factor = CanvasExtent.GetFactor(scale, IsEditing, designWidth, _availableWidth);
+    var isScaled = scale == CanvasScale.FitWidth && !IsEditing && designWidth > 0;
+    var frameStyle = isScaled
+        ? string.Create(CultureInfo.InvariantCulture, $"width: 100%; height: {height * factor}px; overflow: hidden;")
+        : "width: 100%; overflow-x: auto;";
+    var containerStyle = isScaled
+        ? string.Create(CultureInfo.InvariantCulture, $"position: relative; width: {designWidth}px; min-height: {height}px; transform: scale({factor}); transform-origin: 0 0;")
+        : scale == CanvasScale.FitWidth
+            ? string.Create(CultureInfo.InvariantCulture, $"position: relative; width: max(100%, {designWidth}px); min-height: {height}px;")
+            : string.Create(CultureInfo.InvariantCulture, $"position: relative; width: 100%; min-height: {height}px;");
+
+    RenderFragment container = @<div class="canvas-layout-container @(IsEditing ? "editing edit-mode-interactive" : "")"
+     style="@containerStyle"
      @onmousedown="MouseDownCallback"
      @onclick="ClickCallback"
      @onclick:stopPropagation="@IsEditing">
 
-    <Diagram @ref="_diagram" SelectionChanged="OnDiagramSelectionChanged" class="canvas-diagram" style="@($"width: 100%; height: {Canvas?.MinHeight ?? 400}px;")">
+    <Diagram @ref="_diagram" SelectionChanged="OnDiagramSelectionChanged" class="canvas-diagram" style="@($"width: 100%; height: {height}px;")">
         <NavigationSettings DisableZooming="@(!IsEditing)" DisablePanning="@(!IsEditing)" OriginChanged="@(_ => _ignoreNextClick = true)" />
         <Links />
         <Nodes OnModified="OnNodeModified">
-            @foreach (var node in Nodes)
+            @foreach (var node in nodes)
             {
                 <Node @key="node"
                       Id="@GetNodeId(node)"
@@ -52,7 +75,26 @@
             }
         </Nodes>
     </Diagram>
-</div>
+</div>;
+}
+
+@if (widthError is not null)
+{
+    <WidgetArgumentError Message="@widthError" />
+}
+else if (scale == CanvasScale.FitWidth)
+{
+    @* The frame is the width the canvas fits. While viewed it cuts off the space that the scaled canvas no longer takes,
+       while edited it scrolls a canvas that is wider than the page. A canvas that does not fit the width needs none and
+       stays a direct child of its widget, where the styles and the tests of the layouts expect it. *@
+    <div class="canvas-scale-frame" @ref="_frame" style="@frameStyle" data-testid="canvas-scale-frame">
+        @container
+    </div>
+}
+else
+{
+    @container
+}
 
 <style>
     /*
@@ -147,6 +189,19 @@
 
     private readonly Dictionary<CanvasNode, SubjectComponent> _nodeComponents = new();
 
+    private const string ModulePath = "./_content/HomeBlaze.Components/Components/CanvasLayoutWidget.razor.js";
+
+    private ElementReference _frame;
+    private string? _observedFrameId;
+    private const double MaxScrollbarWidth = 24;
+
+    private double _availableWidth;
+    private double _previousAvailableWidth;
+    private bool _isDisposed;
+    private DotNetObjectReference<CanvasLayoutWidget>? _dotNetReference;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _widthObserver;
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
@@ -228,6 +283,98 @@
                 _nodeComponents.Remove(node);
             }
         }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The frame is observed from the first render that has one, and again when it is rendered anew (after the scale
+        // or the width was changed); a canvas that never fits the width loads no module. The id is taken before the first
+        // await, so that a render while the module loads does not observe the frame a second time.
+        var canvas = Canvas;
+        if (canvas is not { Scale: CanvasScale.FitWidth } ||
+            CanvasExtent.Validate(canvas.Width) is not null ||
+            _frame.Id is null ||
+            _frame.Id == _observedFrameId)
+        {
+            return;
+        }
+
+        _observedFrameId = _frame.Id;
+        try
+        {
+            if (_widthObserver is not null)
+            {
+                var previous = _widthObserver;
+                _widthObserver = null;
+                await previous.InvokeVoidAsync("dispose");
+                await previous.DisposeAsync();
+            }
+
+            _dotNetReference ??= DotNetObjectReference.Create(this);
+            _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            var observer = await _module.InvokeAsync<IJSObjectReference>("observeWidth", _frame, _dotNetReference);
+            if (_isDisposed)
+            {
+                await observer.InvokeVoidAsync("dispose");
+                await observer.DisposeAsync();
+                return;
+            }
+
+            _widthObserver = observer;
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException)
+        {
+            // Without the width the canvas is drawn unscaled.
+        }
+    }
+
+    /// <summary>Called by the module with the width of the frame, at once and whenever it changes.</summary>
+    [JSInvokable]
+    public Task OnFrameWidthChanged(double width)
+    {
+        if (_isDisposed || Math.Abs(width - _availableWidth) < 0.5)
+        {
+            return Task.CompletedTask;
+        }
+
+        // The scaled height can decide whether the page scrolls, and the vertical scrollbar of the page takes its width
+        // from the frame, which changes the height again. A change back to the wider width before the last one, by no
+        // more than a scrollbar, is that scrollbar toggling and is ignored, so that the canvas stays at the narrower width
+        // instead of switching between both.
+        if (width > _availableWidth &&
+            width - _availableWidth <= MaxScrollbarWidth &&
+            Math.Abs(width - _previousAvailableWidth) < 0.5)
+        {
+            return Task.CompletedTask;
+        }
+
+        _previousAvailableWidth = _availableWidth;
+        _availableWidth = width;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        try
+        {
+            if (_widthObserver is not null)
+            {
+                await _widthObserver.InvokeVoidAsync("dispose");
+                await _widthObserver.DisposeAsync();
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or TaskCanceledException)
+        {
+            // The circuit is gone, and the observer with it.
+        }
+
+        _dotNetReference?.Dispose();
     }
 
     // The diagram selects the node that a press is on, and none for a press on the empty canvas, which is how a click on

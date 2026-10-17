@@ -86,7 +86,7 @@
 /* The buttons of the cells of a grid and of the nodes of a canvas show only while the layout, or a widget inside it, is
    selected. A nested layout hides its own buttons while neither applies to it, also when the layout around it is selected.
    Without a selection no widget is selectable, and the buttons always show. */
-.subject-component-wrapper.selectable:not(.selected):not(:has(.subject-component-wrapper.selected)) > ::deep :is(.grid-layout-container, .grid-layout-sizer, .canvas-layout-container) .layout-item-actions {
+.subject-component-wrapper.selectable:not(.selected):not(:has(.subject-component-wrapper.selected)) > ::deep :is(.grid-layout-container, .grid-layout-sizer, .canvas-layout-container, .canvas-scale-frame) .layout-item-actions {
     display: none;
 }
 
