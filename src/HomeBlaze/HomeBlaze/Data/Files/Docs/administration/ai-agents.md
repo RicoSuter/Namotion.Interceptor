@@ -61,7 +61,8 @@ The `AnthropicAgent` sends its requests, with the API key, to `ANTHROPIC_BASE_UR
 - HomeBlaze starts `claude -p` per turn in the agent's own working directory. The message goes on standard input; the system prompt and MCP configuration are in two temporary files only the HomeBlaze user can read (file permissions on Linux and macOS, an access list on Windows), deleted after the turn.
 - The CLI gets no built-in tools (no shell or files, no web unless [web tools](#web-tools) are allowed), none of the user's MCP servers, settings, hooks or plugins, and no `CLAUDE.md` of the working directory or above.
 - It reaches only the agent's allowed tools, on the agent route `/mcp/agents`, which HomeBlaze serves on its own listener on `127.0.0.1` with a port the operating system assigns at each start. The web server's bindings, HTTPS settings, published ports and reverse proxy neither expose nor affect it.
-- The route accepts only the token of a running turn, also from other local processes. The token is revoked when the turn ends, and a later tool call returns an error and runs nothing. It never reaches the tools of another agent or of `/mcp`, and the route works when `/mcp` is off.
+- Any local process can connect to the port, but the route accepts only the token of a running turn. Under WSL in mirrored mode, Windows processes share this localhost too.
+- The token is revoked when the turn ends, and a later tool call returns an error and runs nothing. It never reaches the tools of another agent or of `/mcp`, and the route works when `/mcp` is off.
 
 ### The CLI environment
 
@@ -74,11 +75,11 @@ The CLI always runs on the subscription login:
 
 ### Docker
 
-- **Image**: the official image has no Claude CLI. Build an image from it that installs the CLI, with the native installer or with Node.js and `npm install -g @anthropic-ai/claude-code`. The CLI must run in the HomeBlaze container, which starts it per turn over the container's loopback address.
-- **Path**: as root, the native installer puts `claude` in `/root/.local/bin`, which is not on the `PATH`. Set `CliPath` to `/root/.local/bin/claude`, add the folder to `PATH`, or link it into `/usr/local/bin`, where npm puts it.
-- **Login**: run `claude setup-token` on a machine with a browser and pass the token in `CLAUDE_CODE_OAUTH_TOKEN`. The token is long-lived: keep it out of the compose file and shell history, for example in an `env_file` only its owner can read. Environment values show in `docker inspect`; a Docker secret that your image's entrypoint exports avoids that.
-- **Ports**: publish only the web server's port. The agent route is not reachable through published ports or a reverse proxy. With host networking or a shared network namespace, such as Kubernetes sidecars or WSL mirrored mode, other local processes can connect but still need a turn's token.
-- **Sessions**: the CLI keeps chat sessions in `~/.claude`. Without a volume there, recreating the container starts a fresh chat session; timeline and memory stay in the data folder. The folder holds chat transcripts with tool results and device data, so keep the volume private.
+- **Image**: the official image has no Claude CLI. Build an image from it that installs the CLI, with the native installer or with Node.js and `npm install -g @anthropic-ai/claude-code`. The CLI must run in the HomeBlaze container: HomeBlaze starts it per turn, and the CLI calls back over the container's loopback address.
+- **Path**: the image runs as root, so the native installer puts `claude` in `/root/.local/bin`, which is not on the `PATH`. Set `CliPath` to `/root/.local/bin/claude`, add the folder to `PATH`, or link it into `/usr/local/bin`, where npm puts it.
+- **Login**: run `claude setup-token` on a machine with a browser and pass the token in `CLAUDE_CODE_OAUTH_TOKEN`. The token is long-lived: keep it out of the compose file and shell history, for example in an `env_file` only its owner can read. Values from an `env_file` still show in `docker inspect`; to avoid that, mount the token as a Docker secret and let your image's entrypoint export it.
+- **Ports**: publish only the web server's port. The agent route is not reachable through published ports or a reverse proxy. With host networking or a shared network namespace, such as Kubernetes sidecars, other local processes can connect but still need a turn's token.
+- **Sessions**: the CLI keeps chat sessions in `/root/.claude`. Without a volume there, recreating the container starts a fresh chat session; timeline and memory stay in the data folder. The folder holds chat transcripts with tool results and device data, so keep the volume private.
 
 ---
 
@@ -193,7 +194,7 @@ The agent's own notebook of key-value entries, kept across runs and chats, such 
 
 - **`update_memory`** is always available and does not count against the tool-call budget. One call applies a list of set and remove changes in order, all or nothing. Removing a key that ends in `/` removes its subtree.
 - **In the prompt**, the memory is marked as data that never overrides the instructions.
-- **The Memory tab** lets you read, add, edit and delete entries once the agent has started. The form warns when the agent changed an entry you are editing; otherwise the last write of a key wins.
+- **The Memory tab** lets you read, add, edit and delete entries once the agent has started. The form warns when the agent changed an entry you are editing, since saving replaces that change; the last write of a key always wins.
 - **A damaged file** is copied to `.memory.json.damaged`; the readable entries are kept.
 
 ---
@@ -205,10 +206,11 @@ The header has a status chip, **Run now** and **New conversation** (disabled whi
 | Tab | Shows |
 |---|---|
 | Chat | The timeline: messages, replies and errors with the tools their turn called, background findings (**Show full answer** for the whole reply) and dividers. Quiet runs collapse into one line. The newest 50 rows; **Show earlier** adds 50 more |
-| Activity | Run count, last run, CLI subscription usage, and the background runs still in the timeline (newest 500 entries), 25 per page, with trigger, duration, tokens, tool calls and result. Failed and cancelled runs are included, chat turns are not. The count also includes older runs and survives restarts and new conversations |
+| Activity | Run count, last run, CLI subscription usage, and the background runs still in the timeline (newest 500 entries), 25 per page, with trigger, duration, tokens, tool calls and result. Failed and cancelled runs are included, chat turns are not |
 | Memory | The entries with update times and a size bar, see [Memory](#memory) |
 | Settings | A summary of the settings; change them with the subject's Edit action |
 
+- The run count on the Activity tab also includes older runs and survives restarts and new conversations.
 - Enter sends and Shift+Enter adds a line; on touch devices Enter adds a line and the button sends.
 - While a background run or an `AnthropicAgent` summary holds the agent, the status shows Waiting and your message is answered after it.
 - A message to an agent that is stopped or still starting is rejected and stays in the input.
@@ -238,7 +240,7 @@ Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. This
 | `update_memory` | always | Changes the agent's memory |
 | `web_search`, `web_fetch` | off | Search the web and load pages, see [Web tools](#web-tools) |
 
-A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line.
+Only methods marked `[Query]` or `[Operation]` are visible to the tools. A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line.
 
 ### Reading pages and documents
 
@@ -252,7 +254,7 @@ Pages and documents, such as these docs under `/Docs`, are the main context abou
 
 With `invoke_operation` or `set_property` allowed, the edit form marks the agent as able to change devices and send notifications. The preamble tells it to change something only when asked or when its instructions call for it, and to say what it changed. These limits always apply:
 
-- **`set_property` never writes configuration**, for agents and external MCP clients alike. It refuses a property that is also `[Configuration]`, such as `IsEnabled` of an OPC UA server or the mode of a GPIO pin: "Property is not writable: path. It is a configuration property; set_property cannot change configuration, an operation of the subject may."
+- **`set_property` never writes configuration**, for agents and external MCP clients alike. It writes only `[State]` properties and refuses one that is also `[Configuration]`, such as `IsEnabled` of an OPC UA server or the mode of a GPIO pin: "Property is not writable: path. It is a configuration property; set_property cannot change configuration, an operation of the subject may."
 - **Agent settings** are not reachable at all, and operations of agents, such as Run now, are refused: "Agents cannot run operations of agents."
 - **Operations that require confirmation** cannot be called through MCP by anyone; run them from the UI. `list_methods` marks them with `requiresConfirmation`. Examples: Wallbox reboot, firmware update, Unlock, Set ICP Max Current and charge port unlock and toggle; door lock unlock and toggle; FRITZ!Box guest WLAN on and toggle; adding and removing plugins; starting and stopping the OPC UA server and client; New conversation of an agent.
 
@@ -276,10 +278,10 @@ The operations change text only and refuse:
 
 - **Changing blocks**: adding, changing, removing or moving any [block](pages.md#blocks), with its arguments, `json` block and everything inside, because a block creates or configures running subjects. Slot blocks such as `Footer` and style blocks such as `:: {.note}` count. Text directly after a block without a closing line belongs to it.
 - **Recreating unnamed blocks**: a change that would create the subject of a block without a `#name` again, such as adding an expression or a first text before it, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps). Editing existing text is fine; a `#name` given in the page editor frees the text before it.
-- **Active content**: raw HTML, images and media, math and diagram blocks, element attributes such as `{onclick=...}`, abbreviation definitions such as `*[HB]: HomeBlaze`, and links other than http, https and mailto. Active content a page already has may stay or be removed.
+- **Active content**: raw HTML, images and media, math and diagram blocks, element attributes such as `{onclick=...}`, abbreviation definitions such as `*[HB]: HomeBlaze` (which change text inside blocks and expressions), and links other than http, https and mailto. Active content a page already has may stay or be removed. One gap remains: an agent can add a link reference definition with an http or https address, which changes where a `[text][label]` link inside a block leads.
 - **Large pages**: more than 64 KB of source, counted with `***` for hidden values.
 
-Secrets stay hidden: the operations see the `ReadRawContent` view, and a block with a hidden secret is kept by repeating it with `***`. A passage or block with a guessed value is not found or refused, so neither reveals it. One gap remains: an agent can add a link reference definition with an http or https address, which changes where a `[text][label]` link inside a block leads. [AI Integration](../architecture/design/ai.md#page-write-rules) lists every rule.
+Secrets stay hidden: the operations see the `ReadRawContent` view, and a block with a hidden secret is kept by repeating it with `***`. A guessed value is not found or is refused, so it reveals nothing.
 
 Before you allow page changes:
 
@@ -296,6 +298,8 @@ Before you allow page changes:
 - **Plain values only**: a layout block holds non-secret configuration values and never a device. A card's `Href` must be relative or http, https or mailto, and a subject path in a new or changed block must lead to an existing subject.
 - **Everything else stays**: every other block and its subject stay as they are, and a change that would show an error box is refused.
 - **Review**: a `Widget` can show any existing subject, with its operation controls, under any title, so a page can present a device misleadingly. A refused `Widget` path tells whether a subject exists, as browsing does.
+
+[AI Integration](../architecture/design/ai.md#page-write-rules) lists every rule.
 
 ### Web tools
 
@@ -317,7 +321,8 @@ Before you allow page changes:
 
 - **Prompt injection**: names and values from the graph, pages and documents reach the model and can try to steer it. The prompt calls them data, but the real defense is the tool scope: allow `invoke_operation` and `set_property` only to agents whose inputs you trust.
 - **Pages**: pages are the main context of people and other agents, and a `{{ path }}` expression is evaluated whenever a page is shown or read. Allow page changes, including through `invoke_operation`, only to agents whose inputs you trust. No agent can add HTML, scripts or other active content, and with `edit_page_layout` it can rearrange a page and show any subject on it, but not create, change or remove a device.
-- **Web content**: with web tools, anyone who controls a page or search result the agent reads can try to steer it, a far larger group than those who can change your graph. Do not combine them with `invoke_operation`, `set_property` or the page tools unless you accept that risk; a read-only agent can at worst report something wrong. Requests also tell the site or search provider what the agent looked up, and a `ClaudeCliAgent` with `web_fetch` can be steered into your local network.
+- **Web content**: with web tools, anyone who controls a page or search result the agent reads can try to steer it, a far larger group than those who can change your graph. Do not combine them with `invoke_operation`, `set_property` or the page tools unless you accept that risk; a read-only agent can at worst report something wrong.
+- **Privacy and local network**: a web request tells the site or search provider what the agent looked up. A `ClaudeCliAgent` with `web_fetch` can be steered into loading pages from your local network; allow it only for agents whose instructions and inputs you trust.
 - **Secrets**: tools expose only state, which a secret cannot be, and pages and page tools never show a secret value (see [Properties Shown on Pages](../development/building-subjects.md#properties-shown-on-pages)). An `AnthropicAgent`'s API key is stored in plain text in its JSON file, like other secrets; protect the data folder.
 - **Audit**: every tool call is recorded in the timeline with previews of its arguments and result.
 - **CLI isolation**: see [How a turn runs the CLI](#how-a-turn-runs-the-cli).
@@ -364,7 +369,7 @@ Each agent keeps its data in the `Agents` folder of the [data folder](configurat
 | The Claude usage limit is reached until ... | The subscription limit is used up; the message names it when the CLI does, such as "The Claude weekly Opus usage limit". Automatic runs resume after the reset. Use a smaller background model or fewer runs |
 | The Claude CLI path '...' is a batch file ... | Set `CliPath` to `claude.exe` instead of the npm `claude.cmd` shim |
 | The turn stopped after N model rounds, the limit set by MaxToolCallsPerTurn. | Raise `MaxToolCallsPerTurn` or narrow the instructions, see [Settings](#settings) |
-| The agent MCP listener is not running. | HomeBlaze is starting or shutting down, or the listener could not bind `127.0.0.1` at startup, see the log. HomeBlaze keeps running; only CLI agents fail |
+| The agent MCP listener is not running. | HomeBlaze is starting or shutting down, or the listener could not start on `127.0.0.1` (the log names why). Fix the cause and restart HomeBlaze. Until then CLI agent turns fail and automatic runs back off; the rest of HomeBlaze keeps running |
 | The turn did not finish within ... | Raise `TurnTimeout`, or narrow the instructions and watch paths |
 | The tool call budget of N calls for this turn is exhausted. | Shown on a tool call. Raise `MaxToolCallsPerTurn` if the agent regularly needs more |
 | Set the API key of the agent. / The Anthropic API rejected the API key. | Enter a valid key in the edit form |
