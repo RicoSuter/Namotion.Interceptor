@@ -5,23 +5,7 @@
 /* MudSwitch keeps 12 pixels around its track for the ripple of the thumb. At the start they would move the track in
    from the edge where the box of a Select and the label of a Slider start, and above and below its label they would add
    7 pixels to the space between blocks. The ripple may reach into the space around the switch. */
-.switch-widget .mud-switch {
+.switch-widget ::deep .mud-switch {
     margin-block: -7px;
     margin-inline-start: -12px;
-}
-
-/* The label of an outlined Select stands on its top border and reaches 6 pixels above the box. The margin of MudBlazor
-   for it would collapse into the space between blocks, so it is kept inside the widget, without the one below the box. */
-.select-widget {
-    display: flow-root;
-}
-
-.select-widget .mud-select > .mud-input-control {
-    margin-top: 6px;
-    margin-bottom: 0;
-}
-
-/* MudSlider is an inline block, which adds the room below a baseline to the height of the widget. */
-.slider-widget .mud-slider {
-    display: block;
 }

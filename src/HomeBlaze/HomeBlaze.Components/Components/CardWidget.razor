@@ -20,7 +20,7 @@
         var headerRight = card.HeaderRight;
         var hasHeader = hasTitle || hasSubtitle || hasIcon || headerRight is not null;
 
-        // The paddings, and the closer distance between a header and a body that follows it directly, are in card-widget.css.
+        // The paddings, and the closer distance between a header and a body that follows it directly, are in SubjectComponent.razor.css.
         // MudCardHeader gives its actions area a margin of -8 pixels at the top and at the end, because it is made for icon buttons with a padding of their own. me-1 and mt-2 cancel 4 of them and the 4 pixels that an indicator has around itself the rest, so that its visible edge ends where the content of the card ends, as the header and the body have the same padding. mb-n1 takes back the bottom margin of the indicator, which would make the header 4 pixels taller than the title.
         // The 4 pixels of top margin of the indicator are also what centers one line of content, 24 pixels high, on the 32 pixel title line. Text that stands here has no margin and ends 4 pixels further out than the content of the card. A button in the slot has a padding of its own and needs no me-1 and no mt-2.
         // The header aligns its parts at the top, so that the icon stands on the title line like the content of HeaderRight, also when the subtitle takes several lines. mt-1 centers the icon, 24 pixels high, on the 32 pixel title line. d-block keeps the icon out of a line box, which would add the room below a baseline to the height of the header.
