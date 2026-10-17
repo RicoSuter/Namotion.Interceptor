@@ -17,9 +17,9 @@ using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
 
-public sealed class HomeBlazeContentSearchToolTests : IDisposable
+public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
 {
-    private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-content-search-");
+    private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-markdown-search-");
     private readonly List<FluentStorageContainer> _storages = [];
 
     [Fact]
@@ -328,7 +328,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
     public async Task WhenAPageHasASecretConfigurationValue_ThenTheValueIsNeitherMatchedNorShown()
     {
         // Arrange
-        var device = typeof(ContentSearchSecretDevice).FullName;
+        var device = typeof(MarkdownSearchSecretDevice).FullName;
         var tool = await CreateToolAsync(("Gateway.md", $":: {device}#gateway Host=gateway-host Password=s3cr3t\n::\n"));
 
         // Act
@@ -343,7 +343,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheConfigurationIsReadOnly_ThenSearchContentIsOfferedAsAReadOnlyTool()
+    public async Task WhenTheConfigurationIsReadOnly_ThenSearchMarkdownIsOfferedAsAReadOnlyTool()
     {
         // Act
         var tool = await CreateToolAsync();
@@ -356,7 +356,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
     {
         var (root, services) = await CreateGraphAsync(additionalFiles);
         var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: true, forAgents: true);
-        return new McpToolFactory(root, configuration).CreateTools().Single(tool => tool.Name == HomeBlazeContentSearchToolProvider.SearchContentToolName);
+        return new McpToolFactory(root, configuration).CreateTools().Single(tool => tool.Name == HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName);
     }
 
     private async Task<(AgentTestRoot Root, IServiceProvider Services)> CreateGraphAsync((string Path, string Content)[] additionalFiles)
@@ -371,7 +371,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
 
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
-        typeProvider.AddAssembly(typeof(ContentSearchSecretDevice).Assembly);
+        typeProvider.AddAssembly(typeof(MarkdownSearchSecretDevice).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         var services = new ServiceCollection();
@@ -428,7 +428,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
 }
 
 [InterceptorSubject]
-public partial class ContentSearchSecretDevice : IConfigurable
+public partial class MarkdownSearchSecretDevice : IConfigurable
 {
     [Configuration]
     public partial string? Host { get; set; }

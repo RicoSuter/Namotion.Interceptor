@@ -71,13 +71,13 @@ public class AgentToolSetTests
     }
 
     [Fact]
-    public void WhenUsingTheDefaultAllowedTools_ThenSearchContentIsAllowed()
+    public void WhenUsingTheDefaultAllowedTools_ThenSearchMarkdownIsAllowed()
     {
         // Act
         var allowedTools = AgentToolSet.DefaultAllowedTools;
 
         // Assert
-        Assert.Contains(HomeBlazeContentSearchToolProvider.SearchContentToolName, allowedTools);
+        Assert.Contains(HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName, allowedTools);
     }
 
     [Fact]

@@ -12,14 +12,14 @@ using Namotion.Interceptor.Registry.Paths;
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// Provides search_content, which finds text in the Markdown pages and documents of the graph. It searches the source of
+/// Provides search_markdown, which finds text in the Markdown pages and documents of the graph. It searches the source of
 /// each page as <see cref="MarkdownFile.ReadRawContent"/> shows it, with secret values hidden, so a hidden value can
 /// neither match nor appear in a snippet. The tool only reads and is also offered when the configuration is read-only.
 /// </summary>
-public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
+public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
 {
     /// <summary>The name of the tool that finds text in Markdown pages and documents.</summary>
-    public const string SearchContentToolName = "search_content";
+    public const string SearchMarkdownToolName = "search_markdown";
 
     private const int DefaultMaxPages = 20;
     private const int MaxPagesLimit = 100;
@@ -61,7 +61,7 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
     /// <param name="rootSubjectProvider">Resolves the root subject when the tool runs.</param>
     /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
     /// <param name="pathPrefix">The prefix of every path, <see cref="McpServerConfiguration.PathPrefix"/> of the configuration.</param>
-    internal HomeBlazeContentSearchToolProvider(Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix)
+    internal HomeBlazeMarkdownSearchToolProvider(Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
@@ -72,7 +72,7 @@ public class HomeBlazeContentSearchToolProvider : IMcpToolProvider
     {
         yield return new McpToolInfo
         {
-            Name = SearchContentToolName,
+            Name = SearchMarkdownToolName,
             Description = Description,
             InputSchema = Schema,
             Handler = HandleAsync,

@@ -41,7 +41,7 @@ public class HomeBlazeMcpToolAnnotationTests
         var tools = (await client.ListToolsAsync()).ToDictionary(tool => tool.Name, tool => tool.ProtocolTool.Annotations);
 
         // Assert
-        foreach (var name in new[] { "browse", "search", "get_property", "list_types", "list_methods", "invoke_query", "search_content" })
+        foreach (var name in new[] { "browse", "search", "get_property", "list_types", "list_methods", "invoke_query", "search_markdown" })
         {
             Assert.True(tools[name]!.ReadOnlyHint, name);
             Assert.Null(tools[name]!.DestructiveHint);

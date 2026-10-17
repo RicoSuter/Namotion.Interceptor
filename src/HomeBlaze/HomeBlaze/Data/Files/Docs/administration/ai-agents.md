@@ -78,7 +78,7 @@ Create a subject of type `ClaudeCliAgent` or `AnthropicAgent` (category AI) in t
   "backgroundEffort": "Low",
   "watchPaths": ["/Energy"],
   "pollInterval": "00:15:00",
-  "allowedTools": ["browse", "search", "search_content", "get_property", "list_types", "list_methods", "invoke_query", "get_property_history", "invoke_operation"]
+  "allowedTools": ["browse", "search", "search_markdown", "get_property", "list_types", "list_methods", "invoke_query", "get_property_history", "invoke_operation"]
 }
 ```
 
@@ -198,7 +198,7 @@ The agent reaches the graph through the HomeBlaze MCP tools. Each turn offers ex
 |---|---|---|
 | `browse` | on | Browses the subject tree and reads property values |
 | `search` | on | Finds subjects by title, path or type |
-| `search_content` | on | Finds text in Markdown pages and documents, with the line and a snippet of each match |
+| `search_markdown` | on | Finds text in Markdown pages and documents, with the line and a snippet of each match |
 | `get_property` | on | Reads one property value |
 | `list_types` | on | Lists interfaces and concrete types, so subjects can be found by capability |
 | `list_methods` | on | Lists the methods of a subject, each with its kind (`query` or `operation`) and whether it requires confirmation |
@@ -216,7 +216,7 @@ The agent reaches the graph through the HomeBlaze MCP tools. Each turn offers ex
 
 Only methods marked `[Query]` or `[Operation]` are visible to the tools, and `invoke_query` calls only queries while `invoke_operation` calls only operations. A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line.
 
-**Reading pages and documents.** Markdown pages and documents, such as these docs under `/Docs`, are the main source of context about an installation. The agent reads them with `invoke_query` and the query `ReadEvaluatedContent` of the page, which returns the text with every `{{ path }}` expression replaced by its current value. With `includeSourcePaths` set to true, each value is followed by the absolute path of its property, for example `21.5 (/Devices/Kitchen/Temperature)`, which the agent can read with `get_property` when the property is state. `ReadRawContent` returns the source with the expressions unevaluated. Both queries show the secret configuration values in the arguments and `json` blocks of the blocks as `***`. For a block that creates no subject, for example because of an error or because it stands inside a block that is an error, they hide every argument value and its `json` block (a layout block, see [Editing page layout](#editing-page-layout), holds no secret and is shown as it is), for a head line that cannot be read everything after its name, in a `json` block every value that does not match the subject, and for the old `subject(name)` form the whole content of the fence. A page expression never shows a secret configuration value, nor the raw source of a page through its `Content` property. The tool descriptions and the preamble point the agent to these pages, and the external MCP server sends the same hint to its clients as server instructions. To find the pages that mention a term, the agent uses `search_content`, which searches the same view as `ReadRawContent`, so it never matches or shows a hidden secret value.
+**Reading pages and documents.** Markdown pages and documents, such as these docs under `/Docs`, are the main source of context about an installation. The agent reads them with `invoke_query` and the query `ReadEvaluatedContent` of the page, which returns the text with every `{{ path }}` expression replaced by its current value. With `includeSourcePaths` set to true, each value is followed by the absolute path of its property, for example `21.5 (/Devices/Kitchen/Temperature)`, which the agent can read with `get_property` when the property is state. `ReadRawContent` returns the source with the expressions unevaluated. Both queries show the secret configuration values in the arguments and `json` blocks of the blocks as `***`. For a block that creates no subject, for example because of an error or because it stands inside a block that is an error, they hide every argument value and its `json` block (a layout block, see [Editing page layout](#editing-page-layout), holds no secret and is shown as it is), for a head line that cannot be read everything after its name, in a `json` block every value that does not match the subject, and for the old `subject(name)` form the whole content of the fence. A page expression never shows a secret configuration value, nor the raw source of a page through its `Content` property. The tool descriptions and the preamble point the agent to these pages, and the external MCP server sends the same hint to its clients as server instructions. To find the pages that mention a term, the agent uses `search_markdown`, which searches the same view as `ReadRawContent`, so it never matches or shows a hidden secret value.
 
 **Changing things.** With `invoke_operation` or `set_property` allowed, the edit form marks the agent as able to change devices and send notifications. The preamble tells the agent to change something only when you asked for it in the chat or its instructions call for it, and to say in its reply what it changed. Some limits apply regardless:
 

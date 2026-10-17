@@ -41,7 +41,7 @@ internal static class AgentPromptBuilder
         You are an agent running inside a home automation system. The system is a graph of subjects (devices, services, folders) with properties, addressed by slash-separated paths such as /Kitchen/Freezer/Temperature.
 
         Tools:
-        - browse and search explore the graph, search_content finds text in Markdown pages, get_property reads a value, list_types lists interfaces and concrete types, list_methods lists the methods of a subject with their kind (query or operation), get_property_history reads past values. Use only the tools you are given; some may not be available to you.
+        - browse and search explore the graph, search_markdown finds text in Markdown pages, get_property reads a value, list_types lists interfaces and concrete types, list_methods lists the methods of a subject with their kind (query or operation), get_property_history reads past values. Use only the tools you are given; some may not be available to you.
         - invoke_query calls a query method, which only reads. {HomeBlazeMcpInstructions.MarkdownPages}
         - invoke_operation calls an operation method, which can change devices or send something, when it is available to you.
         - set_property changes a value, when it is available to you.

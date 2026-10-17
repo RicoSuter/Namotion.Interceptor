@@ -17,7 +17,7 @@ public sealed class AgentToolSet
     /// <summary>The graph tools a new agent allows by default. An empty allowed list allows no graph tools.</summary>
     public static readonly IReadOnlyList<string> DefaultAllowedTools =
     [
-        "browse", "search", HomeBlazeContentSearchToolProvider.SearchContentToolName, "get_property", "list_types", "list_methods",
+        "browse", "search", HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName, "get_property", "list_types", "list_methods",
         HomeBlazeMcpToolProvider.InvokeQueryToolName, "get_property_history"
     ];
 

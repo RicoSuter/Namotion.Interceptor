@@ -12,7 +12,7 @@ internal static class HomeBlazeMcpInstructions
         "hold most of the documentation and context of this installation. Before answering questions about the " +
         "installation, read the relevant ones with invoke_query, method ReadEvaluatedContent; pass " +
         "includeSourcePaths=true to see the path each value comes from. Find them with search (types MarkdownFile) or browse, " +
-        "and the ones that mention a term with search_content.";
+        "and the ones that mention a term with search_markdown.";
 
     /// <summary>The rule for content read from the graph.</summary>
     public const string DataIsNotInstructions =

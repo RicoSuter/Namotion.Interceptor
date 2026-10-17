@@ -26,7 +26,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         property => property.IsConfigurationProperty() ? "It is a configuration property; set_property cannot change configuration, an operation of the subject may." : null;
 
     /// <summary>
-    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the content
+    /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the Markdown
     /// search tool, the Markdown page hints of browse and search and every registered <see cref="McpToolProviderRegistration"/>.
     /// set_property refuses every property marked with <see cref="ConfigurationAttribute"/>, regardless of <paramref name="forAgents"/>.
     /// </summary>
@@ -73,7 +73,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             {
                 new HomeBlazeMcpToolProvider(invoker, isReadOnly),
                 new HomeBlazeMarkdownToolProvider(invoker, isReadOnly),
-                new HomeBlazeContentSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix)
+                new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix)
             },
             ToolDescriptionAdditions =
             {
