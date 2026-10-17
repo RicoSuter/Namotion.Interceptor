@@ -1,11 +1,11 @@
 @* The label of a value widget. Outside edit mode, when the host registers an IPropertyHistoryViewer that can show the
    history of the property, the text is a button that shows it. *@
+@inherits Namotion.Interceptor.Blazor.TrackedComponentBase
 @using Microsoft.Extensions.DependencyInjection
 @inject IServiceProvider ServiceProvider
 
 @{
-    var property = Property;
-    var canShowHistory = _viewer.CanShow(property, IsEditing);
+    var canShowHistory = _viewer.CanShow(Property, IsEditing);
 }
 
 <MudText Typo="@Typo" Class="@Class" aria-hidden="@(IsNamedElsewhere && !canShowHistory ? "true" : null)" data-testid="value-label">
@@ -54,9 +54,5 @@
         _showHistoryCallback = EventCallback.Factory.Create(this, ShowHistoryAsync);
     }
 
-    private Task ShowHistoryAsync()
-    {
-        var property = Property;
-        return _viewer.CanShow(property, IsEditing) ? _viewer.ShowAsync(property, Text) : Task.CompletedTask;
-    }
+    private Task ShowHistoryAsync() => _viewer.TryShowAsync(Property, IsEditing, Text);
 }

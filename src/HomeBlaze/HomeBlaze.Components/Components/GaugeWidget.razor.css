@@ -1,6 +1,5 @@
-/* A gauge: the ring with the label below it. It stands where the text of its place is aligned, at the top of its line.
-   As the only content of a grid cell or a canvas node it takes the whole place (place-centered,
-   SubjectComponent.razor.css), stands in its middle and is a size container. */
+/* A gauge: the ring with the label below it, where the text of its place is aligned, at the top of its line. It centers
+   them in a grid cell or a canvas node, which it fills (place-centered, SubjectComponent.razor.css). */
 .gauge-widget {
     container-name: gauge;
     display: inline-flex;
@@ -11,15 +10,12 @@
     gap: 8px;
 }
 
-/* The diameter of the ring is the size of the gauge (--gauge-size, an inline style), and the value and the label have
-   text sizes in proportion to it, the label a smaller one. In a grid cell or a canvas node the value and the label have the sizes of the primary
-   and the secondary line of the place, as a tile next to the gauge has (SubjectComponent.razor.css), and the ring fills
-   what is left of the place, up to twice its size, with 8 pixels at the edges of the place. */
+/* The diameter of the ring is the size of the gauge (--gauge-size, an inline style), and the value and the label are in
+   proportion to it. In a grid cell or a canvas node, a size container, the ring fills what the label leaves of the place,
+   up to twice its size, with 8 pixels at the edges, and the text has the sizes of the place. */
 .gauge-ring,
 .gauge-widget ::deep .gauge-label {
     --gauge-diameter: var(--gauge-size);
-    --gauge-value-text: max(0.75rem, var(--gauge-diameter) * 0.19);
-    --gauge-label-text: max(0.75rem, var(--gauge-diameter) * 0.13);
 }
 
 @container gauge (height > 0px) {
@@ -39,7 +35,7 @@
 /* Only the ring gives way to the label. */
 .gauge-widget ::deep .gauge-label {
     flex-shrink: 0;
-    font-size: var(--place-secondary-text, var(--gauge-label-text));
+    font-size: var(--place-secondary-text, max(0.75rem, var(--gauge-diameter) * 0.13));
     line-height: 1.25;
 }
 
@@ -47,7 +43,7 @@
    second line, rather than reaching over the ring. */
 .gauge-text ::deep .mud-typography {
     max-width: calc(var(--gauge-diameter) * 0.75);
-    font-size: min(var(--place-primary-text, var(--gauge-value-text)), var(--gauge-diameter) * 0.3);
+    font-size: min(var(--place-primary-text, max(0.75rem, var(--gauge-diameter) * 0.19)), var(--gauge-diameter) * 0.3);
     font-weight: 700;
     line-height: 1.15;
     text-align: center;

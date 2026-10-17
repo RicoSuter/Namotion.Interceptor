@@ -1078,7 +1078,7 @@ namespace HomeBlaze.Components.Components
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public class HistoryLabel : Microsoft.AspNetCore.Components.ComponentBase
+    public class HistoryLabel : Namotion.Interceptor.Blazor.TrackedComponentBase
     {
         public HistoryLabel() { }
         [Microsoft.AspNetCore.Components.Parameter]

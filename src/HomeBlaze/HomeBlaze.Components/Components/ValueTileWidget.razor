@@ -79,8 +79,6 @@
 
         var path = tile.Path;
         var property = ValueReader.ResolveProperty(PathResolver, tile, path);
-        return _viewer.CanShow(property, IsEditing)
-            ? _viewer.ShowAsync(property, ValueReader.GetLabel(property, tile.Label, path))
-            : Task.CompletedTask;
+        return _viewer.TryShowAsync(property, IsEditing, ValueReader.GetLabel(property, tile.Label, path));
     }
 }

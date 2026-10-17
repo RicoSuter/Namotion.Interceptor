@@ -26,9 +26,10 @@
     var drawnWidth = designWidth * factor;
     // A canvas held at its least width is wider than the frame, which then scrolls it. A transform leaves the layout box
     // at the design width, so the sizer gives the frame the drawn size to scroll and to be as high as.
-    var frameStyle = isScaled && _availableWidth > 0 && drawnWidth > _availableWidth + 0.5
-        ? "width: 100%; overflow-x: auto; overflow-y: hidden;"
-        : isScaled ? "width: 100%; overflow: hidden;" : "width: 100%; overflow-x: auto;";
+    var isHeldAtMinWidth = isScaled && _availableWidth > 0 && drawnWidth > _availableWidth + 0.5;
+    var frameStyle = !isScaled ? "width: 100%; overflow-x: auto;"
+        : isHeldAtMinWidth ? "width: 100%; overflow-x: auto; overflow-y: hidden;"
+        : "width: 100%; overflow: hidden;";
     var sizerStyle = isScaled
         ? string.Create(CultureInfo.InvariantCulture, $"width: {drawnWidth}px; height: {height * factor}px; overflow: hidden;")
         : null;

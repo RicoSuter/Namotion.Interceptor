@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.History;
 using HomeBlaze.Services;
@@ -23,10 +24,10 @@ internal sealed class PropertyHistoryViewer : IPropertyHistoryViewer
         _rootContext = rootContext;
     }
 
-    // Whether the property is recorded under a path, which the dialog queries. Looking for a store would walk every known
+    // Whether the property is recorded under a path (GetHistoryPath without joining it), which the dialog queries. Looking for a store would walk every known
     // subject on every render of every widget, and without a store the dialog shows an empty history.
     public bool CanShow(RegisteredSubjectProperty property) =>
-        property.HasHistory() && property.GetHistoryPath(_pathResolver) is not null;
+        property.HasHistory() && _pathResolver.GetPath(property.Subject, PathStyle.Canonical) is not null;
 
     public async Task ShowAsync(RegisteredSubjectProperty property, string displayName)
     {

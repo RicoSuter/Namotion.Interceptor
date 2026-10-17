@@ -142,8 +142,7 @@
    the place, from their least sizes at about 150 pixels to twice them, so that a tile and a gauge side by side show the
    same kind of text in the same size: the primary line (the value of a value, the name of a switch), the secondary line
    (the label of a value, the state of a switch), the icon and the gap between them. A widget inside one of them, such as
-   in the body of a card, has its own sizes again. A place-centered widget centers its content itself
-   (GaugeWidget.razor.css), which only shows here, where it is larger than it. */
+   in the body of a card, has its own sizes again. */
 ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> :is(.place-filler, .place-centered)),
 ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered)),
 ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered)),

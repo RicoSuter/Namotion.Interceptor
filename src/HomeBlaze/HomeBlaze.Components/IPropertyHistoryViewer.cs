@@ -30,4 +30,10 @@ internal static class PropertyHistoryViewerExtensions
         [NotNullWhen(true)] RegisteredSubjectProperty? property,
         bool isEditing) =>
         !isEditing && viewer is not null && property is not null && viewer.CanShow(property);
+
+    /// <summary>
+    /// Shows the history of the property under the display name when <see cref="CanShow"/> allows it, else nothing.
+    /// </summary>
+    public static Task TryShowAsync(this IPropertyHistoryViewer? viewer, RegisteredSubjectProperty? property, bool isEditing, string displayName) =>
+        viewer.CanShow(property, isEditing) ? viewer.ShowAsync(property, displayName) : Task.CompletedTask;
 }
