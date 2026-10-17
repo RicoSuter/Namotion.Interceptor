@@ -25,6 +25,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     // (path, style) → Subject resolve cache (absolute paths only)
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
 
+    private SubjectPathsVersion? _pathsVersion;
+    private long _pathsVersionValue;
+
     /// <summary>
     /// Raised when a subject was attached to or detached from the graph: a path may lead to another subject than
     /// before or to none, and a subject may have other paths. Whoever shows something that was resolved from a path
@@ -37,9 +40,6 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     /// and does its work on another thread. Blazor's <c>InvokeAsync</c> does not qualify, because it runs the callback
     /// inline when the dispatcher is idle.
     /// </remarks>
-    private SubjectPathsVersion? _pathsVersion;
-    private long _pathsVersionValue;
-
     public event Action? PathsChanged;
 
     /// <param name="getRoot">
