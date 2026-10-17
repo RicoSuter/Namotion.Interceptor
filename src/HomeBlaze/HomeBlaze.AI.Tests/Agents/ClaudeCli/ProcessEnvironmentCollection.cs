@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace HomeBlaze.AI.Tests.Agents.Cli;
+namespace HomeBlaze.AI.Tests.Agents.ClaudeCli;
 
 /// <summary>
 /// Runs tests that change the environment variables of the test process alone, after all parallel tests.

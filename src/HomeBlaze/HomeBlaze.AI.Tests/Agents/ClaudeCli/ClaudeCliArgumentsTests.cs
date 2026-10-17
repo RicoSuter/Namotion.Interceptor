@@ -1,10 +1,10 @@
 using System.Text.Json;
 using HomeBlaze.AI.Agents;
-using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Agents.ClaudeCli;
 using Xunit;
-using static HomeBlaze.AI.Tests.Agents.Cli.FakeClaudeCli;
+using static HomeBlaze.AI.Tests.Agents.ClaudeCli.FakeClaudeCli;
 
-namespace HomeBlaze.AI.Tests.Agents.Cli;
+namespace HomeBlaze.AI.Tests.Agents.ClaudeCli;
 
 public class ClaudeCliArgumentsTests
 {

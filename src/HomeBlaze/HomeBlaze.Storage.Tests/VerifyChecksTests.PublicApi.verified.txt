@@ -61,8 +61,6 @@ namespace HomeBlaze.Storage.Files
     {
         public const string ActiveContent = "HTML, images and media, math and diagram blocks, element attributes, abbreviation" +
             " definitions and links other than http, https and mailto";
-        public const string DocumentationFolderMessage = "Pages under the documentation folder are replaced on start and cannot be changed " +
-            "by agents.";
         public const int MaxContentSize = 65536;
         public MarkdownFile(HomeBlaze.Storage.Abstractions.IStorageContainer storage, string fullPath, HomeBlaze.Storage.Internal.MarkdownContentParser parser, HomeBlaze.Services.ConfigurableSubjectSerializer serializer) { }
         [Namotion.Interceptor.Attributes.Derived]
@@ -138,7 +136,6 @@ namespace HomeBlaze.Storage
         [Namotion.Interceptor.Attributes.Derived]
         public string IconColor { get; }
         public string IconName { get; }
-        public bool IsLocal { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int ReconcileIntervalSeconds { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]

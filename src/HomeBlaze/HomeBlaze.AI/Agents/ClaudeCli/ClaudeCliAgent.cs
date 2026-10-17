@@ -4,7 +4,7 @@ using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.AI.Agents.Cli;
+namespace HomeBlaze.AI.Agents.ClaudeCli;
 
 /// <summary>
 /// An agent that runs on the Claude subscription of the user HomeBlaze runs as, through the locally installed

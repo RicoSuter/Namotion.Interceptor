@@ -1,10 +1,10 @@
 using HomeBlaze.AI.Agents;
-using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Agents.ClaudeCli;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
-namespace HomeBlaze.AI.Tests.Agents.Cli;
+namespace HomeBlaze.AI.Tests.Agents.ClaudeCli;
 
 [Collection(ProcessEnvironmentCollection.Name)]
 public class ClaudeCliProcessEnvironmentTests

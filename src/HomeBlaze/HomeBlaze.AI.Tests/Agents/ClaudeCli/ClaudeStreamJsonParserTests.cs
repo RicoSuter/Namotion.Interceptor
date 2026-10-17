@@ -1,13 +1,13 @@
 using HomeBlaze.AI.Agents;
-using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Agents.ClaudeCli;
 using Xunit;
 
-namespace HomeBlaze.AI.Tests.Agents.Cli;
+namespace HomeBlaze.AI.Tests.Agents.ClaudeCli;
 
 public class ClaudeStreamJsonParserTests
 {
     private static IReadOnlyList<ClaudeStreamEvent> ParseFixture(string name) =>
-        File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "Agents", "Cli", "Fixtures", name))
+        File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "Agents", "ClaudeCli", "Fixtures", name))
             .Select(ClaudeStreamJsonParser.Parse)
             .OfType<ClaudeStreamEvent>()
             .ToList();

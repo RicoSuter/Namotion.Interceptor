@@ -29,12 +29,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public const int MaxContentSize = 64 * 1024;
 
     /// <summary>
-    /// The error for a page or a folder in the documentation folder, which the write operations do not change.
-    /// </summary>
-    public const string DocumentationFolderMessage =
-        "Pages under the documentation folder are replaced on start and cannot be changed by agents.";
-
-    /// <summary>
     /// The active content, besides blocks, that the write operations cannot add to a file.
     /// </summary>
     public const string ActiveContent =
@@ -251,13 +245,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <see cref="ActiveContent"/> may only appear as far as the file already has it.
     /// </summary>
     /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes, adds, changes,
-    /// removes or moves a block, or adds such content, or the file is in the documentation folder or not in local
-    /// storage.</exception>
+    /// removes or moves a block, or adds such content.</exception>
     [Operation(Title = "Replace Content", Description = "Replaces the whole markdown source of this file.", Icon = "EditNote")]
     public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
     {
-        MarkdownWriteRules.EnsureLocal(Storage);
-        MarkdownWriteRules.EnsureNotInDocumentationFolder(Storage, FullPath);
         EnsureNotWithinWrite();
         MarkdownWriteRules.EnsureContentSize(content, nameof(content));
 
@@ -281,13 +272,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// An occurrence that overlaps a hidden secret value does not count.
     /// </summary>
     /// <exception cref="ArgumentException">The text is empty, not found, found more than once, the result is larger than
-    /// <see cref="MaxContentSize"/> bytes, or it adds, changes, removes or moves a block or adds such content, or the file
-    /// is in the documentation folder or not in local storage.</exception>
+    /// <see cref="MaxContentSize"/> bytes, or it adds, changes, removes or moves a block or adds such content.</exception>
     [Operation(Title = "Replace Text", Description = "Replaces one exact, unique passage of the markdown source.", Icon = "FindReplace")]
     public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)
     {
-        MarkdownWriteRules.EnsureLocal(Storage);
-        MarkdownWriteRules.EnsureNotInDocumentationFolder(Storage, FullPath);
         EnsureNotWithinWrite();
         if (string.IsNullOrEmpty(oldText))
         {

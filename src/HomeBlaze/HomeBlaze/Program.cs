@@ -1,6 +1,6 @@
 using HomeBlaze.AI;
 using HomeBlaze.AI.Agents;
-using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Agents.ClaudeCli;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Components;
 using HomeBlaze.History.Blazor;

@@ -11,7 +11,7 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// Provides edit_markdown, write_markdown and create_markdown, which call the operations ReplaceText and ReplaceContent of
-/// a Markdown file and CreateMarkdownFile of a local storage folder through the same path as invoke_operation, so its
+/// a Markdown file and CreateMarkdownFile of a storage folder through the same path as invoke_operation, so its
 /// argument checks, operation filter and confirmation rule apply. The tools are only offered when the configuration is
 /// not read-only.
 /// </summary>
@@ -42,19 +42,18 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     private static readonly string EditMarkdownDescription =
         "Replace one passage of a Markdown page or document (*.md): old_text must occur exactly once in the Markdown source, " +
         $"as returned by {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent (with {{{{ path }}}} expressions unevaluated), and is replaced by new_text. " +
-        $"Prefer this over {WriteMarkdownToolName} for small changes and on pages with hidden secret values. Only Markdown files in local storage can be changed. " +
+        $"Prefer this over {WriteMarkdownToolName} for small changes and on pages with hidden secret values. " +
         $"{BlocksRule} {MarkdownFile.ActiveContent} cannot be added. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private static readonly string WriteMarkdownDescription =
         $"Replace the whole Markdown source of a Markdown page or document (*.md) with content ({MaxContentSizeText}). Read the " +
         $"source first with {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent and keep what should stay; for small changes use {EditMarkdownToolName}. " +
-        "Only Markdown files in local storage can be changed. " +
         $"{BlocksRule} {MarkdownFile.ActiveContent} cannot be added. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private static readonly string CreateMarkdownDescription =
-        "Create a Markdown page or document: folder_path is the path of a local storage folder or storage, name a plain " +
+        "Create a Markdown page or document: folder_path is the path of a storage folder or storage, name a plain " +
         $"file name ending in .md that does not exist there yet, content the Markdown source ({MaxContentSizeText}) without " +
         $"blocks (lines that start with two or more colons), {MarkdownFile.ActiveContent}. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
@@ -164,8 +163,7 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
         return _invoker.InvokeAsync(subject, tool.MethodName, MethodKind.Operation, arguments, cancellationToken);
     }
 
-    // Only the type is checked here; the operations refuse a file or folder outside local storage or in the
-    // documentation folder themselves, with a message that reaches the caller.
+    // Only the type is checked here; the operations check the rest themselves, with a message that reaches the caller.
     private static string? GetMarkdownFileError(IInterceptorSubject subject, string path) =>
         subject is MarkdownFile ? null : $"'{path}' is not a Markdown file.";
 

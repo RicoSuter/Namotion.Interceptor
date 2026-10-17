@@ -15,47 +15,12 @@ using Markdig.Syntax.Inlines;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// The rules shared by the operations that write Markdown files: local storage only, a size limit, plain file names,
-/// unchanged blocks and no added active content.
+/// The rules shared by the operations that write Markdown files: a size limit, plain file names, unchanged blocks and
+/// no added active content.
 /// </summary>
 internal static partial class MarkdownWriteRules
 {
     private static readonly char[] InvalidFileNameCharacters = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
-
-    /// <summary>
-    /// Whether the storage is a <see cref="FluentStorageContainer"/> on the local disk or in memory. The files it loads,
-    /// also those in its folders, have it as their storage.
-    /// </summary>
-    public static bool IsLocal(IStorageContainer storage) => storage is FluentStorageContainer { IsLocal: true };
-
-    /// <exception cref="ArgumentException">The storage is not local.</exception>
-    public static void EnsureLocal(IStorageContainer storage)
-    {
-        // An argument error, so that its message reaches the caller of the operation, like the other rules of a write.
-        if (!IsLocal(storage))
-        {
-            throw CreateNotLocalException();
-        }
-    }
-
-    public static ArgumentException CreateNotLocalException() =>
-        new("Only Markdown files in local storage (on disk or in memory) can be written; this storage is not local.");
-
-    /// <summary>
-    /// Whether the path, relative to the storage, is in the documentation folder of the data directory, which is
-    /// replaced from the image on every start.
-    /// </summary>
-    public static bool IsInDocumentationFolder(IStorageContainer storage, string path) =>
-        storage is FluentStorageContainer container && container.IsPathInDocumentationFolder(path);
-
-    /// <exception cref="ArgumentException">The path is in the documentation folder.</exception>
-    public static void EnsureNotInDocumentationFolder(IStorageContainer storage, string path)
-    {
-        if (IsInDocumentationFolder(storage, path))
-        {
-            throw new ArgumentException(MarkdownFile.DocumentationFolderMessage);
-        }
-    }
 
     /// <summary>
     /// Refuses a write that comes from work on the worker of the storage, such as the load of the page: the write would
