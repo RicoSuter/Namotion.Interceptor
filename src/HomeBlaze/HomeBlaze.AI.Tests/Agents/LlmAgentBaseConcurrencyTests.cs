@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -173,10 +175,98 @@ public class LlmAgentBaseConcurrencyTests
             test.Agent.Timeline.Entries.Select(entry => entry.Kind));
     }
 
+    [Fact]
+    public async Task WhenAToolCallEndsAfterItsTurnReturned_ThenTheEntryOfTheTurnRecordsIt()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        var toolSource = new BlockingToolSource();
+        await using var test = await StartWithRunningToolCallAsync(toolSource, time, logger: null);
+        var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // The turn waits for the running call on the timer of its bounded wait.
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
+
+        // Act
+        toolSource.Release.SetResult();
+        await chat;
+
+        // Assert
+        Assert.Equal("browse", Assert.Single(test.Agent.Timeline.Entries[^1].ToolCalls).Name);
+    }
+
+    [Fact]
+    public async Task WhenAToolCallOutlastsTheWaitAfterItsTurn_ThenItIsLoggedAsMissingFromTheTimeline()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        var toolSource = new BlockingToolSource();
+        var logger = new RecordingLogger();
+        await using var test = await StartWithRunningToolCallAsync(toolSource, time, logger);
+        var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromSeconds(5));
+        await chat;
+        toolSource.Release.SetResult();
+
+        // Assert
+        Assert.Empty(test.Agent.Timeline.Entries[^1].ToolCalls);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => logger.Warnings.Any(warning => warning.Contains("browse", StringComparison.Ordinal)),
+            message: "The late call should be logged with its tool name.");
+    }
+
+    /// <summary>Starts an agent whose turn leaves a call of <paramref name="toolSource"/> running when it returns.</summary>
+    private static Task<AgentTestContext<FakeAgent>> StartWithRunningToolCallAsync(
+        BlockingToolSource toolSource, TimeProvider time, RecordingLogger? logger) =>
+        AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(
+                new AgentServices(toolSource, services.TokenRegistry, services.EndpointAddress, services.TimeProvider), logger),
+            agent =>
+            {
+                agent.AllowedTools = ["browse"];
+                agent.TurnTimeout = TimeSpan.Zero;
+                agent.Handler = async (request, _, _) =>
+                {
+                    // The backend no longer waits for the call, as a timed out CLI turn does for a call over the MCP route.
+                    _ = request.Tools.Tools.First(tool => tool.Name == "browse")
+                        .Handler(JsonSerializer.SerializeToElement(new { }), CancellationToken.None);
+                    await toolSource.Started.Task;
+                    return new AgentTurnResult("Done.", null, null);
+                };
+            },
+            timeProvider: time);
+
     private static async Task<AgentTurnResult> WaitForCancellationAsync(
         AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
         await Task.Delay(Timeout.Infinite, cancellationToken);
         return new AgentTurnResult(string.Empty, null, null);
     }
+}
+
+/// <summary>Offers a browse tool whose calls run until the test releases them.</summary>
+internal sealed class BlockingToolSource : IAgentToolSource
+{
+    public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly) =>
+    [
+        new McpToolInfo
+        {
+            Name = "browse",
+            Description = "browse",
+            InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
+            Handler = async (_, _) =>
+            {
+                Started.TrySetResult();
+                await Release.Task;
+                return "done";
+            }
+        }
+    ];
 }

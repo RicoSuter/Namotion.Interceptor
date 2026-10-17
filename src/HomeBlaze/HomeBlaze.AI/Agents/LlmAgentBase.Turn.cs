@@ -7,7 +7,12 @@ namespace HomeBlaze.AI.Agents;
 
 public abstract partial class LlmAgentBase
 {
-    /// <summary>Runs a turn and closes its tool set when it ends, so a tool call that arrives later runs nothing.</summary>
+    private static readonly TimeSpan RunningToolCallTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Runs a turn and closes its tool set when it ends, so a tool call that arrives later runs nothing, then waits
+    /// up to <see cref="RunningToolCallTimeout"/> for the calls still running, so the entry of the turn records them.
+    /// </summary>
     private async Task<AgentTurnResult> RunTurnAsync(
         AgentTurnKind kind,
         string message,
@@ -38,8 +43,12 @@ public abstract partial class LlmAgentBase
         finally
         {
             tools.Close();
+            await tools.WaitForRunningCallsAsync(RunningToolCallTimeout, _services.TimeProvider, LogLateToolCall);
         }
     }
+
+    private void LogLateToolCall(string toolName) =>
+        _logger.LogWarning("A {Tool} call of agent {Agent} ended after its turn was recorded, so the timeline misses it.", toolName, Title);
 
     private AgentTurnRequest CreateTurnRequest(AgentTurnKind kind, string message, string[] allowedTools, AgentToolSet tools)
     {
