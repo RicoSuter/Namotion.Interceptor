@@ -25,9 +25,22 @@ public class TileWidgetTests
     private Motor GetMotor() =>
         (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["tilemotor"];
 
-    private async Task<IPage> OpenPageAsync()
+    private async Task<IPage> OpenPageAsync(int? width = null, int height = 900, string? initScript = null)
     {
         var page = await _fixture.CreatePageAsync();
+
+        // Before the page opens: a narrower window closes the navigation drawer with a transition, which the page
+        // follows for a moment after the resize.
+        if (width is { } viewportWidth)
+        {
+            await page.SetViewportSizeAsync(viewportWidth, height);
+        }
+
+        if (initScript is not null)
+        {
+            await page.AddInitScriptAsync(initScript);
+        }
+
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
         await page.WaitUntilInteractiveAsync(Timeout);
@@ -260,8 +273,7 @@ public class TileWidgetTests
     public async Task WhenGridHasASquareCellAspectRatio_ThenItsCellsAreSquareAndTheTileFillsThemAtEveryWidth(string label, int width)
     {
         // Arrange
-        var page = await OpenPageAsync();
-        await page.SetViewportSizeAsync(width, 900);
+        var page = await OpenPageAsync(width);
         var tile = GetTileRoot(GetSwitchTile(page, label));
         await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = Timeout });
 
@@ -292,6 +304,28 @@ public class TileWidgetTests
         Assert.InRange(Math.Abs(nodeBox.Width - frameBox.Width / 2), 0, 2);
         Assert.InRange(Math.Abs(nodeBox.Height - frameBox.Width / 2), 0, 2);
         Assert.InRange(Math.Abs(frameBox.Height - frameBox.Width / 2), 0, 2);
+    }
+
+    [Theory]
+    [InlineData(800)]
+    [InlineData(375)]
+    public async Task WhenNavigationDrawerClosesAfterTheCanvasWasScaled_ThenTheCanvasFitsTheWiderFrame(int width)
+    {
+        // Arrange: below the medium breakpoint the navigation drawer is hidden and the page takes its place, in a
+        // transition that widens the frame after the canvas was scaled to it.
+        var page = await OpenPageAsync(initScript: HoldTransitionsUntilCanvasIsScaledScript);
+        var frame = GetCanvasFrame(page);
+        var node = GetCanvasNode(page);
+        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitForScaledNodeAsync(page, frame, node);
+
+        // Act
+        await page.SetViewportSizeAsync(width, 900);
+        await WaitForScaledNodeAsync(page, frame, node);
+
+        // Assert
+        var mismatch = await GetLargestMismatchOfScaledNodeAsync(page, frame, node);
+        Assert.InRange(mismatch, 0, 2);
     }
 
     [Theory]
@@ -376,8 +410,7 @@ public class TileWidgetTests
     // Opens the page at the size and waits until the canvas that fits the width is drawn at the factor of its frame.
     private async Task<(IPage Page, ILocator Frame, ILocator Node)> OpenScaledCanvasAsync(int width, int height)
     {
-        var page = await OpenPageAsync();
-        await page.SetViewportSizeAsync(width, height);
+        var page = await OpenPageAsync(width, height);
         var frame = GetCanvasFrame(page);
         var node = GetCanvasNode(page);
         await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -390,12 +423,57 @@ public class TileWidgetTests
     private static ILocator GetCanvasNode(IPage page) =>
         page.Locator(".canvas-node").Filter(new() { Has = GetSwitchTile(page, "Canvas tile") });
 
-    // The node is half of the 400 pixel design width, so it is drawn at half of the frame once the frame is measured.
+    // The node is half of the 400 pixel design width, so it is drawn at half of the frame once the frame is measured. The
+    // canvas is scaled to every width the frame is measured at, so while a transition still widens or narrows the frame (as
+    // that of the margin the navigation drawer leaves when a resize crosses the medium breakpoint), a node that matches it
+    // only matches a width that is about to change.
     private static async Task WaitForScaledNodeAsync(IPage page, ILocator frame, ILocator node) =>
         await page.WaitForFunctionAsync(
-            "([frame, node]) => Math.abs(node.getBoundingClientRect().width - frame.getBoundingClientRect().width / 2) < 2",
+            """
+            ([frame, node]) =>
+                !document.getAnimations().some(animation => animation instanceof CSSTransition && animation.playState === 'running') &&
+                Math.abs(node.getBoundingClientRect().width - frame.getBoundingClientRect().width / 2) < 2
+            """,
             new object[] { await frame.ElementHandleAsync(), await node.ElementHandleAsync() },
             new() { Timeout = Timeout });
+
+    // How far the node is from half of the frame at most, over the next 20 frames.
+    private static async Task<double> GetLargestMismatchOfScaledNodeAsync(IPage page, ILocator frame, ILocator node) =>
+        await page.EvaluateAsync<double>(
+            """
+            ([frame, node]) => new Promise(resolve => {
+                let largest = 0;
+                let count = 0;
+                const measure = () => {
+                    largest = Math.max(largest, Math.abs(node.getBoundingClientRect().width - frame.getBoundingClientRect().width / 2));
+                    if (++count < 20) requestAnimationFrame(measure); else resolve(largest);
+                };
+                requestAnimationFrame(measure);
+            })
+            """,
+            new object[] { await frame.ElementHandleAsync(), await node.ElementHandleAsync() });
+
+    // Holds the transitions that a resize of the window starts, such as that of the margin the navigation drawer leaves
+    // below the medium breakpoint, until the canvas that fits the width is drawn at the factor of its frame (its node is
+    // half of the 400 pixel width), as a slow machine can draw it before the transition has moved. A playback rate of 0
+    // keeps a transition running, which a paused one is not.
+    private const string HoldTransitionsUntilCanvasIsScaledScript =
+        """
+        window.addEventListener('resize', () => {
+            const transitions = document.getAnimations().filter(animation => animation instanceof CSSTransition);
+            transitions.forEach(transition => transition.playbackRate = 0);
+            const release = () => {
+                const frame = [...document.querySelectorAll('[data-testid="canvas-scale-frame"]')].pop();
+                const node = frame?.querySelector('.canvas-node');
+                if (node && Math.abs(node.getBoundingClientRect().width - frame.getBoundingClientRect().width / 2) < 2) {
+                    transitions.forEach(transition => transition.playbackRate = 1);
+                } else {
+                    requestAnimationFrame(release);
+                }
+            };
+            requestAnimationFrame(release);
+        });
+        """;
 
     // Unscaled, the node is drawn at its own width of 200 pixels.
     private static async Task WaitForUnscaledNodeAsync(IPage page, ILocator node) =>
