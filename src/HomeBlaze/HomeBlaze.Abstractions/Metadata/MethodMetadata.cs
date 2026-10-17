@@ -121,10 +121,13 @@ public class MethodMetadata
             await task.ConfigureAwait(false);
             if (ResultType != null)
             {
-                var taskType = task.GetType();
-                if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
+                // The task of an async method is a subclass of Task<T>, not Task<T> itself.
+                for (var taskType = task.GetType(); taskType is not null; taskType = taskType.BaseType)
                 {
-                    return taskType.GetProperty("Result")?.GetValue(task);
+                    if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
+                    {
+                        return taskType.GetProperty(nameof(Task<object>.Result))?.GetValue(task);
+                    }
                 }
             }
             return null;
