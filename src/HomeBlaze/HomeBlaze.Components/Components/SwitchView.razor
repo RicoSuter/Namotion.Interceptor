@@ -29,17 +29,22 @@
             canToggle = PropertyWriter.IsWritable(property, value);
         }
     }
+
+    var isDisabled = IsEditing || _pending is not null || !canToggle;
+    var label = ValueReader.GetLabel(property, Label, Path);
 }
 
 @if (Kind == SwitchKind.Tile)
 {
-    var reading = ValueReader.ReadResolved(property, ValueMap, TimeZone);
     // The case itself decides the fill: a case without a color is drawn on the surface, while a value without a case
     // is filled with the primary color when true.
     var fill = matched?.Color ?? (value is true ? Color.Primary : Color.Default);
-    var subtitle = !string.IsNullOrEmpty(Subtitle) ? Subtitle : ValueMap is not null && !reading.IsMissing ? reading.Text : null;
-    var icon = reading.IsMissing ? Icons.Material.Filled.QuestionMark : MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? Icon);
-    var label = ValueReader.GetLabel(property, Label, Path);
+    var subtitle = !string.IsNullOrEmpty(Subtitle)
+        ? Subtitle
+        : ValueMap is not null && property is not null && value is not null ? ValueReader.GetText(property, value, matched, TimeZone) : null;
+    var icon = value is null
+        ? Icons.Material.Filled.QuestionMark
+        : MudBlazorIconResolver.ResolveOrNull(string.IsNullOrEmpty(matched?.Icon) ? Icon : matched.Icon);
     @* The label alone is the accessible name, as for the toggle switch: the subtitle is the state, which aria-checked gives. *@
     <TileView TestId="switch-tile"
               Role="switch"
@@ -49,7 +54,7 @@
               Subtitle="@subtitle"
               Icon="@icon"
               Color="@fill"
-              Disabled="@(IsEditing || _pending is not null || !canToggle)"
+              Disabled="@isDisabled"
               IsBusy="@(_pending is not null)"
               Badge="@Badge"
               OnClick="_tileClickCallback" />
@@ -63,9 +68,9 @@ else
                    @key="_resetKey"
                    Value="@(_pending ?? isOn)"
                    ValueChanged="_toggleCallback"
-                   Label="@ValueReader.GetLabel(property, Label, Path)"
+                   Label="@label"
                    Color="@color"
-                   Disabled="@(IsEditing || _pending is not null || !canToggle)" />
+                   Disabled="@isDisabled" />
     </div>
 }
 
