@@ -371,7 +371,7 @@ else
                 await _module.DisposeAsync();
             }
         }
-        catch (Exception exception) when (exception is JSDisconnectedException or TaskCanceledException)
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException)
         {
             // The circuit is gone, and the observer with it.
         }
