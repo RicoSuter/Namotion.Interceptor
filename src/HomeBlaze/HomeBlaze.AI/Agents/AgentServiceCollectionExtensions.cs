@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using ModelContextProtocol.AspNetCore;
 
 namespace HomeBlaze.AI.Agents;
 
@@ -10,40 +9,23 @@ namespace HomeBlaze.AI.Agents;
 public static class AgentServiceCollectionExtensions
 {
     /// <summary>
-    /// Adds the agent services and hooks the agent route into the MCP HTTP transport, after any session options
-    /// callback configured elsewhere. Call <c>MapHomeBlazeAgentMcp</c> on the application as well.
+    /// Adds the agent services, including a hosted service that serves the agent MCP route of CLI agents on a
+    /// loopback listener of its own.
     /// </summary>
     public static IServiceCollection AddHomeBlazeAgents(this IServiceCollection services)
     {
-        if (services.Any(descriptor => descriptor.ServiceType == typeof(AgentServicesMarker)))
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(AgentMcpListener)))
         {
             return services;
         }
 
-        services.AddSingleton<AgentServicesMarker>();
+        services.AddSingleton<AgentMcpListener>();
+        services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<AgentMcpListener>());
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<AgentTurnTokenRegistry>();
         services.TryAddSingleton<IAgentToolSource, HomeBlazeAgentToolSource>();
-        services.TryAddSingleton<IAgentEndpointAddress, ServerAgentEndpointAddress>();
+        services.TryAddSingleton<IAgentEndpointAddress>(serviceProvider => serviceProvider.GetRequiredService<AgentMcpListener>());
         services.TryAddSingleton<AgentServices>();
-
-        // Post-configure so a callback set by WithHttpTransport is composed regardless of registration order.
-        services.PostConfigure<HttpServerTransportOptions>(options =>
-        {
-            var previous = options.ConfigureSessionOptions;
-            options.ConfigureSessionOptions = previous is null
-                ? AgentMcpEndpoint.ConfigureSessionOptions
-                : async (context, serverOptions, cancellationToken) =>
-                {
-                    await previous(context, serverOptions, cancellationToken);
-                    await AgentMcpEndpoint.ConfigureSessionOptions(context, serverOptions, cancellationToken);
-                };
-        });
         return services;
     }
 }
-
-/// <summary>
-/// Proves to <see cref="AgentMcpEndpoint.MapHomeBlazeAgentMcp"/> that <see cref="AgentServiceCollectionExtensions.AddHomeBlazeAgents"/> ran.
-/// </summary>
-internal sealed class AgentServicesMarker;

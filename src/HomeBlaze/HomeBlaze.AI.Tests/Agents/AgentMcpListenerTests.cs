@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -16,15 +17,14 @@ using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
 
-public sealed class AgentMcpEndpointTests : IAsyncLifetime
+public sealed class AgentMcpListenerTests : IAsyncLifetime
 {
     private const string ExternalRoute = "/mcp";
-    private const string RemoteAddressTestHeader = "X-Test-Remote-Address";
-    private const string LocalAddressTestHeader = "X-Test-Local-Address";
     private const string ExternalServerInstructions = "Read the documentation pages first.";
 
     private WebApplication? _app;
     private string _baseAddress = string.Empty;
+    private string _agentEndpoint = string.Empty;
     private readonly AgentTurnTokenRegistry _registry = new();
 
     public async Task InitializeAsync()
@@ -46,27 +46,10 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
             .WithResources([McpServerResource.Create(() => "registered", new McpServerResourceCreateOptions { Name = "registered_resource", UriTemplate = "test://registered" })]);
 
         _app = builder.Build();
-
-        // Simulates other connection addresses; registered before the agent gate so the gate sees the changed addresses.
-        _app.Use((context, next) =>
-        {
-            if (context.Request.Headers.TryGetValue(RemoteAddressTestHeader, out var remoteAddress))
-            {
-                context.Connection.RemoteIpAddress = IPAddress.Parse(remoteAddress.ToString());
-            }
-
-            if (context.Request.Headers.TryGetValue(LocalAddressTestHeader, out var localAddress))
-            {
-                context.Connection.LocalIpAddress = IPAddress.Parse(localAddress.ToString());
-            }
-
-            return next(context);
-        });
-
-        _app.MapHomeBlazeAgentMcp();
         _app.MapMcp(ExternalRoute);
         await _app.StartAsync();
         _baseAddress = _app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
+        _agentEndpoint = _app.Services.GetRequiredService<IAgentEndpointAddress>().GetAgentEndpoint()!.ToString();
     }
 
     public async Task DisposeAsync()
@@ -90,37 +73,30 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         return AgentToolSet.Create([browse], ["browse"], memory.CreateUpdateTool(), maxToolCalls: 10, progress: null);
     }
 
-    private async Task<HttpResponseMessage> PostToAgentRouteAsync(string? token, string? remoteAddress = null, string? localAddress = null)
+    private static async Task<HttpResponseMessage> PostAsync(string address, string? authorization)
     {
         using var httpClient = new HttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route)
+        using var request = new HttpRequestMessage(HttpMethod.Post, address)
         {
             Content = new StringContent("{}", Encoding.UTF8, "application/json")
         };
-        if (token is not null)
+        if (authorization is not null)
         {
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-        }
-
-        if (remoteAddress is not null)
-        {
-            request.Headers.Add(RemoteAddressTestHeader, remoteAddress);
-        }
-
-        if (localAddress is not null)
-        {
-            request.Headers.Add(LocalAddressTestHeader, localAddress);
+            request.Headers.TryAddWithoutValidation("Authorization", authorization);
         }
 
         return await httpClient.SendAsync(request);
     }
 
-    private Task<McpClient> ConnectAsync(string token) =>
-        ConnectAsync(AgentMcpEndpoint.Route, "Bearer " + token);
+    private Task<McpClient> ConnectToAgentRouteAsync(string authorization) =>
+        ConnectAsync(new Uri(_agentEndpoint), authorization);
 
-    private async Task<McpClient> ConnectAsync(string route, string? authorization, Dictionary<string, string>? additionalHeaders = null)
+    private Task<McpClient> ConnectToExternalRouteAsync() =>
+        ConnectAsync(new Uri(_baseAddress + ExternalRoute), authorization: null);
+
+    private static async Task<McpClient> ConnectAsync(Uri endpoint, string? authorization)
     {
-        var headers = additionalHeaders ?? new Dictionary<string, string>();
+        var headers = new Dictionary<string, string>();
         if (authorization is not null)
         {
             headers["Authorization"] = authorization;
@@ -128,7 +104,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
 
         var transport = new HttpClientTransport(new HttpClientTransportOptions
         {
-            Endpoint = new Uri(_baseAddress + route),
+            Endpoint = endpoint,
             TransportMode = HttpTransportMode.StreamableHttp,
             AdditionalHeaders = headers
         }, NullLoggerFactory.Instance);
@@ -141,7 +117,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         // Arrange
         var toolSet = CreateToolSet();
         using var registration = _registry.Register(toolSet);
-        await using var client = await ConnectAsync(registration.Token);
+        await using var client = await ConnectToAgentRouteAsync("Bearer " + registration.Token);
 
         // Act
         var tools = await client.ListToolsAsync();
@@ -158,10 +134,10 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
     {
         // Arrange
         using var registration = _registry.Register(CreateToolSet());
-        await using var externalClient = await ConnectAsync(ExternalRoute, authorization: null);
+        await using var externalClient = await ConnectToExternalRouteAsync();
 
         // Act
-        await using var agentClient = await ConnectAsync(registration.Token);
+        await using var agentClient = await ConnectToAgentRouteAsync("Bearer " + registration.Token);
 
         // Assert
         Assert.Equal(ExternalServerInstructions, externalClient.ServerInstructions);
@@ -172,7 +148,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
     public async Task WhenNoTokenIsSent_ThenTheRequestIsRejected()
     {
         // Act
-        using var response = await PostToAgentRouteAsync(token: null);
+        using var response = await PostAsync(_agentEndpoint, authorization: null);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -188,41 +164,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         registration.Dispose();
 
         // Act
-        using var response = await PostToAgentRouteAsync(token);
-
-        // Assert
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task WhenTheRequestComesFromTheServersOwnNonLoopbackAddress_ThenAValidTokenIsAccepted()
-    {
-        // Arrange
-        using var registration = _registry.Register(CreateToolSet());
-        await using var client = await ConnectAsync(AgentMcpEndpoint.Route, "Bearer " + registration.Token, new Dictionary<string, string>
-        {
-            [RemoteAddressTestHeader] = "192.0.2.10",
-            [LocalAddressTestHeader] = "::ffff:192.0.2.10"
-        });
-
-        // Act
-        var tools = await client.ListToolsAsync();
-
-        // Assert
-        Assert.Equal(["browse", "update_memory"], tools.Select(tool => tool.Name).Order());
-    }
-
-    [Theory]
-    [InlineData("192.0.2.1", null, true)]
-    [InlineData("192.0.2.1", "192.0.2.10", true)]
-    [InlineData("192.0.2.10", "192.0.2.10", false)]
-    public async Task WhenTheRequestIsNotFromTheSameHostOrHasNoToken_ThenItIsRejected(string remoteAddress, string? localAddress, bool sendToken)
-    {
-        // Arrange
-        using var registration = _registry.Register(CreateToolSet());
-
-        // Act
-        using var response = await PostToAgentRouteAsync(sendToken ? registration.Token : null, remoteAddress, localAddress);
+        using var response = await PostAsync(_agentEndpoint, "Bearer " + token);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -233,7 +175,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
     {
         // Arrange
         using var registration = _registry.Register(CreateToolSet());
-        await using var client = await ConnectAsync(AgentMcpEndpoint.Route, "bearer " + registration.Token);
+        await using var client = await ConnectToAgentRouteAsync("bearer " + registration.Token);
 
         // Act
         var tools = await client.ListToolsAsync();
@@ -247,8 +189,8 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
     {
         // Arrange
         using var registration = _registry.Register(CreateToolSet());
-        await using var externalClient = await ConnectAsync(ExternalRoute, authorization: null);
-        await using var agentClient = await ConnectAsync(registration.Token);
+        await using var externalClient = await ConnectToExternalRouteAsync();
+        await using var agentClient = await ConnectToAgentRouteAsync("Bearer " + registration.Token);
 
         // Act
         var externalTools = await externalClient.ListToolsAsync();
@@ -266,8 +208,8 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         using var registration = _registry.Register(CreateToolSet());
 
         // Act
-        await using var externalClient = await ConnectAsync(ExternalRoute, authorization: null);
-        await using var agentClient = await ConnectAsync(registration.Token);
+        await using var externalClient = await ConnectToExternalRouteAsync();
+        await using var agentClient = await ConnectToAgentRouteAsync("Bearer " + registration.Token);
 
         // Assert
         Assert.NotNull(externalClient.ServerCapabilities.Prompts);
@@ -277,8 +219,55 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         Assert.Null(agentClient.ServerCapabilities.Completions);
     }
 
+    [Theory]
+    [InlineData("Bearer 0000000000000000000000000000000000000000000000000000000000000000")]
+    [InlineData("Basic dXNlcjpwYXNzd29yZA==")]
+    [InlineData("Bearer")]
+    public async Task WhenTheTokenIsUnknownOrNotABearerToken_ThenTheRequestIsRejected(string authorization)
+    {
+        // Arrange
+        using var registration = _registry.Register(CreateToolSet());
+
+        // Act
+        using var response = await PostAsync(_agentEndpoint, authorization);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     [Fact]
-    public void WhenAgentServicesAreResolved_ThenTheyUseTheRegisteredRegistryAndTheServerAddress()
+    public async Task WhenTheMainServerIsAskedForTheAgentRoute_ThenItDoesNotServeItEvenWithAValidToken()
+    {
+        // Arrange
+        using var registration = _registry.Register(CreateToolSet());
+
+        // Act
+        using var response = await PostAsync(_baseAddress + AgentMcpListener.Route, "Bearer " + registration.Token);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public void WhenTheListenerRuns_ThenItIsBoundToLoopbackOnlyOnAPortOfItsOwn()
+    {
+        // Arrange
+        var listener = _app!.Services.GetRequiredService<AgentMcpListener>();
+
+        // Act
+        var endpoint = new Uri(_agentEndpoint);
+
+        // Assert
+        Assert.Equal("127.0.0.1", endpoint.Host);
+        Assert.Equal(AgentMcpListener.Route, endpoint.AbsolutePath);
+        Assert.NotEqual(new Uri(_baseAddress).Port, endpoint.Port);
+        var boundAddress = new Uri(Assert.Single(listener.BoundAddresses));
+        Assert.True(IPAddress.IsLoopback(IPAddress.Parse(boundAddress.Host)));
+        Assert.Equal(endpoint.Port, boundAddress.Port);
+    }
+
+    [Fact]
+    public void WhenAgentServicesAreResolved_ThenTheyUseTheRegisteredRegistryAndTheListenerAddress()
     {
         // Act
         var services = _app!.Services.GetRequiredService<AgentServices>();
@@ -287,38 +276,42 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         Assert.Same(_registry, services.TokenRegistry);
         Assert.Same(TimeProvider.System, services.TimeProvider);
         Assert.IsType<HomeBlazeAgentToolSource>(services.ToolSource);
-        var port = new Uri(_baseAddress).Port;
-        Assert.Equal($"http://127.0.0.1:{port}/mcp/agents", services.EndpointAddress.GetAgentEndpoint()?.ToString());
+        Assert.Same(_app.Services.GetRequiredService<AgentMcpListener>(), services.EndpointAddress);
     }
 
     [Fact]
-    public async Task WhenTheTransportIsNotStateless_ThenMappingThrows()
+    public async Task WhenTheHostHasNoWebServerOrMcpServer_ThenTheListenerStillServesTheTurn()
     {
         // Arrange
-        var builder = WebApplication.CreateSlimBuilder();
+        var registry = new AgentTurnTokenRegistry();
+        var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings());
+        builder.Services.AddLogging();
+        builder.Services.AddSingleton(registry);
         builder.Services.AddHomeBlazeAgents();
-        builder.Services.AddMcpServer().WithHttpTransport(options => options.Stateless = false);
-        await using var app = builder.Build();
+        using var host = builder.Build();
+        await host.StartAsync();
+        using var registration = registry.Register(CreateToolSet());
+        var endpoint = host.Services.GetRequiredService<IAgentEndpointAddress>().GetAgentEndpoint()!;
 
-        // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => app.MapHomeBlazeAgentMcp());
+        // Act
+        await using var client = await ConnectAsync(endpoint, "Bearer " + registration.Token);
+        var tools = await client.ListToolsAsync();
+        await host.StopAsync();
+
+        // Assert
+        Assert.Equal(["browse", "update_memory"], tools.Select(tool => tool.Name).Order());
     }
 
     [Fact]
-    public async Task WhenTheAgentServicesAreNotAdded_ThenMappingThrowsEvenWithAStatelessTransportAndACallback()
+    public async Task WhenTheHostStops_ThenTheListenerHasNoAddress()
     {
         // Arrange
-        var builder = WebApplication.CreateSlimBuilder();
-        builder.Services.AddSingleton(new AgentTurnTokenRegistry());
-        builder.Services.AddMcpServer().WithHttpTransport(options =>
-        {
-            options.Stateless = true;
-            options.ConfigureSessionOptions = (_, _, _) => Task.CompletedTask;
-        });
-        await using var app = builder.Build();
+        var endpointAddress = _app!.Services.GetRequiredService<IAgentEndpointAddress>();
 
-        // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(() => app.MapHomeBlazeAgentMcp());
-        Assert.Contains(nameof(AgentServiceCollectionExtensions.AddHomeBlazeAgents), exception.Message);
+        // Act
+        await _app.StopAsync();
+
+        // Assert
+        Assert.Null(endpointAddress.GetAgentEndpoint());
     }
 }
