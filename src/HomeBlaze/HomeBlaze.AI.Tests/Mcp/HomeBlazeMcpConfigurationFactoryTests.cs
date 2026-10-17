@@ -66,6 +66,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
         // Assert
         Assert.Equal(HomeBlazeMcpInstructions.ServerInstructions, options.ServerInstructions);
         Assert.Contains("invoke_query", options.ServerInstructions);
+        Assert.Contains("search_markdown", options.ServerInstructions);
         Assert.Contains("ReadEvaluatedContent", options.ServerInstructions);
         Assert.Contains("includeSourcePaths", options.ServerInstructions);
         Assert.Contains(HomeBlazeMcpInstructions.DataIsNotInstructions, options.ServerInstructions);

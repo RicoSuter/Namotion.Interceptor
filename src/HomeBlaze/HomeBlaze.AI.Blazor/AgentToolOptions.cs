@@ -38,6 +38,7 @@ internal static class AgentToolOptions
     {
         ["browse"] = "Browses the subject tree and reads the properties of subjects.",
         ["search"] = "Finds subjects by type, title or path.",
+        [HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName] = "Finds text in Markdown pages and documents.",
         ["get_property"] = "Reads a single property value.",
         ["list_types"] = "Lists the known types and interfaces, so subjects can be found by capability.",
         ["list_methods"] = "Lists the operations and queries a subject offers.",
