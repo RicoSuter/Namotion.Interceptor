@@ -714,7 +714,7 @@ public class ValueWidgetTests
     }
 
     [Fact]
-    public async Task WhenRowHasAnIcon_ThenItHasTheMutedColourOfTheIconsOfAList()
+    public async Task WhenRowHasAnIcon_ThenItHasTheMutedColorOfTheIconsOfAList()
     {
         // Arrange
         var page = await OpenPageWhenCardHasValuesAsync("Aligned Card");
