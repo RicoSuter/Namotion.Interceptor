@@ -1,3 +1,4 @@
+using System.Numerics;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -15,7 +16,7 @@ public partial class HistoryChartSeries : IConfigurable
     /// Path of the property whose history the series shows.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kinds = SubjectPathKinds.Number | SubjectPathKinds.Boolean | SubjectPathKinds.Enum)]
+    [SubjectPath(ValueTypes = [typeof(INumber<>), typeof(bool), typeof(Enum)])]
     public partial string? Path { get; set; }
 
     /// <summary>
@@ -25,8 +26,8 @@ public partial class HistoryChartSeries : IConfigurable
     public partial string? Label { get; set; }
 
     /// <summary>
-    /// The CSS colour of a line, for example "#E4572E". Defaults to the next colour of the chart.
-    /// A state band has one colour per state and ignores it.
+    /// The CSS color of a line, for example "#E4572E". Defaults to the next color of the chart.
+    /// A state band has one color per state and ignores it.
     /// </summary>
     [Configuration]
     public partial string? Color { get; set; }

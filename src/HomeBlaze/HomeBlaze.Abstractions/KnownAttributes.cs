@@ -1,17 +1,18 @@
 namespace HomeBlaze.Abstractions;
 
 /// <summary>
-/// Well-known attribute names used across HomeBlaze. HomeBlaze metadata is prefixed with "HB:" so it cannot
-/// collide with attribute names driven by external sources, e.g. OPC UA browse names. Names that describe
-/// the value itself, such as its range, are not prefixed, so external sources can provide and read them.
+/// Well-known attribute names used across HomeBlaze. HomeBlaze metadata, such as <see cref="State"/> and
+/// <see cref="Configuration"/>, is prefixed with "HB:" so it cannot collide with attribute names driven by external
+/// sources, e.g. OPC UA browse names. Names that describe the member itself, such as its range or whether it is
+/// enabled, are not prefixed, so external sources can provide and read them.
 /// </summary>
 public static class KnownAttributes
 {
     /// <summary>
-    /// Attribute name for enabling/disabling operations and properties.
-    /// Use with [PropertyAttribute] to control when an operation button is enabled.
+    /// Attribute name for whether a member is enabled, for example whether an operation can currently run. A member
+    /// without the attribute is enabled.
     /// </summary>
-    public const string IsEnabled = "HB:IsEnabled";
+    public const string IsEnabled = "IsEnabled";
 
     /// <summary>
     /// Registry attribute name for [State] property metadata.

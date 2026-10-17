@@ -1,0 +1,16 @@
+/* A card that is the only content of a flow item, directly or as the only block of its page content, is as high as the
+   highest item of its row, so that the cards of a row end on one line, and its footer stays at the bottom. A height or an
+   aspect ratio of its own wins, and a card that shares its item with other blocks keeps its own height. The only block
+   is found as in SubjectComponent.razor.css. */
+.flow-layout-item > ::deep .subject-component-wrapper:has(> .card-widget:not(.card-widget-sized)),
+.flow-layout-item > ::deep .subject-component-wrapper > .card-widget:not(.card-widget-sized),
+.flow-layout-item > ::deep .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget:not(.card-widget-sized)),
+.flow-layout-item > ::deep .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget:not(.card-widget-sized)),
+.flow-layout-item > ::deep .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> .card-widget:not(.card-widget-sized)),
+.flow-layout-item > ::deep .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget:not(.card-widget-sized) {
+    height: 100%;
+}
+
+.flow-layout-item ::deep .card-widget:not(.card-widget-sized) > .mud-card-content {
+    flex-grow: 1;
+}

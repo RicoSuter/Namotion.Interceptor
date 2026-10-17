@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Tests.Models;
@@ -190,7 +191,7 @@ public class GaugeDisplayTests
     [InlineData(Color.Default, Color.Primary)]
     [InlineData(Color.Success, Color.Success)]
     [InlineData(Color.Error, Color.Error)]
-    public void WhenReadingHasTheColourOfACase_ThenRingHasItAndPrimaryWithoutOne(Color caseColor, Color expected)
+    public void WhenReadingHasTheColorOfACase_ThenRingHasItAndPrimaryWithoutOne(Color caseColor, Color expected)
     {
         // Arrange
         var subject = new MeasuredSubject(_context) { Speed = 500 };
@@ -242,7 +243,8 @@ public class GaugeDisplayTests
         // Assert
         Assert.Equal(GaugeSize.Medium, gauge.Size);
         Assert.Null(path.SubjectType);
-        Assert.Equal(SubjectPathKinds.Number, path.Kinds);
+        Assert.Equal(SubjectPathKind.Property, path.Kind);
+        Assert.Equal([typeof(INumber<>)], path.ValueTypes);
         Assert.False(path.IsWritable);
         Assert.Equal(typeof(ValueMap), map.SubjectType);
     }

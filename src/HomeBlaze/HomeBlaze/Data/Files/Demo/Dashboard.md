@@ -30,7 +30,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 
 :: HomeBlaze.Components.TabLayout#widgets
 ::: Tab#values Title="Values" Icon=Insights
-:::: HomeBlaze.Components.Responsive Show=Phone
+:::: HomeBlaze.Components.Responsive To=Xs
 ::::: HomeBlaze.Components.Card Title="Motors" Icon=Settings
 :::::: HomeBlaze.Components.ValueList
 ::::::: Value Path=/Demo/Compressor/Status Label="Compressor" Map=motorstate
@@ -43,7 +43,7 @@ Every motor on this page is simulated. The speeds climb to the target of the mot
 {{ /Demo/CoolingFan/CurrentSpeed }} RPM
 ::::::: Value Path=/Demo/ExhaustFan/Status Label="Exhaust Fan" Map=motorstate
 {{ /Demo/ExhaustFan/CurrentSpeed }} RPM
-:::: HomeBlaze.Components.Responsive Show=NotPhone
+:::: HomeBlaze.Components.Responsive From=Sm
 ::::: HomeBlaze.Components.FlowLayout MinWidth=180
 :::::: Item
 ::::::: HomeBlaze.Components.ValueTile Path=/Demo/Compressor/CurrentSpeed Label="Compressor RPM" Icon=Bolt
@@ -140,9 +140,9 @@ The speed of the compressor in the three sizes of a gauge.
 ::::::: HomeBlaze.Components.Gauge Path=/Demo/Compressor/CurrentSpeed Label="Large" Minimum=0 Maximum=3000 Size=Large
 ::::
 
-Widgets of this tab: [ValueList](../Docs/administration/widgets/value-list.md), [ValueTile](../Docs/administration/widgets/value-tile.md), [Gauge](../Docs/administration/widgets/gauge.md), [HistoryChart](../Docs/administration/widgets/history-chart.md), [Indicator](../Docs/administration/widgets/indicator.md), [Progress](../Docs/administration/widgets/progress.md), [Card](../Docs/administration/widgets/card.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md) and [Responsive](../Docs/administration/widgets/responsive.md). The texts, colours and icons of the status and the mode come from the two [ValueMap](../Docs/administration/widgets/value-map.md) blocks at the top of this page.
+Widgets of this tab: [ValueList](../Docs/administration/widgets/value-list.md), [ValueTile](../Docs/administration/widgets/value-tile.md), [Gauge](../Docs/administration/widgets/gauge.md), [HistoryChart](../Docs/administration/widgets/history-chart.md), [Indicator](../Docs/administration/widgets/indicator.md), [Progress](../Docs/administration/widgets/progress.md), [Card](../Docs/administration/widgets/card.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md) and [Responsive](../Docs/administration/widgets/responsive.md). The texts, colors and icons of the status and the mode come from the two [ValueMap](../Docs/administration/widgets/value-map.md) blocks at the top of this page.
 ::: Tab#controls Title="Controls" Icon=Tune
-:::: HomeBlaze.Components.Responsive Show=NotPhone
+:::: HomeBlaze.Components.Responsive From=Sm
 ::::: HomeBlaze.Components.Card Title="Load" Icon=DonutLarge
 :::::: HomeBlaze.Components.FlowLayout MinWidth=120
 ::::::: Item

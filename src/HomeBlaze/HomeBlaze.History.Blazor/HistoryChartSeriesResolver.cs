@@ -26,7 +26,7 @@ internal enum HistoryChartSeriesKind
 /// A series of a <see cref="HistoryChart"/> with the property its path leads to.
 /// </summary>
 /// <param name="Label">The label in the legend.</param>
-/// <param name="Color">The colour the series asks for, or null.</param>
+/// <param name="Color">The color the series asks for, or null.</param>
 /// <param name="Property">The property, or null when the path leads nowhere.</param>
 /// <param name="Kind">How the series is drawn.</param>
 /// <param name="Unit">The unit of the property.</param>
@@ -217,7 +217,7 @@ internal static class HistoryChartSeriesResolver
     }
 
     /// <summary>
-    /// Gets the colour of every recorded line, in series order: its own, otherwise the next of
+    /// Gets the color of every recorded line, in series order: its own, otherwise the next of
     /// <see cref="HistoryChartPalette.LineColors"/> by its position among the recorded lines. Null for
     /// everything else.
     /// </summary>

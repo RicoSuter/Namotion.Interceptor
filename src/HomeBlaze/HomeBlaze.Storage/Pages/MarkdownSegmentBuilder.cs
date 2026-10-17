@@ -308,8 +308,8 @@ public static partial class MarkdownSegmentBuilder
         }
     }
 
-    // The box, and not the table, scrolls sideways (see markdown-page.css): a table whose display is changed loses its
-    // table semantics in some browsers.
+    // The box, and not the table, scrolls sideways (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor):
+    // a table whose display is changed loses its table semantics in some browsers.
     private sealed class ScrollableTableRenderer : HtmlTableRenderer
     {
         protected override void Write(HtmlRenderer renderer, Table table)

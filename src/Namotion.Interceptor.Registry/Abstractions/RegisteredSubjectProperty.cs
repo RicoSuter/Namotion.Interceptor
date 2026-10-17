@@ -19,6 +19,9 @@ public class RegisteredSubjectProperty
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
+    // 0: not computed yet, 1: no public setter, 2: public setter. Computed on first read because it reflects over the setter.
+    private byte _hasPublicSetter;
+
     internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name,
@@ -148,18 +151,32 @@ public class RegisteredSubjectProperty
     public bool HasGetter => Reference.Metadata.GetValue is not null;
 
     /// <summary>
-    /// Gets a value indicating whether the property has a setter.
+    /// Gets a value indicating whether the property has a setter of any accessibility, see <see cref="HasPublicSetter"/>;
+    /// a generated init-only property has no setter.
     /// </summary>
     public bool HasSetter => Reference.Metadata.SetValue is not null;
 
     /// <summary>
-    /// Gets a value indicating whether the property has a setter that is public. An init-only setter counts as no setter.
+    /// Gets a value indicating whether the property has a setter that is public. An init-only setter does not count as public.
     /// A setter that an override inherits has the accessibility of the property it overrides. An explicit or default
     /// interface implementation has the accessibility of the implemented interface member. A dynamic property without
     /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> counts as public when it has a setter.
     /// </summary>
-    // TODO: Read the accessibility from the generated metadata instead of the PropertyInfo (see #102)
-    public bool HasPublicSetter => HasSetter && IsSetterPublic(Reference.Metadata.PropertyInfo);
+    // TODO: Read the accessibility from the generated metadata instead of the PropertyInfo (see #732)
+    public bool HasPublicSetter
+    {
+        get
+        {
+            var hasPublicSetter = _hasPublicSetter;
+            if (hasPublicSetter == 0)
+            {
+                hasPublicSetter = HasSetter && IsSetterPublic(Reference.Metadata.PropertyInfo) ? (byte)2 : (byte)1;
+                _hasPublicSetter = hasPublicSetter;
+            }
+
+            return hasPublicSetter == 2;
+        }
+    }
 
     /// <summary>
     /// Gets the current value of the property.

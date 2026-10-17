@@ -127,7 +127,7 @@ The pump is {{ ../Pump/Status }} and runs at {{ ../Pump/CurrentSpeed }} of {{ ..
 The fan is {{ ../Fan/Status }} and runs at {{ ../Fan/CurrentSpeed }} of {{ ../Fan/TargetSpeed }} RPM.
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **A number of pixels**: `MinWidth` is a plain number, without a unit. The layout puts as many columns into a row as fit with at least that width each, and then makes all columns equally wide to fill the row. The room between two cells is in [Spacing](basics.md#spacing).
 - **Smaller means more columns**: With `MinWidth=120` many cells fit into one row. With `MinWidth=600` two cells stand next to each other only on a wide screen.
@@ -139,7 +139,7 @@ The fan is {{ ../Fan/Status }} and runs at {{ ../Fan/CurrentSpeed }} of {{ ../Fa
 
 ## Related
 
-- [Basics](basics.md) - Type names, paths, spacing, colours and icons
+- [Basics](basics.md) - Type names, paths, spacing, colors and icons
 - [Overview](overview.md) - All widgets by group
 - [Card](card.md) - A titled box, the usual content of a cell
 - [GridLayout](grid-layout.md) - Fixed rows and columns, with cells that span several

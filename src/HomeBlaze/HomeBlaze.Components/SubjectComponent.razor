@@ -36,7 +36,7 @@
             }
             @if (isSelected && (selectableParent != null || hasEditAction))
             {
-                @* The anchor of the bar, see widget-selection.css. *@
+                @* The anchor of the bar, see SubjectComponent.razor.css. *@
                 <div class="subject-action-bar-anchor">
                     <MudPopover Open="true"
                                 AnchorOrigin="Origin.TopRight"
@@ -47,27 +47,30 @@
                                 role="toolbar"
                                 aria-label="Widget actions"
                                 data-testid="widget-action-bar">
-                        @if (selectableParent != null)
-                        {
-                            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
-                                           Size="Size.Small"
-                                           Class="select-parent-button"
-                                           title="Select parent"
-                                           aria-label="Select parent"
-                                           OnClick="_selectParentCallback"
-                                           data-testid="select-parent-button" />
-                        }
+                        @* Written here, so that it keeps the scope of this component in the provider of the popover. *@
+                        <div class="subject-action-bar-content">
+                            @if (selectableParent != null)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                                               Size="Size.Small"
+                                               Class="select-parent-button"
+                                               title="Select parent"
+                                               aria-label="Select parent"
+                                               OnClick="_selectParentCallback"
+                                               data-testid="select-parent-button" />
+                            }
 
-                        @if (hasEditAction)
-                        {
-                            <MudIconButton Icon="@Icons.Material.Filled.Edit"
-                                           Size="Size.Small"
-                                           Color="Color.Primary"
-                                           title="Edit"
-                                           aria-label="Edit"
-                                           OnClick="_editCallback"
-                                           data-testid="edit-subject-button" />
-                        }
+                            @if (hasEditAction)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                               Size="Size.Small"
+                                               Color="Color.Primary"
+                                               title="Edit"
+                                               aria-label="Edit"
+                                               OnClick="_editCallback"
+                                               data-testid="edit-subject-button" />
+                            }
+                        </div>
                     </MudPopover>
                 </div>
             }

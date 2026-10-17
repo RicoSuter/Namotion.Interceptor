@@ -59,4 +59,23 @@ public class NumberValuesTests
         // Assert
         Assert.Equal(expected, text);
     }
+
+    [Theory]
+    [InlineData(typeof(int), true)]
+    [InlineData(typeof(int?), true)]
+    [InlineData(typeof(decimal), true)]
+    [InlineData(typeof(double), true)]
+    [InlineData(typeof(char), false)]
+    [InlineData(typeof(bool), false)]
+    [InlineData(typeof(DayOfWeek), false)]
+    [InlineData(typeof(Half), false)]
+    [InlineData(typeof(string), false)]
+    public void WhenATypeIsChecked_ThenItIsANumberTypeWhenItsValuesAreRead(Type type, bool expected)
+    {
+        // Act
+        var isNumberType = NumberValues.IsNumberType(type);
+
+        // Assert
+        Assert.Equal(expected, isNumberType);
+    }
 }

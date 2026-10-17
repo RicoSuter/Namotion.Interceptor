@@ -46,8 +46,8 @@ public static class OperationInvoker
     /// <param name="serviceProvider">Resolves the parameters of the method that come from services.</param>
     /// <param name="method">The operation or query.</param>
     /// <param name="lifetime">
-    /// Cancelled when the caller goes away. From then on no dialog is shown and a method that has not started is
-    /// not started. A started method is not cancelled.
+    /// Canceled when the caller goes away. From then on no dialog is shown and a method that has not started is
+    /// not started. A started method is not canceled.
     /// </param>
     /// <param name="isRunningChanged">
     /// Called with true right before the method starts and with false once it has returned or thrown, before a result
@@ -62,7 +62,7 @@ public static class OperationInvoker
     {
         if (lifetime.IsCancellationRequested)
         {
-            return OperationOutcome.Cancelled;
+            return OperationOutcome.Canceled;
         }
 
         object?[]? parameters = null;
@@ -74,7 +74,7 @@ public static class OperationInvoker
                 var dialogResult = await dialog.Result;
                 if (dialogResult is null || dialogResult.Canceled)
                 {
-                    return OperationOutcome.Cancelled;
+                    return OperationOutcome.Canceled;
                 }
 
                 parameters = dialogResult.Data as object?[];
@@ -86,7 +86,7 @@ public static class OperationInvoker
                 var dialogResult = await dialog.Result;
                 if (dialogResult is null || dialogResult.Canceled)
                 {
-                    return OperationOutcome.Cancelled;
+                    return OperationOutcome.Canceled;
                 }
 
                 break;
@@ -95,14 +95,14 @@ public static class OperationInvoker
 
         if (lifetime.IsCancellationRequested)
         {
-            return OperationOutcome.Cancelled;
+            return OperationOutcome.Canceled;
         }
 
         object? result;
         isRunningChanged?.Invoke(true);
         try
         {
-            // Navigating away must not abort an operation that a device has already started. The method is not cancelled
+            // Navigating away must not abort an operation that a device has already started. The method is not canceled
             // from here, so an OperationCanceledException is a failure of its own, such as a request that timed out.
             result = await method.InvokeAsync(parameters, serviceProvider, CancellationToken.None);
         }

@@ -93,10 +93,10 @@ Body of the footer card.
 
 :: HomeBlaze.Components.TabLayout#spacingtabs
 ::: Tab Title="Hidden First"
-:::: HomeBlaze.Components.Responsive Show=Phone
+:::: HomeBlaze.Components.Responsive To=Xs
 ::::: HomeBlaze.Components.Card Title="Phone Card"
 Only on a phone.
-:::: HomeBlaze.Components.Responsive Show=NotPhone
+:::: HomeBlaze.Components.Responsive From=Sm
 ::::: HomeBlaze.Components.Card Title="Wide Card"
 Not on a phone.
 :::: HomeBlaze.Components.Alert
@@ -133,12 +133,12 @@ Text before the code table.
 | ExpansionPanels | `HomeBlaze.Components.ExpansionPanels` | Page content in panels that open and close |
 | HistoryChart | `HomeBlaze.History.Blazor.HistoryChart` | The recorded history of numbers as lines and of states as bands |
 
-Text after the code table, with code that is wider than a phone: `Href="../Docs/administration/widgets/expansion-panels.md#behaviour-and-limits"`.
+Text after the code table, with code that is wider than a phone: `Href="../Docs/administration/widgets/expansion-panels.md#behavior-and-limits"`.
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Subtitle` | Text | None | A smaller line below the title |
-| `IconColor` | Colour | `Default` | The colour of the icon |
+| `IconColor` | Color | `Default` | The color of the icon |
 | `AspectRatio` | Text | None | The width and the height of the card in the form `W:H` |
 
 | Name | Word |

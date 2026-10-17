@@ -59,7 +59,7 @@ public class SubjectPaneOperationTests
     }
 
     [Fact]
-    public async Task WhenAConfirmationIsCancelled_ThenTheButtonIsEnabledAgain()
+    public async Task WhenAConfirmationIsCanceled_ThenTheButtonIsEnabledAgain()
     {
         // Arrange
         var (page, pane) = await OpenPaneAsync(MotorPath);
@@ -122,8 +122,8 @@ public class SubjectPaneOperationTests
             // Assert: the dialog renders outside the layout, and still gets the styles of the mode.
             var alert = page.Locator(".mud-dialog .mud-alert-text-error");
             await Assertions.Expect(alert).ToContainTextAsync("The request timed out.", new() { Timeout = PageLoadTimeout });
-            var expected = await page.ResolveColourAsync("var(--mud-palette-error-lighten)");
-            Assert.NotEqual(await page.ResolveColourAsync("var(--mud-palette-error-darken)"), expected);
+            var expected = await page.ResolveColorAsync("var(--mud-palette-error-lighten)");
+            Assert.NotEqual(await page.ResolveColorAsync("var(--mud-palette-error-darken)"), expected);
             await Assertions.Expect(alert.Locator(".mud-alert-message")).ToHaveCSSAsync("color", expected);
         }
         finally

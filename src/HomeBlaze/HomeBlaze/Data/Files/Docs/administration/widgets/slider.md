@@ -54,7 +54,7 @@ A slider with a range and a step of its own. They are in the unit of the propert
 :: HomeBlaze.Components.Slider Path=../Fan/Load Label="Fan load" Minimum=0.2 Maximum=0.8 Step=0.1
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **The range**: [Ranges](basics.md#ranges) has where the ends of the range come from and the messages for a missing or an empty range.
 - **Percent**: A property with the unit percent is shown and entered as 0 to 100 and written as 0 to 1. `Minimum`, `Maximum` and `Step` stay in the unit of the property.

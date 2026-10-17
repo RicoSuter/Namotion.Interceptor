@@ -1,20 +1,20 @@
-/* The ring of a Gauge: the track and the value are two MudProgressCircular on top of each other, with the text in their centre. */
+/* The ring of a Gauge: the track and the value are two MudProgressCircular on top of each other, with the text in their center. */
 
 .gauge-ring {
     position: relative;
 }
 
-.gauge-ring .mud-progress-circular {
+.gauge-ring ::deep .mud-progress-circular {
     position: absolute;
     inset: 0;
 }
 
-.gauge-ring svg {
+.gauge-ring ::deep svg {
     width: 100%;
     height: 100%;
 }
 
-.gauge-ring .gauge-track {
+.gauge-ring ::deep .gauge-track {
     opacity: 0.2;
 }
 

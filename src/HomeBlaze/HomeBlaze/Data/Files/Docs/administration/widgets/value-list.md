@@ -25,7 +25,7 @@ The arguments of a `Value` block:
 | `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the row shows. A row with content needs none |
 | `Label` | Text | From the property, see [Labels](basics.md#labels) | The label of the row |
 | `Icon` | Text | None | The [icon](basics.md#icons) at the start of the row |
-| `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, colour and icon, see [ValueMap](value-map.md) |
+| `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, color and icon, see [ValueMap](value-map.md) |
 
 ## Samples
 
@@ -46,7 +46,7 @@ Rows with a label and an icon. The first two rows have an icon, so the third row
 ::: Value Path=../Pump/IsAtTargetSpeed Label="At target speed"
 ::
 
-Rows without a label, the last one with the map of [ValueMap](value-map.md). Each row takes its label from the property, see [Labels](basics.md#labels): "Speed" and "Target" are titles that the motor declares, and "Status" is the name of its property. The status is shown with the text, the colour and the icon of its case:
+Rows without a label, the last one with the map of [ValueMap](value-map.md). Each row takes its label from the property, see [Labels](basics.md#labels): "Speed" and "Target" are titles that the motor declares, and "Status" is the name of its property. The status is shown with the text, the color and the icon of its case:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -82,16 +82,16 @@ A row with content and without a path, and a row with a `Progress` as content. T
 :::: HomeBlaze.Components.Progress Path=../Fan/CurrentSpeed Minimum=0 Maximum=3000
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **Aligned labels**: When at least one row has an icon, the rows without one keep the room of an icon, so that all labels line up. An icon that comes from a case of a map counts as well. In a card with an icon, a list in which at least one row has an icon lines up the icons of its rows with the icon of the header and its labels with the title.
-- **Colour and icon of a case**: A matching case gives the value text its colour and the row its icon, see [ValueMap](value-map.md).
+- **Color and icon of a case**: A matching case gives the value text its color and the row its icon, see [ValueMap](value-map.md).
 - **Content and value**: Content and a value can stand in the same row. The content takes the room between the label and the value: a `Progress` fills it, and a text stands at the right end of it, right before the value.
 
 ## Related
 
-- [Basics](basics.md) - Type names, paths, value widgets, colours and icons
+- [Basics](basics.md) - Type names, paths, value widgets, colors and icons
 - [Overview](overview.md) - All widgets by group
-- [ValueMap](value-map.md) - The text, colour and icon of a value
+- [ValueMap](value-map.md) - The text, color and icon of a value
 - [Progress](progress.md) - A bar for a number, also as the content of a row
 - [ValueTile](value-tile.md) - A small box with a label and one large value

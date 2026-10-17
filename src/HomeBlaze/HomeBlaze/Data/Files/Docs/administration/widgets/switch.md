@@ -49,7 +49,7 @@ A switch with an operation for each state. Turning it on invokes `PowerOn` of th
 :: HomeBlaze.Components.Switch Path=../Fan/IsPowered Label="Fan" On=../Fan/PowerOn Off=../Fan/PowerOff
 ::
 
-## Behaviour and Limits
+## Behavior and Limits
 
 - **Shows the property**: The switch is on while the value is true. A value that is not set and a path that leads nowhere show the switch off.
 - **Writes the property**: Without `On` and `Off`, a toggle writes true or false to the property. Besides the cases of [Control Writes](basics.md#control-writes), the switch is disabled when the property holds no boolean.

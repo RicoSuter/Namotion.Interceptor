@@ -148,7 +148,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Minimum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Boolean | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Number | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Enum | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.OtherValue | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Operation | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Value)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Property | HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Step { get; set; }
@@ -234,7 +234,7 @@ namespace HomeBlaze.Components
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Speed")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("Dashboard")]
-    [System.ComponentModel.Description("Shows a number as a ring with the value in its centre")]
+    [System.ComponentModel.Description("Shows a number as a ring with the value in its center")]
     [System.ComponentModel.DisplayName("Gauge")]
     public class Gauge : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
@@ -250,7 +250,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Minimum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Number)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
+                typeof(System.Numerics.INumber<!0>)})]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Components.GaugeSize Size { get; set; }
@@ -378,7 +379,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Operation)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Path { get; set; }
         public string? Title { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -408,7 +409,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Minimum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Number)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
+                typeof(System.Numerics.INumber<!0>)})]
         public string? Path { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
@@ -423,7 +425,7 @@ namespace HomeBlaze.Components
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Devices")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("Dashboard")]
-    [System.ComponentModel.Description("Shows its content only on phones, tablets or desktops")]
+    [System.ComponentModel.Description("Shows its content only on windows of some widths")]
     [System.ComponentModel.DisplayName("Responsive")]
     public class Responsive : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
@@ -432,8 +434,10 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Slot(IsDefault=true)]
         public Namotion.Interceptor.IInterceptorSubject? Content { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        public HomeBlaze.Components.ResponsiveShow Show { get; set; }
+        public MudBlazor.Breakpoint From { get; set; }
         public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public MudBlazor.Breakpoint To { get; set; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
@@ -442,15 +446,7 @@ namespace HomeBlaze.Components
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-        public static string GetCssClasses(HomeBlaze.Components.ResponsiveShow show) { }
-    }
-    public enum ResponsiveShow
-    {
-        Phone = 0,
-        Tablet = 1,
-        Desktop = 2,
-        NotPhone = 3,
-        NotDesktop = 4,
+        public static bool TryGetCssClasses(MudBlazor.Breakpoint from, MudBlazor.Breakpoint to, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? cssClasses, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("ArrowDropDownCircle")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -467,7 +463,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
         public string? Map { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(IsWritable=true, Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Enum)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(IsWritable=true, ValueTypes=new System.Type[] {
+                typeof(System.Enum)})]
         public string? Path { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
@@ -495,7 +492,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Minimum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(IsWritable=true, Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Number)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(IsWritable=true, ValueTypes=new System.Type[] {
+                typeof(System.Numerics.INumber<!0>)})]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Step { get; set; }
@@ -593,13 +591,14 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Operation)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Off { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Operation)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? On { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Boolean)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
+                typeof(bool)})]
         public string? Path { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
@@ -1502,7 +1501,7 @@ namespace HomeBlaze.Components.Operations
     }
     public enum OperationOutcome
     {
-        Cancelled = 0,
+        Canceled = 0,
         Succeeded = 1,
         Failed = 2,
     }

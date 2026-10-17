@@ -15,7 +15,7 @@ internal static class ConfigurationPersistence
     /// <see cref="IConfigurable.ApplyConfigurationAsync"/> of the owner, also when the writer wrote nothing.
     /// </summary>
     /// <remarks>
-    /// The write is not cancelled, so a configuration is never left half written; the token only cancels the apply step.
+    /// The write is not canceled, so a configuration is never left half written; the token only cancels the apply step.
     /// </remarks>
     public static async Task<ConfigurationPersistResult> PersistOwnerAsync(
         RootManager rootManager,

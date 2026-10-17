@@ -48,10 +48,22 @@ title: Displays Demo
 :: HomeBlaze.Components.Progress Path=dispmotor/TargetSpeed Minimum=2000 Maximum=0
 ::
 
-:: HomeBlaze.Components.Responsive Show=NotPhone
+:: HomeBlaze.Components.Responsive From=Sm
 Wide screen text
 ::
 
-:: HomeBlaze.Components.Responsive Show=Phone
+:: HomeBlaze.Components.Responsive To=Xs
 Phone screen text
+::
+
+:: HomeBlaze.Components.Responsive From=Sm To=Md
+Tablet screen text
+::
+
+:: HomeBlaze.Components.Responsive From=Md To=Md
+Large tablet screen text
+::
+
+:: HomeBlaze.Components.Responsive From=Lg
+Desktop screen text
 ::

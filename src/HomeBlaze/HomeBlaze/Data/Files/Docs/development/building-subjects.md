@@ -531,6 +531,7 @@ public partial class Server
 - The property attribute name (e.g., `"Start"`) must match the method name without the `Async` suffix
 - The `IsEnabled` property should be `[Derived]` so it automatically updates when dependencies change
 - When `IsEnabled` is `false`, the button is disabled in the UI
+- The attribute name is `IsEnabled`, without the `HB:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
 - The button renders again by itself when the derived property changes, because its render read it
 
 ## Categories
@@ -613,7 +614,7 @@ This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for 
 
 ### Range Attributes
 
-`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range, declared as above. A widget that shows or sets a number within a range reads them when the page sets no range of its own, and only when their value is a number; [Ranges](../administration/widgets/basics.md#ranges) has the order in which the widget looks for each end, including the range 0 to 1 of a property with `StateUnit.Percent`. Unlike the other names of `KnownAttributes`, they have no `HB:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
+`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range, declared as above. A widget that shows or sets a number within a range reads them when the page sets no range of its own, and only when their value is a number; [Ranges](../administration/widgets/basics.md#ranges) has the order in which the widget looks for each end, including the range 0 to 1 of a property with `StateUnit.Percent`. Like `KnownAttributes.IsEnabled` and unlike `State` and `Configuration`, they have no `HB:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
 
 ## Complete Example: Motor
 
@@ -981,16 +982,22 @@ public partial string? Path { get; set; }
 public partial string? Map { get; set; }
 ```
 
-A path to a property can be narrowed with `Kinds` and `IsWritable`. `Kinds` takes the flags of `SubjectPathKinds`, which combine with OR: `Boolean`, `Number` (integral, floating point and decimal types), `Enum`, `OtherValue`, `Operation` (an `[Operation]` or `[Query]` method), and `Value`, the default, for the four value kinds. A nullable type counts as its underlying type. `IsWritable = true` keeps only properties with a public setter and never matches an operation. Both are ignored for a path to a subject, so do not set them together with a type:
+Without a type, `Kind` says what the path leads to, with the flags of `SubjectPathKind` that combine with OR: `Property`, the default, for a property that holds a value, `Attribute` for an attribute of a property or of an operation, such as `Minimum`, and `Operation` for an `[Operation]` or `[Query]` method. The picker lists an attribute below its property and never offers the metadata of `KnownAttributes.State` and `KnownAttributes.Configuration`. An attribute is a property of the subject, so its path is the name under which the subject registers it, for example `/Demo/Conveyor/TargetSpeed_Minimum`, or `Speed@Minimum` for an attribute added at runtime.
+
+`ValueTypes` names the types that the value of a property or an attribute may have, and null, the default, accepts any type. A nullable type counts as its underlying type. A type matches when it is assignable to one of them or, for an open generic type, when it implements or derives from a closed form of it. `typeof(Enum)` matches only enum types, not a property declared as `System.Enum`. `typeof(INumber<>)` matches the numbers that the number widgets read: the built-in integral types, `float`, `double` and `decimal`, so neither `char` nor types such as `Half` or `Int128`. `ValueTypes` does not restrict an operation. `IsWritable = true` keeps only properties and attributes with a public setter and never matches an operation. `Kind`, `ValueTypes` and `IsWritable` are ignored for a path to a subject, so do not set them together with a type:
 
 ```csharp
 [Configuration]
-[SubjectPath(Kinds = SubjectPathKinds.Number, IsWritable = true)]
+[SubjectPath(ValueTypes = [typeof(INumber<>)], IsWritable = true)]
 public partial string? Path { get; set; }
 
 [Configuration]
-[SubjectPath(Kinds = SubjectPathKinds.Operation)]
+[SubjectPath(Kind = SubjectPathKind.Operation)]
 public partial string? Operation { get; set; }
+
+[Configuration]
+[SubjectPath(Kind = SubjectPathKind.Property | SubjectPathKind.Operation, ValueTypes = [typeof(bool), typeof(Enum)])]
+public partial string? Target { get; set; }
 ```
 
 The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.

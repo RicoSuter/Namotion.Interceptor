@@ -29,9 +29,10 @@ else
     <CascadingValue Value="_widgetSelection" IsFixed="true">
         @* The head of the page in every mode: the actions of the editor, what the page shows there, such as the time of
            its last change, and the button of the edit modes, side by side. In the view modes a markdown page leaves room
-           for them next to its title (the padding of its first h1 in markdown-page.css of HomeBlaze.Storage.Blazor), and
-           in the editing modes they stand at the end of the bar above the editor. One outlet per section that stays in
-           place, because a second outlet of the same section while the mode changes would end the circuit. *@
+           for them next to its title (the padding of its first h1 in MarkdownFilePageComponent.razor.css of
+           HomeBlaze.Storage.Blazor), and in the editing modes they stand at the end of the bar above the editor. One
+           outlet per section that stays in place, because a second outlet of the same section while the mode changes
+           would end the circuit. *@
         <div class="d-flex align-center" style="@GetPageHeadStyle()" data-testid="page-head">
             <div @ref="_pageHeadContent" class="@(ShowEditor ? "page-head-content page-head-editing" : "page-head-content")">
                 <SectionOutlet SectionName="EditActions" />

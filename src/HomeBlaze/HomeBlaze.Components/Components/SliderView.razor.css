@@ -1,0 +1,5 @@
+/* MudSlider is an inline block, which adds the room below a baseline to the height of the widget. See "Spacing" in the
+   widget basics. */
+.slider-widget ::deep .mud-slider {
+    display: block;
+}

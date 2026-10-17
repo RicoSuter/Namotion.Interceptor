@@ -73,7 +73,7 @@ public class WidgetSelectionTests
     }
 
     [Fact]
-    public async Task WhenAWidgetIsSelectedInDarkMode_ThenItsOutlineAndEditActionHaveTheLightenedPrimaryColour()
+    public async Task WhenAWidgetIsSelectedInDarkMode_ThenItsOutlineAndEditActionHaveTheLightenedPrimaryColor()
     {
         // Arrange: the app starts in the dark theme.
         var page = await OpenPageInInlineModeAsync();
@@ -83,8 +83,8 @@ public class WidgetSelectionTests
         var actionBar = await wrapper.SelectWidgetAsync();
 
         // Assert
-        var expected = await page.ResolveColourAsync("var(--mud-palette-primary-lighten)");
-        Assert.NotEqual(await page.ResolveColourAsync("var(--mud-palette-primary)"), expected);
+        var expected = await page.ResolveColorAsync("var(--mud-palette-primary-lighten)");
+        Assert.NotEqual(await page.ResolveColorAsync("var(--mud-palette-primary)"), expected);
         await Assertions.Expect(wrapper).ToHaveCSSAsync("outline-color", expected, new() { Timeout = Timeout });
         await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCSSAsync("color", expected);
     }

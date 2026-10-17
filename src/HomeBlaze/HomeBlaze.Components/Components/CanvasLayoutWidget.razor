@@ -107,9 +107,11 @@
     }
 
     /* The library moves a node only when the press is on the node itself, so the content, and every widget in it,
-       takes no pointer input. A click on the node selects its widget instead. */
+       takes no pointer input. A click on the node selects its widget instead. The container in the second selector
+       makes it more specific than the rule of SubjectComponent.razor.css that gives a nested selectable widget the
+       pointer. */
     .canvas-node.editing .canvas-node-content,
-    .canvas-node.editing .canvas-node-content .subject-component-wrapper.selectable {
+    .canvas-layout-container .canvas-node.editing .canvas-node-content .subject-component-wrapper.selectable {
         pointer-events: none;
     }
 

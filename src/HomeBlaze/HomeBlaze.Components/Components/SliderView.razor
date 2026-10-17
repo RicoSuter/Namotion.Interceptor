@@ -2,7 +2,6 @@
 @using System.Globalization
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Components.Controls
-@using HomeBlaze.Components.Inputs
 @using HomeBlaze.Services.Display
 @inject PropertyWriter Writer
 
@@ -98,7 +97,7 @@ else
     }
 
     private static bool IsNumber([NotNullWhen(true)] RegisteredSubjectProperty? property) =>
-        property is not null && SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number);
+        property is not null && NumberValues.IsNumberType(property.Type);
 
     private bool TryResolveScale(RegisteredSubjectProperty? property, bool isNumber, out ValueRange range, out double step,
         out double scale, [NotNullWhen(false)] out string? error)

@@ -882,7 +882,7 @@ public class MarkdownBlockTests
     }
 
     [Fact]
-    public async Task WhenThemeIsLight_ThenALinkHasThePrimaryColourOfTheTheme()
+    public async Task WhenThemeIsLight_ThenALinkHasThePrimaryColorOfTheTheme()
     {
         // Arrange
         var page = await OpenScratchPageWithLinkAsync();
@@ -891,13 +891,13 @@ public class MarkdownBlockTests
         // Act
         await page.GetByTitle("Toggle Dark Mode").ClickAsync();
 
-        // Assert: #3f2ddd, the primary colour of the light palette.
+        // Assert: #3f2ddd, the primary color of the light palette.
         await Assertions.Expect(link).ToHaveCSSAsync("color", "rgb(63, 45, 221)");
-        Assert.Equal("rgb(63, 45, 221)", await page.ResolveColourAsync("var(--mud-palette-primary)"));
+        Assert.Equal("rgb(63, 45, 221)", await page.ResolveColorAsync("var(--mud-palette-primary)"));
     }
 
     [Fact]
-    public async Task WhenThemeIsDark_ThenALinkHasTheLightenedPrimaryColourOfTheTheme()
+    public async Task WhenThemeIsDark_ThenALinkHasTheLightenedPrimaryColorOfTheTheme()
     {
         // Arrange & Act: the app starts in the dark theme.
         var page = await OpenScratchPageWithLinkAsync();
@@ -905,8 +905,8 @@ public class MarkdownBlockTests
         await Assertions.Expect(page.Locator(".homeblaze-dark-mode")).ToHaveCountAsync(1);
 
         // Assert
-        var expected = await page.ResolveColourAsync("var(--mud-palette-primary-lighten)");
-        Assert.NotEqual(await page.ResolveColourAsync("var(--mud-palette-primary)"), expected);
+        var expected = await page.ResolveColorAsync("var(--mud-palette-primary-lighten)");
+        Assert.NotEqual(await page.ResolveColorAsync("var(--mud-palette-primary)"), expected);
         await Assertions.Expect(link).ToHaveCSSAsync("color", expected);
     }
 

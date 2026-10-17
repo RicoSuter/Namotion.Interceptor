@@ -187,7 +187,7 @@ public class OperationInvokerTests
     }
 
     [Fact]
-    public async Task WhenConfirmationIsCancelled_ThenNoRunningIsReported()
+    public async Task WhenConfirmationIsCanceled_ThenNoRunningIsReported()
     {
         // Arrange
         var dialogService = new Mock<IDialogService>();
@@ -203,7 +203,7 @@ public class OperationInvokerTests
     }
 
     [Fact]
-    public async Task WhenParameterDialogIsCancelled_ThenMethodIsNotInvoked()
+    public async Task WhenParameterDialogIsCanceled_ThenMethodIsNotInvoked()
     {
         // Arrange
         var dialogService = new Mock<IDialogService>();
@@ -218,12 +218,12 @@ public class OperationInvokerTests
         var outcome = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
 
         // Assert
-        Assert.Equal(OperationOutcome.Cancelled, outcome);
+        Assert.Equal(OperationOutcome.Canceled, outcome);
         Assert.False(isInvoked);
     }
 
     [Fact]
-    public async Task WhenConfirmationIsCancelled_ThenMethodIsNotInvoked()
+    public async Task WhenConfirmationIsCanceled_ThenMethodIsNotInvoked()
     {
         // Arrange
         var dialogService = new Mock<IDialogService>();
@@ -235,7 +235,7 @@ public class OperationInvokerTests
         var outcome = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
 
         // Assert
-        Assert.Equal(OperationOutcome.Cancelled, outcome);
+        Assert.Equal(OperationOutcome.Canceled, outcome);
         Assert.False(isInvoked);
     }
 
@@ -320,7 +320,7 @@ public class OperationInvokerTests
     }
 
     [Fact]
-    public async Task WhenLifetimeIsCancelledWhileMethodIsCancelled_ThenNoErrorDialogIsShown()
+    public async Task WhenLifetimeIsCanceledWhileMethodIsCanceled_ThenNoErrorDialogIsShown()
     {
         // Arrange
         var dialogService = new Mock<IDialogService>();
@@ -359,7 +359,7 @@ public class OperationInvokerTests
     }
 
     [Fact]
-    public async Task WhenLifetimeIsCancelledBeforeStart_ThenNoDialogIsShownAndMethodIsNotInvoked()
+    public async Task WhenLifetimeIsCanceledBeforeStart_ThenNoDialogIsShownAndMethodIsNotInvoked()
     {
         // Arrange
         var dialogService = new Mock<IDialogService>();
@@ -372,13 +372,13 @@ public class OperationInvokerTests
         var outcome = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, lifetime.Token);
 
         // Assert
-        Assert.Equal(OperationOutcome.Cancelled, outcome);
+        Assert.Equal(OperationOutcome.Canceled, outcome);
         Assert.False(isInvoked);
         dialogService.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task WhenLifetimeIsCancelledWhileConfirmationIsOpen_ThenMethodIsNotInvoked()
+    public async Task WhenLifetimeIsCanceledWhileConfirmationIsOpen_ThenMethodIsNotInvoked()
     {
         // Arrange
         var dialogService = new Mock<IDialogService>();
@@ -395,12 +395,12 @@ public class OperationInvokerTests
         var outcome = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, lifetime.Token);
 
         // Assert
-        Assert.Equal(OperationOutcome.Cancelled, outcome);
+        Assert.Equal(OperationOutcome.Canceled, outcome);
         Assert.False(isInvoked);
     }
 
     [Fact]
-    public async Task WhenLifetimeIsCancelledWhileMethodRuns_ThenNoResultDialogIsShown()
+    public async Task WhenLifetimeIsCanceledWhileMethodRuns_ThenNoResultDialogIsShown()
     {
         // Arrange
         var dialogService = new Mock<IDialogService>();
@@ -421,7 +421,7 @@ public class OperationInvokerTests
     }
 
     [Fact]
-    public async Task WhenLifetimeIsCancelledWhileMethodFails_ThenNoErrorDialogIsShown()
+    public async Task WhenLifetimeIsCanceledWhileMethodFails_ThenNoErrorDialogIsShown()
     {
         // Arrange
         var dialogService = new Mock<IDialogService>();

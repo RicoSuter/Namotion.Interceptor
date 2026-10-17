@@ -13,7 +13,7 @@
 
 <MudThemeProvider Theme="@_theme" IsDarkMode="_isDarkMode"/>
 
-@* MudBlazor marks no element with the mode, so styles that differ by mode beyond the palette (wwwroot/theme.css) scope to
+@* MudBlazor marks no element with the mode, so styles that differ by mode beyond the palette (MainLayout.razor.css) scope to
    this class. It wraps the providers too, because dialogs, popovers and snackbars render there and not inside the layout. *@
 <div class="@(_isDarkMode ? DarkModeClass : null)" style="display: contents">
     <MudPopoverProvider/>
@@ -148,8 +148,8 @@
     }
 
     // Three levels with equal steps in lightness: the drawer, the page background and the surfaces of cards,
-    // tiles and tab bars. The secondary text and the primary colour of the light palette are darker than the
-    // defaults, which are below 4.5:1 on the page background and on the active drawer link. The status colours
+    // tiles and tab bars. The secondary text and the primary color of the light palette are darker than the
+    // defaults, which are below 4.5:1 on the page background and on the active drawer link. The status colors
     // are darker for the same reason: as text on the page and on alerts, and behind the white text of filled
     // buttons and chips. The outline of inputs reaches 3:1 on cards.
     private readonly PaletteLight _lightPalette = new()
@@ -172,12 +172,12 @@
         Divider = "rgba(0,0,0,0.12)"
     };
 
-    // Links on pages use the lightened primary colour, which is lighter than the computed default so that it
+    // Links on pages use the lightened primary color, which is lighter than the computed default so that it
     // reaches 4.5:1 on the surface of cards, as does the secondary text. The outline of inputs reaches 3:1 on
     // cards. The darker status tones keep their defaults for the hover of filled buttons, so text in a status
-    // colour, such as that of alerts, gets the lightened tone in theme.css, which reaches 4.5:1 on cards. Filled
-    // buttons and chips in a status colour have dark text, as in the dark theme of Material, because white text
-    // is below 4.5:1 on all four status colours.
+    // color, such as that of alerts, gets the lightened tone in MainLayout.razor.css, which reaches 4.5:1 on cards. Filled
+    // buttons and chips in a status color have dark text, as in the dark theme of Material, because white text
+    // is below 4.5:1 on all four status colors.
     private readonly PaletteDark _darkPalette = new()
     {
         PrimaryLighten = "#a29aef",

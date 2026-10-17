@@ -714,13 +714,13 @@ public class ValueWidgetTests
     }
 
     [Fact]
-    public async Task WhenRowHasAnIcon_ThenItHasTheMutedColourOfTheIconsOfAList()
+    public async Task WhenRowHasAnIcon_ThenItHasTheMutedColorOfTheIconsOfAList()
     {
         // Arrange
         var page = await OpenPageWhenCardHasValuesAsync("Aligned Card");
 
         // Act: the variable is resolved next to the icon, because the theme may define it on an element below the body.
-        var colours = await page.GetCard("Aligned Card").GetByTestId("value-icon").First.EvaluateAsync<string[]>(
+        var colors = await page.GetCard("Aligned Card").GetByTestId("value-icon").First.EvaluateAsync<string[]>(
             """
             icon => {
                 const probe = document.createElement('span');
@@ -733,8 +733,8 @@ public class ValueWidgetTests
             """);
 
         // Assert
-        Assert.Equal(colours[1], colours[0]);
-        Assert.NotEqual("rgba(0, 0, 0, 0)", colours[1]);
+        Assert.Equal(colors[1], colors[0]);
+        Assert.NotEqual("rgba(0, 0, 0, 0)", colors[1]);
     }
 
     [Theory]

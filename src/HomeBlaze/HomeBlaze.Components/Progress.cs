@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Numerics;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -24,7 +25,7 @@ public partial class Progress : IConfigurable, ITitleProvider
     /// Path of the property whose value the bar shows.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kinds = SubjectPathKinds.Number)]
+    [SubjectPath(ValueTypes = [typeof(INumber<>)])]
     public partial string? Path { get; set; }
 
     /// <summary>

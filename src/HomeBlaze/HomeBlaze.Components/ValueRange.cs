@@ -1,7 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Components.Inputs;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -91,7 +90,7 @@ internal static class ValueRangeResolver
     {
         if (!TryResolve(property, minimum, maximum, out var range, out var error))
         {
-            var isNumber = property is not null && SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number);
+            var isNumber = property is not null && NumberValues.IsNumberType(property.Type);
             return !isNumber && error == MissingRangeError
                 ? default
                 : new ValueRangeState(null, null, null, error);

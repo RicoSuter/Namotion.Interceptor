@@ -14,7 +14,7 @@ internal static class GaugeDisplay
     private static readonly string LargeRingStyle = CreateRingStyle(GaugeSize.Large);
 
     /// <summary>
-    /// Gets the colour of the ring: that of the matched case of the map, otherwise the primary colour.
+    /// Gets the color of the ring: that of the matched case of the map, otherwise the primary color.
     /// </summary>
     public static Color GetColor(ValueReading reading) =>
         reading.Color == Color.Default ? Color.Primary : reading.Color;
@@ -40,7 +40,7 @@ internal static class GaugeDisplay
     };
 
     /// <summary>
-    /// Gets the typography of the value in the centre of the ring.
+    /// Gets the typography of the value in the center of the ring.
     /// </summary>
     public static Typo GetValueTypo(GaugeSize size) => size switch
     {

@@ -15,7 +15,7 @@ namespace HomeBlaze.Components;
 [InterceptorSubject]
 public partial class OperationButton : IConfigurable, ITitleProvider
 {
-    /// <summary>The colour of a button that sets none.</summary>
+    /// <summary>The color of a button that sets none.</summary>
     internal const MudBlazor.Color DefaultColor = MudBlazor.Color.Primary;
 
     /// <summary>The variant of a button that sets none.</summary>
@@ -31,7 +31,7 @@ public partial class OperationButton : IConfigurable, ITitleProvider
     /// Path of the operation or query that the button invokes.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kinds = SubjectPathKinds.Operation)]
+    [SubjectPath(Kind = SubjectPathKind.Operation)]
     public partial string? Path { get; set; }
 
     /// <summary>
@@ -48,7 +48,7 @@ public partial class OperationButton : IConfigurable, ITitleProvider
     public partial string? Icon { get; set; }
 
     /// <summary>
-    /// The colour of the button.
+    /// The color of the button.
     /// </summary>
     [Configuration]
     public partial MudBlazor.Color Color { get; set; }

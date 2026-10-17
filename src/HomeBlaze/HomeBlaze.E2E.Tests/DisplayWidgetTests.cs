@@ -15,9 +15,8 @@ public class DisplayWidgetTests
 
     private const string MissingText = "–";
 
-    private const int PhoneWidth = 400;
-
-    private const int DesktopWidth = 1400;
+    // The texts of the Responsive blocks of the page, each followed by " screen text".
+    private static readonly string[] ResponsiveScreens = ["Phone", "Wide", "Tablet", "Large tablet", "Desktop"];
 
     private readonly PlaywrightFixture _fixture;
 
@@ -162,7 +161,7 @@ public class DisplayWidgetTests
     }
 
     [Fact]
-    public async Task WhenFirstColumnHasAMap_ThenItsLinkShowsTheMappedTextInTheColourOfTheCase()
+    public async Task WhenFirstColumnHasAMap_ThenItsLinkShowsTheMappedTextInTheColorOfTheCase()
     {
         // Arrange & Act
         var page = await OpenPageAsync();
@@ -198,33 +197,32 @@ public class DisplayWidgetTests
         await Assertions.Expect(second).ToHaveTextAsync("Second Motor");
     }
 
-    [Fact]
-    public async Task WhenWindowIsAsNarrowAsAPhone_ThenOnlyThePhoneContentIsVisibleAndBothAreRendered()
+    [Theory]
+    [InlineData(400, "Phone")]
+    [InlineData(800, "Wide", "Tablet")]
+    [InlineData(1100, "Wide", "Tablet", "Large tablet")]
+    [InlineData(1400, "Wide", "Desktop")]
+    public async Task WhenWindowHasAWidth_ThenOnlyTheContentBetweenItsBreakpointsIsVisibleAndAllIsRendered(int width, params string[] visibleScreens)
     {
         // Arrange
         var page = await OpenPageAsync();
 
         // Act
-        await page.SetViewportSizeAsync(PhoneWidth, 800);
+        await page.SetViewportSizeAsync(width, 800);
 
         // Assert
-        await Assertions.Expect(page.GetByText("Phone screen text")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByText("Wide screen text")).ToBeHiddenAsync();
-        await Assertions.Expect(page.GetByText("Wide screen text")).ToHaveCountAsync(1);
-    }
-
-    [Fact]
-    public async Task WhenWindowIsAsWideAsADesktop_ThenOnlyTheWideContentIsVisibleAndBothAreRendered()
-    {
-        // Arrange
-        var page = await OpenPageAsync();
-
-        // Act
-        await page.SetViewportSizeAsync(DesktopWidth, 800);
-
-        // Assert
-        await Assertions.Expect(page.GetByText("Wide screen text")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByText("Phone screen text")).ToBeHiddenAsync();
-        await Assertions.Expect(page.GetByText("Phone screen text")).ToHaveCountAsync(1);
+        foreach (var screen in ResponsiveScreens)
+        {
+            var text = page.GetByText($"{screen} screen text", new() { Exact = true });
+            await Assertions.Expect(text).ToHaveCountAsync(1, new() { Timeout = Timeout });
+            if (visibleScreens.Contains(screen))
+            {
+                await Assertions.Expect(text).ToBeVisibleAsync();
+            }
+            else
+            {
+                await Assertions.Expect(text).ToBeHiddenAsync();
+            }
+        }
     }
 }

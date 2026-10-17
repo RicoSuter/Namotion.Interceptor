@@ -28,7 +28,7 @@ public class ProgressTests
     }
 
     [Fact]
-    public void WhenProgressIsCreated_ThenItHasNoRangeOfItsOwnAndThePrimaryColour()
+    public void WhenProgressIsCreated_ThenItHasNoRangeOfItsOwnAndThePrimaryColor()
     {
         // Act
         var progress = new Progress(_context);

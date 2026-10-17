@@ -6,7 +6,7 @@ position: 1
 
 # Widgets for Markdown Pages
 
-These widgets ship with HomeBlaze and are made for [markdown pages](../pages.md). Each one has a page of its own with its arguments, its slots, live samples and its limits. [Basics](basics.md) has the rules that all of them share: type names, paths, the sample motors, picker filters, slot blocks, labels, values, ranges, control writes, colours, icons and spacing. [Markdown Pages](../pages.md#blocks) describes the syntax of the blocks that they are written in.
+These widgets ship with HomeBlaze and are made for [markdown pages](../pages.md). Each one has a page of its own with its arguments, its slots, live samples and its limits. [Basics](basics.md) has the rules that all of them share: type names, paths, the sample motors, picker filters, slot blocks, labels, values, ranges, control writes, colors, icons and spacing. [Markdown Pages](../pages.md#blocks) describes the syntax of the blocks that they are written in.
 
 Every other type that can be configured works as a block as well, see [Widgets](../pages.md#widgets) on that page.
 
@@ -33,10 +33,10 @@ Every other type that can be configured works as a block as well, see [Widgets](
 
 | Widget | Type name | What it does |
 |--------|-----------|--------------|
-| [ValueMap](value-map.md) | `HomeBlaze.Components.ValueMap` | The text, colour and icon that a value gets in other widgets |
+| [ValueMap](value-map.md) | `HomeBlaze.Components.ValueMap` | The text, color and icon that a value gets in other widgets |
 | [ValueList](value-list.md) | `HomeBlaze.Components.ValueList` | Rows with an icon, a label, optional content and a value |
 | [ValueTile](value-tile.md) | `HomeBlaze.Components.ValueTile` | A small box with a label and one large value |
-| [Indicator](indicator.md) | `HomeBlaze.Components.Indicator` | A state as a coloured chip or as an icon |
+| [Indicator](indicator.md) | `HomeBlaze.Components.Indicator` | A state as a colored chip or as an icon |
 | [Progress](progress.md) | `HomeBlaze.Components.Progress` | A bar that shows where a number stands between a minimum and a maximum |
 | [Gauge](gauge.md) | `HomeBlaze.Components.Gauge` | A ring with a number between a minimum and a maximum |
 | [SubjectTable](subject-table.md) | `HomeBlaze.Components.SubjectTable` | A table with one row per subject and one column per property |
