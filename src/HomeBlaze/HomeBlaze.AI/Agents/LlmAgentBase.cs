@@ -15,7 +15,7 @@ namespace HomeBlaze.AI.Agents;
 /// A subclass only executes a turn on its backend and resets its chat session.
 /// </summary>
 [InterceptorSubject]
-[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The agent base coordinates configuration, triggers, the turn gate, prompts, memory, timeline and tool scoping around one lifecycle and state lock; its partial files separate these concerns and the logic that needs no agent state lives in dedicated helper types, so splitting the class itself would spread that shared state.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The agent base coordinates configuration, triggers, the turn gate, prompts, memory, timeline and tool scoping around one lifecycle and state lock; logic that needs no agent state lives in helper types, so splitting the class would spread that shared state.")]
 public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider
 {
     /// <summary>The text of the error entry recorded for a chat message that was cancelled before a reply.</summary>
@@ -354,6 +354,13 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
     }
 
+    /// <summary>Waits until no turn, upkeep or start holds the turn gate; it never faults.</summary>
+    internal async Task WaitForTurnGateAsync()
+    {
+        await _turnGate.WaitAsync(CancellationToken.None);
+        _turnGate.Release();
+    }
+
     // A configuration file may hold an explicit null, which the rest of the agent never expects.
     partial void OnWatchPathsChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
 
@@ -503,6 +510,35 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private string? GetStoragePath(string suffix) =>
         _storageDirectory is null ? null : Path.Combine(_storageDirectory, _storageName + suffix);
 
+    /// <summary>
+    /// Persists the run count and the last activity, also while the host stops; the caller holds the turn gate.
+    /// </summary>
+    private Task WriteRunStatisticsAsync() => AgentStorage.TryWriteDataFileAsync(
+        GetStoragePath(AgentStorage.StatsSuffix),
+        JsonSerializer.Serialize(new AgentStats(RunCount, LastActivityTime), AgentJsonContext.Default.AgentStats),
+        "after a restart the run count and the last activity may be older",
+        _logger,
+        this,
+        CancellationToken.None);
+
+    /// <summary>
+    /// Restores the run count and the last activity from the stats file, none when it is missing, and the last run
+    /// from the timeline; the caller holds the turn gate.
+    /// </summary>
+    private async Task RestoreRunStatisticsAsync(CancellationToken cancellationToken)
+    {
+        var statistics = await AgentStorage.TryReadJsonDataFileAsync(
+            GetStoragePath(AgentStorage.StatsSuffix),
+            content => JsonSerializer.Deserialize(content, AgentJsonContext.Default.AgentStats),
+            "the run count starts at zero and the last activity is unknown",
+            _logger,
+            this,
+            cancellationToken);
+        LastRunTime = Timeline.GetLastBackgroundRunTime();
+        RunCount = statistics?.BackgroundRunCount ?? 0;
+        LastActivityTime = statistics?.LastActivityTime;
+    }
+
     private void OnPauseLifted()
     {
         lock (_stateLock)
@@ -578,3 +614,5 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
     }
 }
+
+internal sealed record AgentStats(int BackgroundRunCount, DateTimeOffset? LastActivityTime);

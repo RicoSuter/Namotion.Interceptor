@@ -1,4 +1,3 @@
-using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Logging;
@@ -192,35 +191,6 @@ public abstract partial class LlmAgentBase
         return WriteRunStatisticsAsync();
     }
 
-    /// <summary>
-    /// Persists the run count and the last activity, also while the host stops; the caller holds the turn gate.
-    /// </summary>
-    private Task WriteRunStatisticsAsync() => AgentStorage.TryWriteDataFileAsync(
-        GetStoragePath(AgentStorage.StatsSuffix),
-        JsonSerializer.Serialize(new AgentStats(RunCount, LastActivityTime), AgentJsonContext.Default.AgentStats),
-        "after a restart the run count and the last activity may be older",
-        _logger,
-        this,
-        CancellationToken.None);
-
-    /// <summary>
-    /// Restores the run count and the last activity from the stats file, none when it is missing, and the last run
-    /// from the timeline; the caller holds the turn gate.
-    /// </summary>
-    private async Task RestoreRunStatisticsAsync(CancellationToken cancellationToken)
-    {
-        var statistics = await AgentStorage.TryReadJsonDataFileAsync(
-            GetStoragePath(AgentStorage.StatsSuffix),
-            content => JsonSerializer.Deserialize(content, AgentJsonContext.Default.AgentStats),
-            "the run count starts at zero and the last activity is unknown",
-            _logger,
-            this,
-            cancellationToken);
-        LastRunTime = Timeline.GetLastBackgroundRunTime();
-        RunCount = statistics?.BackgroundRunCount ?? 0;
-        LastActivityTime = statistics?.LastActivityTime;
-    }
-
     /// <summary>The error entry of a background run, with the calls of its tool set when it has one.</summary>
     private AgentTimelineEntry CreateBackgroundErrorEntry(string text, string trigger, DateTimeOffset started, AgentToolSet? tools) => new()
     {
@@ -232,5 +202,3 @@ public abstract partial class LlmAgentBase
         Duration = _services.TimeProvider.GetUtcNow() - started
     };
 }
-
-internal sealed record AgentStats(int BackgroundRunCount, DateTimeOffset? LastActivityTime);

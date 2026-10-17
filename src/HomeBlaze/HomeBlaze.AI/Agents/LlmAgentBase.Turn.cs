@@ -7,13 +7,6 @@ namespace HomeBlaze.AI.Agents;
 
 public abstract partial class LlmAgentBase
 {
-    /// <summary>Waits until no turn, upkeep or start holds the turn gate; it never faults.</summary>
-    internal async Task WaitForTurnGateAsync()
-    {
-        await _turnGate.WaitAsync(CancellationToken.None);
-        _turnGate.Release();
-    }
-
     /// <summary>Runs a turn and closes its tool set when it ends, so a tool call that arrives later runs nothing.</summary>
     private async Task<AgentTurnResult> RunTurnAsync(
         AgentTurnKind kind,
