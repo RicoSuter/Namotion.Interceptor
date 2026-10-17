@@ -12,8 +12,14 @@ internal static class ControlKindResolver
     /// Gets the kind of control for a property or a method property.
     /// </summary>
     /// <param name="property">The target, or null when the path leads nowhere.</param>
-    /// <param name="minimum">The <c>Minimum</c> argument of the control, which can give a number its range.</param>
-    /// <param name="maximum">The <c>Maximum</c> argument of the control, which can give a number its range.</param>
+    /// <param name="minimum">
+    /// The <c>Minimum</c> argument of the control. Without it the lower end comes from the <c>Minimum</c> attribute of the
+    /// property, then 0 for a percent, see <see cref="ValueRangeResolver.TryFindEnds"/>.
+    /// </param>
+    /// <param name="maximum">
+    /// The <c>Maximum</c> argument of the control. Without it the upper end comes from the <c>Maximum</c> attribute of the
+    /// property, then 1 for a percent, see <see cref="ValueRangeResolver.TryFindEnds"/>.
+    /// </param>
     /// <param name="sliderRange">
     /// For <see cref="ControlKind.Slider"/> the ends of its range, also of an empty range, which the slider reports;
     /// otherwise default.

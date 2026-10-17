@@ -29,13 +29,15 @@ public partial class Control : IConfigurable, ITitleProvider
     public partial string? Label { get; set; }
 
     /// <summary>
-    /// The value at the left end of a slider, in the unit of the property.
+    /// The value at the left end of a slider, in the unit of the property. Defaults to the Minimum attribute of the
+    /// property, then to 0 for a percent.
     /// </summary>
     [Configuration]
     public partial double? Minimum { get; set; }
 
     /// <summary>
-    /// The value at the right end of a slider, in the unit of the property.
+    /// The value at the right end of a slider, in the unit of the property. Defaults to the Maximum attribute of the
+    /// property, then to 1 for a percent.
     /// </summary>
     [Configuration]
     public partial double? Maximum { get; set; }
