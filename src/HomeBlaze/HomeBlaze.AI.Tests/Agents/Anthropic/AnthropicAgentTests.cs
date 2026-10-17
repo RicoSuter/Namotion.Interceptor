@@ -4,7 +4,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Anthropic;
-using HomeBlaze.AI.Tests.Agents.Cli;
+using HomeBlaze.AI.Tests.Agents.ClaudeCli;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;

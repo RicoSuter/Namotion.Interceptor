@@ -13,11 +13,8 @@ public static class DataDirectorySeeder
     /// </summary>
     public const string SeedRootFileName = "Root.json";
 
-    /// <summary>
-    /// The documentation directory, relative to both the seed directory and the data directory, which
-    /// <see cref="ReplaceDocumentation"/> replaces.
-    /// </summary>
-    public const string DocumentationDirectory = "Files/Docs";
+    // Relative to both the seed directory and the data directory.
+    private const string DocumentationDirectory = "Files/Docs";
 
     /// <summary>
     /// Copies the seed directory into the folder of <paramref name="rootConfigurationPath"/> when that file does not exist

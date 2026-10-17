@@ -1,8 +1,8 @@
 using HomeBlaze.AI.Agents;
-using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Agents.ClaudeCli;
 using Xunit;
 
-namespace HomeBlaze.AI.Tests.Agents.Cli;
+namespace HomeBlaze.AI.Tests.Agents.ClaudeCli;
 
 public class ClaudeCliFailureTests
 {

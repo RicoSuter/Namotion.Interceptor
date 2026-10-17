@@ -2,7 +2,7 @@ using System.Runtime.Versioning;
 using HomeBlaze.Abstractions;
 using System.Text.RegularExpressions;
 using HomeBlaze.AI.Agents;
-using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Agents.ClaudeCli;
 using HomeBlaze.AI.Tests;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;

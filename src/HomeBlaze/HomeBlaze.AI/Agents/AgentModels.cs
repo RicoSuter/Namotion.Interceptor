@@ -22,25 +22,6 @@ public enum AgentEffort
 }
 
 /// <summary>
-/// Conversions of <see cref="AgentEffort"/>.
-/// </summary>
-internal static class AgentEffortExtensions
-{
-    /// <summary>
-    /// The value used by the Claude CLI <c>--effort</c> flag and the API <c>output_config.effort</c> field.
-    /// </summary>
-    public static string ToWireValue(this AgentEffort effort) => effort switch
-    {
-        AgentEffort.Low => "low",
-        AgentEffort.Medium => "medium",
-        AgentEffort.High => "high",
-        AgentEffort.ExtraHigh => "xhigh",
-        AgentEffort.Max => "max",
-        _ => throw new ArgumentOutOfRangeException(nameof(effort), effort, null)
-    };
-}
-
-/// <summary>
 /// One turn handed to a backend.
 /// </summary>
 /// <param name="Kind">Background or chat.</param>
@@ -71,7 +52,7 @@ public sealed record AgentTurnRequest(
 /// The whole answer as streamed: every text segment of the turn in order, separated by a blank line.
 /// </param>
 /// <param name="Usage">Token usage, if reported.</param>
-/// <param name="RateLimit">Subscription utilization, if reported.</param>
+/// <param name="RateLimit">Subscription utilization reported by the Claude CLI, null for other backends.</param>
 public sealed record AgentTurnResult(string Text, AgentUsage? Usage, AgentRateLimit? RateLimit)
 {
     /// <summary>

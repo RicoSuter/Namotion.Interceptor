@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace HomeBlaze.AI.Agents.Cli;
+namespace HomeBlaze.AI.Agents.ClaudeCli;
 
 /// <summary>An event of the Claude CLI stream-json output that agents use.</summary>
 internal abstract record ClaudeStreamEvent;

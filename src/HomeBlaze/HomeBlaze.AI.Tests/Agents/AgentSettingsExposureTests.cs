@@ -1,7 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Anthropic;
-using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Agents.ClaudeCli;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.Logging.Abstractions;

@@ -2,7 +2,7 @@ using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
 
-namespace HomeBlaze.AI.Agents.Cli;
+namespace HomeBlaze.AI.Agents.ClaudeCli;
 
 /// <summary>
 /// Writes the turn files of the CLI, the system prompt and the MCP configuration with the turn token, so that only the

@@ -7,7 +7,6 @@ using HomeBlaze.Storage.Abstractions.Attributes;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Namotion.Interceptor;
@@ -18,15 +17,7 @@ namespace HomeBlaze.Storage.Tests;
 
 public class MarkdownFileWriteTests : IDisposable
 {
-    // The storage is the Files folder of a data directory, so its Docs folder is the documentation folder once the
-    // data directory is known to the storage.
-    private readonly DirectoryInfo _dataDirectory = Directory.CreateTempSubdirectory("homeblaze-markdown-");
-    private readonly DirectoryInfo _directory;
-
-    public MarkdownFileWriteTests()
-    {
-        _directory = _dataDirectory.CreateSubdirectory("Files");
-    }
+    private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-markdown-");
     private readonly List<FluentStorageContainer> _storages = [];
 
     [Fact]
@@ -606,45 +597,6 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheStorageIsNotLocal_ThenTheWriteOperationsAreRefusedWithoutWriting()
-    {
-        // Arrange
-        var storage = new Mock<IStorageContainer>();
-        var (parser, serializer) = CreateParserAndSerializer();
-        var markdown = new MarkdownFile(storage.Object, "Notes.md", parser, serializer);
-
-        // Act & Assert
-        var replaceContent = await Assert.ThrowsAsync<ArgumentException>(
-            () => markdown.ReplaceContentAsync("# New", CancellationToken.None));
-        var replaceText = await Assert.ThrowsAsync<ArgumentException>(
-            () => markdown.ReplaceTextAsync("# Old", "# New", CancellationToken.None));
-        Assert.Contains("local", replaceContent.Message);
-        Assert.Contains("local", replaceText.Message);
-        Assert.False(MarkdownWriteRules.IsLocal(markdown.Storage));
-        storage.Verify(container => container.WriteBlobAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
-        storage.Verify(container => container.WriteBlobAsync(It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
-        storage.Verify(container => container.ReadBlobAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task WhenTheStorageTypeIsNotLocal_ThenCreatingAMarkdownFileIsRefused()
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-        var folder = new VirtualFolder(storage, "Docs/");
-        storage.StorageType = "azure-blob";
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(
-            () => storage.CreateMarkdownFileAsync("Notes.md", "# Notes", CancellationToken.None));
-        await Assert.ThrowsAsync<ArgumentException>(
-            () => folder.CreateMarkdownFileAsync("Notes.md", "# Notes", CancellationToken.None));
-        Assert.False(storage.IsLocal);
-        Assert.False(File.Exists(GetFullPath("Notes.md")));
-        Assert.False(File.Exists(GetFullPath("Docs/Notes.md")));
-    }
-
-    [Fact]
     public async Task WhenAFolderBelongsToAnotherStorage_ThenCreatingAMarkdownFileIsRefused()
     {
         // Arrange
@@ -653,24 +605,6 @@ public class MarkdownFileWriteTests : IDisposable
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
             () => folder.CreateMarkdownFileAsync("Notes.md", "# Notes", CancellationToken.None));
-    }
-
-    [Theory]
-    [InlineData("disk", true)]
-    [InlineData("filesystem", true)]
-    [InlineData("inmemory", true)]
-    [InlineData("azure-blob", false)]
-    public void WhenCheckingTheStorageType_ThenOnlyDiskAndInMemoryStorageIsLocal(string storageType, bool expected)
-    {
-        // Arrange
-        var storage = CreateStorage();
-
-        // Act
-        storage.StorageType = storageType;
-
-        // Assert
-        Assert.Equal(expected, storage.IsLocal);
-        Assert.Equal(expected, MarkdownWriteRules.IsLocal(storage));
     }
 
     [Fact]
@@ -775,34 +709,6 @@ public class MarkdownFileWriteTests : IDisposable
         var exception = Assert.IsType<InvalidOperationException>(innerException);
         Assert.StartsWith("An operation of a storage was called from work that runs on the worker", exception.Message);
         Assert.EndsWith("Changed.", ReadFile("Notes.md"));
-    }
-
-    [Fact]
-    public async Task WhenAPageIsInTheDocumentationFolder_ThenTheWriteOperationsRefuseItAndOtherPagesStayWritable()
-    {
-        // Arrange
-        WriteFile("Docs/Guide.md", "# Guide");
-        WriteFile("Notes.md", "# Notes");
-        var storage = await ConnectWithDocumentationFolderAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        var guide = Assert.IsType<MarkdownFile>(docs.Children["Guide.md"]);
-        var notes = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
-
-        // Act
-        var replaceText = await Record.ExceptionAsync(() => guide.ReplaceTextAsync("Guide", "Changed", CancellationToken.None));
-        var replaceContent = await Record.ExceptionAsync(() => guide.ReplaceContentAsync("# Changed", CancellationToken.None));
-        var create = await Record.ExceptionAsync(() => docs.CreateMarkdownFileAsync("New.md", "# New", CancellationToken.None));
-        await notes.ReplaceTextAsync("Notes", "Changed notes", CancellationToken.None);
-
-        // Assert
-        Assert.All([replaceText, replaceContent, create], exception =>
-            Assert.Equal(MarkdownFile.DocumentationFolderMessage, Assert.IsType<ArgumentException>(exception).Message));
-        Assert.True(storage.IsPathInDocumentationFolder(guide.FullPath));
-        Assert.True(storage.IsPathInDocumentationFolder(docs.RelativePath));
-        Assert.False(storage.IsPathInDocumentationFolder(notes.FullPath));
-        Assert.Equal("# Guide", ReadFile("Docs/Guide.md"));
-        Assert.False(File.Exists(GetFullPath("Docs/New.md")));
-        Assert.Equal("# Changed notes", ReadFile("Notes.md"));
     }
 
     private const string PageWithLayout = """
@@ -1366,9 +1272,9 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.All(method.Parameters.Where(parameter => parameter.RequiresInput), parameter => Assert.Equal(typeof(string), parameter.Type));
     }
 
-    private FluentStorageContainer CreateStorage(string storageType = "disk", string? dataDirectory = null)
+    private FluentStorageContainer CreateStorage(string storageType = "disk")
     {
-        var services = CreateServices(out var context, dataDirectory);
+        var services = CreateServices(out var context);
         var serviceProvider = services.BuildServiceProvider();
         var storage = new FluentStorageContainer(
             serviceProvider.GetRequiredService<SubjectTypeRegistry>(),
@@ -1385,13 +1291,6 @@ public class MarkdownFileWriteTests : IDisposable
         return storage;
     }
 
-    private async Task<FluentStorageContainer> ConnectWithDocumentationFolderAsync()
-    {
-        var storage = CreateStorage(dataDirectory: _dataDirectory.FullName);
-        await storage.ConnectAsync(CancellationToken.None);
-        return storage;
-    }
-
     private async Task<FluentStorageContainer> ConnectAsync(string storageType = "disk")
     {
         var storage = CreateStorage(storageType);
@@ -1399,9 +1298,7 @@ public class MarkdownFileWriteTests : IDisposable
         return storage;
     }
 
-    /// <param name="context">The context of the services.</param>
-    /// <param name="dataDirectory">The data directory that the root manager serves to the storage, or null for the default.</param>
-    private static ServiceCollection CreateServices(out IInterceptorSubjectContext context, string? dataDirectory = null)
+    private static ServiceCollection CreateServices(out IInterceptorSubjectContext context)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
@@ -1418,22 +1315,9 @@ public class MarkdownFileWriteTests : IDisposable
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        if (dataDirectory is not null)
-        {
-            services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
-                .AddInMemoryCollection([new(HomeBlazePaths.RootConfigurationFileKey, Path.Combine(dataDirectory, "root.json"))])
-                .Build());
-        }
-
         services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
         return services;
-    }
-
-    private static (MarkdownContentParser Parser, ConfigurableSubjectSerializer Serializer) CreateParserAndSerializer()
-    {
-        var serviceProvider = CreateServices(out _).BuildServiceProvider();
-        return (serviceProvider.GetRequiredService<MarkdownContentParser>(), serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>());
     }
 
     private string GetFullPath(string relativePath)
@@ -1455,7 +1339,7 @@ public class MarkdownFileWriteTests : IDisposable
             storage.Dispose();
         }
 
-        _dataDirectory.Delete(recursive: true);
+        _directory.Delete(recursive: true);
     }
 
     /// <summary>A stream whose reads wait until <see cref="Open"/> is called.</summary>

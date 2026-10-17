@@ -3,7 +3,7 @@ using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
 
-public class AgentModelsTests
+public class ClaudeEffortTests
 {
     [Theory]
     [InlineData(AgentEffort.Low, "low")]
@@ -14,7 +14,7 @@ public class AgentModelsTests
     public void WhenEffortIsConvertedToTheWireValue_ThenItMatchesTheApiName(AgentEffort effort, string expected)
     {
         // Act
-        var value = effort.ToWireValue();
+        var value = ClaudeEffort.ToWireValue(effort);
 
         // Assert
         Assert.Equal(expected, value);
