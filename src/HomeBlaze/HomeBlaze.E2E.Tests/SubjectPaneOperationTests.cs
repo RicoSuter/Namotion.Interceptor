@@ -59,6 +59,21 @@ public class SubjectPaneOperationTests
     }
 
     [Fact]
+    public async Task WhenAFolderPaneIsShown_ThenItHasNoButtonsForTheMethodsOnlyForAgents()
+    {
+        // Arrange & Act
+        var (_, pane) = await OpenPaneAsync("Demo");
+
+        // Assert
+        await Assertions.Expect(Method(pane, "Create")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(Method(pane, "Get Order")).ToHaveCountAsync(0);
+        await Assertions.Expect(Method(pane, "Set Order")).ToHaveCountAsync(0);
+        await Assertions.Expect(Method(pane, "Get Metadata")).ToHaveCountAsync(0);
+        await Assertions.Expect(Method(pane, "Set Metadata")).ToHaveCountAsync(0);
+        await Assertions.Expect(Method(pane, "Set Child Metadata")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenAConfirmationIsCanceled_ThenTheButtonIsEnabledAgain()
     {
         // Arrange

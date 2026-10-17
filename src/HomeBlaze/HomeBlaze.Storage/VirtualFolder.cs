@@ -150,4 +150,56 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+
+    /// <summary>
+    /// Gets the names of the children of this folder in the order in which they are shown.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The storage is not connected, or the folder is not in it.</exception>
+    [Query(Title = "Get Order", Description = MetadataMethodDescriptions.GetOrder, Position = 2, Audience = MethodAudience.Agents)]
+    public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
+        => RootStorage.GetChildOrderAsync(StoragePath.Normalize(RelativePath), cancellationToken);
+
+    /// <summary>
+    /// Stores the order of the children of this folder: the given names first, in the given order, then the other
+    /// children in the order in which they are shown.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is given more than once, or is not a child of this folder.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The storage is not connected, the folder is not in it, or its metadata file could not be read.
+    /// </exception>
+    [Operation(Title = "Set Order", Description = MetadataMethodDescriptions.SetOrder, Position = 3, Audience = MethodAudience.Agents)]
+    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken)
+        => RootStorage.SetChildOrderAsync(StoragePath.Normalize(RelativePath), names, cancellationToken);
+
+    /// <summary>
+    /// Gets the metadata of this folder and of its children that are stored as JSON files.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The storage is not connected, or the folder is not in it.</exception>
+    [Query(Title = "Get Metadata", Description = MetadataMethodDescriptions.GetMetadata, Position = 4, Audience = MethodAudience.Agents)]
+    public Task<ContainerMetadata> GetMetadataAsync(CancellationToken cancellationToken)
+        => RootStorage.GetContainerMetadataAsync(StoragePath.Normalize(RelativePath), cancellationToken);
+
+    /// <summary>
+    /// Writes the metadata of this folder. A null or blank value is removed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The storage is not connected, the folder is not in it, or its metadata file could not be read.
+    /// </exception>
+    [Operation(Title = "Set Metadata", Description = MetadataMethodDescriptions.SetMetadata, Position = 5, Audience = MethodAudience.Agents)]
+    public Task SetMetadataAsync(string? title, string? navigationTitle, string? icon, CancellationToken cancellationToken)
+        => WriteMetadataAsync(new FolderMetadata(title, navigationTitle, icon), cancellationToken);
+
+    /// <summary>
+    /// Writes the navigation metadata of a child of this folder that is stored as a JSON file. A null or blank value is removed.
+    /// </summary>
+    /// <exception cref="ArgumentException">The name is not the name of a child stored as a JSON file.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The storage is not connected, the folder is not in it, or the metadata file could not be read.
+    /// </exception>
+    [Operation(Title = "Set Child Metadata", Description = MetadataMethodDescriptions.SetChildMetadata, Position = 6, Audience = MethodAudience.Agents)]
+    public Task SetChildMetadataAsync(
+        string name, string? navigationTitle, string? icon, NavigationLocation? location, AppBarAlignment? alignment,
+        CancellationToken cancellationToken)
+        => RootStorage.WriteChildMetadataAsync(
+            StoragePath.Normalize(RelativePath), name, new SubjectMetadata(navigationTitle, icon, location, alignment), cancellationToken);
 }

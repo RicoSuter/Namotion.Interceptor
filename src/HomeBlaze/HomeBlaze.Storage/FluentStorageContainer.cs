@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using FluentStorage;
 using FluentStorage.Blobs;
@@ -634,21 +635,90 @@ public partial class FluentStorageContainer :
         var connection = Connection;
         await RunOperationAsync(connection, token =>
         {
-            if (!connection.Index.TryGetEntry(subject, out var entry) || entry.IsFolder ||
-                subject is not IConfigurable || !StoragePath.IsJson(entry.Path))
+            if (!TryGetJsonEntry(connection, subject, out var entry))
             {
                 throw new InvalidOperationException("Only the subject of a JSON file in this storage has metadata.");
             }
 
-            var path = StorageMetadataPath.GetSubjectFilePath(entry.Path);
-            var document = GetMetadataDocument(connection, path);
-            document.NavigationTitle = GetValue(metadata?.NavigationTitle);
-            document.Icon = GetValue(metadata?.Icon);
-            document.Location = metadata?.Location;
-            document.Alignment = metadata?.Alignment;
-            return WriteMetadataDocumentAsync(connection, path, document, token);
+            return WriteSubjectMetadataAsync(connection, entry, metadata, token);
         }, cancellationToken);
     }
+
+    /// <summary>
+    /// Writes the metadata of a child of a folder that is stored as a JSON file, given by its name.
+    /// </summary>
+    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
+    /// <param name="name">The name of the child.</param>
+    /// <param name="metadata">The metadata, null to remove it.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="ArgumentException">The name is not the name of a child stored as a JSON file.</exception>
+    /// <exception cref="InvalidOperationException">The folder is not in the tree, or the metadata file could not be read.</exception>
+    internal async Task WriteChildMetadataAsync(string folder, string name, SubjectMetadata? metadata, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        await RunOperationAsync(connection, token =>
+        {
+            var children = GetChildren(connection, folder, out _);
+            if (!children.TryGetValue(name, out var child) || !TryGetJsonEntry(connection, child, out var entry))
+            {
+                var namesWithMetadata = children
+                    .Where(pair => TryGetJsonEntry(connection, pair.Value, out _))
+                    .Select(static pair => pair.Key)
+                    .Order(StringComparer.Ordinal);
+                throw new ArgumentException(
+                    $"'{name}' is not a child of the folder stored as a JSON file. Children with metadata: {FormatNames(namesWithMetadata)}.",
+                    nameof(name));
+            }
+
+            return WriteSubjectMetadataAsync(connection, entry, metadata, token);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets the metadata of a folder and the metadata of its children that are stored as JSON files.
+    /// </summary>
+    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
+    /// <param name="cancellationToken">Cancels waiting for the worker.</param>
+    /// <exception cref="InvalidOperationException">The folder is not in the tree.</exception>
+    internal async Task<ContainerMetadata> GetContainerMetadataAsync(string folder, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        ContainerMetadata? result = null;
+        await RunOperationAsync(connection, token =>
+        {
+            var children = GetChildren(connection, folder, out var virtualFolder);
+            var childrenMetadata = new Dictionary<string, SubjectMetadata?>(StringComparer.Ordinal);
+            foreach (var (name, child) in children)
+            {
+                if (TryGetJsonEntry(connection, child, out _))
+                {
+                    childrenMetadata[name] = child.TryGetSubjectMetadata();
+                }
+            }
+
+            result = new ContainerMetadata(virtualFolder?.Metadata, childrenMetadata);
+            return Task.CompletedTask;
+        }, cancellationToken);
+
+        return result!;
+    }
+
+    private Task WriteSubjectMetadataAsync(
+        StorageConnection connection, StorageEntry entry, SubjectMetadata? metadata, CancellationToken cancellationToken)
+    {
+        var path = StorageMetadataPath.GetSubjectFilePath(entry.Path);
+        var document = GetMetadataDocument(connection, path);
+        document.NavigationTitle = GetValue(metadata?.NavigationTitle);
+        document.Icon = GetValue(metadata?.Icon);
+        document.Location = metadata?.Location;
+        document.Alignment = metadata?.Alignment;
+        return WriteMetadataDocumentAsync(connection, path, document, cancellationToken);
+    }
+
+    private static bool TryGetJsonEntry(
+        StorageConnection connection, IInterceptorSubject subject, [NotNullWhen(true)] out StorageEntry? entry)
+        => connection.Index.TryGetEntry(subject, out entry) && !entry.IsFolder &&
+            subject is IConfigurable && StoragePath.IsJson(entry.Path);
 
     /// <summary>
     /// Moves a child of a folder to the place of another child in the order in which they are shown, shifting the
@@ -666,14 +736,8 @@ public partial class FluentStorageContainer :
         await RunOperationAsync(connection, token =>
         {
             // Read on the worker, so that a move starts from the order the move before it wrote.
-            var virtualFolder = folder.Length == 0 ? null : GetPlacedFolder(connection, folder);
-            var children = virtualFolder?.Children ?? Children;
-            var childOrder = virtualFolder?.ChildOrder ?? ChildOrder;
-
-            var names = ChildOrdering
-                .Order(children, childOrder, static child => child.Key, static child => child.Value.GetNavigationTitle(child.Key))
-                .Select(static child => child.Key)
-                .ToList();
+            var children = GetChildren(connection, folder, out var virtualFolder);
+            var names = GetShownNames(children, virtualFolder?.ChildOrder ?? ChildOrder);
 
             var index = names.IndexOf(name);
             var targetIndex = names.IndexOf(targetName);
@@ -690,6 +754,118 @@ public partial class FluentStorageContainer :
             document.Order = [.. names];
             return WriteMetadataDocumentAsync(connection, path, document, token);
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets the names of the children of a folder in the order in which they are shown.
+    /// </summary>
+    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
+    /// <param name="cancellationToken">Cancels waiting for the worker.</param>
+    /// <exception cref="InvalidOperationException">The folder is not in the tree.</exception>
+    internal async Task<string[]> GetChildOrderAsync(string folder, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        string[] names = [];
+        await RunOperationAsync(connection, _ =>
+        {
+            // Read on the worker, so that the order is the one that the write before it stored.
+            var children = GetChildren(connection, folder, out var virtualFolder);
+            names = [.. GetShownNames(children, virtualFolder?.ChildOrder ?? ChildOrder)];
+            return Task.CompletedTask;
+        }, cancellationToken);
+
+        return names;
+    }
+
+    /// <summary>
+    /// Writes the order of the children of a folder: the given names first, in the given order, then the other children
+    /// in the order in which they are shown, which drops the names of children that are gone.
+    /// </summary>
+    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
+    /// <param name="names">The names of the children to show first.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="ArgumentException">A name is given more than once, or is not a child of the folder.</exception>
+    /// <exception cref="InvalidOperationException">The folder is not in the tree, or its metadata file could not be read.</exception>
+    internal async Task SetChildOrderAsync(string folder, IReadOnlyList<string> names, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        // A copy, as the worker reads the names later.
+        var requestedNames = names.ToArray();
+        var listedNames = new HashSet<string>(StringComparer.Ordinal);
+        var repeatedNames = new List<string>();
+        foreach (var name in requestedNames)
+        {
+            // Null arrives from an agent that sends a JSON null in the array.
+            if (name is null)
+            {
+                throw new ArgumentException("A name is null.", nameof(names));
+            }
+
+            if (!listedNames.Add(name) && !repeatedNames.Contains(name))
+            {
+                repeatedNames.Add(name);
+            }
+        }
+
+        if (repeatedNames.Count > 0)
+        {
+            throw new ArgumentException($"Names given more than once: {FormatNames(repeatedNames)}.", nameof(names));
+        }
+
+        var connection = Connection;
+        await RunOperationAsync(connection, token =>
+        {
+            var children = GetChildren(connection, folder, out var virtualFolder);
+            var unknownNames = requestedNames.Where(name => !children.ContainsKey(name)).ToList();
+            if (unknownNames.Count > 0)
+            {
+                throw new ArgumentException(
+                    $"Names that are not children of the folder: {FormatNames(unknownNames)}. Its children: {FormatNames(children.Keys.Order(StringComparer.Ordinal))}.",
+                    nameof(names));
+            }
+
+            var shownNames = GetShownNames(children, virtualFolder?.ChildOrder ?? ChildOrder);
+            var order = new string[shownNames.Count];
+            var position = 0;
+            foreach (var name in requestedNames)
+            {
+                order[position++] = name;
+            }
+
+            foreach (var name in shownNames)
+            {
+                if (!listedNames.Contains(name))
+                {
+                    order[position++] = name;
+                }
+            }
+
+            var path = StorageMetadataPath.GetFolderFilePath(folder);
+            var document = GetMetadataDocument(connection, path);
+            document.Order = order;
+            return WriteMetadataDocumentAsync(connection, path, document, token);
+        }, cancellationToken);
+    }
+
+    // Runs on the worker, which replaces the children of a folder.
+    private IReadOnlyDictionary<string, IInterceptorSubject> GetChildren(
+        StorageConnection connection, string folder, out VirtualFolder? virtualFolder)
+    {
+        virtualFolder = folder.Length == 0 ? null : GetPlacedFolder(connection, folder);
+        return virtualFolder?.Children ?? Children;
+    }
+
+    private static List<string> GetShownNames(IReadOnlyDictionary<string, IInterceptorSubject> children, ImmutableArray<string> childOrder)
+        => ChildOrdering
+            .Order(children, childOrder, static child => child.Key, static child => child.Value.GetNavigationTitle(child.Key))
+            .Select(static child => child.Key)
+            .ToList();
+
+    private static string FormatNames(IEnumerable<string> names)
+    {
+        var text = string.Join(", ", names.Select(static name => $"'{name}'"));
+        return text.Length > 0 ? text : "none";
     }
 
     private static VirtualFolder GetPlacedFolder(StorageConnection connection, string folder)
@@ -948,6 +1124,43 @@ public partial class FluentStorageContainer :
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+
+    /// <summary>
+    /// Gets the names of the children of the root in the order in which they are shown.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The storage is not connected.</exception>
+    [Query(Title = "Get Order", Description = MetadataMethodDescriptions.GetOrder, Position = 2, Audience = MethodAudience.Agents)]
+    public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
+        => GetChildOrderAsync(string.Empty, cancellationToken);
+
+    /// <summary>
+    /// Stores the order of the children of the root: the given names first, in the given order, then the other
+    /// children in the order in which they are shown.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is given more than once, or is not a child of the root.</exception>
+    /// <exception cref="InvalidOperationException">The storage is not connected, or the metadata file could not be read.</exception>
+    [Operation(Title = "Set Order", Description = MetadataMethodDescriptions.SetOrder, Position = 3, Audience = MethodAudience.Agents)]
+    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken)
+        => SetChildOrderAsync(string.Empty, names, cancellationToken);
+
+    /// <summary>
+    /// Gets the metadata of the children of the root that are stored as JSON files. The root has no metadata of its own.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The storage is not connected.</exception>
+    [Query(Title = "Get Metadata", Description = MetadataMethodDescriptions.GetMetadata, Position = 4, Audience = MethodAudience.Agents)]
+    public Task<ContainerMetadata> GetMetadataAsync(CancellationToken cancellationToken)
+        => GetContainerMetadataAsync(string.Empty, cancellationToken);
+
+    /// <summary>
+    /// Writes the navigation metadata of a child of the root that is stored as a JSON file. A null or blank value is removed.
+    /// </summary>
+    /// <exception cref="ArgumentException">The name is not the name of a child stored as a JSON file.</exception>
+    /// <exception cref="InvalidOperationException">The storage is not connected, or the metadata file could not be read.</exception>
+    [Operation(Title = "Set Child Metadata", Description = MetadataMethodDescriptions.SetChildMetadata, Position = 5, Audience = MethodAudience.Agents)]
+    public Task SetChildMetadataAsync(
+        string name, string? navigationTitle, string? icon, NavigationLocation? location, AppBarAlignment? alignment,
+        CancellationToken cancellationToken)
+        => WriteChildMetadataAsync(string.Empty, name, new SubjectMetadata(navigationTitle, icon, location, alignment), cancellationToken);
 
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the index.

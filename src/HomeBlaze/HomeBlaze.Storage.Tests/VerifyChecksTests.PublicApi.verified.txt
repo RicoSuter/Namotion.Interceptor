@@ -2,6 +2,131 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.E2E.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Storage.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Storage
+{
+    public sealed class ContainerMetadata : System.IEquatable<HomeBlaze.Storage.ContainerMetadata>
+    {
+        public ContainerMetadata(HomeBlaze.Components.Abstractions.Pages.FolderMetadata? Metadata, System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Components.Abstractions.Pages.SubjectMetadata?> Children) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Components.Abstractions.Pages.SubjectMetadata?> Children { get; init; }
+        public HomeBlaze.Components.Abstractions.Pages.FolderMetadata? Metadata { get; init; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Storage")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("System")]
+    [System.ComponentModel.Description("Mounts a storage location and loads the files in it as subjects")]
+    [System.ComponentModel.DisplayName("Storage")]
+    public class FluentStorageContainer : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Components.Abstractions.Pages.IMetadataContainer, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public FluentStorageContainer(HomeBlaze.Services.SubjectTypeRegistry typeRegistry, HomeBlaze.Services.ConfigurableSubjectSerializer serializer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.FluentStorageContainer>? logger = null) { }
+        public System.Collections.Generic.IReadOnlyCollection<string> ChildNames { get; }
+        public System.Collections.Immutable.ImmutableArray<string> ChildOrder { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Registry.Attributes.InlinePaths]
+        public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string ConnectionString { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? ContainerName { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool EnableFileWatching { get; set; }
+        public bool HasOwnMetadata { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconColor { get; }
+        public string IconName { get; }
+        public HomeBlaze.Components.Abstractions.Pages.FolderMetadata? Metadata { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int ReconcileIntervalSeconds { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public HomeBlaze.Storage.Abstractions.StorageStatus Status { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string StorageType { get; set; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task ConnectAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
+        public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Gets the metadata of this folder (Title, NavigationTitle, Icon; null when it has none, always null for the root of a storage) and the navigation metadata of each child stored as a JSON file (NavigationTitle, Icon, Location, Alignment; null when it has none), keyed by the name of the child. Set Metadata and Set Child Metadata replace every value, so read it first to keep the values that are not changed.", Position=4, Title="Get Metadata")]
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.ContainerMetadata> GetMetadataAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description="Gets the names of the children of this folder in the order in which they are show" +
+            "n in navigation and in the browser. A name is the key of the child in Children.", Position=2, Title="Get Order")]
+        public System.Threading.Tasks.Task<string[]> GetOrderAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        public System.Threading.Tasks.Task MoveChildAsync(string name, string targetName, System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Replaces the navigation metadata of a child stored as a JSON file, given by its name as Get Metadata lists it. A value that is null or blank is removed. navigationTitle: the title in navigation. icon: a MudBlazor icon name for navigation, the icon of the subject itself is unchanged. location: where a subject with a page appears in navigation. alignment: the side of the top bar, only used for the location AppBar.", Position=5, Title="Set Child Metadata")]
+        public System.Threading.Tasks.Task SetChildMetadataAsync(string name, string? navigationTitle, string? icon, HomeBlaze.Components.Abstractions.Pages.NavigationLocation? location, HomeBlaze.Components.Abstractions.Pages.AppBarAlignment? alignment, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Sets the order in which the children of this folder are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as Get Order returns it, and may be given only once.", Position=3, Title="Set Order")]
+        public System.Threading.Tasks.Task SetOrderAsync(string[] names, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteChildMetadataAsync(Namotion.Interceptor.IInterceptorSubject child, HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteMetadataAsync(HomeBlaze.Components.Abstractions.Pages.FolderMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class VirtualFolder : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Components.Abstractions.Pages.IMetadataContainer, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public VirtualFolder(HomeBlaze.Storage.Abstractions.IStorageContainer storage, string relativePath) { }
+        public System.Collections.Generic.IReadOnlyCollection<string> ChildNames { get; }
+        public System.Collections.Immutable.ImmutableArray<string> ChildOrder { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Registry.Attributes.InlinePaths]
+        public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; set; }
+        public bool HasOwnMetadata { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        public HomeBlaze.Components.Abstractions.Pages.FolderMetadata? Metadata { get; }
+        public string RelativePath { get; }
+        public HomeBlaze.Storage.Abstractions.StorageStatus Status { get; }
+        public HomeBlaze.Storage.Abstractions.IStorageContainer Storage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
+        public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Gets the metadata of this folder (Title, NavigationTitle, Icon; null when it has none, always null for the root of a storage) and the navigation metadata of each child stored as a JSON file (NavigationTitle, Icon, Location, Alignment; null when it has none), keyed by the name of the child. Set Metadata and Set Child Metadata replace every value, so read it first to keep the values that are not changed.", Position=4, Title="Get Metadata")]
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.ContainerMetadata> GetMetadataAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description="Gets the names of the children of this folder in the order in which they are show" +
+            "n in navigation and in the browser. A name is the key of the child in Children.", Position=2, Title="Get Order")]
+        public System.Threading.Tasks.Task<string[]> GetOrderAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        public System.Threading.Tasks.Task MoveChildAsync(string name, string targetName, System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Replaces the navigation metadata of a child stored as a JSON file, given by its name as Get Metadata lists it. A value that is null or blank is removed. navigationTitle: the title in navigation. icon: a MudBlazor icon name for navigation, the icon of the subject itself is unchanged. location: where a subject with a page appears in navigation. alignment: the side of the top bar, only used for the location AppBar.", Position=6, Title="Set Child Metadata")]
+        public System.Threading.Tasks.Task SetChildMetadataAsync(string name, string? navigationTitle, string? icon, HomeBlaze.Components.Abstractions.Pages.NavigationLocation? location, HomeBlaze.Components.Abstractions.Pages.AppBarAlignment? alignment, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Replaces the metadata of this folder. A value that is null or blank is removed. title: the title of the folder everywhere, without one the name of the folder. navigationTitle: the title in navigation, without one the title. icon: a MudBlazor icon name such as Devices, without one Folder.", Position=5, Title="Set Metadata")]
+        public System.Threading.Tasks.Task SetMetadataAsync(string? title, string? navigationTitle, string? icon, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Sets the order in which the children of this folder are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as Get Order returns it, and may be given only once.", Position=3, Title="Set Order")]
+        public System.Threading.Tasks.Task SetOrderAsync(string[] names, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteChildMetadataAsync(Namotion.Interceptor.IInterceptorSubject child, HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteMetadataAsync(HomeBlaze.Components.Abstractions.Pages.FolderMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
+    }
+}
 namespace HomeBlaze.Storage.Files
 {
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -100,105 +225,6 @@ namespace HomeBlaze.Storage.Files
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
-    }
-}
-namespace HomeBlaze.Storage
-{
-    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Storage")]
-    [Namotion.Interceptor.Attributes.InterceptorSubject]
-    [System.ComponentModel.Category("System")]
-    [System.ComponentModel.Description("Mounts a storage location and loads the files in it as subjects")]
-    [System.ComponentModel.DisplayName("Storage")]
-    public class FluentStorageContainer : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Components.Abstractions.Pages.IMetadataContainer, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
-    {
-        public FluentStorageContainer(HomeBlaze.Services.SubjectTypeRegistry typeRegistry, HomeBlaze.Services.ConfigurableSubjectSerializer serializer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.FluentStorageContainer>? logger = null) { }
-        public System.Collections.Generic.IReadOnlyCollection<string> ChildNames { get; }
-        public System.Collections.Immutable.ImmutableArray<string> ChildOrder { get; }
-        [HomeBlaze.Abstractions.Attributes.State]
-        [Namotion.Interceptor.Registry.Attributes.InlinePaths]
-        public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; set; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public string ConnectionString { get; set; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public string? ContainerName { get; set; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public bool EnableFileWatching { get; set; }
-        public bool HasOwnMetadata { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public string IconColor { get; }
-        public string IconName { get; }
-        public HomeBlaze.Components.Abstractions.Pages.FolderMetadata? Metadata { get; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public int ReconcileIntervalSeconds { get; set; }
-        [HomeBlaze.Abstractions.Attributes.State]
-        public HomeBlaze.Storage.Abstractions.StorageStatus Status { get; set; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public string StorageType { get; set; }
-        public string Title { get; }
-        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
-        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
-        public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task ConnectAsync(System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
-        public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
-        public override void Dispose() { }
-        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
-        public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
-        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
-        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
-        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
-        public System.Threading.Tasks.Task MoveChildAsync(string name, string targetName, System.Threading.CancellationToken cancellationToken) { }
-        protected void RaisePropertyChanged(string propertyName) { }
-        public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
-        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
-        public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task WriteChildMetadataAsync(Namotion.Interceptor.IInterceptorSubject child, HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task WriteMetadataAsync(HomeBlaze.Components.Abstractions.Pages.FolderMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
-    }
-    [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class VirtualFolder : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Components.Abstractions.Pages.IMetadataContainer, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
-    {
-        public VirtualFolder(HomeBlaze.Storage.Abstractions.IStorageContainer storage, string relativePath) { }
-        public System.Collections.Generic.IReadOnlyCollection<string> ChildNames { get; }
-        public System.Collections.Immutable.ImmutableArray<string> ChildOrder { get; }
-        [HomeBlaze.Abstractions.Attributes.State]
-        [Namotion.Interceptor.Registry.Attributes.InlinePaths]
-        public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; set; }
-        public bool HasOwnMetadata { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public string IconName { get; }
-        public HomeBlaze.Components.Abstractions.Pages.FolderMetadata? Metadata { get; }
-        public string RelativePath { get; }
-        public HomeBlaze.Storage.Abstractions.StorageStatus Status { get; }
-        public HomeBlaze.Storage.Abstractions.IStorageContainer Storage { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public string Title { get; }
-        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
-        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
-        public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
-        public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
-        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
-        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
-        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
-        public System.Threading.Tasks.Task MoveChildAsync(string name, string targetName, System.Threading.CancellationToken cancellationToken) { }
-        protected void RaisePropertyChanged(string propertyName) { }
-        public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
-        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task WriteChildMetadataAsync(Namotion.Interceptor.IInterceptorSubject child, HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task WriteMetadataAsync(HomeBlaze.Components.Abstractions.Pages.FolderMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
     }
 }
 namespace HomeBlaze.Storage.Internal

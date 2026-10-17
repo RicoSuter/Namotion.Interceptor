@@ -114,6 +114,20 @@ A subject metadata file never changes the title or the icon of the subject itsel
 
 A file whose name ends with `.metadata.json` is never loaded as a subject, so a subject cannot be named `Something.metadata`. Deleting a subject also deletes its `X.metadata.json` sidecar.
 
+### Ordering and Metadata by Agents
+
+Agents read and change the order and the metadata through methods of the folder, and of the root of the storage, that are meant only for agents: they are listed by MCP `list_methods` and run by `invoke_method`, but show no button in the browser.
+
+| Method | Description |
+|--------|-------------|
+| `GetOrder` | Returns the names of the children in the order in which they are shown |
+| `SetOrder` | Takes `names` and stores them first, in that order, then the other children in their current order. A name that is not a child, or that is given twice, is refused |
+| `GetMetadata` | Returns the metadata of the folder (none for the root) and the metadata of each child stored as `X.json`, keyed by the name of the child |
+| `SetMetadata` | Takes `title`, `navigationTitle` and `icon` and replaces the metadata of the folder. Not available on the root |
+| `SetChildMetadata` | Takes the `name` of a child stored as `X.json`, `navigationTitle`, `icon`, `location` and `alignment` and replaces the metadata of that child |
+
+A value left out or blank is removed, the same as an empty field in the **Metadata** dialog, so an agent reads with `GetMetadata` first to keep the values it does not change.
+
 ---
 
 ## Relative Links
