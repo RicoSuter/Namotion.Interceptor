@@ -44,6 +44,24 @@ public class ClaudeCliArgumentsTests
     }
 
     [Theory]
+    [InlineData(AgentEffort.Low, "low")]
+    [InlineData(AgentEffort.Medium, "medium")]
+    [InlineData(AgentEffort.High, "high")]
+    [InlineData(AgentEffort.ExtraHigh, "xhigh")]
+    [InlineData(AgentEffort.Max, "max")]
+    public void WhenBuildingWithAnEffort_ThenTheEffortArgumentMatchesTheApiName(AgentEffort effort, string expected)
+    {
+        // Arrange
+        var options = new ClaudeCliOptions("/tmp/prompt.md", "/tmp/mcp.json", null, effort, null, null, PersistSession: true);
+
+        // Act
+        var arguments = ClaudeCliArguments.Build(options);
+
+        // Assert
+        Assert.Equal(expected, ValueAfter(arguments, "--effort"));
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("   ")]
     public void WhenTheResumeSessionIdIsBlank_ThenResumeIsOmitted(string sessionId)
