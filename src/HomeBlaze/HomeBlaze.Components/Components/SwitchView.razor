@@ -117,11 +117,7 @@ else
     [Parameter]
     public SwitchKind Kind { get; set; }
 
-    /// <summary>The name or path of the map as written. Without one, true has the primary color.</summary>
-    [Parameter]
-    public string? Map { get; set; }
-
-    /// <summary>The resolved map, or null for none.</summary>
+    /// <summary>The resolved map, or null for none. Without one, true has the primary color.</summary>
     [Parameter]
     public ValueMap? ValueMap { get; set; }
 

@@ -1210,8 +1210,6 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public string? Map { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? OffProperty { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? OnProperty { get; set; }
