@@ -57,6 +57,27 @@ public class ReadPropertyRecorderTargetTests
     }
 
     [Fact]
+    public void WhenTargetScopesAreDisposed_ThenNoTargetIsCounted()
+    {
+        // Arrange
+        var countBefore = ReadPropertyRecorder.ThreadTargetCount;
+
+        // Act
+        using (ReadPropertyRecorder.RecordOnCurrentThread(new RecordingTarget()))
+        {
+            using (ReadPropertyRecorder.RecordOnCurrentThread(new RecordingTarget()))
+            {
+                Assert.Equal(countBefore + 2, ReadPropertyRecorder.ThreadTargetCount);
+            }
+        }
+
+        default(ReadPropertyRecorderTargetScope).Dispose();
+
+        // Assert
+        Assert.Equal(countBefore, ReadPropertyRecorder.ThreadTargetCount);
+    }
+
+    [Fact]
     public void WhenATargetIsSetOnOneThread_ThenReadsOnAnotherThreadDoNotReachIt()
     {
         // Arrange

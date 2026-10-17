@@ -18,7 +18,17 @@ public class ReadPropertyRecorder : IReadInterceptor
     [ThreadStatic]
     private static IReadPropertyRecorderTarget? _currentThreadTarget;
 
-    internal static void RestoreCurrentThreadTarget(IReadPropertyRecorderTarget? target) => _currentThreadTarget = target;
+    // The number of thread targets set on any thread. A read checks it before the thread static, whose access is a call
+    // on some platforms, so that reads outside a thread target cost no more than without the feature.
+    private static int _threadTargetCount;
+
+    internal static int ThreadTargetCount => Volatile.Read(ref _threadTargetCount);
+
+    internal static void RestoreCurrentThreadTarget(IReadPropertyRecorderTarget? target)
+    {
+        _currentThreadTarget = target;
+        Interlocked.Decrement(ref _threadTargetCount);
+    }
 
     /// <summary>
     /// Sends the property reads of the current thread to the given target until the returned scope is disposed.
@@ -30,6 +40,8 @@ public class ReadPropertyRecorder : IReadInterceptor
     public static ReadPropertyRecorderTargetScope RecordOnCurrentThread(IReadPropertyRecorderTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
+        // Counted before the target is set, so that the reads of this thread find the count above zero.
+        Interlocked.Increment(ref _threadTargetCount);
         var previousTarget = _currentThreadTarget;
         _currentThreadTarget = target;
         return new ReadPropertyRecorderTargetScope(previousTarget);
@@ -84,11 +96,14 @@ public class ReadPropertyRecorder : IReadInterceptor
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
     {
         // Recorded before the value is read, so that a change written after the read finds the property recorded.
-        var target = _currentThreadTarget;
-        if (target is not null)
+        if (_threadTargetCount != 0)
         {
-            target.OnRead(context.Property);
-            return next(ref context);
+            var target = _currentThreadTarget;
+            if (target is not null)
+            {
+                target.OnRead(context.Property);
+                return next(ref context);
+            }
         }
 
         var scopes = _activeScopes.Value;

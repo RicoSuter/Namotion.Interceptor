@@ -7,10 +7,12 @@ namespace Namotion.Interceptor.Tracking.Recorder;
 public readonly ref struct ReadPropertyRecorderTargetScope
 {
     private readonly IReadPropertyRecorderTarget? _previousTarget;
+    private readonly bool _isStarted;
 
     internal ReadPropertyRecorderTargetScope(IReadPropertyRecorderTarget? previousTarget)
     {
         _previousTarget = previousTarget;
+        _isStarted = true;
     }
 
     /// <summary>
@@ -18,6 +20,9 @@ public readonly ref struct ReadPropertyRecorderTargetScope
     /// </summary>
     public void Dispose()
     {
-        ReadPropertyRecorder.RestoreCurrentThreadTarget(_previousTarget);
+        if (_isStarted)
+        {
+            ReadPropertyRecorder.RestoreCurrentThreadTarget(_previousTarget);
+        }
     }
 }
