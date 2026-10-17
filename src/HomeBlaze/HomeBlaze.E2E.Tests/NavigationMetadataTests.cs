@@ -188,6 +188,42 @@ public class NavigationMetadataTests
     }
 
     [Fact]
+    public async Task WhenARowIsMovedToTheTopWithEnter_ThenItsDownArrowHasTheFocus()
+    {
+        // Arrange
+        var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
+        var originalMetadata = await File.ReadAllTextAsync(metadataPath);
+        var folder = GetDemoFolder();
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Demo");
+            var rows = await StartReorderingAsync(pane);
+            var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
+            var names = GetShownChildNames(folder);
+            await pane.GetByRole(AriaRole.Button, new() { Name = $"Move {shownNames[1]} up", Exact = true }).FocusAsync();
+
+            // Act
+            await page.Keyboard.PressAsync("Enter");
+
+            // Assert - the first row has no up arrow, so the one that was pressed is gone.
+            await Assertions.Expect(rows.Nth(0).Locator(".subject-pane-child-name"))
+                .ToHaveTextAsync(shownNames[1], new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(rows.Nth(0).GetByTestId("move-child-up-button")).ToHaveCountAsync(0);
+            await Assertions.Expect(pane.GetByRole(AriaRole.Button, new() { Name = $"Move {shownNames[1]} down", Exact = true }))
+                .ToBeFocusedAsync(new() { Timeout = PageLoadTimeout });
+
+            string[] expectedNames = [names[1], names[0], .. names.Skip(2)];
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => folder.ChildOrder.ToArray().SequenceEqual(expectedNames),
+                message: "The order of the folder was not written");
+        }
+        finally
+        {
+            await RestoreDemoMetadataAsync(metadataPath, originalMetadata);
+        }
+    }
+
+    [Fact]
     public async Task WhenTheDeviceHasNoHover_ThenTheArrowsShowAndMoveAChild()
     {
         // Arrange

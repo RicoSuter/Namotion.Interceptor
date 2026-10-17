@@ -1211,8 +1211,9 @@
     private void OnChildDropped(
         IMetadataContainer container, SubjectPropertyChild[] children, MudItemDropInfo<SubjectPropertyChild> drop)
     {
+        // A drop that moves nothing is refreshed away, as the zone shows the dropped row in its new place already.
         var index = Array.IndexOf(children, drop.Item);
-        if (index < 0 || drop.IndexInZone < 0 || drop.IndexInZone >= children.Length || drop.IndexInZone == index)
+        if (_isMovingChild || index < 0 || drop.IndexInZone < 0 || drop.IndexInZone >= children.Length || drop.IndexInZone == index)
         {
             _reorderDropContainer?.Refresh();
             return;
@@ -1254,13 +1255,12 @@
     private static bool IsConnected(IMetadataContainer container)
         => container is not IStorageContainer { Status: not StorageStatus.Connected };
 
-    // A move that writes nothing refreshes the reorder list, which shows a dropped row in its new place already.
-    // Returns whether the order was written.
+    // A failed move refreshes the reorder list, which shows a dropped row in its new place already. Returns whether
+    // the order was written.
     private async Task<bool> MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
     {
         if (_isMovingChild)
         {
-            _reorderDropContainer?.Refresh();
             return false;
         }
 
