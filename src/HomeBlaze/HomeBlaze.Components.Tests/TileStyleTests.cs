@@ -1,0 +1,77 @@
+using HomeBlaze.Components.Controls;
+using MudBlazor;
+using Xunit;
+
+namespace HomeBlaze.Components.Tests;
+
+public class TileStyleTests
+{
+    [Fact]
+    public void WhenColorIsWarningAndFilled_ThenTheTileIsFilledWithItAndUsesItsTextColor()
+    {
+        // Act
+        var style = TileStyle.GetStyle(Color.Warning, Variant.Filled);
+
+        // Assert
+        Assert.Equal("background: var(--mud-palette-warning); color: var(--mud-palette-warning-text)", style);
+    }
+
+    [Theory]
+    [InlineData(Color.Default)]
+    [InlineData(Color.Inherit)]
+    [InlineData(Color.Transparent)]
+    [InlineData(Color.Surface)]
+    public void WhenColorHasNoPaletteFill_ThenTheTileIsDrawnOnTheSurface(Color color)
+    {
+        // Act
+        var style = TileStyle.GetStyle(color, Variant.Filled);
+
+        // Assert
+        Assert.Equal("background: var(--mud-palette-surface); color: var(--mud-palette-text-primary)", style);
+    }
+
+    [Theory]
+    [InlineData(99, (int)Variant.Filled)]
+    [InlineData((int)Color.Primary, 99)]
+    [InlineData(-1, (int)Variant.Filled)]
+    [InlineData((int)Color.Primary, -1)]
+    public void WhenColorOrVariantIsUndefined_ThenTheTileIsDrawnOnTheSurface(int color, int variant)
+    {
+        // Act
+        var style = TileStyle.GetStyle((Color)color, (Variant)variant);
+
+        // Assert
+        Assert.Equal("background: var(--mud-palette-surface); color: var(--mud-palette-text-primary)", style);
+    }
+
+    [Fact]
+    public void WhenVariantIsOutlined_ThenTheTileHasABorderInTheColor()
+    {
+        // Act
+        var style = TileStyle.GetStyle(Color.Primary, Variant.Outlined);
+
+        // Assert
+        Assert.Equal("background: var(--mud-palette-surface); color: var(--mud-palette-primary); box-shadow: inset 0 0 0 2px var(--mud-palette-primary)", style);
+    }
+
+    [Fact]
+    public void WhenVariantIsText_ThenOnlyTheTextHasTheColor()
+    {
+        // Act
+        var style = TileStyle.GetStyle(Color.Error, Variant.Text);
+
+        // Assert
+        Assert.Equal("background: var(--mud-palette-surface); color: var(--mud-palette-error)", style);
+    }
+
+    [Fact]
+    public void WhenStyleIsAskedTwice_ThenTheSameInstanceIsReturned()
+    {
+        // Act
+        var first = TileStyle.GetStyle(Color.Success, Variant.Outlined);
+        var second = TileStyle.GetStyle(Color.Success, Variant.Outlined);
+
+        // Assert
+        Assert.Same(first, second);
+    }
+}

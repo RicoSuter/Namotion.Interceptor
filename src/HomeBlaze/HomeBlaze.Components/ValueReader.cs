@@ -85,18 +85,20 @@ public static class ValueReader
         }
 
         var matched = valueMap?.FindCase(RawValueFormatter.Format(value));
-        var text = string.IsNullOrEmpty(matched?.Text)
-            ? property.GetPropertyDisplayValue(value, timeZone)
-            : matched.Text;
-
         return new ValueReading(
             property,
             value,
-            text,
+            GetText(property, value, matched, timeZone),
             matched?.Color ?? Color.Default,
             string.IsNullOrEmpty(matched?.Icon) ? null : matched.Icon,
             mapError);
     }
+
+    /// <summary>
+    /// Gets the text of a value that is not missing: that of the matched case, otherwise the formatted value.
+    /// </summary>
+    internal static string GetText(RegisteredSubjectProperty property, object value, ValueMapCase? matched, ITimeZoneDisplay? timeZone) =>
+        string.IsNullOrEmpty(matched?.Text) ? property.GetPropertyDisplayValue(value, timeZone) : matched.Text;
 
     /// <summary>
     /// Reads the value at the path alone, for a widget that shows no text of it.
