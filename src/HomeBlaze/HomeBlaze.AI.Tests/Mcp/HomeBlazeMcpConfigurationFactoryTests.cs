@@ -101,7 +101,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
 
         // Assert
         Assert.Equal(
-            "Property is not writable: /TargetTemperature. It is a configuration property; configuration cannot be changed through MCP.",
+            "Property is not writable: /TargetTemperature. It is a configuration property; set_property cannot change configuration, an operation of the subject may.",
             result.GetProperty("error").GetString());
         Assert.Equal(20m, room.TargetTemperature);
     }

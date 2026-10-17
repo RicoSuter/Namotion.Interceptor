@@ -21,7 +21,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         (subject, _) => subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
 
     private static readonly Func<RegisteredSubjectProperty, string?> RefuseConfigurationWrite =
-        property => property.IsConfigurationProperty() ? "It is a configuration property; configuration cannot be changed through MCP." : null;
+        property => property.IsConfigurationProperty() ? "It is a configuration property; set_property cannot change configuration, an operation of the subject may." : null;
 
     /// <summary>
     /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the
