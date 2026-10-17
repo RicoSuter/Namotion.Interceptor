@@ -85,6 +85,19 @@ internal sealed class SqliteCoverageStore(Func<SqliteConnection> openMetadata)
         RebuildSnapshot();
     }
 
+    // Persists a range independent of the active session range, which keeps advancing on its own.
+    public void Add(long fromTicks, long toTicks)
+    {
+        using var insert = openMetadata().CreateCommand();
+        insert.CommandText =
+            "INSERT INTO coverage_ranges (from_ts, to_ts) VALUES (@from, @to); SELECT last_insert_rowid();";
+        insert.Parameters.AddWithValue("@from", fromTicks);
+        insert.Parameters.AddWithValue("@to", toTicks);
+        var id = (long)insert.ExecuteScalar()!;
+        _rows.Add(new CoverageRangeRow(id, fromTicks, toTicks));
+        RebuildSnapshot();
+    }
+
     public void Trim(long retainedFrom)
     {
         var connection = openMetadata();

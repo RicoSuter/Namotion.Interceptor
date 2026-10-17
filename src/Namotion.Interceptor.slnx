@@ -102,6 +102,8 @@
     <Project Path="HomeBlaze/HomeBlaze.History.Abstractions.Tests/HomeBlaze.History.Abstractions.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.History.Blazor/HomeBlaze.History.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.History.Blazor.Tests/HomeBlaze.History.Blazor.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.History.Import.Influx/HomeBlaze.History.Import.Influx.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.History.Import.Influx.Tests/HomeBlaze.History.Import.Influx.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.History.InMemory/HomeBlaze.History.InMemory.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.History.InMemory.Blazor/HomeBlaze.History.InMemory.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.History.InMemory.Tests/HomeBlaze.History.InMemory.Tests.csproj" />

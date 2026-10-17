@@ -131,6 +131,80 @@ internal static class SqliteHistoryWriter
         return (long)assigned.ExecuteScalar()!;
     }
 
+    // Writes one path's imported rows into a partition in a single transaction and returns how many were
+    // inserted. OR IGNORE rather than the flush's OR REPLACE: a row already stored for the same instant
+    // is either a recorded one, which is authoritative, or the same import run again.
+    public static long ImportPartition(
+        SqliteConnection connection,
+        string path,
+        ValueColumn column,
+        bool isUlong,
+        IReadOnlyList<(long Ticks, Row Row)> rows)
+    {
+        using var transaction = connection.BeginTransaction();
+        var pathId = InternImportPath(connection, transaction, path, column, isUlong);
+
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText =
+            "INSERT OR IGNORE INTO history (path_id, ts, value_long, value_double, value_json) " +
+            "VALUES (@path_id, @ts, @long, @double, @json);";
+        insert.Parameters.Add("@path_id", SqliteType.Integer).Value = pathId;
+        var tsParameter = insert.Parameters.Add("@ts", SqliteType.Integer);
+        var longParameter = insert.Parameters.Add("@long", SqliteType.Integer);
+        var doubleParameter = insert.Parameters.Add("@double", SqliteType.Real);
+        var jsonParameter = insert.Parameters.Add("@json", SqliteType.Text);
+
+        var inserted = 0L;
+        foreach (var (ticks, row) in rows)
+        {
+            tsParameter.Value = ticks;
+            longParameter.Value = (object?)row.Long ?? DBNull.Value;
+            doubleParameter.Value = (object?)row.Double ?? DBNull.Value;
+            jsonParameter.Value = (object?)row.Json ?? DBNull.Value;
+            inserted += insert.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return inserted;
+    }
+
+    // Unlike InternPath, an import never rewrites a stored kind: the rows already in this partition were
+    // written under it, and relabelling them would make the reader misinterpret every one.
+    private static long InternImportPath(
+        SqliteConnection connection, SqliteTransaction transaction, string path, ValueColumn column, bool isUlong)
+    {
+        using (var lookup = connection.CreateCommand())
+        {
+            lookup.Transaction = transaction;
+            lookup.CommandText = "SELECT id, value_column, is_ulong FROM paths WHERE path = @path;";
+            lookup.Parameters.AddWithValue("@path", path);
+
+            using var reader = lookup.ExecuteReader();
+            if (reader.Read())
+            {
+                if ((ValueColumn)reader.GetInt64(1) != column || (reader.GetInt64(2) != 0) != isUlong)
+                {
+                    throw new InvalidOperationException(
+                        $"The path '{path}' is stored as {(ValueColumn)reader.GetInt64(1)} in this partition, " +
+                        $"but the import writes {column}.");
+                }
+
+                return reader.GetInt64(0);
+            }
+        }
+
+        using var register = connection.CreateCommand();
+        register.Transaction = transaction;
+        register.CommandText =
+            "INSERT INTO paths (path, value_column, is_ulong) VALUES (@path, @column, @is_ulong); " +
+            "SELECT last_insert_rowid();";
+        register.Parameters.AddWithValue("@path", path);
+        register.Parameters.AddWithValue("@column", (int)column);
+        register.Parameters.AddWithValue("@is_ulong", isUlong ? 1 : 0);
+        return (long)register.ExecuteScalar()!;
+    }
+
     // Persists queued moves into the metadata database in a single transaction. OR IGNORE because a
     // flush that fails re-queues its moves, so the same record can be offered twice.
     public static void WriteMoves(SqliteConnection movesConnection, IReadOnlyList<HistoryMove> moves)

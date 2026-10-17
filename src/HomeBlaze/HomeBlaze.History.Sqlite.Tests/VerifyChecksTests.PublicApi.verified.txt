@@ -3,6 +3,19 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace HomeBlaze.History.Sqlite
 {
+    public readonly struct HistoryImportResult : System.IEquatable<HomeBlaze.History.Sqlite.HistoryImportResult>
+    {
+        public HistoryImportResult(long InsertedCount, long IgnoredCount, long OversizeCount) { }
+        public long IgnoredCount { get; init; }
+        public long InsertedCount { get; init; }
+        public long OversizeCount { get; init; }
+    }
+    public readonly struct HistoryImportSample : System.IEquatable<HomeBlaze.History.Sqlite.HistoryImportSample>
+    {
+        public HistoryImportSample(System.DateTimeOffset Timestamp, object? Value) { }
+        public System.DateTimeOffset Timestamp { get; init; }
+        public object? Value { get; init; }
+    }
     public enum PartitionInterval
     {
         Daily = 0,
@@ -24,10 +37,13 @@ namespace HomeBlaze.History.Sqlite
         public int QueueDepth { get; }
         public long RecordedCount { get; }
         public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
+        public void AddCoverage(HomeBlaze.History.Abstractions.HistoryCoverage range) { }
         public void Dispose() { }
         public System.Threading.Tasks.Task FlushAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryChainLeg> GetMoveChain(string propertyPath) { }
         public HomeBlaze.History.Abstractions.HistoryPoint? GetSampleAtOrBefore(string propertyPath, System.DateTimeOffset asOf) { }
         public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
+        public HomeBlaze.History.Sqlite.HistoryImportResult Import(string propertyPath, System.Type propertyType, System.Collections.Generic.IEnumerable<HomeBlaze.History.Sqlite.HistoryImportSample> samples) { }
         public HomeBlaze.History.Abstractions.HistorySeries Query(HomeBlaze.History.Abstractions.HistoryQuery query) { }
         public System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryAsync(HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken) { }
         public void Record(string propertyPath, System.DateTimeOffset timestamp, object? value, System.Type propertyType) { }
