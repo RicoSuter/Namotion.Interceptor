@@ -26,8 +26,7 @@ public sealed class ChangeDeliveryFilterRaceCollection
 /// <remarks>
 /// Not parallel: every step waits on the processor's dequeue loop and flush, which run on the thread
 /// pool and cannot be moved to dedicated threads, so concurrently running tests that block pool workers
-/// can delay a step past its timeout. The flush loop is worst off, since it is queued locally on the
-/// worker that then blocks in the dequeue loop and only runs once another worker steals it.
+/// can delay a step past its timeout.
 /// </remarks>
 [Collection(ChangeDeliveryFilterRaceCollection.Name)]
 public class ChangeDeliveryFilterRaceTests
