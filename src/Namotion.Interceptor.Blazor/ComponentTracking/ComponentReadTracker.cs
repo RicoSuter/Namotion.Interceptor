@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.RenderTree;
@@ -29,13 +30,15 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
     private Dictionary<RenderFragment, RenderFragment>? _contentWrappers;
     private Dictionary<RenderFragment, RenderFragment>? _previousContentWrappers;
 
-    // The properties acquired from the dispatcher, the reads of the render in progress or the last one, and the reads of
-    // content that components which are not a ComponentBase rendered for this one after its last render, and before it.
-    // Content rendered after the render reads after it, so its reads stay acquired until the render after the next one.
-    private HashSet<PropertyReference>? _acquired;
-    private HashSet<PropertyReference>? _renderReads;
-    private HashSet<PropertyReference>? _contentReads;
-    private HashSet<PropertyReference>? _previousContentReads;
+    // The properties acquired from the dispatcher, each with the number of the last render that read it and of the last
+    // render after which content read it. Content that components which are not a ComponentBase render for this one
+    // reads after its render, so such a read stays acquired until the end of the render after the next one. Renders are
+    // numbered from 1, so that 0 means never.
+    private Dictionary<PropertyReference, ReadMark>? _acquired;
+    private int _renderNumber;
+    private int _renderReadCount;
+    private int _contentReadCount;
+    private int _previousContentReadCount;
     private bool? _isInteractive;
     private Renderer? _renderer;
 
@@ -79,24 +82,36 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
 
     public void OnRead(PropertyReference property)
     {
-        (_renderReads ??= []).Add(property);
-        Acquire(property);
+        ref var mark = ref Acquire(property);
+        if (mark.Render != _renderNumber)
+        {
+            mark.Render = _renderNumber;
+            _renderReadCount++;
+        }
     }
 
     /// <summary>Records a read of content that this component passed to a component that is not a ComponentBase.</summary>
     public void OnContentRead(PropertyReference property)
     {
-        (_contentReads ??= []).Add(property);
-        Acquire(property);
+        ref var mark = ref Acquire(property);
+        if (mark.Content != _renderNumber)
+        {
+            mark.Content = _renderNumber;
+            _contentReadCount++;
+        }
     }
 
-    private void Acquire(PropertyReference property)
+    // One lookup per read. The reference is used before anything else changes the dictionary.
+    private ref ReadMark Acquire(PropertyReference property)
     {
-        if ((_acquired ??= []).Add(property))
+        ref var mark = ref CollectionsMarshal.GetValueRefOrAddDefault(_acquired ??= [], property, out var exists);
+        if (!exists)
         {
             // Before the value is read, so that a change written after the read is delivered.
             _dispatcher!.Acquire(property, this);
         }
+
+        return ref mark;
     }
 
     public void RequestRender()
@@ -126,16 +141,13 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
     {
         if (_acquired is not null)
         {
-            foreach (var property in _acquired)
+            foreach (var property in _acquired.Keys)
             {
                 _dispatcher!.Release(property, this);
             }
         }
 
         _acquired = null;
-        _renderReads = null;
-        _contentReads = null;
-        _previousContentReads = null;
     }
 
     private void RenderCore(RenderTreeBuilder builder)
@@ -151,9 +163,10 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
         }
 
         _dispatcher!.OnRenderStarting(this);
-        _renderReads?.Clear();
-        (_previousContentReads, _contentReads) = (_contentReads, _previousContentReads);
-        _contentReads?.Clear();
+        _renderNumber++;
+        _renderReadCount = 0;
+        _previousContentReadCount = _contentReadCount;
+        _contentReadCount = 0;
         (_previousContentWrappers, _contentWrappers) = (_contentWrappers, _previousContentWrappers);
         _contentWrappers?.Clear();
 
@@ -180,18 +193,18 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
     // Releases what neither this render nor the content rendered after the last one read.
     private void ReleaseUnread()
     {
-        // The reads of the render are acquired, so when they are as many as the acquired properties and no content read
-        // something after the last render, every acquired property was read again.
-        if (_acquired is null ||
-            (_previousContentReads is not { Count: > 0 } && (_renderReads?.Count ?? 0) == _acquired.Count))
+        // Every property this render read is acquired, so when it read as many as are acquired and no content read
+        // something after the last render, nothing is unread.
+        if (_acquired is null || (_previousContentReadCount == 0 && _renderReadCount == _acquired.Count))
         {
             return;
         }
 
+        var previousRender = _renderNumber - 1;
         List<PropertyReference>? unread = null;
-        foreach (var property in _acquired)
+        foreach (var (property, mark) in _acquired)
         {
-            if (_renderReads?.Contains(property) != true && _previousContentReads?.Contains(property) != true)
+            if (mark.Render != _renderNumber && mark.Content != previousRender)
             {
                 (unread ??= []).Add(property);
             }
@@ -231,5 +244,11 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
         public void OnRead(PropertyReference property)
         {
         }
+    }
+
+    private struct ReadMark
+    {
+        public int Render;
+        public int Content;
     }
 }
