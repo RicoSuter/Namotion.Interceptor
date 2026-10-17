@@ -15,10 +15,21 @@ internal static class TileStyle
 
     /// <summary>
     /// Gets the style of a tile. A color without a palette fill (Default, Inherit, Transparent, Surface) draws the tile
-    /// on the surface; a disabled tile has the disabled colors of the theme.
+    /// on the surface, as does a color or a variant that is not defined (a configuration can give any integer); a
+    /// disabled tile has the disabled colors of the theme.
     /// </summary>
-    public static string GetStyle(Color color, Variant variant, bool disabled) =>
-        disabled ? Disabled : Styles[(int)color, (int)variant];
+    public static string GetStyle(Color color, Variant variant, bool disabled)
+    {
+        if (disabled)
+        {
+            return Disabled;
+        }
+
+        // The unsigned comparison also rejects a negative value.
+        return (uint)color < (uint)Styles.GetLength(0) && (uint)variant < (uint)Styles.GetLength(1)
+            ? Styles[(int)color, (int)variant] ?? Surface
+            : Surface;
+    }
 
     private static string[,] BuildStyles()
     {

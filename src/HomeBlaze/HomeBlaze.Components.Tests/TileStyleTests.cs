@@ -30,6 +30,20 @@ public class TileStyleTests
         Assert.Equal("background: var(--mud-palette-surface); color: var(--mud-palette-text-primary)", style);
     }
 
+    [Theory]
+    [InlineData(99, (int)Variant.Filled)]
+    [InlineData((int)Color.Primary, 99)]
+    [InlineData(-1, (int)Variant.Filled)]
+    [InlineData((int)Color.Primary, -1)]
+    public void WhenColorOrVariantIsUndefined_ThenTheTileIsDrawnOnTheSurface(int color, int variant)
+    {
+        // Act
+        var style = TileStyle.GetStyle((Color)color, (Variant)variant, disabled: false);
+
+        // Assert
+        Assert.Equal("background: var(--mud-palette-surface); color: var(--mud-palette-text-primary)", style);
+    }
+
     [Fact]
     public void WhenVariantIsOutlined_ThenTheTileHasABorderInTheColor()
     {
