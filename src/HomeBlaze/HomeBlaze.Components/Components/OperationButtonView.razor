@@ -11,19 +11,21 @@
     var isEnabled = method is not null && property!.IsMethodEnabled();
     var text = !string.IsNullOrEmpty(Label) ? Label : method?.Title ?? Path ?? string.Empty;
     var icon = MudBlazorIconResolver.ResolveOrNull(!string.IsNullOrEmpty(Icon) ? Icon : method is null ? null : OperationInvoker.GetIconName(method));
+    var tooltip = method is null ? Path : method.Description;
+    var isDisabled = IsEditing || _isRunning || !isEnabled;
 }
 
 @if (Kind == OperationButtonKind.Tile)
 {
     <TileView TestId="operation-button-tile"
               AccessibleName="@(string.IsNullOrEmpty(Label) ? text : null)"
-              Tooltip="@(method is null ? Path : method.Description)"
+              Tooltip="@tooltip"
               Label="@Label"
               Subtitle="@Subtitle"
               Icon="@icon"
               Color="@Color"
               Variant="@Variant"
-              Disabled="@(IsEditing || _isRunning || !isEnabled)"
+              Disabled="@isDisabled"
               IsBusy="@_isRunning"
               Badge="@Badge"
               OnClick="_runCallback" />
@@ -33,9 +35,9 @@ else
     <MudButton Variant="@Variant"
                Color="@Color"
                StartIcon="@(_isRunning ? null : icon)"
-               Disabled="@(IsEditing || _isRunning || !isEnabled)"
+               Disabled="@isDisabled"
                OnClick="_runCallback"
-               title="@(method is null ? Path : method.Description)"
+               title="@tooltip"
                aria-busy="@(_isRunning ? "true" : null)"
                data-testid="operation-button">
         @* The spinner takes the start icon's place instead of adding one, so the button keeps its width while busy. *@
