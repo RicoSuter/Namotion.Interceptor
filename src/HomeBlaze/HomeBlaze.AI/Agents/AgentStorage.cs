@@ -1,11 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using HomeBlaze.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.AI.Agents;
 
 /// <summary>
-/// The names of an agent's data files: a flat storage name derived from the agent's canonical path, followed by
-/// one suffix per file.
+/// The data files of an agent: their names, a flat storage name derived from the agent's canonical path followed by
+/// one suffix per file, and their reading and writing.
 /// </summary>
 internal static class AgentStorage
 {
@@ -66,6 +69,74 @@ internal static class AgentStorage
 
         var name = new string(characters);
         return isAmbiguous ? name + HashSeparator + GetPathHash(trimmed) : name;
+    }
+
+    /// <summary>
+    /// Reads a data file of an agent and parses it, or returns null when the agent has no storage, the file does not
+    /// exist, or it cannot be read or parsed; read and parse failures are logged.
+    /// </summary>
+    /// <param name="path">The path of the file, null when the agent has no storage.</param>
+    /// <param name="parse">Parses the content; may throw <see cref="JsonException"/>.</param>
+    /// <param name="consequence">What happens when the file cannot be read, for the warning.</param>
+    /// <param name="logger">The logger of the agent.</param>
+    /// <param name="agent">The agent, named in the warning.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<T?> TryReadJsonDataFileAsync<T>(
+        string? path, Func<string, T?> parse, string consequence, ILogger logger, ITitleProvider agent, CancellationToken cancellationToken)
+        where T : class
+    {
+        if (path is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return parse(await File.ReadAllTextAsync(path, cancellationToken));
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be read; {Consequence}.", path, agent.Title, consequence);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Writes a data file of an agent atomically, or deletes it for null content; does nothing when the agent has no
+    /// storage. Write failures are logged, not thrown.
+    /// </summary>
+    /// <param name="path">The path of the file, null when the agent has no storage.</param>
+    /// <param name="content">The content, or null to delete the file.</param>
+    /// <param name="consequence">What happens when the file cannot be written, for the warning.</param>
+    /// <param name="logger">The logger of the agent.</param>
+    /// <param name="agent">The agent, named in the warning.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task TryWriteDataFileAsync(
+        string? path, string? content, string consequence, ILogger logger, ITitleProvider agent, CancellationToken cancellationToken)
+    {
+        if (path is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (content is null)
+            {
+                File.Delete(path);
+                return;
+            }
+
+            await AtomicFile.WriteAllTextAsync(path, content, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be written; {Consequence}.", path, agent.Title, consequence);
+        }
     }
 
     private static string GetPathHash(string trimmedPath)

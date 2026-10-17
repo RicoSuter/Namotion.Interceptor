@@ -15,7 +15,7 @@ namespace HomeBlaze.AI.Agents;
 /// A subclass only executes a turn on its backend and resets its chat session.
 /// </summary>
 [InterceptorSubject]
-[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The agent base coordinates configuration, triggers, the turn gate, prompts, memory, timeline and tool scoping around one lifecycle and state lock; the logic already lives in dedicated helper types, so splitting further would spread that shared state.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The agent base coordinates configuration, triggers, the turn gate, prompts, memory, timeline and tool scoping around one lifecycle and state lock; its partial files separate these concerns and the logic that needs no agent state lives in dedicated helper types, so splitting the class itself would spread that shared state.")]
 public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider
 {
     /// <summary>The text of the error entry recorded for a chat message that was cancelled before a reply.</summary>
@@ -282,14 +282,15 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// </summary>
     protected Task<T?> ReadSessionAsync<T>(Func<string, T?> parse, CancellationToken cancellationToken)
         where T : class =>
-        TryReadJsonDataFileAsync(AgentStorage.SessionSuffix, parse, "a new session starts", cancellationToken);
+        AgentStorage.TryReadJsonDataFileAsync(GetStoragePath(AgentStorage.SessionSuffix), parse, "a new session starts", _logger, this, cancellationToken);
 
     /// <summary>
     /// Writes the backend's session file atomically; null deletes it. Write failures are logged, not thrown, so the
     /// file may keep its previous content.
     /// </summary>
     protected Task WriteSessionAsync(string? content, CancellationToken cancellationToken) =>
-        TryWriteDataFileAsync(AgentStorage.SessionSuffix, content, "after a restart the agent may resume the previous session", cancellationToken);
+        AgentStorage.TryWriteDataFileAsync(
+            GetStoragePath(AgentStorage.SessionSuffix), content, "after a restart the agent may resume the previous session", _logger, this, cancellationToken);
 
     /// <summary>Appends a divider, for example when a backend session had to be restarted.</summary>
     protected Task AppendDividerAsync(string text) => AppendAsync(new AgentTimelineEntry
@@ -501,70 +502,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     private string? GetStoragePath(string suffix) =>
         _storageDirectory is null ? null : Path.Combine(_storageDirectory, _storageName + suffix);
-
-    /// <summary>
-    /// Reads a data file of this agent and parses it, or returns null when the agent has no storage, the file does not
-    /// exist, or it cannot be read or parsed; read and parse failures are logged.
-    /// </summary>
-    /// <param name="suffix">The suffix of the file name.</param>
-    /// <param name="parse">Parses the content; may throw <see cref="JsonException"/>.</param>
-    /// <param name="consequence">What happens when the file cannot be read, for the warning.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    private async Task<T?> TryReadJsonDataFileAsync<T>(string suffix, Func<string, T?> parse, string consequence, CancellationToken cancellationToken)
-        where T : class
-    {
-        var path = GetStoragePath(suffix);
-        if (path is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return parse(await File.ReadAllTextAsync(path, cancellationToken));
-        }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
-        {
-            return null;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
-        {
-            _logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be read; {Consequence}.", path, Title, consequence);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Writes a data file of this agent atomically, or deletes it for null content; does nothing when the agent has no
-    /// storage. Write failures are logged, not thrown.
-    /// </summary>
-    /// <param name="suffix">The suffix of the file name.</param>
-    /// <param name="content">The content, or null to delete the file.</param>
-    /// <param name="consequence">What happens when the file cannot be written, for the warning.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    private async Task TryWriteDataFileAsync(string suffix, string? content, string consequence, CancellationToken cancellationToken)
-    {
-        var path = GetStoragePath(suffix);
-        if (path is null)
-        {
-            return;
-        }
-
-        try
-        {
-            if (content is null)
-            {
-                File.Delete(path);
-                return;
-            }
-
-            await AtomicFile.WriteAllTextAsync(path, content, cancellationToken);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning(exception, "The file {Path} of agent {Agent} could not be written; {Consequence}.", path, Title, consequence);
-        }
-    }
 
     private void OnPauseLifted()
     {

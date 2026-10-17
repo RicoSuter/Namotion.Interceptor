@@ -3,7 +3,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -114,7 +113,7 @@ public abstract partial class LlmAgentBase
                 reason,
                 Timeline.GetRecentBackgroundResults(RecentResultCount),
                 Timeline.GetLastQuietRunTime(),
-                await FetchWatchedStateAsync(cancellationToken),
+                await AgentWatchPaths.FetchStateAsync(Volatile.Read(ref _normalizedWatchPaths), _services.ToolSource, cancellationToken),
                 started.Value);
 
             var result = await RunTurnAsync(AgentTurnKind.Background, message, allowedTools, tools, progress, cancellationToken);
@@ -196,10 +195,12 @@ public abstract partial class LlmAgentBase
     /// <summary>
     /// Persists the run count and the last activity, also while the host stops; the caller holds the turn gate.
     /// </summary>
-    private Task WriteRunStatisticsAsync() => TryWriteDataFileAsync(
-        AgentStorage.StatsSuffix,
+    private Task WriteRunStatisticsAsync() => AgentStorage.TryWriteDataFileAsync(
+        GetStoragePath(AgentStorage.StatsSuffix),
         JsonSerializer.Serialize(new AgentStats(RunCount, LastActivityTime), AgentJsonContext.Default.AgentStats),
         "after a restart the run count and the last activity may be older",
+        _logger,
+        this,
         CancellationToken.None);
 
     /// <summary>
@@ -208,10 +209,12 @@ public abstract partial class LlmAgentBase
     /// </summary>
     private async Task RestoreRunStatisticsAsync(CancellationToken cancellationToken)
     {
-        var statistics = await TryReadJsonDataFileAsync(
-            AgentStorage.StatsSuffix,
+        var statistics = await AgentStorage.TryReadJsonDataFileAsync(
+            GetStoragePath(AgentStorage.StatsSuffix),
             content => JsonSerializer.Deserialize(content, AgentJsonContext.Default.AgentStats),
             "the run count starts at zero and the last activity is unknown",
+            _logger,
+            this,
             cancellationToken);
         LastRunTime = Timeline.GetLastBackgroundRunTime();
         RunCount = statistics?.BackgroundRunCount ?? 0;
@@ -228,78 +231,6 @@ public abstract partial class LlmAgentBase
         ToolCalls = tools?.Calls ?? [],
         Duration = _services.TimeProvider.GetUtcNow() - started
     };
-
-    private async Task<IReadOnlyList<AgentWatchedState>> FetchWatchedStateAsync(CancellationToken cancellationToken)
-    {
-        var watchPaths = Volatile.Read(ref _normalizedWatchPaths);
-        if (watchPaths.Length == 0)
-        {
-            return [];
-        }
-
-        var tools = _services.ToolSource.CreateTools(isReadOnly: true);
-        var browse = tools.FirstOrDefault(tool => tool.Name == "browse");
-        var getProperty = tools.FirstOrDefault(tool => tool.Name == "get_property");
-        var states = new List<AgentWatchedState>(watchPaths.Length);
-        foreach (var path in watchPaths)
-        {
-            try
-            {
-                states.Add(await FetchPathStateAsync(path, browse, getProperty, cancellationToken));
-            }
-            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
-            {
-                states.Add(new AgentWatchedState(path, AgentWatchedStateKind.Error, ToJsonString("Error: " + exception.Message)));
-            }
-        }
-
-        return states;
-    }
-
-    /// <summary>
-    /// Browses the subject at a watch path, or reads the property there when no subject is, since browse only
-    /// resolves subjects.
-    /// </summary>
-    private static async Task<AgentWatchedState> FetchPathStateAsync(
-        string path, McpToolInfo? browse, McpToolInfo? getProperty, CancellationToken cancellationToken)
-    {
-        string? error = null;
-        if (browse is not null)
-        {
-            var input = JsonSerializer.SerializeToElement(new AgentBrowseInput(path, Depth: 2, IncludeProperties: true, Format: "text"), AgentJsonContext.Default.AgentBrowseInput);
-            var result = await browse.Handler(input, cancellationToken);
-            if (result is string text)
-            {
-                return new AgentWatchedState(path, AgentWatchedStateKind.Subject, ToJsonString(text));
-            }
-
-            // Tool results are open-ended objects, so only they are serialized without generated metadata.
-            error = TryGetError(JsonSerializer.SerializeToElement(result));
-        }
-
-        if (getProperty is not null)
-        {
-            var input = JsonSerializer.SerializeToElement(new AgentPathInput(path), AgentJsonContext.Default.AgentPathInput);
-            var result = JsonSerializer.SerializeToElement(await getProperty.Handler(input, cancellationToken));
-            if (TryGetError(result) is null && result.ValueKind == JsonValueKind.Object)
-            {
-                return new AgentWatchedState(path, AgentWatchedStateKind.Property, result);
-            }
-        }
-
-        return new AgentWatchedState(path, AgentWatchedStateKind.Error, ToJsonString(error ?? $"No subject or property found at {path}."));
-    }
-
-    private static JsonElement ToJsonString(string text) => JsonSerializer.SerializeToElement(text, AgentJsonContext.Default.String);
-
-    private static string? TryGetError(JsonElement result) =>
-        result.ValueKind == JsonValueKind.Object && result.TryGetProperty("error", out var error) ? error.ToString() : null;
 }
 
 internal sealed record AgentStats(int BackgroundRunCount, DateTimeOffset? LastActivityTime);
-
-/// <summary>The input of the browse tool for the state of a watch path.</summary>
-internal sealed record AgentBrowseInput(string Path, int Depth, bool IncludeProperties, string Format);
-
-/// <summary>The input of the get_property tool for the state of a watch path.</summary>
-internal sealed record AgentPathInput(string Path);
