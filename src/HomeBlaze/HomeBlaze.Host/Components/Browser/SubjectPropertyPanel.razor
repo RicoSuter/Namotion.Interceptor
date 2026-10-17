@@ -30,7 +30,13 @@
                 @{
                     var childSections = GetChildSections();
                     var reorderContainer = GetReorderContainer(childSections);
-                    var isReordering = _isReordering && reorderContainer is not null;
+                    if (reorderContainer is null && _isReordering)
+                    {
+                        // A folder left with fewer than two children leaves the mode rather than return to it later.
+                        StopReordering();
+                    }
+
+                    var isReordering = _isReordering;
                 }
                 <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
                     @{
@@ -287,14 +293,6 @@
         padding: 8px 16px 8px 4px;
     }
 
-    /* Above the strip at the top of the drop zone, which takes a drop in first place and would otherwise cover the
-       upper half of the handle and the arrows of the first row. */
-    .subject-pane-reorder-handle,
-    .subject-pane-move {
-        position: relative;
-        z-index: 1;
-    }
-
     .subject-pane-reorder-handle {
         flex-shrink: 0;
         width: 24px;
@@ -313,13 +311,32 @@
         margin: 4px 0;
     }
 
-    /* Two columns, so that the single arrow of the first and the last row stays in the column of its kind. */
+    /* Above the strip at the top of the drop zone, which takes a drop in first place and would otherwise cover the
+       upper half of the handle and the arrows of the first row. */
+    .subject-pane-reorder-handle,
+    .subject-pane-move {
+        position: relative;
+        z-index: 1;
+    }
+
+    /* Two columns, so that the single arrow of the first and the last row stays in the column of its kind.
+       Dragging moves a row with a mouse. The arrows are for the keyboard, so they show only while one has focus.
+       Transparent rather than hidden, so that they stay in the tab order, and without pointer events meanwhile, so
+       that a click cannot press an arrow it does not see. A device without hover gets the arrows instead of the
+       handle, so that a touch on a row scrolls the pane rather than dragging the row. */
     .subject-pane-move {
         flex-shrink: 0;
         display: grid;
         grid-template-columns: 28px 28px;
         justify-items: center;
         margin-left: 8px;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .subject-pane-move:focus-within {
+        opacity: 1;
+        pointer-events: auto;
     }
 
     .subject-pane-move-up {
@@ -328,20 +345,6 @@
 
     .subject-pane-move-down {
         grid-column: 2;
-    }
-
-    /* Dragging moves a row with a mouse. The arrows are for the keyboard, so they show only while one has focus.
-       Transparent rather than hidden, so that they stay in the tab order, and without pointer events meanwhile, so
-       that a click cannot press an arrow it does not see. A device without hover gets the arrows instead of the
-       handle, so that a touch on a row scrolls the pane rather than dragging the row. */
-    .subject-pane-move {
-        opacity: 0;
-        pointer-events: none;
-    }
-
-    .subject-pane-move:focus-within {
-        opacity: 1;
-        pointer-events: auto;
     }
 
     @@media (hover: none) {
@@ -422,7 +425,7 @@
     private readonly HashSet<string> _expandedProperties = [];
 
     private ElementReference _rootElement;
-    private string? _registeredElementId;
+    private string? _copyButtonsElementId;
     private IJSObjectReference? _module;
     private DotNetObjectReference<SubjectPropertyPanel>? _dotNetReference;
     private bool _isDisposed;
@@ -442,6 +445,11 @@
 
     private bool _isReordering;
     private MudDropContainer<SubjectPropertyChild>? _reorderDropContainer;
+    private readonly Dictionary<SubjectPropertyChild, MudIconButton> _upArrows = [];
+    private readonly Dictionary<SubjectPropertyChild, MudIconButton> _downArrows = [];
+
+    // The arrow that takes the focus after the next render, the up arrow of the child when the flag is set.
+    private (SubjectPropertyChild Child, bool IsUpArrow)? _arrowToFocus;
 
     // The children the reorder list showed last, to tell when the order changed.
     private SubjectPropertyChild[]? _reorderedChildren;
@@ -502,16 +510,17 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         await base.OnAfterRenderAsync(firstRender);
+        await FocusArrowAsync();
 
-        // The listeners sit on the root, as the tracking scope replaces everything inside it on every change in
+        // The listener sits on the root, as the tracking scope replaces everything inside it on every change in
         // developer mode. The root is new only when the pane showed no subject in between.
-        if (Subject is null || _rootElement.Id is null || _rootElement.Id == _registeredElementId)
+        if (Subject is null || _rootElement.Id is null || _rootElement.Id == _copyButtonsElementId)
         {
             return;
         }
 
         // Claimed before the awaits, so that a render during them does not register the element again.
-        _registeredElementId = _rootElement.Id;
+        _copyButtonsElementId = _rootElement.Id;
         try
         {
             _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>(
@@ -523,11 +532,32 @@
             }
 
             _dotNetReference ??= DotNetObjectReference.Create(this);
-            await _module.InvokeVoidAsync("registerPane", _rootElement, _dotNetReference);
+            await _module.InvokeVoidAsync("registerCopyButtons", _rootElement, _dotNetReference);
         }
         catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
         {
             // Without the script the copy buttons do nothing; the values are still shown.
+        }
+    }
+
+    private async Task FocusArrowAsync()
+    {
+        if (_arrowToFocus is not { } arrow)
+        {
+            return;
+        }
+
+        _arrowToFocus = null;
+        if ((arrow.IsUpArrow ? _upArrows : _downArrows).TryGetValue(arrow.Child, out var button))
+        {
+            try
+            {
+                await button.FocusAsync();
+            }
+            catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
+            {
+                // The row is gone, and with it the arrow.
+            }
         }
     }
 
@@ -700,6 +730,9 @@
         _isReordering = false;
         _reorderDropContainer = null;
         _reorderedChildren = null;
+        _upArrows.Clear();
+        _downArrows.Clear();
+        _arrowToFocus = null;
     }
 
     // The container whose children the property holds when they can be put in order, null for any other property.
@@ -1090,19 +1123,24 @@
     {
         // The drop zone keeps the order in which it first saw its items, and the one of its last drop, rather than the
         // order of the items it is given. Cleared before it renders, so that it shows each new order of the storage.
+        // Must stay idempotent, as the fragment runs on every render of the pane.
         if (_reorderedChildren is not null && !_reorderedChildren.AsSpan().SequenceEqual(children))
         {
             _reorderDropContainer?.Refresh();
         }
 
         _reorderedChildren = children;
-        var canMove = CanMoveChildren(container);
+        var canDrag = CanMoveChildren(container);
+
+        // Stays enabled while a move is written, as a focused button that turns disabled loses the focus. A press
+        // meanwhile is ignored.
+        var canPressArrows = IsConnected(container);
 
         <MudDropContainer T="SubjectPropertyChild"
                           @ref="_reorderDropContainer"
                           Items="@children"
                           ItemsSelector="@((_, _) => true)"
-                          ItemDisabled="@(_ => !canMove)"
+                          ItemDisabled="@(_ => !canDrag)"
                           DisabledClass=""
                           ItemDropped="@(drop => OnChildDropped(container, children, drop))">
             <ChildContent>
@@ -1118,7 +1156,7 @@
                 }
                 <div class="@(isSelected ? "subject-pane-reorder-row mud-primary-text" : "subject-pane-reorder-row")"
                      data-testid="reorder-child-row">
-                    <MudDragHandle T="SubjectPropertyChild" Class="subject-pane-reorder-handle">
+                    <MudDragHandle T="SubjectPropertyChild" Class="subject-pane-reorder-handle" aria-hidden="true">
                         <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" />
                     </MudDragHandle>
                     <MudIcon Icon="@GetSubjectIcon(child.Subject)"
@@ -1135,22 +1173,26 @@
                         @if (childIndex > 0)
                         {
                             var previousChild = children[childIndex - 1];
-                            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                            var reachesTop = childIndex == 1;
+                            <MudIconButton @ref="_upArrows[child]"
+                                           Icon="@Icons.Material.Filled.ArrowUpward"
                                            Size="Size.Small"
                                            Class="subject-pane-move-up pa-0"
-                                           Disabled="@(!canMove)"
-                                           OnClick="@(() => MoveChildAsync(container, child, previousChild))"
+                                           Disabled="@(!canPressArrows)"
+                                           OnClick="@(() => MoveChildByArrowAsync(container, child, previousChild, isUp: true, reachesTop))"
                                            aria-label="@($"Move {childName} up")"
                                            data-testid="move-child-up-button" />
                         }
                         @if (childIndex >= 0 && childIndex < children.Length - 1)
                         {
                             var nextChild = children[childIndex + 1];
-                            <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
+                            var reachesBottom = childIndex == children.Length - 2;
+                            <MudIconButton @ref="_downArrows[child]"
+                                           Icon="@Icons.Material.Filled.ArrowDownward"
                                            Size="Size.Small"
                                            Class="subject-pane-move-down pa-0"
-                                           Disabled="@(!canMove)"
-                                           OnClick="@(() => MoveChildAsync(container, child, nextChild))"
+                                           Disabled="@(!canPressArrows)"
+                                           OnClick="@(() => MoveChildByArrowAsync(container, child, nextChild, isUp: false, reachesBottom))"
                                            aria-label="@($"Move {childName} down")"
                                            data-testid="move-child-down-button" />
                         }
@@ -1182,10 +1224,29 @@
 
     private async Task MoveDroppedChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
     {
-        await MoveChildAsync(container, child, target);
-        if (!_isDisposed)
+        try
         {
-            StateHasChanged();
+            await MoveChildAsync(container, child, target);
+            if (!_isDisposed)
+            {
+                StateHasChanged();
+            }
+        }
+        catch (Exception exception)
+        {
+            // Nothing awaits this task, so an exception would otherwise go unobserved.
+            await DispatchExceptionAsync(exception);
+        }
+    }
+
+    // The arrow pressed on a row that the move takes to the top or the bottom is gone after the move, so the other
+    // arrow of the row takes the focus, which a keyboard user would lose otherwise.
+    private async Task MoveChildByArrowAsync(
+        IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target, bool isUp, bool reachesEnd)
+    {
+        if (await MoveChildAsync(container, child, target) && reachesEnd)
+        {
+            _arrowToFocus = (child, !isUp);
         }
     }
 
@@ -1194,27 +1255,35 @@
         => container is not IStorageContainer { Status: not StorageStatus.Connected };
 
     // A move that writes nothing refreshes the reorder list, which shows a dropped row in its new place already.
-    private async Task MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
+    // Returns whether the order was written.
+    private async Task<bool> MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
     {
         if (_isMovingChild)
         {
             _reorderDropContainer?.Refresh();
-            return;
+            return false;
         }
 
         _isMovingChild = true;
         try
         {
             await container.MoveChildAsync(child.Index!.ToString()!, target.Index!.ToString()!, _lifetime.Token);
+            return true;
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
             // The pane is gone.
+            return false;
         }
         catch (Exception exception)
         {
-            _reorderDropContainer?.Refresh();
-            await DialogService.ShowMessageBoxAsync("Move Failed", $"Failed to move: {exception.Message}", yesText: "OK");
+            if (!_isDisposed)
+            {
+                _reorderDropContainer?.Refresh();
+                await DialogService.ShowMessageBoxAsync("Move Failed", $"Failed to move: {exception.Message}", yesText: "OK");
+            }
+
+            return false;
         }
         finally
         {

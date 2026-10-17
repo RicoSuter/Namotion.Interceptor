@@ -112,6 +112,82 @@ public class NavigationMetadataTests
     }
 
     [Fact]
+    public async Task WhenAChildIsDraggedDown_ThenItTakesThePlaceOfTheRowItIsDroppedOn()
+    {
+        // Arrange
+        var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
+        var originalMetadata = await File.ReadAllTextAsync(metadataPath);
+        var folder = GetDemoFolder();
+        try
+        {
+            var (_, pane) = await OpenPaneAsync("Demo");
+            var rows = await StartReorderingAsync(pane);
+            var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
+            var names = GetShownChildNames(folder);
+            Assert.Equal(names.Length, shownNames.Count);
+
+            // Act
+            await rows.Nth(0).Locator(".mud-drag-handle").DragToAsync(rows.Nth(2));
+
+            // Assert
+            string[] expectedShownNames = [shownNames[1], shownNames[2], shownNames[0], .. shownNames.Skip(3)];
+            await Assertions.Expect(rows.Locator(".subject-pane-child-name"))
+                .ToHaveTextAsync(expectedShownNames, new() { Timeout = PageLoadTimeout });
+
+            string[] expectedNames = [names[1], names[2], names[0], .. names.Skip(3)];
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => folder.ChildOrder.ToArray().SequenceEqual(expectedNames),
+                message: "The order of the folder was not written");
+            Assert.Equal(expectedNames, folder.ChildOrder.ToArray());
+        }
+        finally
+        {
+            await RestoreDemoMetadataAsync(metadataPath, originalMetadata);
+        }
+    }
+
+    [Fact]
+    public async Task WhenEnterIsPressedTwiceOnAnArrow_ThenTheRowMovesTwoPlaces()
+    {
+        // Arrange
+        var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
+        var originalMetadata = await File.ReadAllTextAsync(metadataPath);
+        var folder = GetDemoFolder();
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Demo");
+            var rows = await StartReorderingAsync(pane);
+            var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
+            var names = GetShownChildNames(folder);
+            var upArrow = pane.GetByRole(AriaRole.Button, new() { Name = $"Move {shownNames[3]} up", Exact = true });
+            await upArrow.FocusAsync();
+
+            // Act - the second press goes to the arrow that has the focus after the first move.
+            await page.Keyboard.PressAsync("Enter");
+            await Assertions.Expect(rows.Nth(2).Locator(".subject-pane-child-name"))
+                .ToHaveTextAsync(shownNames[3], new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(upArrow).ToBeFocusedAsync();
+            await page.Keyboard.PressAsync("Enter");
+
+            // Assert
+            string[] expectedShownNames = [shownNames[0], shownNames[3], shownNames[1], shownNames[2], .. shownNames.Skip(4)];
+            await Assertions.Expect(rows.Locator(".subject-pane-child-name"))
+                .ToHaveTextAsync(expectedShownNames, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(upArrow).ToBeFocusedAsync();
+
+            string[] expectedNames = [names[0], names[3], names[1], names[2], .. names.Skip(4)];
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => folder.ChildOrder.ToArray().SequenceEqual(expectedNames),
+                message: "The order of the folder was not written");
+            Assert.Equal(expectedNames, folder.ChildOrder.ToArray());
+        }
+        finally
+        {
+            await RestoreDemoMetadataAsync(metadataPath, originalMetadata);
+        }
+    }
+
+    [Fact]
     public async Task WhenTheDeviceHasNoHover_ThenTheArrowsShowAndMoveAChild()
     {
         // Arrange

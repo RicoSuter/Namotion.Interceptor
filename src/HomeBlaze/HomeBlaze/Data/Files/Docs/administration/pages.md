@@ -91,7 +91,7 @@ A metadata file left with every key blank is deleted rather than kept empty on d
 
 ### Ordering in the Browser
 
-The **Reorder** button in the header of a folder switches its list of children to reorder mode, and **Done** switches it back. The button is disabled while the storage is not connected. In reorder mode a click on a row does not open it.
+The **Reorder** button in the header of a folder with at least two children switches its list of children to reorder mode, and **Done** switches it back. **Reorder** is disabled while the storage is not connected. In reorder mode, dragging and the arrows are disabled while the storage is not connected, and a click on a row does not open it.
 
 Drag a row by its handle to move it. A dashed placeholder shows where it will land: dropping on a row puts the dragged row after it, and dropping at the very top of the list puts it first. Each move writes the whole order of the folder to its `.metadata.json`.
 
