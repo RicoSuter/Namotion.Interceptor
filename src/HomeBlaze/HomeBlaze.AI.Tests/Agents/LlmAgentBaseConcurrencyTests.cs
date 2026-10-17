@@ -196,6 +196,26 @@ public class LlmAgentBaseConcurrencyTests
     }
 
     [Fact]
+    public async Task WhenAnAgentWithoutStorageRestarts_ThenItKeepsItsTimelineAndMemoryInstances()
+    {
+        // Arrange
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(services => new FakeAgent(services), hasDataDirectory: false);
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        var timeline = test.Agent.Timeline;
+        var memory = test.Agent.Memory;
+
+        // Act
+        await test.RestartAgentAsync();
+
+        // Assert - an append of a run that outlives its stop lands in the instance that the restarted agent shows.
+        Assert.Same(timeline, test.Agent.Timeline);
+        Assert.Same(memory, test.Agent.Memory);
+        Assert.Equal(
+            [AgentTimelineEntryKind.User, AgentTimelineEntryKind.Assistant],
+            test.Agent.Timeline.Entries.Select(entry => entry.Kind));
+    }
+
+    [Fact]
     public async Task WhenTheAgentRestarts_ThenItKeepsItsTimelineInstanceWithItsEntries()
     {
         // Arrange
