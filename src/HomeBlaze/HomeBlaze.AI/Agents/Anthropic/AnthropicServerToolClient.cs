@@ -67,7 +67,6 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
                     yield return update;
                 }
 
-                // The caller sends these contents back only after the stream ended, so they are complete in time.
                 var finishReason = updates.LastOrDefault(update => update.FinishReason is not null)?.FinishReason;
                 if (finishReason?.Value != PauseTurnReason)
                 {
@@ -88,6 +87,7 @@ internal sealed class AnthropicServerToolClient : DelegatingChatClient
         }
         finally
         {
+            // The caller sends these contents back only after the stream ended, so they are complete in time.
             tracker.CompletePendingCalls();
         }
     }

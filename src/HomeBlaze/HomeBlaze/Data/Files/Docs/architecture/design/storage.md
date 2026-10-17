@@ -214,7 +214,7 @@ A `MarkdownFile` turns its text into child subjects when the file is loaded and 
 | `MarkdownFragment` | `HomeBlaze.Storage/Pages` | The subject that holds the content of one slot. Its `Children` have the same shape as the `Children` of the page |
 | `MarkdownBlockWriter` | `HomeBlaze.Storage/Pages` | Writes the configuration of one block back into the page text. Replaces the head line and the `json` block and never touches the content of the block. A block without a closing line gets none. Also creates the text of a new block for the editor, which always has a closing line. What it adds gets the line ending of the page |
 | `MarkdownContentView` | `HomeBlaze.Storage.Blazor/Files` | Renders the children of a page or of a fragment. HTML and expression values are joined into one markup string, every other child is rendered through `SubjectComponent` |
-| `MarkdownDecorationParser`, `MarkdownBlockMatcher`, `MarkdownBlockNames` | `HomeBlaze.Storage.Blazor/Models` | The regions that the editor marks, the check that a block of the editor text is the same block as in the saved page, and the check of the name that the editor gives a new block |
+| `MarkdownDecorationParser`, `BlockOutlineDecorations`, `MarkdownBlockMatcher`, `MarkdownBlockNames` | `HomeBlaze.Storage.Blazor/Models` | The regions that the editor marks and the outline of every block, which colors its fences by depth, labels its closing line and makes it foldable, the check that a block of the editor text is the same block as in the saved page, and the check of the name that the editor gives a new block |
 
 The subjects of a page with a card and a named motor:
 
