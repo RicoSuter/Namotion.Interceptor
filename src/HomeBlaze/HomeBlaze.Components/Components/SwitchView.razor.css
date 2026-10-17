@@ -1,10 +1,7 @@
-/* The edges of the control widgets: their visible parts start and end where the text around them does, and the room
-   that MudBlazor keeps around them for a ripple or a label does not add to the space between blocks. See "Spacing" in
-   the widget basics. */
-
 /* MudSwitch keeps 12 pixels around its track for the ripple of the thumb. At the start they would move the track in
    from the edge where the box of a Select and the label of a Slider start, and above and below its label they would add
-   7 pixels to the space between blocks. The ripple may reach into the space around the switch. */
+   7 pixels to the space between blocks. The ripple may reach into the space around the switch. See "Spacing" in the
+   widget basics. */
 .switch-widget ::deep .mud-switch {
     margin-block: -7px;
     margin-inline-start: -12px;
