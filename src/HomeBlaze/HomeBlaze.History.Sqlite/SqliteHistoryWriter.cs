@@ -43,10 +43,11 @@ internal static class SqliteHistoryWriter
         // newer one. Taking the kind from the last arrival then stored the superseded one, and a ulong
         // whose value had overflowed into value_json read back as JSON text instead of a number. Ordering
         // by timestamp makes the stored kind independent of the order the samples turned up in.
+        // A tie goes to the later arrival, because that write replaces the earlier row at the same instant.
         var newestByPath = new Dictionary<string, PendingSample>(StringComparer.Ordinal);
         foreach (var sample in samples)
         {
-            if (!newestByPath.TryGetValue(sample.Path, out var newest) || sample.Timestamp > newest.Timestamp)
+            if (!newestByPath.TryGetValue(sample.Path, out var newest) || sample.Timestamp >= newest.Timestamp)
             {
                 newestByPath[sample.Path] = sample;
             }

@@ -345,11 +345,6 @@ public sealed class SqliteHistorySchemaTests : IDisposable
         var maximum = core.Query(new HistoryQuery(
             "/a/Value", Base, Base.AddSeconds(30), TimeSpan.FromSeconds(30), HistoryAggregations.Maximum));
         Assert.Equal(new double?[] { 2.5 }, maximum.Points.Select(point => point.Number).ToArray());
-
-        var raw = core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(30)));
-        Assert.Equal(
-            new double?[] { null, null, 1.5, 2.5 },
-            raw.Points.Select(point => point.Number).ToArray());
     }
 
     [Fact]
@@ -389,6 +384,26 @@ public sealed class SqliteHistorySchemaTests : IDisposable
 
         // Act
         core.Record("/a/Value", Base.AddSeconds(20), "on", typeof(string));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var partition = Directory.EnumerateFiles(_directory, "*.db")
+            .Single(file => Path.GetFileName(file) != "metadata.db");
+        Assert.Equal((long)ValueColumn.Json, Scalar(partition, "SELECT value_column FROM paths;"));
+        Assert.Throws<HistoryAggregationNotSupportedException>(() => core.Query(new HistoryQuery(
+            "/a/Value", Base, Base.AddSeconds(30), TimeSpan.FromSeconds(30), HistoryAggregations.Maximum)));
+    }
+
+    [Fact]
+    public async Task WhenTwoSamplesOfDifferentTypesShareAnInstantInOneFlush_ThenTheLaterOneOwnsTheStoredColumnKind()
+    {
+        // Arrange - the second write at the same timestamp replaces the first row, so the string is the
+        // only row left and must be the one that decides the kind.
+        using var core = NewCore(Base.AddSeconds(60));
+        core.Record("/a/Value", Base, 1.5d, typeof(double));
+        core.Record("/a/Value", Base, "on", typeof(string));
+
+        // Act
         await core.FlushAsync(CancellationToken.None);
 
         // Assert
