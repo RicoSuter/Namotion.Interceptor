@@ -30,7 +30,7 @@ public sealed class SubjectPathAttribute : Attribute
     /// The types that the value of a property or an attribute at the path may have, or null for any type. A type, a
     /// nullable type as its underlying type, matches when it is assignable to one of them or, for an open generic type,
     /// implements or derives from a closed form of it.
-    /// <see cref="Enum"/> matches every enum, and <see cref="char"/> matches no interface of
+    /// <see cref="Enum"/> matches only enum types, not a property declared as <see cref="Enum"/>, and <see cref="char"/> matches no interface of
     /// <c>System.Numerics</c>. <c>typeof(INumber&lt;&gt;)</c> matches only the built-in integral types,
     /// <see cref="float"/>, <see cref="double"/> and <see cref="decimal"/>, the numbers that number widgets read. Does not
     /// restrict an operation. Ignored when <see cref="SubjectType"/> is set.
