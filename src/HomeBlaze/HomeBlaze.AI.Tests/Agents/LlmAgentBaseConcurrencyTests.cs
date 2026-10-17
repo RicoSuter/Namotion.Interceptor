@@ -87,6 +87,40 @@ public class LlmAgentBaseConcurrencyTests
     }
 
     [Fact]
+    public async Task WhenAnUnrelatedChangeIsSavedWhileTheFailureOfATurnThatSawTheIntervalsFixedIsRecorded_ThenTheStatusShowsTheFailure()
+    {
+        // Arrange
+        var isReconfigured = 0;
+        await using var test = await StartAsync();
+        test.Agent.PollInterval = TimeSpan.FromDays(400);
+        await test.Agent.ApplyConfigurationAsync(CancellationToken.None);
+        test.Agent.Handler = async (_, _, _) =>
+        {
+            // The fix is saved while the turn runs, so the turn is left to report it.
+            test.Agent.PollInterval = null;
+            await test.Agent.ApplyConfigurationAsync(CancellationToken.None);
+            throw new AgentTurnException(AgentFailureKind.Transient, "backend broke");
+        };
+        test.Agent.StateChanged += () =>
+        {
+            // Raised once the error entry is recorded, after the failure was reported and before its status is
+            // written; this change neither breaks nor fixes anything.
+            if (test.Agent.Timeline.Entries.Count == 2 && Interlocked.Exchange(ref isReconfigured, 1) == 0)
+            {
+                _ = test.Agent.ApplyConfigurationAsync(CancellationToken.None);
+            }
+        };
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, isReconfigured);
+        Assert.Equal(ServiceStatus.Error, test.Agent.Status);
+        Assert.Equal("backend broke", test.Agent.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenTheAgentStopsDuringAChat_ThenItReportsNoIdleStatusBeforeItIsStopped()
     {
         // Arrange

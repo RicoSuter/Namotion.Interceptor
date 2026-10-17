@@ -163,11 +163,9 @@ public abstract partial class LlmAgentBase
     {
         _logger.LogWarning("The turn of agent {Agent} failed: {Message}", Title, exception.Message);
         var failure = exception;
-        int reportedConfigurationVersion;
         lock (_stateLock)
         {
-            reportedConfigurationVersion = _configurationVersion;
-            if (failure.Kind == AgentFailureKind.Configuration && reportedConfigurationVersion != _turnConfigurationVersion)
+            if (failure.Kind == AgentFailureKind.Configuration && _configurationVersion != _turnConfigurationVersion)
             {
                 // The turn may have failed on the configuration that was replaced meanwhile, so a pause until the
                 // next change would outlive the fix; the failure only backs off.
@@ -175,29 +173,26 @@ public abstract partial class LlmAgentBase
             }
 
             _scheduler?.ReportFailure(failure);
+
+            // The failure status written below accounts for every configuration change so far, so a pending report
+            // only stands for a change after this point.
+            _isIdleReportPending = false;
         }
 
         // Recorded before the status changes, so a reader that sees the failure status also sees the entry.
         await AppendAsync(errorEntry);
-        SetFailureStatus(failure, reportedConfigurationVersion);
+        SetFailureStatus(failure);
     }
 
-    /// <summary>
-    /// Writes the status after a failure that was reported to the scheduler while the configuration version was
-    /// <paramref name="reportedConfigurationVersion"/>.
-    /// </summary>
-    private void SetFailureStatus(AgentTurnException failure, int reportedConfigurationVersion)
+    /// <summary>Writes the status after a failure that was reported to the scheduler.</summary>
+    private void SetFailureStatus(AgentTurnException failure)
     {
         lock (_stateLock)
         {
-            if (_configurationVersion == reportedConfigurationVersion)
+            if (_isIdleReportPending)
             {
-                // The failure status accounts for every configuration change so far.
-                _isIdleReportPending = false;
-            }
-            else if (_isIdleReportPending)
-            {
-                // A change after the report changed the pause, which the end of the turn reports.
+                // A change after the report changed the configuration error or the pause, which the end of the turn
+                // reports.
                 return;
             }
 
