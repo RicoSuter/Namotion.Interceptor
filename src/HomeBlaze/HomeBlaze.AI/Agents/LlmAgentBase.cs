@@ -551,12 +551,15 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
     }
 
-    /// <summary>Reports the idle status of a started agent; a stopped or starting agent keeps its status.</summary>
+    /// <summary>
+    /// Reports the idle status of a started agent; a stopped, starting or stopping agent keeps its status.
+    /// </summary>
     private void SetIdle()
     {
         lock (_stateLock)
         {
-            if (_scheduler is not { } scheduler)
+            // A stopping agent still has its scheduler until the turns it waits for have ended.
+            if (_scheduler is not { } scheduler || _lifetime is { IsCancellationRequested: true })
             {
                 return;
             }

@@ -656,6 +656,28 @@ public class LlmAgentBaseTests
     }
 
     [Fact]
+    public async Task WhenTheAgentStopsDuringAChat_ThenItReportsNoIdleStatusBeforeItIsStopped()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = WaitForCancellationAsync);
+        var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
+        var statusMessages = new ConcurrentQueue<string?>();
+        using var subscription = ((IInterceptorSubject)test.Agent).Context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => ReferenceEquals(change.Property.Subject, test.Agent) &&
+                             change.Property.Name == nameof(LlmAgentBase.StatusMessage))
+            .Subscribe(change => statusMessages.Enqueue(change.GetNewValue<string?>()));
+
+        // Act
+        await test.StopAgentAsync();
+        await chat;
+
+        // Assert
+        Assert.DoesNotContain("Idle", statusMessages);
+        Assert.Equal(ServiceStatus.Stopped, test.Agent.Status);
+    }
+
+    [Fact]
     public async Task WhenTheAgentIsStopped_ThenAChatIsRejectedAndRunNowDoesNothing()
     {
         // Arrange
