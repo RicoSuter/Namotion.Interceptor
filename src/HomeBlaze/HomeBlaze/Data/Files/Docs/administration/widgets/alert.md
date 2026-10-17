@@ -1,7 +1,6 @@
 ---
 title: Alert
 navTitle: Alert
-position: 21
 ---
 
 # Alert

@@ -1,7 +1,6 @@
 ---
 title: Control
 navTitle: Control
-position: 44
 ---
 
 # Control

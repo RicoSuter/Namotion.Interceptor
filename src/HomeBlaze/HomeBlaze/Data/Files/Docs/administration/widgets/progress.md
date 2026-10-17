@@ -1,7 +1,6 @@
 ---
 title: Progress
 navTitle: Progress
-position: 34
 ---
 
 # Progress

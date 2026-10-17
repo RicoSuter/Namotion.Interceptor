@@ -1,0 +1,13 @@
+{
+  "order": [
+    "installation.md",
+    "configuration.md",
+    "subjects.md",
+    "pages.md",
+    "page-errors.md",
+    "paths.md",
+    "monitoring.md",
+    "updates.md",
+    "widgets"
+  ]
+}

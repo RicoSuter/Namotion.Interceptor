@@ -1,0 +1,11 @@
+{
+  "order": [
+    "Readme.md",
+    "Dashboard.md",
+    "Settings.md",
+    "Devices.md",
+    "Help.md",
+    "Demo",
+    "Docs"
+  ]
+}

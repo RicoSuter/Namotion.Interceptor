@@ -1,7 +1,6 @@
 ---
 title: TabLayout
 navTitle: TabLayout
-position: 11
 ---
 
 # TabLayout

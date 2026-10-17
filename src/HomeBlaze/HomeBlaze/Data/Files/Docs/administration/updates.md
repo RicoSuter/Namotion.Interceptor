@@ -1,7 +1,6 @@
 ---
 title: Version and Updates
 navTitle: Updates
-position: 9
 ---
 
 # Version and Updates

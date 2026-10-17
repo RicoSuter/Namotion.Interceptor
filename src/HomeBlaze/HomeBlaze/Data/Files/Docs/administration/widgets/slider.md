@@ -1,7 +1,6 @@
 ---
 title: Slider
 navTitle: Slider
-position: 41
 ---
 
 # Slider

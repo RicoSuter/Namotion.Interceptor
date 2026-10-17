@@ -1,7 +1,6 @@
 ---
 title: Notifications
 navTitle: Notifications
-position: 5
 ---
 
 # Notifications

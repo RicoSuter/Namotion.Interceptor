@@ -1,7 +1,6 @@
 ---
 title: HomeBlaze Architecture
 navTitle: Architecture
-position: 0
 ---
 
 # HomeBlaze Architecture

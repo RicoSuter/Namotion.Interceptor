@@ -1,7 +1,6 @@
 ---
 title: GridLayout
 navTitle: GridLayout
-position: 12
 ---
 
 # GridLayout

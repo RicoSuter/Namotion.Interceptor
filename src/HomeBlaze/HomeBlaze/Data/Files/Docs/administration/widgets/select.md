@@ -1,7 +1,6 @@
 ---
 title: Select
 navTitle: Select
-position: 42
 ---
 
 # Select

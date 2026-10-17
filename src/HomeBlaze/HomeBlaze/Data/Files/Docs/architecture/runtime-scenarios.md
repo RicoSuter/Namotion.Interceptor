@@ -1,7 +1,6 @@
 ---
 title: Runtime Scenarios
 navTitle: Runtime Scenarios
-position: 3
 ---
 
 # Runtime Scenarios

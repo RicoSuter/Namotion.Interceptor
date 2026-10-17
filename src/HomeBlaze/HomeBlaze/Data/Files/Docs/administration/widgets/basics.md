@@ -1,7 +1,6 @@
 ---
 title: Widget Basics
 navTitle: Basics
-position: 2
 ---
 
 # Widget Basics

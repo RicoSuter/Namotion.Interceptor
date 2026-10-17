@@ -1,7 +1,6 @@
 ---
 title: Subjects, Storage & Files
 navTitle: Subjects
-position: 3
 ---
 
 # Subjects, Storage & Files

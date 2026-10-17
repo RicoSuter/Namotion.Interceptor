@@ -1,7 +1,6 @@
 ---
 title: Building Custom Subjects
 navTitle: Building Subjects
-position: 0
 ---
 
 # Building Custom Subjects

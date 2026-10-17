@@ -1,7 +1,6 @@
 ---
 title: OperationButton
 navTitle: OperationButton
-position: 43
 ---
 
 # OperationButton

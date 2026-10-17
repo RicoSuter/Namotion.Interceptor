@@ -1,7 +1,6 @@
 ---
 title: Glossary
 navTitle: Glossary
-position: 10
 ---
 
 # Glossary

@@ -1,7 +1,6 @@
 ---
 title: ExpansionPanels
 navTitle: ExpansionPanels
-position: 14
 ---
 
 # ExpansionPanels

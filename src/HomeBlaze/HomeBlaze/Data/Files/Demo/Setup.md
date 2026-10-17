@@ -1,7 +1,6 @@
 ﻿---
 title: Demo Setup Guide
 navTitle: Demo Setup
-position: 1
 ---
 
 # Demo Setup Guide

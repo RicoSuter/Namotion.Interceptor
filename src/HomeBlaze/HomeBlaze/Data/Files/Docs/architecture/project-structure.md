@@ -1,7 +1,6 @@
 ---
 title: Project Structure
 navTitle: Project Structure
-position: 2
 ---
 
 # Project Structure

@@ -1,7 +1,6 @@
 ---
 title: Indicator
 navTitle: Indicator
-position: 33
 ---
 
 # Indicator

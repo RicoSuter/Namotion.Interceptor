@@ -1,0 +1,28 @@
+{
+  "order": [
+    "overview.md",
+    "basics.md",
+    "flow-layout.md",
+    "tab-layout.md",
+    "grid-layout.md",
+    "canvas-layout.md",
+    "expansion-panels.md",
+    "responsive.md",
+    "card.md",
+    "alert.md",
+    "widget.md",
+    "value-map.md",
+    "value-list.md",
+    "value-tile.md",
+    "indicator.md",
+    "progress.md",
+    "gauge.md",
+    "subject-table.md",
+    "switch.md",
+    "slider.md",
+    "select.md",
+    "operation-button.md",
+    "control.md",
+    "history-chart.md"
+  ]
+}

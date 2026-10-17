@@ -1,0 +1,12 @@
+{
+  "order": [
+    "home.md",
+    "concepts.md",
+    "glossary.md",
+    "administration",
+    "architecture",
+    "development",
+    "devices",
+    "plans"
+  ]
+}

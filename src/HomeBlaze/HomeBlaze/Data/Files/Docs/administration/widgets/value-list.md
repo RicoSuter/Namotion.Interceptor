@@ -1,7 +1,6 @@
 ---
 title: ValueList
 navTitle: ValueList
-position: 31
 ---
 
 # ValueList

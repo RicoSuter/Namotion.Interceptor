@@ -1,7 +1,6 @@
 ---
 title: Errors on Markdown Pages
 navTitle: Page Errors
-position: 6
 ---
 
 # Errors on Markdown Pages

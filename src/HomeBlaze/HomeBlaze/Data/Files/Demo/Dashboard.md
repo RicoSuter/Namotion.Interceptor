@@ -1,7 +1,6 @@
 ---
 title: Dashboard Demo
 navTitle: Dashboard Demo
-position: 7
 ---
 
 # Dashboard Demo

@@ -1,7 +1,6 @@
 ---
 title: Monitoring
 navTitle: Monitoring
-position: 8
 ---
 
 # Monitoring and Health Checks

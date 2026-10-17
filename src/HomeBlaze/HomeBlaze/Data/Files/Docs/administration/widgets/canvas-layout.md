@@ -1,7 +1,6 @@
 ---
 title: CanvasLayout
 navTitle: CanvasLayout
-position: 13
 ---
 
 # CanvasLayout

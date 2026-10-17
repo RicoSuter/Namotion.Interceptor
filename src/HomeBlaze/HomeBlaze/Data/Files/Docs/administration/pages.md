@@ -1,7 +1,6 @@
 ---
 title: Markdown Pages
 navTitle: Pages
-position: 4
 ---
 
 # Markdown Pages

@@ -1,7 +1,6 @@
 ---
 title: Implementation State
 navTitle: State
-position: 1
 ---
 
 # HomeBlaze Implementation State

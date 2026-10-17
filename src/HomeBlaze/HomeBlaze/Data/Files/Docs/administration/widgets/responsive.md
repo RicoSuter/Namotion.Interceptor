@@ -1,7 +1,6 @@
 ---
 title: Responsive
 navTitle: Responsive
-position: 15
 ---
 
 # Responsive

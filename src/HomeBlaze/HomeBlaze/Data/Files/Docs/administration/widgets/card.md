@@ -1,7 +1,6 @@
 ---
 title: Card
 navTitle: Card
-position: 20
 ---
 
 # Card

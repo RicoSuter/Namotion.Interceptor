@@ -1,7 +1,6 @@
 ---
 title: SubjectTable
 navTitle: SubjectTable
-position: 36
 ---
 
 # SubjectTable
