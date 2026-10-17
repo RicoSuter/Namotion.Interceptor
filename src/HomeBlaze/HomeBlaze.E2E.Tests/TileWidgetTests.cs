@@ -165,4 +165,21 @@ public class TileWidgetTests
         Assert.InRange(cellBox.Width - tileBox.Width, 0, 2.5);
         Assert.InRange(cellBox.Height - tileBox.Height, 0, 2.5);
     }
+
+    [Fact]
+    public async Task WhenOperationButtonTileHasNoLabel_ThenItShowsOnlyTheIconAndIsDisabledWhileTheOperationIsNotEnabled()
+    {
+        // Arrange
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var tile = page.GetByRole(AriaRole.Button, new() { Name = "Power On", Exact = true });
+
+        // Act & Assert: PowerOn is not enabled while the motor is powered.
+        await Assertions.Expect(tile).ToBeDisabledAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(tile.GetByTestId("tile-icon")).ToBeVisibleAsync();
+        await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveCountAsync(0);
+
+        GetMotor().IsPowered = false;
+        await Assertions.Expect(tile).ToBeEnabledAsync(new() { Timeout = Timeout });
+    }
 }

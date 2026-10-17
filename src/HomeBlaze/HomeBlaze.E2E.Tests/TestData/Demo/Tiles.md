@@ -23,6 +23,8 @@ This page is changed by the tile widget tests.
 :::: HomeBlaze.Components.Switch#plaintile Kind=Tile Path=tilemotor/IsPowered Label="Plain"
 ::: Cell Row=0 Column=2
 :::: HomeBlaze.Components.Switch#missingtile Kind=Tile Path=tilemotor/DoesNotExist Label="Missing"
+::: Cell Row=0 Column=3
+:::: HomeBlaze.Components.OperationButton#ontile Kind=Tile Path=tilemotor/PowerOn
 ::
 
 :: HomeBlaze.Components.ValueMap#falseonly

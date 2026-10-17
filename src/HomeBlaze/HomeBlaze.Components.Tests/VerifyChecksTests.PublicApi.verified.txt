@@ -372,15 +372,21 @@ namespace HomeBlaze.Components
     {
         public OperationButton() { }
         public OperationButton(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.Slot]
+        public Namotion.Interceptor.IInterceptorSubject? Badge { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public MudBlazor.Color Color { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Icon { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Components.OperationButtonKind Kind { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Path { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Subtitle { get; set; }
         public string? Title { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public MudBlazor.Variant Variant { get; set; }
@@ -392,6 +398,11 @@ namespace HomeBlaze.Components
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum OperationButtonKind
+    {
+        Button = 0,
+        Tile = 1,
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("LinearScale")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -1061,17 +1072,23 @@ namespace HomeBlaze.Components.Components
     {
         public OperationButtonView() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Badge { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public MudBlazor.Color Color { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Icon { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
         public bool IsEditing { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Components.OperationButtonKind Kind { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Path { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Subtitle { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public MudBlazor.Variant Variant { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
