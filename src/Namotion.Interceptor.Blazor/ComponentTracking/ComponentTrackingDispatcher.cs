@@ -22,12 +22,14 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     private readonly ConcurrentQueue<Entry> _changedEntries = new();
     private readonly long _throttleTicks;
     private const long SweepIntervalMilliseconds = 1000;
+    private const int RetryDelayMilliseconds = 1000;
     private readonly Action _drain;
     private Timer? _timer;
     private readonly ILogger _logger;
 
     private volatile Dispatcher? _dispatcher;
     private int _isDrainScheduled;
+    private bool _isDraining;
     private long _lastDrainTimestamp;
     private long _lastSweepTimestamp;
     private int _trackerCountAfterSweep;
@@ -44,7 +46,7 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     internal int DrainCount { get; private set; }
 
     /// <summary>Gets a value indicating whether no change waits for a drain.</summary>
-    internal bool IsIdle => Volatile.Read(ref _isDrainScheduled) == 0 && _changedEntries.IsEmpty;
+    internal bool IsIdle => Volatile.Read(ref _isDrainScheduled) == 0 && !Volatile.Read(ref _isDraining) && _changedEntries.IsEmpty;
 
     /// <summary>Gets the number of subscribed properties.</summary>
     internal int SubscriptionCount => _entries.Count;
@@ -178,20 +180,31 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
         {
             _ = dispatcher.InvokeAsync(_drain);
         }
+        catch (ObjectDisposedException)
+        {
+            // The renderer has been disposed with its circuit, which renders nothing anymore.
+            Volatile.Write(ref _isDrainScheduled, 0);
+        }
         catch (Exception exception)
         {
-            // A post that fails, for example after the renderer has been disposed with its circuit, must not leave the
-            // flag set, which would keep every later change from scheduling a drain.
-            Volatile.Write(ref _isDrainScheduled, 0);
-            if (exception is not ObjectDisposedException)
+            // The queued changes keep their pending flags, so no later change of their properties schedules a drain:
+            // retry, instead of leaving them behind.
+            _logger.LogError(exception, "Failed to schedule the render of the components whose tracked properties changed.");
+            try
             {
-                _logger.LogError(exception, "Failed to schedule the render of the components whose tracked properties changed.");
+                GetTimer().Change(RetryDelayMilliseconds, Timeout.Infinite);
+            }
+            catch (ObjectDisposedException)
+            {
+                Volatile.Write(ref _isDrainScheduled, 0);
             }
         }
     }
 
     private void Drain()
     {
+        // Before the flag is cleared, so that a test of IsIdle never sees neither.
+        Volatile.Write(ref _isDraining, true);
         try
         {
             DrainCore();
@@ -201,20 +214,27 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
             // A render that fails is handled by the renderer; this is a failure of the tracking itself.
             _logger.LogError(exception, "Failed to render the components whose tracked properties changed.");
         }
+        finally
+        {
+            Volatile.Write(ref _isDraining, false);
+        }
     }
 
     private void DrainCore()
     {
         Volatile.Write(ref _lastDrainTimestamp, Stopwatch.GetTimestamp());
 
-        // Cleared before the queue is read, so that a change from now on schedules another drain.
-        Volatile.Write(ref _isDrainScheduled, 0);
+        // Cleared before the queue is read, so that a change from now on schedules another drain. A full fence: the writer
+        // enqueues and then tests this flag, so a plain store could be reordered after the reads of the queue below, and
+        // both sides would miss the entry.
+        Interlocked.Exchange(ref _isDrainScheduled, 0);
         DrainCount++;
 
         while (_changedEntries.TryDequeue(out var entry))
         {
-            // Cleared before routing, so that a change from now on enqueues the entry again.
-            Volatile.Write(ref entry.IsPending, 0);
+            // Cleared before routing, so that a change from now on enqueues the entry again. A full fence for the same
+            // reason: the render that follows must read a value at least as new as a change that saw the flag set.
+            Interlocked.Exchange(ref entry.IsPending, 0);
             foreach (var tracker in entry.Trackers)
             {
                 if (!tracker.IsRenderRequested)

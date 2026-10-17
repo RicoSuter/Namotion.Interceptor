@@ -59,7 +59,7 @@ public class ComponentTrackingTests
     [Theory]
     [InlineData(TestRenderMode.WebAssembly)]
     [InlineData(TestRenderMode.Server)]
-    public async Task WhenManySiblingsReadChangedProperties_ThenEachRendersOnceAndEachDrainInOneBatch(TestRenderMode mode)
+    public async Task WhenManySiblingsReadChangedProperties_ThenEachRendersOnceAndEachDrainInAtMostOneBatch(TestRenderMode mode)
     {
         // Arrange
         var context = CreateContext();
@@ -88,7 +88,8 @@ public class ComponentTrackingTests
         var drains = dispatcher.DrainCount - drainsBefore;
         _output.WriteLine($"{mode}: renders per sibling after a change of each: {string.Join(",", renders)}; drains: {drains}, batches: {renderer.BatchCount - batchesBefore}");
         Assert.All(renders, count => Assert.Equal(1, count));
-        Assert.Equal(drains, renderer.BatchCount - batchesBefore);
+        // A drain can find the changes already rendered by the one before it, so it renders at most one batch.
+        Assert.InRange(renderer.BatchCount - batchesBefore, 1, drains);
     }
 
     [Theory]
@@ -134,16 +135,18 @@ public class ComponentTrackingTests
         await using var renderer = CreateRenderer(mode);
         await RenderAsync(renderer, Box.Of(Fragments.Cascading(Fragments.Inline("cascaded", person, log))));
         await SettleAsync(renderer);
-        var before = log.Renders("cascaded");
 
-        // Act
-        person.FirstName = "Changed";
-        await WaitAsync(() => log.Value("cascaded") == "Changed");
-        await SettleAsync(renderer);
+        // Act & Assert: the content is read after each render of its owner, so its reads must stay acquired across them.
+        for (var change = 0; change < 3; change++)
+        {
+            var before = log.Renders("cascaded");
+            person.FirstName = $"Changed {change}";
+            await WaitAsync(() => log.Value("cascaded") == $"Changed {change}");
+            await SettleAsync(renderer);
 
-        // Assert
-        _output.WriteLine($"{mode}: cascaded content renders: {log.Renders("cascaded") - before}");
-        Assert.Equal(1, log.Renders("cascaded") - before);
+            _output.WriteLine($"{mode}: cascaded content renders after change {change}: {log.Renders("cascaded") - before}");
+            Assert.Equal(1, log.Renders("cascaded") - before);
+        }
     }
 
     [Theory]

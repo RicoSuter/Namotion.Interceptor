@@ -322,9 +322,11 @@ public class ComponentTrackingEdgeCaseTests
         failing.FirstName = ThrowingReader.FailingValue;
         await WaitAsync(() => renderer.ExceptionCount > 0);
         person.FirstName = "Changed";
+        failing.FirstName = "Recovered";
 
-        // Assert
+        // Assert: the others keep updating, and the failed component renders again once its value is fine.
         await WaitAsync(() => log.Value("reader") == "Changed");
+        await WaitAsync(() => log.Value("failing") == "Recovered");
     }
 
     [Theory]
@@ -407,23 +409,22 @@ public class ComponentTrackingEdgeCaseTests
         var log = new RenderLog();
 
         await using var renderer = CreateRenderer(mode);
-        await RenderAsync(renderer, Fragments.Read("reader", person, log));
+        await RenderAsync(renderer, Fragments.Read<ThreadRecordingReader>("reader", person, log));
         await SettleAsync(renderer);
-        var before = log.Renders("reader");
 
         // Act
-        var rendersDuringWrite = -1;
+        var writerThread = -1;
         var writer = new Thread(() =>
         {
+            writerThread = Environment.CurrentManagedThreadId;
             person.FirstName = "Changed";
-            rendersDuringWrite = log.Renders("reader") - before;
         });
         writer.Start();
         writer.Join();
         await WaitAsync(() => log.Value("reader") == "Changed");
 
         // Assert
-        Assert.Equal(0, rendersDuringWrite);
+        Assert.NotEqual(writerThread.ToString(), log.Value(ThreadRecordingReader.ThreadKey("reader")));
     }
 
     [Theory]
@@ -595,6 +596,18 @@ public sealed class CascadedContentRenderer : ComponentBase
     public RenderFragment? Header { get; set; }
 
     protected override void BuildRenderTree(RenderTreeBuilder builder) => builder.AddContent(0, Header);
+}
+
+/// <summary>Records the thread of its last render.</summary>
+public sealed class ThreadRecordingReader : Reader
+{
+    public static string ThreadKey(string key) => key + ":thread";
+
+    protected override void BuildRenderTree(RenderTreeBuilder builder)
+    {
+        Log.Record(ThreadKey(Key), Environment.CurrentManagedThreadId.ToString());
+        base.BuildRenderTree(builder);
+    }
 }
 
 /// <summary>Fails to render while the first name has <see cref="FailingValue"/>.</summary>

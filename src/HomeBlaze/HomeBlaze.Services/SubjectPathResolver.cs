@@ -68,7 +68,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         IInterceptorSubject? relativeTo = null)
     {
         var root = _getRoot();
-        // A cache hit reads no property of the graph, so this read is what a caller that tracks its reads depends on.
+
+        // An absolute path is cached, the root is not a property and a parent is found in the registry, so a resolution
+        // may read no property of the graph: this read is what a caller that tracks its reads depends on.
         _ = _pathsVersion.Value;
 
         if (string.IsNullOrEmpty(path))

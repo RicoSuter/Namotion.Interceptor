@@ -22,7 +22,8 @@ public abstract class TrackedComponentBase : ComponentBase
     /// <inheritdoc />
     public override Task SetParametersAsync(ParameterView parameters)
     {
-        if (!UpdateParameters(parameters) && IsTracked())
+        // Hot reload passes the same parameters to render the changed markup, so it is never skipped.
+        if (!UpdateParameters(parameters) && IsTracked() && !ComponentBaseAccessors.RenderHandleOf(this).IsRenderingOnMetadataUpdate)
         {
             return Task.CompletedTask;
         }

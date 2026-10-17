@@ -52,12 +52,12 @@ public class ComponentTrackingMemoryTests
         var (component, dispatcher) = await RenderAndEndAsync(mode, person);
 
         // Act: a continuation of the ended renderer can still be on its way, so collect until it has run.
-        for (var attempt = 0; attempt < 10 && (component.IsAlive || dispatcher.IsAlive); attempt++)
+        await WaitAsync(() =>
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
-            await Task.Yield();
-        }
+            return !component.IsAlive && !dispatcher.IsAlive;
+        });
 
         // Assert
         Assert.False(component.IsAlive);
@@ -95,6 +95,30 @@ public class ComponentTrackingMemoryTests
         Assert.Equal(shown.Count, dispatcher.SubscriptionCount);
         Assert.All(shown, person => Assert.Equal(1, SubscriptionCount(person)));
         Assert.All(replaced, person => Assert.Equal(0, SubscriptionCount(person)));
+    }
+
+    [Theory]
+    [InlineData(TestRenderMode.WebAssembly)]
+    [InlineData(TestRenderMode.Server)]
+    public async Task WhenComponentsAreReplacedManyTimesWithoutAnExplicitSweep_ThenTheSubscriptionsStayBounded(TestRenderMode mode)
+    {
+        // Arrange: a sweep also runs once the trackers have doubled, so removed components cannot pile up for a second.
+        var context = CreateContext();
+        var log = new RenderLog();
+        await using var renderer = CreateRenderer(mode);
+        var host = await RenderAsync(renderer, _ => { });
+        var dispatcher = renderer.Services.GetRequiredService<ComponentTrackingDispatcher>();
+
+        // Act
+        for (var round = 0; round < 100; round++)
+        {
+            var people = Enumerable.Range(0, 5).Select(index => new Person(context) { FirstName = $"{round}-{index}" }).ToList();
+            var content = Fragments.Each(people.Count, index => Fragments.Read($"reader{index}", people[index], log));
+            await renderer.Dispatcher.InvokeAsync(() => host.SetContent(content));
+        }
+
+        // Assert: 500 components read 500 properties in total; without the sweeps all of them would stay subscribed.
+        Assert.InRange(dispatcher.SubscriptionCount, 5, 150);
     }
 
     // Kept out of the test method, so that no local of the test keeps the component or the dispatcher alive.
