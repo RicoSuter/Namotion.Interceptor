@@ -28,7 +28,7 @@ public sealed class AgentTimeline
     }
 
     /// <summary>The JSONL file, null when the timeline is kept in-process only.</summary>
-    public string? FilePath => _filePath;
+    internal string? FilePath => _filePath;
 
     /// <summary>A snapshot of the entries, oldest first.</summary>
     public IReadOnlyList<AgentTimelineEntry> Entries => Volatile.Read(ref _entries);
