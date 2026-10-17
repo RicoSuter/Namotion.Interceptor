@@ -48,6 +48,9 @@ This page is changed by the tile widget tests.
 :: HomeBlaze.Components.Switch#unresolvedmaptile Kind=Tile Path=tilemotor/IsPowered Map=unresolvedtilemap Label="Unresolved map"
 ::
 
+:: HomeBlaze.Components.Switch#blockedtile Kind=Tile Path=tilemotor/IsPowered Label="Blocked tile" On=tilemotor/PowerOff Off=tilemotor/PowerOn
+::
+
 :: HomeBlaze.Components.GridLayout#squaregrid Rows=2 Columns=3 CellAspectRatio=1:1
 ::: Cell Row=0 Column=0
 :::: HomeBlaze.Components.Switch#squaretile Kind=Tile Path=tilemotor/IsPowered Label="Square"

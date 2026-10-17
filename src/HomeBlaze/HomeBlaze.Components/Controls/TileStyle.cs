@@ -8,23 +8,17 @@ namespace HomeBlaze.Components.Controls;
 internal static class TileStyle
 {
     private const string Surface = "background: var(--mud-palette-surface); color: var(--mud-palette-text-primary)";
-    private const string Disabled = "background: var(--mud-palette-action-disabled-background); color: var(--mud-palette-action-disabled)";
 
     // Built once, so that a render allocates no style text. Indexed by color, then by variant.
     private static readonly string[,] Styles = BuildStyles();
 
     /// <summary>
     /// Gets the style of a tile. A color without a palette fill (Default, Inherit, Transparent, Surface) draws the tile
-    /// on the surface, as does a color or a variant that is not defined (a configuration can give any integer); a
-    /// disabled tile has the disabled colors of the theme.
+    /// on the surface, as does a color or a variant that is not defined (a configuration can give any integer). A
+    /// disabled tile keeps its style and is dimmed by its class instead.
     /// </summary>
-    public static string GetStyle(Color color, Variant variant, bool disabled)
+    public static string GetStyle(Color color, Variant variant)
     {
-        if (disabled)
-        {
-            return Disabled;
-        }
-
         // The unsigned comparison also rejects a negative value.
         return (uint)color < (uint)Styles.GetLength(0) && (uint)variant < (uint)Styles.GetLength(1)
             ? Styles[(int)color, (int)variant] ?? Surface

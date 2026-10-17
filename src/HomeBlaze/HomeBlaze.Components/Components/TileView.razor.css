@@ -9,6 +9,11 @@
     overflow: hidden;
 }
 
+/* Dims the fill, the content, the badge and the progress circle of a tile that cannot be used. */
+.tile-widget-disabled {
+    opacity: 0.5;
+}
+
 .tile-widget-button {
     width: 100%;
     height: 100%;

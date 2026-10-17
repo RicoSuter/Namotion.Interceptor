@@ -173,6 +173,41 @@ public class TileWidgetTests
     }
 
     [Fact]
+    public async Task WhenSwitchTileIsDisabledWhileTrue_ThenItKeepsTheFillOfItsStateAndIsDimmed()
+    {
+        // Arrange: with On and Off swapped, the operation for the other state (PowerOn) is not enabled while powered.
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var tile = GetSwitchTile(page, "Blocked tile");
+
+        // Act
+        await Assertions.Expect(tile).ToBeDisabledAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
+
+        // Assert
+        var primary = await page.ResolveColorAsync("var(--mud-palette-primary)");
+        Assert.Equal(primary, await GetBackgroundAsync(tile));
+        var opacity = await GetTileRoot(tile).EvaluateAsync<double>("element => parseFloat(getComputedStyle(element).opacity)");
+        Assert.InRange(opacity, 0.01, 0.99);
+    }
+
+    [Fact]
+    public async Task WhenSwitchTileIsEnabled_ThenItIsNotDimmed()
+    {
+        // Arrange
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var tile = GetSwitchTile(page, "Motor");
+
+        // Act
+        await Assertions.Expect(tile).ToBeEnabledAsync(new() { Timeout = Timeout });
+
+        // Assert
+        var opacity = await GetTileRoot(tile).EvaluateAsync<double>("element => parseFloat(getComputedStyle(element).opacity)");
+        Assert.Equal(1, opacity);
+    }
+
+    [Fact]
     public async Task WhenTileIsTheOnlyContentOfAGridCell_ThenItFillsTheCell()
     {
         // Arrange & Act
