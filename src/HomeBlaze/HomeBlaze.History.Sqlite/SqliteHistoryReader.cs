@@ -74,13 +74,15 @@ internal readonly struct SqliteReadContext(
             .OrderBy(entry => entry.Range.Start)
             .Select(entry => (entry.Key, entry.Range.Start, entry.Range.End));
 
-    // Existing partition files at or before asOf, newest first (look-back across files stops at the first hit).
-    public IEnumerable<string> PartitionKeysAtOrBefore(DateTimeOffset asOf) =>
+    // Existing partition files starting at or before asOf with each file's inferred end in epoch ticks, latest
+    // end first. Files overlap in time after the interval was made coarser, so a later start does not mean newer
+    // rows: a look-back keeps the newest row found and stops at the first file ending at or before it.
+    public IEnumerable<(string Key, long EndTicks)> PartitionsAtOrBeforeByEndDescending(DateTimeOffset asOf) =>
         EnumeratePartitionFileKeys()
             .Select(key => (Key: key, Range: SqlitePartition.InferredRange(key)))
             .Where(entry => entry.Range.Start <= asOf)
-            .OrderByDescending(entry => entry.Range.Start)
-            .Select(entry => entry.Key);
+            .OrderByDescending(entry => entry.Range.End)
+            .Select(entry => (entry.Key, EpochTicks.ToEpochTicks(entry.Range.End)));
 }
 
 /// <summary>
@@ -256,10 +258,15 @@ internal static class SqliteHistoryReader
     private static RawRow? GetLegSampleAtOrBefore(SqliteReadContext context, string path, DateTimeOffset asOf)
     {
         var asOfTicks = EpochTicks.ToEpochTicks(asOf);
-
-        // Search the partition holding asOf, then earlier partitions, newest match wins.
-        foreach (var key in context.PartitionKeysAtOrBefore(asOf))
+        RawRow? newest = null;
+        var newestTicks = long.MinValue;
+        foreach (var (key, endTicks) in context.PartitionsAtOrBeforeByEndDescending(asOf))
         {
+            if (endTicks <= newestTicks)
+            {
+                break; // this file and every later one only hold rows before the newest found
+            }
+
             if (!context.PartitionFileExists(key))
             {
                 continue;
@@ -279,13 +286,14 @@ internal static class SqliteHistoryReader
             command.Parameters.AddWithValue("@asOf", asOfTicks);
 
             using var reader = command.ExecuteReader();
-            if (reader.Read())
+            if (reader.Read() && reader.GetInt64(0) > newestTicks)
             {
-                return ReadRawRow(reader);
+                newest = ReadRawRow(reader);
+                newestTicks = newest.Value.Ticks;
             }
         }
 
-        return null;
+        return newest;
     }
 
     // The largest finite double: comparing ABS(v) against it rejects NULL, NaN and the infinities in one predicate.
@@ -306,8 +314,15 @@ internal static class SqliteHistoryReader
     {
         var sql = isUlong ? UlongLastNumericBeforeSql : LastNumericBeforeSql;
         var beforeTicks = EpochTicks.ToEpochTicks(before);
-        foreach (var key in context.PartitionKeysAtOrBefore(before))
+        HistoryPoint? newest = null;
+        var newestTicks = long.MinValue;
+        foreach (var (key, endTicks) in context.PartitionsAtOrBeforeByEndDescending(before))
         {
+            if (endTicks <= newestTicks)
+            {
+                break; // this file and every later one only hold rows before the newest found
+            }
+
             if (!context.PartitionFileExists(key))
             {
                 continue;
@@ -325,13 +340,14 @@ internal static class SqliteHistoryReader
             command.Parameters.AddWithValue("@before", beforeTicks);
 
             using var reader = command.ExecuteReader();
-            if (reader.Read())
+            if (reader.Read() && reader.GetInt64(0) > newestTicks)
             {
-                return new HistoryPoint(EpochTicks.FromEpochTicks(reader.GetInt64(0)), reader.GetDouble(1), null);
+                newestTicks = reader.GetInt64(0);
+                newest = new HistoryPoint(EpochTicks.FromEpochTicks(newestTicks), reader.GetDouble(1), null);
             }
         }
 
-        return null;
+        return newest;
     }
 
     // The id a partition interns a path to, or null when that partition never held the path.

@@ -39,10 +39,10 @@ public sealed class SqliteHistoryStorePartitionIntervalChangeTests : IDisposable
         using var store = await RecordAcrossIntervalChangeAsync(before, after);
 
         // Act
-        var series = store.Query(DailyQuery(HistoryAggregations.Delta));
+        var series = store.Query(DailyQuery(Monday, HistoryAggregations.Delta));
 
         // Assert - an out-of-order reading looks like a counter restart and adds the whole counter value.
-        Assert.Equal(new double?[] { 0, 10, 10, 0 }, Numbers(series));
+        Assert.Equal(new double?[] { 0, 10, 10, 10, 0 }, Numbers(series));
     }
 
     [Theory]
@@ -54,56 +54,56 @@ public sealed class SqliteHistoryStorePartitionIntervalChangeTests : IDisposable
         using var store = await RecordAcrossIntervalChangeAsync(before, after);
 
         // Act
-        var series = store.Query(DailyQuery(HistoryAggregations.TimeWeightedAverage));
+        var series = store.Query(DailyQuery(Monday, HistoryAggregations.TimeWeightedAverage));
 
-        // Assert - 100 from Monday noon, 110 from Tuesday noon, 120 from Wednesday noon.
-        var numbers = Numbers(series);
-        Assert.Equal(4, numbers.Length);
-        Assert.Equal(100d, numbers[0]!.Value, 6);
-        Assert.Equal(105d, numbers[1]!.Value, 6);
-        Assert.Equal(115d, numbers[2]!.Value, 6);
-        Assert.Equal(120d, numbers[3]!.Value, 6);
+        // Assert - 100 from Monday noon, 110 from Tuesday noon, 120 from Wednesday noon, 130 from Thursday noon.
+        AssertNumbers([100, 105, 115, 125, 130], series);
     }
 
     [Theory]
     [MemberData(nameof(CoarserIntervals))]
-    public async Task WhenIntervalIsMadeCoarserMidPeriod_ThenGroupedAggregationsCombineBothFiles(
+    public async Task WhenIntervalIsMadeCoarserMidPeriod_ThenLookBackAfterTheChangeReturnsTheNewestSample(
         PartitionInterval before, PartitionInterval after)
     {
         // Arrange
         using var store = await RecordAcrossIntervalChangeAsync(before, after);
+        var thursday = Monday.AddDays(3);
 
         // Act
-        var count = store.Query(DailyQuery(HistoryAggregations.Count));
-        var sum = store.Query(DailyQuery(HistoryAggregations.Sum));
-        var last = store.Query(DailyQuery(HistoryAggregations.Last));
+        var held = store.GetSampleAtOrBefore("/a/Energy", thursday);
+        var lastNumeric = store.GetLastNumericSampleBefore("/a/Energy", thursday);
 
-        // Assert
-        Assert.Equal(new double?[] { 1, 1, 1, 0 }, Numbers(count));
-        Assert.Equal(new double?[] { 100, 110, 120, null }, Numbers(sum));
-        Assert.Equal(new double?[] { 100, 110, 120, 120 }, Numbers(last));
+        // Assert - the file that starts last holds only Tuesday; Wednesday's row is in the coarser file.
+        Assert.Equal(Monday.AddDays(2).AddHours(12), held?.Timestamp);
+        Assert.Equal(120d, held?.Number);
+        Assert.Equal(Monday.AddDays(2).AddHours(12), lastNumeric?.Timestamp);
+        Assert.Equal(120d, lastNumeric?.Number);
     }
 
     [Theory]
     [MemberData(nameof(CoarserIntervals))]
-    public async Task WhenIntervalIsMadeCoarserMidPeriod_ThenRawQueryReturnsSamplesAscending(
+    public async Task WhenQueryStartsAfterTheIntervalChange_ThenSeedsComeFromTheNewestSample(
         PartitionInterval before, PartitionInterval after)
     {
         // Arrange
         using var store = await RecordAcrossIntervalChangeAsync(before, after);
+        var thursday = Monday.AddDays(3);
 
         // Act
-        var series = store.Query(new HistoryQuery("/a/Energy", Monday, Monday.AddDays(4)));
+        var timeWeightedAverage = store.Query(DailyQuery(thursday, HistoryAggregations.TimeWeightedAverage));
+        var delta = store.Query(DailyQuery(thursday, HistoryAggregations.Delta));
+        var last = store.Query(new HistoryQuery(
+            "/a/Energy", thursday, thursday.AddHours(18), TimeSpan.FromHours(6), HistoryAggregations.Last, MaxPoints: 100));
 
-        // Assert
-        Assert.Equal(
-            new[] { Monday.AddHours(12), Monday.AddDays(1).AddHours(12), Monday.AddDays(2).AddHours(12) },
-            series.Points.Select(point => point.Timestamp).ToArray());
-        Assert.Equal(new double?[] { 100, 110, 120 }, Numbers(series));
+        // Assert - Wednesday's 120 is held into Thursday, not Tuesday's 110.
+        AssertNumbers([125, 130], timeWeightedAverage);
+        Assert.Equal(new double?[] { 10, 0 }, Numbers(delta));
+        Assert.Equal(new double?[] { 120, 120, 130 }, Numbers(last));
     }
 
     // Monday and Tuesday noon are recorded under the first interval, then the store is reopened at Wednesday
-    // midnight under the second interval and records Wednesday noon. Coverage is continuous across the reopen.
+    // midnight under the second interval and records Wednesday and Thursday noon. Coverage is continuous across
+    // the reopen.
     private async Task<SqliteHistoryStore> RecordAcrossIntervalChangeAsync(
         PartitionInterval before, PartitionInterval after)
     {
@@ -118,6 +118,7 @@ public sealed class SqliteHistoryStorePartitionIntervalChangeTests : IDisposable
 
         var second = NewStore(after, () => now);
         second.Record("/a/Energy", Monday.AddDays(2).AddHours(12), 120d, typeof(double));
+        second.Record("/a/Energy", Monday.AddDays(3).AddHours(12), 130d, typeof(double));
         now = Monday.AddYears(1);
         await second.FlushAsync(CancellationToken.None);
         return second;
@@ -127,8 +128,19 @@ public sealed class SqliteHistoryStorePartitionIntervalChangeTests : IDisposable
         new(priority: 50, databaseDirectory: _directory, interval, TimeSpan.FromDays(3650),
             maxJsonSize: 8192, getUtcNow);
 
-    private static HistoryQuery DailyQuery(string aggregation) =>
-        new("/a/Energy", Monday, Monday.AddDays(4), Day, aggregation, MaxPoints: 100);
+    // Daily buckets from the given day to Saturday midnight.
+    private static HistoryQuery DailyQuery(DateTimeOffset from, string aggregation) =>
+        new("/a/Energy", from, Monday.AddDays(5), Day, aggregation, MaxPoints: 100);
+
+    private static void AssertNumbers(double[] expected, HistorySeries series)
+    {
+        var numbers = Numbers(series);
+        Assert.Equal(expected.Length, numbers.Length);
+        for (var index = 0; index < expected.Length; index++)
+        {
+            Assert.Equal(expected[index], numbers[index]!.Value, 6);
+        }
+    }
 
     private static double?[] Numbers(HistorySeries series) =>
         series.Points.Select(point => point.Number).ToArray();

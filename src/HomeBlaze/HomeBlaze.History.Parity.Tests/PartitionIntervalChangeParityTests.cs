@@ -16,6 +16,10 @@ public sealed class PartitionIntervalChangeParityTests : IDisposable
     // A Monday, so the daily and the weekly file of that day share one key.
     private static readonly DateTimeOffset Monday = new(2026, 3, 2, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset To = Monday.AddDays(5);
+
+    // Thursday 06:00: the newest earlier sample (Wednesday 18:00) sits in the Monday file, which starts before
+    // the Tuesday file that holds only older rows.
+    private static readonly DateTimeOffset AfterOverlap = Monday.AddDays(3).AddHours(6);
     private static readonly TimeZoneInfo Zurich = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
 
     private static readonly (PartitionInterval Interval, DateTimeOffset SessionStart, (double Hours, double? Value)[] Samples)[] Sessions =
@@ -31,6 +35,23 @@ public sealed class PartitionIntervalChangeParityTests : IDisposable
     public void Dispose()
     {
         try { Directory.Delete(_directory, recursive: true); } catch (DirectoryNotFoundException) { }
+    }
+
+    public static TheoryData<string, string> SeededCases()
+    {
+        var cases = new TheoryData<string, string>();
+        foreach (var bucket in new[] { "6h", "calendar day" })
+        {
+            foreach (var aggregation in new[]
+                     {
+                         HistoryAggregations.Delta, HistoryAggregations.TimeWeightedAverage, HistoryAggregations.Last
+                     })
+            {
+                cases.Add(bucket, aggregation);
+            }
+        }
+
+        return cases;
     }
 
     public static TheoryData<string, string> Cases()
@@ -60,10 +81,7 @@ public sealed class PartitionIntervalChangeParityTests : IDisposable
         // Arrange
         using var inMemory = RecordInMemory();
         using var sqlite = await RecordInSqliteAcrossIntervalChangesAsync();
-        var query = new HistoryQuery(
-            Path, Monday, To,
-            bucket == "6h" ? TimeSpan.FromHours(6) : HistoryBucket.Calendar(HistoryCalendarUnit.Day, Zurich),
-            aggregation, MaxPoints: 1000);
+        var query = new HistoryQuery(Path, Monday, To, Bucket(bucket), aggregation, MaxPoints: 1000);
 
         // Act
         var expected = inMemory.Query(query);
@@ -72,6 +90,45 @@ public sealed class PartitionIntervalChangeParityTests : IDisposable
         // Assert
         Assert.Equal(expected.Points.Select(point => point.Timestamp), actual.Points.Select(point => point.Timestamp));
         ParityAssert.NumbersEqual(expected.Points.Select(point => point.Number).ToArray(), actual);
+    }
+
+    [Theory]
+    [MemberData(nameof(SeededCases))]
+    public async Task WhenQueryStartsAfterTheOverlap_ThenSeededBucketedQueriesMatchInMemory(string bucket, string aggregation)
+    {
+        // Arrange
+        using var inMemory = RecordInMemory();
+        using var sqlite = await RecordInSqliteAcrossIntervalChangesAsync();
+        var query = new HistoryQuery(Path, AfterOverlap, To, Bucket(bucket), aggregation, MaxPoints: 1000);
+
+        // Act
+        var expected = inMemory.Query(query);
+        var actual = sqlite.Query(query);
+
+        // Assert
+        Assert.Equal(expected.Points.Select(point => point.Timestamp), actual.Points.Select(point => point.Timestamp));
+        ParityAssert.NumbersEqual(expected.Points.Select(point => point.Number).ToArray(), actual);
+    }
+
+    [Fact]
+    public async Task WhenLookingBackAfterTheOverlap_ThenSamplesMatchInMemory()
+    {
+        // Arrange
+        using var inMemory = RecordInMemory();
+        using var sqlite = await RecordInSqliteAcrossIntervalChangesAsync();
+
+        // Act
+        var expectedHeld = inMemory.GetSampleAtOrBefore(Path, AfterOverlap);
+        var actualHeld = sqlite.GetSampleAtOrBefore(Path, AfterOverlap);
+        var expectedNumeric = inMemory.GetLastNumericSampleBefore(Path, AfterOverlap);
+        var actualNumeric = sqlite.GetLastNumericSampleBefore(Path, AfterOverlap);
+
+        // Assert
+        Assert.Equal(117d, expectedHeld?.Number);
+        Assert.Equal(expectedHeld?.Timestamp, actualHeld?.Timestamp);
+        Assert.Equal(expectedHeld?.Number, actualHeld?.Number);
+        Assert.Equal(expectedNumeric?.Timestamp, actualNumeric?.Timestamp);
+        Assert.Equal(expectedNumeric?.Number, actualNumeric?.Number);
     }
 
     [Fact]
@@ -91,6 +148,9 @@ public sealed class PartitionIntervalChangeParityTests : IDisposable
         Assert.Equal(expected.Points.Select(point => point.Timestamp), actual.Points.Select(point => point.Timestamp));
         Assert.Equal(expected.Points.Select(point => point.Number), actual.Points.Select(point => point.Number));
     }
+
+    private static HistoryBucket Bucket(string bucket) =>
+        bucket == "6h" ? TimeSpan.FromHours(6) : HistoryBucket.Calendar(HistoryCalendarUnit.Day, Zurich);
 
     private static InMemoryParityStore RecordInMemory()
     {
