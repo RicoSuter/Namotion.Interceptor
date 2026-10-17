@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
@@ -10,14 +11,22 @@ public static class ParentsHandlerExtensions
     internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
     {
         var parentsSet = (ParentsSet)subject.Data.GetOrAdd((null, ParentsKey), _ => new ParentsSet())!;
-        parentsSet.Add(new SubjectParent(parent, index));
+        parentsSet.Add(parent, index);
     }
 
-    internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
+    internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent)
     {
         if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
         {
-            ((ParentsSet)existing!).Remove(new SubjectParent(parent, index));
+            ((ParentsSet)existing!).Remove(parent);
+        }
+    }
+
+    internal static void UpdateParentIndex(this IInterceptorSubject subject, PropertyReference parent, object? index)
+    {
+        if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
+        {
+            ((ParentsSet)existing!).UpdateIndex(parent, index);
         }
     }
 
@@ -169,55 +178,82 @@ public static class ParentsHandlerExtensions
     private sealed class ParentsSet
     {
         private readonly Lock _lock = new();
-        private readonly HashSet<SubjectParent> _set = [];
+
+        // Keyed by the property alone, because the lifecycle attaches a subject to a property
+        // once, however many keys or positions of it hold the subject.
+        private readonly Dictionary<PropertyReference, object?> _indices = [];
         private volatile ImmutableArray<SubjectParent>[]? _cache; // Box in array for volatile
 
-        public void Add(SubjectParent parent)
+        public void Add(PropertyReference parent, object? index)
         {
             lock (_lock)
             {
-                if (_set.Add(parent))
+                if (_indices.TryAdd(parent, index))
                 {
                     _cache = null; // Invalidate cache
                 }
             }
         }
 
-        public void Remove(SubjectParent parent)
+        public void Remove(PropertyReference parent)
         {
             lock (_lock)
             {
-                if (_set.Remove(parent))
+                if (_indices.Remove(parent))
                 {
                     _cache = null; // Invalidate cache
                 }
+            }
+        }
+
+        public void UpdateIndex(PropertyReference parent, object? index)
+        {
+            lock (_lock)
+            {
+                ref var current = ref CollectionsMarshal.GetValueRefOrNullRef(_indices, parent);
+                if (Unsafe.IsNullRef(ref current) || Equals(current, index))
+                {
+                    return;
+                }
+
+                current = index;
+                _cache = null; // Invalidate cache
             }
         }
 
         public ImmutableArray<SubjectParent> ToImmutableArray()
         {
             var cached = _cache;
-            if (cached is not null)
-            {
-                return cached[0];
-            }
+            return cached is not null ? cached[0] : CreateSnapshot();
+        }
 
+        // Kept out of the method above: the enumerator here made every cached read zero stack.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private ImmutableArray<SubjectParent> CreateSnapshot()
+        {
             lock (_lock)
             {
-                cached = _cache;
+                var cached = _cache;
                 if (cached is not null)
                 {
                     return cached[0];
                 }
 
                 // Fast path: avoid allocation for empty set
-                if (_set.Count == 0)
+                if (_indices.Count == 0)
                 {
                     _cache = [ImmutableArray<SubjectParent>.Empty];
                     return ImmutableArray<SubjectParent>.Empty;
                 }
 
-                ImmutableArray<SubjectParent> array = [.. _set];
+                var parents = new SubjectParent[_indices.Count];
+                var position = 0;
+                foreach (var (parent, index) in _indices)
+                {
+                    parents[position++] = new SubjectParent(parent, index);
+                }
+
+                var array = ImmutableCollectionsMarshal.AsImmutableArray(parents);
                 _cache = [array];
                 return array;
             }
