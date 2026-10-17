@@ -29,9 +29,8 @@ internal static class GridRows
             return null;
         }
 
-        // The format never switches to an exponent, which a CSS calc() does not accept (the default does for 1E-05 and below).
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"repeat({rows}, calc((100cqw - {(columns - 1) * Gap}px) / {columns} * {height:0.###############} / {width:0.###############}))");
+            $"repeat({rows}, calc((100cqw - {(columns - 1) * Gap}px) / {columns} * {height} / {width}))");
     }
 }

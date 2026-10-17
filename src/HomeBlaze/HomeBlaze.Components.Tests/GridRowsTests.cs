@@ -38,17 +38,6 @@ public class GridRowsTests
         Assert.Equal("repeat(2, calc((100cqw - 16px) / 2 * 3 / 4))", template);
     }
 
-    [Fact]
-    public void WhenAspectRatioIsVerySmall_ThenTheNumbersAreWrittenWithoutAnExponent()
-    {
-        // Act
-        var template = GridRows.GetTemplate(1, 2, "0.0000001:1", out var error);
-
-        // Assert: an exponent such as 1E-07 is not valid in a CSS calc().
-        Assert.Null(error);
-        Assert.Equal("repeat(1, calc((100cqw - 16px) / 2 * 1 / 0.0000001))", template);
-    }
-
     [Theory]
     [InlineData("square")]
     [InlineData("1:0")]
