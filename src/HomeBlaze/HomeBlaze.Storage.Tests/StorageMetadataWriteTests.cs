@@ -235,6 +235,25 @@ public class StorageMetadataWriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenChildIsMovedOntoItself_ThenOrderIsUnchanged()
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/b.md");
+        WriteFile("Docs/c.md");
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+
+        // Act
+        await docs.MoveChildAsync("b.md", "b.md", CancellationToken.None);
+
+        // Assert
+        string?[] expectedOrder = ["a.md", "b.md", "c.md"];
+        Assert.Equal(["a.md", "b.md", "c.md"], docs.ChildOrder.ToArray());
+        Assert.Equal(expectedOrder, ReadMetadataFile("Docs/.metadata.json").Order);
+    }
+
+    [Fact]
     public async Task WhenOrderHasNamesOfChildrenThatAreGone_ThenMoveDropsThem()
     {
         // Arrange

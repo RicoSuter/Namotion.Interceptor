@@ -654,6 +654,7 @@ public partial class FluentStorageContainer :
     /// Moves a child of a folder to the place of another child in the order in which they are shown, shifting the
     /// children in between, and writes the whole resulting order, which drops the names of children that are gone.
     /// </summary>
+    /// <remarks>Moving a child to its own place writes the current order unchanged.</remarks>
     /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
     /// <param name="name">The name of the child to move.</param>
     /// <param name="targetName">The name of the child whose place it takes.</param>

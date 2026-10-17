@@ -46,6 +46,7 @@ public interface IMetadataContainer
     /// Moves a child to the place of another child in the order in which they are shown, shifting the children in
     /// between, and stores the whole resulting order.
     /// </summary>
+    /// <remarks>Moving a child to its own place stores the current order unchanged.</remarks>
     /// <param name="name">The name of the child to move.</param>
     /// <param name="targetName">The name of the child whose place it takes.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
