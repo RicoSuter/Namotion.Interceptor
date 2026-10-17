@@ -41,12 +41,12 @@ public sealed class PropertyWriter : IDisposable
     }
 
     /// <summary>
-    /// Gets whether a control may write the property: it has a public setter and its current value, which the caller
-    /// has already read, is no operation.
+    /// Gets whether a control may write the property: it has a public setter, its current value, which the caller
+    /// has already read, is no operation, and it is not the navigation metadata of its subject.
     /// </summary>
     public static bool IsWritable(RegisteredSubjectProperty property, object? currentValue)
     {
-        return property.HasPublicSetter && currentValue is not MethodMetadata;
+        return property.HasPublicSetter && currentValue is not MethodMetadata && !property.IsSubjectMetadata();
     }
 
     /// <summary>

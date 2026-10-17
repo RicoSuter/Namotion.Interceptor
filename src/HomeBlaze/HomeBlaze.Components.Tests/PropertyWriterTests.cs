@@ -1,5 +1,7 @@
+using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Components.Controls;
 using HomeBlaze.Components.Tests.Models;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Time.Testing;
 using MudBlazor;
 using Namotion.Interceptor;
@@ -40,6 +42,20 @@ public sealed class PropertyWriterTests : IDisposable
 
         // Assert
         Assert.Equal(expected, isWritable);
+    }
+
+    [Fact]
+    public void WhenPropertyHoldsNavigationMetadata_ThenItIsNotWritable()
+    {
+        // Arrange
+        _graph.Device.SetSubjectMetadata(new SubjectMetadata("Pump", null, null, null));
+        var property = GetProperty(_graph.Device, SubjectMetadata.PropertyName);
+
+        // Act
+        var isWritable = PropertyWriter.IsWritable(property, property.GetValue());
+
+        // Assert
+        Assert.False(isWritable);
     }
 
     [Fact]
