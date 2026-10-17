@@ -80,8 +80,9 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public void FrontmatterParser_WithPosition_ReturnsPosition()
+    public void WhenFrontmatterHasPosition_ThenTheRestIsStillRead()
     {
+        // Arrange
         var content = """
             ---
             title: Test
@@ -90,10 +91,12 @@ public class MarkdownFileTests
             # Content
             """;
 
+        // Act
         var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
+        // Assert
         Assert.NotNull(result);
-        Assert.Equal(5, result.Position);
+        Assert.Equal("Test", result.Title);
     }
 
     [Fact]
@@ -192,25 +195,6 @@ public class MarkdownFileTests
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Nav Title", markdown.NavigationTitle);
-    }
-
-    [Fact]
-    public async Task MarkdownFile_PagePosition_WithFrontmatter_ReturnsPosition()
-    {
-        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
-        var content = """
-            ---
-            title: Test
-            position: 3
-            ---
-            # Content
-            """;
-        await WriteFileAsync(storage, "test.md", content);
-
-        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
-        await markdown.OnFileChangedAsync(CancellationToken.None);
-
-        Assert.Equal(3, markdown.PagePosition);
     }
 
     [Fact]

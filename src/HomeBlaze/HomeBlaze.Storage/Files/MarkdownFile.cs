@@ -77,9 +77,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public string? NavigationIconName => Frontmatter?.Icon ?? IconName;
 
     [Derived]
-    public int? PagePosition => Frontmatter?.Position;
-
-    [Derived]
     public NavigationLocation PageLocation => Frontmatter?.Location ?? NavigationLocation.NavBar;
 
     [Derived]

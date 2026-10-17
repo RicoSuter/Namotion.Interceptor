@@ -79,8 +79,6 @@ namespace HomeBlaze.Storage.Files
         public string? NavigationTitle { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public HomeBlaze.Components.Abstractions.Pages.NavigationLocation PageLocation { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public int? PagePosition { get; }
         public HomeBlaze.Storage.Abstractions.IStorageContainer Storage { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? Title { get; }
@@ -230,8 +228,6 @@ namespace HomeBlaze.Storage.Internal
         public string? NavTitle { get; set; }
         [YamlDotNet.Serialization.YamlMember(Alias="nav_title")]
         public string? NavTitleSnakeCase { get; set; }
-        [YamlDotNet.Serialization.YamlMember(Alias="position")]
-        public int? Position { get; set; }
         [YamlDotNet.Serialization.YamlMember(Alias="title")]
         public string? Title { get; set; }
     }
