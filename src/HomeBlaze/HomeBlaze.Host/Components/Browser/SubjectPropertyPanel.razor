@@ -194,6 +194,12 @@
                                                          Icon="@GetSubjectIcon(child.Subject)"
                                                          IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
                                                          Class="@(isSelected ? "mud-primary-text" : "")">
+                                                @if (isSelected)
+                                                {
+                                                    <div style="float: right; line-height: 0">
+                                                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
+                                                    </div>
+                                                }
                                                 @if (orderedContainer is not null)
                                                 {
                                                     var childName = property.GetChildDisplayName(child);
@@ -222,12 +228,6 @@
                                                                            data-testid="move-child-down-button" />
                                                         }
                                                     </span>
-                                                }
-                                                @if (isSelected)
-                                                {
-                                                    <div style="float: right; line-height: 0">
-                                                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
-                                                    </div>
                                                 }
                                                 <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
                                                 @if (childCount > 0)
