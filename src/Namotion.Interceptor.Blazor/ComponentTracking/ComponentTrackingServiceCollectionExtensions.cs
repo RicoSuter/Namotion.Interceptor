@@ -9,6 +9,10 @@ public static class ComponentTrackingServiceCollectionExtensions
     /// Makes every component record the intercepted property reads of its own render and render again when one of
     /// them changes. Requires a context with property change tracking and the read property recorder.
     /// </summary>
+    /// <remarks>
+    /// Registers an <see cref="IComponentActivator"/>: it replaces one registered before this call and is replaced by one
+    /// registered after it.
+    /// </remarks>
     public static IServiceCollection AddComponentTracking(this IServiceCollection services, Action<ComponentTrackingOptions>? configure = null)
     {
         services.AddOptions<ComponentTrackingOptions>();

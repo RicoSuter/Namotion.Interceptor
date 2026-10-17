@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.Blazor.Tests;
 
 /// <summary>
 /// Per-component tracking: each change renders exactly the components whose render read the changed property, once,
-/// wherever and whenever they render. Each test writes its counts to the test output before it asserts them.
+/// wherever and whenever they render.
 /// </summary>
 public class ComponentTrackingTests
 {
@@ -277,12 +277,14 @@ public class ComponentTrackingTests
         await RenderAsync(renderer, Fragments.Read("reader", person, log));
         await SettleAsync(renderer);
 
+        var dispatcher = renderer.Services.GetRequiredService<ComponentTrackingDispatcher>();
+
         // Act
         renderer.HoldAcknowledgements();
         for (var index = 0; index < 10; index++)
         {
             person.FirstName = $"Value {index}";
-            await WaitAsync(() => renderer.Services.GetRequiredService<ComponentTrackingDispatcher>().IsIdle);
+            await WaitAsync(() => dispatcher.IsIdle);
         }
 
         renderer.ReleaseAcknowledgements();
@@ -451,12 +453,6 @@ public class ComponentTrackingTests
         _output.WriteLine($"{mode}: subscriptions before removal: {subscribed}, after: {dispatcher.SubscriptionCount}");
         Assert.Equal(1, subscribed);
         Assert.Equal(0, dispatcher.SubscriptionCount);
-    }
-
-    private static TestRenderer CreateRenderer(TestRenderMode mode, int throttleMilliseconds = 0, int maximumUnacknowledgedBatches = 10)
-    {
-        return new TestRenderer(mode, maximumUnacknowledgedBatches, services => services
-            .AddComponentTracking(options => options.ThrottleMilliseconds = throttleMilliseconds));
     }
 }
 

@@ -7,7 +7,8 @@ public sealed class ComponentTrackingOptions
 {
     /// <summary>
     /// Gets or sets the minimum time between two rounds of renders that changes cause, in milliseconds.
-    /// Changes within this window render each affected component once. Default is 33 (~30 rounds a second).
+    /// Each round renders each affected component once, so a burst of changes renders a component at most twice: at its
+    /// start and at the end of the interval. Default is 33 (~30 rounds a second).
     /// </summary>
     public int ThrottleMilliseconds { get; set; } = 33;
 }

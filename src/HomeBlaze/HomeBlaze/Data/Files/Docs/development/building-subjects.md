@@ -1392,7 +1392,7 @@ A widget component renders a slot with `SubjectComponent` and does not need to k
     var tabs = Layout?.Tabs ?? [];
 }
 
-<MudTabs KeepPanelsAlive="true">
+<MudTabs>
     @foreach (var tab in tabs)
     {
         <MudTabPanel Text="@tab.Title">

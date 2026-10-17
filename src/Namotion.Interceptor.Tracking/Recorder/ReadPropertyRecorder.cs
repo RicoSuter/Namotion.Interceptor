@@ -8,6 +8,8 @@ namespace Namotion.Interceptor.Tracking.Recorder;
 /// records property reads to all active scopes on the current async context.
 /// Uses AsyncLocal to ensure proper isolation across concurrent async operations
 /// (e.g., Blazor components in different browser tabs/sessions).
+/// A target set for the current thread with <see cref="RecordOnCurrentThread"/> takes precedence: while it is set,
+/// reads on that thread go to the target and not to the async scopes.
 /// </summary>
 public class ReadPropertyRecorder : IReadInterceptor
 {
@@ -21,7 +23,7 @@ public class ReadPropertyRecorder : IReadInterceptor
     /// <summary>
     /// Sends the property reads of the current thread to the given target until the returned scope is disposed.
     /// While a target is set, reads on this thread are not recorded by the scopes of <see cref="Start"/>.
-    /// The scope must be disposed on the same thread, which a <c>ref struct</c> ensures across awaits.
+    /// The scope must be disposed on the thread that started it.
     /// </summary>
     /// <param name="target">The target that receives the reads.</param>
     /// <returns>The scope that restores the previous target of the thread.</returns>

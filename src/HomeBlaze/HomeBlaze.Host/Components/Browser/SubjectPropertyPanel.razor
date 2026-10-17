@@ -449,6 +449,8 @@
         if (_registeredSubject == null)
             return [];
 
+        // Read in the render, so that a property added at run time, which increments the version, renders the panel again.
+        _ = PathResolver.PathsVersion;
         return _registeredSubject.Properties
             .Where(p =>
                 p.GetStateMetadata() != null
@@ -462,6 +464,8 @@
         if (_registeredSubject == null)
             return [];
 
+        // Read in the render, so that a property added at run time, which increments the version, renders the panel again.
+        _ = PathResolver.PathsVersion;
         return _registeredSubject.Properties
             .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .OrderBy(p => p.GetDisplayPosition());

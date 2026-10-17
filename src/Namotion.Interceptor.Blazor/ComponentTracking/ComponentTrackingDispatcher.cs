@@ -16,22 +16,23 @@ namespace Namotion.Interceptor.Blazor.ComponentTracking;
 /// </remarks>
 internal sealed class ComponentTrackingDispatcher : IDisposable
 {
+    private const long SweepIntervalMilliseconds = 1000;
+    private const int RetryDelayMilliseconds = 1000;
+
     private readonly Dictionary<PropertyReference, Entry> _entries = [];
     private readonly HashSet<ComponentReadTracker> _trackers = [];
     private readonly Queue<ComponentReadTracker> _renderQueue = new();
     private readonly ConcurrentQueue<Entry> _changedEntries = new();
     private readonly long _throttleTicks;
-    private const long SweepIntervalMilliseconds = 1000;
-    private const int RetryDelayMilliseconds = 1000;
     private readonly Action _drain;
-    private Timer? _timer;
     private readonly ILogger _logger;
 
+    private Timer? _timer;
     private volatile Dispatcher? _dispatcher;
     private int _isDrainScheduled;
     private bool _isDraining;
     private long _lastDrainTimestamp;
-    private long _lastSweepTimestamp;
+    private long _lastSweepTickCount;
     private int _trackerCountAfterSweep;
     private volatile bool _isDisposed;
 
@@ -250,15 +251,15 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     }
 
     // The renderer tells no one when it disposes a component, so the properties of disposed components are released
-    // at most once a second, when something renders or changes anyway.
+    // once a second has passed or the trackers have doubled, when something renders or changes anyway.
     private void SweepIfDue()
     {
         // Checked on every render, so with the cheaper clock. Also due once the trackers have doubled since the last sweep,
         // so that components that are replaced quickly, as rows of a grid, cannot pile up for a second.
         var now = Environment.TickCount64;
-        if (now - _lastSweepTimestamp > SweepIntervalMilliseconds || _trackers.Count > 2 * _trackerCountAfterSweep + 64)
+        if (now - _lastSweepTickCount > SweepIntervalMilliseconds || _trackers.Count > 2 * _trackerCountAfterSweep + 64)
         {
-            _lastSweepTimestamp = now;
+            _lastSweepTickCount = now;
             Sweep();
             _trackerCountAfterSweep = _trackers.Count;
         }

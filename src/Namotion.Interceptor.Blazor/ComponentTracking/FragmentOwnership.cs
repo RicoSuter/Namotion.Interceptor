@@ -46,13 +46,16 @@ internal static class FragmentOwnership
                 continue;
             }
 
-            for (var attribute = index + 1; attribute < frames.Count && array[attribute].FrameType == RenderTreeFrameType.Attribute; attribute++)
+            var attribute = index + 1;
+            for (; attribute < frames.Count && array[attribute].FrameType == RenderTreeFrameType.Attribute; attribute++)
             {
                 if (array[attribute].AttributeValue is RenderFragment fragment && fragment.Target is not OwnedFragment)
                 {
                     ComponentBaseAccessors.AttributeValueOf(ref array[attribute]) = owner.GetContentWrapper(fragment);
                 }
             }
+
+            index = attribute - 1;
         }
     }
 

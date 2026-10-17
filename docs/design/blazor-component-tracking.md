@@ -12,9 +12,9 @@ Both come from the same cause: a scope around a fragment has no boundary of the 
 
 1. A change renders only the components whose own render read the changed property, wherever and whenever they render.
 2. At-least-once: after a change of a property that a component's last render read, the component renders again, and that render reads values at least as new as the change.
-3. Once per change: changes within the throttle interval render each affected component once, in one batch.
+3. Throttled: renders that changes cause run at most once per throttle interval, and each round renders each affected component once, in one batch. The drain is leading-edge, so a burst renders a component at most twice: at its start and at the end of the interval.
 4. Transparent: existing components, including those of component libraries, are tracked without changing them.
-5. No allocation per change and none per render in steady state.
+5. No allocation per change of a property whose change is already pending, and none per render in steady state. The first change after a quiet interval queues one work item.
 
 ## The Extension Point
 
@@ -75,7 +75,7 @@ Render (renderer's dispatcher)            Write (any thread)                Drai
 - **Throttle:** a drain runs as soon as possible when the last one is older than `ThrottleMilliseconds`, otherwise at the end of the interval, through one timer that is created on first use. It is always posted from the thread pool or the timer, never from the writer: the dispatcher of an idle renderer runs a posted action on the calling thread, which would render inside the setter and in the writer's async flow.
 - **One batch per drain:** a render request outside a batch renders at once, one batch per component. The drain therefore renders the first tracker, and the start of its render requests the rest, which then join the batch in progress. A component that is requested twice, or that its parent renders in the same batch, renders once.
 - **Rendering past `ShouldRender`:** a tracked change renders the component as `StateHasChanged` does, without asking `ShouldRender`. A component that renders only when its data changes cannot know that a value its render read has changed, and would otherwise show it stale.
-- **Disposal:** the renderer tells no one when it disposes a component. At most once a second, at a render or a drain, the dispatcher releases the properties of trackers whose component the renderer no longer knows. A render request for a component disposed in between is skipped. When the circuit's scope ends, the dispatcher disposes every subscription.
+- **Disposal:** the renderer tells no one when it disposes a component. At a render or a drain, once a second has passed since the last sweep or once the number of trackers that hold properties exceeds twice the number after the last sweep plus 64, the dispatcher releases the properties of trackers whose component the renderer no longer knows. The second trigger keeps components that are replaced quickly, as rows of a grid, from piling up between the timed sweeps. A render request for a component disposed in between is skipped. When the circuit's scope ends, the dispatcher disposes every subscription.
 
 ### At-Least-Once
 
@@ -86,9 +86,9 @@ Per-property inline subscriptions deliver every write that commits after `Subscr
 | Path | Steady state | When it changes |
 |---|---|---|
 | Component activation | one tracker and one delegate | |
-| Read in a render | one thread-local read, two hash set operations | first read of a property in a circuit: entry and subscription |
+| Read in a render | one thread-local read, one dictionary lookup | first read of a property by a tracker: hash set operations in the dispatcher; first read of a property in a circuit: entry and subscription |
 | End of a render | one pass over its frames | content of a non-`ComponentBase` component: one delegate per fragment |
-| End of a render | one pass over the acquired properties | released properties: subscription disposal |
+| End of a render | nothing when the render read every acquired property and no content read since the last render, otherwise one pass over the acquired properties | released properties: subscription disposal |
 | Change of a watched property | one interlocked exchange, enqueue at most once per drain | |
 | Change of an unwatched property | nothing for the circuit | |
 | Drain | one queue pass and one `InvokeAsync` per interval | |

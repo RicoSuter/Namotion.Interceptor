@@ -82,12 +82,12 @@ public class ReadPropertyRecorderThreadTargetBenchmark
     private sealed class TrackerLikeTarget : IReadPropertyRecorderTarget
     {
         private readonly Dictionary<PropertyReference, int> _acquired = [];
-        private int _renderNumber = 1;
+        private const int RenderNumber = 1;
 
         public void OnRead(PropertyReference property)
         {
             ref var render = ref CollectionsMarshal.GetValueRefOrAddDefault(_acquired, property, out _);
-            render = _renderNumber;
+            render = RenderNumber;
         }
     }
 }
@@ -129,12 +129,7 @@ public class ComponentTrackingRenderBenchmark
     [GlobalCleanup]
     public void Cleanup()
     {
-        if (_renderer.ExceptionCount != 0)
-        {
-            throw new InvalidOperationException("The renderer handled an exception.");
-        }
-
-        _renderer.Dispose();
+        _renderer.VerifyAndDispose();
     }
 }
 
@@ -189,12 +184,7 @@ public class ComponentTrackingWriteBenchmark
 
         foreach (var renderer in _renderers)
         {
-            if (renderer.ExceptionCount != 0)
-            {
-                throw new InvalidOperationException("The renderer handled an exception.");
-            }
-
-            renderer.Dispose();
+            renderer.VerifyAndDispose();
         }
     }
 }
@@ -256,7 +246,16 @@ internal sealed class BenchmarkRenderer : Renderer
 
     protected override RendererInfo RendererInfo { get; } = new("Benchmark", isInteractive: true);
 
-    public int ExceptionCount => _exceptionCount;
+    /// <summary>Throws if the renderer handled an exception, which makes the measurement invalid, and otherwise disposes it.</summary>
+    public void VerifyAndDispose()
+    {
+        if (_exceptionCount != 0)
+        {
+            throw new InvalidOperationException("The renderer handled an exception.");
+        }
+
+        Dispose();
+    }
 
     public TComponent RenderRoot<TComponent>(Dictionary<string, object?> parameters)
         where TComponent : IComponent

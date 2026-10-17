@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.RenderTree;
 using Namotion.Interceptor.Tracking.Recorder;
 
-// Reads the frames of a render to find the content passed to components that are not a ComponentBase.
+// Counts the frames of a render to find where its output starts, and keeps the renderer to test whether the component is alive.
 #pragma warning disable BL0006
 
 namespace Namotion.Interceptor.Blazor.ComponentTracking;
@@ -55,23 +55,6 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
     /// <summary>Gets the tracker whose component renders on the current thread, if any.</summary>
     internal static ComponentReadTracker? Current => _current;
 
-    /// <summary>Gets the wrapper of the given content that records into this component, reusing the one of the last render.</summary>
-    internal RenderFragment GetContentWrapper(RenderFragment content)
-    {
-        if (_contentWrappers?.TryGetValue(content, out var wrapper) == true)
-        {
-            return wrapper;
-        }
-
-        if (_previousContentWrappers is null || !_previousContentWrappers.TryGetValue(content, out wrapper))
-        {
-            wrapper = FragmentOwnership.Wrap(this, content);
-        }
-
-        (_contentWrappers ??= [])[content] = wrapper;
-        return wrapper;
-    }
-
     internal bool IsRenderRequested { get; set; }
 
     /// <summary>Gets a value indicating whether the renders of the component record their reads.</summary>
@@ -79,6 +62,19 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
 
     /// <summary>Gets a value indicating whether the renderer has not disposed the component yet.</summary>
     public bool IsAlive => _renderer is null || ComponentBaseAccessors.GetComponentState(_renderer, _component) is not null;
+
+    /// <summary>Gets the wrapper of the given content that records into this component, reusing the one of the last render.</summary>
+    internal RenderFragment GetContentWrapper(RenderFragment content)
+    {
+        // Neither the previous wrappers nor Wrap touch this dictionary, so the reference stays valid until it is set.
+        ref var wrapper = ref CollectionsMarshal.GetValueRefOrAddDefault(_contentWrappers ??= [], content, out var exists);
+        if (!exists && (_previousContentWrappers is null || !_previousContentWrappers.TryGetValue(content, out wrapper)))
+        {
+            wrapper = FragmentOwnership.Wrap(this, content);
+        }
+
+        return wrapper!;
+    }
 
     public void OnRead(PropertyReference property)
     {
@@ -179,6 +175,12 @@ internal sealed class ComponentReadTracker : IReadPropertyRecorderTarget
             {
                 _renderFragment(builder);
             }
+        }
+        catch
+        {
+            // The renderer keeps the output of the last render that succeeded, so its wrappers are the ones to reuse.
+            (_previousContentWrappers, _contentWrappers) = (_contentWrappers, _previousContentWrappers);
+            throw;
         }
         finally
         {

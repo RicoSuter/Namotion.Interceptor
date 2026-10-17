@@ -54,12 +54,7 @@ public class ComponentTrackingScenarioBenchmark
     [GlobalCleanup]
     public void Cleanup()
     {
-        if (_renderer.ExceptionCount != 0)
-        {
-            throw new InvalidOperationException("The renderer handled an exception.");
-        }
-
-        _renderer.Dispose();
+        _renderer.VerifyAndDispose();
     }
 
     private void Render() => _renderer.Dispatcher.InvokeAsync(_renderAgain).GetAwaiter().GetResult();
@@ -126,12 +121,7 @@ public class ComponentTrackingChangeBenchmark
     [GlobalCleanup]
     public void Cleanup()
     {
-        if (_renderer.ExceptionCount != 0)
-        {
-            throw new InvalidOperationException("The renderer handled an exception.");
-        }
-
-        _renderer.Dispose();
+        _renderer.VerifyAndDispose();
     }
 }
 

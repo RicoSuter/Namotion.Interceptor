@@ -582,7 +582,7 @@ public class HistoryChartWidgetTests
         try
         {
             // Act - a subject that comes and goes changes the paths of the graph but none of the series.
-            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren) { ["PathsChangedSubject"] = subject };
+            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren) { ["TransientSubject"] = subject };
             folder.Children = originalChildren;
 
             // A new speed renders the chart after the change of the paths.

@@ -203,7 +203,6 @@
 
     protected override void OnInitialized()
     {
-
         _pointerDownCallback = EventCallback.Factory.Create<PointerEventArgs>(this, OnPointerDown);
         _clickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, OnClick);
         _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown);
@@ -350,7 +349,6 @@
 
     public void Dispose()
     {
-
         Selection?.Remove(this);
         ParentComponent?._childComponents?.Remove(this);
     }

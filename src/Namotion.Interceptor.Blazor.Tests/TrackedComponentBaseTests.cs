@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
-using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Blazor.ComponentTracking;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
@@ -38,7 +37,40 @@ public class TrackedComponentBaseTests
 
         // Assert
         Assert.Equal(0, log.Renders("reader") - before);
+        Assert.Equal(1, log.Renders(TrackedReader.ParametersSetKey("reader")));
         Assert.Empty(renderer.Exceptions);
+    }
+
+    [Theory]
+    [InlineData(TestRenderMode.WebAssembly)]
+    [InlineData(TestRenderMode.Server)]
+    public async Task WhenTheComponentCallsStateHasChanged_ThenItRendersWithUnchangedParameters(TestRenderMode mode)
+    {
+        // Arrange
+        var person = new Person(CreateContext()) { FirstName = "Initial" };
+        var log = new RenderLog();
+        TrackedReader? reader = null;
+
+        await using var renderer = CreateRenderer(mode);
+        await RenderAsync(renderer, builder =>
+        {
+            builder.OpenComponent<TrackedReader>(0);
+            builder.AddComponentParameter(1, nameof(TrackedReader.Key), "reader");
+            builder.AddComponentParameter(2, nameof(TrackedReader.Person), person);
+            builder.AddComponentParameter(3, nameof(TrackedReader.Log), log);
+            builder.AddComponentReferenceCapture(4, component => reader = (TrackedReader)component);
+            builder.CloseComponent();
+        });
+        await SettleAsync(renderer);
+        var before = log.Renders("reader");
+
+        // Act
+        Assert.NotNull(reader);
+        await reader.RenderAgainAsync();
+        await SettleAsync(renderer);
+
+        // Assert
+        Assert.Equal(1, log.Renders("reader") - before);
     }
 
     [Theory]
@@ -186,12 +218,6 @@ public class TrackedComponentBaseTests
         Assert.Equal(1, log.Renders("reader") - before);
     }
 
-    private static TestRenderer CreateRenderer(TestRenderMode mode)
-    {
-        return new TestRenderer(mode, configureServices: services => services
-            .AddComponentTracking(options => options.ThrottleMilliseconds = 0));
-    }
-
     private sealed record Label(string Text, int Number);
 }
 
@@ -227,6 +253,12 @@ public sealed class TrackedReader : TrackedComponentBase
 
         builder.CloseComponent();
     };
+
+    public static string ParametersSetKey(string key) => key + ":parameters";
+
+    public Task RenderAgainAsync() => InvokeAsync(StateHasChanged);
+
+    protected override void OnParametersSet() => Log.Record(ParametersSetKey(Key), "");
 
     protected override void BuildRenderTree(RenderTreeBuilder builder)
     {

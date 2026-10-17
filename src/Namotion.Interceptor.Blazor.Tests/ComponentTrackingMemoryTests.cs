@@ -88,7 +88,7 @@ public class ComponentTrackingMemoryTests
             await renderer.Dispatcher.InvokeAsync(() => host.SetContent(content));
         }
 
-        await WaitAsync(() => dispatcher.IsIdle && renderer.UnacknowledgedBatchCount == 0);
+        await SettleAsync(renderer);
         await renderer.Dispatcher.InvokeAsync(dispatcher.Sweep);
 
         // Assert
@@ -139,7 +139,4 @@ public class ComponentTrackingMemoryTests
     private static int SubscriptionCount(Person person) =>
         ((IInterceptorSubject)person).Data.TryGetValue((nameof(Person.FirstName), PropertyChangeSubscription.ListenersKey), out var subscriptions) &&
         subscriptions is Array array ? array.Length : 0;
-
-    private static TestRenderer CreateRenderer(TestRenderMode mode) =>
-        new(mode, configureServices: services => services.AddComponentTracking(options => options.ThrottleMilliseconds = 0));
 }

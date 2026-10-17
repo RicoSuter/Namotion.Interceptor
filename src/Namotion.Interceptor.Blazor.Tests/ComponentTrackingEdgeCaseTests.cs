@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.AspNetCore.Components.Web.HtmlRendering;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 using Namotion.Interceptor.Blazor.ComponentTracking;
 using Namotion.Interceptor.Testing;
@@ -412,16 +414,25 @@ public class ComponentTrackingEdgeCaseTests
         await RenderAsync(renderer, Fragments.Read<ThreadRecordingReader>("reader", person, log));
         await SettleAsync(renderer);
 
-        // Act
+        // Act: the writer stays alive until the render, so that no other thread can have its id.
         var writerThread = -1;
+        using var rendered = new ManualResetEventSlim();
         var writer = new Thread(() =>
         {
             writerThread = Environment.CurrentManagedThreadId;
             person.FirstName = "Changed";
+            rendered.Wait();
         });
         writer.Start();
-        writer.Join();
-        await WaitAsync(() => log.Value("reader") == "Changed");
+        try
+        {
+            await WaitAsync(() => log.Value("reader") == "Changed");
+        }
+        finally
+        {
+            rendered.Set();
+            writer.Join();
+        }
 
         // Assert
         Assert.NotEqual(writerThread.ToString(), log.Value(ThreadRecordingReader.ThreadKey("reader")));
@@ -472,11 +483,11 @@ public class ComponentTrackingEdgeCaseTests
         var person = new Person(context) { FirstName = "Static" };
         var log = new RenderLog();
         await using var services = new ServiceCollection()
-            .AddSingleton<Microsoft.Extensions.Logging.ILoggerFactory>(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
-            .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(Microsoft.Extensions.Logging.Abstractions.NullLogger<>))
+            .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
             .AddComponentTracking()
             .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
-        await using var htmlRenderer = new HtmlRenderer(services, services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>());
+        await using var htmlRenderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
 
         // Act
         var html = await htmlRenderer.Dispatcher.InvokeAsync(async () =>

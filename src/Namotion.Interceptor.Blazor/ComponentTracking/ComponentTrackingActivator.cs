@@ -1,11 +1,7 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using System.Reflection.Metadata;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-
-[assembly: MetadataUpdateHandler(typeof(Namotion.Interceptor.Blazor.ComponentTracking.ComponentTrackingActivator))]
 
 namespace Namotion.Interceptor.Blazor.ComponentTracking;
 
@@ -15,8 +11,6 @@ namespace Namotion.Interceptor.Blazor.ComponentTracking;
 /// </summary>
 internal sealed class ComponentTrackingActivator : IComponentActivator
 {
-    private static readonly ConcurrentDictionary<Type, ObjectFactory> _factories = new();
-
     private readonly IServiceProvider _serviceProvider;
     private ComponentTrackingDispatcher? _dispatcher;
 
@@ -31,9 +25,10 @@ internal sealed class ComponentTrackingActivator : IComponentActivator
     }
 
     /// <summary>
-    /// Gets the dispatcher of the scope, created on the first interactive render, so that a renderer that never renders
-    /// interactively, such as an <c>HtmlRenderer</c> on the root service provider, never resolves the scoped service.
+    /// Gets the dispatcher of the scope, resolved on first access.
     /// </summary>
+    // Resolved lazily, on the first interactive render, so that a renderer that never renders interactively, such as an
+    // HtmlRenderer on the root service provider, never resolves the scoped service.
     internal ComponentTrackingDispatcher Dispatcher =>
         _dispatcher ??= _serviceProvider.GetRequiredService<ComponentTrackingDispatcher>();
 
@@ -44,12 +39,7 @@ internal sealed class ComponentTrackingActivator : IComponentActivator
             throw new ArgumentException($"The type {componentType.FullName} does not implement {nameof(IComponent)}.", nameof(componentType));
         }
 
-        if (!_factories.TryGetValue(componentType, out var factory))
-        {
-            factory = ActivatorUtilities.CreateFactory(componentType, Type.EmptyTypes);
-            _factories.TryAdd(componentType, factory);
-        }
-
+        var factory = ComponentFactoryCache.Get(componentType);
         var component = (IComponent)factory(_serviceProvider, []);
         if (component is ComponentBase componentBase && ComponentBaseAccessors.IsSupported)
         {
@@ -59,7 +49,4 @@ internal sealed class ComponentTrackingActivator : IComponentActivator
 
         return component;
     }
-
-    /// <summary>Called by hot reload, after which a component type can have other constructors.</summary>
-    public static void ClearCache(Type[]? updatedTypes) => _factories.Clear();
 }

@@ -18,7 +18,10 @@ public interface ITimeZoneDisplay
     /// <summary>Text shown for a timestamp while the zone is not yet resolved.</summary>
     string Placeholder { get; }
 
-    /// <summary>Raised when the resolved zone changes, so consumers can re-render.</summary>
+    /// <summary>
+    /// Raised when the resolved zone changes. A component that reads the zone in its render renders again without it;
+    /// subscribe only to update data that is built outside the render.
+    /// </summary>
     event Action? Changed;
 
     /// <summary>Formats an absolute instant in the chosen zone (placeholder while unresolved).</summary>

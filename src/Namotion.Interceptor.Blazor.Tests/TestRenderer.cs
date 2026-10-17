@@ -40,6 +40,7 @@ internal sealed class TestRenderer : Renderer
     private volatile bool _holdAcknowledgements;
     private int _unacknowledgedBatchCount;
     private int _deferredRenderRequests;
+    private int _batchCount;
 
     /// <param name="mode">How batches render and complete.</param>
     /// <param name="maximumUnacknowledgedBatches">
@@ -69,12 +70,6 @@ internal sealed class TestRenderer : Renderer
 
     /// <summary>Gets the number of batches rendered so far.</summary>
     public int BatchCount => Volatile.Read(ref _batchCount);
-
-    /// <summary>Gets the number of component renders in all batches so far.</summary>
-    public int RenderedComponentCount => Volatile.Read(ref _renderedComponentCount);
-
-    private int _batchCount;
-    private int _renderedComponentCount;
 
     public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
 
@@ -141,7 +136,6 @@ internal sealed class TestRenderer : Renderer
     protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
     {
         Interlocked.Increment(ref _batchCount);
-        Interlocked.Add(ref _renderedComponentCount, renderBatch.UpdatedComponents.Count);
         switch (_mode)
         {
             case TestRenderMode.WebAssembly:

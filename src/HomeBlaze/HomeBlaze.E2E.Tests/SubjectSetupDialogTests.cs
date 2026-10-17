@@ -628,7 +628,7 @@ public class SubjectSetupDialogTests
         await field.FillAsync("500");
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
 
-        // Assert - the form subscribes the properties it reads while it renders, so a warning is logged by now.
+        // Assert - the form subscribes the properties it reads while it renders, so a warning would be logged by now if a property could not be tracked.
         var trackingEntries = _fixture.ServerLog.GetEntriesSince(logCount)
             .Where(entry => entry.Category.StartsWith("Namotion.Interceptor.Blazor", StringComparison.Ordinal))
             .Select(entry => entry.Message)

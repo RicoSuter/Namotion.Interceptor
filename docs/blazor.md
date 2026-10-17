@@ -39,9 +39,9 @@ No base class, wrapper or subscription is needed. A change renders only the comp
 ### Guarantees
 
 - **At-least-once render**: After a change of a property that a component's last render read, the component renders again, and that render reads values at least as new as the change. The property is subscribed before its value is read, so a change during the render renders once more.
-- **Once per change and component**: Changes within `ThrottleMilliseconds` (default 33 ms) render each affected component once, and the components of one round render in one batch. A component that a parent renders in the same batch renders once.
+- **Throttled rounds**: Renders that changes cause run at most once per `ThrottleMilliseconds` (default 33 ms). Each round renders each affected component once, in one batch, and a component that a parent renders in the same batch renders once. A burst of changes renders a component at most twice: at its start and at the end of the interval.
 - **Thread safety**: Changes can be written on any thread. Components render on their renderer's dispatcher.
-- **Cost**: A property that no component reads costs a circuit nothing. A watched property costs one subscription per circuit, however many components read it. A change allocates nothing on the writer's thread, and each round of renders posts one work item. A render allocates nothing in steady state, apart from a wrapper for content that is new on every render and passed to a component that does not derive from `ComponentBase`.
+- **Cost**: A property that no component reads costs a circuit nothing. A watched property costs one subscription per circuit, however many components read it. A change of a property whose change is already pending allocates nothing. The first change after a quiet interval queues one work item, and each round of renders posts one work item to the renderer. A render allocates nothing in steady state, apart from a wrapper for content that is new on every render and passed to a component that does not derive from `ComponentBase`.
 
 ### What Is Not Tracked
 
@@ -76,7 +76,7 @@ A component renders whenever its parent renders and passes a parameter that is n
 }
 ```
 
-- **Unchanged** means equal by `Equals` to the value passed before, so the same instance, an equal value or an equal record. Content and other delegates always count as changed, as they do for Blazor.
+- **Unchanged** means equal by `Equals` to the value passed before, so the same instance, an equal value or an equal record. Content (`RenderFragment`) and other delegates always count as changed, as they do for Blazor. An `EventCallback` is a struct, not a delegate, so it counts as unchanged when it is equal by `Equals`, that is when it has the same receiver and an equal delegate.
 - **Still renders** when a property that its render read changes, when a parameter changes and when it calls `StateHasChanged`. `OnParametersSet` does not run for a skipped render.
 - **Only with component tracking**: while prerendering, or without `AddComponentTracking`, it renders with its parent as any component does.
 
@@ -84,11 +84,11 @@ Derive from it only if the render shows nothing else that can change: an object 
 
 ### Prerendering and Disposal
 
-While prerendering, nothing is recorded or subscribed. The interactive render that follows subscribes what it reads. A component that the renderer disposes releases its subscriptions at the next sweep, which runs at a render or a change of the circuit once a second has passed or the number of components has doubled, and the circuit releases all of them when it ends.
+While prerendering, nothing is recorded or subscribed. The interactive render that follows subscribes what it reads. A component that the renderer disposes releases its subscriptions at the next sweep, which runs at a render or a round of renders of the circuit once a second has passed since the last sweep, or once the number of components that hold subscriptions has grown to more than twice the number after the last sweep plus 64. The circuit releases all of them when it ends.
 
 ### Compatibility
 
-Component tracking is installed through `IComponentActivator` and wraps the render of each `ComponentBase` through a private member of the framework. If a version of `Microsoft.AspNetCore.Components` changes that member, an error is logged for each renderer and components render as without component tracking. Component tracking registers its own `IComponentActivator`: it replaces one that the application registered before, and one registered after it replaces component tracking.
+Component tracking is installed through `IComponentActivator` and wraps the render of each `ComponentBase` through private members of the framework. If a version of `Microsoft.AspNetCore.Components` changes one of them, an error is logged for each renderer and components render as without component tracking. Component tracking registers its own `IComponentActivator`: it replaces one that the application registered before, and one registered after it replaces component tracking.
 
 ## TrackingScope
 
