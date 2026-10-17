@@ -14,6 +14,7 @@ A grid with a fixed number of rows and columns. Type name: `HomeBlaze.Components
 |----------|---------------|---------|---------|
 | `Rows` | Whole number | `2` | The number of rows |
 | `Columns` | Whole number | `2` | The number of columns |
+| `CellAspectRatio` | Ratio `W:H` | None | The shape of a cell, for example `1:1` for squares. A row is as high as a column is wide times H/W, so the grid follows the width of the page. Without it the rows share the height of the grid, which is at least 400 pixels |
 
 ## Slots
 
@@ -55,9 +56,35 @@ The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/Targ
 The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/TargetSpeed }}**.
 ::
 
+A grid with cells that keep their shape. `CellAspectRatio=1:1` makes each cell as high as it is wide, so the cells stay square at every width of the page:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.GridLayout#squaregrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+Living room
+::: Cell Row=0 Column=1
+Kitchen
+::: Cell Row=0 Column=2
+Garden
+::
+~~~~
+
+:: HomeBlaze.Components.GridLayout#squaregrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+Living room
+::: Cell Row=0 Column=1
+Kitchen
+::: Cell Row=0 Column=2
+Garden
+::
+
 ## Behavior and Limits
 
-- **Equal rows and columns**: All rows have the same height and all columns the same width, and the grid is at least 400 pixels high.
+- **Equal rows and columns**: All columns have the same width. Without `CellAspectRatio` all rows have the same height and the grid is at least 400 pixels high.
+- **Cell aspect ratio**: With `CellAspectRatio=W:H` a row is as high as a column is wide times H/W, and follows the width of the page. The cells have no minimum height then.
+- **An invalid ratio**: A `CellAspectRatio` that is not two numbers above 0 with a colon between them shows `CellAspectRatio must look like 1:1` with the value in place of the grid, see [Value Widget Errors](../page-errors.md#value-widget-errors).
+- **Tiles**: A tile ([Switch](switch.md) or [OperationButton](operation-button.md) with `Kind=Tile`) in a cell fills the cell, as a card does. Square cells suit tiles.
 - **Cards**: A [Card](card.md) in a cell fills the cell and ignores its `AspectRatio`, unless it has a `Height` of its own. Its body scrolls when its content does not fit.
 - **Fixed columns**: The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
 - **Names**: Give a cell a `#name` to keep it and everything in it when cells are added or removed, see [What an Edit of the Page Keeps](../pages.md#what-an-edit-of-the-page-keeps).

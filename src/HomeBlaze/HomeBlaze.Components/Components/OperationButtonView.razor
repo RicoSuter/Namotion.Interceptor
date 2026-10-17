@@ -11,23 +11,50 @@
     var isEnabled = method is not null && property!.IsMethodEnabled();
     var text = !string.IsNullOrEmpty(Label) ? Label : method?.Title ?? Path ?? string.Empty;
     var icon = MudBlazorIconResolver.ResolveOrNull(!string.IsNullOrEmpty(Icon) ? Icon : method is null ? null : OperationInvoker.GetIconName(method));
+    // A tile shows the icon alone when the method gives one, but never nothing: without a method it shows the path.
+    var tileLabel = !string.IsNullOrEmpty(Label) ? Label : method is null ? text : null;
+    // Nothing to show at all (no path, no method, no label, no icon) falls back to the dash, so the tile is never empty.
+    if (string.IsNullOrEmpty(tileLabel) && icon is null)
+    {
+        tileLabel = ValueReader.MissingText;
+    }
+    var tooltip = method is null ? Path : method.Description;
+    var isDisabled = IsEditing || _isRunning || !isEnabled;
 }
 
-<MudButton Variant="@Variant"
-           Color="@Color"
-           StartIcon="@(_isRunning ? null : icon)"
-           Disabled="@(IsEditing || _isRunning || !isEnabled)"
-           OnClick="_runCallback"
-           title="@(method is null ? Path : method.Description)"
-           aria-busy="@(_isRunning ? "true" : null)"
-           data-testid="operation-button">
-    @* The spinner takes the start icon's place instead of adding one, so the button keeps its width while busy. *@
-    @if (_isRunning)
-    {
-        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" Style="width: 20px; height: 20px;" />
-    }
-    @text
-</MudButton>
+@if (Kind == OperationButtonKind.Tile)
+{
+    <TileView TestId="operation-button-tile"
+              AccessibleName="@(string.IsNullOrEmpty(tileLabel) && !string.IsNullOrEmpty(text) ? text : null)"
+              Tooltip="@tooltip"
+              Label="@tileLabel"
+              Subtitle="@Subtitle"
+              Icon="@icon"
+              Color="@Color"
+              Variant="@Variant"
+              Disabled="@isDisabled"
+              IsBusy="@_isRunning"
+              Badge="@Badge"
+              OnClick="_runCallback" />
+}
+else
+{
+    <MudButton Variant="@Variant"
+               Color="@Color"
+               StartIcon="@(_isRunning ? null : icon)"
+               Disabled="@isDisabled"
+               OnClick="_runCallback"
+               title="@tooltip"
+               aria-busy="@(_isRunning ? "true" : null)"
+               data-testid="operation-button">
+        @* The spinner takes the start icon's place instead of adding one, so the button keeps its width while busy. *@
+        @if (_isRunning)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" Style="width: 20px; height: 20px;" />
+        }
+        @text
+    </MudButton>
+}
 
 @code {
     private readonly CancellationTokenSource _lifetime = new();
@@ -64,6 +91,24 @@
 
     [Parameter]
     public Variant Variant { get; set; } = OperationButton.DefaultVariant;
+
+    /// <summary>
+    /// Whether the operation is drawn as a button or as a tile that fills its place.
+    /// </summary>
+    [Parameter]
+    public OperationButtonKind Kind { get; set; }
+
+    /// <summary>
+    /// A second, smaller line below the label of a tile.
+    /// </summary>
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    /// <summary>
+    /// Content drawn over the top right corner of a tile, such as an indicator.
+    /// </summary>
+    [Parameter]
+    public IInterceptorSubject? Badge { get; set; }
 
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }

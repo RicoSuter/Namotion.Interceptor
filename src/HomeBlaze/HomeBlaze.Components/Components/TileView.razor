@@ -1,0 +1,73 @@
+@* A tile: one click target that fills its place, with icon, label and subtitle centered, a badge over its top right
+   corner and, while it works, a progress circle over its bottom right corner. The badge and the progress circle are
+   siblings of the button, not inside it, so the markup stays valid; they take no pointer input, so a click on them
+   reaches the button below. The style is on the root, so that they inherit the text color of the tile. A disabled tile
+   (also a busy one and every tile in edit mode) keeps its fill and is dimmed as a whole by its class. *@
+@using HomeBlaze.Components.Controls
+
+<div class="@(Disabled ? "tile-widget place-filler tile-widget-disabled" : "tile-widget place-filler")" style="@TileStyle.GetStyle(Color, Variant)" data-testid="@TestId">
+    <button type="button"
+            class="tile-widget-button"
+            disabled="@Disabled"
+            role="@(Checked is null ? null : "switch")"
+            aria-checked="@(Checked is { } isChecked ? (isChecked ? "true" : "false") : null)"
+            aria-label="@AccessibleName"
+            aria-busy="@(IsBusy ? "true" : null)"
+            title="@Tooltip"
+            @onclick="OnClick">
+        @if (Icon is not null)
+        {
+            <MudIcon Icon="@Icon" Class="tile-widget-icon" data-testid="tile-icon" />
+        }
+        @if (!string.IsNullOrEmpty(Label))
+        {
+            <span class="tile-widget-label" data-testid="tile-label">@Label</span>
+        }
+        @if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <span class="tile-widget-subtitle" data-testid="tile-subtitle">@Subtitle</span>
+        }
+    </button>
+    @if (IsBusy)
+    {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="tile-widget-progress" data-testid="tile-progress" />
+    }
+    @if (Badge is not null)
+    {
+        <div class="tile-widget-badge" data-testid="tile-badge">
+            <SubjectComponent Subject="@Badge" Type="SubjectComponentType.Widget" />
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? TestId { get; set; }
+
+    /// <summary>Whether a switch tile is on, which makes the button a switch; null for a plain button.</summary>
+    [Parameter] public bool? Checked { get; set; }
+
+    /// <summary>The accessible name when the tile shows no label, such as the title of the operation of an icon tile.</summary>
+    [Parameter] public string? AccessibleName { get; set; }
+
+    [Parameter] public string? Tooltip { get; set; }
+
+    [Parameter] public string? Label { get; set; }
+
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>The icon as resolved by <see cref="MudBlazorIconResolver"/>, or null for none.</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    [Parameter] public Color Color { get; set; }
+
+    [Parameter] public Variant Variant { get; set; } = Variant.Filled;
+
+    [Parameter] public bool Disabled { get; set; }
+
+    [Parameter] public bool IsBusy { get; set; }
+
+    /// <summary>The content of the badge slot, or null for none.</summary>
+    [Parameter] public IInterceptorSubject? Badge { get; set; }
+
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+}
