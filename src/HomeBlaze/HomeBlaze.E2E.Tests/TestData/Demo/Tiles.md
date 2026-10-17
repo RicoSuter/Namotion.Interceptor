@@ -38,6 +38,16 @@ This page is changed by the tile widget tests.
 :::: HomeBlaze.Components.Switch#casetexttile Kind=Tile Path=tilemotor/IsPowered Map=powered Label="Case text"
 ::
 
+:: HomeBlaze.Components.ValueMap#colorlessmap
+::: Case Value=True Text="Colorless"
+::
+
+:: HomeBlaze.Components.Switch#colorlesstile Kind=Tile Path=tilemotor/IsPowered Map=colorlessmap Label="Colorless case"
+::
+
+:: HomeBlaze.Components.Switch#unresolvedmaptile Kind=Tile Path=tilemotor/IsPowered Map=unresolvedtilemap Label="Unresolved map"
+::
+
 :: HomeBlaze.Components.GridLayout#squaregrid Rows=2 Columns=3 CellAspectRatio=1:1
 ::: Cell Row=0 Column=0
 :::: HomeBlaze.Components.Switch#squaretile Kind=Tile Path=tilemotor/IsPowered Label="Square"

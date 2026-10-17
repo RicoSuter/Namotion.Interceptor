@@ -125,6 +125,35 @@ public class TileWidgetTests
     }
 
     [Fact]
+    public async Task WhenSwitchTileMapCaseForTheValueHasNoColor_ThenItStaysOnTheSurfaceWhileTrue()
+    {
+        // Arrange
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var tile = GetSwitchTile(page, "Colorless case");
+
+        // Act
+        await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Colorless");
+        var surface = await page.ResolveColorAsync("var(--mud-palette-surface)");
+        Assert.Equal(surface, await GetBackgroundAsync(tile));
+    }
+
+    [Fact]
+    public async Task WhenSwitchMapCannotBeResolved_ThenItShowsTheErrorInPlaceOfTheSwitch()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        var error = page.GetByTestId("widget-argument-error").Filter(new() { HasText = "unresolvedtilemap" });
+        await Assertions.Expect(error).ToHaveTextAsync("Cannot resolve map: unresolvedtilemap", new() { Timeout = Timeout });
+        await Assertions.Expect(GetSwitchTile(page, "Unresolved map")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenSwitchTileHasNoSubtitle_ThenItShowsTheTextOfTheMatchedCase()
     {
         // Arrange
@@ -245,6 +274,38 @@ public class TileWidgetTests
         Assert.InRange(Math.Abs(nodeBox.Width - frameBox.Width / 2), 0, 2);
         Assert.InRange(Math.Abs(nodeBox.Height - frameBox.Width / 2), 0, 2);
         Assert.InRange(Math.Abs(frameBox.Height - frameBox.Width / 2), 0, 2);
+    }
+
+    [Theory]
+    [InlineData(1280)]
+    [InlineData(375)]
+    public async Task WhenTileIsTheOnlyContentOfACanvasNodeThatFitsTheWidth_ThenItFillsTheNode(int width)
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await page.SetViewportSizeAsync(width, 900);
+        var frame = GetCanvasFrame(page);
+        var node = GetCanvasNode(page);
+        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitForScaledNodeAsync(page, frame, node);
+        var tile = node.GetByTestId("switch-tile");
+
+        // Act: the node has a border of 1 pixel on each side, which is scaled with the canvas (the node is 200 pixels wide),
+        // so the node is larger than the tile by that and no more. The page is still changing its width for a moment after
+        // the viewport has, so the boxes must agree for 20 frames in a row (polled once per frame).
+        await page.WaitForFunctionAsync(
+            """
+            ([node, tile]) => {
+                const nodeBox = node.getBoundingClientRect();
+                const tileBox = tile.getBoundingClientRect();
+                const tolerance = 2 * nodeBox.width / 200 + 0.5;
+                const fills = Math.abs(nodeBox.width - tileBox.width) <= tolerance && Math.abs(nodeBox.height - tileBox.height) <= tolerance;
+                node.__fillFrames = fills ? (node.__fillFrames ?? 0) + 1 : 0;
+                return node.__fillFrames >= 20;
+            }
+            """,
+            new object[] { await node.ElementHandleAsync(), await tile.ElementHandleAsync() },
+            new() { Timeout = Timeout });
     }
 
     [Fact]
