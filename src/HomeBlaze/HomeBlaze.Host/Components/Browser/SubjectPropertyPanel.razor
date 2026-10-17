@@ -196,36 +196,55 @@
                                                          Icon="@GetSubjectIcon(child.Subject)"
                                                          IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
                                                          Class="@(isSelected ? "mud-primary-text" : "")">
-                                                @if (isSelected)
+                                                @if (orderedContainer is null)
                                                 {
-                                                    <div style="float: right; line-height: 0">
-                                                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
-                                                    </div>
+                                                    @if (isSelected)
+                                                    {
+                                                        <div style="float: right; line-height: 0">
+                                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
+                                                        </div>
+                                                    }
                                                 }
-                                                @if (orderedContainer is not null)
+                                                else
                                                 {
                                                     @* Stops the click, which would otherwise select the row. *@
-                                                    <span class="@(isSelected ? "subject-pane-move subject-pane-move-selected" : "subject-pane-move")"
+                                                    <span class="@(isSelected ? "subject-pane-row-end subject-pane-row-end-selected" : "subject-pane-row-end")"
                                                           @onclick:stopPropagation="true">
-                                                        @if (!isFirstChild)
+                                                        <span class="subject-pane-move">
+                                                            @if (!isFirstChild)
+                                                            {
+                                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                                                                               Size="Size.Small"
+                                                                               Class="pa-0"
+                                                                               Disabled="@(!CanMoveChildren(orderedContainer))"
+                                                                               OnClick="@(() => MoveChildAsync(orderedContainer, child, previousChild))"
+                                                                               aria-label="@($"Move {childName} up")"
+                                                                               data-testid="move-child-up-button" />
+                                                            }
+                                                            else
+                                                            {
+                                                                @* Keeps the other arrow in the column of the arrows of the other rows. *@
+                                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Class="pa-0" Disabled="true" Style="visibility: hidden;" aria-hidden="true" />
+                                                            }
+                                                            @if (!isLastChild)
+                                                            {
+                                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
+                                                                               Size="Size.Small"
+                                                                               Class="pa-0"
+                                                                               Disabled="@(!CanMoveChildren(orderedContainer))"
+                                                                               OnClick="@(() => MoveChildAsync(orderedContainer, child, nextChild))"
+                                                                               aria-label="@($"Move {childName} down")"
+                                                                               data-testid="move-child-down-button" />
+                                                            }
+                                                            else
+                                                            {
+                                                                @* Keeps the other arrow in the column of the arrows of the other rows. *@
+                                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Class="pa-0" Disabled="true" Style="visibility: hidden;" aria-hidden="true" />
+                                                            }
+                                                        </span>
+                                                        @if (isSelected)
                                                         {
-                                                            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
-                                                                           Size="Size.Small"
-                                                                           Class="pa-0"
-                                                                           Disabled="@(!CanMoveChildren(orderedContainer))"
-                                                                           OnClick="@(() => MoveChildAsync(orderedContainer, child, previousChild))"
-                                                                           aria-label="@($"Move {childName} up")"
-                                                                           data-testid="move-child-up-button" />
-                                                        }
-                                                        @if (!isLastChild)
-                                                        {
-                                                            <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
-                                                                           Size="Size.Small"
-                                                                           Class="pa-0"
-                                                                           Disabled="@(!CanMoveChildren(orderedContainer))"
-                                                                           OnClick="@(() => MoveChildAsync(orderedContainer, child, nextChild))"
-                                                                           aria-label="@($"Move {childName} down")"
-                                                                           data-testid="move-child-down-button" />
+                                                            <MudIcon Class="subject-pane-chevron" Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                                         }
                                                     </span>
                                                 }
@@ -285,23 +304,40 @@
         }
     }
 
-    /* The arrows that move a child show while its row is hovered or focused, on the selected row, and always on a
-       device without hover. Transparent rather than hidden, so that they stay in the tab order. */
-    .subject-pane-move {
+    /* The end of a row that can be moved holds its arrows, and on the selected row its chevron in the same place, so
+       that the selected row looks calm and no row changes its width. The selected row shows its arrows instead while
+       it is hovered or has keyboard focus, and always on a device without hover, which cannot hover. */
+    .subject-pane-row-end {
         float: right;
+        display: grid;
         line-height: 0;
-        opacity: 0;
     }
 
-    .mud-list-item:hover .subject-pane-move,
-    .mud-list-item:focus-within .subject-pane-move,
-    .subject-pane-move-selected {
-        opacity: 1;
+    .subject-pane-row-end > * {
+        grid-area: 1 / 1;
+        justify-self: end;
+    }
+
+    .subject-pane-row-end-selected .subject-pane-move,
+    .mud-list-item:hover .subject-pane-row-end-selected .subject-pane-chevron,
+    .mud-list-item:focus-visible .subject-pane-row-end-selected .subject-pane-chevron,
+    .subject-pane-row-end-selected:focus-within .subject-pane-chevron {
+        visibility: hidden;
+    }
+
+    .mud-list-item:hover .subject-pane-row-end-selected .subject-pane-move,
+    .mud-list-item:focus-visible .subject-pane-row-end-selected .subject-pane-move,
+    .subject-pane-row-end-selected:focus-within .subject-pane-move {
+        visibility: visible;
     }
 
     @@media (hover: none) {
-        .subject-pane-move {
-            opacity: 1;
+        .subject-pane-row-end-selected .subject-pane-move {
+            visibility: visible;
+        }
+
+        .subject-pane-row-end-selected .subject-pane-chevron {
+            visibility: hidden;
         }
     }
 
