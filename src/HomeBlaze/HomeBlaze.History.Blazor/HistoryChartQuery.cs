@@ -12,7 +12,7 @@ namespace HomeBlaze.History.Blazor;
 /// <param name="PropertyType">The type of the property, used to name its states.</param>
 /// <param name="IsBand">Whether the series is drawn as a state band rather than a line.</param>
 /// <param name="Aggregation">The aggregation of a line query; lines with the same aggregation share one batch. Ignored for a band, which is always queried as raw samples.</param>
-/// <param name="Color">The CSS color of a line, or null for the next of <see cref="HistoryChartPalette.LineColors"/>.</param>
+/// <param name="Color">The color of a line as <see cref="HistoryChartSeriesResolver.AssignLineColors"/> returned it, which reaches the chart unchecked, or null for the next of <see cref="HistoryChartPalette.LineColors"/>.</param>
 /// <param name="Unit">The unit of the property. A line in <see cref="StateUnit.Percent"/> is drawn in percent, except a count of samples.</param>
 internal sealed record HistoryChartSeriesRequest(
     string PropertyPath,

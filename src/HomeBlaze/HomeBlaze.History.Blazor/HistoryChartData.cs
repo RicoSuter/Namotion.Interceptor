@@ -43,7 +43,7 @@ public sealed record HistoryChartData(
 
 /// <summary>A number series: its gap-free runs of points, each drawn as one line in <paramref name="Color"/>.</summary>
 /// <param name="Label">The name of the series.</param>
-/// <param name="Color">The CSS color of the line.</param>
+/// <param name="Color">The color of the line, which reaches the chart unchecked: one that <see cref="HistoryChartSeriesResolver.AssignLineColors"/> returned or one of <see cref="HistoryChartPalette.LineColors"/>.</param>
 /// <param name="Runs">The gap-free runs of points in time order.</param>
 /// <param name="IsPercent">Whether the points are fractions that are drawn in percent, see <see cref="HistoryChartAxis.ToPercent"/>.</param>
 public sealed record HistoryChartLine(

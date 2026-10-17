@@ -27,9 +27,10 @@ public partial class HistoryChartSeries : IConfigurable
     public partial string? Label { get; set; }
 
     /// <summary>
-    /// The CSS color of a line, for example "#E4572E", a name such as "teal", or rgb(), rgba(), hsl() or hsla() with
-    /// plain numbers. Defaults to the next color of the chart, which is also used for a value that is not such a plain
-    /// CSS color. A state band has one color per state and ignores it.
+    /// The CSS color of a line, for example "#E4572E", a word of letters such as a color name, or rgb(), rgba(), hsl()
+    /// or hsla() with plain numbers. Defaults to the next color of the chart, which is also used for a value of another
+    /// form. A word that the browser does not know as a color leaves the line without a color. A state band has one
+    /// color per state and ignores it.
     /// </summary>
     [Configuration]
     public partial string? Color { get; set; }

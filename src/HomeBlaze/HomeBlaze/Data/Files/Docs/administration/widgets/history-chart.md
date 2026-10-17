@@ -33,7 +33,7 @@ The arguments of a `Series` block:
 |----------|---------------|---------|---------|
 | `Path` | Path (Number, Boolean or Enum) | None | The [path](basics.md#paths) of the property whose history the series shows. A number is a line, and a boolean, an enum, a text and a number whose state is marked as discrete are a band. The picker offers no text, so type the path of a text |
 | `Label` | Text | From the property, see [Labels](basics.md#labels) | The label in the legend of the lines or above a band |
-| `Color` | Text, a CSS color such as `"#E4572E"`, `teal` or `"rgb(228, 87, 46)"` | The next color of the chart | The color of a line. A value other than `#` with 3, 4, 6 or 8 hex digits, a color name, or `rgb()`, `rgba()`, `hsl()` or `hsla()` with plain numbers uses the next color of the chart. A band has one color per state and ignores it |
+| `Color` | Text, a CSS color such as `"#E4572E"`, `teal` or `"rgb(228, 87, 46)"` | The next color of the chart | The color of a line. A value other than `#` with 3, 4, 6 or 8 hex digits, a word of letters such as a color name, or `rgb()`, `rgba()`, `hsl()` or `hsla()` with plain numbers uses the next color of the chart. A word the browser does not know as a color leaves the line without a color. A band has one color per state and ignores it |
 | `Aggregation` | Like `Aggregation` of the chart | The aggregation of the chart | The aggregation of this line in place of the one of the chart. A band ignores it |
 
 ## Samples
