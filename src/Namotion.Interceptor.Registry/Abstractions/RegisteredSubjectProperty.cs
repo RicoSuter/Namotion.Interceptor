@@ -152,12 +152,12 @@ public class RegisteredSubjectProperty
 
     /// <summary>
     /// Gets a value indicating whether the property has a setter of any accessibility, see <see cref="HasPublicSetter"/>;
-    /// an init-only setter counts as no setter.
+    /// a generated init-only property has no setter.
     /// </summary>
     public bool HasSetter => Reference.Metadata.SetValue is not null;
 
     /// <summary>
-    /// Gets a value indicating whether the property has a setter that is public. An init-only setter counts as no setter.
+    /// Gets a value indicating whether the property has a setter that is public. An init-only setter does not count as public.
     /// A setter that an override inherits has the accessibility of the property it overrides. An explicit or default
     /// interface implementation has the accessibility of the implemented interface member. A dynamic property without
     /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> counts as public when it has a setter.
