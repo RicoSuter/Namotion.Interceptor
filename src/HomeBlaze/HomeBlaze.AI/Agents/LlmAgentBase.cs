@@ -181,7 +181,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     /// <summary>
     /// Whether the agent has loaded its timeline and memory, which happens when it starts for the first time. Before
-    /// that, <see cref="Timeline"/> and <see cref="Memory"/> are empty placeholders that are replaced on start.
+    /// that, <see cref="Timeline"/> and <see cref="Memory"/> are empty placeholders, which the start replaces unless
+    /// the agent has no storage and keeps them.
     /// </summary>
     public bool IsStorageLoaded => _isStorageLoaded;
 
@@ -500,9 +501,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         await LoadTimelineAsync(cancellationToken);
 
         // Loaded before it is published, so the memory editor never writes to a memory that has not read its file.
-        // A restart keeps the instance of an unchanged path, so two instances never write the same file.
+        // A restart keeps the instance of an unchanged path, also of none, so two instances never write the same file
+        // and a memory without storage keeps its entries.
         var memoryPath = GetStoragePath(AgentStorage.MemorySuffix);
-        var memory = memoryPath is not null && Memory.FilePath == memoryPath
+        var memory = Memory.FilePath == memoryPath
             ? Memory
             : new AgentMemory(memoryPath, _services.TimeProvider, _logger);
         await memory.LoadAsync(cancellationToken);
@@ -522,9 +524,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private async Task LoadTimelineAsync(CancellationToken cancellationToken)
     {
         // Loaded before it is published, so a reader never sees an empty placeholder. A restart keeps the instance of
-        // an unchanged path, so an append of the stopped run and this load share its file lock.
+        // an unchanged path, also of none, so an append of the stopped run and this load share its file lock, or the
+        // append lands in the timeline that the agent shows when it has no storage.
         var timelinePath = GetStoragePath(AgentStorage.TimelineSuffix);
-        var timeline = timelinePath is not null && Timeline.FilePath == timelinePath
+        var timeline = Timeline.FilePath == timelinePath
             ? Timeline
             : new AgentTimeline(timelinePath);
         await timeline.LoadAsync(cancellationToken);
@@ -567,9 +570,19 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     {
         lock (_stateLock)
         {
-            // A running turn reports the status itself when it ends, and the failure of a turn that ended during the
-            // pause replaced the pause status and stays until the next turn.
-            if (!IsBusy && Status == ServiceStatus.Unavailable)
+            // The failure of a turn that ended during the pause replaced the pause status and stays until the next
+            // turn. A running turn shows its own status until its failure status is written, so a pause status
+            // while busy is the one of a failed turn that has not ended yet, which reports it when it ends.
+            if (Status != ServiceStatus.Unavailable)
+            {
+                return;
+            }
+
+            if (IsBusy)
+            {
+                _isIdleReportPending = true;
+            }
+            else
             {
                 SetIdle();
             }

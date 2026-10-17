@@ -129,7 +129,7 @@ internal static class AgentTestContext
 }
 
 /// <summary>
-/// A graph with a root, an agent attached under /Agent (or another name), path resolution and a data directory.
+/// A graph with a root, an agent attached under /Agent (or another name), path resolution and, unless disabled, a data directory.
 /// </summary>
 internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
     where TAgent : LlmAgentBase
@@ -159,7 +159,8 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
         Uri? endpoint = null,
         AgentTurnTokenRegistry? tokenRegistry = null,
         TimeProvider? timeProvider = null,
-        string agentName = "Agent")
+        string agentName = "Agent",
+        bool hasDataDirectory = true)
     {
         var dataDirectory = Directory.CreateTempSubdirectory("agent-test").FullName;
         var context = InterceptorSubjectContext.Create()
@@ -172,7 +173,10 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
 
         var root = new AgentTestRoot(context);
         context.AddService(new SubjectPathResolver(() => root));
-        context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
+        if (hasDataDirectory)
+        {
+            context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
+        }
 
         var services = AgentTestContext.CreateServices(root, tokenRegistry, endpoint, timeProvider);
         var agent = createAgent(services);
