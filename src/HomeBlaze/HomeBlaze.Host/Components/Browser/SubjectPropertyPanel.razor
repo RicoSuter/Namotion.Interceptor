@@ -27,6 +27,11 @@
     <div @ref="_rootElement" style="display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); height: 100%;">
         <TrackingScope Context="Subject.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
             <div style="display: flex; flex-direction: column; height: 100%;">
+                @{
+                    var childSections = GetChildSections();
+                    var reorderContainer = GetReorderContainer(childSections);
+                    var isReordering = _isReordering && reorderContainer is not null;
+                }
                 <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
                     @{
                         var canEdit = CanEdit();
@@ -63,6 +68,21 @@
                                            data-testid="edit-metadata-button" />
                         </MudTooltip>
                     }
+                    @if (reorderContainer is not null)
+                    {
+                        var reorderLabel = isReordering ? "Done" : "Reorder";
+                        @* Done stays enabled, so that a pane whose storage disconnects can still leave the mode. *@
+                        <MudTooltip Text="@reorderLabel">
+                            <MudIconButton OnClick="@ToggleReordering"
+                                           Icon="@(isReordering ? Icons.Material.Filled.Check : Icons.Material.Filled.SwapVert)"
+                                           Color="@(isReordering ? Color.Primary : Color.Default)"
+                                           Variant="Variant.Text"
+                                           Size="Size.Small"
+                                           Disabled="@(!isReordering && !IsConnected(reorderContainer))"
+                                           aria-label="@reorderLabel"
+                                           data-testid="reorder-children-button" />
+                        </MudTooltip>
+                    }
                     @if (canDelete)
                     {
                         <MudTooltip Text="Delete">
@@ -75,7 +95,7 @@
                     }
                     @if (CanClose)
                     {
-                        @if (canEdit || canDelete || metadataTarget is not null)
+                        @if (canEdit || canDelete || metadataTarget is not null || reorderContainer is not null)
                         {
                             <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                         }
@@ -132,7 +152,7 @@
                     }
 
                     @* Child Collections *@
-                    @foreach (var section in GetChildSections())
+                    @foreach (var section in childSections)
                     {
                         var sectionGapClass = GetGapClass(previousBlock, PaneBlock.Section);
                         previousBlock = PaneBlock.Section;
@@ -179,84 +199,39 @@
                                     <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="my-0">@children.Length</MudChip>
                                 </TitleContent>
                                 <ChildContent>
-                                    <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true">
-                                        @for (var childIndex = 0; childIndex < children.Length; childIndex++)
-                                        {
-                                            var child = children[childIndex];
-                                            var isSelected = child.Subject == SelectedChild;
-                                            var childCount = GetChildCount(child);
-                                            var childName = property.GetChildDisplayName(child);
-                                            var isFirstChild = childIndex == 0;
-                                            var isLastChild = childIndex == children.Length - 1;
-                                            var previousChild = isFirstChild ? child : children[childIndex - 1];
-                                            var nextChild = isLastChild ? child : children[childIndex + 1];
+                                    @if (isReordering && orderedContainer is not null)
+                                    {
+                                        @RenderReorderList(property, children, orderedContainer)
+                                    }
+                                    else
+                                    {
+                                        <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true">
+                                            @foreach (var child in children)
+                                            {
+                                                var isSelected = child.Subject == SelectedChild;
+                                                var childCount = GetChildCount(child);
 
-                                            <MudListItem Value="@child.Subject"
-                                                         OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
-                                                         Icon="@GetSubjectIcon(child.Subject)"
-                                                         IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
-                                                         Class="@(isSelected ? "mud-primary-text" : "")">
-                                                @if (orderedContainer is null)
-                                                {
+                                                <MudListItem Value="@child.Subject"
+                                                             OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
+                                                             Icon="@GetSubjectIcon(child.Subject)"
+                                                             IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
+                                                             Class="@(isSelected ? "mud-primary-text" : "")">
                                                     @if (isSelected)
                                                     {
                                                         <div style="float: right; line-height: 0">
                                                             <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                                         </div>
                                                     }
-                                                }
-                                                else
-                                                {
-                                                    @* Stops the click, which would otherwise select the row. *@
-                                                    <span class="@(isSelected ? "subject-pane-row-end subject-pane-row-end-selected" : "subject-pane-row-end")"
-                                                          @onclick:stopPropagation="true">
-                                                        <span class="subject-pane-move">
-                                                            @if (!isFirstChild)
-                                                            {
-                                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
-                                                                               Size="Size.Small"
-                                                                               Class="pa-0"
-                                                                               Disabled="@(!CanMoveChildren(orderedContainer))"
-                                                                               OnClick="@(() => MoveChildAsync(orderedContainer, child, previousChild))"
-                                                                               aria-label="@($"Move {childName} up")"
-                                                                               data-testid="move-child-up-button" />
-                                                            }
-                                                            else
-                                                            {
-                                                                @* Keeps the other arrow in the column of the arrows of the other rows. *@
-                                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Class="pa-0" Disabled="true" Style="visibility: hidden;" aria-hidden="true" />
-                                                            }
-                                                            @if (!isLastChild)
-                                                            {
-                                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
-                                                                               Size="Size.Small"
-                                                                               Class="pa-0"
-                                                                               Disabled="@(!CanMoveChildren(orderedContainer))"
-                                                                               OnClick="@(() => MoveChildAsync(orderedContainer, child, nextChild))"
-                                                                               aria-label="@($"Move {childName} down")"
-                                                                               data-testid="move-child-down-button" />
-                                                            }
-                                                            else
-                                                            {
-                                                                @* Keeps the other arrow in the column of the arrows of the other rows. *@
-                                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Class="pa-0" Disabled="true" Style="visibility: hidden;" aria-hidden="true" />
-                                                            }
-                                                        </span>
-                                                        @if (isSelected)
-                                                        {
-                                                            <MudIcon Class="subject-pane-chevron" Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
-                                                        }
-                                                    </span>
-                                                }
-                                                <span class="subject-pane-child-name" style="word-break: break-word;">@childName</span>
-                                                @if (childCount > 0)
-                                                {
-                                                    <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
-                                                }
-                                            </MudListItem>
-                                            <MudDivider />
-                                        }
-                                    </MudList>
+                                                    <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+                                                    @if (childCount > 0)
+                                                    {
+                                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
+                                                    }
+                                                </MudListItem>
+                                                <MudDivider />
+                                            }
+                                        </MudList>
+                                    }
                                 </ChildContent>
                             </MudExpansionPanel>
                         }
@@ -304,40 +279,87 @@
         }
     }
 
-    /* The end of a row that can be moved holds its arrows, and on the selected row its chevron in the same place, so
-       that the selected row looks calm and no row changes its width. The selected row shows its arrows instead while
-       it is hovered or has keyboard focus, and always on a device without hover, which cannot hover. */
-    .subject-pane-row-end {
-        float: right;
+    /* A row in reorder mode, as high as a list item. The handle takes most of the gutter, so that the name starts
+       where it starts in the list. */
+    .subject-pane-reorder-row {
+        display: flex;
+        align-items: center;
+        padding: 8px 16px 8px 4px;
+    }
+
+    /* Above the strip at the top of the drop zone, which takes a drop in first place and would otherwise cover the
+       upper half of the handle and the arrows of the first row. */
+    .subject-pane-reorder-handle,
+    .subject-pane-move {
+        position: relative;
+        z-index: 1;
+    }
+
+    .subject-pane-reorder-handle {
+        flex-shrink: 0;
+        width: 24px;
+        justify-content: center;
+        color: var(--mud-palette-action-default);
+    }
+
+    .subject-pane-reorder-icon {
+        flex-shrink: 0;
+        margin: 0 12px 0 8px;
+    }
+
+    .subject-pane-reorder-name {
+        flex-grow: 1;
+        min-width: 0;
+        margin: 4px 0;
+    }
+
+    /* Two columns, so that the single arrow of the first and the last row stays in the column of its kind. */
+    .subject-pane-move {
+        flex-shrink: 0;
         display: grid;
-        line-height: 0;
+        grid-template-columns: 28px 28px;
+        justify-items: center;
+        margin-left: 8px;
     }
 
-    .subject-pane-row-end > * {
-        grid-area: 1 / 1;
-        justify-self: end;
+    .subject-pane-move-up {
+        grid-column: 1;
     }
 
-    .subject-pane-row-end-selected .subject-pane-move,
-    .mud-list-item:hover .subject-pane-row-end-selected .subject-pane-chevron,
-    .mud-list-item:focus-visible .subject-pane-row-end-selected .subject-pane-chevron,
-    .subject-pane-row-end-selected:focus-within .subject-pane-chevron {
-        visibility: hidden;
+    .subject-pane-move-down {
+        grid-column: 2;
     }
 
-    .mud-list-item:hover .subject-pane-row-end-selected .subject-pane-move,
-    .mud-list-item:focus-visible .subject-pane-row-end-selected .subject-pane-move,
-    .subject-pane-row-end-selected:focus-within .subject-pane-move {
-        visibility: visible;
+    /* Dragging moves a row with a mouse. The arrows are for the keyboard, so they show only while one has focus.
+       Transparent rather than hidden, so that they stay in the tab order, and without pointer events meanwhile, so
+       that a click cannot press an arrow it does not see. A device without hover gets the arrows instead of the
+       handle, so that a touch on a row scrolls the pane rather than dragging the row. */
+    .subject-pane-move {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .subject-pane-move:focus-within {
+        opacity: 1;
+        pointer-events: auto;
     }
 
     @@media (hover: none) {
-        .subject-pane-row-end-selected .subject-pane-move {
-            visibility: visible;
+        .subject-pane-move {
+            opacity: 1;
+            pointer-events: auto;
         }
 
-        .subject-pane-row-end-selected .subject-pane-chevron {
-            visibility: hidden;
+        .subject-pane-reorder-handle {
+            display: none;
+        }
+
+        .subject-pane-reorder-row {
+            padding-left: 16px;
+        }
+
+        .subject-pane-reorder-icon {
+            margin: 0 32px 0 0;
         }
     }
 
@@ -415,8 +437,14 @@
     // The method that runs, which shows the spinner. Not set while its prompt or result dialog is open.
     private MethodMetadata? _executingMethod;
 
-    // True while a move is written. A click meanwhile is ignored, as its neighbor comes from the order before the move.
+    // True while a move is written. A move meanwhile is ignored, as its target comes from the order before the move.
     private bool _isMovingChild;
+
+    private bool _isReordering;
+    private MudDropContainer<SubjectPropertyChild>? _reorderDropContainer;
+
+    // The children the reorder list showed last, to tell when the order changed.
+    private SubjectPropertyChild[]? _reorderedChildren;
     private readonly CancellationTokenSource _lifetime = new();
 
     [Parameter]
@@ -499,8 +527,7 @@
         }
         catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
         {
-            // Without the script the copy buttons do nothing and the keyboard cannot press a move arrow; the values
-            // are still shown and the arrows still take a click.
+            // Without the script the copy buttons do nothing; the values are still shown.
         }
     }
 
@@ -526,6 +553,7 @@
         if (registeredSubject != _registeredSubject)
         {
             _linkedSubjectTypes.Clear();
+            StopReordering();
         }
 
         _registeredSubject = registeredSubject;
@@ -637,6 +665,41 @@
         }
 
         return children.ToArray();
+    }
+
+    // The shown subject when it is a container whose children are listed and can be put in order, null otherwise.
+    private static IMetadataContainer? GetReorderContainer(List<ChildSection> sections)
+    {
+        foreach (var section in sections)
+        {
+            if (section.CollectionProperty is { } property &&
+                section.CollectionChildren.Length > 1 &&
+                GetOrderedContainer(property) is { } container)
+            {
+                return container;
+            }
+        }
+
+        return null;
+    }
+
+    private void ToggleReordering()
+    {
+        if (_isReordering)
+        {
+            StopReordering();
+        }
+        else
+        {
+            _isReordering = true;
+        }
+    }
+
+    private void StopReordering()
+    {
+        _isReordering = false;
+        _reorderDropContainer = null;
+        _reorderedChildren = null;
     }
 
     // The container whose children the property holds when they can be put in order, null for any other property.
@@ -1022,22 +1085,127 @@
         </MudStack>
     };
 
+    private RenderFragment RenderReorderList(
+        RegisteredSubjectProperty property, SubjectPropertyChild[] children, IMetadataContainer container) => __builder =>
+    {
+        // The drop zone keeps the order in which it first saw its items, and the one of its last drop, rather than the
+        // order of the items it is given. Cleared before it renders, so that it shows each new order of the storage.
+        if (_reorderedChildren is not null && !_reorderedChildren.AsSpan().SequenceEqual(children))
+        {
+            _reorderDropContainer?.Refresh();
+        }
+
+        _reorderedChildren = children;
+        var canMove = CanMoveChildren(container);
+
+        <MudDropContainer T="SubjectPropertyChild"
+                          @ref="_reorderDropContainer"
+                          Items="@children"
+                          ItemsSelector="@((_, _) => true)"
+                          ItemDisabled="@(_ => !canMove)"
+                          DisabledClass=""
+                          ItemDropped="@(drop => OnChildDropped(container, children, drop))">
+            <ChildContent>
+                <MudDropZone T="SubjectPropertyChild" AllowReorder="true" data-testid="reorder-children-list" />
+            </ChildContent>
+            <ItemRenderer>
+                @{
+                    var child = context;
+                    var childIndex = Array.IndexOf(children, child);
+                    var isSelected = child.Subject == SelectedChild;
+                    var childCount = GetChildCount(child);
+                    var childName = property.GetChildDisplayName(child);
+                }
+                <div class="@(isSelected ? "subject-pane-reorder-row mud-primary-text" : "subject-pane-reorder-row")"
+                     data-testid="reorder-child-row">
+                    <MudDragHandle T="SubjectPropertyChild" Class="subject-pane-reorder-handle">
+                        <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" />
+                    </MudDragHandle>
+                    <MudIcon Icon="@GetSubjectIcon(child.Subject)"
+                             Color="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
+                             Class="subject-pane-reorder-icon" />
+                    <MudText Typo="Typo.body1" Class="subject-pane-reorder-name">
+                        <span class="subject-pane-child-name" style="word-break: break-word;">@childName</span>
+                        @if (childCount > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
+                        }
+                    </MudText>
+                    <span class="subject-pane-move">
+                        @if (childIndex > 0)
+                        {
+                            var previousChild = children[childIndex - 1];
+                            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                                           Size="Size.Small"
+                                           Class="subject-pane-move-up pa-0"
+                                           Disabled="@(!canMove)"
+                                           OnClick="@(() => MoveChildAsync(container, child, previousChild))"
+                                           aria-label="@($"Move {childName} up")"
+                                           data-testid="move-child-up-button" />
+                        }
+                        @if (childIndex >= 0 && childIndex < children.Length - 1)
+                        {
+                            var nextChild = children[childIndex + 1];
+                            <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
+                                           Size="Size.Small"
+                                           Class="subject-pane-move-down pa-0"
+                                           Disabled="@(!canMove)"
+                                           OnClick="@(() => MoveChildAsync(container, child, nextChild))"
+                                           aria-label="@($"Move {childName} down")"
+                                           data-testid="move-child-down-button" />
+                        }
+                    </span>
+                </div>
+                <MudDivider />
+            </ItemRenderer>
+        </MudDropContainer>
+    };
+
     private bool CanMoveChildren(IMetadataContainer container)
         => !_isMovingChild && IsConnected(container);
+
+    // The index in the drop info is the place of the dropped child in the order after the drop, which is the place of
+    // the child shown there before it.
+    private void OnChildDropped(
+        IMetadataContainer container, SubjectPropertyChild[] children, MudItemDropInfo<SubjectPropertyChild> drop)
+    {
+        var index = Array.IndexOf(children, drop.Item);
+        if (index < 0 || drop.IndexInZone < 0 || drop.IndexInZone >= children.Length || drop.IndexInZone == index)
+        {
+            _reorderDropContainer?.Refresh();
+            return;
+        }
+
+        // Not awaited, so that the drop ends now: until it does, the zone shows a placeholder at the drop position.
+        _ = MoveDroppedChildAsync(container, children[index], children[drop.IndexInZone]);
+    }
+
+    private async Task MoveDroppedChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
+    {
+        await MoveChildAsync(container, child, target);
+        if (!_isDisposed)
+        {
+            StateHasChanged();
+        }
+    }
 
     // A folder reports the status of its storage. A container that is no storage has no connection to lose.
     private static bool IsConnected(IMetadataContainer container)
         => container is not IStorageContainer { Status: not StorageStatus.Connected };
 
-    private async Task MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild neighbor)
+    // A move that writes nothing refreshes the reorder list, which shows a dropped row in its new place already.
+    private async Task MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
     {
         if (_isMovingChild)
+        {
+            _reorderDropContainer?.Refresh();
             return;
+        }
 
         _isMovingChild = true;
         try
         {
-            await container.MoveChildAsync(child.Index!.ToString()!, neighbor.Index!.ToString()!, _lifetime.Token);
+            await container.MoveChildAsync(child.Index!.ToString()!, target.Index!.ToString()!, _lifetime.Token);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
@@ -1045,6 +1213,7 @@
         }
         catch (Exception exception)
         {
+            _reorderDropContainer?.Refresh();
             await DialogService.ShowMessageBoxAsync("Move Failed", $"Failed to move: {exception.Message}", yesText: "OK");
         }
         finally

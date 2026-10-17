@@ -91,7 +91,13 @@ A metadata file left with every key blank is deleted rather than kept empty on d
 
 ### Ordering in the Browser
 
-Hover a row in the list of a folder, or give it keyboard focus, to see its up and down arrows; the selected row and every row on a touch screen always show them. A click on an arrow, or Enter or Space while it has focus, swaps the row with its neighbor and writes the whole order of the folder to its `.metadata.json`. The arrows are disabled while the storage is not connected.
+The **Reorder** button in the header of a folder switches its list of children to reorder mode, and **Done** switches it back. The button is disabled while the storage is not connected. In reorder mode a click on a row does not open it.
+
+Drag a row by its handle to move it. A dashed placeholder shows where it will land: dropping on a row puts the dragged row after it, and dropping at the very top of the list puts it first. Each move writes the whole order of the folder to its `.metadata.json`.
+
+On a touch screen the rows have no handle, so that swiping scrolls the list. Each row shows up and down arrows instead, which move it by one place.
+
+With a keyboard, press Tab to reach the arrows of a row, which show while they have focus, and press Enter or Space to move the row by one place.
 
 ### Metadata of a Folder or Subject
 
