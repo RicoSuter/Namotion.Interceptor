@@ -118,5 +118,5 @@ public partial class NavigationTestFolder : IMetadataContainer, ITitleProvider
 
     public Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public Task MoveChildAsync(string name, string neighborName, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task MoveChildAsync(string name, string targetName, CancellationToken cancellationToken) => Task.CompletedTask;
 }

@@ -522,8 +522,8 @@ public partial class FluentStorageContainer :
         => WriteSubjectMetadataAsync(child, metadata, cancellationToken);
 
     /// <inheritdoc />
-    public Task MoveChildAsync(string name, string neighborName, CancellationToken cancellationToken)
-        => MoveChildAsync(string.Empty, name, neighborName, cancellationToken);
+    public Task MoveChildAsync(string name, string targetName, CancellationToken cancellationToken)
+        => MoveChildAsync(string.Empty, name, targetName, cancellationToken);
 
     /// <summary>
     /// IConfigurationWriter - Saves the file of the subject, or of the subject it is nested in through
@@ -651,15 +651,15 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Swaps two children of a folder in the order in which they are shown, and writes the whole resulting order,
-    /// which drops the names of children that are gone.
+    /// Moves a child of a folder to the place of another child in the order in which they are shown, shifting the
+    /// children in between, and writes the whole resulting order, which drops the names of children that are gone.
     /// </summary>
     /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
     /// <param name="name">The name of the child to move.</param>
-    /// <param name="neighborName">The name of the child whose place it takes.</param>
+    /// <param name="targetName">The name of the child whose place it takes.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <exception cref="InvalidOperationException">The folder is not in the tree, a name is not a child of it, or its metadata file could not be read.</exception>
-    internal async Task MoveChildAsync(string folder, string name, string neighborName, CancellationToken cancellationToken)
+    internal async Task MoveChildAsync(string folder, string name, string targetName, CancellationToken cancellationToken)
     {
         var connection = Connection;
         await RunOperationAsync(connection, token =>
@@ -675,13 +675,14 @@ public partial class FluentStorageContainer :
                 .ToList();
 
             var index = names.IndexOf(name);
-            var neighborIndex = names.IndexOf(neighborName);
-            if (index < 0 || neighborIndex < 0)
+            var targetIndex = names.IndexOf(targetName);
+            if (index < 0 || targetIndex < 0)
             {
-                throw new InvalidOperationException($"'{name}' and '{neighborName}' are not both children of the folder.");
+                throw new InvalidOperationException($"'{name}' and '{targetName}' are not both children of the folder.");
             }
 
-            (names[index], names[neighborIndex]) = (names[neighborIndex], names[index]);
+            names.RemoveAt(index);
+            names.Insert(targetIndex, name);
 
             var path = StorageMetadataPath.GetFolderFilePath(folder);
             var document = GetMetadataDocument(connection, path);

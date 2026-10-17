@@ -43,11 +43,12 @@ public interface IMetadataContainer
     Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Swaps two children in the order in which they are shown and stores the whole resulting order.
+    /// Moves a child to the place of another child in the order in which they are shown, shifting the children in
+    /// between, and stores the whole resulting order.
     /// </summary>
     /// <param name="name">The name of the child to move.</param>
-    /// <param name="neighborName">The name of the child whose place it takes.</param>
+    /// <param name="targetName">The name of the child whose place it takes.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="InvalidOperationException">One of the names is not a child of the container.</exception>
-    Task MoveChildAsync(string name, string neighborName, CancellationToken cancellationToken);
+    Task MoveChildAsync(string name, string targetName, CancellationToken cancellationToken);
 }

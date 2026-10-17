@@ -207,6 +207,33 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal(expectedOrder, ReadMetadataFile(".metadata.json").Order);
     }
 
+    [Theory]
+    [InlineData("b.md", "d.md", new[] { "a.md", "c.md", "d.md", "b.md", "e.md" })]
+    [InlineData("e.md", "b.md", new[] { "a.md", "e.md", "b.md", "c.md", "d.md" })]
+    [InlineData("b.md", "a.md", new[] { "b.md", "a.md", "c.md", "d.md", "e.md" })]
+    [InlineData("c.md", "a.md", new[] { "c.md", "a.md", "b.md", "d.md", "e.md" })]
+    [InlineData("b.md", "e.md", new[] { "a.md", "c.md", "d.md", "e.md", "b.md" })]
+    [InlineData("a.md", "e.md", new[] { "b.md", "c.md", "d.md", "e.md", "a.md" })]
+    public async Task WhenChildIsMovedToThePlaceOfAnotherChild_ThenTheChildrenInBetweenShift(
+        string name, string targetName, string[] expectedOrder)
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/b.md");
+        WriteFile("Docs/c.md");
+        WriteFile("Docs/d.md");
+        WriteFile("Docs/e.md");
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+
+        // Act
+        await docs.MoveChildAsync(name, targetName, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expectedOrder, docs.ChildOrder.ToArray());
+        Assert.Equal(expectedOrder, ReadMetadataFile("Docs/.metadata.json").Order);
+    }
+
     [Fact]
     public async Task WhenOrderHasNamesOfChildrenThatAreGone_ThenMoveDropsThem()
     {

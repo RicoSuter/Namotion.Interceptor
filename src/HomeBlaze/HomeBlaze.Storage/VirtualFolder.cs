@@ -89,8 +89,8 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
         => RootStorage.WriteSubjectMetadataAsync(child, metadata, cancellationToken);
 
     /// <inheritdoc />
-    public Task MoveChildAsync(string name, string neighborName, CancellationToken cancellationToken)
-        => RootStorage.MoveChildAsync(StoragePath.Normalize(RelativePath), name, neighborName, cancellationToken);
+    public Task MoveChildAsync(string name, string targetName, CancellationToken cancellationToken)
+        => RootStorage.MoveChildAsync(StoragePath.Normalize(RelativePath), name, targetName, cancellationToken);
 
     private FluentStorageContainer RootStorage => Storage as FluentStorageContainer
         ?? throw new NotSupportedException("Only a folder of a FluentStorageContainer stores metadata.");
