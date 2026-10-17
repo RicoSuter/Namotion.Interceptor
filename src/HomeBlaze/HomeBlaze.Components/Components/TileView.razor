@@ -1,7 +1,7 @@
-@* A tile: one click target that fills its place, with icon, label and subtitle centered, and a badge over its top
-   right corner. The badge is a sibling of the button, not inside it, so the markup stays valid; it takes no pointer
-   input, so a click on it reaches the button below. The style is on the root, so that the badge inherits the text
-   color of the tile. *@
+@* A tile: one click target that fills its place, with icon, label and subtitle centered, a badge over its top right
+   corner and, while it works, a progress circle over its bottom right corner. The badge and the progress circle are
+   siblings of the button, not inside it, so the markup stays valid; they take no pointer input, so a click on them
+   reaches the button below. The style is on the root, so that they inherit the text color of the tile. *@
 @using HomeBlaze.Components.Controls
 
 <div class="tile-widget place-filler" style="@TileStyle.GetStyle(Color, Variant, Disabled)" data-testid="@TestId">
@@ -26,11 +26,11 @@
         {
             <span class="tile-widget-subtitle" data-testid="tile-subtitle">@Subtitle</span>
         }
-        @if (IsBusy)
-        {
-            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="tile-widget-progress" data-testid="tile-progress" />
-        }
     </button>
+    @if (IsBusy)
+    {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="tile-widget-progress" data-testid="tile-progress" />
+    }
     @if (Badge is not null)
     {
         <div class="tile-widget-badge" data-testid="tile-badge">
