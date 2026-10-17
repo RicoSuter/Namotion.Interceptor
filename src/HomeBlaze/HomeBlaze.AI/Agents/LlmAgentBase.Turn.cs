@@ -183,6 +183,13 @@ public abstract partial class LlmAgentBase
                 return;
             }
 
+            if (_configurationError is { } configurationError)
+            {
+                // Automatic runs stay stopped until the configuration is corrected, whatever this turn did.
+                SetStatusIfStarted(ServiceStatus.Error, configurationError);
+                return;
+            }
+
             SetStatusIfStarted(
                 failure.Kind is AgentFailureKind.Configuration or AgentFailureKind.UsageLimit
                     ? ServiceStatus.Unavailable

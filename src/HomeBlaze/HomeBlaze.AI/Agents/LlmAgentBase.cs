@@ -556,8 +556,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     {
         lock (_stateLock)
         {
-            // A running turn reports the status itself when it ends.
-            if (!IsBusy)
+            // A running turn reports the status itself when it ends, and the failure of a turn that ended during the
+            // pause replaced the pause status and stays until the next turn.
+            if (!IsBusy && Status == ServiceStatus.Unavailable)
             {
                 SetIdle();
             }

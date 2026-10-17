@@ -10,7 +10,7 @@ using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
 
-/// <summary>Turns, configuration changes, stops and restarts of an agent that overlap.</summary>
+/// <summary>Turns, configuration changes, stops, restarts and status reports of an agent that overlap.</summary>
 public class LlmAgentBaseConcurrencyTests
 {
     private static Task<AgentTestContext<FakeAgent>> StartAsync(Action<FakeAgent>? configure = null) =>
@@ -104,6 +104,55 @@ public class LlmAgentBaseConcurrencyTests
         // Assert
         Assert.DoesNotContain("Idle", statusMessages);
         Assert.Equal(ServiceStatus.Stopped, test.Agent.Status);
+    }
+
+    [Fact]
+    public async Task WhenAChatFailsWhileTheIntervalsAreInvalid_ThenTheStatusStillShowsTheConfigurationError()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = (_, _, _) =>
+            throw new AgentTurnException(AgentFailureKind.Transient, "backend broke"));
+        test.Agent.PollInterval = TimeSpan.FromDays(400);
+        await test.Agent.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, test.Agent.Status);
+        Assert.Contains("Poll interval must not exceed", test.Agent.StatusMessage);
+        Assert.Equal("backend broke", test.Agent.Timeline.Entries[^1].Text);
+    }
+
+    [Fact]
+    public async Task WhenAUsageLimitPauseEndsAfterALaterRunFailed_ThenTheStatusKeepsTheFailure()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services),
+            agent =>
+            {
+                agent.WatchPaths = ["/Temperature"];
+                agent.Handler = (_, _, _) => agent.Requests.Count == 1
+                    ? throw new AgentTurnException(AgentFailureKind.UsageLimit, "Usage limit reached", retryAfter: time.GetUtcNow().AddMinutes(1))
+                    : throw new AgentTurnException(AgentFailureKind.Transient, "backend broke");
+            },
+            timeProvider: time);
+        await test.RunNowAndWaitAsync();
+        await test.RunNowAndWaitAsync();
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromMinutes(1));
+
+        // Assert - the change waits for the backoff of two minutes on a timer that the scheduler creates only after it
+        // handled the end of the pause.
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 0);
+        test.Root.Temperature = 30;
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
+        Assert.Equal(ServiceStatus.Error, test.Agent.Status);
+        Assert.Equal("backend broke", test.Agent.StatusMessage);
     }
 
     private static async Task<AgentTurnResult> WaitForCancellationAsync(
