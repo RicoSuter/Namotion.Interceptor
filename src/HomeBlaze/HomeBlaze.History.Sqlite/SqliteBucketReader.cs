@@ -368,10 +368,12 @@ internal static class SqliteBucketReader
         string sql) : IDisposable
     {
         private int _nextSegment;
+        private long _nextStartTicks;
         private CancellationToken _cancellationToken;
 
-        // The open scans, each positioned on its next row. A segment is opened only once the stream reaches
-        // its start, so disjoint segments are read one at a time and only overlapping ones are open together.
+        // The open scans in segment order, each positioned on its next row. A segment is opened only once the
+        // stream reaches its start, so disjoint segments are read one at a time and only overlapping ones are
+        // open together. Exhausted scans are removed by shifting, which keeps the segment order for ties.
         private OpenScan[] _scans = new OpenScan[2];
         private int _scanCount;
 
@@ -380,6 +382,7 @@ internal static class SqliteBucketReader
         {
             segments.Sort(CompareByTime);
             _nextSegment = 0;
+            _nextStartTicks = segments.Count > 0 ? segments[0].FromTicks : long.MaxValue;
             _cancellationToken = cancellationToken;
         }
 
@@ -399,7 +402,7 @@ internal static class SqliteBucketReader
             if (!scan.Advance())
             {
                 scan.Dispose();
-                _scans[earliest] = _scans[--_scanCount];
+                Array.Copy(_scans, earliest + 1, _scans, earliest, --_scanCount - earliest);
                 _scans[_scanCount] = default;
             }
 
@@ -413,15 +416,15 @@ internal static class SqliteBucketReader
             while (true)
             {
                 var earliest = FindEarliest();
-                if (_nextSegment >= segments.Count ||
-                    (earliest >= 0 && segments[_nextSegment].FromTicks > _scans[earliest].Ticks))
+                if (earliest >= 0 ? _nextStartTicks > _scans[earliest].Ticks : _nextSegment >= segments.Count)
                 {
-                    return earliest;
+                    return earliest; // no pending segment leaves _nextStartTicks at long.MaxValue, above every row
                 }
 
                 _cancellationToken.ThrowIfCancellationRequested();
-                Open(segments[_nextSegment], _nextSegment);
+                Open(segments[_nextSegment]);
                 _nextSegment++;
+                _nextStartTicks = _nextSegment < segments.Count ? segments[_nextSegment].FromTicks : long.MaxValue;
             }
         }
 
@@ -431,8 +434,7 @@ internal static class SqliteBucketReader
             for (var index = 0; index < _scanCount; index++)
             {
                 ref var scan = ref _scans[index];
-                if (earliest < 0 || scan.Ticks < _scans[earliest].Ticks ||
-                    (scan.Ticks == _scans[earliest].Ticks && scan.Order < _scans[earliest].Order))
+                if (earliest < 0 || scan.Ticks < _scans[earliest].Ticks)
                 {
                     earliest = index;
                 }
@@ -441,7 +443,7 @@ internal static class SqliteBucketReader
             return earliest;
         }
 
-        private void Open(ChainSegment segment, int order)
+        private void Open(ChainSegment segment)
         {
             var command = CreateOrderedScan(context, pathIds, segment, sql);
             if (command is null)
@@ -453,7 +455,7 @@ internal static class SqliteBucketReader
             try
             {
                 reader = command.ExecuteReader();
-                var scan = new OpenScan(command, reader, order);
+                var scan = new OpenScan(command, reader);
                 if (!scan.Advance())
                 {
                     scan.Dispose();
@@ -488,9 +490,8 @@ internal static class SqliteBucketReader
     }
 
     // One segment's open ordered scan and the row it is positioned on.
-    private struct OpenScan(SqliteCommand command, SqliteDataReader reader, int order)
+    private struct OpenScan(SqliteCommand command, SqliteDataReader reader)
     {
-        public readonly int Order = order;
         public long Ticks;
         public double? Value;
 
