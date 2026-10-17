@@ -12,6 +12,7 @@ namespace HomeBlaze.Components;
 [Description("Shows page content in tabs")]
 [DisplayName("Tab layout")]
 [SubjectIcon("Tab")]
+[PageLayout]
 [InterceptorSubject]
 public partial class TabLayout : IConfigurable, ITitleProvider
 {

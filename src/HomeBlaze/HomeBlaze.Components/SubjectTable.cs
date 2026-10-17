@@ -13,6 +13,7 @@ namespace HomeBlaze.Components;
 [Description("A table with a row per subject and a column per property")]
 [DisplayName("Subject table")]
 [SubjectIcon("TableChart")]
+[PageLayout]
 [InterceptorSubject]
 public partial class SubjectTable : IConfigurable, ITitleProvider
 {

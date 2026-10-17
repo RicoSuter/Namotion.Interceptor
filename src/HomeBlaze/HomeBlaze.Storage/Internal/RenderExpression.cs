@@ -54,7 +54,7 @@ public partial class RenderExpression : ITitleProvider
     {
         try
         {
-            return _pathResolver.ResolveScopedProperty(Path, PathStyle.Canonical, Parent);
+            return _pathResolver.ResolveScopedDisplayableProperty(Path, PathStyle.Canonical, Parent);
         }
         catch
         {

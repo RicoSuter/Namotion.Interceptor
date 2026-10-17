@@ -99,7 +99,9 @@ public class SubjectTypeRegistry
 
         foreach (var type in _typeProvider.Types)
         {
-            if (type.GetCustomAttributes(typeof(InterceptorSubjectAttribute), false).Length != 0 &&
+            // An abstract base subject cannot be created, so it must not be offered in the create dialog or resolved from $type.
+            if (!type.IsAbstract &&
+                type.GetCustomAttributes(typeof(InterceptorSubjectAttribute), false).Length != 0 &&
                 typeof(IInterceptorSubject).IsAssignableFrom(type))
             {
                 if (type.FullName != null)

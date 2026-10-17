@@ -286,7 +286,7 @@ else
 
         // Save the file, which also reloads it on the worker of its storage. The reload keeps the edited
         // subject and applies its configuration.
-        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(_currentContent), CancellationToken.None);
+        await File.WriteAsync(_currentContent, CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
@@ -363,7 +363,7 @@ else
         await _editor.SetValue(_currentContent);
 
         // Save the file, which also reloads it on the worker of its storage
-        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(_currentContent), CancellationToken.None);
+        await File.WriteAsync(_currentContent, CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
@@ -441,7 +441,7 @@ else
         await _editor.SetValue(_currentContent);
 
         // Save the file, which also reloads it on the worker of its storage
-        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(_currentContent), CancellationToken.None);
+        await File.WriteAsync(_currentContent, CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
@@ -573,7 +573,7 @@ else
         var content = await _editor.GetValue();
         var contentChangeCount = _contentChangeCount;
 
-        await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content), cancellationToken);
+        await File.WriteAsync(content, cancellationToken);
 
         _originalContent = content;
 

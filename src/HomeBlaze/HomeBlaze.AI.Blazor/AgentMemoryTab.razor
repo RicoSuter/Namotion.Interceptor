@@ -1,0 +1,119 @@
+@inject ITimeZoneDisplay TimeZone
+@inject IDialogService DialogService
+
+@{ var memory = MemoryEditor.Snapshot; }
+<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-1">
+    <MudText Typo="Typo.h6">Entries</MudText>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="MemoryEditor.StartAdd" Disabled="@(!MemoryEditor.IsAvailable || MemoryEditor.IsEditing || MemoryEditor.IsSaving)" data-testid="agent-memory-add">Add entry</MudButton>
+</MudStack>
+<MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
+    The agent's own notes, shown to it with their update time on every run. Keys are slash paths such as alerts/freezer.
+</MudText>
+@if (!MemoryEditor.IsAvailable)
+{
+    <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">@AgentMemoryEditor.NotLoadedText</MudText>
+}
+<MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="my-2">
+    <MudProgressLinear Value="@GetUsage(memory)" Color="@(GetUsage(memory) >= 90 ? Color.Warning : Color.Primary)"
+                       Rounded="true" Size="Size.Small" Class="flex-grow-1" Style="max-width: 240px;" aria-label="Memory usage" />
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        @memory.Size.ToString("N0") of @AgentMemory.MaxSize.ToString("N0") bytes, @memory.Entries.Length of @AgentMemory.MaxEntries entries
+    </MudText>
+</MudStack>
+@if (MemoryEditor.IsEditing)
+{
+    <MudPaper Outlined="true" Class="pa-3 mb-2">
+        <MudText Typo="Typo.subtitle2" Class="mb-2">@(MemoryEditor.OriginalKey is null ? "New entry" : "Edit entry")</MudText>
+        <MudStack Spacing="2">
+            <div data-testid="agent-memory-key">
+                <MudTextField T="string" @bind-Value="MemoryEditor.Key" Label="Key" Placeholder="alerts/freezer-temperature" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Immediate="true" Disabled="MemoryEditor.IsSaving" MaxLength="@AgentMemory.MaxKeyLength" />
+            </div>
+            <div data-testid="agent-memory-value">
+                <MudTextField T="string" @bind-Value="MemoryEditor.Value" Label="Value" Variant="Variant.Outlined" Lines="3" Sizing="InputSizing.Auto" MaxLines="12"
+                              Immediate="true" Disabled="MemoryEditor.IsSaving" Counter="@AgentMemory.MaxValueLength"
+                              Error="@(MemoryEditor.ValueError is not null)" ErrorText="@MemoryEditor.ValueError" />
+            </div>
+        </MudStack>
+        @if (MemoryEditor.IsStale)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                The agent changed this entry while you were editing. Saving replaces its change.
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="MemoryEditor.Reload">Reload</MudButton>
+            </MudAlert>
+        }
+        else if (MemoryEditor.ReplacesExisting)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">An entry with this key exists. Saving replaces it.</MudAlert>
+        }
+        @if (MemoryEditor.Error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@MemoryEditor.Error</MudAlert>
+        }
+        <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2" Class="mt-2">
+            <MudButton Variant="Variant.Text" OnClick="MemoryEditor.Cancel" Disabled="MemoryEditor.IsSaving">Cancel</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="MemoryEditor.SaveAsync"
+                       Disabled="@(MemoryEditor.IsSaving || string.IsNullOrWhiteSpace(MemoryEditor.Key) || string.IsNullOrWhiteSpace(MemoryEditor.Value) || MemoryEditor.ValueError is not null)"
+                       data-testid="agent-memory-save">Save</MudButton>
+        </MudStack>
+    </MudPaper>
+}
+else if (MemoryEditor.Error is not null)
+{
+    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@MemoryEditor.Error</MudAlert>
+}
+@* Below the small breakpoint each entry stacks into labeled lines instead of a wide table. *@
+<MudTable T="AgentMemoryEntry" Items="memory.Entries" Dense="true" Hover="true" Elevation="0" Class="mud-background"
+          Breakpoint="Breakpoint.Xs" data-testid="agent-memory">
+    <HeaderContent>
+        @* The value gets the remaining width; keys are short slash paths. *@
+        <MudTh Style="width: 25%;">Key</MudTh>
+        <MudTh>Value</MudTh>
+        <MudTh Style="white-space: nowrap;">Updated</MudTh>
+        <MudTh aria-label="Actions"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        @* The wrapping styles sit on inner elements: on phones the cell also renders its data label, which must not wrap. *@
+        <MudTd DataLabel="Key"><span style="overflow-wrap: anywhere;">@context.Key</span></MudTd>
+        <MudTd DataLabel="Value"><div style="white-space: pre-wrap; overflow-wrap: anywhere;">@context.Value</div></MudTd>
+        <MudTd DataLabel="Updated" Style="white-space: nowrap;">@TimeZone.Format(context.Updated)</MudTd>
+        <MudTd>
+            <div class="d-flex justify-end flex-nowrap">
+                <MudTooltip Text="Edit">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="@($"Edit {context.Key}")"
+                                   OnClick="@(() => MemoryEditor.StartEdit(context))" Disabled="@(MemoryEditor.IsSaving || MemoryEditor.IsEditing)" />
+                </MudTooltip>
+                <MudTooltip Text="Delete">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" aria-label="@($"Delete {context.Key}")"
+                                   OnClick="@(() => DeleteAsync(context))" Disabled="MemoryEditor.IsSaving" />
+                </MudTooltip>
+            </div>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">The memory is empty.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    [Parameter, EditorRequired]
+    public AgentMemoryEditor MemoryEditor { get; set; } = null!;
+
+    private static double GetUsage(AgentMemorySnapshot memory) =>
+        Math.Min(100, 100.0 * Math.Max((double)memory.Size / AgentMemory.MaxSize, (double)memory.Entries.Length / AgentMemory.MaxEntries));
+
+    private async Task DeleteAsync(AgentMemoryEntry entry)
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Delete memory entry",
+            $"Delete the entry {entry.Key}?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            await MemoryEditor.DeleteAsync(entry);
+        }
+    }
+}

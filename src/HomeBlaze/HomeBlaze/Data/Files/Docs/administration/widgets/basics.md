@@ -85,6 +85,7 @@ A widget with a `Label` argument shows the label that is set. Without it, a widg
 `ValueList`, `ValueTile`, `Indicator`, `Progress`, `Gauge` and `SubjectTable` show values of properties, and `ValueMap` says what text, color and icon a value gets. The pages of these widgets refer to the rules in this section.
 
 - **The formatted value**: A value is shown in the [formatted form of an expression](../pages.md#expression-formats). A map can replace the text.
+- **Shown properties**: A widget shows the same properties as an expression. For a secret, the raw source of a page or a plain property without `[State]` it shows the dash of a [missing value](#missing-values), see [Properties Shown on Pages](../../development/building-subjects.md#properties-shown-on-pages).
 - **Live**: A value changes on the page when the property changes.
 
 ## Missing Values

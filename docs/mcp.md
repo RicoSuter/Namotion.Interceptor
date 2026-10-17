@@ -205,6 +205,8 @@ Read a property value by path. Returns the value, JSON schema type, and optional
 
 Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. A value that cannot be converted returns an error and leaves the property unchanged.
 
+An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and returns null to allow the write or the reason it is refused, for example to keep a client from changing properties that hold settings. `set_property` then returns the error `Property is not writable: <path>. <reason>` and writes nothing. A refused property is not reported as writable by `get_property`, `browse` and `search`. The filter may be called concurrently.
+
 ### `list_types`
 
 List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces.
@@ -233,12 +235,20 @@ var config = new McpServerConfiguration
     // Optional: additional tools
     ToolProviders = { new MyToolProvider() },
 
+    // Optional: text appended to a tool's description, keyed by tool name
+    ToolDescriptionAdditions = { ["browse"] = "Subjects of type Document hold the manuals." },
+
+    // Optional: refuse writes to some properties; return null to allow, else the reason for the client
+    PropertyWriteFilter = property => property.Name == "Password" ? "Passwords cannot be changed." : null,
+
     // Safety limits
     MaxDepth = 10,
     MaxSubjectsPerResponse = 500,
     IsReadOnly = true
 };
 ```
+
+`ToolDescriptionAdditions` describes conventions of the application to the client without replacing the generic description of a tool, for example which subjects hold its documentation. Each text is appended after a space; names of tools that are not offered are ignored.
 
 ### Access Control
 
@@ -300,13 +310,56 @@ public class MyToolProvider : IMcpToolProvider
             Name = "my_tool",
             Description = "My custom tool",
             InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
-            Handler = async (input, ct) => new { result = "hello" }
+            Handler = async (input, ct) => new { result = "hello" },
+            Annotations = McpToolAnnotations.ReadOnly
         };
     }
 }
 ```
 
 Tools are transport-agnostic `McpToolInfo` instances registered via `WithSubjectRegistryTools`.
+
+`Annotations` carries the MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) that clients may use to decide which calls need the user's approval. They are hints, not enforcement. `McpToolAnnotations.ReadOnly` marks a tool that only reads and `McpToolAnnotations.Destructive` one that can change state; both set `openWorldHint` to false. The core tools carry these: `set_property` is destructive, the other core tools are read-only.
+
+## Using the Tools In-Process
+
+The tools do not depend on the MCP transport, so an application can hand them to its own AI agent directly or serve a selection of them on another route.
+
+```csharp
+// The core tools and those of the tool providers, with ToolDescriptionAdditions applied
+var tools = new McpToolFactory(() => rootSubject, configuration).CreateTools();
+
+// Function calling with Microsoft.Extensions.AI
+var options = new ChatOptions { Tools = [.. tools.Select(tool => tool.ToAIFunction())] };
+var client = new FunctionInvokingChatClient(innerChatClient);
+var response = await client.GetResponseAsync(messages, options, cancellationToken);
+```
+
+`ToAIFunction()` wraps a tool as an `AIFunction` with the tool's name, description and input schema; invoking it calls the tool's handler with the arguments as a JSON object.
+
+`McpToolDispatcher` serves any list of tools through the MCP list and call requests, which `WithSubjectRegistryTools` uses as well. It lets a custom route offer a different tool list, for example only the tools one client may use, set in a stateless transport's `ConfigureSessionOptions` on `options.Handlers`:
+
+```csharp
+var handlers = options.Handlers;
+handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
+handlers.CallToolHandler = (request, cancellationToken) =>
+    McpToolDispatcher.CallToolAsync(tools, request.Params, logger, cancellationToken);
+```
+
+`ListTools` maps the annotations of each tool. `CallToolAsync` returns a string result as text and any other result as indented JSON that keeps non-ASCII characters and `<>&'` unescaped, and turns an unknown tool or a throwing handler into an error result. A call whose cancellation token is cancelled throws `OperationCanceledException` instead.
+
+To change one member of a tool, for example to wrap its handler with a budget or logging, copy it with the copy constructor, which keeps all other members including the annotations:
+
+```csharp
+var counted = new McpToolInfo(tool)
+{
+    Handler = async (input, cancellationToken) =>
+    {
+        Interlocked.Increment(ref callCount);
+        return await tool.Handler(input, cancellationToken);
+    }
+};
+```
 
 ## Connecting Claude Desktop (Local Development)
 

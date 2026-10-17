@@ -42,6 +42,20 @@ public class GetPropertyHistoryToolTests
     }
 
     [Fact]
+    public void WhenListingTheTool_ThenItIsAnnotatedAsReadOnly()
+    {
+        // Arrange
+        var provider = new HistoryMcpToolProvider(
+            () => throw new InvalidOperationException("Not used."), new StateAttributePathProvider(), NullLogger<HistoryMcpToolProvider>.Instance);
+
+        // Act
+        var tool = provider.GetTools().Single();
+
+        // Assert
+        Assert.Same(Namotion.Interceptor.Mcp.McpToolAnnotations.ReadOnly, tool.Annotations);
+    }
+
+    [Fact]
     public async Task WhenOnePathCannotBeServed_ThenOnlyThatPathCarriesAnErrorAndTheOthersReturnData()
     {
         // Arrange - a store that rejects the aggregation for one path only, the way a real store does

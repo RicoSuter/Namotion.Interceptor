@@ -49,7 +49,8 @@ public static class StateUnitExtensions
     }
 
     /// <summary>
-    /// Renders a property value with proper formatting including unit support.
+    /// Renders a property value with proper formatting including unit support. A value whose text can show a secret
+    /// configuration value, such as a record with a secret property, and such an element of a list render as an empty text.
     /// </summary>
     public static string GetPropertyDisplayValue(
         this RegisteredSubjectProperty property, object? value, ITimeZoneDisplay? timeZone = null)
@@ -119,7 +120,7 @@ public static class StateUnitExtensions
             // Binary payloads would otherwise render one line per byte.
             byte[] bytes => $"{bytes.Length} bytes",
             IEnumerable elements => JoinElements(elements),
-            _ => value.ToString() ?? ""
+            _ => FormatOther(value)
         };
     }
 
@@ -127,7 +128,10 @@ public static class StateUnitExtensions
     // never arrive here because the panel lists them as child subjects instead; a dictionary of plain values does, and
     // renders one "[key, value]" line per entry.
     private static string JoinElements(IEnumerable elements) =>
-        string.Join('\n', elements.Cast<object?>().Select(element => element is null ? "null" : element.ToString() ?? ""));
+        string.Join('\n', elements.Cast<object?>().Select(element => element is null ? "null" : FormatOther(element)));
+
+    private static string FormatOther(object value) =>
+        SecretValueTypes.HoldsSecret(value) ? string.Empty : value.ToString() ?? "";
 
     /// <summary>
     /// Formats a fraction as a percentage rounded to one decimal place, for example 0.756 as "75.6%".

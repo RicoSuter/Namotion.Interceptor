@@ -7,6 +7,7 @@ using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
 
@@ -15,8 +16,8 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 public sealed partial class MarkdownContentParser
 {
-    private const string HtmlKeyPrefix = "Html_";
-    private const string ExpressionKeyPrefix = "Expression_";
+    internal const string HtmlKeyPrefix = "Html_";
+    internal const string ExpressionKeyPrefix = "Expression_";
 
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
@@ -187,12 +188,18 @@ public sealed partial class MarkdownContentParser
         _logger?.LogWarning(exception, "Failed to reload the page {Path} after a refused write", path);
 
     /// <summary>
-    /// Renders markdown content by replacing {{ path }} expressions with their resolved values in the format
-    /// each one asks for. An expression with an unknown format stays as written.
-    /// Everything else stays as written, including the lines of the blocks and the front matter. An expression inside markdown code is kept as written.
+    /// Renders markdown content by replacing each {{ path }} expression that
+    /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value in the format it asks for: also
+    /// one in the front matter, on the head line of a block or in an invalid block, which the page itself does not
+    /// evaluate. An expression with an unknown format, and one inside markdown code, is kept as written, and everything
+    /// else stays as written. Only a displayable property is shown (<see cref="SubjectRegistryExtensions.IsDisplayable"/>).
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
-    public string? RenderContent(string? content, MarkdownFile parent)
+    /// <param name="content">The markdown content.</param>
+    /// <param name="parent">The markdown file the expressions are relative to.</param>
+    /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute canonical path of
+    /// its property in parentheses. An expression that does not resolve to a property renders as without it.</param>
+    public string? RenderContent(string? content, MarkdownFile parent, bool includeSourcePaths = false)
     {
         if (string.IsNullOrEmpty(content))
             return content;
@@ -211,9 +218,7 @@ public sealed partial class MarkdownContentParser
             {
                 try
                 {
-                    // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
-                    var property = _pathResolver.ResolveScopedProperty(expression.Path, PathStyle.Canonical, parent);
-                    rendered.Append(RenderExpression.GetText(property, expression.Format, timeZone: null));
+                    rendered.Append(RenderExpressionValue(expression, parent, includeSourcePaths));
                 }
                 catch
                 {
@@ -227,6 +232,25 @@ public sealed partial class MarkdownContentParser
         return rendered is null
             ? content
             : rendered.Append(content, copiedLength, content.Length - copiedLength).ToString();
+    }
+
+    private string? RenderExpressionValue(MarkdownExpression expression, MarkdownFile parent, bool includeSourcePaths)
+    {
+        // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
+        var property = _pathResolver.ResolveScopedDisplayableProperty(expression.Path, PathStyle.Canonical, parent);
+        var valueText = RenderExpression.GetText(property, expression.Format, timeZone: null);
+        if (!includeSourcePaths || property is null || GetAbsolutePath(property) is not { } sourcePath)
+        {
+            return valueText;
+        }
+
+        return $"{valueText} ({sourcePath})";
+    }
+
+    private string? GetAbsolutePath(RegisteredSubjectProperty property)
+    {
+        var subjectPath = _pathResolver.GetPath(property.Subject, PathStyle.Canonical);
+        return subjectPath is null ? null : $"{subjectPath.TrimEnd('/')}/{property.Name}";
     }
 
     /// <summary>
@@ -343,7 +367,7 @@ public sealed partial class MarkdownContentParser
                 $"'{head.Name}' is not a slot at this position. A slot block must be directly inside the widget that declares it."));
         }
 
-        var type = _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == head.Name);
+        var type = FindType(head.Name);
         if (type is null)
         {
             return (null, null, new BlockError(
@@ -365,7 +389,7 @@ public sealed partial class MarkdownContentParser
         }
 
         // An id can equal the positional key of another block, for example #Card_3.
-        var key = head.Id ?? $"{type.Name}_{index}";
+        var key = MarkdownSubjectKeys.GetContentKey(head.Id, type, index);
         if (children.ContainsKey(key))
         {
             return (null, null, new BlockError(block.Line, FormatUsedTwice(key)));
@@ -376,6 +400,22 @@ public sealed partial class MarkdownContentParser
             type, $"The type '{head.Name}'", segment, existing, state, cancellationToken);
 
         return (subject is null ? null : key, subject, error);
+    }
+
+    /// <summary>Gets the type that a widget block names with its full name, or null when there is none.</summary>
+    internal Type? FindType(string fullName) => _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == fullName);
+
+    /// <summary>Gets whether the path resolves to a subject from <paramref name="from"/> the way a page resolves it.</summary>
+    internal bool ResolvesToSubject(string path, IInterceptorSubject from)
+    {
+        try
+        {
+            return _pathResolver.ResolveScopedSubject(path, PathStyle.Canonical, from) is not null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return false;
+        }
     }
 
     private static string FormatUsedTwice(string name) => $"The name '{name}' is used twice on this page.";
@@ -419,7 +459,7 @@ public sealed partial class MarkdownContentParser
                 return (null, new BlockError(block.Line, configurationError!));
             }
 
-            if (!TryArrangeContent(type, slots, segment, state, out var content, out var contentError))
+            if (!TryArrangeContent(type, slots, segment, state.OwnsName, out var content, out var contentError))
             {
                 return (null, contentError);
             }

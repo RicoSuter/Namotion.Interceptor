@@ -222,19 +222,19 @@ public class ControlWidgetTests
             // Arrange
             ResetMotor();
             var page = await OpenPageAsync();
-            var stopSwitch = GetSwitch(page, "Power with stop");
-            await Assertions.Expect(stopSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
+            var restartSwitch = GetSwitch(page, "Power with restart");
+            await Assertions.Expect(restartSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
 
             // Act
-            await stopSwitch.ClickAsync();
+            await restartSwitch.ClickAsync();
             var dialog = page.GetByRole(AriaRole.Dialog);
-            await Assertions.Expect(dialog).ToContainTextAsync("Confirm: Emergency Stop", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog).ToContainTextAsync("Confirm: Restart Controller", new() { Timeout = Timeout });
             await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
 
             // Assert
             await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
-            await Assertions.Expect(stopSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(stopSwitch).ToBeEnabledAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(restartSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(restartSwitch).ToBeEnabledAsync(new() { Timeout = Timeout });
             Assert.True(GetMotor().IsPowered);
         }
         finally
@@ -365,16 +365,16 @@ public class ControlWidgetTests
             var page = await OpenPageAsync();
 
             // Act
-            await GetButton(page, "Emergency Stop").ClickAsync();
+            await GetButton(page, "Restart Controller").ClickAsync();
             var dialog = page.GetByRole(AriaRole.Dialog);
-            await Assertions.Expect(dialog).ToContainTextAsync("Confirm: Emergency Stop", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog).ToContainTextAsync("Confirm: Restart Controller", new() { Timeout = Timeout });
             await dialog.GetByRole(AriaRole.Button, new() { Name = "Execute", Exact = true }).ClickAsync();
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => GetMotor() is { IsPowered: false, CurrentSpeed: 0 },
                 WaitTimeout,
-                message: "The emergency stop was not invoked");
+                message: "The restart of the controller was not invoked");
         }
         finally
         {

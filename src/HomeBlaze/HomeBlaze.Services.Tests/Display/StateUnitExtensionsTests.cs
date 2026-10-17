@@ -207,6 +207,27 @@ public class StateUnitExtensionsTests
     }
 
     [Fact]
+    public void WhenADisplayValueOrAnElementHoldsASecretConfigurationValue_ThenItRendersEmpty()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+        var credentials = new SecretCredentials("admin", "s3cr3t");
+
+        // Act
+        var single = property.GetPropertyDisplayValue(credentials);
+        var list = property.GetPropertyDisplayValue(new object[] { credentials, 2 });
+
+        // Assert
+        Assert.Equal("", single);
+        Assert.Equal("\n2", list);
+    }
+
+    private sealed record SecretCredentials(string User, [property: Configuration(IsSecret = true)] string Password);
+
+    [Fact]
     public void WhenDisplayValueIsByteArray_ThenRendersItsLength()
     {
         // Arrange

@@ -1,4 +1,7 @@
 using HomeBlaze.AI;
+using HomeBlaze.AI.Agents;
+using HomeBlaze.AI.Agents.ClaudeCli;
+using HomeBlaze.AI.Mcp;
 using HomeBlaze.Components;
 using HomeBlaze.History.Blazor;
 using HomeBlaze.History.InMemory.Blazor;
@@ -54,20 +57,20 @@ var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configu
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
 
-// Optionally add the MCP subject server (default: false, enabled in Development)
+// The history package contributes its own tool; the AI package knows nothing about it. Registered once so
+// both the external MCP server and the built-in agents get it.
+builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvider(
+    context.RootSubjectProvider,
+    context.PathProvider,
+    context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
+builder.Services.AddHomeBlazeAgents();
+
+// The MCP server is always registered because the built-in agents use it; McpServer:Enabled only decides
+// whether the external /mcp route is mapped (default: false, enabled in Development).
 var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
-if (mcpEnabled)
-{
-    builder.Services.AddMcpServer()
-        .WithHttpTransport(options => options.Stateless = true)
-        .WithHomeBlazeMcpTools(
-            isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true),
-            // The history package contributes its own tool; the AI package knows nothing about it.
-            context => new HistoryMcpToolProvider(
-                context.RootSubjectProvider,
-                context.PathProvider,
-                context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
-}
+builder.Services.AddMcpServer()
+    .WithHttpTransport(options => options.Stateless = true)
+    .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
 
 // Add services to the container.
 builder.Services
@@ -137,7 +140,9 @@ typeProvider
     .AddAssembly(typeof(SonosSystem).Assembly)                                              // Namotion.Devices.Sonos
     .AddAssembly(typeof(SonosSystemWidget).Assembly)                                        // Namotion.Devices.Sonos.HomeBlaze
     .AddAssembly(typeof(FritzBox).Assembly)                                                 // Namotion.Devices.FritzBox
-    .AddAssembly(typeof(FritzBoxWidget).Assembly);                                          // Namotion.Devices.FritzBox.HomeBlaze
+    .AddAssembly(typeof(FritzBoxWidget).Assembly)                                           // Namotion.Devices.FritzBox.HomeBlaze
+    .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
+    .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly);                           // HomeBlaze.AI.Blazor
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
@@ -165,12 +170,17 @@ if (!app.Environment.IsDevelopment())
 
 if (!app.Environment.IsDevelopment())
 {
-    app.UseHttpsRedirection();
+    // The CLI agent calls back over HTTP on the same host; a redirect would drop its bearer token.
+    app.UseWhen(
+        context => !context.Request.Path.StartsWithSegments(AgentMcpEndpoint.Route),
+        branch => branch.UseHttpsRedirection());
 }
 
 app.UseAntiforgery();
 
-// Map MCP server endpoint if enabled
+app.MapHomeBlazeAgentMcp();
+
+// Map the external MCP server endpoint if enabled
 if (mcpEnabled)
 {
     app.MapMcp("/mcp");

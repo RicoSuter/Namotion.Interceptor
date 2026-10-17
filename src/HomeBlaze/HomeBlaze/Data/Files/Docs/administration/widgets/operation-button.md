@@ -26,15 +26,15 @@ An `OperationButton` has no slots.
 
 These samples operate the shared sample motors `Pump` and `Fan` next to this page. What they change lasts until the motors restart, see [Control Writes](basics.md#control-writes).
 
-An operation that asks for confirmation. `EmergencyStop` of the pump shows a dialog first, and stops the pump only when it is confirmed:
+An operation that asks for confirmation. `RestartController` of the pump shows a dialog first, and stops the pump only when it is confirmed. `EmergencyStop` asks for no confirmation, because a safety action must run at once:
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.OperationButton Path=../Pump/EmergencyStop Color=Error
+:: HomeBlaze.Components.OperationButton Path=../Pump/RestartController Color=Error
 ::
 ~~~~
 
-:: HomeBlaze.Components.OperationButton Path=../Pump/EmergencyStop Color=Error
+:: HomeBlaze.Components.OperationButton Path=../Pump/RestartController Color=Error
 ::
 
 Two operations that are enabled in turn. `PowerOff` is enabled while the pump is powered and `PowerOn` while it is not, so one of the two buttons is always disabled:

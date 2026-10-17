@@ -1,4 +1,7 @@
+using System.Reflection;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Devices;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -320,6 +323,42 @@ public class FritzBoxLoopTests
         Assert.True(fake.IsGuestWlanEnabled);
         Assert.True(guest.IsOn);
         Assert.Contains("SetEnable", fake.Actions);
+    }
+
+    [Fact]
+    public async Task WhenTheGuestWlanIsToggled_ThenItSwitchesToTheOtherState()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var router = CreateRouter(fake);
+        await using var running = await RunAsync(router);
+        var guest = await WaitForGuestWlanAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(() => guest.IsOn is not null, message: "The router should report the guest WLAN state.");
+        var wasOn = guest.IsOn!.Value;
+
+        // Act
+        await guest.ToggleAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(!wasOn, fake.IsGuestWlanEnabled);
+        Assert.Equal(!wasOn, guest.IsOn);
+    }
+
+    [Theory]
+    [InlineData(nameof(ISwitchController.TurnOnAsync), true)]
+    [InlineData(nameof(ISwitchController.ToggleAsync), true)]
+    [InlineData(nameof(ISwitchController.TurnOffAsync), false)]
+    public void WhenTheGuestWlanIsSwitchedThroughTheSwitchController_ThenOnlyTurningItOffRunsWithoutConfirmation(string methodName, bool expected)
+    {
+        // Arrange
+        var map = typeof(FritzBoxGuestWlan).GetInterfaceMap(typeof(ISwitchController));
+
+        // Act
+        var implementation = map.TargetMethods[Array.FindIndex(map.InterfaceMethods, method => method.Name == methodName)];
+
+        // Assert
+        Assert.Equal(typeof(FritzBoxGuestWlan), implementation.DeclaringType);
+        Assert.Equal(expected, implementation.GetCustomAttribute<OperationAttribute>()?.RequiresConfirmation ?? false);
     }
 
     [Fact]
