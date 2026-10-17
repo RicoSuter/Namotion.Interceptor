@@ -1187,6 +1187,39 @@ namespace HomeBlaze.Components.Components
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
     }
+    public class TileView : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public TileView() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? AccessibleName { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? AriaChecked { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Badge { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MudBlazor.Color Color { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Disabled { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Icon { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsBusy { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<Microsoft.AspNetCore.Components.Web.MouseEventArgs> OnClick { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Role { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Subtitle { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? TestId { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Tooltip { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MudBlazor.Variant Variant { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ValueList))]
     public class ValueListWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {

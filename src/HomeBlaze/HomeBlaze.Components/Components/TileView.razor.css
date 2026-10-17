@@ -1,0 +1,65 @@
+/* Alone on a page a tile is as wide as its place and 96 pixels high; in a grid cell, a canvas node or a flow row the
+   class place-filler makes it fill its place (SubjectComponent.razor.css). */
+.tile-widget {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 96px;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.tile-widget-button {
+    width: 100%;
+    height: 100%;
+    min-height: inherit;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 12px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: center;
+    cursor: pointer;
+}
+
+.tile-widget-button:disabled {
+    cursor: default;
+}
+
+.tile-widget-button:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: -4px;
+}
+
+.tile-widget-label {
+    font-weight: 700;
+    font-size: 1.125rem;
+    line-height: 1.25;
+}
+
+.tile-widget-subtitle {
+    font-size: 1rem;
+    line-height: 1.25;
+}
+
+.tile-widget ::deep .tile-widget-icon {
+    font-size: 2.5rem;
+}
+
+.tile-widget ::deep .tile-widget-progress {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+}
+
+.tile-widget-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    pointer-events: none;
+}

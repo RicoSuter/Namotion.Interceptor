@@ -1,0 +1,75 @@
+@* A tile: one click target that fills its place, with icon, label and subtitle centered, and a badge over its top
+   right corner. The badge is a sibling of the button, not inside it, so the markup stays valid; it takes no pointer
+   input, so a click on it reaches the button below. The style is on the root, so that the badge inherits the text
+   color of the tile. *@
+@using HomeBlaze.Components.Controls
+
+<div class="tile-widget place-filler" style="@TileStyle.GetStyle(Color, Variant, Disabled)" data-testid="@TestId">
+    <button type="button"
+            class="tile-widget-button"
+            disabled="@Disabled"
+            role="@Role"
+            aria-checked="@AriaChecked"
+            aria-label="@AccessibleName"
+            aria-busy="@(IsBusy ? "true" : null)"
+            title="@Tooltip"
+            @onclick="OnClick">
+        @if (Icon is not null)
+        {
+            <MudIcon Icon="@Icon" Class="tile-widget-icon" data-testid="tile-icon" />
+        }
+        @if (!string.IsNullOrEmpty(Label))
+        {
+            <span class="tile-widget-label" data-testid="tile-label">@Label</span>
+        }
+        @if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <span class="tile-widget-subtitle" data-testid="tile-subtitle">@Subtitle</span>
+        }
+        @if (IsBusy)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="tile-widget-progress" data-testid="tile-progress" />
+        }
+    </button>
+    @if (Badge is not null)
+    {
+        <div class="tile-widget-badge" data-testid="tile-badge">
+            <SubjectComponent Subject="@Badge" Type="SubjectComponentType.Widget" />
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? TestId { get; set; }
+
+    /// <summary>The ARIA role of the button, "switch" for a switch tile, null for a plain button.</summary>
+    [Parameter] public string? Role { get; set; }
+
+    /// <summary>"true" or "false" for a switch tile, null otherwise.</summary>
+    [Parameter] public string? AriaChecked { get; set; }
+
+    /// <summary>The accessible name when the tile shows no label, such as the title of the operation of an icon tile.</summary>
+    [Parameter] public string? AccessibleName { get; set; }
+
+    [Parameter] public string? Tooltip { get; set; }
+
+    [Parameter] public string? Label { get; set; }
+
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>The icon as resolved by <see cref="MudBlazorIconResolver"/>, or null for none.</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    [Parameter] public Color Color { get; set; }
+
+    [Parameter] public Variant Variant { get; set; } = Variant.Filled;
+
+    [Parameter] public bool Disabled { get; set; }
+
+    [Parameter] public bool IsBusy { get; set; }
+
+    /// <summary>The content of the badge slot, or null for none.</summary>
+    [Parameter] public IInterceptorSubject? Badge { get; set; }
+
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+}
