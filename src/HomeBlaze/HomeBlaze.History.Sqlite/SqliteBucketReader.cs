@@ -109,7 +109,9 @@ internal static class SqliteBucketReader
             var pathIds = new Dictionary<(string PartitionKey, string Path), long?>();
             var segments = new List<ChainSegment>();
             var deltaCursor = new BucketCursor(bucket);
-            var orderedValueSql = isUlong ? UlongOrderedValueSql : OrderedValueSql;
+            using var orderedScan = aggregation == HistoryAggregations.TimeWeightedAverage || isDelta
+                ? new OrderedScanMerge(context, pathIds, segments, isUlong ? UlongOrderedValueSql : OrderedValueSql)
+                : null;
             var firstPartition = 0;
             for (var windowIndex = 0; windowIndex < windows.Length; windowIndex++)
             {
@@ -119,18 +121,14 @@ internal static class SqliteBucketReader
                 {
                     // The held value only enters the scan when this store covers the first bucket's start.
                     var seed = windowIndex == 0 && window.From == alignedFrom ? carrySeed?.Number : null;
-                    ReadTimeWeightedAverageWindow(
-                        context, pathIds, segments, window, orderedValueSql, bucket, seed, partials,
-                        cancellationToken);
+                    ReadTimeWeightedAverageWindow(orderedScan!, window, bucket, seed, partials, cancellationToken);
                     continue;
                 }
 
                 if (isDelta)
                 {
                     // The held value threads through every window: gaps between them are bridged.
-                    ReadDeltaWindow(
-                        context, pathIds, segments, orderedValueSql, ref deltaCarry, partials, ref deltaCursor,
-                        cancellationToken);
+                    ReadDeltaWindow(orderedScan!, ref deltaCarry, partials, ref deltaCursor, cancellationToken);
                     continue;
                 }
 
@@ -304,15 +302,10 @@ internal static class SqliteBucketReader
     // interval up to the next numeric event adds nothing.
     //
     // Unlike the other aggregations, TWA must see one ascending event stream across partition files and
-    // move legs. The segments of a window are disjoint time slices, so ordering them and streaming each
-    // SQL reader in timestamp order reconstructs that stream with constant sample memory and no SQLite
-    // ATTACH limit. The segments list is sorted in place.
+    // move legs, which OrderedScanMerge provides with constant sample memory and no SQLite ATTACH limit.
     private static void ReadTimeWeightedAverageWindow(
-        SqliteReadContext context,
-        Dictionary<(string PartitionKey, string Path), long?> pathIds,
-        List<ChainSegment> segments,
+        OrderedScanMerge orderedScan,
         HistoryCoverage window,
-        string sql,
         HistoryBucket bucket,
         double? seed,
         Dictionary<long, BucketPartial> result,
@@ -322,75 +315,201 @@ internal static class SqliteBucketReader
         var previousValue = seed;
         var cursor = new BucketCursor(bucket);
 
-        segments.Sort(CompareByTime);
-        foreach (var segment in segments)
+        orderedScan.Start(cancellationToken);
+        while (orderedScan.MoveNext(out var ticks, out var value))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var command = CreateOrderedScan(context, pathIds, segment, sql);
-            if (command is null)
-            {
-                continue;
-            }
-
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var ticks = reader.GetInt64(0);
-                Integrate(result, previousTicks, ticks, previousValue, ref cursor);
-                previousTicks = ticks;
-                previousValue = reader.IsDBNull(1) ? null : reader.GetDouble(1);
-            }
+            Integrate(result, previousTicks, ticks, previousValue, ref cursor);
+            previousTicks = ticks;
+            previousValue = value;
         }
 
         Integrate(result, previousTicks, EpochTicks.ToEpochTicks(window.To), previousValue, ref cursor);
     }
 
     // Delta for one coverage window: one ascending stream of numeric samples across partition files and move legs,
-    // as for TWA, adding each step to the bucket holding the later sample. Null and non-finite samples are skipped. The segments
-    // list is sorted in place.
+    // as for TWA, adding each step to the bucket holding the later sample. Null and non-finite samples are skipped.
     private static void ReadDeltaWindow(
-        SqliteReadContext context,
-        Dictionary<(string PartitionKey, string Path), long?> pathIds,
-        List<ChainSegment> segments,
-        string sql,
+        OrderedScanMerge orderedScan,
         ref double? carry,
         Dictionary<long, BucketPartial> result,
         ref BucketCursor cursor,
         CancellationToken cancellationToken)
     {
-        segments.Sort(CompareByTime);
-        foreach (var segment in segments)
+        orderedScan.Start(cancellationToken);
+        while (orderedScan.MoveNext(out var ticks, out var reading))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var command = CreateOrderedScan(context, pathIds, segment, sql);
-            if (command is null)
+
+            // An infinite reading is no counter reading; NaN never gets here, it is stored as JSON.
+            if (reading is not { } value || !double.IsFinite(value))
             {
                 continue;
             }
 
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            var (bucketStart, _) = cursor.Locate(ticks);
+            ref var partial = ref CollectionsMarshal.GetValueRefOrAddDefault(result, bucketStart, out _);
+            var step = carry is { } previous ? HistoryDelta.Step(previous, value) : 0;
+            partial = partial with { BucketStartTicks = bucketStart, Sum = (partial.Sum ?? 0) + step };
+            carry = value;
+        }
+    }
+
+    /// <summary>
+    /// Streams the rows of the current window's segments ascending by timestamp, merging the per-segment
+    /// ordered scans. Segments overlap in time when the partition interval was changed while data existed:
+    /// rows of one span are then split between a file of the old interval and one of the new interval.
+    /// Rows with equal timestamps come in segment order. Dispose closes the scans a failed read left open.
+    /// </summary>
+    private sealed class OrderedScanMerge(
+        SqliteReadContext context,
+        Dictionary<(string PartitionKey, string Path), long?> pathIds,
+        List<ChainSegment> segments,
+        string sql) : IDisposable
+    {
+        private int _nextSegment;
+        private CancellationToken _cancellationToken;
+
+        // The open scans, each positioned on its next row. A segment is opened only once the stream reaches
+        // its start, so disjoint segments are read one at a time and only overlapping ones are open together.
+        private OpenScan[] _scans = new OpenScan[2];
+        private int _scanCount;
+
+        // Sorts the segments in place by start and begins the stream over them; the previous one must have ended.
+        public void Start(CancellationToken cancellationToken)
+        {
+            segments.Sort(CompareByTime);
+            _nextSegment = 0;
+            _cancellationToken = cancellationToken;
+        }
+
+        public bool MoveNext(out long ticks, out double? value)
+        {
+            var earliest = OpenSegmentsStartingBy();
+            if (earliest < 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (reader.IsDBNull(1))
-                {
-                    continue;
-                }
-
-                // An infinite reading is no counter reading; NaN never gets here, it is stored as JSON.
-                var value = reader.GetDouble(1);
-                if (!double.IsFinite(value))
-                {
-                    continue;
-                }
-
-                var (bucketStart, _) = cursor.Locate(reader.GetInt64(0));
-                ref var partial = ref CollectionsMarshal.GetValueRefOrAddDefault(result, bucketStart, out _);
-                var step = carry is { } previous ? HistoryDelta.Step(previous, value) : 0;
-                partial = partial with { BucketStartTicks = bucketStart, Sum = (partial.Sum ?? 0) + step };
-                carry = value;
+                ticks = 0;
+                value = null;
+                return false;
             }
+
+            ref var scan = ref _scans[earliest];
+            ticks = scan.Ticks;
+            value = scan.Value;
+            if (!scan.Advance())
+            {
+                scan.Dispose();
+                _scans[earliest] = _scans[--_scanCount];
+                _scans[_scanCount] = default;
+            }
+
+            return true;
+        }
+
+        // Opens every pending segment that can hold a row at or before the earliest open row, and returns
+        // that row's scan index, or -1 when the stream has ended.
+        private int OpenSegmentsStartingBy()
+        {
+            while (true)
+            {
+                var earliest = FindEarliest();
+                if (_nextSegment >= segments.Count ||
+                    (earliest >= 0 && segments[_nextSegment].FromTicks > _scans[earliest].Ticks))
+                {
+                    return earliest;
+                }
+
+                _cancellationToken.ThrowIfCancellationRequested();
+                Open(segments[_nextSegment], _nextSegment);
+                _nextSegment++;
+            }
+        }
+
+        private int FindEarliest()
+        {
+            var earliest = -1;
+            for (var index = 0; index < _scanCount; index++)
+            {
+                ref var scan = ref _scans[index];
+                if (earliest < 0 || scan.Ticks < _scans[earliest].Ticks ||
+                    (scan.Ticks == _scans[earliest].Ticks && scan.Order < _scans[earliest].Order))
+                {
+                    earliest = index;
+                }
+            }
+
+            return earliest;
+        }
+
+        private void Open(ChainSegment segment, int order)
+        {
+            var command = CreateOrderedScan(context, pathIds, segment, sql);
+            if (command is null)
+            {
+                return;
+            }
+
+            SqliteDataReader? reader = null;
+            try
+            {
+                reader = command.ExecuteReader();
+                var scan = new OpenScan(command, reader, order);
+                if (!scan.Advance())
+                {
+                    scan.Dispose();
+                    return;
+                }
+
+                if (_scanCount == _scans.Length)
+                {
+                    Array.Resize(ref _scans, _scans.Length * 2);
+                }
+
+                _scans[_scanCount++] = scan;
+            }
+            catch
+            {
+                reader?.Dispose();
+                command.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            for (var index = 0; index < _scanCount; index++)
+            {
+                _scans[index].Dispose();
+                _scans[index] = default;
+            }
+
+            _scanCount = 0;
+        }
+    }
+
+    // One segment's open ordered scan and the row it is positioned on.
+    private struct OpenScan(SqliteCommand command, SqliteDataReader reader, int order)
+    {
+        public readonly int Order = order;
+        public long Ticks;
+        public double? Value;
+
+        public bool Advance()
+        {
+            if (!reader.Read())
+            {
+                return false;
+            }
+
+            Ticks = reader.GetInt64(0);
+            Value = reader.IsDBNull(1) ? null : reader.GetDouble(1);
+            return true;
+        }
+
+        public readonly void Dispose()
+        {
+            reader.Dispose();
+            command.Dispose();
         }
     }
 
