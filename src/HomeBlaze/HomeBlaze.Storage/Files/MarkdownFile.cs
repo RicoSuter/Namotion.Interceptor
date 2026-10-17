@@ -57,8 +57,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // Serializes every write of this file: the read-modify-write of ReplaceText cannot interleave with another write,
     // and each write-back computes its text from the snapshot that the write before it left, because the reload inside
-    // that write has applied the page before the next one reads the graph. Taken only through BeginWrite. Not the
-    // reload lock, which the reload inside the write takes while this one is held.
+    // that write has applied the page before the next one reads the graph. A write takes it with WaitAsync after
+    // EnsureNotWithinWrite, calls BeginWrite right after, and releases it only through EndWrite. Not the reload lock,
+    // which the reload inside the write takes while this one is held.
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     internal const string CallFromWithinWriteMessage =
@@ -246,6 +247,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// </summary>
     /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes, adds, changes,
     /// removes or moves a block, or adds such content.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
+    /// load of a file, or from within a write of this page.</exception>
     [Operation(Title = "Replace Content", Description = "Replaces the whole markdown source of this file.", Icon = "EditNote")]
     public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
     {
@@ -273,6 +276,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// </summary>
     /// <exception cref="ArgumentException">The text is empty, not found, found more than once, the result is larger than
     /// <see cref="MaxContentSize"/> bytes, or it adds, changes, removes or moves a block or adds such content.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
+    /// load of a file, or from within a write of this page.</exception>
     [Operation(Title = "Replace Text", Description = "Replaces one exact, unique passage of the markdown source.", Icon = "FindReplace")]
     public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)
     {
@@ -458,6 +463,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// read again from its file before this returns, so the graph matches the text again unless that read fails.
     /// Saves of one page run one after the other.
     /// </remarks>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
+    /// load of a file, or from within a write of this page.</exception>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
