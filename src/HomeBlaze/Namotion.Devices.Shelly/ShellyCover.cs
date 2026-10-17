@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Abstractions.Devices.Covers;
 using HomeBlaze.Abstractions.Sensors;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.Shelly;
 
@@ -109,6 +110,14 @@ public partial class ShellyCover :
 
     [Derived]
     public string? IconColor => IsMoving == true ? "Warning" : null;
+
+    [Derived]
+    [PropertyAttribute("Open", KnownAttributes.IsEnabled)]
+    public bool Open_IsEnabled => _device.IsConnected && ShutterState is not (RollerShutterState.Open or RollerShutterState.Opening);
+
+    [Derived]
+    [PropertyAttribute("Close", KnownAttributes.IsEnabled)]
+    public bool Close_IsEnabled => _device.IsConnected && ShutterState is not (RollerShutterState.Closed or RollerShutterState.Closing);
 
     public ShellyCover(ShellyDevice device, int index)
     {
