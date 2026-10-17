@@ -1,5 +1,3 @@
-using Namotion.Interceptor.Testing;
-
 namespace HomeBlaze.AI.Tests.Agents.Cli;
 
 /// <summary>

@@ -3,11 +3,11 @@ using HomeBlaze.Abstractions;
 using System.Text.RegularExpressions;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Tests;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
-using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
 
