@@ -124,6 +124,12 @@ namespace HomeBlaze.Services
     {
         public static string? ResolveScopedLink(this Namotion.Interceptor.IInterceptorSubject subject, string? link) { }
     }
+    public static class SubjectMetadataExtensions
+    {
+        public static bool IsSubjectMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static void SetSubjectMetadata(this Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? metadata) { }
+        public static HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? TryGetSubjectMetadata(this Namotion.Interceptor.IInterceptorSubject subject) { }
+    }
     public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
         public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
