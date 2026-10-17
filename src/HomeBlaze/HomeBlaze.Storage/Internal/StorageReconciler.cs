@@ -382,6 +382,13 @@ internal sealed class StorageReconciler
                 continue;
             }
 
+            // The path filter only inspects segments and cannot tell a folder from a file, so a directory named
+            // like the folder metadata file would otherwise pass through and shadow the file of its parent.
+            if (blob.IsFolder && string.Equals(StoragePath.GetName(path), StorageMetadataPath.FolderFileName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             var version = blob.IsFolder ? default : new StorageVersion(blob.Size ?? 0, blob.LastModificationTime);
             listing[path] = new StorageListing(path, blob.IsFolder, version);
         }

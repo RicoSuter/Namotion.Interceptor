@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using HomeBlaze.Components.Abstractions.Pages;
@@ -42,9 +43,10 @@ internal sealed class StorageMetadataDocument
     public static StorageMetadataDocument Parse(byte[] content)
     {
         ReadOnlySpan<byte> json = content;
-        if (json.StartsWith("﻿"u8))
+        var preamble = Encoding.UTF8.Preamble;
+        if (json.StartsWith(preamble))
         {
-            json = json[3..];
+            json = json[preamble.Length..];
         }
 
         return JsonSerializer.Deserialize(json, StorageMetadataJsonContext.Default.StorageMetadataDocument)
@@ -73,7 +75,9 @@ internal sealed class StorageMetadataDocument
 
     public SubjectMetadata? ToSubjectMetadata()
     {
-        var metadata = new SubjectMetadata(GetValue(NavigationTitle), GetValue(Icon), Location, Alignment);
+        NavigationLocation? location = Location is { } definedLocation && Enum.IsDefined(definedLocation) ? definedLocation : null;
+        AppBarAlignment? alignment = Alignment is { } definedAlignment && Enum.IsDefined(definedAlignment) ? definedAlignment : null;
+        var metadata = new SubjectMetadata(GetValue(NavigationTitle), GetValue(Icon), location, alignment);
         return metadata is { NavigationTitle: null, Icon: null, Location: null, Alignment: null } ? null : metadata;
     }
 

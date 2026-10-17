@@ -108,4 +108,17 @@ public class StorageMetadataDocumentTests
         Assert.Null(subject);
         Assert.Equal(["a"], order.AsSpan().ToArray());
     }
+
+    [Fact]
+    public void WhenEnumValueIsUndefined_ThenItIsNotSetInTheMetadata()
+    {
+        // Arrange
+        var document = StorageMetadataDocument.Parse(Encoding.UTF8.GetBytes("""{ "navTitle": "Pump", "location": 5, "alignment": 7 }"""));
+
+        // Act
+        var subject = document.ToSubjectMetadata();
+
+        // Assert
+        Assert.Equal(new SubjectMetadata("Pump", null, null, null), subject);
+    }
 }
