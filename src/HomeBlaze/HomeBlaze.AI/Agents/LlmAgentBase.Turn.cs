@@ -107,22 +107,35 @@ public abstract partial class LlmAgentBase
     {
         ClearStreamingText();
         IsBusy = true;
-        SetStatusIfStarted(ServiceStatus.Running, statusMessage);
+        lock (_stateLock)
+        {
+            _turnConfigurationVersion = _configurationVersion;
+            SetStatusIfStarted(ServiceStatus.Running, statusMessage);
+        }
+
         var started = _services.TimeProvider.GetUtcNow();
         LastActivityTime = started;
         return started;
     }
 
-    /// <summary>Ends a turn; <paramref name="isIdle"/> reports the idle status once the agent is no longer busy.</summary>
+    /// <summary>
+    /// Ends a turn; <paramref name="isIdle"/> reports the idle status once the agent is no longer busy, as does a
+    /// configuration change that the turn left to report.
+    /// </summary>
     private void EndTurn(bool isIdle)
     {
         ClearStreamingText();
 
-        // Cleared before the idle status, so a configuration change that skipped SetIdle while busy is picked up.
+        // Cleared before the pending idle report is read, so a configuration change either sees the agent idle and
+        // reports itself or leaves its report to this turn.
         IsBusy = false;
-        if (isIdle)
+        lock (_stateLock)
         {
-            SetIdle();
+            if (isIdle || _isIdleReportPending)
+            {
+                _isIdleReportPending = false;
+                SetIdle();
+            }
         }
     }
 
@@ -140,18 +153,42 @@ public abstract partial class LlmAgentBase
     private async Task HandleFailureAsync(AgentTurnException exception, AgentTimelineEntry errorEntry)
     {
         _logger.LogWarning("The turn of agent {Agent} failed: {Message}", Title, exception.Message);
+        var failure = exception;
+        int reportedConfigurationVersion;
         lock (_stateLock)
         {
-            _scheduler?.ReportFailure(exception);
+            reportedConfigurationVersion = _configurationVersion;
+            if (failure.Kind == AgentFailureKind.Configuration && reportedConfigurationVersion != _turnConfigurationVersion)
+            {
+                // The turn may have failed on the configuration that was replaced meanwhile, so a pause until the
+                // next change would outlive the fix; the failure only backs off.
+                failure = new AgentTurnException(AgentFailureKind.Transient, exception.Message, innerException: exception);
+            }
+
+            _scheduler?.ReportFailure(failure);
         }
 
         // Recorded before the status changes, so a reader that sees the failure status also sees the entry.
         await AppendAsync(errorEntry);
-        SetStatusIfStarted(
-            exception.Kind is AgentFailureKind.Configuration or AgentFailureKind.UsageLimit
-                ? ServiceStatus.Unavailable
-                : ServiceStatus.Error,
-            exception.Message);
+        lock (_stateLock)
+        {
+            if (_configurationVersion == reportedConfigurationVersion)
+            {
+                // The failure status accounts for every configuration change so far.
+                _isIdleReportPending = false;
+            }
+            else if (_isIdleReportPending)
+            {
+                // A change after the report changed the pause, which the end of the turn reports.
+                return;
+            }
+
+            SetStatusIfStarted(
+                failure.Kind is AgentFailureKind.Configuration or AgentFailureKind.UsageLimit
+                    ? ServiceStatus.Unavailable
+                    : ServiceStatus.Error,
+                failure.Message);
+        }
     }
 
     /// <summary>

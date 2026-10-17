@@ -49,14 +49,18 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private readonly Lock _streamingLock = new();
     private readonly StringBuilder _streamingText = new();
 
-    // Guards _scheduler, _lifetime, _runGeneration, the configuration error and every status write of a started
-    // agent, so a turn that ends after the agent stopped cannot report it as running. A non-null _scheduler means
-    // started. Status and StatusMessage are intercepted property writes, so change subscribers run while this lock
-    // is held and must neither block nor call back into the agent synchronously.
+    // Guards _scheduler, _lifetime, _runGeneration, the configuration error, the configuration versions, the
+    // pending idle report and every status write of a started agent, so a turn that ends after the agent stopped
+    // cannot report it as running. A non-null _scheduler means started. Status and StatusMessage are intercepted
+    // property writes, so change subscribers run while this lock is held and must neither block nor call back into
+    // the agent synchronously.
     private readonly Lock _stateLock = new();
     private AgentTriggerScheduler? _scheduler;
     private CancellationTokenSource? _lifetime;
     private int _runGeneration;
+    private int _configurationVersion;
+    private int _turnConfigurationVersion;
+    private bool _isIdleReportPending;
     private string[] _normalizedWatchPaths = [];
     private volatile string? _configurationError;
     private string? _storageDirectory;
@@ -228,6 +232,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     {
         lock (_stateLock)
         {
+            _configurationVersion++;
             Volatile.Write(ref _normalizedWatchPaths, AgentWatchPaths.Normalize(WatchPaths));
             if (_scheduler is not { } scheduler)
             {
@@ -241,9 +246,17 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 Status = ServiceStatus.Error;
                 StatusMessage = _configurationError;
             }
-            else if ((hadConfigurationError || !string.Equals(previousPauseReason, scheduler.PauseReason, StringComparison.Ordinal)) && !IsBusy)
+            else if (hadConfigurationError || !string.Equals(previousPauseReason, scheduler.PauseReason, StringComparison.Ordinal))
             {
-                SetIdle();
+                if (IsBusy)
+                {
+                    // The running turn writes its own status until it ends, and reports this change then.
+                    _isIdleReportPending = true;
+                }
+                else
+                {
+                    SetIdle();
+                }
             }
         }
 
