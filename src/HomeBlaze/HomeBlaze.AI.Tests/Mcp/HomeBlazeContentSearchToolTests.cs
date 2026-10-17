@@ -206,7 +206,7 @@ public sealed class HomeBlazeContentSearchToolTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheTokenIsCancelled_ThenTheSearchIsCancelled()
+    public async Task WhenTheTokenIsCanceled_ThenTheSearchIsCanceled()
     {
         // Arrange
         var tool = await CreateToolAsync();
