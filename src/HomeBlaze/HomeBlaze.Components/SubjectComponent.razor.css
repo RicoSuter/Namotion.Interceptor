@@ -116,9 +116,9 @@
    the card higher. A card fills a cell or a node when it is its child, as in a layout of a configuration file, or the
    only block of its content on a page. A block that shows nothing has an empty wrapper, which the page hides, so only
    the wrappers that are not empty count, unlike with :only-child. The padding of the content that such a card fills is
-   left out in MarkdownFilePageComponent.razor.css, for every place-filler. */
-::deep .card-widget.card-widget-sized,
-::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .card-widget {
+   left out in MarkdownFilePageComponent.razor.css, for every place-filler. A card that fills its place gets
+   min-height: 0 from the rule of every place-filler below. */
+::deep .card-widget.card-widget-sized {
     min-height: 0;
 }
 

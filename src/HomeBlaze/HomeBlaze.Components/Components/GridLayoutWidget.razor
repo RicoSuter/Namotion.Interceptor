@@ -15,7 +15,7 @@
     var columns = Grid?.Columns ?? 1;
     var cellAspectRatio = Grid?.CellAspectRatio;
     var rowTemplate = GridRows.GetTemplate(rows, columns, cellAspectRatio, out var ratioError);
-    var hasAspectRatio = rowTemplate is not null && !string.IsNullOrWhiteSpace(cellAspectRatio);
+    var hasAspectRatio = !string.IsNullOrWhiteSpace(cellAspectRatio);
 
     RenderFragment grid = @<div class="@(hasAspectRatio ? "grid-layout-container has-cell-aspect-ratio" : "grid-layout-container")"
      style="display: grid;
