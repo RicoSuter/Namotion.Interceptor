@@ -233,6 +233,53 @@ public class TileWidgetTests
     }
 
     [Fact]
+    public async Task WhenOperationButtonTileHasNoPathMethodLabelOrIcon_ThenItShowsTheDashAsItsLabel()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var tile = page.GetByRole(AriaRole.Button, new() { Name = "\u2013", Exact = true });
+
+        // Assert
+        await Assertions.Expect(tile).ToBeDisabledAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveTextAsync("\u2013");
+        await Assertions.Expect(tile).Not.ToHaveAttributeAsync("aria-label", "");
+    }
+
+    [Fact]
+    public async Task WhenOperationOfSwitchTileAsksForConfirmation_ThenItShowsTheStateItGoesToAndIsDimmedUntilItIsCanceled()
+    {
+        // Arrange
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var tile = GetSwitchTile(page, "Restart tile");
+        await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
+        var warning = await page.ResolveColorAsync("var(--mud-palette-warning)");
+        var surface = await page.ResolveColorAsync("var(--mud-palette-surface)");
+        Assert.Equal(warning, await GetBackgroundAsync(tile));
+
+        // Act: the toggle stays pending while the dialog asks for the confirmation.
+        await tile.ClickAsync();
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToContainTextAsync("Confirm: Restart Controller", new() { Timeout = Timeout });
+
+        // Assert
+        await Assertions.Expect(tile).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToBeDisabledAsync();
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Off");
+        Assert.Equal(surface, await GetBackgroundAsync(tile));
+        var opacity = await GetTileRoot(tile).EvaluateAsync<double>("element => parseFloat(getComputedStyle(element).opacity)");
+        Assert.InRange(opacity, 0.01, 0.99);
+
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+        await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToBeEnabledAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Running");
+        Assert.Equal(warning, await GetBackgroundAsync(tile));
+        Assert.True(GetMotor().IsPowered);
+    }
+
+    [Fact]
     public async Task WhenTileIsTheOnlyContentOfAGridCell_ThenItFillsTheCell()
     {
         // Arrange & Act
@@ -323,7 +370,8 @@ public class TileWidgetTests
         await page.SetViewportSizeAsync(width, 900);
         await WaitForScaledNodeAsync(page, frame, node);
 
-        // Assert
+        // Assert: without a held transition, the canvas could be drawn at its final width before the frame reaches it.
+        Assert.True(await page.EvaluateAsync<int>("window.__heldTransitions ?? 0") > 0);
         var mismatch = await GetLargestMismatchOfScaledNodeAsync(page, frame, node);
         Assert.InRange(mismatch, 0, 2);
     }
@@ -462,6 +510,7 @@ public class TileWidgetTests
         window.addEventListener('resize', () => {
             const transitions = document.getAnimations().filter(animation => animation instanceof CSSTransition);
             transitions.forEach(transition => transition.playbackRate = 0);
+            window.__heldTransitions = (window.__heldTransitions ?? 0) + transitions.length;
             const release = () => {
                 const frame = [...document.querySelectorAll('[data-testid="canvas-scale-frame"]')].pop();
                 const node = frame?.querySelector('.canvas-node');

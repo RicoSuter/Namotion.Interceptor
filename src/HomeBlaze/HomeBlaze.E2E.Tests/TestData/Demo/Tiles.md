@@ -51,7 +51,13 @@ This page is changed by the tile widget tests.
 :: HomeBlaze.Components.Switch#blockedtile Kind=Tile Path=tilemotor/IsPowered Label="Blocked tile" On=tilemotor/PowerOff Off=tilemotor/PowerOn
 ::
 
+:: HomeBlaze.Components.Switch#restarttile Kind=Tile Path=tilemotor/IsPowered Label="Restart tile" Map=powered On=tilemotor/PowerOn Off=tilemotor/RestartController
+::
+
 :: HomeBlaze.Components.OperationButton#nowheretile Kind=Tile Path=tilemotor/DoesNotExistEither
+::
+
+:: HomeBlaze.Components.OperationButton#emptytile Kind=Tile
 ::
 
 :: HomeBlaze.Components.GridLayout#squaregrid Rows=2 Columns=3 CellAspectRatio=1:1
