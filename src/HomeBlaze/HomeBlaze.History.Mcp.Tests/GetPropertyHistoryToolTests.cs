@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.History.Abstractions;
@@ -162,7 +163,7 @@ public class GetPropertyHistoryToolTests
 
         // Act
         var json = await InvokeAsync(
-            new { paths = new[] { "/Power" }, from = "2026-06-23", to = "2026-06-24", bucket = "day", time_zone = "Europe/Zurich", aggregation = "Count" },
+            new { paths = new[] { "/Power" }, from = "2026-06-23", to = "2026-06-24", bucket = "day", time_zone = "Europe/Zurich" },
             Configure);
 
         // Assert
@@ -171,34 +172,44 @@ public class GetPropertyHistoryToolTests
         Assert.Equal("2026-06-23T00:00:00+02:00", series.GetProperty("complete_from").GetString());
     }
 
+    private static readonly TimeZoneInfo Zurich = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
+
+    private static DateTimeOffset InZurich(int month, int day, int hour = 0)
+    {
+        var local = new DateTime(2026, month, day, hour, 0, 0, DateTimeKind.Unspecified);
+        return new DateTimeOffset(local, Zurich.GetUtcOffset(local));
+    }
+
+    private static Task<JsonElement> InvokeZurichDaysAsync(
+        string from, string to, ImmutableArray<HistoryCoverage> coverage, params HistoryPoint[] points) =>
+        InvokeAsync(
+            new { paths = new[] { "/Power" }, from, to, bucket = "day", time_zone = "Europe/Zurich", aggregation = "Count" },
+            store =>
+            {
+                store.Coverage = coverage;
+                store.Points = [.. points];
+            });
+
+    private static string[] GetPartial(JsonElement json) =>
+        json.GetProperty("coverage").TryGetProperty("partial", out var partial)
+            ? partial.EnumerateArray().Select(entry => entry.GetString()!).ToArray()
+            : [];
+
     [Fact]
     public async Task WhenDayBucketsArePartlyCovered_ThenCoverageListsThemAndTheirCountIsPresent()
     {
-        // Arrange - Zurich days 06-22, 06-23 and 06-24 (the query ends at noon); a restart gap from 06-23 12:00 to 06-24
-        // 00:00 leaves 06-23 partly covered. 06-24 ends at the query end, which is not a gap.
-        void Configure(TestHistoryStore store)
-        {
-            store.Coverage =
-            [
-                new HistoryCoverage(new DateTimeOffset(2026, 6, 21, 22, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 23, 10, 0, 0, TimeSpan.Zero)),
-                new HistoryCoverage(new DateTimeOffset(2026, 6, 23, 22, 0, 0, TimeSpan.Zero), DateTimeOffset.MaxValue)
-            ];
-            store.Points =
-            [
-                new HistoryPoint(new DateTimeOffset(2026, 6, 21, 22, 0, 0, TimeSpan.Zero), 10, null),
-                new HistoryPoint(new DateTimeOffset(2026, 6, 22, 22, 0, 0, TimeSpan.Zero), 4, null),
-                new HistoryPoint(new DateTimeOffset(2026, 6, 23, 22, 0, 0, TimeSpan.Zero), 6, null)
-            ];
-        }
-
-        // Act
-        var json = await InvokeAsync(
-            new { paths = new[] { "/Power" }, from = "2026-06-22", to = "2026-06-24T12:00", bucket = "day", time_zone = "Europe/Zurich", aggregation = "Count" },
-            Configure);
+        // Act - a restart gap from 06-23 12:00 to 06-24 00:00 leaves 06-23 partly covered; 06-24 ends at the query end
+        // at noon, which is not a gap.
+        var json = await InvokeZurichDaysAsync(
+            "2026-06-22",
+            "2026-06-24T12:00",
+            [new HistoryCoverage(InZurich(6, 22), InZurich(6, 23, 12)), new HistoryCoverage(InZurich(6, 24), DateTimeOffset.MaxValue)],
+            new HistoryPoint(InZurich(6, 22), 10, null),
+            new HistoryPoint(InZurich(6, 23), 4, null),
+            new HistoryPoint(InZurich(6, 24), 6, null));
 
         // Assert
-        var partial = json.GetProperty("coverage").GetProperty("partial").EnumerateArray().Select(entry => entry.GetString());
-        Assert.Equal(["2026-06-23"], partial);
+        Assert.Equal(["2026-06-23"], GetPartial(json));
         var points = json.GetProperty("series").GetProperty("/Power").GetProperty("points").EnumerateArray()
             .Select(point => $"{point[0].GetString()}={point[1].GetDouble()}");
         Assert.Equal(["2026-06-22=10", "2026-06-23=4", "2026-06-24=6"], points);
@@ -207,30 +218,28 @@ public class GetPropertyHistoryToolTests
     [Fact]
     public async Task WhenCoverageEndsInsideTheNewestBucketBeforeTo_ThenThatBucketIsListedAsPartial()
     {
-        // Arrange - Zurich days 06-22, 06-23 and 06-24, the query ends at the end of 06-24; coverage ends at 06-24 12:00
-        // local, before the query end, so the newest bucket is partly covered although it ends at the query end.
-        void Configure(TestHistoryStore store)
-        {
-            store.Coverage =
-            [
-                new HistoryCoverage(new DateTimeOffset(2026, 6, 21, 22, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 24, 10, 0, 0, TimeSpan.Zero))
-            ];
-            store.Points =
-            [
-                new HistoryPoint(new DateTimeOffset(2026, 6, 21, 22, 0, 0, TimeSpan.Zero), 10, null),
-                new HistoryPoint(new DateTimeOffset(2026, 6, 22, 22, 0, 0, TimeSpan.Zero), 10, null),
-                new HistoryPoint(new DateTimeOffset(2026, 6, 23, 22, 0, 0, TimeSpan.Zero), 5, null)
-            ];
-        }
-
-        // Act
-        var json = await InvokeAsync(
-            new { paths = new[] { "/Power" }, from = "2026-06-22", to = "2026-06-25", bucket = "day", time_zone = "Europe/Zurich", aggregation = "Count" },
-            Configure);
+        // Act - the query ends at the end of 06-24, and coverage ends at 06-24 12:00, before the query end.
+        var json = await InvokeZurichDaysAsync(
+            "2026-06-22", "2026-06-25", [new HistoryCoverage(InZurich(6, 22), InZurich(6, 24, 12))]);
 
         // Assert
-        var partial = json.GetProperty("coverage").GetProperty("partial").EnumerateArray().Select(entry => entry.GetString());
-        Assert.Equal(["2026-06-24"], partial);
+        Assert.Equal(["2026-06-24"], GetPartial(json));
+    }
+
+    [Theory]
+    [InlineData("2026-03-28", "2026-03-31", 3, 28, 0, new string[0])]
+    [InlineData("2026-10-24", "2026-10-27", 10, 24, 0, new string[0])]
+    [InlineData("2026-03-28", "2026-03-31", 3, 29, 12, new[] { "2026-03-29" })]
+    [InlineData("2026-10-24", "2026-10-27", 10, 25, 12, new[] { "2026-10-25" })]
+    public async Task WhenADaylightSavingDayIsCovered_ThenItIsPartialOnlyWhenItsCoverageIsIncomplete(
+        string from, string to, int coverageMonth, int coverageDay, int coverageHour, string[] expected)
+    {
+        // Act - 2026-03-29 has 23 hours in Zurich and 2026-10-25 has 25.
+        var json = await InvokeZurichDaysAsync(
+            from, to, [new HistoryCoverage(InZurich(coverageMonth, coverageDay, coverageHour), DateTimeOffset.MaxValue)]);
+
+        // Assert
+        Assert.Equal(expected, GetPartial(json));
     }
 
     [Fact]
