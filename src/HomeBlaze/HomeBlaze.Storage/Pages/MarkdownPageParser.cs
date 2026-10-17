@@ -247,6 +247,15 @@ public sealed class MarkdownPage
 
     internal MarkdownBlock GetBlock(MarkdownBlockContainer container) => _containers[container];
 
+    /// <summary>
+    /// Gets the block of a node. A node inside an invalid block, which the parser does not read, is described as a block
+    /// at a place that allows no block, with an index of -1.
+    /// </summary>
+    internal MarkdownBlock DescribeBlock(MarkdownBlockContainer container) =>
+        _containers.TryGetValue(container, out var block)
+            ? block
+            : MarkdownPageParser.CreateBlock(container, Source, allowsBlocks: false, hasOwner: false);
+
     internal void Register(MarkdownBlockContainer container, MarkdownBlock block)
     {
         _containers[container] = block;
@@ -283,6 +292,12 @@ public static class MarkdownPageParser
         builder.Extensions.Add(new MarkdownBlockContainerExtension());
         return builder.Build();
     }
+
+    /// <summary>Finds the end of the line at <paramref name="position"/>, before its line ending, for the redaction of a page.</summary>
+    internal static int GetLineEnd(string source, int position) => FindLineEnd(source, position);
+
+    /// <summary>Gets the position after the last character of a code block, also of one that is never closed.</summary>
+    internal static int GetCodeBlockEnd(string source, CodeBlock block) => FindCodeBlockEnd(source, block);
 
     private static MarkdownSpan[] FindCodeSpans(string source, MarkdownDocument document)
     {
@@ -336,14 +351,12 @@ public static class MarkdownPageParser
     /// <summary>Gets the position after the last character of the line at <paramref name="position"/>, before its line ending.</summary>
     private static int FindLineEnd(string source, int position)
     {
-        var lineEnd = source.IndexOf('\n', position);
-        if (lineEnd < 0)
-        {
-            return source.Length;
-        }
-
-        return lineEnd > position && source[lineEnd - 1] == '\r' ? lineEnd - 1 : lineEnd;
+        // Markdig also ends a line with a carriage return alone.
+        var lineEnd = source.IndexOfAny(LineEndCharacters, position);
+        return lineEnd < 0 ? source.Length : lineEnd;
     }
+
+    private static readonly char[] LineEndCharacters = ['\r', '\n'];
 
     private static void Visit(
         ContainerBlock container, List<MarkdownBlock> siblings, MarkdownPage page, bool allowsBlocks, bool hasOwner)
@@ -369,21 +382,11 @@ public static class MarkdownPageParser
         }
     }
 
-    private static MarkdownBlock CreateBlock(
+    internal static MarkdownBlock CreateBlock(
         MarkdownBlockContainer container, string source, bool allowsBlocks, bool hasOwner)
     {
         var headStart = container.Span.Start;
-        var headEnd = source.IndexOf('\n', headStart);
-        if (headEnd < 0)
-        {
-            headEnd = source.Length;
-        }
-
-        if (headEnd > headStart && source[headEnd - 1] == '\r')
-        {
-            headEnd--;
-        }
-
+        var headEnd = FindLineEnd(source, headStart);
         var headSpan = new MarkdownSpan(headStart, headEnd - headStart);
         var kind = MarkdownBlockKind.Invalid;
         MarkdownBlockHead? head = null;

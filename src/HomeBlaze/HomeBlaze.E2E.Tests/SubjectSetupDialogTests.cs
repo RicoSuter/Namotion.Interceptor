@@ -924,6 +924,11 @@ public class SubjectSetupDialogTests
         {
             // Arrange
             var root = Assert.IsType<FluentStorageContainer>(_fixture.ServerServices.GetRequiredService<RootManager>().Root);
+
+            // The storage may still be loading its folders when this test runs first.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => root.Children.TryGetValue("Demo", out var demo) && demo is VirtualFolder { Children: var children } && children.ContainsKey("Motor"),
+                TimeSpan.FromSeconds(30));
             var motor = Assert.IsType<Motor>(Assert.IsType<VirtualFolder>(root.Children["Demo"]).Children["Motor"]);
 
             var page = await _fixture.CreatePageAsync();

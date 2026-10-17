@@ -16,6 +16,7 @@ namespace HomeBlaze.Components;
 [Description("References another subject by path and renders its widget")]
 [DisplayName("Widget")]
 [SubjectIcon("Widgets")]
+[PageLayout]
 [InterceptorSubject]
 public partial class Widget : ITitleProvider, IConfigurable
 {

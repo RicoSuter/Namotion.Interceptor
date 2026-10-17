@@ -6,7 +6,9 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -37,6 +39,7 @@ public partial class FluentStorageContainer :
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
     private readonly FileSubjectFactory _subjectFactory;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly ILogger<FluentStorageContainer>? _logger;
 
@@ -142,6 +145,7 @@ public partial class FluentStorageContainer :
         ILogger<FluentStorageContainer>? logger = null)
     {
         _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, serviceProvider, logger);
+        _serviceProvider = serviceProvider;
         _serializer = serializer;
         _logger = logger;
 
@@ -491,7 +495,8 @@ public partial class FluentStorageContainer :
     /// IConfigurationWriter - Saves the file of the subject, or of the subject it is nested in through
     /// [Configuration] properties.
     /// </summary>
-    /// <returns>False when no file in this storage contains the subject, or the storage is not connected.</returns>
+    /// <returns>False when no file in this storage contains the subject as configuration, such as a subject of a
+    /// document or of a file that is no configurable subject, or the storage is not connected.</returns>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = _connection;
@@ -506,7 +511,8 @@ public partial class FluentStorageContainer :
                 // Only the subject of a file has an entry. A subject nested in its configuration is written with it.
                 StorageEntry? entry = null;
                 var fileSubject = subject.TryGetConfigurationOwner(candidate => connection.Index.TryGetEntry(candidate, out entry));
-                if (fileSubject is null || entry is null)
+                // Only configuration is written here. A document, such as a Markdown page, writes itself, under its own rules.
+                if (fileSubject is not IConfigurable || fileSubject is IStorageFile || entry is null)
                     return;
 
                 await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);
@@ -743,6 +749,113 @@ public partial class FluentStorageContainer :
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+
+    /// <summary>
+    /// Creates a Markdown file in the root folder of this storage and adds it as a page.
+    /// </summary>
+    /// <exception cref="ArgumentException">The name is not a plain file name ending in .md, the file exists, or the
+    /// content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes or has blocks or other
+    /// <see cref="MarkdownFile.ActiveContent"/>.</exception>
+    /// <exception cref="InvalidOperationException">The storage is not connected.</exception>
+    [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
+    public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
+        => CreateMarkdownFileAsync(folderPath: string.Empty, name, content, cancellationToken);
+
+    /// <summary>
+    /// Creates a Markdown file in the folder at <paramref name="folderPath"/>, relative to the storage root, and adds it as a page.
+    /// </summary>
+    internal async Task CreateMarkdownFileAsync(string folderPath, string name, string content, CancellationToken cancellationToken)
+    {
+        MarkdownWriteRules.ValidateFileName(name, nameof(name));
+
+        var bytes = MarkdownWriteRules.GetContentBytes(content, nameof(content));
+        MarkdownWriteRules.EnsureActiveContentUnchanged(string.Empty, content, nameof(content), GetPageLayoutRules());
+        var relativePath = StoragePath.Normalize(string.IsNullOrEmpty(folderPath) ? name : $"{folderPath.TrimEnd('/')}/{name}");
+        if (StoragePathFilter.IsIgnored(relativePath))
+            throw new ArgumentException($"A file in '{folderPath}' would not be loaded: the folder is hidden or temporary.", nameof(folderPath));
+
+        var connection = Connection;
+        await RunOperationAsync(connection, async token =>
+        {
+            // On the worker, so the checks, the write and the placement are one step for every other change of the storage.
+            var subject = _subjectFactory.CreateFile(this, StoragePath.ToFullPath(relativePath));
+
+            // A pass only needs to look at the path when the storage may hold a file that the index does not know.
+            var isPassNeeded = false;
+            try
+            {
+                if (subject is not MarkdownFile file)
+                    throw new InvalidOperationException($"'{name}' is not loaded as a Markdown page by this storage.");
+
+                if (connection.Index.TryGet(relativePath, out _))
+                    throw new ArgumentException($"'{name}' already exists in this folder.", nameof(name));
+
+                // Before the storage is asked, as for AddSubjectAsync: on disk, asking about a path creates its folder.
+                if (!connection.Reconciler.IsKeyFree(relativePath, subject))
+                    throw new ArgumentException(GetKeyTakenMessage(connection, relativePath, name), nameof(name));
+
+                if (await connection.Client.ExistsAsync(relativePath, token))
+                {
+                    isPassNeeded = true;
+                    throw new ArgumentException($"'{name}' already exists in this folder.", nameof(name));
+                }
+
+                var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
+                isPassNeeded = true;
+                await WriteAndRecordAsync(connection, entry, bytes, token);
+
+                // Not cancelled from here on: the file is written, and a cancel must not report that it was not.
+                var hasVersion = entry.Version != default;
+                file.FileSize = hasVersion ? entry.Version.Size : bytes.Length;
+                file.LastModified = (hasVersion ? entry.Version.Modified?.UtcDateTime : null) ?? DateTime.UtcNow;
+                await file.OnFileChangedAsync(CancellationToken.None);
+
+                connection.Index.EnsureFolders(relativePath);
+                connection.Index.Set(entry);
+                connection.Reconciler.Apply();
+            }
+            catch
+            {
+                // Not placed, so nothing else would ever detach it. A file that was written is loaded by the next pass.
+                if (!connection.Index.TryGetEntry(subject, out _))
+                {
+                    _subjectFactory.Release(subject);
+                    if (isPassNeeded)
+                    {
+                        connection.NotifyChanged(relativePath);
+                    }
+                }
+
+                throw;
+            }
+
+            _logger?.LogInformation("Created Markdown file: {Path}", relativePath);
+        }, cancellationToken);
+    }
+
+    // The rules of the permission to edit page layout when the caller has it. A new page has no names and no place
+    // yet, so a reference path must be absolute.
+    private PageLayoutRules? GetPageLayoutRules()
+    {
+        if (!MarkdownPageLayoutPermission.IsGranted)
+            return null;
+
+        var parser = _serviceProvider.GetRequiredService<MarkdownContentParser>();
+        return new PageLayoutRules(parser.FindType, path => path.StartsWith('/') && parser.ResolvesToSubject(path, this), parser.FindLayoutError);
+    }
+
+    private static string GetKeyTakenMessage(StorageConnection connection, string relativePath, string name)
+    {
+        for (var parent = StoragePath.GetParent(relativePath); parent.Length > 0; parent = StoragePath.GetParent(parent))
+        {
+            if (connection.Index.TryGet(parent, out var folder) && !folder.IsFolder)
+            {
+                return $"'{name}' cannot be created: '{parent}' is a file and not a folder.";
+            }
+        }
+
+        return $"'{name}' cannot be created: another subject in this folder, or the folder itself, already has its name in the tree.";
+    }
 
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the index.

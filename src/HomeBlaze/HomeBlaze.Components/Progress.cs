@@ -13,6 +13,7 @@ namespace HomeBlaze.Components;
 [Description("Shows a number as a bar between a minimum and a maximum")]
 [DisplayName("Progress")]
 [SubjectIcon("LinearScale")]
+[PageLayout]
 [InterceptorSubject]
 public partial class Progress : IConfigurable, ITitleProvider
 {

@@ -12,6 +12,7 @@ namespace HomeBlaze.History.Blazor;
 [Description("Shows the recorded history of numbers as lines and of states as bands")]
 [DisplayName("History chart")]
 [SubjectIcon("ShowChart")]
+[PageLayout]
 [InterceptorSubject]
 public partial class HistoryChart : IConfigurable, ITitleProvider
 {

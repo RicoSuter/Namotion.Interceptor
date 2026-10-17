@@ -1,6 +1,8 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Parent;
@@ -63,6 +65,41 @@ public static class SubjectRegistryExtensions
     {
         return property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
     }
+
+    /// <summary>
+    /// Gets whether a page expression may show the value of the property: an intercepted (partial) property, a derived
+    /// property or a property with <see cref="StateMetadata"/> (marked with <see cref="StateAttribute"/>, also through an
+    /// interface), that is no secret configuration property and is not marked with
+    /// <see cref="ExcludeFromExpressionsAttribute"/>.
+    /// </summary>
+    /// <remarks>
+    /// A plain public property without state metadata is registered as well, but it is no tracked value of the subject
+    /// and can hold internal data, such as the text of an answer while an agent writes it, so it is not shown.
+    /// </remarks>
+    public static bool IsDisplayable(this RegisteredSubjectProperty property)
+    {
+        if (property.GetConfigurationMetadata()?.IsSecret == true)
+        {
+            return false;
+        }
+
+        var isDerived = false;
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            if (attribute is ExcludeFromExpressionsAttribute)
+            {
+                return false;
+            }
+
+            isDerived |= attribute is DerivedAttribute;
+        }
+
+        return isDerived || property.Reference.Metadata.IsIntercepted || property.GetStateMetadata() is not null;
+    }
+
+    /// <summary>Gets the property when it is <see cref="IsDisplayable"/>, else null.</summary>
+    internal static RegisteredSubjectProperty? AsDisplayable(this RegisteredSubjectProperty? property) =>
+        property is not null && property.IsDisplayable() ? property : null;
 
     /// <summary>
     /// Gets the <see cref="ConfigurationMetadata"/> for a property, or null if not present.

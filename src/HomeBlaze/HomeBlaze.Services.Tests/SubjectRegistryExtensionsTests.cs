@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Reflection;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Abstractions.Sensors;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -300,6 +302,40 @@ public class SubjectRegistryExtensionsTests
     }
 
     [Fact]
+    public void WhenAnInterfaceDefaultStatePropertyIsDerived_ThenItIsDisplayableAndFollowsItsSource()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DoorSensorTestSubject(context);
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(IDoorSensor.IsClosed))!;
+
+        // Act
+        subject.State = DoorState.Closed;
+
+        // Assert
+        Assert.True(property.IsDisplayable());
+        Assert.Equal(true, property.GetValue());
+    }
+
+    [Fact]
+    public void WhenAnAbstractionHasADefaultStateProperty_ThenItIsDerived()
+    {
+        // Arrange
+        var interfaces = typeof(IServerSubject).Assembly.GetTypes().Where(type => type.IsInterface);
+
+        // Act
+        var notDerived = interfaces
+            .SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            .Where(property => property.GetMethod is { IsAbstract: false } &&
+                property.IsDefined(typeof(StateAttribute), inherit: false) &&
+                !property.IsDefined(typeof(DerivedAttribute), inherit: false))
+            .Select(property => property.DeclaringType!.Name + "." + property.Name);
+
+        // Assert
+        Assert.Empty(notDerived);
+    }
+
+    [Fact]
     public void DynamicSubject_WithProgrammaticAttributes_WorksIdentically()
     {
         // Arrange
@@ -455,6 +491,12 @@ public partial class ExtensionsTestSubject
 
     [Configuration]
     public partial string? Config { get; set; }
+}
+
+[InterceptorSubject]
+public partial class DoorSensorTestSubject : IDoorSensor
+{
+    public partial DoorState? State { get; set; }
 }
 
 [InterceptorSubject]

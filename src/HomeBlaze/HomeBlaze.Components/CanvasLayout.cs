@@ -12,6 +12,7 @@ namespace HomeBlaze.Components;
 [Description("Free-form canvas layout with draggable widgets")]
 [DisplayName("Canvas layout")]
 [SubjectIcon("Dashboard")]
+[PageLayout]
 [InterceptorSubject]
 public partial class CanvasLayout : IConfigurable, ITitleProvider
 {

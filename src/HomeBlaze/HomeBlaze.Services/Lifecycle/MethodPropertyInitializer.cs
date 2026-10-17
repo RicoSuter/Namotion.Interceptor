@@ -15,14 +15,9 @@ namespace HomeBlaze.Services.Lifecycle;
 /// </summary>
 public class MethodPropertyInitializer : ILifecycleHandler
 {
-    [ThreadStatic]
-    private static NullabilityInfoContext? _nullabilityContext;
-
-    private static NullabilityInfoContext NullabilityContext => _nullabilityContext ??= new();
-
     // Per subject type, as the class method that implements an interface method decides. Weak, so that the types of
     // an unloaded plugin are not kept alive.
-    private static readonly ConditionalWeakTable<Type, ConcurrentDictionary<MethodInfo, string?>> CategoriesBySubjectType = new();
+    private static readonly ConditionalWeakTable<Type, SubjectTypeMethods> MethodsBySubjectType = new();
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
@@ -33,11 +28,12 @@ public class MethodPropertyInitializer : ILifecycleHandler
 
             var type = change.Subject.GetType();
             var discoveredMethods = new HashSet<string>();
+            var typeMethods = MethodsBySubjectType.GetValue(type, static type => new SubjectTypeMethods(type));
 
             // Discover methods from the concrete type
             foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
             {
-                TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods);
+                TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods, typeMethods);
             }
 
             // Discover methods from interfaces (for default interface implementations or attribute on interface)
@@ -45,7 +41,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             {
                 foreach (var method in interfaceType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
                 {
-                    TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods);
+                    TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods, typeMethods);
                 }
             }
         }
@@ -55,7 +51,8 @@ public class MethodPropertyInitializer : ILifecycleHandler
         Namotion.Interceptor.Registry.Abstractions.RegisteredSubject registeredSubject,
         Namotion.Interceptor.IInterceptorSubject subject,
         MethodInfo method,
-        HashSet<string> discoveredMethods)
+        HashSet<string> discoveredMethods,
+        SubjectTypeMethods typeMethods)
     {
         // Skip if already discovered — deduplicates by name (overloaded methods register only once)
         if (discoveredMethods.Contains(method.Name))
@@ -93,41 +90,22 @@ public class MethodPropertyInitializer : ILifecycleHandler
             return;
         }
 
-        var parameters = method.GetParameters()
-            .Select(parameter =>
-            {
-                var operationParameterAttribute = parameter.GetCustomAttribute<OperationParameterAttribute>();
-                var nullabilityInfo = NullabilityContext.Create(parameter);
-                var isNullable = Nullable.GetUnderlyingType(parameter.ParameterType) != null
-                    || nullabilityInfo.WriteState == NullabilityState.Nullable
-                    || parameter is { HasDefaultValue: true, DefaultValue: null };
-                
-                return new MethodParameter
-                {
-                    Name = parameter.Name ?? $"arg{parameter.Position}",
-                    Type = parameter.ParameterType,
-                    Unit = operationParameterAttribute?.Unit,
-                    IsFromServices = parameter.GetCustomAttribute<FromServicesAttribute>() != null,
-                    IsRuntimeProvided = parameter.ParameterType == typeof(CancellationToken),
-                    IsNullable = isNullable,
-                };
-            })
-            .ToArray();
-
         var resultType = GetUnwrappedResultType(method.ReturnType);
-        var requiresConfirmation = attribute is OperationAttribute { RequiresConfirmation: true };
+        var traits = typeMethods.GetTraits(method);
 
         var metadata = new MethodMetadata(subject, method)
         {
-            Kind = kind,
+            // A query that implements or overrides an operation requiring confirmation runs as that operation, so it
+            // cannot be invoked as a query either.
+            Kind = traits.RequiresConfirmation ? MethodKind.Operation : kind,
             PropertyName = propertyName,
             Title = attribute.Title ?? propertyName,
             Description = attribute.Description,
             Icon = attribute.Icon,
             Position = attribute.Position,
-            Category = GetCategory(subject.GetType(), method),
-            RequiresConfirmation = requiresConfirmation,
-            Parameters = parameters,
+            Category = traits.Category,
+            RequiresConfirmation = traits.RequiresConfirmation,
+            Parameters = traits.Parameters,
             ResultType = resultType,
         };
 
@@ -137,54 +115,6 @@ public class MethodPropertyInitializer : ILifecycleHandler
             _ => metadata,
             null,
             [.. method.GetCustomAttributes<Attribute>()]);
-    }
-
-    private static string? GetCategory(Type subjectType, MethodInfo method)
-    {
-        return CategoriesBySubjectType
-            .GetValue(subjectType, static _ => new ConcurrentDictionary<MethodInfo, string?>())
-            .GetOrAdd(method, static (method, subjectType) => FindCategory(subjectType, method), subjectType);
-    }
-
-    private static string? FindCategory(Type subjectType, MethodInfo method)
-    {
-        var parameterTypes = Array.ConvertAll(method.GetParameters(), static parameter => parameter.ParameterType);
-        var isInterfaceMethod = method.DeclaringType is { IsInterface: true };
-
-        // An explicit implementation has another name and is not found, so the interface method decides for it.
-        var classMethod = isInterfaceMethod
-            ? FindMethod(subjectType, method.Name, parameterTypes)
-            : method;
-
-        // An attribute decides also when its name is empty, which is how a class method opts out.
-        if (classMethod?.GetCustomAttribute<CategoryAttribute>() is { } classCategory)
-        {
-            return classCategory.GetNormalizedCategory();
-        }
-
-        // Before the other interfaces, of which one may declare the same method with another category.
-        if (isInterfaceMethod && method.GetCustomAttribute<CategoryAttribute>() is { } ownCategory)
-        {
-            return ownCategory.GetNormalizedCategory();
-        }
-
-        foreach (var interfaceType in subjectType.GetInterfaces())
-        {
-            if (FindMethod(interfaceType, method.Name, parameterTypes)?.GetCustomAttribute<CategoryAttribute>() is { } interfaceCategory)
-            {
-                return interfaceCategory.GetNormalizedCategory();
-            }
-        }
-
-        return null;
-    }
-
-    // Not Type.GetMethod, whose binder also accepts parameter types that the given ones convert to.
-    private static MethodInfo? FindMethod(Type type, string name, Type[] parameterTypes)
-    {
-        return type.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(candidate =>
-            candidate.Name == name &&
-            candidate.GetParameters().Select(static parameter => parameter.ParameterType).SequenceEqual(parameterTypes));
     }
 
     private static Type? GetUnwrappedResultType(Type returnType)
@@ -199,5 +129,180 @@ public class MethodPropertyInitializer : ILifecycleHandler
             return returnType.GetGenericArguments()[0];
 
         return returnType;
+    }
+
+    /// <summary>The category, the confirmation and the parameters of a discovered method of one subject type.</summary>
+    private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation, MethodParameter[] Parameters);
+
+    /// <summary>The interface maps of a subject type and the traits of its methods, computed once per method.</summary>
+    private sealed class SubjectTypeMethods
+    {
+        private readonly InterfaceMapping[] _interfaceMaps;
+        private readonly ConcurrentDictionary<MethodInfo, MethodTraits> _traits = new();
+
+        public SubjectTypeMethods(Type subjectType)
+        {
+            _interfaceMaps = Array.ConvertAll(subjectType.GetInterfaces(), subjectType.GetInterfaceMap);
+        }
+
+        public MethodTraits GetTraits(MethodInfo method) =>
+            _traits.GetOrAdd(method, static (method, self) => self.FindTraits(method), this);
+
+        private MethodTraits FindTraits(MethodInfo method)
+        {
+            var isInterfaceMethod = method.DeclaringType is { IsInterface: true };
+
+            // The method that runs: the method itself, or what implements the interface method, which may be the
+            // interface method itself, an explicit implementation or a class method.
+            var implementation = isInterfaceMethod ? FindImplementation(method) ?? method : method;
+            var implementedMethods = GetImplementedInterfaceMethods(implementation);
+
+            // An explicit implementation is not a public class method, so the interface method decides for it.
+            var classMethod = implementation is { IsPublic: true, DeclaringType.IsInterface: false } ? implementation : null;
+
+            return new MethodTraits(
+                FindCategory(method, isInterfaceMethod, classMethod, implementedMethods),
+                RequiresConfirmation(method) ||
+                (classMethod is not null && AnyOverriddenMethodRequiresConfirmation(classMethod)) ||
+                implementedMethods.Exists(RequiresConfirmation),
+                CreateParameters(method));
+        }
+
+        private static MethodParameter[] CreateParameters(MethodInfo method)
+        {
+            var parameters = method.GetParameters();
+            if (parameters.Length == 0)
+            {
+                return [];
+            }
+
+            // Owned by this computation rather than shared: the context caches the members it reads, which would keep
+            // the types of an unloaded plugin alive, and it is not thread-safe.
+            var nullabilityContext = new NullabilityInfoContext();
+            return Array.ConvertAll(parameters, parameter =>
+            {
+                var operationParameterAttribute = parameter.GetCustomAttribute<OperationParameterAttribute>();
+                var isNullable = Nullable.GetUnderlyingType(parameter.ParameterType) != null
+                    || nullabilityContext.Create(parameter).WriteState == NullabilityState.Nullable
+                    || parameter is { HasDefaultValue: true, DefaultValue: null };
+
+                return new MethodParameter
+                {
+                    Name = parameter.Name ?? $"arg{parameter.Position}",
+                    Type = parameter.ParameterType,
+                    Unit = operationParameterAttribute?.Unit,
+                    IsFromServices = parameter.GetCustomAttribute<FromServicesAttribute>() != null,
+                    IsRuntimeProvided = parameter.ParameterType == typeof(CancellationToken),
+                    IsNullable = isNullable,
+                };
+            });
+        }
+
+        private static string? FindCategory(MethodInfo method, bool isInterfaceMethod, MethodInfo? classMethod, List<MethodInfo> implementedMethods)
+        {
+            // An attribute decides also when its name is empty, which is how a class method opts out.
+            if (classMethod?.GetCustomAttribute<CategoryAttribute>() is { } classCategory)
+            {
+                return classCategory.GetNormalizedCategory();
+            }
+
+            // Before the other interfaces, of which one may declare the same method with another category.
+            if (isInterfaceMethod && method.GetCustomAttribute<CategoryAttribute>() is { } ownCategory)
+            {
+                return ownCategory.GetNormalizedCategory();
+            }
+
+            foreach (var implementedMethod in implementedMethods)
+            {
+                if (implementedMethod.GetCustomAttribute<CategoryAttribute>() is { } interfaceCategory)
+                {
+                    return interfaceCategory.GetNormalizedCategory();
+                }
+            }
+
+            return null;
+        }
+
+        private static bool RequiresConfirmation(MethodInfo method) =>
+            method.GetCustomAttribute<OperationAttribute>() is { RequiresConfirmation: true };
+
+        // Every level, not only the base definition: an intermediate override may add the requirement, and an own
+        // attribute on a further override hides the inherited one.
+        private static bool AnyOverriddenMethodRequiresConfirmation(MethodInfo method)
+        {
+            var baseDefinition = method.GetBaseDefinition();
+            var current = method;
+            while (!IsSameMethod(current, baseDefinition) && current.DeclaringType?.BaseType is { } baseType)
+            {
+                var overridden = FindOverriddenMethod(baseType, current, baseDefinition);
+                if (overridden is null)
+                {
+                    return RequiresConfirmation(baseDefinition);
+                }
+
+                if (RequiresConfirmation(overridden))
+                {
+                    return true;
+                }
+
+                current = overridden;
+            }
+
+            return false;
+        }
+
+        // By the slot rather than by the parameter types, which differ between the levels of a generic method because
+        // each declares its own type parameters. A new-slot method has another base definition, and reflection lists
+        // only the most derived override of a slot, so at most one candidate matches.
+        private static MethodInfo? FindOverriddenMethod(Type baseType, MethodInfo method, MethodInfo baseDefinition)
+        {
+            foreach (var candidate in baseType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                if (candidate.Name == method.Name &&
+                    candidate.IsVirtual &&
+                    IsSameMethod(candidate.GetBaseDefinition(), baseDefinition))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private MethodInfo? FindImplementation(MethodInfo interfaceMethod)
+        {
+            foreach (var map in _interfaceMaps)
+            {
+                if (map.InterfaceType == interfaceMethod.DeclaringType)
+                {
+                    var index = Array.FindIndex(map.InterfaceMethods, candidate => IsSameMethod(candidate, interfaceMethod));
+                    return index >= 0 ? map.TargetMethods[index] : null;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>The interface methods that <paramref name="implementation"/> implements, in the order of the interfaces.</summary>
+        private List<MethodInfo> GetImplementedInterfaceMethods(MethodInfo implementation)
+        {
+            var implementedMethods = new List<MethodInfo>();
+            foreach (var map in _interfaceMaps)
+            {
+                for (var index = 0; index < map.TargetMethods.Length; index++)
+                {
+                    if (IsSameMethod(map.TargetMethods[index], implementation))
+                    {
+                        implementedMethods.Add(map.InterfaceMethods[index]);
+                    }
+                }
+            }
+
+            return implementedMethods;
+        }
+
+        // Not Equals, which also compares the type the method was read from.
+        private static bool IsSameMethod(MethodInfo left, MethodInfo right) =>
+            left.MethodHandle == right.MethodHandle && left.DeclaringType == right.DeclaringType;
     }
 }

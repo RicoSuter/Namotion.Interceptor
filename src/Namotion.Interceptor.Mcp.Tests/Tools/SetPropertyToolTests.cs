@@ -38,6 +38,36 @@ public class SetPropertyToolTests
     }
 
     [Fact]
+    public async Task WhenTheWriteFilterRefusesAProperty_ThenItsErrorIsReturnedAndTheValueIsUnchanged()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Test", Temperature = 21.5m };
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            IsReadOnly = false,
+            PropertyWriteFilter = property => property.Name == "Temperature" ? "It is protected." : null
+        };
+        var tool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "set_property");
+
+        // Act
+        var refused = JsonSerializer.SerializeToElement(await tool.Handler(
+            JsonSerializer.SerializeToElement(new { path = "Temperature", value = 25.0 }), CancellationToken.None));
+        var allowed = JsonSerializer.SerializeToElement(await tool.Handler(
+            JsonSerializer.SerializeToElement(new { path = "Name", value = "Changed" }), CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Property is not writable: Temperature. It is protected.", refused.GetProperty("error").GetString());
+        Assert.Equal(21.5m, room.Temperature);
+        Assert.True(allowed.GetProperty("success").GetBoolean());
+        Assert.Equal("Changed", room.Name);
+    }
+
+    [Fact]
     public async Task WhenReadOnly_ThenSetIsBlocked()
     {
         // Arrange

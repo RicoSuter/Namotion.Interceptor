@@ -21,29 +21,23 @@ public sealed partial class MarkdownContentParser
     /// names of the slot blocks, how many blocks a slot takes, what a slot block may carry and whether the
     /// type has a slot for the loose content.
     /// </summary>
+    /// <param name="type">The type of the block subject.</param>
+    /// <param name="slots">The slots of the type.</param>
+    /// <param name="owner">The block.</param>
+    /// <param name="ownsName">Gets whether a block is the first one in the page with its name.</param>
+    /// <param name="content">The sorted content.</param>
+    /// <param name="error">The error when the content does not fit.</param>
     private static bool TryArrangeContent(
         Type type,
         SlotMap slots,
         BlockMarkdownSegment owner,
-        ParseState state,
+        Func<MarkdownBlock, bool> ownsName,
         out BlockContent content,
         [NotNullWhen(false)] out BlockError? error)
     {
         content = default;
 
-        var defaultContent = new List<MarkdownSegment>();
-        var slotBlocks = new List<BlockMarkdownSegment>();
-        foreach (var segment in owner.Content)
-        {
-            if (segment is BlockMarkdownSegment { Block.Kind: MarkdownBlockKind.Slot } slotBlock)
-            {
-                slotBlocks.Add(slotBlock);
-            }
-            else
-            {
-                defaultContent.Add(segment);
-            }
-        }
+        var (defaultContent, slotBlocks) = MarkdownSubjectKeys.SplitContent(owner.Content);
 
         var slotGroups = new List<SlotBlockGroup>();
         var defaultIsFilledByBlock = false;
@@ -68,7 +62,7 @@ public sealed partial class MarkdownContentParser
             foreach (var block in blocks.Select(slotBlock => slotBlock.Block))
             {
                 var head = block.Head!;
-                if (head.Id is not null && !state.OwnsName(block))
+                if (head.Id is not null && !ownsName(block))
                 {
                     error = new BlockError(block.Line, FormatUsedTwice(head.Id));
                     return false;
@@ -318,6 +312,8 @@ public sealed partial class MarkdownContentParser
     // A block with a name takes the value that the block of that name created before, wherever it is in the slot
     // now. A block without a name takes the next value that no name created, so those are reused by position
     // among themselves, like widgets without a name in the content.
+    // The rule is described once in MarkdownSubjectKeys.GetSlotValueKey, which the write rules use to tell whether a
+    // change keeps a value; both must change together.
     private IInterceptorSubject? FindExistingSlotValue(
         IReadOnlyList<IInterceptorSubject?> existingValues, string? name, ref int unnamedPosition)
     {

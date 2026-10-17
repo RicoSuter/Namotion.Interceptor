@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp;
@@ -24,9 +25,16 @@ public class McpServerConfiguration
     public IList<IMcpTypeProvider> TypeProviders { get; init; } = [];
 
     /// <summary>
-    /// Additional tools beyond the 5 core tools (e.g., list_methods, invoke_method).
+    /// Additional tools beyond the 5 core tools, for example tools that call methods of subjects.
     /// </summary>
     public IList<IMcpToolProvider> ToolProviders { get; init; } = [];
+
+    /// <summary>
+    /// Text appended to the description of a tool, keyed by tool name, separated by a space. Lets an application
+    /// describe its own conventions, for example which subjects hold its documentation, while keeping the generic
+    /// description. Names of tools that are not offered are ignored.
+    /// </summary>
+    public IDictionary<string, string> ToolDescriptionAdditions { get; init; } = new Dictionary<string, string>();
 
     /// <summary>
     /// Maximum subject tree traversal depth (default: 10).
@@ -51,7 +59,16 @@ public class McpServerConfiguration
     public Type[] ExcludeTypes { get; init; } = [];
 
     /// <summary>
-    /// When true, set_property is blocked and invoke_method only allows Query methods.
+    /// Decides whether set_property may write a property. Returns null to allow the write, or the reason it is refused,
+    /// which set_property returns to the client after the property path, in which case nothing is written.
+    /// Null (the default) allows every writable property. Not consulted when <see cref="IsReadOnly"/> is true.
+    /// Also decides whether get_property, browse and search report a property as writable. May be called
+    /// concurrently, so it must be thread-safe.
+    /// </summary>
+    public Func<RegisteredSubjectProperty, string?>? PropertyWriteFilter { get; init; }
+
+    /// <summary>
+    /// When true, set_property is blocked.
     /// </summary>
     public bool IsReadOnly { get; init; } = true;
 }

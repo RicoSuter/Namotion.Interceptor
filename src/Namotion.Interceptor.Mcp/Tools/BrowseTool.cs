@@ -48,7 +48,8 @@ internal class BrowseTool
                           "To find subjects by capability, use list_types then search with types instead. " +
                           "Use format=json for structured data, text (default) for overview.",
             InputSchema = Schema,
-            Handler = HandleBrowseAsync
+            Handler = HandleBrowseAsync,
+            Annotations = McpToolAnnotations.ReadOnly
         };
     }
 

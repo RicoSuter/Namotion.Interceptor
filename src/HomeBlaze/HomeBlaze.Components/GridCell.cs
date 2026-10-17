@@ -9,6 +9,7 @@ namespace HomeBlaze.Components;
 /// A cell in a grid layout containing a child subject.
 /// </summary>
 [ExcludeFromCreation]
+[PageLayout]
 [InterceptorSubject]
 public partial class GridCell : IConfigurable
 {
