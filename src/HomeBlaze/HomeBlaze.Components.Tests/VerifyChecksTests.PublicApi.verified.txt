@@ -148,7 +148,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Minimum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Boolean | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Number | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Enum | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.OtherValue | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Operation | HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Value)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Property | HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Step { get; set; }
@@ -250,7 +250,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Minimum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Number)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
+                typeof(System.Numerics.INumber<!0>)})]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Components.GaugeSize Size { get; set; }
@@ -378,7 +379,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Operation)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Path { get; set; }
         public string? Title { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -408,7 +409,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Minimum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Number)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
+                typeof(System.Numerics.INumber<!0>)})]
         public string? Path { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
@@ -467,7 +469,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
         public string? Map { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(IsWritable=true, Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Enum)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(IsWritable=true, ValueTypes=new System.Type[] {
+                typeof(System.Enum)})]
         public string? Path { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
@@ -495,7 +498,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Minimum { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(IsWritable=true, Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Number)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(IsWritable=true, ValueTypes=new System.Type[] {
+                typeof(System.Numerics.INumber<!0>)})]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public double? Step { get; set; }
@@ -593,13 +597,14 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Operation)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Off { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Operation)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? On { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        [HomeBlaze.Abstractions.Attributes.SubjectPath(Kinds=HomeBlaze.Abstractions.Attributes.SubjectPathKinds.Boolean)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
+                typeof(bool)})]
         public string? Path { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }

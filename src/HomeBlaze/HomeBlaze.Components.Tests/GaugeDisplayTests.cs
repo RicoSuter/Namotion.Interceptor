@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Tests.Models;
@@ -242,7 +243,8 @@ public class GaugeDisplayTests
         // Assert
         Assert.Equal(GaugeSize.Medium, gauge.Size);
         Assert.Null(path.SubjectType);
-        Assert.Equal(SubjectPathKinds.Number, path.Kinds);
+        Assert.Equal(SubjectPathKind.Property, path.Kind);
+        Assert.Equal([typeof(INumber<>)], path.ValueTypes);
         Assert.False(path.IsWritable);
         Assert.Equal(typeof(ValueMap), map.SubjectType);
     }

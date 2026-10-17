@@ -1,6 +1,8 @@
+using System.Numerics;
 using System.Reflection;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Components.Inputs;
 using HomeBlaze.Components.Tests.Models;
 using HomeBlaze.Services.Lifecycle;
@@ -47,7 +49,7 @@ public class SubjectPathSelectionTests
         var property = GetProperty(card, nameof(Card.Title));
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(property, subjectType: null);
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, new SubjectPathAttribute());
 
         // Assert
         Assert.True(canSelect);
@@ -64,9 +66,9 @@ public class SubjectPathSelectionTests
         var collection = GetProperty(map, nameof(ValueMap.Cases));
 
         // Act
-        var canSelectReference = SubjectPathSelection.CanSelectProperty(reference, subjectType: null);
-        var canSelectEmptyReference = SubjectPathSelection.CanSelectProperty(emptyReference, subjectType: null);
-        var canSelectCollection = SubjectPathSelection.CanSelectProperty(collection, subjectType: null);
+        var canSelectReference = SubjectPathSelection.CanSelectProperty(reference, new SubjectPathAttribute());
+        var canSelectEmptyReference = SubjectPathSelection.CanSelectProperty(emptyReference, new SubjectPathAttribute());
+        var canSelectCollection = SubjectPathSelection.CanSelectProperty(collection, new SubjectPathAttribute());
 
         // Assert
         Assert.False(canSelectReference);
@@ -130,7 +132,7 @@ public class SubjectPathSelectionTests
         var property = GetProperty(card, nameof(Card.Content));
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(property, typeof(ValueMap));
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, new SubjectPathAttribute(typeof(ValueMap)));
 
         // Assert
         Assert.True(canSelect);
@@ -144,7 +146,7 @@ public class SubjectPathSelectionTests
         var property = GetProperty(card, nameof(Card.Content));
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(property, typeof(ValueMap));
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, new SubjectPathAttribute(typeof(ValueMap)));
 
         // Assert
         Assert.False(canSelect);
@@ -158,7 +160,7 @@ public class SubjectPathSelectionTests
         var property = GetProperty(card, nameof(Card.Content));
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(property, typeof(ValueMap));
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, new SubjectPathAttribute(typeof(ValueMap)));
 
         // Assert
         Assert.False(canSelect);
@@ -172,9 +174,9 @@ public class SubjectPathSelectionTests
         var property = GetProperty(card, nameof(Card.Content));
 
         // Act
-        var canSelectBefore = SubjectPathSelection.CanSelectProperty(property, typeof(ValueMap));
+        var canSelectBefore = SubjectPathSelection.CanSelectProperty(property, new SubjectPathAttribute(typeof(ValueMap)));
         card.Content = new ValueMap(_context);
-        var canSelectAfter = SubjectPathSelection.CanSelectProperty(property, typeof(ValueMap));
+        var canSelectAfter = SubjectPathSelection.CanSelectProperty(property, new SubjectPathAttribute(typeof(ValueMap)));
 
         // Assert
         Assert.False(canSelectBefore);
@@ -191,8 +193,8 @@ public class SubjectPathSelectionTests
         var value = GetProperty(card, nameof(Card.Title));
 
         // Act
-        var canSelectCollection = SubjectPathSelection.CanSelectProperty(collection, typeof(ValueMapCase));
-        var canSelectValue = SubjectPathSelection.CanSelectProperty(value, typeof(ValueMap));
+        var canSelectCollection = SubjectPathSelection.CanSelectProperty(collection, new SubjectPathAttribute(typeof(ValueMapCase)));
+        var canSelectValue = SubjectPathSelection.CanSelectProperty(value, new SubjectPathAttribute(typeof(ValueMap)));
 
         // Assert
         Assert.False(canSelectCollection);
@@ -200,15 +202,10 @@ public class SubjectPathSelectionTests
     }
 
     [Theory]
-    [InlineData(typeof(Progress), nameof(Progress.Path), null, SubjectPathKinds.Number)]
-    [InlineData(typeof(Indicator), nameof(Indicator.Path), null, SubjectPathKinds.Value)]
-    [InlineData(typeof(Indicator), nameof(Indicator.Map), typeof(ValueMap), SubjectPathKinds.Value)]
-    [InlineData(typeof(ValueTile), nameof(ValueTile.Path), null, SubjectPathKinds.Value)]
-    [InlineData(typeof(ValueTile), nameof(ValueTile.Map), typeof(ValueMap), SubjectPathKinds.Value)]
-    [InlineData(typeof(ValueRow), nameof(ValueRow.Path), null, SubjectPathKinds.Value)]
-    [InlineData(typeof(ValueRow), nameof(ValueRow.Map), typeof(ValueMap), SubjectPathKinds.Value)]
-    public void WhenAValueWidgetIsRegistered_ThenItsPathPropertiesCarryTheAttributeForTheEditor(
-        Type widgetType, string propertyName, Type? expectedSubjectType, SubjectPathKinds expectedKind)
+    [InlineData(typeof(Indicator), nameof(Indicator.Path))]
+    [InlineData(typeof(ValueTile), nameof(ValueTile.Path))]
+    [InlineData(typeof(ValueRow), nameof(ValueRow.Path))]
+    public void WhenAValueWidgetIsRegistered_ThenItsPathLeadsToAPropertyOfAnyValueType(Type widgetType, string propertyName)
     {
         // Arrange
         var widget = (IInterceptorSubject)Activator.CreateInstance(widgetType, _context)!;
@@ -218,81 +215,173 @@ public class SubjectPathSelectionTests
 
         // Assert
         Assert.NotNull(attribute);
-        Assert.Equal(expectedSubjectType, attribute.SubjectType);
-        Assert.Equal(expectedKind, attribute.Kinds);
+        Assert.Null(attribute.SubjectType);
+        Assert.Equal(SubjectPathKind.Property, attribute.Kind);
+        Assert.Null(attribute.ValueTypes);
+        Assert.False(attribute.IsWritable);
+    }
+
+    [Theory]
+    [InlineData(typeof(Indicator), nameof(Indicator.Map))]
+    [InlineData(typeof(ValueTile), nameof(ValueTile.Map))]
+    [InlineData(typeof(ValueRow), nameof(ValueRow.Map))]
+    public void WhenAValueWidgetIsRegistered_ThenItsMapLeadsToAValueMap(Type widgetType, string propertyName)
+    {
+        // Arrange
+        var widget = (IInterceptorSubject)Activator.CreateInstance(widgetType, _context)!;
+
+        // Act
+        var attribute = GetProperty(widget, propertyName).ReflectionAttributes.OfType<SubjectPathAttribute>().SingleOrDefault();
+
+        // Assert
+        Assert.NotNull(attribute);
+        Assert.Equal(typeof(ValueMap), attribute.SubjectType);
+    }
+
+    [Fact]
+    public void WhenAProgressIsRegistered_ThenItsPathLeadsToANumber()
+    {
+        // Act
+        var attribute = typeof(Progress).GetProperty(nameof(Progress.Path))!.GetCustomAttribute<SubjectPathAttribute>()!;
+
+        // Assert
+        Assert.Equal(SubjectPathKind.Property, attribute.Kind);
+        Assert.Equal([typeof(INumber<>)], attribute.ValueTypes);
         Assert.False(attribute.IsWritable);
     }
 
     [Fact]
-    public void WhenAPathAttributeSetsNoFilter_ThenItAcceptsEveryValueWithOrWithoutASetter()
+    public void WhenAPathAttributeSetsNoFilter_ThenItAcceptsAPropertyOfAnyValueTypeWithOrWithoutASetter()
     {
         // Act
         var attribute = new SubjectPathAttribute();
 
         // Assert
-        Assert.Equal(SubjectPathKinds.Value, attribute.Kinds);
+        Assert.Equal(SubjectPathKind.Property, attribute.Kind);
+        Assert.Null(attribute.ValueTypes);
         Assert.False(attribute.IsWritable);
-        Assert.Equal(
-            SubjectPathKinds.Boolean | SubjectPathKinds.Number | SubjectPathKinds.Enum | SubjectPathKinds.OtherValue,
-            SubjectPathKinds.Value);
-        Assert.False(SubjectPathKinds.Value.HasFlag(SubjectPathKinds.Operation));
     }
 
     [Theory]
-    [InlineData(nameof(PathTargetSubject.IsOn), SubjectPathKinds.Boolean)]
-    [InlineData(nameof(PathTargetSubject.IsOpen), SubjectPathKinds.Boolean)]
-    [InlineData(nameof(PathTargetSubject.Speed), SubjectPathKinds.Number)]
-    [InlineData(nameof(PathTargetSubject.Limit), SubjectPathKinds.Number)]
-    [InlineData(nameof(PathTargetSubject.Count), SubjectPathKinds.Number)]
-    [InlineData(nameof(PathTargetSubject.Temperature), SubjectPathKinds.Number)]
-    [InlineData(nameof(PathTargetSubject.Price), SubjectPathKinds.Number)]
-    [InlineData(nameof(PathTargetSubject.Mode), SubjectPathKinds.Enum)]
-    [InlineData(nameof(PathTargetSubject.FallbackMode), SubjectPathKinds.Enum)]
-    [InlineData(nameof(PathTargetSubject.Name), SubjectPathKinds.OtherValue)]
-    [InlineData(nameof(PathTargetSubject.LastSeen), SubjectPathKinds.OtherValue)]
-    [InlineData(nameof(PathTargetSubject.Stop), SubjectPathKinds.Operation)]
-    [InlineData("GetStatus", SubjectPathKinds.Operation)]
-    public void WhenAPropertyIsOfAKind_ThenItMatchesThatKindAndNoOther(string propertyName, SubjectPathKinds expectedKind)
+    [InlineData(typeof(Indicator), nameof(Indicator.Path),
+        "Count,DoubledSpeed,FallbackMode,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Temperature")]
+    [InlineData(typeof(ValueTile), nameof(ValueTile.Path),
+        "Count,DoubledSpeed,FallbackMode,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Temperature")]
+    [InlineData(typeof(ValueRow), nameof(ValueRow.Path),
+        "Count,DoubledSpeed,FallbackMode,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Temperature")]
+    [InlineData(typeof(Progress), nameof(Progress.Path), "Count,DoubledSpeed,Limit,Price,Reading,Speed,Temperature")]
+    [InlineData(typeof(Gauge), nameof(Gauge.Path), "Count,DoubledSpeed,Limit,Price,Reading,Speed,Temperature")]
+    [InlineData(typeof(Switch), nameof(Switch.Path), "IsOn,IsOpen")]
+    [InlineData(typeof(Switch), nameof(Switch.On), "GetStatus,Stop")]
+    [InlineData(typeof(Switch), nameof(Switch.Off), "GetStatus,Stop")]
+    [InlineData(typeof(Slider), nameof(Slider.Path), "Count,Limit,Price,Speed,Temperature")]
+    [InlineData(typeof(Select), nameof(Select.Path), "FallbackMode,Mode")]
+    [InlineData(typeof(OperationButton), nameof(OperationButton.Path), "GetStatus,Stop")]
+    [InlineData(typeof(Control), nameof(Control.Path),
+        "Count,DoubledSpeed,FallbackMode,GetStatus,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Stop,Temperature")]
+    public void WhenAWidgetPathIsPicked_ThenItOffersTheTargetsTheWidgetCanUse(
+        Type widgetType, string propertyName, string expectedPropertyNames)
     {
         // Arrange
-        var property = GetProperty(CreateTarget(), propertyName);
-        SubjectPathKinds[] singleKinds =
-        [
-            SubjectPathKinds.Boolean,
-            SubjectPathKinds.Number,
-            SubjectPathKinds.Enum,
-            SubjectPathKinds.OtherValue,
-            SubjectPathKinds.Operation
-        ];
+        var attribute = widgetType.GetProperty(propertyName)!.GetCustomAttribute<SubjectPathAttribute>()!;
+        var target = CreateTarget();
 
         // Act
-        var matchingKinds = singleKinds.Where(kind => SubjectPathSelection.MatchesKind(property, kind)).ToArray();
+        var selectable = target.TryGetRegisteredSubject()!.Properties
+            .Where(property => SubjectPathSelection.CanSelectProperty(property, attribute))
+            .Select(property => property.Name)
+            .Order(StringComparer.Ordinal);
 
         // Assert
-        Assert.Equal(new[] { expectedKind }, matchingKinds);
+        Assert.Equal(expectedPropertyNames, string.Join(",", selectable));
     }
 
     [Theory]
-    [InlineData(nameof(PathTargetSubject.IsOn), SubjectPathKinds.Boolean, true)]
-    [InlineData(nameof(PathTargetSubject.IsOpen), SubjectPathKinds.Boolean, true)]
-    [InlineData(nameof(PathTargetSubject.Speed), SubjectPathKinds.Boolean, false)]
-    [InlineData(nameof(PathTargetSubject.Limit), SubjectPathKinds.Number, true)]
-    [InlineData(nameof(PathTargetSubject.Mode), SubjectPathKinds.Number, false)]
-    [InlineData(nameof(PathTargetSubject.FallbackMode), SubjectPathKinds.Enum, true)]
-    [InlineData(nameof(PathTargetSubject.Name), SubjectPathKinds.Value, true)]
-    [InlineData(nameof(PathTargetSubject.IsOn), SubjectPathKinds.Operation, false)]
-    [InlineData(nameof(PathTargetSubject.Stop), SubjectPathKinds.Operation, true)]
-    [InlineData("GetStatus", SubjectPathKinds.Operation, true)]
-    [InlineData(nameof(PathTargetSubject.Stop), SubjectPathKinds.Value, false)]
-    [InlineData("GetStatus", SubjectPathKinds.Value, false)]
-    public void WhenAKindIsGiven_ThenOnlyAPropertyOfThatKindCanBeSelected(
-        string propertyName, SubjectPathKinds kind, bool expected)
+    [InlineData(nameof(PathTargetSubject.IsOn), "Boolean")]
+    [InlineData(nameof(PathTargetSubject.IsOpen), "Boolean")]
+    [InlineData(nameof(PathTargetSubject.Speed), "Number")]
+    [InlineData(nameof(PathTargetSubject.Limit), "Number")]
+    [InlineData(nameof(PathTargetSubject.Count), "Number")]
+    [InlineData(nameof(PathTargetSubject.Temperature), "Number")]
+    [InlineData(nameof(PathTargetSubject.Price), "Number")]
+    [InlineData(nameof(PathTargetSubject.Mode), "Enum")]
+    [InlineData(nameof(PathTargetSubject.FallbackMode), "Enum")]
+    [InlineData(nameof(PathTargetSubject.Name), "String")]
+    [InlineData(nameof(PathTargetSubject.Initial), "Char")]
+    [InlineData(nameof(PathTargetSubject.LastSeen), "DateTimeOffset")]
+    public void WhenAPropertyHasAValueType_ThenItMatchesThatValueTypeAndNoOther(string propertyName, string expectedValueType)
     {
         // Arrange
         var property = GetProperty(CreateTarget(), propertyName);
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(property, subjectType: null, kind, writable: false);
+        var matchingValueTypes = ValueTypeNames
+            .Where(name => SubjectPathSelection.MatchesValueTypes(property.Type, GetValueTypes(name)))
+            .ToArray();
+
+        // Assert
+        Assert.Equal([expectedValueType], matchingValueTypes);
+    }
+
+    [Theory]
+    [InlineData(typeof(int?), typeof(INumber<>), true)]
+    [InlineData(typeof(decimal), typeof(INumber<>), true)]
+    [InlineData(typeof(Half), typeof(INumber<>), true)]
+    [InlineData(typeof(char), typeof(INumber<>), false)]
+    [InlineData(typeof(char), typeof(IBinaryInteger<>), false)]
+    [InlineData(typeof(char), typeof(IEquatable<>), true)]
+    [InlineData(typeof(bool), typeof(INumber<>), false)]
+    [InlineData(typeof(PathTargetMode), typeof(INumber<>), false)]
+    [InlineData(typeof(string), typeof(INumber<>), false)]
+    [InlineData(typeof(PathTargetMode?), typeof(Enum), true)]
+    [InlineData(typeof(int), typeof(Enum), false)]
+    [InlineData(typeof(bool?), typeof(bool), true)]
+    [InlineData(typeof(int), typeof(bool), false)]
+    [InlineData(typeof(List<int>), typeof(List<>), true)]
+    [InlineData(typeof(List<int>), typeof(IEnumerable<>), true)]
+    [InlineData(typeof(string), typeof(object), true)]
+    public void WhenAValueTypeIsGiven_ThenATypeMatchesWhenItIsAssignableOrImplementsTheOpenGenericType(
+        Type type, Type valueType, bool expected)
+    {
+        // Act
+        var matches = SubjectPathSelection.MatchesValueTypes(type, [valueType]);
+
+        // Assert
+        Assert.Equal(expected, matches);
+    }
+
+    [Fact]
+    public void WhenNoValueTypesAreGiven_ThenEveryTypeMatches()
+    {
+        // Act
+        var matchesString = SubjectPathSelection.MatchesValueTypes(typeof(string), valueTypes: null);
+        var matchesSubject = SubjectPathSelection.MatchesValueTypes(typeof(Card), valueTypes: null);
+
+        // Assert
+        Assert.True(matchesString);
+        Assert.True(matchesSubject);
+    }
+
+    [Theory]
+    [InlineData(nameof(PathTargetSubject.IsOn), "Boolean", true)]
+    [InlineData(nameof(PathTargetSubject.IsOpen), "Boolean", true)]
+    [InlineData(nameof(PathTargetSubject.Speed), "Boolean", false)]
+    [InlineData(nameof(PathTargetSubject.Limit), "Number", true)]
+    [InlineData(nameof(PathTargetSubject.Mode), "Number", false)]
+    [InlineData(nameof(PathTargetSubject.Initial), "Number", false)]
+    [InlineData(nameof(PathTargetSubject.FallbackMode), "Enum", true)]
+    [InlineData(nameof(PathTargetSubject.Name), null, true)]
+    [InlineData(nameof(PathTargetSubject.Stop), "Boolean", false)]
+    [InlineData("GetStatus", null, false)]
+    public void WhenValueTypesAreGiven_ThenOnlyAPropertyOfOneOfThemCanBeSelected(
+        string propertyName, string? valueTypes, bool expected)
+    {
+        // Arrange
+        var property = GetProperty(CreateTarget(), propertyName);
+
+        // Act
+        var canSelect = SubjectPathSelection.CanSelectProperty(
+            property, new SubjectPathAttribute { ValueTypes = GetValueTypes(valueTypes) });
 
         // Assert
         Assert.Equal(expected, canSelect);
@@ -304,56 +393,204 @@ public class SubjectPathSelectionTests
     [InlineData(nameof(PathTargetSubject.FallbackMode), true)]
     [InlineData(nameof(PathTargetSubject.Name), false)]
     [InlineData(nameof(PathTargetSubject.Stop), false)]
-    public void WhenKindsAreCombined_ThenAPropertyOfAnyOfThemCanBeSelected(string propertyName, bool expected)
+    public void WhenValueTypesAreCombined_ThenAPropertyOfAnyOfThemCanBeSelected(string propertyName, bool expected)
     {
         // Arrange
         var property = GetProperty(CreateTarget(), propertyName);
-        const SubjectPathKinds kind = SubjectPathKinds.Boolean | SubjectPathKinds.Number | SubjectPathKinds.Enum;
+        var path = new SubjectPathAttribute { ValueTypes = [typeof(INumber<>), typeof(bool), typeof(Enum)] };
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(property, subjectType: null, kind, writable: false);
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, path);
+
+        // Assert
+        Assert.Equal(expected, canSelect);
+    }
+
+    [Theory]
+    [InlineData(nameof(PathTargetSubject.Stop), SubjectPathKind.Operation, true)]
+    [InlineData("GetStatus", SubjectPathKind.Operation, true)]
+    [InlineData(nameof(PathTargetSubject.IsOn), SubjectPathKind.Operation, false)]
+    [InlineData(nameof(PathTargetSubject.Stop), SubjectPathKind.Property, false)]
+    [InlineData(nameof(PathTargetSubject.Speed), SubjectPathKind.Property | SubjectPathKind.Operation, true)]
+    [InlineData(nameof(PathTargetSubject.Stop), SubjectPathKind.Property | SubjectPathKind.Operation, true)]
+    [InlineData(nameof(PathTargetSubject.Speed_Minimum), SubjectPathKind.Property, false)]
+    [InlineData(nameof(PathTargetSubject.Speed_Minimum), SubjectPathKind.Attribute, true)]
+    [InlineData(nameof(PathTargetSubject.Stop_IsEnabled), SubjectPathKind.Attribute, true)]
+    [InlineData(nameof(PathTargetSubject.Speed), SubjectPathKind.Attribute, false)]
+    [InlineData(nameof(PathTargetSubject.Stop), SubjectPathKind.Attribute, false)]
+    public void WhenAKindIsGiven_ThenOnlyATargetOfThatKindCanBeSelected(
+        string propertyName, SubjectPathKind kind, bool expected)
+    {
+        // Arrange
+        var property = GetProperty(CreateTarget(), propertyName);
+
+        // Act
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, new SubjectPathAttribute { Kind = kind });
 
         // Assert
         Assert.Equal(expected, canSelect);
     }
 
     [Fact]
-    public void WhenValueAndOperationAreCombined_ThenValuesAndOperationsCanBeSelected()
+    public void WhenAnOperationIsAllowed_ThenValueTypesDoNotRestrictIt()
     {
         // Arrange
-        var target = CreateTarget();
-        const SubjectPathKinds kind = SubjectPathKinds.Value | SubjectPathKinds.Operation;
+        var property = GetProperty(CreateTarget(), nameof(PathTargetSubject.Stop));
+        var path = new SubjectPathAttribute { Kind = SubjectPathKind.Operation, ValueTypes = [typeof(bool)] };
 
         // Act
-        var canSelectValue = SubjectPathSelection.CanSelectProperty(
-            GetProperty(target, nameof(PathTargetSubject.Speed)), subjectType: null, kind, writable: false);
-        var canSelectOperation = SubjectPathSelection.CanSelectProperty(
-            GetProperty(target, nameof(PathTargetSubject.Stop)), subjectType: null, kind, writable: false);
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, path);
 
         // Assert
-        Assert.True(canSelectValue);
-        Assert.True(canSelectOperation);
+        Assert.True(canSelect);
     }
 
     [Theory]
-    [InlineData(nameof(PathTargetSubject.Speed), SubjectPathKinds.Number, true)]
-    [InlineData(nameof(PathTargetSubject.IsOpen), SubjectPathKinds.Boolean, true)]
-    [InlineData(nameof(PathTargetSubject.Reading), SubjectPathKinds.Number, false)]
-    [InlineData(nameof(PathTargetSubject.DoubledSpeed), SubjectPathKinds.Number, false)]
-    [InlineData(nameof(PathTargetSubject.IsOn), SubjectPathKinds.Number, false)]
-    [InlineData(nameof(PathTargetSubject.Stop), SubjectPathKinds.Operation, false)]
-    [InlineData(nameof(PathTargetSubject.Stop), SubjectPathKinds.Value | SubjectPathKinds.Operation, false)]
-    public void WhenWritableIsSet_ThenOnlyAPropertyOfTheKindWithAPublicSetterCanBeSelected(
-        string propertyName, SubjectPathKinds kind, bool expected)
+    [InlineData(nameof(PathTargetSubject.Speed_Minimum), "Number", true)]
+    [InlineData(nameof(PathTargetSubject.Speed_Minimum), "Boolean", false)]
+    [InlineData(nameof(PathTargetSubject.Stop_IsEnabled), "Boolean", true)]
+    public void WhenValueTypesAreGivenForAnAttribute_ThenOnlyAnAttributeOfOneOfThemCanBeSelected(
+        string propertyName, string valueTypes, bool expected)
     {
         // Arrange
         var property = GetProperty(CreateTarget(), propertyName);
+        var path = new SubjectPathAttribute { Kind = SubjectPathKind.Attribute, ValueTypes = GetValueTypes(valueTypes) };
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(property, subjectType: null, kind, writable: true);
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, path);
 
         // Assert
         Assert.Equal(expected, canSelect);
+    }
+
+    [Fact]
+    public void WhenAnAttributeHoldsHomeBlazeMetadata_ThenItCannotBeSelected()
+    {
+        // Arrange
+        var target = CreateTarget();
+        var state = GetProperty(target, nameof(PathTargetSubject.Speed)).AddAttribute(
+            KnownAttributes.State, typeof(StateMetadata), _ => new StateMetadata(), null);
+
+        // Act
+        var canSelect = SubjectPathSelection.CanSelectProperty(state, new SubjectPathAttribute { Kind = SubjectPathKind.Attribute });
+
+        // Assert
+        Assert.False(canSelect);
+    }
+
+    [Fact]
+    public void WhenAttributesCanBeSelected_ThenThePickerListsThemBelowTheirProperty()
+    {
+        // Arrange
+        var target = CreateTarget();
+        var speed = GetProperty(target, nameof(PathTargetSubject.Speed));
+        speed.AddAttribute(KnownAttributes.State, typeof(StateMetadata), _ => new StateMetadata(), null);
+        var path = new SubjectPathAttribute { Kind = SubjectPathKind.Attribute };
+
+        // Act
+        var speedAttributes = SubjectPathSelection
+            .GetListedAttributes(speed, property => SubjectPathSelection.CanSelectProperty(property, path))
+            .Select(attribute => attribute.Name);
+        var stopAttributes = SubjectPathSelection
+            .GetListedAttributes(GetProperty(target, nameof(PathTargetSubject.Stop)), property => SubjectPathSelection.CanSelectProperty(property, path))
+            .Select(attribute => attribute.Name);
+        var propertyAttributes = SubjectPathSelection
+            .GetListedAttributes(speed, property => SubjectPathSelection.CanSelectProperty(property, new SubjectPathAttribute()));
+
+        // Assert
+        Assert.Equal([nameof(PathTargetSubject.Speed_Minimum)], speedAttributes);
+        Assert.Equal([nameof(PathTargetSubject.Stop_IsEnabled)], stopAttributes);
+        Assert.Empty(propertyAttributes);
+    }
+
+    [Fact]
+    public void WhenOnlyANestedAttributeCanBeSelected_ThenThePickerListsTheAttributeOnTheWayToIt()
+    {
+        // Arrange
+        var target = CreateTarget();
+        var speed = GetProperty(target, nameof(PathTargetSubject.Speed));
+        var unit = GetProperty(target, nameof(PathTargetSubject.Speed_Minimum)).AddAttribute("Unit", typeof(string), _ => "rpm", null);
+        var path = new SubjectPathAttribute { Kind = SubjectPathKind.Attribute, ValueTypes = [typeof(string)] };
+        Func<RegisteredSubjectProperty, bool> canSelectProperty = property => SubjectPathSelection.CanSelectProperty(property, path);
+
+        // Act
+        var speedAttributes = SubjectPathSelection.GetListedAttributes(speed, canSelectProperty).ToArray();
+        var minimumAttributes = SubjectPathSelection.GetListedAttributes(speedAttributes.Single(), canSelectProperty).ToArray();
+
+        // Assert
+        Assert.Equal(nameof(PathTargetSubject.Speed_Minimum), speedAttributes.Single().Name);
+        Assert.False(canSelectProperty(speedAttributes.Single()));
+        Assert.Same(unit, minimumAttributes.Single());
+        Assert.True(canSelectProperty(unit));
+    }
+
+    [Fact]
+    public void WhenAnAttributeBelongsToAProperty_ThenItIsAnAttributeOfItDirectlyOrNested()
+    {
+        // Arrange
+        var target = CreateTarget();
+        var speed = GetProperty(target, nameof(PathTargetSubject.Speed));
+        var minimum = GetProperty(target, nameof(PathTargetSubject.Speed_Minimum));
+        var unit = minimum.AddAttribute("Unit", typeof(string), _ => "rpm", null);
+
+        // Act & Assert
+        Assert.True(SubjectPathSelection.IsAttributeOf(minimum, speed));
+        Assert.True(SubjectPathSelection.IsAttributeOf(unit, speed));
+        Assert.True(SubjectPathSelection.IsAttributeOf(unit, minimum));
+        Assert.False(SubjectPathSelection.IsAttributeOf(minimum, GetProperty(target, nameof(PathTargetSubject.Stop))));
+        Assert.False(SubjectPathSelection.IsAttributeOf(speed, speed));
+        Assert.False(SubjectPathSelection.IsAttributeOf(null, speed));
+    }
+
+    [Theory]
+    [InlineData(nameof(PathTargetSubject.Speed), "Number", true)]
+    [InlineData(nameof(PathTargetSubject.IsOpen), "Boolean", true)]
+    [InlineData(nameof(PathTargetSubject.Reading), "Number", false)]
+    [InlineData(nameof(PathTargetSubject.DoubledSpeed), "Number", false)]
+    [InlineData(nameof(PathTargetSubject.IsOn), "Number", false)]
+    public void WhenWritableIsSet_ThenOnlyAPropertyOfTheValueTypesWithAPublicSetterCanBeSelected(
+        string propertyName, string valueTypes, bool expected)
+    {
+        // Arrange
+        var property = GetProperty(CreateTarget(), propertyName);
+        var path = new SubjectPathAttribute { ValueTypes = GetValueTypes(valueTypes), IsWritable = true };
+
+        // Act
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, path);
+
+        // Assert
+        Assert.Equal(expected, canSelect);
+    }
+
+    [Theory]
+    [InlineData(nameof(PathTargetSubject.Speed_Minimum), true)]
+    [InlineData(nameof(PathTargetSubject.Stop_IsEnabled), false)]
+    public void WhenWritableIsSetForAnAttribute_ThenOnlyAnAttributeWithAPublicSetterCanBeSelected(string propertyName, bool expected)
+    {
+        // Arrange
+        var property = GetProperty(CreateTarget(), propertyName);
+        var path = new SubjectPathAttribute { Kind = SubjectPathKind.Attribute, IsWritable = true };
+
+        // Act
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, path);
+
+        // Assert
+        Assert.Equal(expected, canSelect);
+    }
+
+    [Theory]
+    [InlineData(SubjectPathKind.Operation)]
+    [InlineData(SubjectPathKind.Property | SubjectPathKind.Operation)]
+    public void WhenWritableIsSet_ThenNoOperationCanBeSelected(SubjectPathKind kind)
+    {
+        // Arrange
+        var property = GetProperty(CreateTarget(), nameof(PathTargetSubject.Stop));
+
+        // Act
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, new SubjectPathAttribute { Kind = kind, IsWritable = true });
+
+        // Assert
+        Assert.False(canSelect);
     }
 
     [Fact]
@@ -361,12 +598,11 @@ public class SubjectPathSelectionTests
     {
         // Arrange
         var target = CreateTarget();
+        var path = new SubjectPathAttribute { ValueTypes = [typeof(INumber<>)] };
 
         // Act
-        var canSelectInternalSetter = SubjectPathSelection.CanSelectProperty(
-            GetProperty(target, nameof(PathTargetSubject.Reading)), subjectType: null, SubjectPathKinds.Number, writable: false);
-        var canSelectDerived = SubjectPathSelection.CanSelectProperty(
-            GetProperty(target, nameof(PathTargetSubject.DoubledSpeed)), subjectType: null, SubjectPathKinds.Number, writable: false);
+        var canSelectInternalSetter = SubjectPathSelection.CanSelectProperty(GetProperty(target, nameof(PathTargetSubject.Reading)), path);
+        var canSelectDerived = SubjectPathSelection.CanSelectProperty(GetProperty(target, nameof(PathTargetSubject.DoubledSpeed)), path);
 
         // Assert
         Assert.True(canSelectInternalSetter);
@@ -374,16 +610,18 @@ public class SubjectPathSelectionTests
     }
 
     [Fact]
-    public void WhenNoKindIsGiven_ThenAnOperationCannotBeSelected()
+    public void WhenNoKindIsGiven_ThenNeitherAnOperationNorAnAttributeCanBeSelected()
     {
         // Arrange
-        var property = GetProperty(CreateTarget(), nameof(PathTargetSubject.Stop));
+        var target = CreateTarget();
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(property, subjectType: null);
+        var canSelectOperation = SubjectPathSelection.CanSelectProperty(GetProperty(target, nameof(PathTargetSubject.Stop)), new SubjectPathAttribute());
+        var canSelectAttribute = SubjectPathSelection.CanSelectProperty(GetProperty(target, nameof(PathTargetSubject.Speed_Minimum)), new SubjectPathAttribute());
 
         // Assert
-        Assert.False(canSelect);
+        Assert.False(canSelectOperation);
+        Assert.False(canSelectAttribute);
     }
 
     [Fact]
@@ -392,32 +630,37 @@ public class SubjectPathSelectionTests
         // Arrange
         var card = new Card(_context) { Content = new ValueMap(_context) };
         var property = GetProperty(card, nameof(Card.Content));
-        const SubjectPathKinds kind = SubjectPathKinds.Value | SubjectPathKinds.Operation;
+        var path = new SubjectPathAttribute { Kind = SubjectPathKind.Property | SubjectPathKind.Attribute | SubjectPathKind.Operation };
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(property, subjectType: null, kind, writable: false);
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, path);
 
         // Assert
         Assert.False(canSelect);
     }
 
     [Fact]
-    public void WhenPathLeadsToASubject_ThenKindAndWritableAreIgnored()
+    public void WhenPathLeadsToASubject_ThenKindValueTypesAndWritableAreIgnored()
     {
         // Arrange
         var card = new Card(_context) { Content = new ValueMap(_context) };
         var property = GetProperty(card, nameof(Card.Content));
+        var path = new SubjectPathAttribute(typeof(ValueMap))
+        {
+            Kind = SubjectPathKind.Operation,
+            ValueTypes = [typeof(bool)],
+            IsWritable = true
+        };
 
         // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(
-            property, typeof(ValueMap), SubjectPathKinds.Operation, writable: true);
+        var canSelect = SubjectPathSelection.CanSelectProperty(property, path);
 
         // Assert
         Assert.True(canSelect);
     }
 
     [Fact]
-    public void WhenAWidgetPathLeadsToASubject_ThenItSetsNeitherKindNorWritable()
+    public void WhenAWidgetPathLeadsToASubject_ThenItSetsNoKindValueTypesOrWritable()
     {
         // Arrange
         var subjectPaths = typeof(Card).Assembly.GetTypes()
@@ -428,7 +671,7 @@ public class SubjectPathSelectionTests
 
         // Act
         var combined = subjectPaths
-            .Where(pair => pair.Attribute!.Kinds != SubjectPathKinds.Value || pair.Attribute.IsWritable)
+            .Where(pair => pair.Attribute!.Kind != SubjectPathKind.Property || pair.Attribute.ValueTypes is not null || pair.Attribute.IsWritable)
             .Select(pair => $"{pair.Property.DeclaringType!.Name}.{pair.Property.Name}")
             .ToList();
 
@@ -436,4 +679,18 @@ public class SubjectPathSelectionTests
         Assert.NotEmpty(subjectPaths);
         Assert.Empty(combined);
     }
+
+    private static readonly string[] ValueTypeNames = ["Boolean", "Number", "Enum", "String", "Char", "DateTimeOffset"];
+
+    private static Type[]? GetValueTypes(string? name) => name switch
+    {
+        null => null,
+        "Boolean" => [typeof(bool)],
+        "Number" => [typeof(INumber<>)],
+        "Enum" => [typeof(Enum)],
+        "String" => [typeof(string)],
+        "Char" => [typeof(char)],
+        "DateTimeOffset" => [typeof(DateTimeOffset)],
+        _ => throw new ArgumentOutOfRangeException(nameof(name), name, null)
+    };
 }

@@ -135,18 +135,16 @@ namespace HomeBlaze.Abstractions.Attributes
         public SubjectPathAttribute() { }
         public SubjectPathAttribute(System.Type subjectType) { }
         public bool IsWritable { get; set; }
-        public HomeBlaze.Abstractions.Attributes.SubjectPathKinds Kinds { get; set; }
+        public HomeBlaze.Abstractions.Attributes.SubjectPathKind Kind { get; set; }
         public System.Type? SubjectType { get; }
+        public System.Type[]? ValueTypes { get; set; }
     }
     [System.Flags]
-    public enum SubjectPathKinds
+    public enum SubjectPathKind
     {
-        Boolean = 1,
-        Number = 2,
-        Enum = 4,
-        OtherValue = 8,
-        Operation = 16,
-        Value = 15,
+        Property = 1,
+        Attribute = 2,
+        Operation = 4,
     }
 }
 namespace HomeBlaze.Abstractions.Common

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Numerics;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -19,7 +20,7 @@ public partial class Slider : IConfigurable, ITitleProvider
     /// Path of the number property that the slider shows and writes.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kinds = SubjectPathKinds.Number, IsWritable = true)]
+    [SubjectPath(ValueTypes = [typeof(INumber<>)], IsWritable = true)]
     public partial string? Path { get; set; }
 
     /// <summary>

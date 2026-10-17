@@ -31,7 +31,7 @@ public partial class OperationButton : IConfigurable, ITitleProvider
     /// Path of the operation or query that the button invokes.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kinds = SubjectPathKinds.Operation)]
+    [SubjectPath(Kind = SubjectPathKind.Operation)]
     public partial string? Path { get; set; }
 
     /// <summary>

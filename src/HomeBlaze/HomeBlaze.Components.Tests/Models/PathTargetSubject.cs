@@ -1,5 +1,7 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Components.Tests.Models;
 
@@ -18,6 +20,9 @@ public partial class PathTargetSubject
 
     public partial int Speed { get; set; }
 
+    [PropertyAttribute(nameof(Speed), KnownAttributes.Minimum)]
+    public partial int Speed_Minimum { get; set; }
+
     public partial int? Limit { get; set; }
 
     public partial long Count { get; set; }
@@ -32,6 +37,8 @@ public partial class PathTargetSubject
 
     public partial string? Name { get; set; }
 
+    public partial char Initial { get; set; }
+
     public partial DateTimeOffset LastSeen { get; set; }
 
     public partial int Reading { get; internal set; }
@@ -43,6 +50,10 @@ public partial class PathTargetSubject
     public void Stop()
     {
     }
+
+    [Derived]
+    [PropertyAttribute(nameof(Stop), KnownAttributes.IsEnabled)]
+    public bool Stop_IsEnabled => Speed > 0;
 
     [Query]
     public Task<string> GetStatusAsync() => Task.FromResult("Running");

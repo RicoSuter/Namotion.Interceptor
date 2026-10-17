@@ -1,3 +1,4 @@
+using System.Numerics;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -15,7 +16,7 @@ public partial class HistoryChartSeries : IConfigurable
     /// Path of the property whose history the series shows.
     /// </summary>
     [Configuration]
-    [SubjectPath(Kinds = SubjectPathKinds.Number | SubjectPathKinds.Boolean | SubjectPathKinds.Enum)]
+    [SubjectPath(ValueTypes = [typeof(INumber<>), typeof(bool), typeof(Enum)])]
     public partial string? Path { get; set; }
 
     /// <summary>

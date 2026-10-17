@@ -1,7 +1,6 @@
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Components.Controls
-@using HomeBlaze.Components.Inputs
 @using HomeBlaze.Components.Operations
 @implements IDisposable
 @inject PropertyWriter Writer
@@ -14,7 +13,7 @@
     var value = property?.GetValue();
     var isOn = value as bool? ?? false;
     var canToggle = false;
-    if (property is not null && SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Boolean))
+    if (property is not null && (property.Type == typeof(bool) || property.Type == typeof(bool?)))
     {
         if (UsesOperations)
         {

@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History;
@@ -60,7 +61,8 @@ public class HistoryChartSeriesResolverTests
             .GetCustomAttribute<SubjectPathAttribute>()!;
 
         // Assert
-        Assert.Equal(SubjectPathKinds.Number | SubjectPathKinds.Boolean | SubjectPathKinds.Enum, attribute.Kinds);
+        Assert.Equal(SubjectPathKind.Property, attribute.Kind);
+        Assert.Equal([typeof(INumber<>), typeof(bool), typeof(Enum)], attribute.ValueTypes);
         Assert.False(attribute.IsWritable);
         Assert.Null(attribute.SubjectType);
     }

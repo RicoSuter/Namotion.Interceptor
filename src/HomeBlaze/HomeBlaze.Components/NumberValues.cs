@@ -8,6 +8,17 @@ namespace HomeBlaze.Components;
 internal static class NumberValues
 {
     /// <summary>
+    /// Gets whether <see cref="TryGetNumber"/> reads values of the type, a nullable type as its underlying type.
+    /// </summary>
+    public static bool IsNumberType(Type type)
+    {
+        type = Nullable.GetUnderlyingType(type) ?? type;
+
+        // An enum has the type code of its underlying integral type.
+        return !type.IsEnum && Type.GetTypeCode(type) is >= TypeCode.SByte and <= TypeCode.Decimal;
+    }
+
+    /// <summary>
     /// Gets a value of a numeric type as a double. False for null, for a value of another type and for NaN; an
     /// infinity is a number.
     /// </summary>

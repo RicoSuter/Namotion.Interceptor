@@ -981,16 +981,22 @@ public partial string? Path { get; set; }
 public partial string? Map { get; set; }
 ```
 
-A path to a property can be narrowed with `Kinds` and `IsWritable`. `Kinds` takes the flags of `SubjectPathKinds`, which combine with OR: `Boolean`, `Number` (integral, floating point and decimal types), `Enum`, `OtherValue`, `Operation` (an `[Operation]` or `[Query]` method), and `Value`, the default, for the four value kinds. A nullable type counts as its underlying type. `IsWritable = true` keeps only properties with a public setter and never matches an operation. Both are ignored for a path to a subject, so do not set them together with a type:
+Without a type, `Kind` says what the path leads to, with the flags of `SubjectPathKind` that combine with OR: `Property`, the default, for a property that holds a value, `Attribute` for an attribute of a property or of an operation, such as `Minimum`, and `Operation` for an `[Operation]` or `[Query]` method. The picker lists an attribute below its property and never offers the metadata of `KnownAttributes.State` and `KnownAttributes.Configuration`. An attribute is a property of the subject, so its path is the name under which the subject registers it, for example `/Demo/Conveyor/TargetSpeed_Minimum`, or `Speed@Minimum` for an attribute added at runtime.
+
+`ValueTypes` names the types that the value of a property or an attribute may have, and null, the default, accepts any type. A nullable type counts as its underlying type. A type matches when it is assignable to one of them, so `typeof(Enum)` matches every enum, or, for an open generic type, when it implements or derives from a closed form of it, so `typeof(INumber<>)` matches every number. `char` is no number. `ValueTypes` does not restrict an operation. `IsWritable = true` keeps only properties and attributes with a public setter and never matches an operation. `Kind`, `ValueTypes` and `IsWritable` are ignored for a path to a subject, so do not set them together with a type:
 
 ```csharp
 [Configuration]
-[SubjectPath(Kinds = SubjectPathKinds.Number, IsWritable = true)]
+[SubjectPath(ValueTypes = [typeof(INumber<>)], IsWritable = true)]
 public partial string? Path { get; set; }
 
 [Configuration]
-[SubjectPath(Kinds = SubjectPathKinds.Operation)]
+[SubjectPath(Kind = SubjectPathKind.Operation)]
 public partial string? Operation { get; set; }
+
+[Configuration]
+[SubjectPath(Kind = SubjectPathKind.Property | SubjectPathKind.Operation, ValueTypes = [typeof(bool), typeof(Enum)])]
+public partial string? Target { get; set; }
 ```
 
 The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.

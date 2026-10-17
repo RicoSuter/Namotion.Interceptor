@@ -1,5 +1,4 @@
-using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Components.Inputs;
+using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Components.Controls;
@@ -27,7 +26,7 @@ internal static class ControlKindResolver
             return ControlKind.Value;
         }
 
-        if (SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Operation))
+        if (property.TryGetMethodMetadata() is not null)
         {
             return ControlKind.OperationButton;
         }
@@ -35,7 +34,7 @@ internal static class ControlKindResolver
         // The property holds no operation here, so a null current value decides the same as PropertyWriter.IsWritable
         // would with the real value, without a tracked read of a value that the chosen view reads anyway.
         var isWritable = PropertyWriter.IsWritable(property, currentValue: null);
-        if (SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Boolean))
+        if (property.Type == typeof(bool) || property.Type == typeof(bool?))
         {
             return isWritable ? ControlKind.Switch : ControlKind.Indicator;
         }
@@ -50,7 +49,7 @@ internal static class ControlKindResolver
             return EnumChoices.IsFlags(enumType) ? ControlKind.Value : ControlKind.Select;
         }
 
-        if (SubjectPathSelection.MatchesKind(property, SubjectPathKinds.Number) &&
+        if (NumberValues.IsNumberType(property.Type) &&
             ValueRangeResolver.TryFindEnds(property, minimum, maximum, out sliderRange))
         {
             return ControlKind.Slider;
