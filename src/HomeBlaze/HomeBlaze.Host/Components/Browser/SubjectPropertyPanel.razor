@@ -6,6 +6,7 @@
 @using HomeBlaze.Components.Operations
 @using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
+@using HomeBlaze.Components.Abstractions.Pages
 
 @implements IAsyncDisposable
 
@@ -156,6 +157,7 @@
                         {
                             var property = section.CollectionProperty;
                             var children = section.CollectionChildren;
+                            var orderedContainer = GetOrderedContainer(property);
                             @* mb-0, as MudBlazor gives an expanded panel a margin of 16px above and below. *@
                             <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="@($"{sectionGapClass} mb-0")" HeaderClass="px-4 subject-pane-section-header">
                                 <TitleContent>
@@ -164,16 +166,50 @@
                                 </TitleContent>
                                 <ChildContent>
                                     <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true">
-                                        @foreach (var child in children)
+                                        @for (var childIndex = 0; childIndex < children.Length; childIndex++)
                                         {
+                                            var child = children[childIndex];
                                             var isSelected = child.Subject == SelectedChild;
                                             var childCount = GetChildCount(child);
+                                            var isFirstChild = childIndex == 0;
+                                            var isLastChild = childIndex == children.Length - 1;
+                                            var previousChild = isFirstChild ? child : children[childIndex - 1];
+                                            var nextChild = isLastChild ? child : children[childIndex + 1];
 
                                             <MudListItem Value="@child.Subject"
                                                          OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                                          Icon="@GetSubjectIcon(child.Subject)"
                                                          IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
                                                          Class="@(isSelected ? "mud-primary-text" : "")">
+                                                @if (orderedContainer is not null)
+                                                {
+                                                    var childName = property.GetChildDisplayName(child);
+
+                                                    @* Stops the click, which would otherwise select the row. *@
+                                                    <span class="@(isSelected ? "subject-pane-move subject-pane-move-selected" : "subject-pane-move")"
+                                                          @onclick:stopPropagation="true">
+                                                        @if (!isFirstChild)
+                                                        {
+                                                            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                                                                           Size="Size.Small"
+                                                                           Class="pa-0"
+                                                                           Disabled="@(!CanMoveChildren(orderedContainer))"
+                                                                           OnClick="@(() => MoveChildAsync(orderedContainer, child, previousChild))"
+                                                                           aria-label="@($"Move {childName} up")"
+                                                                           data-testid="move-child-up-button" />
+                                                        }
+                                                        @if (!isLastChild)
+                                                        {
+                                                            <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
+                                                                           Size="Size.Small"
+                                                                           Class="pa-0"
+                                                                           Disabled="@(!CanMoveChildren(orderedContainer))"
+                                                                           OnClick="@(() => MoveChildAsync(orderedContainer, child, nextChild))"
+                                                                           aria-label="@($"Move {childName} down")"
+                                                                           data-testid="move-child-down-button" />
+                                                        }
+                                                    </span>
+                                                }
                                                 @if (isSelected)
                                                 {
                                                     <div style="float: right; line-height: 0">
@@ -232,6 +268,26 @@
 
     @@media (hover: none) {
         .subject-pane-copy {
+            opacity: 1;
+        }
+    }
+
+    /* The arrows that move a child show while its row is hovered or focused, on the selected row, and always on a
+       device without hover. Transparent rather than hidden, so that they stay in the tab order. */
+    .subject-pane-move {
+        float: right;
+        line-height: 0;
+        opacity: 0;
+    }
+
+    .mud-list-item:hover .subject-pane-move,
+    .mud-list-item:focus-within .subject-pane-move,
+    .subject-pane-move-selected {
+        opacity: 1;
+    }
+
+    @@media (hover: none) {
+        .subject-pane-move {
             opacity: 1;
         }
     }
@@ -309,6 +365,9 @@
 
     // The method that runs, which shows the spinner. Not set while its prompt or result dialog is open.
     private MethodMetadata? _executingMethod;
+
+    // True while a move is written, so that a second click waits for the order it changes.
+    private bool _isMovingChild;
     private readonly CancellationTokenSource _lifetime = new();
 
     [Parameter]
@@ -515,10 +574,24 @@
 
     private static SubjectPropertyChild[] GetVisibleChildren(RegisteredSubjectProperty property)
     {
-        return property.Children
-            .Where(child => !Attribute.IsDefined(child.Subject.GetType(), typeof(ExcludeFromBrowsingAttribute), true))
-            .ToArray();
+        var children = property.Children
+            .Where(child => !Attribute.IsDefined(child.Subject.GetType(), typeof(ExcludeFromBrowsingAttribute), true));
+
+        if (GetOrderedContainer(property) is { } container)
+        {
+            children = ChildOrdering.Order(
+                children,
+                container.ChildOrder,
+                static child => child.Index?.ToString() ?? string.Empty,
+                static child => child.Subject.GetNavigationTitle(child.Index?.ToString()));
+        }
+
+        return children.ToArray();
     }
+
+    // The container whose children the property holds when they can be put in order, null for any other property.
+    private static IMetadataContainer? GetOrderedContainer(RegisteredSubjectProperty property)
+        => property.Name == IMetadataContainer.ChildrenPropertyName ? property.Parent.Subject as IMetadataContainer : null;
 
     private void TogglePropertyExpanded(string propertyName)
     {
@@ -860,6 +933,33 @@
             }
         </MudStack>
     };
+
+    private bool CanMoveChildren(IMetadataContainer container)
+        => !_isMovingChild && container is not IStorageContainer { Status: not StorageStatus.Connected };
+
+    private async Task MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild neighbor)
+    {
+        if (_isMovingChild)
+            return;
+
+        _isMovingChild = true;
+        try
+        {
+            await container.MoveChildAsync(child.Index!.ToString()!, neighbor.Index!.ToString()!, _lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            // The pane is gone.
+        }
+        catch (Exception exception)
+        {
+            await DialogService.ShowMessageBoxAsync("Move Failed", $"Failed to move: {exception.Message}", yesText: "OK");
+        }
+        finally
+        {
+            _isMovingChild = false;
+        }
+    }
 
     private async Task ExecuteMethodAsync(MethodMetadata method)
     {
