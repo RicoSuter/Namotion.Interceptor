@@ -31,7 +31,7 @@ internal static class AgentMcpApplication
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
         builder.WebHost.UseKestrelCore().ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port));
         builder.Services.AddRoutingCore();
-        builder.Services.AddSingleton<ILoggerFactory>(new WithoutLifetimeLoggerFactory(loggerFactory));
+        builder.Services.AddSingleton<ILoggerFactory>(new WithoutHostLoggerFactory(loggerFactory));
         // The main host owns the process signals; a console lifetime here would handle them a second time.
         builder.Services.AddSingleton<IHostLifetime, OwnedLifetime>();
         builder.Services.AddMcpServer().WithHttpTransport(options =>
@@ -71,13 +71,15 @@ internal static class AgentMcpApplication
         return Task.CompletedTask;
     }
 
-    // The inner host would log "Now listening on" with its loopback address, which reads like the address of the UI.
-    private sealed class WithoutLifetimeLoggerFactory(ILoggerFactory loggerFactory) : ILoggerFactory
+    // The inner host would log "Now listening on" with its loopback address, which reads like the address of the UI,
+    // and a failed start with its full stack, which AgentMcpListener already logs as the one error.
+    private sealed class WithoutHostLoggerFactory(ILoggerFactory loggerFactory) : ILoggerFactory
     {
         private const string LifetimeCategory = "Microsoft.Hosting.Lifetime";
+        private const string HostCategory = "Microsoft.Extensions.Hosting.Internal.Host";
 
         public ILogger CreateLogger(string categoryName) =>
-            categoryName == LifetimeCategory ? NullLogger.Instance : loggerFactory.CreateLogger(categoryName);
+            categoryName is LifetimeCategory or HostCategory ? NullLogger.Instance : loggerFactory.CreateLogger(categoryName);
 
         public void AddProvider(ILoggerProvider provider) => loggerFactory.AddProvider(provider);
 

@@ -23,8 +23,13 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<AgentMcpListener> _logger;
 
+    private const int NotStarted = 0;
+    private const int Started = 1;
+    private const int Disposed = 2;
+
     private WebApplication? _application;
     private volatile Uri? _endpoint;
+    private int _state;
 
     public AgentMcpListener(AgentTurnTokenRegistry tokenRegistry, ILoggerFactory loggerFactory)
     {
@@ -43,9 +48,12 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
     public Uri? GetAgentEndpoint() => _endpoint;
 
     /// <exception cref="InvalidOperationException">The listener was already started.</exception>
+    /// <exception cref="ObjectDisposedException">The listener was disposed.</exception>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (_application is not null)
+        var previousState = Interlocked.CompareExchange(ref _state, Started, NotStarted);
+        ObjectDisposedException.ThrowIf(previousState == Disposed, this);
+        if (previousState == Started)
         {
             throw new InvalidOperationException("The agent MCP listener was already started.");
         }
@@ -61,13 +69,13 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
-            await application.DisposeAsync();
             _logger.LogError(exception, "The agent MCP listener could not start on 127.0.0.1, so CLI agents cannot run.");
+            await DisposeFailedApplicationAsync(application);
             return;
         }
         catch
         {
-            await application.DisposeAsync();
+            await DisposeFailedApplicationAsync(application);
             throw;
         }
 
@@ -87,6 +95,7 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
 
     public async ValueTask DisposeAsync()
     {
+        Volatile.Write(ref _state, Disposed);
         _endpoint = null;
         // The container disposes this instance once per registration that resolves it.
         if (Interlocked.Exchange(ref _application, null) is { } application)
@@ -97,10 +106,26 @@ internal sealed class AgentMcpListener : IHostedService, IAgentEndpointAddress, 
 
     public void Dispose()
     {
+        Volatile.Write(ref _state, Disposed);
         _endpoint = null;
         if (Interlocked.Exchange(ref _application, null) is { } application)
         {
             ((IDisposable)application).Dispose();
         }
+    }
+
+    private async Task DisposeFailedApplicationAsync(WebApplication application)
+    {
+        // A failure to clean up must not turn the failed start into a failed host start.
+        try
+        {
+            await application.DisposeAsync();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "The agent MCP listener could not clean up after its failed start.");
+        }
+
+        Interlocked.CompareExchange(ref _state, NotStarted, Started);
     }
 }

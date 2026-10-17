@@ -352,12 +352,37 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
 
             // Assert
             Assert.Null(listener.GetAgentEndpoint());
-            Assert.Contains(logs.Messages, message => message.Category == typeof(AgentMcpListener).FullName && message.Level == LogLevel.Error);
+            var error = Assert.Single(logs.Messages, message => message.Level >= LogLevel.Error);
+            Assert.Equal(typeof(AgentMcpListener).FullName, error.Category);
         }
         finally
         {
             occupyingListener.Stop();
         }
+    }
+
+    [Fact]
+    public async Task WhenTheStartIsCancelled_ThenStartingThrowsAndTheListenerHasNoAddress()
+    {
+        // Arrange
+        await using var listener = new AgentMcpListener(new AgentTurnTokenRegistry(), NullLoggerFactory.Instance);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => listener.StartAsync(cancellation.Token));
+        Assert.Null(listener.GetAgentEndpoint());
+    }
+
+    [Fact]
+    public async Task WhenStartedAfterDispose_ThenStartingThrows()
+    {
+        // Arrange
+        var listener = new AgentMcpListener(new AgentTurnTokenRegistry(), NullLoggerFactory.Instance);
+        await listener.DisposeAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => listener.StartAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -378,9 +403,10 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddHomeBlazeAgents();
-        var serviceProvider = services.BuildServiceProvider();
+        using var serviceProvider = services.BuildServiceProvider();
         var listener = serviceProvider.GetRequiredService<AgentMcpListener>();
         await listener.StartAsync(CancellationToken.None);
+        var endpoint = listener.GetAgentEndpoint()!;
 
         // Act
         var exception = Record.Exception(serviceProvider.Dispose);
@@ -388,6 +414,8 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
         // Assert
         Assert.Null(exception);
         Assert.Null(listener.GetAgentEndpoint());
+        using var client = new TcpClient();
+        await Assert.ThrowsAsync<SocketException>(() => client.ConnectAsync(endpoint.Host, endpoint.Port));
     }
 
     [Fact]
