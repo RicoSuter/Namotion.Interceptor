@@ -179,6 +179,15 @@ public abstract partial class LlmAgentBase
 
         // Recorded before the status changes, so a reader that sees the failure status also sees the entry.
         await AppendAsync(errorEntry);
+        SetFailureStatus(failure, reportedConfigurationVersion);
+    }
+
+    /// <summary>
+    /// Writes the status after a failure that was reported to the scheduler while the configuration version was
+    /// <paramref name="reportedConfigurationVersion"/>.
+    /// </summary>
+    private void SetFailureStatus(AgentTurnException failure, int reportedConfigurationVersion)
+    {
         lock (_stateLock)
         {
             if (_configurationVersion == reportedConfigurationVersion)
@@ -199,11 +208,16 @@ public abstract partial class LlmAgentBase
                 return;
             }
 
-            SetStatusIfStarted(
-                failure.Kind is AgentFailureKind.Configuration or AgentFailureKind.UsageLimit
-                    ? ServiceStatus.Unavailable
-                    : ServiceStatus.Error,
-                failure.Message);
+            var pausesRuns = failure.Kind is AgentFailureKind.Configuration or AgentFailureKind.UsageLimit;
+            if (pausesRuns && _scheduler is { PauseReason: null })
+            {
+                // The pause already ended, for example a usage limit whose reset time had passed, and its end found
+                // the agent busy and reported nothing.
+                SetIdle();
+                return;
+            }
+
+            SetStatusIfStarted(pausesRuns ? ServiceStatus.Unavailable : ServiceStatus.Error, failure.Message);
         }
     }
 

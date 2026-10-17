@@ -6,6 +6,10 @@ internal sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
     private readonly Lock _lock = new();
     private readonly List<ManualTimer> _timers = [];
     private DateTimeOffset _now = now;
+    private int _createdTimerCount;
+
+    /// <summary>The number of timers created so far, also of those that fired or were disposed.</summary>
+    public int CreatedTimerCount => Volatile.Read(ref _createdTimerCount);
 
     /// <summary>The number of timers that are due in the future.</summary>
     public int PendingTimerCount
@@ -47,6 +51,7 @@ internal sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
     {
         var timer = new ManualTimer(this, callback, state);
         timer.Change(dueTime, period);
+        Interlocked.Increment(ref _createdTimerCount);
         return timer;
     }
 

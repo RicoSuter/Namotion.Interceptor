@@ -158,6 +158,44 @@ public class LlmAgentBaseConcurrencyTests
     }
 
     [Fact]
+    public async Task WhenAUsageLimitOfAChatEndsBeforeItsFailureIsRecorded_ThenTheAgentEndsIdle()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services),
+            agent =>
+            {
+                // The loop then waits on a poll timer, and creates a new one once it handled the end of the pause.
+                agent.PollInterval = TimeSpan.FromHours(1);
+                agent.TurnTimeout = TimeSpan.Zero;
+                agent.Handler = (_, _, _) => throw new AgentTurnException(
+                    AgentFailureKind.UsageLimit, "Usage limit reached", retryAfter: time.GetUtcNow());
+            },
+            timeProvider: time);
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
+        var createdTimerCount = time.CreatedTimerCount;
+        var hasLoopHandledThePause = false;
+        test.Agent.StateChanged += () =>
+        {
+            // Raised once the error entry is recorded, after the failure was reported and before its status is
+            // written; the loop ends the pause meanwhile and finds the agent busy.
+            if (test.Agent.Timeline.Entries.Count == 2 && !hasLoopHandledThePause)
+            {
+                hasLoopHandledThePause = SpinWait.SpinUntil(() => time.CreatedTimerCount > createdTimerCount, TimeSpan.FromSeconds(30));
+            }
+        };
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.True(hasLoopHandledThePause);
+        Assert.Equal(ServiceStatus.Running, test.Agent.Status);
+        Assert.Equal("Idle", test.Agent.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenTheAgentRestarts_ThenItKeepsItsTimelineInstanceWithItsEntries()
     {
         // Arrange
