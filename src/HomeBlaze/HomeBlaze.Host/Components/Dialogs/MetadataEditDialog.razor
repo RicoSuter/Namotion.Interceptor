@@ -21,7 +21,7 @@
                       Label="Icon"
                       Placeholder="@IconPlaceholder"
                       Clearable="true"
-                      Immediate="true"
+                      DebounceInterval="300"
                       Adornment="Adornment.End"
                       AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? IconPlaceholder)"
                       HelperText="A MudBlazor icon name, such as Dashboard or Settings"
@@ -98,6 +98,9 @@
 
     private async Task SaveAsync()
     {
+        if (_isSaving)
+            return;
+
         _isSaving = true;
         try
         {

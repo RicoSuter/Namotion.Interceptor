@@ -1,14 +1,33 @@
 const registeredElements = new WeakSet();
 
-// Copies the value of a copy button within the element in the click itself, as browsers refuse to copy once the
-// click is over, which a round trip to the server would be. Reports whether the copy succeeded. An element is
-// registered once, however often it is passed.
-export function registerCopyButtons(element, dotNetReference) {
+// Registers the copy buttons and the move arrows within the element. An element is registered once, however often it
+// is passed.
+export function registerPane(element, dotNetReference) {
     if (registeredElements.has(element)) {
         return;
     }
 
     registeredElements.add(element);
+    registerCopyButtons(element, dotNetReference);
+    registerMoveButtons(element);
+}
+
+// The list item around a move arrow cancels Enter and Space to select itself, so the keys would never press the
+// arrow. Stopped while capturing at the element, as the list item listens below it; the button still gets its click.
+function registerMoveButtons(element) {
+    const stopAtMoveButton = event => {
+        if (event.target instanceof Element && event.target.closest('.subject-pane-move') !== null) {
+            event.stopPropagation();
+        }
+    };
+
+    element.addEventListener('keydown', stopAtMoveButton, true);
+    element.addEventListener('keyup', stopAtMoveButton, true);
+}
+
+// Copies the value of a copy button within the element in the click itself, as browsers refuse to copy once the
+// click is over, which a round trip to the server would be. Reports whether the copy succeeded.
+function registerCopyButtons(element, dotNetReference) {
     element.addEventListener('click', event => {
         const button = event.target.closest('[data-copy-value]');
         if (button === null || !element.contains(button)) {

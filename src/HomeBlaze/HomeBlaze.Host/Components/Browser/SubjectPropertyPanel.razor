@@ -31,7 +31,7 @@
                     @{
                         var canEdit = CanEdit();
                         var canDelete = Subject is IStorageFile or IConfigurable;
-                        var canEditMetadata = GetMetadataTarget() is not null;
+                        var metadataTarget = GetMetadataTarget();
                     }
 
                     @* Stays an h1: the page focuses the first h1 after navigation. *@
@@ -51,13 +51,14 @@
                                            data-testid="edit-subject-button" />
                         </MudTooltip>
                     }
-                    @if (canEditMetadata)
+                    @if (metadataTarget is not null)
                     {
                         <MudTooltip Text="Metadata">
                             <MudIconButton OnClick="@OpenMetadataDialogAsync"
                                            Icon="@Icons.Material.Filled.Label"
                                            Variant="Variant.Text"
                                            Size="Size.Small"
+                                           Disabled="@(!IsConnected(metadataTarget.Value.Container))"
                                            aria-label="Metadata"
                                            data-testid="edit-metadata-button" />
                         </MudTooltip>
@@ -74,7 +75,7 @@
                     }
                     @if (CanClose)
                     {
-                        @if (canEdit || canDelete || canEditMetadata)
+                        @if (canEdit || canDelete || metadataTarget is not null)
                         {
                             <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                         }
@@ -184,6 +185,7 @@
                                             var child = children[childIndex];
                                             var isSelected = child.Subject == SelectedChild;
                                             var childCount = GetChildCount(child);
+                                            var childName = property.GetChildDisplayName(child);
                                             var isFirstChild = childIndex == 0;
                                             var isLastChild = childIndex == children.Length - 1;
                                             var previousChild = isFirstChild ? child : children[childIndex - 1];
@@ -202,8 +204,6 @@
                                                 }
                                                 @if (orderedContainer is not null)
                                                 {
-                                                    var childName = property.GetChildDisplayName(child);
-
                                                     @* Stops the click, which would otherwise select the row. *@
                                                     <span class="@(isSelected ? "subject-pane-move subject-pane-move-selected" : "subject-pane-move")"
                                                           @onclick:stopPropagation="true">
@@ -229,7 +229,7 @@
                                                         }
                                                     </span>
                                                 }
-                                                <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+                                                <span class="subject-pane-child-name" style="word-break: break-word;">@childName</span>
                                                 @if (childCount > 0)
                                                 {
                                                     <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
@@ -364,7 +364,7 @@
     private readonly HashSet<string> _expandedProperties = [];
 
     private ElementReference _rootElement;
-    private string? _copyButtonsElementId;
+    private string? _registeredElementId;
     private IJSObjectReference? _module;
     private DotNetObjectReference<SubjectPropertyPanel>? _dotNetReference;
     private bool _isDisposed;
@@ -379,7 +379,7 @@
     // The method that runs, which shows the spinner. Not set while its prompt or result dialog is open.
     private MethodMetadata? _executingMethod;
 
-    // True while a move is written, so that a second click waits for the order it changes.
+    // True while a move is written. A click meanwhile is ignored, as its neighbor comes from the order before the move.
     private bool _isMovingChild;
     private readonly CancellationTokenSource _lifetime = new();
 
@@ -439,15 +439,15 @@
     {
         await base.OnAfterRenderAsync(firstRender);
 
-        // The listener sits on the root, as the tracking scope replaces everything inside it on every change in
+        // The listeners sit on the root, as the tracking scope replaces everything inside it on every change in
         // developer mode. The root is new only when the pane showed no subject in between.
-        if (Subject is null || _rootElement.Id is null || _rootElement.Id == _copyButtonsElementId)
+        if (Subject is null || _rootElement.Id is null || _rootElement.Id == _registeredElementId)
         {
             return;
         }
 
         // Claimed before the awaits, so that a render during them does not register the element again.
-        _copyButtonsElementId = _rootElement.Id;
+        _registeredElementId = _rootElement.Id;
         try
         {
             _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>(
@@ -459,11 +459,12 @@
             }
 
             _dotNetReference ??= DotNetObjectReference.Create(this);
-            await _module.InvokeVoidAsync("registerCopyButtons", _rootElement, _dotNetReference);
+            await _module.InvokeVoidAsync("registerPane", _rootElement, _dotNetReference);
         }
         catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
         {
-            // Without the script the copy buttons do nothing; the values are still shown.
+            // Without the script the copy buttons do nothing and the keyboard cannot press a move arrow; the values
+            // are still shown and the arrows still take a click.
         }
     }
 
@@ -838,7 +839,7 @@
         {
             await MetadataEditDialog.ShowAsync(DialogService, target.Container, target.Child, $"Metadata of {title}",
                 titlePlaceholder: null, navigationTitlePlaceholder: title,
-                iconPlaceholder: (Subject as IIconProvider)?.IconName ?? "Article");
+                iconPlaceholder: (Subject as IIconProvider)?.IconName is { Length: > 0 } iconName ? iconName : "Article");
         }
     }
 
@@ -986,7 +987,11 @@
     };
 
     private bool CanMoveChildren(IMetadataContainer container)
-        => !_isMovingChild && container is not IStorageContainer { Status: not StorageStatus.Connected };
+        => !_isMovingChild && IsConnected(container);
+
+    // A folder reports the status of its storage. A container that is no storage has no connection to lose.
+    private static bool IsConnected(IMetadataContainer container)
+        => container is not IStorageContainer { Status: not StorageStatus.Connected };
 
     private async Task MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild neighbor)
     {
