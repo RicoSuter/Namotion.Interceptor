@@ -8,11 +8,28 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class ChangeDeliveryFilterRaceCollection
+{
+    private ChangeDeliveryFilterRaceCollection()
+    {
+    }
+
+    public const string Name = "ChangeDeliveryFilterRace";
+}
+
 /// <summary>
 /// A property's first publish races a transaction confirmation: the flush decides the older local write
 /// while the confirmation commits and is judged as an echo. Whichever way it interleaves, the source has
 /// to end at the model's value.
 /// </summary>
+/// <remarks>
+/// Not parallel: every step waits on the processor's dequeue loop and flush, which run on the thread
+/// pool and cannot be moved to dedicated threads, so concurrently running tests that block pool workers
+/// can delay a step past its timeout. The flush loop is worst off, since it is queued locally on the
+/// worker that then blocks in the dequeue loop and only runs once another worker steals it.
+/// </remarks>
+[Collection(ChangeDeliveryFilterRaceCollection.Name)]
 public class ChangeDeliveryFilterRaceTests
 {
     private const string WriteStateKey = "ni.wstate";
