@@ -46,7 +46,6 @@ Use YAML frontmatter at the top of your markdown file to control how it appears 
 title: My Dashboard
 navTitle: Dashboard
 icon: Dashboard
-position: 1
 ---
 ```
 
@@ -57,9 +56,57 @@ position: 1
 | `title` | string | Full page title displayed in the header |
 | `navTitle` | string | Short title for navigation menu (optional, defaults to `title`) |
 | `icon` | string | MudBlazor icon name (e.g., `Dashboard`, `Settings`, `Article`) |
-| `position` | number | Sort order in navigation (lower = higher in list) |
 | `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar) |
 | `alignment` | string | AppBar alignment: `Left` (default) or `Right`. Only used when `location` is `AppBar` |
+
+---
+
+## Navigation Order and Folder Metadata
+
+Pages, folders and subjects appear in the same order in the sidebar, the top bar and the browser. A folder keeps that order in a file named `.metadata.json` inside it:
+
+```json
+{
+  "title": "All Devices",
+  "navTitle": "Devices",
+  "icon": "Devices",
+  "order": ["Readme.md", "Heat Pump", "Pumps"]
+}
+```
+
+| Key | Description |
+|-----|-------------|
+| `title` | Title of the folder everywhere. Defaults to the name of the directory |
+| `navTitle` | Title of the folder in the sidebar. Defaults to `title` |
+| `icon` | MudBlazor icon name of the folder. Defaults to `Folder` |
+| `order` | Names of the children in the order they are shown |
+
+Keys are read without regard to upper or lower case, and the file may have comments and a trailing comma after its last value.
+
+A name in `order` is the name of a child as the browser shows it in its address: a subject file without `.json` (`Motor` for `Motor.json`), any other file with its extension (`Readme.md`) and a folder by its name. Children that are not listed follow the listed ones: `readme` first, `index` second, then by navigation title. A name of a child that no longer exists is ignored.
+
+The `.metadata.json` in the data folder itself only holds the `order` of the top level.
+
+A metadata file left with every key blank is deleted rather than kept empty on disk. A metadata file that cannot be read, because its JSON is invalid, is ignored with a warning: the folder or subject then shows no metadata, and saving or moving a child is refused with an error until the file is fixed or deleted by hand.
+
+### Ordering in the Browser
+
+Hover a row in the list of a folder, or give it keyboard focus, to see its up and down arrows; the selected row and every row on a touch screen always show them. A click on an arrow, or Enter or Space while it has focus, swaps the row with its neighbor and writes the whole order of the folder to its `.metadata.json`. The arrows are disabled while the storage is not connected.
+
+### Metadata of a Folder or Subject
+
+The **Metadata** button in the header of a folder or of a subject file opens a dialog. It is not shown for the root folder or for pages, and it is disabled while the storage is not connected. For a folder it sets `title`, `navTitle` and `icon`. For a subject stored as `X.json` it writes `X.metadata.json` beside it:
+
+| Key | Description |
+|-----|-------------|
+| `navTitle` | Title in the navigation |
+| `icon` | Icon in the navigation. The icon of the subject itself is unchanged |
+| `location` | `NavBar` or `AppBar`, for a subject that has a page |
+| `alignment` | `Left` or `Right` in the top bar |
+
+A subject metadata file never changes the title or the icon of the subject itself. Pages keep their metadata in their frontmatter, which the dialog does not change. Saving a metadata file without any value deletes it. Keys that HomeBlaze does not know are kept when the dialog saves.
+
+A file whose name ends with `.metadata.json` is never loaded as a subject, so a subject cannot be named `Something.metadata`. Deleting a subject also deletes its `X.metadata.json` sidecar.
 
 ---
 
@@ -977,7 +1024,6 @@ A complete page. Two motors that have files of their own are shown in cards side
 title: Factory Dashboard
 navTitle: Dashboard
 icon: Dashboard
-position: 0
 ---
 
 # Factory Status
@@ -1050,7 +1096,7 @@ What the sample uses:
 3. **Use property names, not the names of a JSON file**: `TargetSpeed`, not `targetSpeed`, also deep inside a `json` block
 4. **Show shared subjects by path**: Keep a device in a file of its own and show it with a `Widget` block. Create a subject in a block only when it belongs to this page
 5. **Fit `MinWidth` to the widgets**: A flow layout needs a `MinWidth` that is at least as wide as its widest widget
-6. **Order your pages**: Use `position` in the frontmatter to control the place in the navigation
+6. **Order your pages**: Use the arrows in the browser to put the pages and folders of a folder in order
 7. **Keep pages focused**: One topic per page makes navigation cleaner
 
 ---

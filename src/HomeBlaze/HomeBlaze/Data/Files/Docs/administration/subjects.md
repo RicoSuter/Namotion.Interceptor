@@ -79,6 +79,10 @@ Files/
 
 Folders use `[InlinePaths]`, so children are path segments directly (no `Children[...]` brackets). See [Paths](paths.md) for full syntax.
 
+### Metadata Files
+
+A folder can hold a `.metadata.json` with its title, icon and the order of its children, and a subject file `X.json` can have an `X.metadata.json` beside it with its navigation title, navigation icon, location and alignment. Both are written by the browser and can be edited by hand. See [Navigation Order and Folder Metadata](pages.md#navigation-order-and-folder-metadata).
+
 ---
 
 ## Creating Subjects

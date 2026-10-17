@@ -120,6 +120,10 @@ A full-page component for a subject type. Pages appear in the navigation when th
 
 Set via markdown frontmatter on `.md` files — see [Markdown Pages — Frontmatter](administration/pages.md#frontmatter).
 
+### Metadata File
+
+A `.metadata.json` in a folder holds the title, icon and order of the folder, and an `X.metadata.json` beside a subject file `X.json` holds the navigation title, icon, location and alignment of that subject. See [Navigation Order and Folder Metadata](administration/pages.md#navigation-order-and-folder-metadata).
+
 ### Navigation Location
 
 Where a page appears in the application:
