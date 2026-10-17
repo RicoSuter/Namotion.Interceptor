@@ -104,6 +104,49 @@ public class ClaudeCliProcessEnvironmentTests
         }
     }
 
+    [UnixFact]
+    public async Task WhenTheProcessHasAProxyExclusionList_ThenTheCliGetsItWithTheLoopbackAddressInBothSpellings()
+    {
+        // Arrange - with HTTP_PROXY set, the CLI would otherwise send the calls to the agent route and its token through the proxy.
+        using var cli = FakeClaudeCli.Create("success.jsonl");
+        var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
+        var previousUpperCase = Environment.GetEnvironmentVariable("NO_PROXY");
+        var previousLowerCase = Environment.GetEnvironmentVariable("no_proxy");
+        try
+        {
+            Environment.SetEnvironmentVariable("NO_PROXY", "nas.example");
+            Environment.SetEnvironmentVariable("no_proxy", null);
+
+            // Act
+            var result = await ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None);
+
+            // Assert
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("NO_PROXY=nas.example,127.0.0.1", cli.LastEnvironment);
+            Assert.Contains("no_proxy=nas.example,127.0.0.1", cli.LastEnvironment);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NO_PROXY", previousUpperCase);
+            Environment.SetEnvironmentVariable("no_proxy", previousLowerCase);
+        }
+    }
+
+    [Theory]
+    [InlineData(null, "127.0.0.1")]
+    [InlineData("", "127.0.0.1")]
+    [InlineData("nas.example", "nas.example,127.0.0.1")]
+    [InlineData("nas.example, 127.0.0.1", "nas.example, 127.0.0.1")]
+    [InlineData("127.0.0.1,nas.example", "127.0.0.1,nas.example")]
+    public void WhenAddingTheLoopbackAddressToAProxyExclusionList_ThenExistingEntriesAreKeptAndItIsAddedOnce(string? value, string expected)
+    {
+        // Act
+        var result = ClaudeCliProcess.WithLoopbackProxyExclusion(value);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
     [Theory]
     [InlineData("ANTHROPIC_API_KEY", StringComparison.Ordinal, true)]
     [InlineData("ANTHROPIC_SOME_FUTURE_PROVIDER", StringComparison.Ordinal, true)]
