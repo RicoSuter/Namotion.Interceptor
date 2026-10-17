@@ -93,10 +93,10 @@ Body of the footer card.
 
 :: HomeBlaze.Components.TabLayout#spacingtabs
 ::: Tab Title="Hidden First"
-:::: HomeBlaze.Components.Responsive Show=Phone
+:::: HomeBlaze.Components.Responsive To=Xs
 ::::: HomeBlaze.Components.Card Title="Phone Card"
 Only on a phone.
-:::: HomeBlaze.Components.Responsive Show=NotPhone
+:::: HomeBlaze.Components.Responsive From=Sm
 ::::: HomeBlaze.Components.Card Title="Wide Card"
 Not on a phone.
 :::: HomeBlaze.Components.Alert

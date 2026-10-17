@@ -7,6 +7,7 @@ using HomeBlaze.Samples;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Breakpoint = MudBlazor.Breakpoint;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -170,7 +171,7 @@ public class DemoPagesTests
         Assert.Equal(5, subjects.OfType<HistoryChart>().Count(chart => chart.Compact));
         Assert.IsType<SubjectTable>(scope.TryGetNamedSubject("motortable"));
         Assert.Equal(5, Assert.IsType<FlowLayout>(scope.TryGetNamedSubject("controlroom")).Items.Length);
-        Assert.Equal([ResponsiveShow.Phone, ResponsiveShow.NotPhone, ResponsiveShow.NotPhone], subjects.OfType<Responsive>().Select(block => block.Show));
+        Assert.Equal([(Breakpoint.Xs, Breakpoint.Xs), (Breakpoint.Sm, Breakpoint.Xxl), (Breakpoint.Sm, Breakpoint.Xxl)], subjects.OfType<Responsive>().Select(block => (block.From, block.To)));
     }
 
     [Fact]
