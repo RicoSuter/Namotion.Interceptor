@@ -345,6 +345,8 @@ else
             width - _availableWidth <= MaxScrollbarWidth &&
             Math.Abs(width - _previousAvailableWidth) < 0.5)
         {
+            // Only once: the toggle has settled after it, so the same change again comes from resizing the page.
+            _previousAvailableWidth = 0;
             return Task.CompletedTask;
         }
 

@@ -222,36 +222,38 @@ public class TileWidgetTests
     [Theory]
     [InlineData(1280)]
     [InlineData(800)]
+    [InlineData(375)]
     public async Task WhenCanvasFitsTheWidth_ThenItsNodesScaleWithTheWidthOfThePage(int width)
     {
         // Arrange
         var page = await OpenPageAsync();
         await page.SetViewportSizeAsync(width, 900);
-        var frame = page.GetByTestId("canvas-scale-frame").Last;
-        var node = page.Locator(".canvas-node").Filter(new() { Has = GetSwitchTile(page, "Canvas tile") });
+        var frame = GetCanvasFrame(page);
+        var node = GetCanvasNode(page);
         await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act: the node is half of the 400 pixel design width, so it is half of the frame once the frame is measured.
+        await WaitForScaledNodeAsync(page, frame, node);
         var frameBox = await PageGeometry.GetBoxAsync(frame);
-        await page.WaitForFunctionAsync(
-            "([node, expected]) => Math.abs(node.getBoundingClientRect().width - expected) < 2",
-            new object[] { await node.ElementHandleAsync(), frameBox.Width / 2 },
-            new() { Timeout = Timeout });
         var nodeBox = await PageGeometry.GetBoxAsync(node);
 
-        // Assert
+        // Assert: the frame is as high as the 200 pixel MinHeight times the factor, which is half of its width.
         Assert.InRange(Math.Abs(nodeBox.Width - frameBox.Width / 2), 0, 2);
         Assert.InRange(Math.Abs(nodeBox.Height - frameBox.Width / 2), 0, 2);
+        Assert.InRange(Math.Abs(frameBox.Height - frameBox.Width / 2), 0, 2);
     }
 
     [Fact]
     public async Task WhenCanvasThatFitsTheWidthIsEdited_ThenItIsDrawnUnscaled()
     {
-        // Arrange
+        // Arrange: the node is drawn at the factor of the 1008 pixel frame first, about 504 pixels wide.
         var page = await OpenPageAsync();
         await page.SetViewportSizeAsync(1280, 900);
-        var node = page.Locator(".canvas-node").Filter(new() { Has = GetSwitchTile(page, "Canvas tile") });
+        var frame = GetCanvasFrame(page);
+        var node = GetCanvasNode(page);
         await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitForScaledNodeAsync(page, frame, node);
+        Assert.True((await PageGeometry.GetBoxAsync(node)).Width > 300);
 
         // Act
         await page.SelectEditModeAsync("Inline");
@@ -266,20 +268,63 @@ public class TileWidgetTests
     [Fact]
     public async Task WhenCanvasThatFitsTheWidthIsEditedOnANarrowPage_ThenItScrollsHorizontally()
     {
-        // Arrange
+        // Arrange: the node is drawn at the factor of the narrow frame first, below 200 pixels wide.
         var page = await OpenPageAsync();
         await page.SetViewportSizeAsync(375, 812);
-        var frame = page.GetByTestId("canvas-scale-frame").Last;
-        var node = page.Locator(".canvas-node").Filter(new() { Has = GetSwitchTile(page, "Canvas tile") });
+        var frame = GetCanvasFrame(page);
+        var node = GetCanvasNode(page);
         await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitForScaledNodeAsync(page, frame, node);
+        Assert.True((await PageGeometry.GetBoxAsync(node)).Width < 190);
 
         // Act
         await page.SelectEditModeAsync("Inline");
 
         // Assert: the 400 pixel design width is wider than the frame, which scrolls instead of scaling the node.
         await page.WaitForFunctionAsync(
-            "([frame, node]) => frame.scrollWidth > frame.clientWidth && Math.abs(node.getBoundingClientRect().width - 200) < 3",
+            "node => Math.abs(node.getBoundingClientRect().width - 200) < 3",
+            await node.ElementHandleAsync(),
+            new() { Timeout = Timeout });
+        var scrollLeft = await frame.EvaluateAsync<double>(
+            "frame => getComputedStyle(frame).overflowX === 'auto' ? (frame.scrollLeft = 50, frame.scrollLeft) : -1");
+        Assert.True(scrollLeft > 0, $"The frame did not scroll: {scrollLeft}");
+    }
+
+    [Fact]
+    public async Task WhenCanvasThatFitsTheWidthIsViewedWhileThePageResizes_ThenThePageIsNotSaved()
+    {
+        // Arrange
+        var path = _fixture.GetDemoPagePath(PageName);
+        var page = await OpenPageAsync();
+        var frame = GetCanvasFrame(page);
+        var node = GetCanvasNode(page);
+        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await page.SetViewportSizeAsync(1280, 900);
+        await WaitForScaledNodeAsync(page, frame, node);
+        var contentBefore = await _fixture.ReadFileAsync(path);
+        var writeTimeBefore = File.GetLastWriteTimeUtc(path);
+
+        // Act: every resize measures the frame, rescales the canvas and lets the diagram measure its nodes again.
+        foreach (var width in new[] { 900, 1280, 700, 1280 })
+        {
+            await page.SetViewportSizeAsync(width, 900);
+            await WaitForScaledNodeAsync(page, frame, node);
+        }
+
+        // Assert
+        Assert.Equal(contentBefore, await _fixture.ReadFileAsync(path));
+        Assert.Equal(writeTimeBefore, File.GetLastWriteTimeUtc(path));
+    }
+
+    private static ILocator GetCanvasFrame(IPage page) => page.GetByTestId("canvas-scale-frame").Last;
+
+    private static ILocator GetCanvasNode(IPage page) =>
+        page.Locator(".canvas-node").Filter(new() { Has = GetSwitchTile(page, "Canvas tile") });
+
+    // The node is half of the 400 pixel design width, so it is drawn at half of the frame once the frame is measured.
+    private static async Task WaitForScaledNodeAsync(IPage page, ILocator frame, ILocator node) =>
+        await page.WaitForFunctionAsync(
+            "([frame, node]) => Math.abs(node.getBoundingClientRect().width - frame.getBoundingClientRect().width / 2) < 2",
             new object[] { await frame.ElementHandleAsync(), await node.ElementHandleAsync() },
             new() { Timeout = Timeout });
-    }
 }

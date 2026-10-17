@@ -2,7 +2,8 @@
 export function observeWidth(element, dotNetReference) {
     const observer = new ResizeObserver(entries => {
         const width = entries[entries.length - 1].contentRect.width;
-        dotNetReference.invokeMethodAsync('OnFrameWidthChanged', width);
+        // A disposed reference or a lost circuit only means that nobody listens anymore.
+        dotNetReference.invokeMethodAsync('OnFrameWidthChanged', width).catch(() => {});
     });
     observer.observe(element);
     return { dispose: () => observer.disconnect() };
