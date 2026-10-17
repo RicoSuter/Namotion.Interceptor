@@ -21,11 +21,10 @@
 
         var items = NavigationResolver.GetChildItems(Root).Where(i => i.IsPage).ToList();
 
-        // Try first AppBar page (left aligned first, then right)
+        // Try first AppBar page (left aligned first, then right); the items are already in navigation order.
         var appBarPage = items
             .Where(i => i.Location == NavigationLocation.AppBar)
             .OrderBy(i => i.Alignment == AppBarAlignment.Left ? 0 : 1)
-            .ThenBy(i => i.Order)
             .FirstOrDefault();
 
         if (appBarPage != null)
@@ -35,10 +34,7 @@
         }
 
         // Try first NavBar page
-        var navBarPage = items
-            .Where(i => i.Location == NavigationLocation.NavBar)
-            .OrderBy(i => i.Order)
-            .FirstOrDefault();
+        var navBarPage = items.FirstOrDefault(i => i.Location == NavigationLocation.NavBar);
 
         if (navBarPage != null)
         {

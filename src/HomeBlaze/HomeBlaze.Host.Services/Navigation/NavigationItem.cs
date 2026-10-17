@@ -39,11 +39,6 @@ public class NavigationItem
     public bool IsFolder { get; init; }
 
     /// <summary>
-    /// The sort order for the navigation item.
-    /// </summary>
-    public int Order { get; init; }
-
-    /// <summary>
     /// Where this item should appear (NavBar or AppBar).
     /// </summary>
     public NavigationLocation Location { get; init; }

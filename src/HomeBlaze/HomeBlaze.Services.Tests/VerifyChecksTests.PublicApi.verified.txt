@@ -2,27 +2,12 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Components.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Services.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
-namespace HomeBlaze.Services.Components
-{
-    public class SubjectComponentRegistration : System.IEquatable<HomeBlaze.Services.Components.SubjectComponentRegistration>
-    {
-        public SubjectComponentRegistration(System.Type ComponentType, System.Type SubjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type, string? Name) { }
-        public System.Type ComponentType { get; init; }
-        public string? Name { get; init; }
-        public System.Type SubjectType { get; init; }
-        public HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type { get; init; }
-    }
-    public class SubjectComponentRegistry
-    {
-        public SubjectComponentRegistry(HomeBlaze.Services.TypeProvider typeProvider) { }
-        public System.Collections.Generic.IReadOnlyCollection<HomeBlaze.Services.Components.SubjectComponentRegistration> GetAllComponents() { }
-        public HomeBlaze.Services.Components.SubjectComponentRegistration? GetComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
-        public System.Collections.Generic.IEnumerable<HomeBlaze.Services.Components.SubjectComponentRegistration> GetComponents(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type) { }
-        public bool HasComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
-    }
-}
 namespace HomeBlaze.Services
 {
+    public static class ChildOrdering
+    {
+        public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName, System.Func<T, string> getTitle) { }
+    }
     public class ConfigurableSubjectSerializer
     {
         public const string TypeDiscriminatorPropertyName = "$type";
@@ -130,6 +115,13 @@ namespace HomeBlaze.Services
         public static void SetSubjectMetadata(this Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? metadata) { }
         public static HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? TryGetSubjectMetadata(this Namotion.Interceptor.IInterceptorSubject subject) { }
     }
+    public static class SubjectNavigationExtensions
+    {
+        public static HomeBlaze.Components.Abstractions.Pages.AppBarAlignment GetAppBarAlignment(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static string GetNavigationIconName(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static HomeBlaze.Components.Abstractions.Pages.NavigationLocation GetNavigationLocation(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static string GetNavigationTitle(this Namotion.Interceptor.IInterceptorSubject subject, string? propertyKey = null) { }
+    }
     public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
         public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
@@ -203,6 +195,25 @@ namespace HomeBlaze.Services
         public System.Collections.Generic.IReadOnlyCollection<System.Type> Types { get; }
         public HomeBlaze.Services.TypeProvider AddAssembly(System.Reflection.Assembly assembly) { }
         public void AddTypes(System.Collections.Generic.IEnumerable<System.Type> types) { }
+    }
+}
+namespace HomeBlaze.Services.Components
+{
+    public class SubjectComponentRegistration : System.IEquatable<HomeBlaze.Services.Components.SubjectComponentRegistration>
+    {
+        public SubjectComponentRegistration(System.Type ComponentType, System.Type SubjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type, string? Name) { }
+        public System.Type ComponentType { get; init; }
+        public string? Name { get; init; }
+        public System.Type SubjectType { get; init; }
+        public HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type { get; init; }
+    }
+    public class SubjectComponentRegistry
+    {
+        public SubjectComponentRegistry(HomeBlaze.Services.TypeProvider typeProvider) { }
+        public System.Collections.Generic.IReadOnlyCollection<HomeBlaze.Services.Components.SubjectComponentRegistration> GetAllComponents() { }
+        public HomeBlaze.Services.Components.SubjectComponentRegistration? GetComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
+        public System.Collections.Generic.IEnumerable<HomeBlaze.Services.Components.SubjectComponentRegistration> GetComponents(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type) { }
+        public bool HasComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
     }
 }
 namespace HomeBlaze.Services.Diagnostics

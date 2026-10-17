@@ -1,6 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.Attributes;
-using HomeBlaze.Host.Services.Display;
+using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
 using Namotion.Interceptor;
@@ -25,14 +25,14 @@ public class NavigationItemResolver
     }
 
     /// <summary>
-    /// Gets navigation items for direct children of a subject.
+    /// Gets navigation items for direct children of a subject, in the order of <see cref="ChildOrdering"/>.
     /// </summary>
     public IEnumerable<NavigationItem> GetChildItems(IInterceptorSubject parent)
     {
-        var items = new List<NavigationItem>();
+        var items = new List<(NavigationItem Item, string Key)>();
         var registered = parent.TryGetRegisteredSubject();
         if (registered == null)
-            return items;
+            return [];
 
         foreach (var prop in registered.Properties)
         {
@@ -61,7 +61,7 @@ public class NavigationItemResolver
                 // Only include if it's a page or has page descendants
                 if (isPage || isFolder)
                 {
-                    items.Add(new NavigationItem
+                    items.Add((new NavigationItem
                     {
                         Subject = child,
                         Title = child.GetNavigationTitle(key),
@@ -69,20 +69,23 @@ public class NavigationItemResolver
                         Path = path,
                         IsPage = isPage,
                         IsFolder = isFolder,
-                        Order = child.GetNavigationOrder(key),
                         Location = child.GetNavigationLocation(),
                         Alignment = child.GetAppBarAlignment()
-                    });
+                    }, key));
                 }
             }
         }
 
-        return items.OrderBy(i => i.Order).ThenBy(i => i.Title);
+        var childOrder = parent is IMetadataContainer container ? container.ChildOrder : [];
+        return ChildOrdering
+            .Order(items, childOrder, static item => item.Key, static item => item.Item.Title)
+            .Select(static item => item.Item)
+            .ToList();
     }
 
-    private static bool ContainsPath(List<NavigationItem> items, string path)
+    private static bool ContainsPath(List<(NavigationItem Item, string Key)> items, string path)
     {
-        foreach (var item in items)
+        foreach (var (item, _) in items)
         {
             if (item.Path == path)
                 return true;
