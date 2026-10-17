@@ -113,6 +113,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 |---|---|---|
 | `IsPresent` | | Whether the router sees the device as active |
 | `HostName`, `IpAddress`, `MacAddress` | | Identity |
+| `IsPrivateMacAddress` | | Whether `MacAddress` is locally administered: a private address, which a phone or computer may replace with a new one, or the address of a virtual adapter |
 | `InterfaceType`, `IsWireless`, `IsGuest` | | How it is connected |
 | `AccessPointName`, `AccessPointMacAddress` | | Where it is connected, empty while absent or unplaced |
 | `Band`, `Port` | | WLAN band or LAN port, empty while absent; a client the mesh list does not place has no band but can have the host list's port, see [How It Works](#how-it-works) |
@@ -147,6 +148,8 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 
 The router is polled every `PollingInterval`, read only. Each poll starts with its own login check, so a password changed on the router costs one failed login, not one per request. The mesh list places each present client at an access point with its band or LAN port and link speed; a client it does not place, for example because the router offers no mesh list or the client sits behind a third-party access point, falls back to the host list's port and link speed while present. Existing subjects are updated in place.
 
+A client the router stops listing stays for one more poll as absent, with its last host name and IP address, and is removed on the next. Its history therefore ends with `IsPresent` false rather than with the last value it had while listed.
+
 ### Linked Devices
 
 After each poll, a client's `DevicePath` points to the subject of the same device: by MAC address (`INetworkAdapter`), otherwise by IP address or host name (`INetworkHost`) while that subject is connected. A client that several subjects match is not linked.
@@ -180,7 +183,7 @@ HomeBlaze connects to the router on TCP port 49000 (description, unauthenticated
 
 ## Limitations
 
-- Phones and tablets that use private, rotating MAC addresses appear as a new client for every address, and the router keeps the old ones.
+- Phones and tablets that use private, rotating MAC addresses appear as a new client for every address, and the router keeps the old ones. `IsPrivateMacAddress` marks such clients, but nothing links an old address to its successor.
 - Byte totals are not reported, only current rates.
 - The mesh list does not say which way a link between two repeaters points, so the uplink is guessed: a link to the router first, then a link on an interface named `UPLINK...`, then the first connected link. A repeater daisy-chained behind another repeater can therefore show the wrong uplink.
 - SSDP discovery uses IPv4 only.
