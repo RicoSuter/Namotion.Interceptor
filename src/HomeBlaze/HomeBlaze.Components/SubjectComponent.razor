@@ -14,8 +14,10 @@
     {
         var isSelectable = IsSelectable;
         var isSelected = isSelectable && ReferenceEquals(Selection?.Selected, this);
+        @* A page fills a container of definite height, such as the split editor's pane, and keeps its natural
+           height elsewhere. *@
         <div class="@(isSelected ? "subject-component-wrapper selectable selected" : isSelectable ? "subject-component-wrapper selectable" : "subject-component-wrapper")"
-             style="position: relative;"
+             style="position: relative;@(Type == SubjectComponentType.Page ? " height: 100%;" : null)"
              tabindex="@(isSelectable ? "0" : null)"
              role="@(isSelectable ? "group" : null)"
              aria-roledescription="@(isSelectable ? "widget" : null)"

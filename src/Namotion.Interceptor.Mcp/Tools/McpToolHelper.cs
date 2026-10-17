@@ -112,7 +112,7 @@ internal static class McpToolHelper
                 }
 
                 var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-                properties[segment] = BuildScalarPropertyDto(property, includeAttributes, configuration.IsReadOnly);
+                properties[segment] = BuildScalarPropertyDto(property, configuration, includeAttributes);
             }
         }
 
@@ -149,7 +149,9 @@ internal static class McpToolHelper
     }
 
     private static ScalarProperty BuildScalarPropertyDto(
-        RegisteredSubjectProperty property, bool includeAttributes, bool isReadOnly)
+        RegisteredSubjectProperty property,
+        McpServerConfiguration configuration,
+        bool includeAttributes)
     {
         List<PropertyAttribute>? attributes = null;
         if (includeAttributes)
@@ -169,8 +171,38 @@ internal static class McpToolHelper
         return new ScalarProperty(
             property.GetValue(),
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
-            IsWritable: !isReadOnly && property.HasPublicSetter,
+            IsWritable: IsWritable(property, configuration),
             Attributes: attributes);
+    }
+
+    /// <summary>
+    /// Whether set_property may write the property: <see cref="GetWriteError"/> returns null for it.
+    /// </summary>
+    internal static bool IsWritable(RegisteredSubjectProperty property, McpServerConfiguration configuration) =>
+        !configuration.IsReadOnly && property.HasPublicSetter && configuration.PropertyWriteFilter?.Invoke(property) is null;
+
+    /// <summary>
+    /// The error set_property returns for the property, or null when it may be written: the server is read-only, the
+    /// property has no public setter, or the <see cref="McpServerConfiguration.PropertyWriteFilter"/> refuses it.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="path">The path of the property as the client gave it, for the message.</param>
+    /// <param name="configuration">The configuration.</param>
+    internal static string? GetWriteError(RegisteredSubjectProperty property, string path, McpServerConfiguration configuration)
+    {
+        if (configuration.IsReadOnly)
+        {
+            return "Server is in read-only mode.";
+        }
+
+        if (!property.HasPublicSetter)
+        {
+            return $"Property is not writable: {path}";
+        }
+
+        return configuration.PropertyWriteFilter?.Invoke(property) is { } reason
+            ? $"Property is not writable: {path}. {reason}"
+            : null;
     }
 
     private static string[]? ToStringArray(object? value)

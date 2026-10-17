@@ -4,6 +4,7 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace HomeBlaze.History.Blazor
 {
+    [HomeBlaze.Abstractions.Attributes.PageLayout]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("ShowChart")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("Dashboard")]
@@ -71,6 +72,7 @@ namespace HomeBlaze.History.Blazor
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs { get; init; }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [HomeBlaze.Abstractions.Attributes.PageLayout]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class HistoryChartSeries : HomeBlaze.Abstractions.IConfigurable, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
@@ -79,6 +81,7 @@ namespace HomeBlaze.History.Blazor
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Aggregation { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.MediaAddress]
         public string? Color { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }

@@ -91,6 +91,10 @@ public static partial class MarkdownSegmentBuilder
         return hidden is null ? source : new string(hidden);
     }
 
+    /// <summary>Gets whether a block is a fenced code block of the old <c>subject(name)</c> form, which is shown as an error.</summary>
+    internal static bool IsOldSubjectFence(Block block) =>
+        block is FencedCodeBlock { Info: { } info } && info.StartsWith("subject(", StringComparison.Ordinal);
+
     public static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter = null)
     {
         // Page text may contain marker-shaped comments, so only markers carrying this token count.
@@ -294,7 +298,7 @@ public static partial class MarkdownSegmentBuilder
     {
         protected override void Write(HtmlRenderer renderer, CodeBlock block)
         {
-            if (block is FencedCodeBlock { Info: { } info } && info.StartsWith("subject(", StringComparison.Ordinal))
+            if (IsOldSubjectFence(block))
             {
                 renderer.EnsureLine();
                 renderer.Write(MarkdownErrorBox.Render(block.Line + 1, OldSubjectFenceError));

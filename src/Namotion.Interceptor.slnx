@@ -37,6 +37,7 @@
   </Folder>
   <Folder Name="/HomeBlaze/">
     <Project Path="HomeBlaze/HomeBlaze.AI/HomeBlaze.AI.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.AI.Blazor/HomeBlaze.AI.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Components/HomeBlaze.Components.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services/HomeBlaze.Host.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host/HomeBlaze.Host.csproj" />

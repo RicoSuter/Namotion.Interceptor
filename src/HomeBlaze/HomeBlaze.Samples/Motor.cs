@@ -256,7 +256,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// <summary>
     /// Immediately stops the motor by powering it off. The target speed is kept, so <see cref="PowerOn"/> recovers it.
     /// </summary>
-    [Operation(Title = "Emergency Stop", Description = "Immediately stops the motor", Icon = "Stop", Position = 2, RequiresConfirmation = true)]
+    [Operation(Title = "Emergency Stop", Description = "Immediately stops the motor", Icon = "Stop", Position = 2)]
     public void EmergencyStop()
     {
         lock (_simulationLock)
@@ -266,6 +266,13 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
             Status = MotorStatus.Stopped;
         }
     }
+
+    /// <summary>
+    /// Restarts the controller of the motor: the motor stops at once like <see cref="EmergencyStop"/> and stays off until
+    /// <see cref="PowerOn"/>. Unlike the emergency stop it asks for confirmation.
+    /// </summary>
+    [Operation(Title = "Restart Controller", Description = "Restarts the motor controller; the motor stops at once and stays off until it is powered on", Icon = "RestartAlt", Position = 7, RequiresConfirmation = true)]
+    public void RestartController() => EmergencyStop();
 
     /// <summary>
     /// Powers the motor on, so it speeds up to its target again.

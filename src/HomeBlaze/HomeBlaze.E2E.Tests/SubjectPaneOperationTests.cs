@@ -63,13 +63,13 @@ public class SubjectPaneOperationTests
     {
         // Arrange
         var (page, pane) = await OpenPaneAsync(MotorPath);
-        var operation = Method(pane, "Emergency Stop");
+        var operation = Method(pane, "Restart Controller");
         await Assertions.Expect(operation).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
 
         // Act
         await operation.ClickAsync();
         var dialog = page.Locator(".mud-dialog");
-        await Assertions.Expect(dialog).ToContainTextAsync("Immediately stops the motor", new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(dialog).ToContainTextAsync("Restarts the motor controller", new() { Timeout = PageLoadTimeout });
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
 
         // Assert

@@ -31,7 +31,8 @@ internal class SetPropertyTool
         Description = "Write a property value by its full path (e.g. /Devices/Motor/TargetSpeed). " +
                       "Only writable properties can be set. Blocked when server is read-only.",
         InputSchema = Schema,
-        Handler = HandleSetPropertyAsync
+        Handler = HandleSetPropertyAsync,
+        Annotations = McpToolAnnotations.Destructive
     };
 
     private Task<object?> HandleSetPropertyAsync(JsonElement input, CancellationToken cancellationToken)
@@ -64,9 +65,9 @@ internal class SetPropertyTool
             });
         }
 
-        if (!property.HasPublicSetter)
+        if (McpToolHelper.GetWriteError(property, path, _configuration) is { } writeError)
         {
-            return Task.FromResult<object?>(new { error = $"Property is not writable: {path}" });
+            return Task.FromResult<object?>(new { error = writeError });
         }
 
         object? newValue;

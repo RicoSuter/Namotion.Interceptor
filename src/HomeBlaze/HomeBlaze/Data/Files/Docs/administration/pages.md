@@ -132,6 +132,7 @@ The reader sees the sentence with the two values in place of the expressions, an
 - **Live**: The value updates when the property changes.
 - **HTML-safe**: The value is HTML-encoded, so a value can never add markup to the page.
 - **Empty**: A value that is not set shows nothing.
+- **Secrets and plain properties**: A secret configuration value, such as a password or an API key, the raw source of a page (the `Content` property of a markdown file) and a plain property without `[State]` of a subject class are never shown; their expression shows nothing, like a value that is not set. [Properties Shown on Pages](../development/building-subjects.md#properties-shown-on-pages) lists the rules.
 
 ### Expression Paths
 
@@ -916,6 +917,8 @@ The page knows a block by its key. The key is the `#name` of the block. A block 
 - **Errors**: Everything inside a block that was shown as an error is created again once the error is fixed.
 
 Give every subject that has state a name, and name the blocks around it too: the card, the tab, the cell and the layout. A subject that must keep its state under all changes belongs in a file of its own, shown on the page through a `Widget` block.
+
+The Markdown tools of [AI agents](ai-agents.md#changing-pages) refuse a change that would create the subject of a block without a name directly on the page again.
 
 ---
 

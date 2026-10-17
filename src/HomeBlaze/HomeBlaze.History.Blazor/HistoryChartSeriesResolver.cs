@@ -369,7 +369,7 @@ internal static class HistoryChartSeriesResolver
 
         try
         {
-            return resolver.ResolveScopedProperty(path, PathStyle.Canonical, series);
+            return resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, series);
         }
         catch
         {

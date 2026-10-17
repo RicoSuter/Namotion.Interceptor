@@ -8,6 +8,7 @@ namespace HomeBlaze.Components;
 /// One column of a <see cref="SubjectTable"/>: a property that every row shows.
 /// </summary>
 [ExcludeFromCreation]
+[PageLayout]
 [InterceptorSubject]
 public partial class SubjectTableColumn : IConfigurable
 {

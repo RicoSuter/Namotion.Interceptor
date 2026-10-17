@@ -152,7 +152,7 @@ public enum StateUnit
 }
 ```
 
-Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA"). A `Percent` value, state or operation parameter, is a fraction from 0 to 1: it displays as 0 to 100 %, the operation dialog takes 0 to 100 and divides by 100, and MCP `invoke_method` passes the fraction unchanged.
+Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA"). A `Percent` value, state or operation parameter, is a fraction from 0 to 1: it displays as 0 to 100 %, the operation dialog takes 0 to 100 and divides by 100, and the MCP tools `invoke_query` and `invoke_operation` pass the fraction unchanged.
 
 ### Naming Cumulative Properties
 
@@ -425,7 +425,7 @@ public partial class Motor
         TargetSpeed = Math.Clamp(speed, 0, 3000);
     }
 
-    [Operation(Title = "Emergency Stop", RequiresConfirmation = true, Position = 2)]
+    [Operation(Title = "Emergency Stop", Position = 2)]
     public void EmergencyStop()
     {
         TargetSpeed = 0;
@@ -438,7 +438,7 @@ public partial class Motor
         return new MotorDiagnostics { Status = Status, Speed = TargetSpeed };
     }
 
-    [Operation(Title = "Run Test", Position = 4)]
+    [Operation(Title = "Run Test", RequiresConfirmation = true, Position = 4)]
     public async Task RunTestAsync(int speed, int durationSeconds, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(durationSeconds);
@@ -473,7 +473,8 @@ public partial class Motor
 - Async methods are supported and show a progress indicator
 - Methods returning values display the result in a dialog
 - Errors are caught and shown in an error dialog
-- Operations with `RequiresConfirmation = true` show a confirmation dialog first
+- Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code. An implementation of an interface operation that requires confirmation, or an override of a base class operation that requires it, requires confirmation as well, also when it declares its own `[Operation]`; a `[Query]` that implements or overrides such an operation becomes an operation that requires confirmation
+- Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
 
 **Supported parameter types:**
 - `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`
@@ -834,7 +835,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration]` | User-editable settings | Yes | No (unless also `[State]`) |
 | `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
-| `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
+| `[Configuration] + [State]` | Editable and displayed, but not writable through MCP's `set_property`, see [AI Agents](../administration/ai-agents.md#tools-and-permissions); expose a write through an operation instead | Yes | Yes |
 | `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
 | `[State] + [SubjectPath(type)]` | Link to the subject at a canonical path, see [Path Properties](#path-properties) | No | Yes (as the subject) |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
@@ -1069,6 +1070,41 @@ This hides the subject from:
 - MCP `browse` and `search` tool results
 
 Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
+
+### Page Layout Types
+
+A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks create no subject that acts on anything and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). The property attributes that describe its values decide what such a block may hold: a path of a `[SubjectPath]` with a subject type must lead to an existing subject, a `[LinkAddress]` may only hold a relative address or one with http, https or mailto, and a block that sets a `[MediaAddress]`, such as the picture of a card, is no layout block:
+
+```csharp
+[PageLayout]
+[InterceptorSubject]
+public partial class Widget : ITitleProvider, IConfigurable
+{
+    [Configuration]
+    [SubjectPath(typeof(IInterceptorSubject))]
+    public partial string Path { get; set; }
+}
+```
+
+Mark only types whose configuration is plain values and that do nothing but show content.
+
+### Properties Shown on Pages
+
+A `{{ path }}` expression on a page and a [value widget](../administration/widgets/basics.md#value-widgets) show the value of a property they reach only when the property is displayable: a partial (intercepted) property, a `[Derived]` property or a property with `[State]`, on the class or through an interface. An expression shows nothing and a value widget shows a dash for:
+
+- A plain property, a public property without `[State]` that is no partial or `[Derived]` property. It is registered too but is no tracked value of the subject and can hold internal data, such as the text an agent is still writing. Mark a computed value that pages should show with `[Derived]`.
+- A default property of an interface without `[State]`, such as `bool? IsClosed => State switch { ... }`, unless it is marked with `[Derived]`. It is no partial property of the class, so it counts as a plain property otherwise.
+- A secret configuration property (`[Configuration(IsSecret = true)]`).
+- A property marked with `[ExcludeFromExpressions]`, for a value that can hold secrets in another form, such as the raw source of a file.
+
+A displayable property whose value type holds a secret configuration member, such as a record with a property marked `[Configuration(IsSecret = true)]`, renders as empty text, since the text of a record shows its members.
+
+Every other configuration value of any subject is shown by design, also to an AI agent that reads a page with `ReadEvaluatedContent`, while the MCP tools themselves expose only state. Mark a value that must not appear on a page as secret.
+
+```csharp
+[ExcludeFromExpressions]
+public partial string? Content { get; private set; }
+```
 
 ---
 

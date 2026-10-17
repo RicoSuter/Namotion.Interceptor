@@ -8,7 +8,8 @@ namespace HomeBlaze.Services.Display;
 public static class RawValueFormatter
 {
     /// <summary>
-    /// Gets the value with the invariant culture, a date as ISO 8601, and an empty text for null.
+    /// Gets the value with the invariant culture, a date as ISO 8601, and an empty text for null and for a value whose
+    /// text can show a secret configuration value, such as a record with a secret property.
     /// </summary>
     public static string Format(object? value) => value switch
     {
@@ -17,6 +18,6 @@ public static class RawValueFormatter
         DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
         DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
-        _ => value.ToString() ?? string.Empty
+        _ => SecretValueTypes.HoldsSecret(value) ? string.Empty : value.ToString() ?? string.Empty
     };
 }

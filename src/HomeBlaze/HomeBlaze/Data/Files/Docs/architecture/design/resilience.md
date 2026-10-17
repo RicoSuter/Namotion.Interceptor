@@ -110,7 +110,7 @@ No rate limiting exists on any entry point. A misbehaving or misconfigured clien
 
 | Entry Point | Risk | Example |
 |-------------|------|---------|
-| MCP server | External AI agent floods queries or writes | Runaway agent in a loop calling `query` at max speed |
+| MCP server | External AI agent floods queries or writes | Runaway agent in a loop calling `search` or `browse` at max speed |
 | WebSocket sync | Satellite or peer sends excessive updates | Misconfigured connector producing high-frequency noise changes |
 | Operation invocation | Expensive operations called too frequently | Cross-instance RPC amplifying load across the topology |
 | Blazor UI (SignalR) | Many concurrent operator sessions | Large number of users triggering live subscriptions simultaneously |

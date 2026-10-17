@@ -18,10 +18,25 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public ExcludeFromCreationAttribute() { }
     }
+    [System.AttributeUsage(System.AttributeTargets.Property, Inherited=true)]
+    public sealed class ExcludeFromExpressionsAttribute : System.Attribute
+    {
+        public ExcludeFromExpressionsAttribute() { }
+    }
     [System.AttributeUsage(System.AttributeTargets.Parameter)]
     public sealed class FromServicesAttribute : System.Attribute
     {
         public FromServicesAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class LinkAddressAttribute : System.Attribute
+    {
+        public LinkAddressAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class MediaAddressAttribute : System.Attribute
+    {
+        public MediaAddressAttribute() { }
     }
     [System.AttributeUsage(System.AttributeTargets.Method)]
     public class OperationAttribute : HomeBlaze.Abstractions.Attributes.SubjectMethodAttribute
@@ -34,6 +49,11 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public OperationParameterAttribute() { }
         public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; set; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class PageLayoutAttribute : System.Attribute
+    {
+        public PageLayoutAttribute() { }
     }
     [System.AttributeUsage(System.AttributeTargets.Method)]
     public class QueryAttribute : HomeBlaze.Abstractions.Attributes.SubjectMethodAttribute
@@ -225,8 +245,10 @@ namespace HomeBlaze.Abstractions.Devices.Covers
         [HomeBlaze.Abstractions.Attributes.State(Position=123)]
         bool? IsCalibrating { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=125)]
+        [Namotion.Interceptor.Attributes.Derived]
         bool? IsFullyClosed { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=124)]
+        [Namotion.Interceptor.Attributes.Derived]
         bool? IsFullyOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=122)]
         bool? IsMoving { get; }
@@ -429,9 +451,9 @@ namespace HomeBlaze.Abstractions.Devices.Locks
     {
         [HomeBlaze.Abstractions.Attributes.Operation]
         System.Threading.Tasks.Task LockAsync(System.Threading.CancellationToken cancellationToken);
-        [HomeBlaze.Abstractions.Attributes.Operation]
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
         System.Threading.Tasks.Task ToggleLockAsync(System.Threading.CancellationToken cancellationToken);
-        [HomeBlaze.Abstractions.Attributes.Operation]
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
         System.Threading.Tasks.Task UnlockAsync(System.Threading.CancellationToken cancellationToken);
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
@@ -439,6 +461,7 @@ namespace HomeBlaze.Abstractions.Devices.Locks
     public interface IDoorLockState
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=131)]
+        [Namotion.Interceptor.Attributes.Derived]
         bool? IsLocked { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=130)]
         HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
@@ -485,10 +508,13 @@ namespace HomeBlaze.Abstractions
     public interface IServerSubject : HomeBlaze.Abstractions.IMonitoredService
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=920)]
+        [Namotion.Interceptor.Attributes.Derived]
         bool IsServerRunning { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=922)]
+        [Namotion.Interceptor.Attributes.Derived]
         int? Port { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=921)]
+        [Namotion.Interceptor.Attributes.Derived]
         string? ServerUrl { get; }
     }
     public interface ISubjectPathResolver
@@ -858,6 +884,7 @@ namespace HomeBlaze.Abstractions.Sensors
     public interface IDoorSensor
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=231)]
+        [Namotion.Interceptor.Attributes.Derived]
         bool? IsClosed { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=230)]
         HomeBlaze.Abstractions.Sensors.DoorState? State { get; }

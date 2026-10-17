@@ -36,8 +36,12 @@ Each channel is a separate subject with its own `[Configuration]` properties (e.
 
 Since `SendNotificationAsync` is marked with `[Operation]`, it is:
 - Invocable from the Blazor UI (operators can send test notifications)
-- Discoverable via the registry and MCP tools (`list_methods`, `invoke_method`)
+- Discoverable via the registry and MCP tools (`list_methods`, `invoke_operation`)
 - Callable by built-in AI agents for automated notifications
+
+### From AI Agents
+
+A [built-in agent](../administration/ai-agents.md) finds the publishers through its tools: `list_types` finds the `INotificationPublisher` interface, and `search` with that interface in its `types` parameter finds the subjects that implement it. `list_methods` shows the exact method name and parameters: the operation is registered without the `Async` suffix, as `SendNotification` with a `message` parameter. The agent calls it with `invoke_operation`, which must be in the agent's `AllowedTools`; it is off by default, so an agent without it can only report findings on its page. Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because operations that require confirmation cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
 
 ### From Other Subjects
 
