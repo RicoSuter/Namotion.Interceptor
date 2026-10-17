@@ -230,6 +230,8 @@ public sealed class CarView : ComponentBase
     // Read by the cleanup on another thread than the renders.
     public int RenderCount => Volatile.Read(ref _renderCount);
 
+    public void RenderAgain() => StateHasChanged();
+
     protected override void BuildRenderTree(RenderTreeBuilder builder)
     {
         Volatile.Write(ref _renderCount, _renderCount + 1);

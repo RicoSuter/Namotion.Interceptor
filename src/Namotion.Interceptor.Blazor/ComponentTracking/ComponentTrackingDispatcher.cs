@@ -30,6 +30,7 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     private int _isDrainScheduled;
     private long _lastDrainTimestamp;
     private long _lastSweepTimestamp;
+    private int _trackerCountAfterSweep;
     private volatile bool _isDisposed;
 
     public ComponentTrackingDispatcher(IOptions<ComponentTrackingOptions> options, ILogger<ComponentTrackingDispatcher> logger)
@@ -232,12 +233,14 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     // at most once a second, when something renders or changes anyway.
     private void SweepIfDue()
     {
-        // Checked on every render, so with the cheaper clock.
+        // Checked on every render, so with the cheaper clock. Also due once the trackers have doubled since the last sweep,
+        // so that components that are replaced quickly, as rows of a grid, cannot pile up for a second.
         var now = Environment.TickCount64;
-        if (now - _lastSweepTimestamp > SweepIntervalMilliseconds)
+        if (now - _lastSweepTimestamp > SweepIntervalMilliseconds || _trackers.Count > 2 * _trackerCountAfterSweep + 64)
         {
             _lastSweepTimestamp = now;
             Sweep();
+            _trackerCountAfterSweep = _trackers.Count;
         }
     }
 
@@ -268,7 +271,8 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
 
     private sealed class Entry(ComponentTrackingDispatcher owner) : IPropertyChangeObserver
     {
-        public readonly List<ComponentReadTracker> Trackers = new(1);
+        // A set, so that releasing the trackers of many removed components does not search a long list for each.
+        public readonly HashSet<ComponentReadTracker> Trackers = [];
         public IDisposable? Subscription;
         public int IsPending;
 

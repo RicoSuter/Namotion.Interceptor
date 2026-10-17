@@ -127,6 +127,31 @@ A server application with live dashboards, one browser, components counted from 
 
 The same values changed on screen before and after on every page. Server CPU with the dashboard open fell from 14.2% to 2.0% of one core, against about 2% idle.
 
+## Benchmarks
+
+The benchmarks in `src/Namotion.Interceptor.Benchmark` are the baseline for changes to component tracking. Run them with `pwsh scripts/benchmark.ps1`, see [Benchmarking](../benchmarking.md); those that only exist with component tracking need `-LocalOnly` until master has them.
+
+| Benchmark | What it measures |
+|---|---|
+| `ReadPropertyRecorderBenchmark` | A property read without the recorder, with it and nothing recording, after a recording scope ended, and with one open. Runs on master too. |
+| `ReadPropertyRecorderThreadTargetBenchmark` | A read with a thread target that does nothing and with one that records like a tracker. |
+| `ComponentTrackingRenderBenchmark` | A parent rendering 100 children that read three properties each, with and without tracking: the cost per tracked render. |
+| `ComponentTrackingWriteBenchmark` | A write of a property that 0, 1 or 10 circuits track, with and without throttling: the cost on the writer's thread. |
+| `ComponentTrackingChangeBenchmark` | One write until the one of 100 components that shows it has rendered, against a component that the writer asks to render. Includes the hop to the thread pool, so it is a latency rather than CPU time. |
+| `ComponentTrackingScenarioBenchmark` | Content in a cascading value that reads 300 properties, a parent whose 100 children skip its render as `TrackedComponentBase`, and 100 children replaced on every render, which subscribes and releases their properties. |
+
+Results of one machine, `-LocalOnly`, noise reference `ServiceOrderResolverBenchmark.LinearChain` at 1.53 to 1.56 µs:
+
+| Benchmark | Without tracking | With tracking | Allocated with tracking |
+|---|---:|---:|---|
+| Render of 100 children | 48.2 µs | 57.5 µs | as without |
+| Content of a cascading value | 23.9 µs | 33.0 µs | as without |
+| Parent of 100 skipping children | 50.8 µs | 14.3 µs | as without |
+| 100 children replaced on every render | 94.7 µs | 246 to 274 µs | about 1.4 KB more per replaced component |
+| Write tracked by 10 circuits, default throttle | | 268 ns | 0 |
+
+The replaced children are the expensive case: each new component allocates its tracker and subscribes what it reads. Keeping subscriptions without readers until a later sweep did not reduce this in the benchmark and was not kept.
+
 ## Risks
 
 - **Private members** may change in a framework update. The startup check then logs an error and components render without tracking; the test `WhenTheFrameworkIsReferenced_ThenThePrivateMembersAreFound` fails on such an update.
