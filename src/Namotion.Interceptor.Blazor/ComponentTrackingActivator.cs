@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Namotion.Interceptor.Blazor.ComponentTracking;
+namespace Namotion.Interceptor.Blazor;
 
 /// <summary>
 /// Creates components as the default activator does and makes each <see cref="ComponentBase"/> record the property

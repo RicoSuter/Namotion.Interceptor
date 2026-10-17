@@ -5,11 +5,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Blazor.ComponentTracking;
+namespace Namotion.Interceptor.Blazor;
 
 /// <summary>
 /// Subscribes each property that a component of the circuit read, once, and renders the components that read a
-/// property when it changes, at most once per <see cref="ComponentTrackingOptions.ThrottleMilliseconds"/>.
+/// property when it changes, at most once per <see cref="BlazorSubjectTrackingOptions.ThrottleMilliseconds"/>.
 /// </summary>
 /// <remarks>
 /// Everything except <see cref="Entry.OnChange"/>, the queue and the drain flag runs on the renderer's dispatcher.
@@ -36,7 +36,7 @@ internal sealed class ComponentTrackingDispatcher : IDisposable
     private int _trackerCountAfterSweep;
     private volatile bool _isDisposed;
 
-    public ComponentTrackingDispatcher(IOptions<ComponentTrackingOptions> options, ILogger<ComponentTrackingDispatcher> logger)
+    public ComponentTrackingDispatcher(IOptions<BlazorSubjectTrackingOptions> options, ILogger<ComponentTrackingDispatcher> logger)
     {
         _logger = logger;
         _throttleTicks = options.Value.ThrottleMilliseconds * Stopwatch.Frequency / 1000;

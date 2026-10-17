@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Namotion.Interceptor.Blazor.ComponentTracking;
+namespace Namotion.Interceptor.Blazor;
 
-public static class ComponentTrackingServiceCollectionExtensions
+public static class BlazorSubjectTrackingServiceCollectionExtensions
 {
     /// <summary>
     /// Makes every component record the intercepted property reads of its own render and render again when one of
@@ -13,9 +13,9 @@ public static class ComponentTrackingServiceCollectionExtensions
     /// Registers an <see cref="IComponentActivator"/>: it replaces one registered before this call and is replaced by one
     /// registered after it.
     /// </remarks>
-    public static IServiceCollection AddComponentTracking(this IServiceCollection services, Action<ComponentTrackingOptions>? configure = null)
+    public static IServiceCollection AddBlazorSubjectTracking(this IServiceCollection services, Action<BlazorSubjectTrackingOptions>? configure = null)
     {
-        services.AddOptions<ComponentTrackingOptions>();
+        services.AddOptions<BlazorSubjectTrackingOptions>();
         if (configure is not null)
         {
             services.Configure(configure);

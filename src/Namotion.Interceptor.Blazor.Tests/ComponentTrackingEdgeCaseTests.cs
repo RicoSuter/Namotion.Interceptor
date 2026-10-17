@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
-using Namotion.Interceptor.Blazor.ComponentTracking;
+using Namotion.Interceptor.Blazor;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -485,7 +485,7 @@ public class ComponentTrackingEdgeCaseTests
         await using var services = new ServiceCollection()
             .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
             .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
-            .AddComponentTracking()
+            .AddBlazorSubjectTracking()
             .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
         await using var htmlRenderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
 
@@ -522,7 +522,7 @@ public class ComponentTrackingEdgeCaseTests
         var renderer = new TestRenderer(mode, configureServices: services => services
             .AddSingleton<IJSRuntime>(jsRuntime)
             .AddSingleton<IErrorBoundaryLogger, NullErrorBoundaryLogger>()
-            .AddComponentTracking(options => options.ThrottleMilliseconds = 0));
+            .AddBlazorSubjectTracking(options => options.ThrottleMilliseconds = 0));
         jsRuntime.Dispatcher = renderer.Dispatcher;
         return renderer;
     }

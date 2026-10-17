@@ -1,6 +1,6 @@
 using Namotion.Interceptor.SampleBlazor.Components;
 using Namotion.Interceptor.SampleBlazor.Models;
-using Namotion.Interceptor.Blazor.ComponentTracking;
+using Namotion.Interceptor.Blazor;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.SampleBlazor
@@ -17,7 +17,7 @@ namespace Namotion.Interceptor.SampleBlazor
                 .AddInteractiveServerComponents();
 
             // Every component renders again when a property that its render read changes.
-            builder.Services.AddComponentTracking();
+            builder.Services.AddBlazorSubjectTracking();
 
             // Add trackable game
             var context = InterceptorSubjectContext

@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor.Blazor.ComponentTracking;
+using Namotion.Interceptor.Blazor;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;

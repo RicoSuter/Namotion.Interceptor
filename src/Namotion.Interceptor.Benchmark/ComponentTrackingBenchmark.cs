@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Interceptor.Blazor.ComponentTracking;
+using Namotion.Interceptor.Blazor;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Recorder;
 
@@ -112,7 +112,7 @@ public class ComponentTrackingRenderBenchmark
     public void Setup()
     {
         var car = new Car(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithReadPropertyRecorder());
-        _renderer = new BenchmarkRenderer(Tracking ? services => services.AddComponentTracking() : null);
+        _renderer = new BenchmarkRenderer(Tracking ? services => services.AddBlazorSubjectTracking() : null);
         _root = _renderer.RenderRoot<CarListView>(new Dictionary<string, object?>
         {
             [nameof(CarListView.Car)] = car,
@@ -157,7 +157,7 @@ public class ComponentTrackingWriteBenchmark
         _car = new Car(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithReadPropertyRecorder());
         for (var i = 0; i < CircuitCount; i++)
         {
-            var renderer = new BenchmarkRenderer(services => services.AddComponentTracking(options => options.ThrottleMilliseconds = ThrottleMilliseconds));
+            var renderer = new BenchmarkRenderer(services => services.AddBlazorSubjectTracking(options => options.ThrottleMilliseconds = ThrottleMilliseconds));
             _views.Add(renderer.RenderRoot<CarView>(new Dictionary<string, object?> { [nameof(CarView.Car)] = _car }));
             _renderers.Add(renderer);
         }

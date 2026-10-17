@@ -507,7 +507,7 @@ namespace HomeBlaze.Components
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public class SubjectComponent : Namotion.Interceptor.Blazor.ComponentTracking.TrackedComponentBase, Microsoft.AspNetCore.Components.IHandleEvent, System.IDisposable
+    public class SubjectComponent : Namotion.Interceptor.Blazor.TrackedComponentBase, Microsoft.AspNetCore.Components.IHandleEvent, System.IDisposable
     {
         public SubjectComponent() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1187,7 +1187,7 @@ namespace HomeBlaze.Components.Components
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
     }
-    public class ValueListRow : Namotion.Interceptor.Blazor.ComponentTracking.TrackedComponentBase
+    public class ValueListRow : Namotion.Interceptor.Blazor.TrackedComponentBase
     {
         public ValueListRow() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1219,7 +1219,7 @@ namespace HomeBlaze.Components.Components
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public class ValueText : Namotion.Interceptor.Blazor.ComponentTracking.TrackedComponentBase
+    public class ValueText : Namotion.Interceptor.Blazor.TrackedComponentBase
     {
         public ValueText() { }
         [Microsoft.AspNetCore.Components.Parameter]

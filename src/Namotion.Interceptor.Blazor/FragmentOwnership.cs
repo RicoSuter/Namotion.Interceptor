@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking.Recorder;
 // Reads the frames of a render to find the content passed to components that are not a ComponentBase.
 #pragma warning disable BL0006
 
-namespace Namotion.Interceptor.Blazor.ComponentTracking;
+namespace Namotion.Interceptor.Blazor;
 
 /// <summary>
 /// Makes the content that a render passes to a component that is not a <see cref="ComponentBase"/>, such as a

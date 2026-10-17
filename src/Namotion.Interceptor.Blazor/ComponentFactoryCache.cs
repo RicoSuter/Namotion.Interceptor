@@ -3,9 +3,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.Reflection.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 
-[assembly: MetadataUpdateHandler(typeof(Namotion.Interceptor.Blazor.ComponentTracking.ComponentFactoryCache.HotReloadHandler))]
+[assembly: MetadataUpdateHandler(typeof(Namotion.Interceptor.Blazor.ComponentFactoryCache.HotReloadHandler))]
 
-namespace Namotion.Interceptor.Blazor.ComponentTracking;
+namespace Namotion.Interceptor.Blazor;
 
 /// <summary>
 /// The factories that create components, one per component type, as the default activator keeps them.

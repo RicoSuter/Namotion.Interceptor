@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking.Recorder;
 // Counts the frames of a render to find where its output starts, and keeps the renderer to test whether the component is alive.
 #pragma warning disable BL0006
 
-namespace Namotion.Interceptor.Blazor.ComponentTracking;
+namespace Namotion.Interceptor.Blazor;
 
 /// <summary>
 /// Records the property reads of one component's renders, and of the content it passes to components that are not

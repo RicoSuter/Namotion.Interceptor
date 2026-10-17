@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Components;
 
-namespace Namotion.Interceptor.Blazor.ComponentTracking;
+namespace Namotion.Interceptor.Blazor;
 
 /// <summary>
 /// A component that, while component tracking records its renders, ignores a render of its parent that passes

@@ -5,7 +5,7 @@ using System.Threading;
 using BenchmarkDotNet.Attributes;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
-using Namotion.Interceptor.Blazor.ComponentTracking;
+using Namotion.Interceptor.Blazor;
 using Namotion.Interceptor.Tracking;
 
 // The benchmarks drive a custom renderer, which is the only way to render components without a host.
@@ -64,7 +64,7 @@ public class ComponentTrackingScenarioBenchmark
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithReadPropertyRecorder();
         var cars = Enumerable.Range(0, ComponentCount * 2).Select(_ => new Car(context)).ToArray();
-        _renderer = new BenchmarkRenderer(Tracking ? services => services.AddComponentTracking() : null);
+        _renderer = new BenchmarkRenderer(Tracking ? services => services.AddBlazorSubjectTracking() : null);
         var view = _renderer.RenderRoot<TView>(new Dictionary<string, object?> { [nameof(CarsView.Cars)] = cars });
         _renderAgain = view.RenderAgain;
     }
@@ -94,7 +94,7 @@ public class ComponentTrackingChangeBenchmark
         var cars = Enumerable.Range(0, ComponentCount).Select(_ => new Car(context)).ToArray();
         _car = cars[ComponentCount / 2];
         _renderer = new BenchmarkRenderer(Tracking
-            ? services => services.AddComponentTracking(options => options.ThrottleMilliseconds = 0)
+            ? services => services.AddBlazorSubjectTracking(options => options.ThrottleMilliseconds = 0)
             : null);
         var list = _renderer.RenderRoot<ChangeTargetsView>(new Dictionary<string, object?> { [nameof(CarsView.Cars)] = cars });
         _view = list.Views[ComponentCount / 2];

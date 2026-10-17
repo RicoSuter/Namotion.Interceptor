@@ -1,9 +1,9 @@
-namespace Namotion.Interceptor.Blazor.ComponentTracking;
+namespace Namotion.Interceptor.Blazor;
 
 /// <summary>
-/// Options of per-component change tracking, see <see cref="ComponentTrackingServiceCollectionExtensions.AddComponentTracking"/>.
+/// Options of per-component change tracking, see <see cref="BlazorSubjectTrackingServiceCollectionExtensions.AddBlazorSubjectTracking"/>.
 /// </summary>
-public sealed class ComponentTrackingOptions
+public sealed class BlazorSubjectTrackingOptions
 {
     /// <summary>
     /// Gets or sets the minimum time between two rounds of renders that changes cause, in milliseconds.

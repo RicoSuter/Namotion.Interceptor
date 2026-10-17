@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Components.RenderTree;
 // Names types of the render tree to reach their private members.
 #pragma warning disable BL0006
 
-namespace Namotion.Interceptor.Blazor.ComponentTracking;
+namespace Namotion.Interceptor.Blazor;
 
 /// <summary>
 /// Accesses private framework members without reflection. Each member is verified once by <see cref="IsSupported"/>.

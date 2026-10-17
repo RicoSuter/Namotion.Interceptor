@@ -22,7 +22,7 @@ There are two ways to render again on a change: [component tracking](#component-
 Register component tracking once, and every component renders again when a property that its own render read changes:
 
 ```csharp
-builder.Services.AddComponentTracking();
+builder.Services.AddBlazorSubjectTracking();
 ```
 
 ```razor
@@ -52,7 +52,7 @@ No base class, wrapper or subscription is needed. A change renders only the comp
 ### Options
 
 ```csharp
-builder.Services.AddComponentTracking(options => options.ThrottleMilliseconds = 100);
+builder.Services.AddBlazorSubjectTracking(options => options.ThrottleMilliseconds = 100);
 ```
 
 | Option | Default | Description |
@@ -64,7 +64,7 @@ builder.Services.AddComponentTracking(options => options.ThrottleMilliseconds = 
 A component renders whenever its parent renders and passes a parameter that is not of a primitive type, such as a subject, a record or content. Component tracking cannot prevent that, because only the component itself decides in `SetParametersAsync` whether to render. A component that derives from `TrackedComponentBase` ignores a render of its parent whose parameters are all equal to the ones passed before:
 
 ```razor
-@using Namotion.Interceptor.Blazor.ComponentTracking
+@using Namotion.Interceptor.Blazor
 @inherits TrackedComponentBase
 
 <span class="@Reading.CssClass">@Reading.Text</span>
@@ -78,7 +78,7 @@ A component renders whenever its parent renders and passes a parameter that is n
 
 - **Unchanged** means equal by `Equals` to the value passed before, so the same instance, an equal value or an equal record. Content (`RenderFragment`) and other delegates always count as changed, as they do for Blazor. An `EventCallback` is a struct, not a delegate, so it counts as unchanged when it is equal by `Equals`, that is when it has the same receiver and an equal delegate.
 - **Still renders** when a property that its render read changes, when a parameter changes and when it calls `StateHasChanged`. `OnParametersSet` does not run for a skipped render.
-- **Only with component tracking**: while prerendering, or without `AddComponentTracking`, it renders with its parent as any component does.
+- **Only with component tracking**: while prerendering, or without `AddBlazorSubjectTracking`, it renders with its parent as any component does.
 
 Derive from it only if the render shows nothing else that can change: an object that is changed in place and is not a subject, or an `Equals` that ignores what the render shows, would stay stale. It pays off most for the rows or items of a component that reads all their values in its own render.
 
