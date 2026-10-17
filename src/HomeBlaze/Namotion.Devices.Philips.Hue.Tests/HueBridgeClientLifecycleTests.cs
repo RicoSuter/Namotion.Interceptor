@@ -12,7 +12,7 @@ public class HueBridgeClientLifecycleTests
         // Arrange
         var bridge = TestHelpers.CreateTestBridge();
         bridge.AppKey = "test-key";
-        SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+        bridge.Bridge = new LocatedBridge("test-bridge-id", "127.0.0.1", null);
         bridge.IsConnected = true; // the connection loop's precondition for serving operations
 
         var firstClient = bridge.GetOrCreateClient();
@@ -44,7 +44,7 @@ public class HueBridgeClientLifecycleTests
         // so it can be handed a client that has already been replaced.
         var bridge = TestHelpers.CreateTestBridge();
         bridge.AppKey = "test-key";
-        SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+        bridge.Bridge = new LocatedBridge("test-bridge-id", "127.0.0.1", null);
         bridge.IsConnected = true; // the connection loop's precondition for serving operations
 
         var stale = bridge.GetOrCreateClient();
@@ -70,7 +70,7 @@ public class HueBridgeClientLifecycleTests
         // release, so the HttpClient leaked for the lifetime of the process.
         var bridge = TestHelpers.CreateTestBridge();
         bridge.AppKey = "test-key";
-        SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+        bridge.Bridge = new LocatedBridge("test-bridge-id", "127.0.0.1", null);
         bridge.IsConnected = true; // the connection loop's precondition for serving operations
 
         var client = bridge.GetOrCreateClient();
@@ -93,13 +93,6 @@ public class HueBridgeClientLifecycleTests
             ?? throw new InvalidOperationException($"Field '{fieldName}' has no value."));
     }
 
-    private static void SetPrivateField<T>(HueBridge bridge, string fieldName, T value)
-    {
-        var field = typeof(HueBridge).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException($"Field '{fieldName}' was not found.");
-        field.SetValue(bridge, value);
-    }
-
     [Fact]
     public void WhenTheBridgeIsNotConnected_ThenAnOperationIsRefusedRatherThanHalfWorking()
     {
@@ -108,7 +101,7 @@ public class HueBridgeClientLifecycleTests
         // streaming or polling, so every derived value stayed at its pre-command reading indefinitely.
         var bridge = TestHelpers.CreateTestBridge();
         bridge.AppKey = "test-key";
-        SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+        bridge.Bridge = new LocatedBridge("test-bridge-id", "127.0.0.1", null);
 
         // Act & Assert
         Assert.False(bridge.IsConnected);

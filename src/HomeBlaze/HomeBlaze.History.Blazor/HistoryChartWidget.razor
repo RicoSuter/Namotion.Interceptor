@@ -19,10 +19,10 @@
 
 @if (Subject is HistoryChart chart)
 {
-    // The configuration and the current values are read on every render: these reads are what the page tracking scope
-    // records, so a change of a charted value renders the legend again. The legends in the chart view are read in the
-    // same render batch.
+    // The configuration and the current values are read on every render, so that the widget renders again when one
+    // changes: its render after a change of a value is what arms the next query, see OnAfterRender.
     Resolve(chart);
+    ReadCurrentValues();
 
     <div data-testid="history-chart">
         @if (_error is not null)
@@ -94,7 +94,7 @@
     private string? _resolvedAggregation;
     private int _resolvedHeight;
     private TimeSpan _resolvedRefreshInterval;
-    private int _resolvedPathsVersion = -1;
+    private long _resolvedPathsVersion = -1;
     private IReadOnlyList<HistoryChartSeriesInfo> _series = [];
     private string?[] _colors = [];
     private string?[] _swatchStyles = [];
@@ -126,9 +126,6 @@
     // Set when the first render or changed series queue a query, and cleared by the query that completes next, which
     // arms one more query: the stores may not have held the latest values yet, and constant values arm nothing.
     private bool _isFirstQueryPending;
-
-    // Incremented on the thread that changes the graph.
-    private int _pathsVersion;
 
     // Read on a timer thread by OnRefreshDue.
     private volatile bool _isDisposed;
@@ -252,7 +249,6 @@
     protected override void OnInitialized()
     {
         _refresh = new HistoryChartRefresh(TimeProvider, OnRefreshDue);
-        PathResolver.PathsChanged += OnPathsChanged;
     }
 
     protected override void OnAfterRender(bool firstRender)
@@ -267,10 +263,18 @@
             return;
         }
 
-        // The page renders every widget on a change of any value it shows, so only a change of a value of this chart arms it.
+        // The widget renders on a change of a charted value or of its configuration, and only a change of a value arms it.
         if (_error is null && Subject is HistoryChart)
         {
             _refresh?.OnRendered(HistoryRefreshThrottle.GetWindow(_resolvedRefreshInterval, _bucket));
+        }
+    }
+
+    private void ReadCurrentValues()
+    {
+        for (var index = 0; index < _series.Count; index++)
+        {
+            _ = _series[index].Property?.GetValue();
         }
     }
 
@@ -282,7 +286,7 @@
         var aggregation = chart.Aggregation;
         var height = chart.Height;
         var refreshInterval = chart.RefreshInterval;
-        var pathsVersion = Volatile.Read(ref _pathsVersion);
+        var pathsVersion = PathResolver.PathsVersion;
 
         var isCurrent = ReferenceEquals(entries, _resolvedEntries) &&
             pathsVersion == _resolvedPathsVersion &&
@@ -293,7 +297,7 @@
             refreshInterval == _resolvedRefreshInterval &&
             entries.Length == _resolvedConfiguration.Length;
 
-        // Every entry is read once, also after one differs, so the tracking scope records all of them. While they are
+        // Every entry is read once, also after one differs, so the render records all of them. While they are
         // current nothing is allocated.
         var configurations = isCurrent ? null : new HistoryChartSeriesConfiguration[entries.Length];
         for (var index = 0; index < entries.Length; index++)
@@ -364,16 +368,11 @@
         }
     }
 
-    // Runs on the thread that changes the graph, inside the lock of the lifecycle interceptor: it only notes the change,
-    // and the page renders after a change of the paths.
-    private void OnPathsChanged() => Interlocked.Increment(ref _pathsVersion);
-
     // Runs on a timer thread under the lock of the throttle (see the remarks of HistoryRefreshThrottle).
     private void OnRefreshDue() => QueueRefresh();
 
-    // Every query starts on the thread pool without an execution context, never inline: after a render the execution
-    // context is the one of the render, which can hold the read recorder of the page tracking scope, and InvokeAsync
-    // runs inline on an idle dispatcher, so from the throttle callback the query would run under the lock of the throttle.
+    // Every query starts on the thread pool without an execution context, never inline: InvokeAsync runs inline on an
+    // idle dispatcher, so from the throttle callback the query would run under the lock of the throttle.
     private void QueueRefresh()
     {
         if (_isDisposed)
@@ -516,7 +515,6 @@
     public void Dispose()
     {
         _isDisposed = true;
-        PathResolver.PathsChanged -= OnPathsChanged;
         _refresh?.Dispose();
 
         // Cancel before disposing: disposing does not cancel the token of a running query.
