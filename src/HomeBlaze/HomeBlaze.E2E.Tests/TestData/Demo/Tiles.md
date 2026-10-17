@@ -24,3 +24,14 @@ This page is changed by the tile widget tests.
 ::: Cell Row=0 Column=2
 :::: HomeBlaze.Components.Switch#missingtile Kind=Tile Path=tilemotor/DoesNotExist Label="Missing"
 ::
+
+:: HomeBlaze.Components.ValueMap#falseonly
+::: Case Value=False Text="Idle"
+::
+
+:: HomeBlaze.Components.GridLayout#casegrid Rows=1 Columns=2
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Switch#nocasetile Kind=Tile Path=tilemotor/IsPowered Map=falseonly Label="No case"
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.Switch#casetexttile Kind=Tile Path=tilemotor/IsPowered Map=powered Label="Case text"
+::

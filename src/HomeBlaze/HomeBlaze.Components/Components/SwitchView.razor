@@ -2,6 +2,7 @@
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Components.Controls
 @using HomeBlaze.Components.Operations
+@using HomeBlaze.Services.Display
 @implements IDisposable
 @inject PropertyWriter Writer
 @inject IDialogService DialogService
@@ -13,6 +14,7 @@
     var property = Property;
     var value = property?.GetValue();
     var isOn = value as bool? ?? false;
+    var matched = value is not null ? ValueMap?.FindCase(RawValueFormatter.Format(value)) : null;
     var canToggle = false;
     if (property is not null && (property.Type == typeof(bool) || property.Type == typeof(bool?)))
     {
@@ -32,6 +34,9 @@
 @if (Kind == SwitchKind.Tile)
 {
     var reading = ValueReader.ReadResolved(property, ValueMap, TimeZone);
+    // The case itself decides the fill: a case without a color is drawn on the surface, while a value without a case
+    // is filled with the primary color when true.
+    var fill = matched?.Color ?? (value is true ? Color.Primary : Color.Default);
     var subtitle = !string.IsNullOrEmpty(Subtitle) ? Subtitle : ValueMap is not null && !reading.IsMissing ? reading.Text : null;
     var icon = reading.IsMissing ? Icons.Material.Filled.QuestionMark : MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? Icon);
     var label = ValueReader.GetLabel(property, Label, Path);
@@ -43,7 +48,7 @@
               Label="@label"
               Subtitle="@subtitle"
               Icon="@icon"
-              Color="@ValueReader.GetIndicatorColor(reading, Map)"
+              Color="@fill"
               Disabled="@(IsEditing || _pending is not null || !canToggle)"
               IsBusy="@(_pending is not null)"
               Badge="@Badge"
@@ -51,7 +56,8 @@
 }
 else
 {
-    var color = ValueMap is null ? Color.Primary : GetSwitchColor(ValueReader.ReadResolved(property, ValueMap, TimeZone));
+    // A matched case without a color of its own leaves the toggle switch in the primary color.
+    var color = matched?.Color is { } caseColor && caseColor != Color.Default ? caseColor : Color.Primary;
     <div class="switch-widget" data-testid="switch">
         <MudSwitch T="bool"
                    @key="_resetKey"
@@ -107,6 +113,7 @@ else
     [Parameter]
     public RegisteredSubjectProperty? OffProperty { get; set; }
 
+    /// <summary>Whether the switch is drawn as a toggle switch or as a tile.</summary>
     [Parameter]
     public SwitchKind Kind { get; set; }
 
@@ -118,12 +125,15 @@ else
     [Parameter]
     public ValueMap? ValueMap { get; set; }
 
+    /// <summary>The second line of a tile. Without it, a tile with a map shows the text of the value.</summary>
     [Parameter]
     public string? Subtitle { get; set; }
 
+    /// <summary>The name of the icon of a tile, which the icon of the matched case of the map replaces.</summary>
     [Parameter]
     public string? Icon { get; set; }
 
+    /// <summary>The content drawn over the top right corner of a tile, or null for none.</summary>
     [Parameter]
     public IInterceptorSubject? Badge { get; set; }
 
@@ -136,10 +146,6 @@ else
         _toggleCallback = EventCallback.Factory.Create<bool>(this, ToggleAsync);
         _tileClickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, ToggleFromTileAsync);
     }
-
-    // A matched case without a color of its own leaves the toggle switch in the primary color.
-    private static Color GetSwitchColor(ValueReading reading) =>
-        reading.Color == Color.Default ? Color.Primary : reading.Color;
 
     private Task ToggleFromTileAsync() => ToggleAsync(!(Property?.GetValue() as bool? ?? false));
 

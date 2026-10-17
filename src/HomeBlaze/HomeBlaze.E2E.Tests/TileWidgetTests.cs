@@ -67,6 +67,7 @@ public class TileWidgetTests
 
         // Assert
         await Assertions.Expect(tile).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToBeEnabledAsync(new() { Timeout = Timeout });
         Assert.False(GetMotor().IsPowered);
         var surface = await page.ResolveColorAsync("var(--mud-palette-surface)");
         Assert.Equal(surface, await GetBackgroundAsync(tile));
@@ -105,6 +106,37 @@ public class TileWidgetTests
         // Assert
         var primary = await page.ResolveColorAsync("var(--mud-palette-primary)");
         Assert.Equal(primary, await GetBackgroundAsync(tile));
+    }
+
+    [Fact]
+    public async Task WhenSwitchTileMapHasNoCaseForTheValue_ThenItIsFilledWithThePrimaryColorWhileTrue()
+    {
+        // Arrange
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var tile = GetSwitchTile(page, "No case");
+
+        // Act
+        await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
+
+        // Assert
+        var primary = await page.ResolveColorAsync("var(--mud-palette-primary)");
+        Assert.Equal(primary, await GetBackgroundAsync(tile));
+    }
+
+    [Fact]
+    public async Task WhenSwitchTileHasNoSubtitle_ThenItShowsTheTextOfTheMatchedCase()
+    {
+        // Arrange
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var tile = GetSwitchTile(page, "Case text");
+
+        // Act
+        await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Running");
     }
 
     [Fact]
