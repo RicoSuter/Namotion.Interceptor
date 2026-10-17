@@ -1,3 +1,4 @@
+using System.Numerics;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
@@ -55,7 +56,8 @@ internal static class SubjectPathSelection
         type = Nullable.GetUnderlyingType(type) ?? type;
         foreach (var valueType in valueTypes)
         {
-            if (valueType.IsGenericTypeDefinition ? IsClosedFormOf(type, valueType) : valueType.IsAssignableFrom(type))
+            if (valueType == typeof(INumber<>) ? NumberValues.IsNumberType(type) :
+                valueType.IsGenericTypeDefinition ? IsClosedFormOf(type, valueType) : valueType.IsAssignableFrom(type))
             {
                 return true;
             }

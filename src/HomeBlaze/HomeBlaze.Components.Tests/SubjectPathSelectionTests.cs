@@ -264,11 +264,11 @@ public class SubjectPathSelectionTests
 
     [Theory]
     [InlineData(typeof(Indicator), nameof(Indicator.Path),
-        "Count,DoubledSpeed,FallbackMode,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Temperature")]
+        "Count,DoubledSpeed,FallbackMode,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Temperature,Total")]
     [InlineData(typeof(ValueTile), nameof(ValueTile.Path),
-        "Count,DoubledSpeed,FallbackMode,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Temperature")]
+        "Count,DoubledSpeed,FallbackMode,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Temperature,Total")]
     [InlineData(typeof(ValueRow), nameof(ValueRow.Path),
-        "Count,DoubledSpeed,FallbackMode,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Temperature")]
+        "Count,DoubledSpeed,FallbackMode,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Temperature,Total")]
     [InlineData(typeof(Progress), nameof(Progress.Path), "Count,DoubledSpeed,Limit,Price,Reading,Speed,Temperature")]
     [InlineData(typeof(Gauge), nameof(Gauge.Path), "Count,DoubledSpeed,Limit,Price,Reading,Speed,Temperature")]
     [InlineData(typeof(Switch), nameof(Switch.Path), "IsOn,IsOpen")]
@@ -278,7 +278,7 @@ public class SubjectPathSelectionTests
     [InlineData(typeof(Select), nameof(Select.Path), "FallbackMode,Mode")]
     [InlineData(typeof(OperationButton), nameof(OperationButton.Path), "GetStatus,Stop")]
     [InlineData(typeof(Control), nameof(Control.Path),
-        "Count,DoubledSpeed,FallbackMode,GetStatus,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Stop,Temperature")]
+        "Count,DoubledSpeed,FallbackMode,GetStatus,Initial,IsOn,IsOpen,LastSeen,Limit,Mode,Name,Price,Reading,Speed,Stop,Temperature,Total")]
     public void WhenAWidgetPathIsPicked_ThenItOffersTheTargetsTheWidgetCanUse(
         Type widgetType, string propertyName, string expectedPropertyNames)
     {
@@ -326,7 +326,9 @@ public class SubjectPathSelectionTests
     [Theory]
     [InlineData(typeof(int?), typeof(INumber<>), true)]
     [InlineData(typeof(decimal), typeof(INumber<>), true)]
-    [InlineData(typeof(Half), typeof(INumber<>), true)]
+    [InlineData(typeof(Half), typeof(INumber<>), false)]
+    [InlineData(typeof(Int128), typeof(INumber<>), false)]
+    [InlineData(typeof(nint), typeof(INumber<>), false)]
     [InlineData(typeof(char), typeof(INumber<>), false)]
     [InlineData(typeof(char), typeof(IBinaryInteger<>), false)]
     [InlineData(typeof(char), typeof(IEquatable<>), true)]
@@ -340,7 +342,7 @@ public class SubjectPathSelectionTests
     [InlineData(typeof(List<int>), typeof(List<>), true)]
     [InlineData(typeof(List<int>), typeof(IEnumerable<>), true)]
     [InlineData(typeof(string), typeof(object), true)]
-    public void WhenAValueTypeIsGiven_ThenATypeMatchesWhenItIsAssignableOrImplementsTheOpenGenericType(
+    public void WhenAValueTypeIsGiven_ThenATypeMatchesWhenItIsAssignableOrImplementsTheOpenGenericTypeAndNumbersAreTheReadableOnes(
         Type type, Type valueType, bool expected)
     {
         // Act
@@ -369,6 +371,7 @@ public class SubjectPathSelectionTests
     [InlineData(nameof(PathTargetSubject.Limit), "Number", true)]
     [InlineData(nameof(PathTargetSubject.Mode), "Number", false)]
     [InlineData(nameof(PathTargetSubject.Initial), "Number", false)]
+    [InlineData(nameof(PathTargetSubject.Total), "Number", false)]
     [InlineData(nameof(PathTargetSubject.FallbackMode), "Enum", true)]
     [InlineData(nameof(PathTargetSubject.Name), null, true)]
     [InlineData(nameof(PathTargetSubject.Stop), "Boolean", false)]

@@ -31,6 +31,8 @@ public partial class PathTargetSubject
 
     public partial decimal Price { get; set; }
 
+    public partial Int128 Total { get; set; }
+
     public partial PathTargetMode Mode { get; set; }
 
     public partial PathTargetMode? FallbackMode { get; set; }
