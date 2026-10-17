@@ -35,16 +35,16 @@ public static class ChildOrdering
             .Select(child => (Child: child, Name: getName(child)))
             .OrderBy(item => positions is not null && positions.TryGetValue(item.Name, out var position) ? position : int.MaxValue)
             .ThenBy(item => GetDefaultRank(item.Name))
-            .ThenBy(item => getTitle(item.Child), StringComparer.CurrentCulture)
+            .ThenBy(item => getTitle(item.Child), StringComparer.InvariantCulture)
             .ThenBy(item => item.Name, StringComparer.Ordinal)
             .Select(item => item.Child);
     }
 
     private static int GetDefaultRank(string name)
-        => Path.GetFileNameWithoutExtension(name).ToLowerInvariant() switch
-        {
-            "readme" => 0,
-            "index" => 1,
-            _ => 2
-        };
+    {
+        var stem = Path.GetFileNameWithoutExtension(name.AsSpan());
+        return stem.Equals("readme", StringComparison.OrdinalIgnoreCase) ? 0
+            : stem.Equals("index", StringComparison.OrdinalIgnoreCase) ? 1
+            : 2;
+    }
 }
