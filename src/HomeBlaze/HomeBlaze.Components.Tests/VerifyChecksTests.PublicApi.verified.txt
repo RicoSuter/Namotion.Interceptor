@@ -48,6 +48,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int? MinHeight { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int? MinWidth { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.Slot("Node")]
         [HomeBlaze.Abstractions.Attributes.State]
         public HomeBlaze.Components.CanvasNode[] Nodes { get; set; }

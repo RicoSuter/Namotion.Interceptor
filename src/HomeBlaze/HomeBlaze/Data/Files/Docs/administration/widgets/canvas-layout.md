@@ -17,6 +17,7 @@ An area on which content is placed at any position. Type name: `HomeBlaze.Compon
 | `GridSize` | Whole number | `100` | The step of that grid in pixels |
 | `Scale` | `None` or `FitWidth` | `None` | `None` draws the canvas in pixels. `FitWidth` draws a viewed canvas at the factor of the width of its place to its `Width` |
 | `Width` | Whole number above 0 | The right edge of the rightmost node | The design width of the canvas in pixels, which `FitWidth` fits to the width of the page |
+| `MinWidth` | Whole number above 0 | None | The least width in pixels at which `FitWidth` draws the canvas. On a narrower page the canvas keeps this width and scrolls horizontally |
 
 ## Slots
 
@@ -73,11 +74,55 @@ Pump
 Fan
 ::
 
+A wall of eight tiles that fits the width on a wide screen and keeps at least 720 pixels on a narrow one, where it scrolls horizontally, so that a phone shows it as about two screens side by side:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.CanvasLayout#fitwall MinHeight=124 Width=1104 MinWidth=720 Scale=FitWidth
+::: Node X=0 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Pump speed"
+::: Node X=140 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/Temperature Label="Pump temperature"
+::: Node X=280 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/Load Label="Pump load"
+::: Node X=420 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/Status Map=../value-map.md/motorstate Label="Pump status"
+::: Node X=560 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/CurrentSpeed Label="Fan speed"
+::: Node X=700 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/Temperature Label="Fan temperature"
+::: Node X=840 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/Load Label="Fan load"
+::: Node X=980 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/Status Map=../value-map.md/motorstate Label="Fan status"
+::
+~~~~
+
+:: HomeBlaze.Components.CanvasLayout#fitwall MinHeight=124 Width=1104 MinWidth=720 Scale=FitWidth
+::: Node X=0 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Pump speed"
+::: Node X=140 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/Temperature Label="Pump temperature"
+::: Node X=280 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/Load Label="Pump load"
+::: Node X=420 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/Status Map=../value-map.md/motorstate Label="Pump status"
+::: Node X=560 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/CurrentSpeed Label="Fan speed"
+::: Node X=700 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/Temperature Label="Fan temperature"
+::: Node X=840 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/Load Label="Fan load"
+::: Node X=980 Y=0 Width=124 Height=124
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/Status Map=../value-map.md/motorstate Label="Fan status"
+::
+
 ## Behavior and Limits
 
 - **Edit mode**: While the page is in edit mode, the nodes can be moved with the mouse, a click on a node selects the widget in it, or the canvas when the node has no widget, and a click on a free place adds a node there. Each node has buttons to edit and remove it, which show while the canvas or a widget in one of its nodes is selected. The canvas is also selected with the arrow up button of a selected widget in a node, or with the keyboard, see [Editing in the Page Editor](../pages.md#editing-in-the-page-editor).
 - **Zoom and move**: A canvas can be zoomed with the mouse wheel and moved by dragging its background only while the page is edited. While the page is viewed, the canvas itself cannot be zoomed or moved, the wheel scrolls the page, and the widgets in its nodes work as anywhere else on the page. While the page is edited, the widgets in the nodes do not react to the mouse, so that a node can be moved without triggering what it shows. No line can be drawn between nodes in either mode.
 - **Fits the width**: A viewed canvas with `Scale=FitWidth` is drawn at the factor of the width of its place to its `Width`, also larger than 1, and its height is `MinHeight` times that factor.
+- **A least width**: With `MinWidth` a `FitWidth` canvas is never drawn narrower than that. On a narrower page it is drawn at `MinWidth` and scrolls horizontally, while the page around it keeps its width.
 - **A page at the edge of a scrollbar**: In a browser whose scrollbar takes room, as on Windows and Linux, the height of a `FitWidth` canvas can decide whether the page needs a scrollbar, and the scrollbar in turn changes the width the canvas fits. The canvas then keeps the width with the scrollbar, so that it does not switch back and forth, and can end up to the width of a scrollbar short of the right edge. This happens only while the page is about as high as the window; a page that is clearly higher or lower fits exactly.
 - **Unscaled while edited**: While the page is edited, a `FitWidth` canvas is drawn unscaled, so that nodes move in canvas pixels. It scrolls horizontally when it is wider than the page.
 - **An invalid width**: A `Width` of 0 or less shows `Width must be above 0` with the value in place of the canvas, see [Value Widget Errors](../page-errors.md#value-widget-errors).

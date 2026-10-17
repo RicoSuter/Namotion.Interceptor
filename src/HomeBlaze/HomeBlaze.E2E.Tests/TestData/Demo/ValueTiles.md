@@ -50,3 +50,8 @@ This page is changed by the value tile widget tests.
 :: HomeBlaze.Components.ValueList
 ::: Value Path=valuemotor/TargetSpeed Label="List target"
 ::
+
+:: HomeBlaze.Components.CanvasLayout#mincanvas MinHeight=200 Width=400 MinWidth=600 Scale=FitWidth
+::: Node X=0 Y=0 Width=200 Height=200
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=valuemotor/TargetSpeed Label="Min canvas tile"
+::

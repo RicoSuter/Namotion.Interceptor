@@ -40,7 +40,7 @@ public class CanvasExtentTests
     public void WhenWidthIsNotAboveZero_ThenItIsAnError(int value)
     {
         // Act & Assert
-        Assert.Equal($"Width must be above 0: {value}", CanvasExtent.Validate(value));
+        Assert.Equal($"Width must be above 0: {value}", CanvasExtent.Validate(value, null));
     }
 
     [Theory]
@@ -54,7 +54,29 @@ public class CanvasExtentTests
         CanvasScale scale, bool isEditing, int designWidth, double availableWidth, double expected)
     {
         // Act
-        var factor = CanvasExtent.GetFactor(scale, isEditing, designWidth, availableWidth);
+        var factor = CanvasExtent.GetFactor(scale, isEditing, designWidth, availableWidth, null);
+
+        // Assert
+        Assert.Equal(expected, factor, 6);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void WhenMinWidthIsNotAboveZero_ThenItIsAnError(int value)
+    {
+        // Act & Assert
+        Assert.Equal($"MinWidth must be above 0: {value}", CanvasExtent.Validate(null, value));
+    }
+
+    [Theory]
+    [InlineData(375, 750, 0.75)] // narrower than the least width: drawn at it, and the frame scrolls
+    [InlineData(1500, 750, 1.5)] // wider: fits the width
+    [InlineData(0, 750, 1)] // the available width is not known yet
+    public void WhenCanvasHasAMinWidth_ThenItIsDrawnAtLeastThatWide(double availableWidth, int minWidth, double expected)
+    {
+        // Act
+        var factor = CanvasExtent.GetFactor(CanvasScale.FitWidth, false, 1000, availableWidth, minWidth);
 
         // Assert
         Assert.Equal(expected, factor, 6);

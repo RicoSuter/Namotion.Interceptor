@@ -18,14 +18,20 @@
     var canvas = Canvas;
     var nodes = Nodes;
     var scale = canvas?.Scale ?? CanvasScale.None;
-    var widthError = CanvasExtent.Validate(canvas?.Width);
+    var widthError = CanvasExtent.Validate(canvas?.Width, canvas?.MinWidth);
     var height = canvas?.MinHeight ?? 400;
     var designWidth = CanvasExtent.GetDesignWidth(canvas?.Width, nodes);
-    var factor = CanvasExtent.GetFactor(scale, IsEditing, designWidth, _availableWidth);
+    var factor = CanvasExtent.GetFactor(scale, IsEditing, designWidth, _availableWidth, canvas?.MinWidth);
     var isScaled = CanvasExtent.IsScaled(scale, IsEditing, designWidth);
-    var frameStyle = isScaled
-        ? string.Create(CultureInfo.InvariantCulture, $"width: 100%; height: {height * factor}px; overflow: hidden;")
-        : "width: 100%; overflow-x: auto;";
+    var drawnWidth = designWidth * factor;
+    // A canvas held at its least width is wider than the frame, which then scrolls it. A transform leaves the layout box
+    // at the design width, so the sizer gives the frame the drawn size to scroll and to be as high as.
+    var frameStyle = isScaled && drawnWidth > _availableWidth + 0.5
+        ? "width: 100%; overflow-x: auto; overflow-y: hidden;"
+        : isScaled ? "width: 100%; overflow: hidden;" : "width: 100%; overflow-x: auto;";
+    var sizerStyle = isScaled
+        ? string.Create(CultureInfo.InvariantCulture, $"width: {drawnWidth}px; height: {height * factor}px; overflow: hidden;")
+        : null;
     var containerStyle = isScaled
         ? string.Create(CultureInfo.InvariantCulture, $"position: relative; width: {designWidth}px; min-height: {height}px; transform: scale({factor}); transform-origin: 0 0;")
         : scale == CanvasScale.FitWidth
@@ -84,11 +90,14 @@
 }
 else if (scale == CanvasScale.FitWidth)
 {
-    @* The frame is the width the canvas fits. While viewed it cuts off the space that the scaled canvas no longer takes,
-       while edited it scrolls a canvas that is wider than the page. A canvas that does not fit the width needs none and
+    @* The frame is the width the canvas fits. While viewed it cuts off the space that the scaled canvas no longer takes
+       and scrolls a canvas held at its MinWidth, while edited it scrolls a canvas that is wider than the page. A canvas that does not fit the width needs none and
        stays a direct child of its widget, where the styles and the tests of the layouts expect it. *@
     <div class="canvas-scale-frame" @ref="_frame" style="@frameStyle" data-testid="canvas-scale-frame">
-        @container
+        @* Always rendered, also unstyled while edited, so that entering edit mode keeps the diagram. *@
+        <div style="@sizerStyle">
+            @container
+        </div>
     </div>
 }
 else

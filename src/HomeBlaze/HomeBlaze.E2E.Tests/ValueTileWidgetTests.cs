@@ -267,4 +267,36 @@ public class ValueTileWidgetTests
         Assert.True(ringBox.Top >= cellBox.Top);
         Assert.True(labelBox.Top + labelBox.Height <= cellBox.Top + cellBox.Height);
     }
+
+    [Theory]
+    [InlineData(375, true)] // narrower than the MinWidth of 600: drawn at 600, and the frame scrolls
+    [InlineData(1280, false)] // wider: fits the width
+    public async Task WhenCanvasThatFitsTheWidthHasAMinWidth_ThenItIsDrawnAtLeastThatWideAndScrollsOnANarrowerPage(int width, bool scrolls)
+    {
+        // Arrange
+        var page = await OpenPageAsync(width);
+        var tile = GetValueTile(page, "Min canvas tile");
+        await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var frame = tile.Locator("xpath=ancestor::div[@data-testid='canvas-scale-frame'][1]");
+        var node = tile.Locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' canvas-node ')][1]");
+
+        // Act: the node, with its border, is half of the 400 pixel design width, so it is half of the drawn width once the
+        // frame is measured.
+        var drawnWidth = await frame.EvaluateAsync<double>("frame => Math.max(frame.clientWidth, 600)");
+        await page.WaitForFunctionAsync(
+            "([node, expected]) => Math.abs(node.getBoundingClientRect().width - expected) < 2",
+            new object[] { await node.ElementHandleAsync(), drawnWidth / 2 },
+            new() { Timeout = Timeout });
+
+        // Assert
+        var overflow = await frame.EvaluateAsync<double>("frame => frame.scrollWidth - frame.clientWidth");
+        if (scrolls)
+        {
+            Assert.InRange(overflow, 600 - await frame.EvaluateAsync<double>("frame => frame.clientWidth") - 1, 600);
+        }
+        else
+        {
+            Assert.InRange(overflow, 0, 0.5);
+        }
+    }
 }
