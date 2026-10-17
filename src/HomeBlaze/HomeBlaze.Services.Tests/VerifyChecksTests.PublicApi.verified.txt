@@ -31,6 +31,7 @@ namespace HomeBlaze.Services
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public System.Text.Json.JsonElement? GetDefaultConfiguration(System.Type type, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void Release(Namotion.Interceptor.IInterceptorSubject subject) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool> isExcluded, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
@@ -78,6 +79,8 @@ namespace HomeBlaze.Services
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetOperationMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetQueryMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static bool IsMethodEnabled(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty methodProperty) { }
+        public static HomeBlaze.Abstractions.Metadata.MethodMetadata? TryGetMethodMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
     public class RootManager : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IDataDirectoryProvider, HomeBlaze.Storage.Abstractions.IConfigurationWriter
     {

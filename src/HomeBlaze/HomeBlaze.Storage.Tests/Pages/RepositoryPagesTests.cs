@@ -1,8 +1,11 @@
+using System.Text.RegularExpressions;
+using HomeBlaze.Components;
 using HomeBlaze.Storage.Pages;
+using MudBlazor;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-public class RepositoryPagesTests
+public partial class RepositoryPagesTests
 {
     private static readonly string[] PageFolders =
     [
@@ -63,6 +66,24 @@ public class RepositoryPagesTests
         Assert.Contains("The subject(name) fence is no longer supported.", html);
     }
 
+    // An unknown icon name falls back to the article icon without any message, so a misspelled icon is only seen here.
+    [Theory]
+    [MemberData(nameof(PagePaths))]
+    public void WhenRepositoryPageIsRead_ThenEveryIconArgumentNamesAMudBlazorIcon(string relativePath)
+    {
+        // Arrange
+        var text = ReadPage(relativePath);
+
+        // Act
+        var unknownIconNames = IconArgument().Matches(text)
+            .Select(match => match.Groups["name"].Value)
+            .Where(name => name != "Article" && MudBlazorIconResolver.Resolve(name) == Icons.Material.Filled.Article)
+            .ToList();
+
+        // Assert
+        Assert.Empty(unknownIconNames);
+    }
+
     internal static string ReadPage(string relativePath) =>
         File.ReadAllText(Path.Combine(FindRepositoryRoot(), relativePath)).Replace("\r\n", "\n");
 
@@ -76,4 +97,8 @@ public class RepositoryPagesTests
 
         return directory?.FullName ?? throw new InvalidOperationException("Repository root not found.");
     }
+
+    // Also in a code fence and in the text, where a sample shows an argument that a reader copies.
+    [GeneratedRegex("""(?<![\w])Icon=(?:"(?<name>[^"]*)"|(?<name>\w+))""")]
+    private static partial Regex IconArgument();
 }

@@ -60,6 +60,7 @@ public class PluginLoadingTests
     {
         await page.GotoAsync(_fixture.ServerAddress);
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Navigate to the Browser page
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });

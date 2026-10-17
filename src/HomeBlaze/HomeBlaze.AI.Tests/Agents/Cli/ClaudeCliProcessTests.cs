@@ -43,7 +43,9 @@ public class ClaudeCliProcessTests
 
         // Assert
         Assert.Equal("Hello world", result.Result!.Text);
-        Assert.Contains("names no API key source", Assert.Single(logger.Warnings));
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains("names no API key source", warning);
+        Assert.Contains(cli.Directory, warning);
     }
 
     [UnixFact]
@@ -183,6 +185,30 @@ public class ClaudeCliProcessTests
         Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
         Assert.Contains(workingDirectory, exception.Message);
         Assert.Empty(cli.Invocations);
+    }
+
+    [Fact]
+    public async Task WhenTheConfigFolderCannotBeCreated_ThenAConfigurationErrorNamesTheFolder()
+    {
+        // Arrange - a file in place of the folder; the CLI path does not exist, so nothing could be started.
+        var workingDirectory = Directory.CreateTempSubdirectory("claude-cli").FullName;
+        var configPath = Path.Combine(workingDirectory, ".anthropic-config");
+        await File.WriteAllTextAsync(configPath, "not a folder");
+        var invocation = new ClaudeCliInvocation("/nonexistent/claude", ["-p"], workingDirectory, "hi");
+
+        try
+        {
+            // Act & Assert
+            var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
+                ClaudeCliProcess.RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), null, NullLogger.Instance, CancellationToken.None));
+            Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
+            Assert.Contains(configPath, exception.Message);
+            Assert.IsAssignableFrom<IOException>(exception.InnerException);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 
     [UnixFact]

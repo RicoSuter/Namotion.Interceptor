@@ -19,11 +19,9 @@ public class ReadPropertyRecorder : IReadInterceptor
     /// Uses AsyncLocal for proper isolation across async contexts.
     /// </summary>
     /// <param name="properties">Optional preallocated properties dictionary.</param>
-    /// <returns>The recording scope. Dispose to stop recording.</returns>
+    /// <returns>The recording scope. Dispose to stop recording; this may happen on any async context.</returns>
     public static ReadPropertyRecorderScope Start(ConcurrentDictionary<PropertyReference, bool>? properties = null)
     {
-        var scope = new ReadPropertyRecorderScope(properties);
-
         // Get or create the scopes list for this async context
         var scopes = _activeScopes.Value;
         if (scopes == null)
@@ -32,6 +30,7 @@ public class ReadPropertyRecorder : IReadInterceptor
             _activeScopes.Value = scopes;
         }
 
+        var scope = new ReadPropertyRecorderScope(properties, scopes);
         lock (scopes)
         {
             scopes.Add(scope);
@@ -40,23 +39,29 @@ public class ReadPropertyRecorder : IReadInterceptor
         return scope;
     }
 
-    internal static void RemoveScope(ReadPropertyRecorderScope scope)
+    /// <summary>
+    /// Gets the number of scopes that record in the current async context.
+    /// </summary>
+    internal static int ActiveScopeCount
     {
-        var scopes = _activeScopes.Value;
-        if (scopes is not null)
+        get
         {
+            var scopes = _activeScopes.Value;
+            if (scopes is null)
+            {
+                return 0;
+            }
+
             lock (scopes)
             {
-                scopes.Remove(scope);
+                return scopes.Count;
             }
         }
     }
 
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
     {
-        var result = next(ref context);
-
-        // Record to all active scopes in this async context
+        // Recorded before the value is read, so that a change written after the read finds the property recorded.
         var scopes = _activeScopes.Value;
         if (scopes is not null)
         {
@@ -69,6 +74,6 @@ public class ReadPropertyRecorder : IReadInterceptor
             }
         }
 
-        return result;
+        return next(ref context);
     }
 }

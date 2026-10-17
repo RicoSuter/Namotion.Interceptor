@@ -75,6 +75,8 @@ public class NestedSubjectSaveTests
 
     private static async Task SaveCellWithColumnSpanThreeAsync(IPage page)
     {
+        await page.SelectGridThroughFreeCellAsync();
+
         var editCellButton = page.GetByTitle("Edit Cell");
         await Assertions.Expect(editCellButton).ToBeVisibleAsync(new() { Timeout = 30000 });
         await editCellButton.ClickAsync();

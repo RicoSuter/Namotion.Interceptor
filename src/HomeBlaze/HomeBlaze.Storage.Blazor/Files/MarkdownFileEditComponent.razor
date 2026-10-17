@@ -25,6 +25,7 @@
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
 @implements ISubjectEditComponent
+@implements IAsyncDisposable
 
 @if (string.IsNullOrEmpty(_originalContent))
 {
@@ -32,24 +33,33 @@
 }
 else
 {
+    @* The actions stand in the page head at the end of the bar above the editor, which can be too narrow for their
+       labels. *@
     <SectionContent SectionName="EditActions">
         <MudButton Variant="Variant.Filled"
                    Color="Color.Primary"
                    Size="Size.Small"
+                   Class="editor-action"
                    StartIcon="@Icons.Material.Filled.Add"
                    OnClick="OnCreateClick"
+                   title="Create"
+                   aria-label="Create"
                    data-testid="create-subject-button">
-            Create
+            <span class="editor-action-label">Create</span>
         </MudButton>
         @if (_activeRegion != null)
         {
+            var editLabel = _activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression";
             <MudButton Variant="Variant.Filled"
                        Color="Color.Primary"
                        Size="Size.Small"
+                       Class="editor-action"
                        StartIcon="@Icons.Material.Filled.Edit"
                        OnClick="OnEditButtonClick"
+                       title="@editLabel"
+                       aria-label="@editLabel"
                        data-testid="@(_activeRegion.Type == DecorationRegionType.SubjectBlock ? "edit-subject-button" : "edit-expression-button")">
-                @(_activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression")
+                <span class="editor-action-label">@editLabel</span>
             </MudButton>
         }
     </SectionContent>
@@ -69,16 +79,51 @@ else
         width: 100%;
     }
 
-    /* Decoration styles for subject blocks and expressions */
-    .subject-block-decoration {
-        background-color: rgba(65, 105, 225, 0.25); /* Royal blue, works in light/dark modes */
-        border-radius: 3px;
+    /* A long block name is cut off, and the title of the button shows it in full. */
+    .editor-action-label {
+        display: inline-block;
+        max-width: 12rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
     }
 
-    .expression-decoration {
-        background-color: rgba(65, 105, 225, 0.25); /* Royal blue, works in light/dark modes */
-        border-radius: 3px;
+    /* In a page head narrower than the actions with their longest labels, the time and the mode button need (500px), the
+       actions show only their icons. */
+    @@container page-head (max-width: 499.98px) {
+        .editor-action-label {
+            display: none;
+        }
+
+        .editor-action .mud-button-icon-start {
+            margin: 0;
+        }
+
+        .editor-action.mud-button-root {
+            min-width: 0;
+        }
     }
+
+    /* The colors of the block depths, as red, green and blue for rgb() and rgba(). */
+    .monaco-editor.vs-dark .block-color-0 { --block-color: 108, 166, 240; }
+    .monaco-editor.vs-dark .block-color-1 { --block-color: 79, 201, 164; }
+    .monaco-editor.vs-dark .block-color-2 { --block-color: 179, 157, 245; }
+    .monaco-editor.vs-dark .block-color-3 { --block-color: 238, 143, 181; }
+    .monaco-editor.vs-dark .block-color-4 { --block-color: 150, 200, 90; }
+    .monaco-editor.vs .block-color-0 { --block-color: 37, 99, 200; }
+    .monaco-editor.vs .block-color-1 { --block-color: 13, 140, 105; }
+    .monaco-editor.vs .block-color-2 { --block-color: 110, 80, 210; }
+    .monaco-editor.vs .block-color-3 { --block-color: 200, 60, 120; }
+    .monaco-editor.vs .block-color-4 { --block-color: 70, 130, 30; }
+
+    .monaco-editor .block-fence { color: rgb(var(--block-color)) !important; font-weight: bold; }
+    .monaco-editor .block-closing-label { color: rgb(var(--block-color)) !important; font-style: italic; opacity: 0.6; }
+    .monaco-editor .block-head { background-color: rgba(var(--block-color), 0.16); border-radius: 3px; }
+    .monaco-editor.vs .block-head { background-color: rgba(var(--block-color), 0.12); }
+
+    .monaco-editor .expression-decoration { background-color: rgba(224, 160, 80, 0.22); border-radius: 3px; }
+    .monaco-editor.vs .expression-decoration { background-color: rgba(210, 130, 20, 0.18); }
 </style>
 
 @code {
@@ -96,7 +141,16 @@ else
     private string _currentContent = string.Empty;
     private bool _previousDarkMode = true;
     private List<DecorationRegion> _decorationRegions = new();
-    private string[] _currentDecorationIds = Array.Empty<string>();
+    private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownFileEditComponent.razor.js";
+    private Task<IJSObjectReference>? _moduleImport;
+    private bool _isDisposed;
+
+    // The version of the editor model that _currentContent was read with, or 0 when the text came another way.
+    // The editor drops decorations of a version that is no longer current.
+    private int _currentVersion;
+
+    // Counts the changes of _currentContent, so that a save can tell whether newer text arrived during its write.
+    private int _contentChangeCount;
     private DecorationRegion? _activeRegion;
     private Task? _decorationRefresh;
     private bool _isDecorationRefreshRequested;
@@ -122,7 +176,15 @@ else
             Language = "markdown",
             Value = _originalContent,
             WordWrap = "on",
-            Theme = MonacoTheme
+            Theme = MonacoTheme,
+            Folding = true,
+            ShowFoldingControls = "always",
+            StickyScroll = new EditorStickyScrollOptions
+            {
+                Enabled = true,
+                DefaultModel = "foldingProviderModel",
+                MaxLineCount = 6
+            }
         };
     }
 
@@ -181,7 +243,7 @@ else
             return;
 
         // _currentContent follows the editor with a delay, and the comparison below must see what was typed last.
-        _currentContent = await _editor.GetValue();
+        SetCurrentContent(await _editor.GetValue());
 
         // The subject belongs to the block of the saved page. Opening the dialog on editor text that
         // differs would show the saved values and then replace what was typed, or write into another block.
@@ -215,8 +277,8 @@ else
 
         // Writes the head line and the json block only. When the graph has drifted from the text, the write-back
         // can also have inserted or removed blocks, and writing the editor text below overwrites that.
-        _currentContent = MarkdownBlockWriter.WriteConfiguration(
-            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject));
+        SetCurrentContent(MarkdownBlockWriter.WriteConfiguration(
+            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject, block)));
 
         // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
@@ -295,7 +357,7 @@ else
             }
         }
 
-        _currentContent = string.Join('\n', lines);
+        SetCurrentContent(string.Join('\n', lines));
 
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
@@ -317,7 +379,7 @@ else
             return;
 
         // _currentContent follows the editor with a delay, and the names must be those of what was typed last.
-        _currentContent = await _editor.GetValue();
+        SetCurrentContent(await _editor.GetValue());
 
         // The name becomes the #id of the block. It is checked while the dialog is open, because the
         // subject that was configured in it is gone once the dialog has closed.
@@ -332,7 +394,7 @@ else
         string json;
         try
         {
-            json = MarkdownBlockConfiguration.Serialize(Serializer, result.Subject);
+            json = MarkdownBlockConfiguration.Serialize(Serializer, result.Subject, block: null);
         }
         finally
         {
@@ -373,7 +435,7 @@ else
             newLines.Insert(lineAfterBlock, "");
         }
 
-        _currentContent = string.Join(lineEnding, newLines);
+        SetCurrentContent(string.Join(lineEnding, newLines));
 
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
@@ -389,10 +451,8 @@ else
         IsDirtyChanged?.Invoke(false);
     }
 
-    // Called only on the synchronization context of the circuit: the editor keeps its decoration ids in a list that is
-    // not thread-safe, and calls from two threads break it for every later call. A refresh that is requested while one
-    // runs is one more run after it, never a second one at the same time, because both would remove the same old
-    // decorations and the one whose ids are overwritten in _currentDecorationIds would stay in the editor for good.
+    // Called only on the synchronization context of the circuit. A refresh that is requested while one runs is one more
+    // run after it, never a second one at the same time, so that the last text is decorated last.
     // The returned task completes after a run that started after the call, unless a run fails before.
     private Task RefreshDecorationsAsync()
     {
@@ -418,32 +478,67 @@ else
 
     private async Task ApplyDecorationsAsync()
     {
-        if (_editor == null)
+        if (_editor == null || _isDisposed)
             return;
 
-        // Parse decoration regions from current content
+        var version = _currentVersion;
         Func<int, IInterceptorSubject?>? getBlockSubject = File is null ? null : File.GetBlockSubject;
-        _decorationRegions = MarkdownDecorationParser.Parse(_currentContent, getBlockSubject);
+        var parsed = MarkdownDecorationParser.ParseDecorations(_currentContent, getBlockSubject);
+        _decorationRegions = parsed.Regions;
 
-        // Convert to Monaco decorations
-        var decorations = _decorationRegions.Select(region => new ModelDeltaDecoration
+        var decorations = BlockOutlineDecorations.Create(parsed.Regions, parsed.Outlines);
+        if (await GetModuleAsync() is { } module)
         {
-            Range = new BlazorMonaco.Range(
-                region.StartLine,
-                region.StartColumn,
-                region.EndLine,
-                region.EndColumn),
-            Options = new ModelDecorationOptions
-            {
-                ClassName = region.Type == DecorationRegionType.SubjectBlock
-                    ? "subject-block-decoration"
-                    : "expression-decoration",
-                IsWholeLine = false
-            }
-        }).ToArray();
+            await module.InvokeVoidAsync("update", _editor.Id, version, decorations.Values, decorations.Labels);
+        }
+    }
 
-        // Apply decorations (delta update - removes old, adds new)
-        _currentDecorationIds = await _editor.DeltaDecorations(_currentDecorationIds, decorations);
+    // Null once the component is disposed: the next page editor gets the same editor id, and a late call would
+    // decorate its model with this page.
+    private async ValueTask<IJSObjectReference?> GetModuleAsync()
+    {
+        if (_isDisposed)
+            return null;
+
+        var moduleImport = _moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
+        try
+        {
+            var module = await moduleImport;
+            return _isDisposed ? null : module;
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException)
+        {
+            // The next call imports again. Until then the editor has no decorations and reads its text without the module.
+            if (_moduleImport == moduleImport)
+            {
+                _moduleImport = null;
+            }
+
+            return null;
+        }
+    }
+
+    // The text with the version of the editor model, or with version 0 when the module is not available.
+    private async Task<EditorContent?> ReadContentAsync(StandaloneCodeEditor editor)
+    {
+        if (_isDisposed)
+            return null;
+
+        if (await GetModuleAsync() is { } module)
+            return await module.InvokeAsync<EditorContent?>("getContent", editor.Id);
+
+        // Checked again, because the component can have been disposed while the module was imported.
+        if (_isDisposed)
+            return null;
+
+        return new EditorContent(0, await editor.GetValue());
+    }
+
+    private void SetCurrentContent(string content, int version = 0)
+    {
+        _currentContent = content;
+        _currentVersion = version;
+        _contentChangeCount++;
     }
 
     protected override async Task OnInitializedAsync()
@@ -453,7 +548,7 @@ else
             await using var stream = await File.ReadAsync(CancellationToken.None);
             using var reader = new StreamReader(stream);
             _originalContent = await reader.ReadToEndAsync();
-            _currentContent = _originalContent;
+            SetCurrentContent(_originalContent);
         }
     }
 
@@ -462,9 +557,9 @@ else
         // TODO: Add try-catch for ObjectDisposedException/JSDisconnectedException - component may be disposed during async operation
         // Awaited here and not run on the thread pool, because the decorations are refreshed on the synchronization
         // context of the circuit only, see RefreshDecorationsAsync.
-        if (_editor != null)
+        if (_editor != null && await ReadContentAsync(_editor) is { } content)
         {
-            _currentContent = await _editor.GetValue();
+            SetCurrentContent(content.Text, content.Version);
             await RefreshDecorationsAsync();
 
             IsDirtyChanged?.Invoke(IsDirty);
@@ -476,16 +571,47 @@ else
         if (File == null || _editor == null) return;
 
         var content = await _editor.GetValue();
+        var contentChangeCount = _contentChangeCount;
 
         await File.WriteAsync(content, cancellationToken);
 
         _originalContent = content;
-        _currentContent = content;
+
+        // Text typed during the write was read by its content change after the read above, and stays the current
+        // text, which is not saved.
+        if (_contentChangeCount == contentChangeCount)
+        {
+            SetCurrentContent(content);
+        }
 
         // The storage reloads the file as part of the write, so the regions get the subjects of the saved page.
         await RefreshDecorationsAsync();
 
-        IsDirtyChanged?.Invoke(false);
+        IsDirtyChanged?.Invoke(IsDirty);
     }
 
+    // The module forgets the folds of a model when Monaco disposes the model together with the editor.
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        if (_moduleImport is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await (await _moduleImport).DisposeAsync();
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException)
+        {
+            // The import failed, and there is no module to dispose.
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone and the browser with it.
+        }
+    }
+
+    private sealed record EditorContent(int Version, string Text);
 }

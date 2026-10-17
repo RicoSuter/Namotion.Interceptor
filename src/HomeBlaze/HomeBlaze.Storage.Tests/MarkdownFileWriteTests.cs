@@ -767,8 +767,9 @@ public class MarkdownFileWriteTests : IDisposable
         writer.WhenApplied = async () =>
             innerException = await Record.ExceptionAsync(() => markdown.ReplaceTextAsync("Text.", "Inner.", CancellationToken.None));
 
-        // Act
-        await markdown.ReplaceTextAsync("Text.", "Changed.", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        // Act - a save of the editor that changes the block, so that the reload inside the write applies it again.
+        await markdown.WriteAsync(":: HomeBlaze.Storage.Tests.PageWritingSubject#writer Level=2\n::\n\nChanged.", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(30));
 
         // Assert
         var exception = Assert.IsType<InvalidOperationException>(innerException);
@@ -836,6 +837,10 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Title=Info", "Title=Info Href=\"https://example.com/plant\"")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout Rows=1 Columns=2\n::: Cell Row=0 Column=1\n:::: HomeBlaze.Components.Widget Path=motor\n::::\n:::\n::")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.CanvasLayout MinHeight=300\n::: Node X=20 Y=20\n:::: HomeBlaze.Components.Card Title=Note\n::::\n:::\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Gauge Path=motor/CurrentSpeed Maximum=3000\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Responsive From=Md\nWide windows only.\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.SubjectTable Source=motor\n::: Column Property=CurrentSpeed Label=Speed\n:::\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.History.Blazor.HistoryChart Range=6h\n::: Series Path=motor/CurrentSpeed Label=Speed\n:::\n::")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesLayoutBlocks_ThenThePageIsWritten(string oldText, string newText)
     {
         // Arrange
@@ -899,6 +904,11 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n::: Cell\n```json\n{ \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"motor\" } }\n```\n:::\n::", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n::: Cell\n:::: HomeBlaze.Components.Widget Path=missing\n::::\n:::\n::", "leads to no existing subject")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.CanvasLayout\n::: Node\n:::: HomeBlaze.Components.Card Title=Pixel Image=\"https://tracker.example.com/pixel.png\"\n::::\n:::\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Switch Path=motor/IsAtTargetSpeed\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Slider Path=motor/TargetSpeed\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.OperationButton Path=motor/EmergencyStop\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.History.Blazor.HistoryChart\n::: Series Path=motor/CurrentSpeed Color=\"url(https://tracker.example.com/pixel.png)\"\n:::\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.SubjectTable Source=motor\n::: Column Property=CurrentSpeed Map=missing\n:::\n::", "leads to no existing subject")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesAnythingElse_ThenItIsRejected(string oldText, string newText, string expectedMessage)
     {
         // Arrange
@@ -1397,6 +1407,7 @@ public class MarkdownFileWriteTests : IDisposable
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
         typeProvider.AddAssembly(typeof(Components.Card).Assembly);
+        typeProvider.AddAssembly(typeof(History.Blazor.HistoryChart).Assembly);
         typeProvider.AddAssembly(typeof(MarkdownFileWriteTests).Assembly);
 
         var services = new ServiceCollection();

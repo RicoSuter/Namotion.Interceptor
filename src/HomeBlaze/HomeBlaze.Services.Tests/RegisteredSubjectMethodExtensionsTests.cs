@@ -1,9 +1,11 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -137,6 +139,83 @@ public class RegisteredSubjectMethodExtensionsTests
         Assert.Equal(3, operations.Count);
         Assert.All(operations, m => Assert.Equal(MethodKind.Operation, m.Kind));
     }
+
+    [Fact]
+    public void WhenMethodHasAnIsEnabledAttribute_ThenItsValueSaysWhetherTheMethodIsEnabled()
+    {
+        // Arrange
+        var subject = new EnabledMethodTestSubject(CreateContext());
+        var start = subject.TryGetRegisteredSubject()!.TryGetProperty("Start")!;
+
+        // Act
+        var isEnabledWhileStopped = start.IsMethodEnabled();
+        subject.IsRunning = true;
+        var isEnabledWhileRunning = start.IsMethodEnabled();
+
+        // Assert
+        Assert.True(isEnabledWhileStopped);
+        Assert.False(isEnabledWhileRunning);
+    }
+
+    [Fact]
+    public void WhenMethodHasNoIsEnabledAttribute_ThenItIsEnabled()
+    {
+        // Arrange
+        var subject = new EnabledMethodTestSubject(CreateContext());
+        var reset = subject.TryGetRegisteredSubject()!.TryGetProperty("Reset")!;
+
+        // Act
+        var isEnabled = reset.IsMethodEnabled();
+
+        // Assert
+        Assert.True(isEnabled);
+    }
+
+    [Fact]
+    public void WhenIsEnabledAttributeHoldsNoBoolean_ThenTheMethodIsEnabled()
+    {
+        // Arrange
+        var subject = new EnabledMethodTestSubject(CreateContext());
+        var stop = subject.TryGetRegisteredSubject()!.TryGetProperty("Stop")!;
+
+        // Act
+        var isEnabled = stop.IsMethodEnabled();
+
+        // Assert
+        Assert.True(isEnabled);
+    }
+
+    [Fact]
+    public void WhenAPropertyHoldsAMethod_ThenTryGetMethodMetadataReturnsIt()
+    {
+        // Arrange
+        var registered = new MethodExtTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("First")!;
+
+        // Act
+        var metadata = property.TryGetMethodMetadata();
+
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Equal("First", metadata.Title);
+    }
+
+    [Fact]
+    public void WhenAPropertyTypeCannotHoldAMethod_ThenTryGetMethodMetadataReturnsNullWithoutReadingTheValue()
+    {
+        // Arrange
+        var registered = new MethodDiscoveryGetterSubject(CreateContext()).TryGetRegisteredSubject()!;
+        var unavailable = registered.TryGetProperty(nameof(MethodDiscoveryGetterSubject.UnavailableValue))!;
+        var objectMethod = registered.TryGetProperty(nameof(MethodDiscoveryGetterSubject.ObjectMethod))!;
+
+        // Act
+        var unavailableMetadata = unavailable.TryGetMethodMetadata();
+        var objectMetadata = objectMethod.TryGetMethodMetadata();
+
+        // Assert
+        Assert.Null(unavailableMetadata);
+        Assert.Equal("Object", objectMetadata?.Title);
+    }
 }
 
 [InterceptorSubject]
@@ -178,4 +257,26 @@ public partial class MethodDiscoveryGetterSubject
     {
         Title = "Subclass", Position = 2, Kind = MethodKind.Operation
     };
+}
+
+[InterceptorSubject]
+public partial class EnabledMethodTestSubject
+{
+    public partial bool IsRunning { get; set; }
+
+    [Derived]
+    [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
+    public bool Start_IsEnabled => !IsRunning;
+
+    [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
+    public partial string? Stop_IsEnabled { get; set; }
+
+    [Operation(Title = "Start")]
+    public void Start() => IsRunning = true;
+
+    [Operation(Title = "Stop")]
+    public void Stop() => IsRunning = false;
+
+    [Operation(Title = "Reset")]
+    public Task ResetAsync() => Task.CompletedTask;
 }

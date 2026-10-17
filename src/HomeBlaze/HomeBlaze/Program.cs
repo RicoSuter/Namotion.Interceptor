@@ -3,6 +3,7 @@ using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Cli;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Components;
+using HomeBlaze.History.Blazor;
 using HomeBlaze.History.InMemory.Blazor;
 using HomeBlaze.History.Mcp;
 using HomeBlaze.History.Sqlite.Blazor;
@@ -131,6 +132,7 @@ typeProvider
     .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly)                        // HomeBlaze.History.InMemory.Blazor
     .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject).Assembly)       // HomeBlaze.History.Sqlite
     .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly)                          // HomeBlaze.History.Sqlite.Blazor
+    .AddAssembly(typeof(HistoryChart).Assembly)                                             // HomeBlaze.History.Blazor
     .AddAssembly(typeof(HomeBlaze.Installation.HomeBlazeInstallation).Assembly)             // HomeBlaze.Installation
     .AddAssembly(typeof(HomeBlaze.Installation.Blazor.InstallationWidget).Assembly)         // HomeBlaze.Installation.Blazor
     .AddAssembly(typeof(LuxtronikHeatPump).Assembly)                                        // Namotion.Devices.Luxtronik

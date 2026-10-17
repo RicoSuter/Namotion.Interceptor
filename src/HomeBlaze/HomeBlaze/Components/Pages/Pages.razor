@@ -5,6 +5,7 @@
 @using HomeBlaze.Components.Editors
 @using HomeBlaze.Services.Components
 @using Microsoft.AspNetCore.Components.Sections
+@using Microsoft.JSInterop
 @using Namotion.Interceptor.Blazor
 @using Toolbelt.Blazor.HotKeys2
 
@@ -15,6 +16,7 @@
 @inject SubjectPathResolver PathResolver
 @inject DeveloperModeService DeveloperMode
 @inject HotKeys HotKeys
+@inject IJSRuntime JsRuntime
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
@@ -26,6 +28,26 @@
     else
     {
         <CascadingValue Value="@IsEditing" Name="IsEditing">
+        <CascadingValue Value="_widgetSelection" IsFixed="true">
+            @* The head of the page in every mode: the actions of the editor, what the page shows there, such as the time of
+               its last change, and the button of the edit modes, side by side. In the view modes a markdown page leaves room
+               for them next to its title (the padding of its first h1 in MarkdownFilePageComponent.razor.css of
+               HomeBlaze.Storage.Blazor), and in the editing modes they stand at the end of the bar above the editor. One
+               outlet per section that stays in place, because a second outlet of the same section while the mode changes
+               would end the circuit. *@
+            <div class="d-flex align-center" style="@GetPageHeadStyle()" data-testid="page-head">
+                <div @ref="_pageHeadContent" class="@(ShowEditor ? "page-head-content page-head-editing" : "page-head-content")">
+                    <SectionOutlet SectionName="EditActions" />
+                    <div class="page-head-info">
+                        <SectionOutlet SectionName="PageHeadInfo" />
+                    </div>
+                    @if (CanEdit())
+                    {
+                        @RenderEditMenu()
+                    }
+                </div>
+            </div>
+
             @if (_editMode == PageEditMode.Split && CanEdit())
             {
                 <div data-testid="edit-splitter">
@@ -34,7 +56,7 @@
                                  EnableSlide="true"
                                  OnDoubleClicked="ResetSplitDimension">
                         <StartContent>
-                            <div style="width: 100%; height: 100%; overflow-y: auto;">
+                            <div class="page-split-preview" style="width: 100%; height: 100%; overflow-y: auto;" @onclick="ClearSelectionCallback">
                                 <SubjectComponent @key="_componentKey"
                                                   Subject="@_subject"
                                                   Type="SubjectComponentType.Page"/>
@@ -42,12 +64,7 @@
                         </StartContent>
                         <EndContent>
                             <div class="d-flex flex-column" style="height: 100%; width: 100%">
-                                <div class="d-flex align-center justify-space-between gap-2 px-4 py-2" style="height: 56px; flex-shrink: 0; border-bottom: 1px solid var(--mud-palette-divider); width: 100%">
-                                    <div class="d-flex gap-2">
-                                        <SectionOutlet SectionName="EditActions" />
-                                    </div>
-                                    @RenderEditMenu()
-                                </div>
+                                <div @ref="_editorBar" style="@EditorBarStyle" data-testid="editor-bar"></div>
                                 <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                                     <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
                                         <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>
@@ -69,12 +86,7 @@
             else if (_editMode == PageEditMode.Source && CanEdit())
             {
                 <div class="d-flex flex-column" style="height: calc(100vh - 80px); width: 100%">
-                    <div class="d-flex align-center justify-space-between gap-2 px-4 py-2" style="height: 56px; flex-shrink: 0; border-bottom: 1px solid var(--mud-palette-divider); width: 100%">
-                        <div class="d-flex gap-2">
-                            <SectionOutlet SectionName="EditActions" />
-                        </div>
-                        @RenderEditMenu()
-                    </div>
+                    <div @ref="_editorBar" style="@EditorBarStyle" data-testid="editor-bar"></div>
                     <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                         <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
                             <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>
@@ -92,21 +104,48 @@
             }
             else
             {
-                @if (CanEdit())
-                {
-                    <div style="position: absolute; top: 80px; right: 20px; z-index: 100;">
-                        @RenderEditMenu()
-                    </div>
-                }
 
-                @* View or Inline mode - show page component *@
-                <SubjectComponent @key="_componentKey"
-                                  Subject="@_subject"
-                                  Type="SubjectComponentType.Page"/>
+                @* View or Inline mode - show page component. A click that no widget took clears the selection. In edit mode the
+                   area reaches down to the bottom of the window, so that a short page still has empty space to click; the 160px
+                   cover the app bar and the paddings of the layout, so that the area alone does not make the page scroll. *@
+                <div style="@(IsEditing ? "min-height: calc(100vh - 160px);" : null)" @onclick="ClearSelectionCallback">
+                    <SubjectComponent @key="_componentKey"
+                                      Subject="@_subject"
+                                      Type="SubjectComponentType.Page"/>
+                </div>
             }
+        </CascadingValue>
         </CascadingValue>
     }
 </TrackingScope>
+
+<style>
+    .page-head-content {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .page-head-info {
+        display: flex;
+    }
+
+    /* In the editing modes the head is as wide as the bar above the editor, less 16px at each end, and leaves out what
+       does not fit: first the labels of the editor actions (see MarkdownFileEditComponent), then the time of the last
+       change. Pages.razor.js keeps the width of the bar in the property. */
+    .page-head-editing {
+        width: calc(var(--editor-bar-width, 0px) - 32px);
+        justify-content: flex-end;
+        container: page-head / inline-size;
+    }
+
+    /* The icons of both actions, the time and the mode button need 252px. */
+    @@container page-head (max-width: 251.98px) {
+        .page-head-info {
+            display: none;
+        }
+    }
+</style>
 
 @code {
     [Parameter] public string? Path { get; set; }
@@ -122,6 +161,25 @@
     private bool _isEditPanelValid;
 
     private HotKeysContext? _hotKeysContext;
+
+    private readonly WidgetSelection _widgetSelection = new();
+
+    private const string ModulePath = "./Components/Pages/Pages.razor.js";
+    private ElementReference _pageHeadContent;
+    private ElementReference _editorBar;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _pageHeadFit;
+
+    // The mode whose editor bar the head follows, null while it follows none.
+    private PageEditMode? _fittedMode;
+
+    // The last fit of the head. Renders do not wait for each other's OnAfterRenderAsync, so each fit waits for the one
+    // before it, otherwise an older fit that finishes last would replace the observer of the current bar.
+    private Task _pageHeadFitTask = Task.CompletedTask;
+
+    // The selection is the receiver, so that a click on empty page space does not render the page, only the widget that it
+    // deselects together with the widgets inside it.
+    private EventCallback<MouseEventArgs> _clearSelectionCallback;
 
     // How long the page waits after a change of the paths before it renders. Attaches and detaches come in bursts,
     // such as the subjects of a device that connects, and every one of them inside this time ends in the same render.
@@ -143,11 +201,25 @@
     private bool IsEditing => _editMode != PageEditMode.View;
     private bool ShowEditor => _editMode is PageEditMode.Split or PageEditMode.Source;
 
+    // The bar above the editor, in which the page head stands.
+    private const string EditorBarStyle = "height: 56px; flex-shrink: 0; border-bottom: 1px solid var(--mud-palette-divider); width: 100%";
+
+    // The page head is placed on the document below the app bar. The layout has 16px of padding at the sides (px-4), the
+    // head stands 16px inside the end of the bar of the editor, which in the split mode is inside the 8px margin of the
+    // splitter content, and in the view modes 20px below the app bar on the line of the title.
+    private string GetPageHeadStyle() => _editMode switch
+    {
+        PageEditMode.Split => "position: absolute; z-index: 100; top: calc(var(--mud-appbar-height) + 8px); right: 40px; height: 56px;",
+        PageEditMode.Source => "position: absolute; z-index: 100; top: var(--mud-appbar-height); right: 32px; height: 56px;",
+        _ => "position: absolute; z-index: 100; top: calc(var(--mud-appbar-height) + 20px); right: 16px;"
+    };
+
     protected override void OnInitialized()
     {
         // The resolver caches an absolute path, so a widget or an expression reads no property on the way to its target
         // and the tracking scope does not see that an entry on the way appeared, was replaced or left.
         PathResolver.PathsChanged += OnPathsChanged;
+        _clearSelectionCallback = EventCallback.Factory.Create<MouseEventArgs>(_widgetSelection, _widgetSelection.Clear);
     }
 
     // Runs on the thread that changes the graph, inside the lock of the lifecycle interceptor.
@@ -188,15 +260,53 @@
         }
     }
 
-    protected override Task OnAfterRenderAsync(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             _hotKeysContext = HotKeys.CreateContext()
-                .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None);
+                .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None)
+                // Escape in a dialog belongs to the dialog, and the widget that the dialog edits stays selected.
+                .Add(Code.Escape, OnEscape, new HotKeyOptions { ExcludeSelector = ".mud-dialog-container, .mud-dialog-container *" });
         }
 
-        return Task.CompletedTask;
+        PageEditMode? mode = ShowEditor ? _editMode : null;
+        if (mode != _fittedMode)
+        {
+            _fittedMode = mode;
+            _pageHeadFitTask = FitPageHeadAsync(_pageHeadFitTask, mode, mode is null ? null : _editorBar);
+            await _pageHeadFitTask;
+        }
+    }
+
+    // Each mode with an editor renders a bar of its own, so the head follows the bar of the current mode.
+    private async Task FitPageHeadAsync(Task previousFit, PageEditMode? mode, ElementReference? editorBar)
+    {
+        await previousFit;
+        if (mode != _fittedMode || _isDisposed)
+        {
+            // A later mode has its own fit queued behind this one, or the page is gone.
+            return;
+        }
+
+        try
+        {
+            if (_pageHeadFit is { } previous)
+            {
+                _pageHeadFit = null;
+                await DisposePageHeadFitAsync(previous);
+            }
+
+            if (editorBar is { } bar)
+            {
+                _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+                _pageHeadFit = await _module.InvokeAsync<IJSObjectReference>("fitToEditorBar", _pageHeadContent, bar);
+            }
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
+        {
+            // The circuit is gone, or the page was left while the call ran.
+        }
     }
 
     protected override void OnParametersSet()
@@ -249,9 +359,19 @@
         }
 
         _editMode = mode;
+        _widgetSelection.Clear();
 
         // Every mode with an editor has an edit panel of its own, which reports its validity once it is ready.
         _isEditPanelValid = false;
+    }
+
+    // Only an edited page has the handler, so that a click on a viewed page renders nothing.
+    private EventCallback<MouseEventArgs> ClearSelectionCallback
+        => IsEditing ? _clearSelectionCallback : default;
+
+    private void OnEscape()
+    {
+        _widgetSelection.Clear();
     }
 
     private void OnEditPanelIsValidChanged(bool isValid)
@@ -311,6 +431,7 @@
     private RenderFragment RenderEditMenu() => __builder =>
     {
         <MudMenu Icon="@GetModeIcon()"
+                 AriaLabel="Edit mode"
                  data-testid="edit-mode-menu"
                  Color="@(IsEditing ? Color.Primary : Color.Default)"
                  Variant="Variant.Filled"
@@ -349,5 +470,31 @@
         {
             await _hotKeysContext.DisposeAsync();
         }
+
+        try
+        {
+            await _pageHeadFitTask;
+
+            if (_pageHeadFit is not null)
+            {
+                await DisposePageHeadFitAsync(_pageHeadFit);
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
+        {
+            // The circuit is gone, and the browser released the objects with it.
+        }
+    }
+
+    // Releasing the reference alone leaves the observer of the handle running in the browser.
+    private static async Task DisposePageHeadFitAsync(IJSObjectReference pageHeadFit)
+    {
+        await pageHeadFit.InvokeVoidAsync("dispose");
+        await pageHeadFit.DisposeAsync();
     }
 }

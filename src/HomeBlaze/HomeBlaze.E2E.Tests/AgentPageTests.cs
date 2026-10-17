@@ -3,11 +3,11 @@ using HomeBlaze.Abstractions;
 using System.Text.RegularExpressions;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Cli;
+using HomeBlaze.AI.Tests;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
-using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -513,6 +513,10 @@ public class AgentPageTests
 
     private static async Task AssertTypingKeepsTheTimelineStillAsync(IPage page, IElementHandle timeline, ILocator input, string text)
     {
+        // A wheel scroll or the pin to the bottom after the load can still be animating; only scrolls caused by typing
+        // may be counted.
+        await WaitForScrollToSettleAsync(page, timeline);
+
         // The row in the middle of the view is followed; scroll events are counted while typing.
         await timeline.EvaluateAsync(
             "timeline => { const view = timeline.getBoundingClientRect(); " +
@@ -529,6 +533,16 @@ public class AgentPageTests
         var scrolls = await timeline.EvaluateAsync<int>("timeline => { timeline.removeEventListener('scroll', window.__typingListener); return window.__typingScrolls; }");
         Assert.Equal(0, scrolls);
     }
+
+    // Resolves once the scroll position has not changed for ten animation frames in a row, and fails when it keeps
+    // changing for 300 frames, so a timeline that never stops scrolling fails the test instead of hanging it.
+    private static Task WaitForScrollToSettleAsync(IPage page, IElementHandle timeline) =>
+        page.EvaluateAsync(
+            "timeline => new Promise((resolve, reject) => { let last = timeline.scrollTop, stableFrames = 0, frames = 0; " +
+            "const check = () => { frames++; if (timeline.scrollTop === last) { stableFrames++; } else { last = timeline.scrollTop; stableFrames = 0; } " +
+            "if (stableFrames >= 10) { resolve(); } else if (frames >= 300) { reject(new Error('The timeline kept scrolling.')); } else { requestAnimationFrame(check); } }; " +
+            "requestAnimationFrame(check); })",
+            timeline);
 
     // Read after two animation frames, so the browser has laid out and painted what the keystroke changed.
     private static Task<double> ReadTypingRowOffsetAsync(IPage page, IElementHandle timeline) =>

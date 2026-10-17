@@ -311,8 +311,10 @@ namespace HomeBlaze.Storage.Pages
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownBlock> Children { get; }
         public string? ConfigurationJson { get; init; }
         public HomeBlaze.Storage.Pages.MarkdownSpan? ConfigurationSpan { get; init; }
+        public int EndLine { get; init; }
         public string? Error { get; init; }
         public int FenceLength { get; init; }
+        public bool HasClosingLine { get; init; }
         public HomeBlaze.Storage.Pages.MarkdownBlockHead? Head { get; init; }
         public HomeBlaze.Storage.Pages.MarkdownSpan HeadSpan { get; init; }
         public int Index { get; }
@@ -328,7 +330,7 @@ namespace HomeBlaze.Storage.Pages
     }
     public static class MarkdownBlockConfiguration
     {
-        public static string Serialize(HomeBlaze.Services.ConfigurableSubjectSerializer serializer, Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static string Serialize(HomeBlaze.Services.ConfigurableSubjectSerializer serializer, Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Storage.Pages.MarkdownBlock? block) { }
     }
     public sealed class MarkdownBlockHead : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownBlockHead>
     {

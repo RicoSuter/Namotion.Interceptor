@@ -75,6 +75,19 @@ public partial class Card : IConfigurable, ITitleProvider
     public partial string? Image { get; set; }
 
     /// <summary>
+    /// Height of the whole card in pixels, above 0; 0 or less is a widget argument error. Without it the card is as high as
+    /// its content. Wins over <see cref="AspectRatio"/>.
+    /// </summary>
+    [Configuration]
+    public partial int? Height { get; set; }
+
+    /// <summary>
+    /// Width and height in the form <c>W:H</c>, for example <c>4:3</c>, so that the height of the card follows its width.
+    /// </summary>
+    [Configuration]
+    public partial string? AspectRatio { get; set; }
+
+    /// <summary>
     /// The body of the card.
     /// </summary>
     [Slot(IsDefault = true)]

@@ -1,6 +1,7 @@
 @implements IDisposable
 @using System.Reactive.Concurrency
 @using System.Reactive.Linq
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 
 @if (!_configurationProperties.Any())
@@ -64,8 +65,9 @@ else
     {
         get
         {
-            // The MudForm only counts once it was evaluated, which the first edit causes. Until then it reports
-            // every form with a required field as invalid, although all of them are prefilled from the subject.
+            // The MudForm sets itself invalid when a required field registers and evaluates itself only after its
+            // first render, which can come after this editor first reports. Until a field is touched, the loop
+            // below decides alone; all required fields are prefilled from the subject.
             if (_form is { IsTouched: true, IsValid: false })
             {
                 return false;
@@ -117,8 +119,9 @@ else
 
         if (Subject != null)
         {
+            // A slot is edited through the subjects it holds, which this editor has no field for.
             _configurationProperties = Subject.GetConfigurationProperties()
-                .Where(p => p.HasSetter)
+                .Where(p => p.HasSetter && !p.ReflectionAttributes.Any(attribute => attribute is SlotAttribute))
                 .OrderBy(p => p.GetDisplayPosition())
                 .ToList();
 

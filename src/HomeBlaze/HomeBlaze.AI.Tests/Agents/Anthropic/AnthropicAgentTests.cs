@@ -952,6 +952,39 @@ public class AnthropicAgentTests
     }
 
     [Fact]
+    public async Task WhenTheClientFailsWithAWrappedException_ThenTheInnerExceptionsAreLoggedWithoutTheKey()
+    {
+        // Arrange
+        var logger = new RecordingLogger<AnthropicAgent>();
+        await using var test = await AgentTestContext<TestableAnthropicAgent>.StartAsync(
+            services => new TestableAnthropicAgent(services, logger),
+            agent =>
+            {
+                agent.ApiKey = ApiKey;
+                agent.Model = "claude-sonnet-5";
+                agent.Client.Respond = (_, _) => throw new InvalidOperationException(
+                    "Outer failure",
+                    new AggregateException(
+                        new TimeoutException("first inner failure"),
+                        new IOException($"second inner failure with key {ApiKey}")));
+            });
+
+        // Act
+        await test.Agent.SendMessageAsync("hello", CancellationToken.None);
+
+        // Assert
+        Assert.Contains(logger.Errors, message =>
+            message.Contains(typeof(AggregateException).FullName!, StringComparison.Ordinal) &&
+            message.Contains(typeof(TimeoutException).FullName + ": first inner failure", StringComparison.Ordinal) &&
+            message.Contains(typeof(IOException).FullName + ": second inner failure with key [redacted]", StringComparison.Ordinal));
+        Assert.All(logger.Entries, entry =>
+        {
+            Assert.DoesNotContain(ApiKey, entry.Message);
+            Assert.DoesNotContain(ApiKey, entry.Exception?.ToString() ?? string.Empty);
+        });
+    }
+
+    [Fact]
     public async Task WhenAWebFetchFailsBeforeAGraphTool_ThenTheFetchIsSentBackWithItsUrl()
     {
         // Arrange - the failed fetch result carries no URL; only the streamed input of the call does.
@@ -1138,23 +1171,74 @@ public class AnthropicAgentProfileTests
 {
     private const string ApiKey = "sk-ant-test-key-1234";
 
+    // The SDK reads these for credentials, the address, headers or the choice and place of a profile, so each test
+    // clears them and only sets the one it is about; a developer machine's own values must not decide the outcome.
+    private static readonly string[] CredentialVariables =
+    [
+        "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_PROFILE",
+        "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_CUSTOM_HEADERS",
+        "ANTHROPIC_IDENTITY_TOKEN", "ANTHROPIC_IDENTITY_TOKEN_FILE", "ANTHROPIC_SERVICE_ACCOUNT_ID",
+        "ANTHROPIC_WORKSPACE_ID", "ANTHROPIC_ORGANIZATION_ID"
+    ];
+
     [Fact]
-    public async Task WhenAProfileSetsABaseUrlAndTheEnvironmentAnAuthToken_ThenOnlyTheKeyIsSentToTheDefaultAddress()
+    public async Task WhenALocalProfileSetsABaseUrl_ThenTheRequestGoesToTheDefaultAddressWithOnlyTheKey()
     {
-        // Arrange - a profile of the Anthropic config directory points the API at another address, and the
-        // environment holds a token that would be sent as Authorization.
+        // Arrange - the default profile of the Anthropic config directory points the API at another address.
         var configDirectory = Directory.CreateTempSubdirectory("anthropic-config").FullName;
         Directory.CreateDirectory(Path.Combine(configDirectory, "configs"));
         await File.WriteAllTextAsync(
             Path.Combine(configDirectory, "configs", "default.json"),
             """{"base_url":"http://profile.invalid","authentication":{"type":"user_oauth"}}""");
-        var previousConfigDirectory = Environment.GetEnvironmentVariable("ANTHROPIC_CONFIG_DIR");
-        var previousAuthToken = Environment.GetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN");
         var handler = new AnthropicStubHandler(HttpStatusCode.InternalServerError, AnthropicStubHandler.ErrorBody("api_error", "failed"));
+
         try
         {
-            Environment.SetEnvironmentVariable("ANTHROPIC_CONFIG_DIR", configDirectory);
-            Environment.SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "environment-auth-token");
+            // Act
+            await SendWithEnvironmentAsync(handler, ("ANTHROPIC_CONFIG_DIR", configDirectory));
+        }
+        finally
+        {
+            Directory.Delete(configDirectory, recursive: true);
+        }
+
+        // Assert
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("api.anthropic.com", request.RequestUri?.Host);
+        Assert.Equal(ApiKey, request.ApiKeyHeader);
+        Assert.False(request.HasAuthorization);
+    }
+
+    [Fact]
+    public async Task WhenTheEnvironmentHoldsAnAuthToken_ThenTheRequestCarriesNoAuthorization()
+    {
+        // Arrange
+        var handler = new AnthropicStubHandler(HttpStatusCode.InternalServerError, AnthropicStubHandler.ErrorBody("api_error", "failed"));
+
+        // Act
+        await SendWithEnvironmentAsync(handler, ("ANTHROPIC_AUTH_TOKEN", "environment-auth-token"));
+
+        // Assert
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(ApiKey, request.ApiKeyHeader);
+        Assert.False(request.HasAuthorization);
+    }
+
+    private static async Task SendWithEnvironmentAsync(AnthropicStubHandler handler, (string Name, string Value) variable)
+    {
+        var previousValues = Array.ConvertAll(CredentialVariables, Environment.GetEnvironmentVariable);
+
+        // Without a config directory the SDK would read the developer's own profiles.
+        var emptyConfigDirectory = Directory.CreateTempSubdirectory("anthropic-config-empty").FullName;
+        try
+        {
+            foreach (var name in CredentialVariables)
+            {
+                Environment.SetEnvironmentVariable(name, null);
+            }
+
+            Environment.SetEnvironmentVariable("ANTHROPIC_CONFIG_DIR", emptyConfigDirectory);
+            Environment.SetEnvironmentVariable(variable.Name, variable.Value);
             await using var test = await AgentTestContext<TestableAnthropicAgent>.StartAsync(
                 services => new TestableAnthropicAgent(services),
                 agent =>
@@ -1164,20 +1248,16 @@ public class AnthropicAgentProfileTests
                     agent.HttpHandler = handler;
                 });
 
-            // Act
             await test.Agent.SendMessageAsync("hello", CancellationToken.None);
         }
         finally
         {
-            Environment.SetEnvironmentVariable("ANTHROPIC_CONFIG_DIR", previousConfigDirectory);
-            Environment.SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", previousAuthToken);
-            Directory.Delete(configDirectory, recursive: true);
-        }
+            for (var index = 0; index < CredentialVariables.Length; index++)
+            {
+                Environment.SetEnvironmentVariable(CredentialVariables[index], previousValues[index]);
+            }
 
-        // Assert
-        var request = Assert.Single(handler.Requests);
-        Assert.NotEqual("profile.invalid", request.RequestUri?.Host);
-        Assert.Equal(ApiKey, request.ApiKeyHeader);
-        Assert.False(request.HasAuthorization);
+            Directory.Delete(emptyConfigDirectory, recursive: true);
+        }
     }
 }

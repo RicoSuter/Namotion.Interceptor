@@ -15,11 +15,6 @@ namespace HomeBlaze.Services.Lifecycle;
 /// </summary>
 public class MethodPropertyInitializer : ILifecycleHandler
 {
-    [ThreadStatic]
-    private static NullabilityInfoContext? _nullabilityContext;
-
-    private static NullabilityInfoContext NullabilityContext => _nullabilityContext ??= new();
-
     // Per subject type, as the class method that implements an interface method decides. Weak, so that the types of
     // an unloaded plugin are not kept alive.
     private static readonly ConditionalWeakTable<Type, SubjectTypeMethods> MethodsBySubjectType = new();
@@ -95,27 +90,6 @@ public class MethodPropertyInitializer : ILifecycleHandler
             return;
         }
 
-        var parameters = method.GetParameters()
-            .Select(parameter =>
-            {
-                var operationParameterAttribute = parameter.GetCustomAttribute<OperationParameterAttribute>();
-                var nullabilityInfo = NullabilityContext.Create(parameter);
-                var isNullable = Nullable.GetUnderlyingType(parameter.ParameterType) != null
-                    || nullabilityInfo.WriteState == NullabilityState.Nullable
-                    || parameter is { HasDefaultValue: true, DefaultValue: null };
-                
-                return new MethodParameter
-                {
-                    Name = parameter.Name ?? $"arg{parameter.Position}",
-                    Type = parameter.ParameterType,
-                    Unit = operationParameterAttribute?.Unit,
-                    IsFromServices = parameter.GetCustomAttribute<FromServicesAttribute>() != null,
-                    IsRuntimeProvided = parameter.ParameterType == typeof(CancellationToken),
-                    IsNullable = isNullable,
-                };
-            })
-            .ToArray();
-
         var resultType = GetUnwrappedResultType(method.ReturnType);
         var traits = typeMethods.GetTraits(method);
 
@@ -131,7 +105,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             Position = attribute.Position,
             Category = traits.Category,
             RequiresConfirmation = traits.RequiresConfirmation,
-            Parameters = parameters,
+            Parameters = traits.Parameters,
             ResultType = resultType,
         };
 
@@ -157,8 +131,8 @@ public class MethodPropertyInitializer : ILifecycleHandler
         return returnType;
     }
 
-    /// <summary>The category and the confirmation of a discovered method of one subject type.</summary>
-    private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation);
+    /// <summary>The category, the confirmation and the parameters of a discovered method of one subject type.</summary>
+    private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation, MethodParameter[] Parameters);
 
     /// <summary>The interface maps of a subject type and the traits of its methods, computed once per method.</summary>
     private sealed class SubjectTypeMethods
@@ -190,7 +164,38 @@ public class MethodPropertyInitializer : ILifecycleHandler
                 FindCategory(method, isInterfaceMethod, classMethod, implementedMethods),
                 RequiresConfirmation(method) ||
                 (classMethod is not null && AnyOverriddenMethodRequiresConfirmation(classMethod)) ||
-                implementedMethods.Exists(RequiresConfirmation));
+                implementedMethods.Exists(RequiresConfirmation),
+                CreateParameters(method));
+        }
+
+        private static MethodParameter[] CreateParameters(MethodInfo method)
+        {
+            var parameters = method.GetParameters();
+            if (parameters.Length == 0)
+            {
+                return [];
+            }
+
+            // Owned by this computation rather than shared: the context caches the members it reads, which would keep
+            // the types of an unloaded plugin alive, and it is not thread-safe.
+            var nullabilityContext = new NullabilityInfoContext();
+            return Array.ConvertAll(parameters, parameter =>
+            {
+                var operationParameterAttribute = parameter.GetCustomAttribute<OperationParameterAttribute>();
+                var isNullable = Nullable.GetUnderlyingType(parameter.ParameterType) != null
+                    || nullabilityContext.Create(parameter).WriteState == NullabilityState.Nullable
+                    || parameter is { HasDefaultValue: true, DefaultValue: null };
+
+                return new MethodParameter
+                {
+                    Name = parameter.Name ?? $"arg{parameter.Position}",
+                    Type = parameter.ParameterType,
+                    Unit = operationParameterAttribute?.Unit,
+                    IsFromServices = parameter.GetCustomAttribute<FromServicesAttribute>() != null,
+                    IsRuntimeProvided = parameter.ParameterType == typeof(CancellationToken),
+                    IsNullable = isNullable,
+                };
+            });
         }
 
         private static string? FindCategory(MethodInfo method, bool isInterfaceMethod, MethodInfo? classMethod, List<MethodInfo> implementedMethods)
@@ -246,15 +251,16 @@ public class MethodPropertyInitializer : ILifecycleHandler
             return false;
         }
 
+        // By the slot rather than by the parameter types, which differ between the levels of a generic method because
+        // each declares its own type parameters. A new-slot method has another base definition, and reflection lists
+        // only the most derived override of a slot, so at most one candidate matches.
         private static MethodInfo? FindOverriddenMethod(Type baseType, MethodInfo method, MethodInfo baseDefinition)
         {
-            var parameterTypes = Array.ConvertAll(method.GetParameters(), static parameter => parameter.ParameterType);
             foreach (var candidate in baseType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
             {
                 if (candidate.Name == method.Name &&
                     candidate.IsVirtual &&
-                    IsSameMethod(candidate.GetBaseDefinition(), baseDefinition) &&
-                    candidate.GetParameters().Select(static parameter => parameter.ParameterType).SequenceEqual(parameterTypes))
+                    IsSameMethod(candidate.GetBaseDefinition(), baseDefinition))
                 {
                     return candidate;
                 }

@@ -108,20 +108,95 @@ public class FritzBoxMergeTests
     }
 
     [Fact]
-    public void WhenAHostDisappears_ThenItsClientIsRemovedAndDetached()
+    public void WhenAHostDisappears_ThenItsClientStaysAttachedAsAbsentForOnePoll()
+    {
+        // Arrange
+        var router = CreateRouter();
+        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        var clients = router.Clients;
+        var laptop = router.Clients[Snapshots.Laptop];
+        var hosts = Snapshots.Hosts().Where(host => host.MacAddress != Snapshots.Laptop).ToList();
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+
+        // Assert
+        Assert.Same(clients, router.Clients);
+        Assert.Same(laptop, router.Clients[Snapshots.Laptop]);
+        Assert.NotNull(laptop.TryGetRegisteredSubject());
+        Assert.False(laptop.IsPresent);
+        Assert.Null(laptop.AccessPointName);
+        Assert.Null(laptop.LinkSpeed);
+        Assert.Equal("192.168.178.20", laptop.IpAddress);
+        Assert.Empty(router.AccessPoints[Snapshots.RepeaterAccessPoint].Clients);
+    }
+
+    [Fact]
+    public void WhenAHostDisappears_ThenItsAbsenceIsPublishedWhileItsClientIsAttached()
+    {
+        // Arrange
+        var router = CreateRouter();
+        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        var laptop = router.Clients[Snapshots.Laptop];
+        var hosts = Snapshots.Hosts().Where(host => host.MacAddress != Snapshots.Laptop).ToList();
+        var changes = new List<(bool? IsPresent, bool IsAttached)>();
+        using var subscription = ((IInterceptorSubject)router).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (ReferenceEquals(change.Property.Subject, laptop) && change.Property.Name == nameof(FritzBoxClient.IsPresent))
+                {
+                    changes.Add((change.GetNewValue<bool?>(), laptop.TryGetRegisteredSubject() is not null));
+                }
+            });
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+
+        // Assert
+        Assert.Equal([(false, true)], changes);
+        Assert.Null(laptop.TryGetRegisteredSubject());
+    }
+
+    [Fact]
+    public void WhenAHostStaysAwayForASecondPoll_ThenItsClientIsRemovedAndDetached()
     {
         // Arrange
         var router = CreateRouter();
         router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
         var phone = router.Clients[Snapshots.Phone];
         var hosts = Snapshots.Hosts().Where(host => host.MacAddress != Snapshots.Phone).ToList();
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
 
         // Act
         router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
 
         // Assert
         Assert.False(router.Clients.ContainsKey(Snapshots.Phone));
+        Assert.Equal(2, router.ClientCount);
         Assert.Null(phone.TryGetRegisteredSubject());
+    }
+
+    [Fact]
+    public void WhenADepartedHostIsListedAgain_ThenItsClientIsKeptAndPresent()
+    {
+        // Arrange
+        var router = CreateRouter();
+        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        var laptop = router.Clients[Snapshots.Laptop];
+        var hosts = Snapshots.Hosts().Where(host => host.MacAddress != Snapshots.Laptop).ToList();
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+
+        // Assert
+        Assert.Same(laptop, router.Clients[Snapshots.Laptop]);
+        Assert.NotNull(laptop.TryGetRegisteredSubject());
+        Assert.True(laptop.IsPresent);
+        Assert.Same(laptop, Assert.Single(router.AccessPoints[Snapshots.RepeaterAccessPoint].Clients).Value);
     }
 
     [Fact]

@@ -606,6 +606,20 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
+    public void WhenAnIntermediateOverrideOfAGenericMethodRequiresConfirmation_ThenAFurtherOverrideStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new FurtherGenericOperationOverrideSubject(CreateContext());
+
+        // Act
+        var apply = GetMethod(subject, "Apply");
+
+        // Assert
+        Assert.Equal("Apply now", apply.Title);
+        Assert.True(apply.RequiresConfirmation);
+    }
+
+    [Fact]
     public void WhenASubjectHasNoMethods_ThenNoMethodPropertiesAreRegistered()
     {
         // Arrange
@@ -1150,4 +1164,23 @@ public partial class FurtherOperationOverrideSubject : ConfirmedOperationOverrid
 {
     [Operation(Title = "Restart now")]
     public override Task RestartAsync() => Task.CompletedTask;
+}
+
+public abstract class UnconfirmedGenericOperationBaseSubject
+{
+    [Operation]
+    public virtual Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
+}
+
+public abstract class ConfirmedGenericOperationOverrideSubject : UnconfirmedGenericOperationBaseSubject
+{
+    [Operation(RequiresConfirmation = true)]
+    public override Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class FurtherGenericOperationOverrideSubject : ConfirmedGenericOperationOverrideSubject
+{
+    [Operation(Title = "Apply now")]
+    public override Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
 }

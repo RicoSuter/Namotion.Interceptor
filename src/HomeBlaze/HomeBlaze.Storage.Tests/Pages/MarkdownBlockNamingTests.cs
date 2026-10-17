@@ -208,7 +208,7 @@ public class MarkdownBlockNamingTests
         // Assert
         Assert.True(handled);
         Assert.Equal(
-            $"intro\n\n:: {LeafType}#leaf Count=1 Enabled=false Interval=00:00:00\n" +
+            $"intro\n\n:: {LeafType}#leaf Count=1\n" +
             "```json\n{\n  \"Tags\": [\n    \"a\",\n    \"b\"\n  ]\n}\n```\n::\n\noutro\n",
             await fixture.ReadAsync("page.md"));
     }

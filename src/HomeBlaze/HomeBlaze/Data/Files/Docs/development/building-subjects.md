@@ -439,12 +439,20 @@ public partial class Motor
     }
 
     [Operation(Title = "Run Test", RequiresConfirmation = true, Position = 4)]
-    public async Task RunTestAsync(int speed, int durationSeconds)
+    public async Task RunTestAsync(int speed, int durationSeconds, CancellationToken cancellationToken)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(durationSeconds);
+
         var previousSpeed = TargetSpeed;
         TargetSpeed = speed;
-        await Task.Delay(TimeSpan.FromSeconds(durationSeconds));
-        TargetSpeed = previousSpeed;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(durationSeconds), cancellationToken);
+        }
+        finally
+        {
+            TargetSpeed = previousSpeed; // also when the run is canceled
+        }
     }
 }
 ```
@@ -524,6 +532,7 @@ public partial class Server
 - The property attribute name (e.g., `"Start"`) must match the method name without the `Async` suffix
 - The `IsEnabled` property should be `[Derived]` so it automatically updates when dependencies change
 - When `IsEnabled` is `false`, the button is disabled in the UI
+- The attribute name is `IsEnabled`, without the `HB:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
 - This uses the `TrackingScope` for automatic re-rendering when the derived property changes
 
 ## Categories
@@ -594,15 +603,19 @@ public partial class Motor
     [State("Target")]
     public partial int TargetSpeed { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Minimum)]
     public partial int TargetSpeed_Minimum { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Maximum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Maximum)]
     public partial int TargetSpeed_Maximum { get; set; }
 }
 ```
 
-This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for `TargetSpeed`, enabling UI features like range sliders.
+This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for `TargetSpeed`.
+
+### Range Attributes
+
+`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range, declared as above. A widget that shows or sets a number within a range reads them when the page sets no range of its own, and only when their value is a number; [Ranges](../administration/widgets/basics.md#ranges) has the order in which the widget looks for each end, including the range 0 to 1 of a property with `StateUnit.Percent`. Like `KnownAttributes.IsEnabled` and unlike `State` and `Configuration`, they have no `HB:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
 
 ## Complete Example: Motor
 
@@ -633,10 +646,10 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     [Category("Speed")]
     public partial int TargetSpeed { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Minimum)]
     public partial int TargetSpeed_Minimum { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Maximum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Maximum)]
     public partial int TargetSpeed_Maximum { get; set; }
 
     [Configuration]
@@ -822,7 +835,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration]` | User-editable settings | Yes | No (unless also `[State]`) |
 | `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
-| `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
+| `[Configuration] + [State]` | Editable and displayed, but not writable through MCP's `set_property`, see [AI Agents](../administration/ai-agents.md#tools-and-permissions); expose a write through an operation instead | Yes | Yes |
 | `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
 | `[State] + [SubjectPath(type)]` | Link to the subject at a canonical path, see [Path Properties](#path-properties) | No | Yes (as the subject) |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
@@ -970,6 +983,24 @@ public partial string? Path { get; set; }
 public partial string? Map { get; set; }
 ```
 
+Without a type, `Kind` says what the path leads to, with the flags of `SubjectPathKind` that combine with OR: `Property`, the default, for a property that holds a value, `Attribute` for an attribute of a property or of an operation, such as `Minimum`, and `Operation` for an `[Operation]` or `[Query]` method. The picker lists an attribute below its property and never offers the metadata of `KnownAttributes.State` and `KnownAttributes.Configuration`. An attribute is a property of the subject, so its path is the name under which the subject registers it, for example `/Demo/Conveyor/TargetSpeed_Minimum`, or `Speed@Minimum` for an attribute added at runtime.
+
+`ValueTypes` names the types that the value of a property or an attribute may have, and null, the default, accepts any type. A nullable type counts as its underlying type. A type matches when it is assignable to one of them or, for an open generic type, when it implements or derives from a closed form of it. `typeof(Enum)` matches only enum types, not a property declared as `System.Enum`. `typeof(INumber<>)` matches the numbers that the number widgets read: the built-in integral types, `float`, `double` and `decimal`, so neither `char` nor types such as `Half` or `Int128`. `ValueTypes` does not restrict an operation. `IsWritable = true` keeps only properties and attributes with a public setter and never matches an operation. `Kind`, `ValueTypes` and `IsWritable` are ignored for a path to a subject, so do not set them together with a type:
+
+```csharp
+[Configuration]
+[SubjectPath(ValueTypes = [typeof(INumber<>)], IsWritable = true)]
+public partial string? Path { get; set; }
+
+[Configuration]
+[SubjectPath(Kind = SubjectPathKind.Operation)]
+public partial string? Operation { get; set; }
+
+[Configuration]
+[SubjectPath(Kind = SubjectPathKind.Property | SubjectPathKind.Operation, ValueTypes = [typeof(bool), typeof(Enum)])]
+public partial string? Target { get; set; }
+```
+
 The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.
 
 On a `[State]` property with a type, the property panel shows the subject at the path with a button that opens it. Use it to point at a subject elsewhere in the tree without attaching it, see [Shared Child Subjects](#shared-child-subjects):
@@ -998,7 +1029,7 @@ In an Edit component of your own, use the `SubjectPathField` component for a pat
 - Text input for direct path entry
 - Search icon button opens tree picker dialog
 - Tree shows all subjects with lazy loading
-- State properties and child properties are displayed
+- State properties and child properties are displayed, and operations when `CanSelectProperty` accepts them
 - Disabled properties shown grayed but still selectable
 - Preview shows resolved value
 
@@ -1014,7 +1045,7 @@ In an Edit component of your own, use the `SubjectPathField` component for a pat
 | `LocalSubjects` | `IDictionary<string, IInterceptorSubject>?` | `null` | Additional local subjects to show in picker |
 | `Class` | `string?` | `null` | CSS class for styling |
 | `IsPropertyVisible` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties the picker shows |
-| `CanSelectProperty` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties can be picked. Typed text is not checked |
+| `CanSelectProperty` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties can be picked. An operation is listed only when this accepts it. Typed text is not checked |
 | `CanSelectSubject` | `Func<IInterceptorSubject, bool>?` | `null` | Which subjects can be picked. Typed text is not checked |
 
 ---
@@ -1059,7 +1090,7 @@ Mark only types whose configuration is plain values and that do nothing but show
 
 ### Properties Shown on Pages
 
-A `{{ path }}` expression on a page and a [value widget](../administration/page-widgets.md#value-widgets) show the value of a property they reach only when the property is displayable: a partial (intercepted) property, a `[Derived]` property or a property with `[State]`, on the class or through an interface. An expression shows nothing and a value widget shows a dash for:
+A `{{ path }}` expression on a page and a [value widget](../administration/widgets/basics.md#value-widgets) show the value of a property they reach only when the property is displayable: a partial (intercepted) property, a `[Derived]` property or a property with `[State]`, on the class or through an interface. An expression shows nothing and a value widget shows a dash for:
 
 - A plain property, a public property without `[State]` that is no partial or `[Derived]` property. It is registered too but is no tracked value of the subject and can hold internal data, such as the text an agent is still writing. Mark a computed value that pages should show with `[Derived]`.
 - A default property of an interface without `[State]`, such as `bool? IsClosed => State switch { ... }`, unless it is marked with `[Derived]`. It is no partial property of the class, so it counts as a plain property otherwise.
@@ -1119,6 +1150,7 @@ Widgets are compact visual representations shown in dashboards and markdown page
     {
         <!-- Inline editing when page is in edit mode -->
         <MudSlider T="int"
+                   Class="edit-mode-interactive"
                    Value="@MotorSubject.TargetSpeed"
                    ValueChanged="@OnSpeedChanged"
                    Min="0" Max="3000" />
@@ -1161,17 +1193,18 @@ public bool IsEditing { get; set; }
 
 ### Auto Edit Button
 
-When a widget has a corresponding Edit component, the host automatically renders an edit button overlay when `IsEditing` is true:
+In the Inline and Split modes of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. Every widget block of a page that shows something can be selected. A block that shows nothing, such as a `ValueMap`, is hidden while the page is edited inline and is edited in the [page editor](../administration/pages.md#editing-in-the-page-editor). When the widget has an Edit component or configuration properties, the bar has an edit button. A widget without either, such as a `ValueList`, gets only the outline, and the bar when it has a parent to select:
 
-- The button appears in the top-right corner of the widget
-- Clicking opens the `SubjectEditDialog` with the Edit component
+- Clicking it opens the `SubjectEditDialog` with the Edit component, or with the generated properties editor without one
+- A widget inside another one has an arrow up button that selects the widget around it, and Escape or a click on the page clears the selection
+- The content of a widget takes no mouse input while the page is edited, so that a click selects the widget instead of operating it. A part that is meant to be used while the page is edited takes it back with the class `edit-mode-interactive`, as the slider above does, or with `edit-mode-selected-interactive` once its widget is selected
 - No boilerplate needed in widget components
 
 ### Content Slots
 
 A widget type can take content from the markdown page it is used on: text, expressions and other widgets. The type declares where the content goes with `[Slot]` on properties, and the page fills these properties from the content of the block. The attribute is in `HomeBlaze.Abstractions.Attributes`.
 
-[Markdown Pages](../administration/pages.md) is the guide for the page side: the colon lines that open and end a block, the arguments and what a page author sees when something is wrong. [Page Widgets](../administration/page-widgets.md) is the reference of the widgets that ship, and [Page Errors](../administration/page-errors.md) lists the messages. This section is the side of the widget author. Its samples of page source use the names of that guide: a block starts with a head line of colons and a name, a block whose name has no dot is a slot block, and a closing line is written only where the next head line does not end the block.
+[Markdown Pages](../administration/pages.md) is the guide for the page side: the colon lines that open and end a block, the arguments and what a page author sees when something is wrong. [Widgets](../administration/widgets/overview.md) is the reference of the widgets that ship, and [Page Errors](../administration/page-errors.md) lists the messages. This section is the side of the widget author. Its samples of page source use the names of that guide: a block starts with a head line of colons and a name, a block whose name has no dot is a slot block, and a closing line is written only where the next head line does not end the block.
 
 #### Declaring Slots
 
@@ -1819,4 +1852,4 @@ Page components provide full-page views:
 | Compact/card format | Yes | No | No |
 | Full configuration | No | Yes | No |
 | Uses IsEditing | Yes (optional) | No | Yes (provides) |
-| Auto edit button | Yes (if Edit exists) | N/A | No |
+| Auto edit button | Yes (if Edit component or configuration properties) | N/A | No |

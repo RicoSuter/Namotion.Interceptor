@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Anthropic;
 using Anthropic.Core;
@@ -79,10 +80,11 @@ public partial class AnthropicAgent : LlmAgentBase
     /// </summary>
     /// <param name="apiKey">The API key, never empty.</param>
     protected virtual IChatClient CreateChatClient(string apiKey) =>
-        // Options rather than an initializer: the parameterless constructor first resolves credentials from the
-        // environment or an Anthropic profile, whose base URL would then receive the key. AuthToken is null, as the
-        // options would otherwise read ANTHROPIC_AUTH_TOKEN and send it as Authorization. Disposing the client would
-        // dispose the shared HttpClient.
+        // Options rather than an initializer: the parameterless constructor first resolves credentials, and a local
+        // Anthropic profile would set the base URL that then receives the key. AuthToken is null, as the options would
+        // otherwise read ANTHROPIC_AUTH_TOKEN and send it as Authorization. ANTHROPIC_BASE_URL and
+        // ANTHROPIC_CUSTOM_HEADERS of the process environment still apply; the operator sets them. Disposing the
+        // client would dispose the shared HttpClient.
         new AnthropicClient(new ClientOptions { ApiKey = apiKey, AuthToken = null, HttpClient = HttpClient }).AsIChatClient();
 
     protected override async Task OnStartingAsync(CancellationToken cancellationToken)
@@ -139,9 +141,14 @@ public partial class AnthropicAgent : LlmAgentBase
                 AppendAnswerText(answer, update, progress);
             }
         }
-        catch (Exception exception) when (Classify(exception, apiKey, cancellationToken) is { } failure)
+        catch (Exception exception) when (Classify(exception, apiKey, cancellationToken) is { } classification)
         {
-            throw failure;
+            if (classification.IsUnexpected)
+            {
+                LogUnexpectedFailure(exception, apiKey);
+            }
+
+            throw classification.Failure;
         }
 
         var response = updates.ToChatResponse();
@@ -378,30 +385,67 @@ public partial class AnthropicAgent : LlmAgentBase
             first.CacheCreationInputTokens + second.CacheCreationInputTokens);
     }
 
-    private AgentTurnException? Classify(Exception exception, string apiKey, CancellationToken cancellationToken)
+    private static (AgentTurnException Failure, bool IsUnexpected)? Classify(Exception exception, string apiKey, CancellationToken cancellationToken)
     {
         return exception switch
         {
             AgentTurnException => null,
             OperationCanceledException when cancellationToken.IsCancellationRequested => null,
-            OperationCanceledException => Failure(AgentFailureKind.Transient, "The Anthropic API did not answer in time.", apiKey, exception),
-            AnthropicApiException api => ClassifyApiException(api, apiKey),
-            AnthropicSseException or AnthropicInvalidDataException => Failure(
-                AgentFailureKind.Transient, "The Anthropic API failed while answering: " + DescribeEmbeddedError(exception.Message), apiKey, exception),
-            AnthropicException or HttpRequestException => Failure(
-                AgentFailureKind.Transient, "The Anthropic API could not be reached: " + exception.Message, apiKey, exception),
+            OperationCanceledException => (Failure(AgentFailureKind.Transient, "The Anthropic API did not answer in time.", apiKey, exception), false),
+            AnthropicApiException api => (ClassifyApiException(api, apiKey), false),
+            AnthropicSseException or AnthropicInvalidDataException => (Failure(
+                AgentFailureKind.Transient, "The Anthropic API failed while answering: " + DescribeEmbeddedError(exception.Message), apiKey, exception), false),
+            AnthropicException or HttpRequestException => (Failure(
+                AgentFailureKind.Transient, "The Anthropic API could not be reached: " + exception.Message, apiKey, exception), false),
             // Redacted like the others: the base class would show and log the message as it is.
-            _ => LogUnexpectedFailure(exception, apiKey)
+            _ => (Failure(AgentFailureKind.Transient, "The Anthropic client failed: " + exception.Message, apiKey, exception), true)
         };
     }
 
-    private AgentTurnException LogUnexpectedFailure(Exception exception, string apiKey)
+    private void LogUnexpectedFailure(Exception exception, string apiKey)
     {
-        // Without the exception object, whose message a log sink would write as it is; the stack trace holds no key.
+        // Without the exception object, whose messages a log sink would write as they are; stack traces hold no key.
         _logger.LogError(
-            "The Anthropic client of agent {Agent} failed unexpectedly with {ExceptionType}: {Message}{NewLine}{StackTrace}",
-            Title, exception.GetType().FullName, Redact(exception.Message, apiKey), Environment.NewLine, exception.StackTrace);
-        return Failure(AgentFailureKind.Transient, "The Anthropic client failed: " + exception.Message, apiKey, exception);
+            "The Anthropic client of agent {Agent} failed unexpectedly with {ExceptionType}: {Message}{InnerExceptions}{NewLine}{StackTrace}",
+            Title, exception.GetType().FullName, Redact(exception.Message, apiKey), DescribeInnerExceptions(exception, apiKey),
+            Environment.NewLine, exception.StackTrace);
+    }
+
+    private static string DescribeInnerExceptions(Exception exception, string apiKey)
+    {
+        const int maximumCount = 8;
+        var builder = new StringBuilder();
+        var pending = new Queue<Exception>();
+        EnqueueInnerExceptions(exception, pending);
+        for (var count = 0; count < maximumCount && pending.TryDequeue(out var inner); count++)
+        {
+            builder.Append(Environment.NewLine).Append(" ---> ").Append(inner.GetType().FullName)
+                .Append(": ").Append(Redact(inner.Message, apiKey));
+            EnqueueInnerExceptions(inner, pending);
+        }
+
+        if (pending.Count > 0)
+        {
+            builder.Append(Environment.NewLine).Append(" ---> ...");
+        }
+
+        return builder.ToString();
+    }
+
+    // An aggregate's InnerException is only its first one.
+    private static void EnqueueInnerExceptions(Exception exception, Queue<Exception> pending)
+    {
+        if (exception is AggregateException aggregate)
+        {
+            foreach (var inner in aggregate.InnerExceptions)
+            {
+                pending.Enqueue(inner);
+            }
+        }
+        else if (exception.InnerException is { } inner)
+        {
+            pending.Enqueue(inner);
+        }
     }
 
     private static AgentTurnException ClassifyApiException(AnthropicApiException exception, string apiKey)

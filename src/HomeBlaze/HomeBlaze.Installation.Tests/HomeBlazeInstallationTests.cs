@@ -13,8 +13,8 @@ public class HomeBlazeInstallationTests
     internal const string Commit = "b1b7c2f4568b7a83baf8d041afaab8f2214fb6cd";
     internal const string RepositoryUrl = "https://github.com/owner/repo";
 
-    internal static BuildInformation CreateBuild(string version = "0.5.0", string? tag = "v0.5.0", string? commit = Commit, string? repositoryUrl = RepositoryUrl) =>
-        new(version, commit, repositoryUrl, tag, Branch: "master", CommitDate: null, BuildTime: null, RunUrl: null);
+    internal static BuildInformation CreateBuild(string version = "0.5.0", string? tag = "v0.5.0", string? commit = Commit, string? repositoryUrl = RepositoryUrl, string? branch = "master") =>
+        new(version, commit, repositoryUrl, tag, branch, CommitDate: null, BuildTime: null, RunUrl: null);
 
     internal static HomeBlazeInstallation CreateInstallation(
         BuildInformation build,

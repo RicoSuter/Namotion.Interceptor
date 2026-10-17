@@ -735,6 +735,40 @@ public class MarkdownSegmentBuilderTests
             ? Flatten(block.Content).Prepend(segment)
             : [segment]);
 
+    [Fact]
+    public void WhenPageHasATable_ThenTheTableStandsInABoxOfItsOwn()
+    {
+        // Act
+        var html = AllHtml(Build("""
+            | Name | Speed |
+            | --- | --- |
+            | Pump | {{ pump/CurrentSpeed }} |
+            """));
+
+        // Assert: the box scrolls a wide table sideways, so the table itself keeps its semantics.
+        Assert.Matches(@"^<div class=""markdown-table"">\s*<table>", html);
+        Assert.Matches(@"</table>\s*</div>\s*$", html);
+    }
+
+    [Fact]
+    public void WhenCodeInATableCellHasDots_ThenItMayBreakAfterEachDotOnly()
+    {
+        // Act
+        var html = AllHtml(Build("""
+            Text with `HomeBlaze.Components.Card`.
+
+            | `Type.Name` | Kind |
+            | --- | --- |
+            | `HomeBlaze.Components.Card` | `Subtitle` |
+            """));
+
+        // Assert
+        Assert.Contains("<p>Text with <code>HomeBlaze.Components.Card</code>.</p>", html);
+        Assert.Contains("<code>Type.<wbr>Name</code>", html);
+        Assert.Contains("<code>HomeBlaze.<wbr>Components.<wbr>Card</code>", html);
+        Assert.Contains("<code>Subtitle</code>", html);
+    }
+
     // What a browser shows for the HTML: character references are decoded.
     private static string VisibleText(IEnumerable<MarkdownSegment> segments) =>
         WebUtility.HtmlDecode(AllHtml(segments));
