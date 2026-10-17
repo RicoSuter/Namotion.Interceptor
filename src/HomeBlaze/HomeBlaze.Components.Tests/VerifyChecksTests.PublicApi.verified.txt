@@ -588,8 +588,17 @@ namespace HomeBlaze.Components
     {
         public Switch() { }
         public Switch(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.Slot]
+        public Namotion.Interceptor.IInterceptorSubject? Badge { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Icon { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Components.SwitchKind Kind { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
+        public string? Map { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Off { get; set; }
@@ -600,6 +609,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
                 typeof(bool)})]
         public string? Path { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Subtitle { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -609,6 +620,11 @@ namespace HomeBlaze.Components
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum SwitchKind
+    {
+        Switch = 0,
+        Tile = 1,
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -1151,10 +1167,18 @@ namespace HomeBlaze.Components.Components
     public class SwitchView : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public SwitchView() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Badge { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Icon { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
         public bool IsEditing { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Components.SwitchKind Kind { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Map { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? OffProperty { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1164,7 +1188,11 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public string? Subtitle { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public bool UsesOperations { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Components.ValueMap? ValueMap { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
         protected override void OnInitialized() { }

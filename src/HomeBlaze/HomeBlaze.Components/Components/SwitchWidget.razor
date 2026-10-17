@@ -14,9 +14,11 @@
     var path = widget.Path;
     var on = widget.On;
     var off = widget.Off;
+    var map = widget.Map;
     var onProperty = ValueReader.ResolveProperty(PathResolver, widget, on);
     var offProperty = ValueReader.ResolveProperty(PathResolver, widget, off);
-    var error = SwitchArguments.Validate(
+    var valueMap = ValueReader.ResolveMap(PathResolver, widget, map, out var mapError);
+    var error = mapError ?? SwitchArguments.Validate(
         on, off, onProperty?.GetValue() as MethodMetadata, offProperty?.GetValue() as MethodMetadata);
 
     if (error is not null)
@@ -30,7 +32,13 @@
                     Label="@widget.Label"
                     UsesOperations="@(!string.IsNullOrEmpty(on))"
                     OnProperty="@onProperty"
-                    OffProperty="@offProperty" />
+                    OffProperty="@offProperty"
+                    Kind="@widget.Kind"
+                    Map="@map"
+                    ValueMap="@valueMap"
+                    Subtitle="@widget.Subtitle"
+                    Icon="@widget.Icon"
+                    Badge="@widget.Badge" />
     }
 }
 
