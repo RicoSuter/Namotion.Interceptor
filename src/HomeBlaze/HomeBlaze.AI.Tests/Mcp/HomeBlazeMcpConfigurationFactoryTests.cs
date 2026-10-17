@@ -99,7 +99,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
 
         // Assert
         Assert.Equal(
-            "Property is not writable: /TargetTemperature. It is a configuration property; agents cannot change configuration.",
+            "Property is not writable: /TargetTemperature. It is a configuration property; configuration cannot be changed through MCP.",
             result.GetProperty("error").GetString());
         Assert.Equal(20m, room.TargetTemperature);
     }
@@ -121,7 +121,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
     }
 
     [Fact]
-    public async Task WhenTheServerConfigurationIsWritable_ThenConfigurationPropertiesCanStillBeSet()
+    public async Task WhenTheExternalServerSetsAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged()
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
@@ -133,8 +133,26 @@ public class HomeBlazeMcpConfigurationFactoryTests
             JsonSerializer.SerializeToElement(new { path = "/TargetTemperature", value = 30 }), CancellationToken.None));
 
         // Assert
+        Assert.Equal(
+            "Property is not writable: /TargetTemperature. It is a configuration property; configuration cannot be changed through MCP.",
+            result.GetProperty("error").GetString());
+        Assert.Equal(20m, room.TargetTemperature);
+    }
+
+    [Fact]
+    public async Task WhenTheExternalServerSetsAStateProperty_ThenItIsWritten()
+    {
+        // Arrange
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var setProperty = CreateTools(room, forAgents: false)["set_property"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Temperature", value = 23 }), CancellationToken.None));
+
+        // Assert
         Assert.True(result.GetProperty("success").GetBoolean());
-        Assert.Equal(30m, room.TargetTemperature);
+        Assert.Equal(23m, room.Temperature);
     }
 
     /// <summary>Creates the services the configuration factory needs, after <paramref name="configure"/> added others.</summary>

@@ -21,7 +21,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         (subject, _) => subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
 
     private static readonly Func<RegisteredSubjectProperty, string?> RefuseConfigurationWrite =
-        property => property.IsConfigurationProperty() ? "It is a configuration property; agents cannot change configuration." : null;
+        property => property.IsConfigurationProperty() ? "It is a configuration property; configuration cannot be changed through MCP." : null;
 
     /// <summary>
     /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the
@@ -31,9 +31,10 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
     /// <param name="forAgents">
-    /// Whether the tools serve the built-in agents: set_property then refuses every property marked with
-    /// <see cref="ConfigurationAttribute"/>, and invoke_operation and the Markdown tools refuse every operation of an
-    /// agent (<see cref="LlmAgentBase"/>).
+    /// Whether the tools serve the built-in agents: invoke_operation and the Markdown tools then refuse every
+    /// operation of an agent (<see cref="LlmAgentBase"/>). set_property refuses every property marked with
+    /// <see cref="ConfigurationAttribute"/> regardless of this flag, so configuration cannot be changed through
+    /// either the agent tools or the external MCP server.
     /// </param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
@@ -78,7 +79,7 @@ internal static class HomeBlazeMcpConfigurationFactory
                 ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint,
                 ["set_property"] = HomeBlazeMcpInstructions.ChangeCaution
             },
-            PropertyWriteFilter = forAgents ? RefuseConfigurationWrite : null,
+            PropertyWriteFilter = RefuseConfigurationWrite,
             IsReadOnly = isReadOnly
         };
 
